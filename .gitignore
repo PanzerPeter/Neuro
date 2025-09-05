@@ -118,4 +118,4 @@ Thumbs.db
 *.log
 .env
 .claude/
-# idea/*
+idea/*
