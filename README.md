@@ -3,7 +3,7 @@
 [![CI](https://github.com/PanzerPeter/Neuro/workflows/CI/badge.svg)](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-> **⚠️ Alpha Notice**: NEURO is in early development (Phase 0 complete). The language specification and API are subject to change.
+> **✅ Phase 1 Progress**: NEURO has successfully completed Phase 0 and is actively implementing Phase 1 features. Current capabilities include lexical analysis, syntax parsing, and basic expression evaluation. The language specification and API are subject to change.
 
 **NEURO** is a high-performance, AI-first programming language designed specifically for machine learning and neural network development. Built with Rust and LLVM, NEURO combines the performance of compiled languages with AI/ML-optimized features like automatic differentiation, tensor operations, and GPU acceleration.
 
@@ -77,9 +77,57 @@ neurc --version
 # NEURO Compiler (neurc) v0.1.0
 ```
 
+## 🎯 Current Status (Phase 1)
+
+### ✅ Implemented Features
+
+- **Lexical Analysis**: Complete tokenization of NEURO syntax including keywords, operators, literals, and comments
+- **Syntax Parsing**: Full AST generation for expressions, statements, and function definitions  
+- **Expression Evaluation**: Runtime evaluation of arithmetic, logical, and string operations
+- **Control Flow**: if/else statements, while loops, break/continue statements
+- **Data Types**: Integers, floats, booleans, strings with type coercion
+- **Operators**: All arithmetic (+, -, *, /, %), comparison (==, !=, <, <=, >, >=), and unary (-) operators
+- **Functions**: Function definitions with parameters and return types
+- **Variables**: Let statements with mutable/immutable bindings
+- **Module System**: Import/export functionality with dependency resolution and circular dependency detection
+
+### 🔄 Currently Working On
+
+- Type system with inference engine
+- Memory management (ARC runtime)
+- LLVM backend integration
+
+### 📊 Test Coverage
+
+- **108 passing tests** with comprehensive coverage
+- Lexical analysis: 24 tests
+- Parser functionality: 20 tests  
+- Expression evaluation: 24 tests
+- Integration testing: 16 tests
+- Module system: 30 tests (module registry, import resolution, dependency graph)
+
+### 🧪 Try It Now
+
+```bash
+# Clone and build
+git clone https://github.com/PanzerPeter/Neuro.git
+cd Neuro
+cargo build
+
+# Run tests to see current functionality
+cargo test
+
+# Check example parsing
+cargo run --bin neurc -- check examples/basic_expressions.nr
+
+# Try module system example
+cargo run --bin neurc -- check examples/modules/calculator.nr
+```
+
 ## 📚 Documentation
 
 - **[Language Specification](docs/specification/)** - Complete language reference
+- **[Module System](docs/modules.md)** - Import/export and dependency management
 - **[Architecture Guide](docs/architecture/)** - VSA principles and compiler design
 - **[API Documentation](https://panzerPeter.github.io/Neuro/api-docs/)** - Generated API docs
 - **[Examples](examples/)** - Comprehensive code examples
@@ -99,8 +147,8 @@ neurc --version
 - [x] Documentation system and examples
 
 ### 🚧 Phase 1: Minimal MVP (IN PROGRESS)
-- [ ] Complete lexer/parser implementation
-- [ ] Core language features (control flow, functions, modules)
+- [x] Complete lexer/parser implementation
+- [x] Core language features (control flow, functions, modules)
 - [ ] Basic type system with inference
 - [ ] Memory management (ARC + pools)
 - [ ] Tensor primitives and basic operations

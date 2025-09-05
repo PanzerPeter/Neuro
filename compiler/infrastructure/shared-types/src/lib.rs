@@ -7,11 +7,15 @@ pub mod span;
 pub mod literal;
 pub mod identifier;
 pub mod attributes;
+pub mod ast;
+pub mod value;
 
 pub use span::*;
 pub use literal::*;
 pub use identifier::*;
 pub use attributes::*;
+pub use ast::*;
+pub use value::*;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;

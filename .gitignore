@@ -30,8 +30,6 @@ flamegraph.svg
 /pkg/
 
 # === Editors / IDEs ===
-.idea/
-idea/*
 .vscode/
 *.sublime-project
 *.sublime-workspace
@@ -110,7 +108,6 @@ yarn-error.log*
 flamegraph.svg
 profile.json
 *.profraw
-.idea/
 .vscode/
 *.swp
 *~
@@ -121,4 +118,4 @@ Thumbs.db
 *.log
 .env
 .claude/
-idea/*
+# idea/*
