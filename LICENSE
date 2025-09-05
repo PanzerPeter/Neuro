@@ -1,0 +1,143 @@
+===============================================================================
+NEURO PROJECT LICENSE
+===============================================================================
+
+Copyright (C) 2024–2025 NEURO Project Contributors
+
+This software is licensed under the GNU General Public License v3.0 (GPL-3.0)
+with additional terms and conditions specific to the NEURO project.
+
+===============================================================================
+ALPHA VERSION NOTICE (MUST BE PRESERVED)
+===============================================================================
+
+⚠️  THIS SOFTWARE IS IN ALPHA STAGE AND IS PROVIDED "AS IS", WITHOUT WARRANTY
+    OF ANY KIND, EXPRESS OR IMPLIED. IN NO EVENT SHALL THE AUTHORS, COPYRIGHT
+    HOLDERS, OR CONTRIBUTORS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+    LIABILITY ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE.
+
+⚠️  USE OF THIS ALPHA SOFTWARE IS ENTIRELY AT YOUR OWN RISK.
+
+===============================================================================
+GNU GENERAL PUBLIC LICENSE v3.0
+===============================================================================
+
+This program is free software: you may redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+GNU General Public License: https://www.gnu.org/licenses/gpl-3.0.html
+
+===============================================================================
+ADDITIONAL TERMS AND CONDITIONS
+===============================================================================
+
+The following terms supplement the GPL v3.0 and clarify obligations for
+redistributors while ensuring users are informed about the alpha status.
+
+1. MANDATORY ATTRIBUTION & COPYRIGHT NOTICE
+   ─────────────────────────────────────────
+   
+   When redistributing the software (source or binary), you must include the
+   following attribution exactly as shown in an obvious place (README, About
+   page, documentation, etc.):
+   
+   Based on NEURO (https://github.com/PanzerPeter/Neuro) — 
+   Copyright (C) 2024–2025 NEURO Project Contributors
+   
+   You must also preserve:
+   • All existing copyright notices
+   • The ALPHA VERSION NOTICE
+   • The full text of this supplementary section
+
+2. MANDATORY ALPHA NOTICE IN DISTRIBUTIONS
+   ───────────────────────────────────────
+   
+   Any redistribution (source or binary) must include:
+   • The ALPHA VERSION NOTICE verbatim
+   • A prominent statement in user-facing materials that the software is an
+     alpha release and may be unstable
+
+3. MODIFICATION DOCUMENTATION
+   ──────────────────────────
+   
+   If you distribute a modified version, you must:
+   • Clearly mark modified files and distributions as modified
+   • Include a CHANGES or MODIFICATIONS file summarizing changes, authors,
+     and modification dates
+   • Not misrepresent the modified version as the original NEURO project
+
+4. SOURCE PROVISION FOR BINARIES
+   ─────────────────────────────
+   
+   If distributing compiled/binary forms, you must:
+   • Comply with GPL v3.0 source offer requirements
+   • Include a prominent pointer to where complete source may be obtained
+
+5. TRADEMARK AND ENDORSEMENT RESTRICTIONS
+   ──────────────────────────────────────
+   
+   No permission is granted to use:
+   • The NEURO Project name or trademark
+   • Project logos
+   • Contributor names
+   
+   For endorsement or promotion without explicit written permission.
+
+6. SAFETY-CRITICAL USES (ADVISORY)
+   ───────────────────────────────
+   
+   This software has not been tested for safety-critical deployments. You are
+   strongly advised NOT to use this software in:
+   • Medical or life-support systems
+   • Aviation or nuclear applications
+   • Other environments where failures could cause injury, death, or severe
+     property/environmental damage
+
+7. CONTRIBUTION GUIDELINES (REQUEST)
+   ─────────────────────────────────
+   
+   Contributors are requested (but not legally required) to:
+   • Report security vulnerabilities or serious bugs via:
+     https://github.com/PanzerPeter/Neuro/issues
+   • Submit improvements as pull requests with clear descriptions
+
+8. LICENSE TERMINATION
+   ───────────────────
+   
+   Failure to comply with the GPL or these terms terminates license rights.
+   Rights may be reinstated as provided in GPL v3.0.
+
+===============================================================================
+REDISTRIBUTION CHECKLIST
+===============================================================================
+
+When distributing this software (source or binaries), ensure you:
+
+□ Include the GPL v3.0 license text
+□ Preserve the ALPHA VERSION NOTICE verbatim
+□ Include the mandatory attribution line (see §1)
+□ Include source or written offer for binaries (per GPL v3.0)
+□ Add CHANGES/MODIFICATIONS file when modifying code
+□ Do not claim original authorship or imply NEURO endorsement
+□ Include user-facing notice that software is alpha and may be unstable
+
+===============================================================================
+ADDITIONAL PERMISSIONS
+===============================================================================
+
+In addition to GPL v3.0 permissions, the NEURO Project Contributors grant:
+
+• Use, modification, and distribution for any purpose, including commercial use
+• Subject to the obligations listed above
+
+You may NOT remove or alter:
+• The ALPHA VERSION NOTICE
+• The mandatory attribution when redistributing software or substantial portions
+
+===============================================================================

@@ -1,0 +1,20 @@
+[package]
+name = "lexical-analysis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Infrastructure dependencies only (VSA principle)
+shared-types = { path = "../infrastructure/shared-types" }
+diagnostics = { path = "../infrastructure/diagnostics" }
+source-location = { path = "../infrastructure/source-location" }
+
+# External dependencies
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "source-location"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+shared-types = { path = "../shared-types" }

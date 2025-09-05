@@ -1,0 +1,51 @@
+[workspace]
+resolver = "2"
+members = [
+    # Infrastructure Components (working)
+    "compiler/infrastructure/shared-types",
+    "compiler/infrastructure/source-location", 
+    "compiler/infrastructure/diagnostics",
+    
+    # Core Compiler Slices (initialized)
+    "compiler/lexical-analysis",
+    "compiler/syntax-parsing", 
+    "compiler/semantic-analysis",
+    "compiler/neurc",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0"
+authors = ["NEURO Language Team"]
+repository = "https://github.com/PanzerPeter/Neuro"
+
+[workspace.dependencies]
+# External dependencies shared across slices
+serde = { version = "1.0", features = ["derive"] }
+tracing = "0.1"
+thiserror = "1.0"
+anyhow = "1.0"
+clap = { version = "4.0", features = ["derive"] }
+
+# Testing dependencies
+proptest = "1.0"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# LLVM integration
+inkwell = { version = "0.4", features = ["llvm18-0"] }
+
+# GPU computation
+wgpu = "0.19"
+cudarc = { version = "0.10", features = ["std"] }
+
+[profile.release]
+debug = false
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+debug = true
+overflow-checks = true
