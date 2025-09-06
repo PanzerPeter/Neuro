@@ -11,7 +11,7 @@ fn test_tokenizer_basic_usage() {
     let expected = vec![
         TokenType::Keyword(Keyword::Let),
         TokenType::Identifier("x".to_string()),
-        TokenType::Equal,
+        TokenType::Assign,
         TokenType::Integer("42".to_string()),
         TokenType::Semicolon,
         TokenType::EndOfFile,

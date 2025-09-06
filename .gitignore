@@ -97,6 +97,9 @@ yarn-error.log*
 *.key
 *.crt
 
+# === C++ package manager (vcpkg) ===
+vcpkg/
+
 # === Other binaries / artifacts ===
 *.class
 *.jar

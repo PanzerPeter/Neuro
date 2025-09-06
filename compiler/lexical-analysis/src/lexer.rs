@@ -106,7 +106,7 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     Ok(Some(Token::new(TokenType::Equal, Span::new(start_pos, self.position))))
                 } else {
-                    Ok(Some(Token::new(TokenType::Equal, Span::new(start_pos, self.position))))
+                    Ok(Some(Token::new(TokenType::Assign, Span::new(start_pos, self.position))))
                 }
             }
             Some('!') => {
@@ -175,6 +175,15 @@ impl<'a> Lexer<'a> {
             Some('.') => {
                 self.advance();
                 Ok(Some(Token::new(TokenType::Dot, Span::new(start_pos, self.position))))
+            }
+            Some(':') => {
+                self.advance();
+                if self.current_char == Some(':') {
+                    self.advance();
+                    Ok(Some(Token::new(TokenType::DoubleColon, Span::new(start_pos, self.position))))
+                } else {
+                    Ok(Some(Token::new(TokenType::Colon, Span::new(start_pos, self.position))))
+                }
             }
             Some(ch) => {
                 self.advance();

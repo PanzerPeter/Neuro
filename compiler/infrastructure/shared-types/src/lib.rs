@@ -39,12 +39,13 @@ pub enum TokenType {
     Star,
     Slash,
     Percent,
-    Equal,
-    NotEqual,
-    Less,
-    LessEqual,
-    Greater,
-    GreaterEqual,
+    Assign,       // =
+    Equal,        // ==
+    NotEqual,     // !=
+    Less,         // <
+    LessEqual,    // <=
+    Greater,      // >
+    GreaterEqual, // >=
     
     // Punctuation
     LeftParen,
@@ -56,7 +57,9 @@ pub enum TokenType {
     Semicolon,
     Comma,
     Dot,
-    Arrow,
+    Colon,        // :
+    DoubleColon,  // ::
+    Arrow,        // ->
     
     // Special
     Newline,

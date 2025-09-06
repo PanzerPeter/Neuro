@@ -1,0 +1,23 @@
+[package]
+name = "llvm-backend"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+# Infrastructure
+shared-types = { path = "../infrastructure/shared-types" }
+diagnostics = { path = "../infrastructure/diagnostics" }
+
+# LLVM integration - currently using text-based IR generation
+# inkwell will be added when direct LLVM binding support is needed
+
+# External dependencies
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

@@ -9,7 +9,7 @@ use shared_types::{
     Program, Item, Function, Parameter, Block, Statement, Expression, 
     ast::{Literal, Identifier, BinaryExpression, BinaryOperator, 
          UnaryExpression, UnaryOperator, CallExpression,
-         LetStatement, ReturnStatement, IfStatement, WhileStatement,
+         LetStatement, AssignmentStatement, ReturnStatement, IfStatement, WhileStatement,
          BreakStatement, ContinueStatement},
     Type,
 };
@@ -55,10 +55,40 @@ impl Parser {
         Ok(Program { items, span })
     }
 
+    /// Parse a single expression (for eval command)
+    pub fn parse_expression_only(&mut self) -> Result<Expression, ParseError> {
+        // Skip any leading newlines
+        while self.match_token(&TokenType::Newline) {
+            // continue
+        }
+        
+        let expr = self.parse_expression()?;
+        
+        // Consume optional semicolon
+        self.match_token(&TokenType::Semicolon);
+        
+        // Skip any trailing newlines
+        while self.match_token(&TokenType::Newline) {
+            // continue
+        }
+        
+        // Should be at end of tokens now
+        if !self.is_at_end() {
+            let span = self.current_span();
+            return Err(ParseError::invalid_statement(
+                "Expected end of expression",
+                span,
+            ));
+        }
+        
+        Ok(expr)
+    }
+
     /// Parse a top-level item
     fn parse_item(&mut self) -> Result<Item, ParseError> {
         match self.peek().token_type {
             TokenType::Keyword(Keyword::Fn) => Ok(Item::Function(self.parse_function()?)),
+            TokenType::Keyword(Keyword::Struct) => Ok(Item::Struct(self.parse_struct()?)),
             TokenType::Keyword(Keyword::Import) => Ok(Item::Import(self.parse_import()?)),
             // Add more item types here as needed
             _ => {
@@ -130,9 +160,8 @@ impl Parser {
             )),
         };
 
-        // For now, we'll make type annotation optional and default to Unknown
-        let param_type = if self.match_token(&TokenType::Identifier(":".to_string())) {
-            // Note: We don't have a proper colon token yet, so we're using a workaround
+        // Parse optional type annotation: param_name: type
+        let param_type = if self.match_token(&TokenType::Colon) {
             self.parse_type()?
         } else {
             Type::Unknown
@@ -148,17 +177,95 @@ impl Parser {
         })
     }
 
+    /// Parse a struct definition
+    fn parse_struct(&mut self) -> Result<shared_types::Struct, ParseError> {
+        let start_span = self.advance().span; // consume 'struct'
+        
+        let name = match &self.advance().token_type {
+            TokenType::Identifier(name) => name.clone(),
+            other => return Err(ParseError::unexpected_token(
+                other.clone(),
+                vec![TokenType::Identifier("struct_name".to_string())],
+                self.previous_span(),
+            )),
+        };
+
+        self.consume(TokenType::LeftBrace, "Expected '{' after struct name")?;
+        
+        let mut fields = Vec::new();
+        while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
+            if self.match_token(&TokenType::Newline) {
+                continue;
+            }
+            fields.push(self.parse_struct_field()?);
+        }
+
+        let end = self.consume(TokenType::RightBrace, "Expected '}'")?;
+        let span = Span::new(start_span.start, end.end);
+
+        Ok(shared_types::Struct { name, fields, span })
+    }
+
+    /// Parse a struct field
+    fn parse_struct_field(&mut self) -> Result<shared_types::StructField, ParseError> {
+        let start_span = self.current_span();
+        
+        let name = match &self.advance().token_type {
+            TokenType::Identifier(name) => name.clone(),
+            other => return Err(ParseError::unexpected_token(
+                other.clone(),
+                vec![TokenType::Identifier("field_name".to_string())],
+                self.previous_span(),
+            )),
+        };
+
+        self.consume(TokenType::Colon, "Expected ':' after field name")?;
+        let field_type = self.parse_type()?;
+        self.consume(TokenType::Comma, "Expected ',' after field type")?;
+        
+        let end_span = self.previous_span();
+        let span = Span::new(start_span.start, end_span.end);
+
+        Ok(shared_types::StructField {
+            name,
+            field_type,
+            span,
+        })
+    }
+
     /// Parse an import statement
     fn parse_import(&mut self) -> Result<shared_types::Import, ParseError> {
         let start_span = self.advance().span; // consume 'import'
         
-        let path = match &self.advance().token_type {
+        // Parse module path which can be: identifier::identifier::...
+        let mut path_parts = Vec::new();
+        
+        // Get first identifier or string
+        let first_token = self.advance();
+        let path = match &first_token.token_type {
+            TokenType::Identifier(name) => {
+                path_parts.push(name.clone());
+                
+                // Handle namespace path like std::math
+                while self.match_token(&TokenType::DoubleColon) {
+                    let next_token = self.advance();
+                    match &next_token.token_type {
+                        TokenType::Identifier(name) => path_parts.push(name.clone()),
+                        other => return Err(ParseError::unexpected_token(
+                            other.clone(),
+                            vec![TokenType::Identifier("module_name".to_string())],
+                            next_token.span,
+                        )),
+                    };
+                }
+                
+                path_parts.join("::")
+            },
             TokenType::String(path) => path.clone(),
-            TokenType::Identifier(path) => path.clone(), // Allow identifiers too for now
             other => return Err(ParseError::unexpected_token(
                 other.clone(),
-                vec![TokenType::String("module_path".to_string())],
-                self.previous_span(),
+                vec![TokenType::Identifier("module_name".to_string())],
+                first_token.span,
             )),
         };
 
@@ -197,6 +304,16 @@ impl Parser {
             TokenType::Keyword(Keyword::Break) => Ok(Statement::Break(self.parse_break_statement()?)),
             TokenType::Keyword(Keyword::Continue) => Ok(Statement::Continue(self.parse_continue_statement()?)),
             TokenType::LeftBrace => Ok(Statement::Block(self.parse_block()?)),
+            TokenType::Identifier(_) => {
+                // Look ahead to see if this is an assignment or expression
+                if self.peek_next().token_type == TokenType::Assign {
+                    Ok(Statement::Assignment(self.parse_assignment_statement()?))
+                } else {
+                    let expr = self.parse_expression()?;
+                    self.consume(TokenType::Semicolon, "Expected ';' after expression")?;
+                    Ok(Statement::Expression(expr))
+                }
+            }
             _ => {
                 let expr = self.parse_expression()?;
                 self.consume(TokenType::Semicolon, "Expected ';' after expression")?;
@@ -222,7 +339,7 @@ impl Parser {
 
         let var_type = None; // TODO: Implement type annotation parsing
         
-        let initializer = if self.match_token(&TokenType::Equal) {
+        let initializer = if self.match_token(&TokenType::Assign) {
             Some(self.parse_expression()?)
         } else {
             None
@@ -237,6 +354,33 @@ impl Parser {
             var_type,
             initializer,
             mutable,
+            span,
+        })
+    }
+
+    /// Parse an assignment statement
+    fn parse_assignment_statement(&mut self) -> Result<shared_types::AssignmentStatement, ParseError> {
+        let start_span = self.current_span();
+        
+        let target = match &self.advance().token_type {
+            TokenType::Identifier(name) => name.clone(),
+            other => return Err(ParseError::unexpected_token(
+                other.clone(),
+                vec![TokenType::Identifier("variable_name".to_string())],
+                self.previous_span(),
+            )),
+        };
+
+        self.consume(TokenType::Assign, "Expected '=' in assignment")?;
+        let value = self.parse_expression()?;
+        self.consume(TokenType::Semicolon, "Expected ';' after assignment")?;
+        
+        let end_span = self.previous_span();
+        let span = Span::new(start_span.start, end_span.end);
+
+        Ok(shared_types::AssignmentStatement {
+            target,
+            value,
             span,
         })
     }
@@ -579,6 +723,14 @@ impl Parser {
     fn peek(&self) -> &Token {
         &self.tokens[self.current]
     }
+    
+    fn peek_next(&self) -> &Token {
+        if self.current + 1 >= self.tokens.len() {
+            &self.tokens[self.tokens.len() - 1] // Return EOF token
+        } else {
+            &self.tokens[self.current + 1]
+        }
+    }
 
     fn previous(&self) -> &Token {
         &self.tokens[self.current - 1]
@@ -592,7 +744,7 @@ impl Parser {
         self.previous().span
     }
 
-    fn consume(&mut self, token_type: TokenType, message: &str) -> Result<Span, ParseError> {
+    fn consume(&mut self, token_type: TokenType, _message: &str) -> Result<Span, ParseError> {
         if self.check(&token_type) {
             Ok(self.advance().span)
         } else {

@@ -76,6 +76,7 @@ pub struct Block {
 pub enum Statement {
     Expression(Expression),
     Let(LetStatement),
+    Assignment(AssignmentStatement),
     Return(ReturnStatement),
     If(IfStatement),
     While(WhileStatement),
@@ -92,6 +93,14 @@ pub struct LetStatement {
     pub var_type: Option<Type>,
     pub initializer: Option<Expression>,
     pub mutable: bool,
+    pub span: Span,
+}
+
+/// Assignment statement
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssignmentStatement {
+    pub target: String,
+    pub value: Expression,
     pub span: Span,
 }
 
@@ -268,6 +277,7 @@ impl Statement {
         match self {
             Statement::Expression(expr) => expr.span(),
             Statement::Let(let_stmt) => let_stmt.span,
+            Statement::Assignment(assign_stmt) => assign_stmt.span,
             Statement::Return(ret) => ret.span,
             Statement::If(if_stmt) => if_stmt.span,
             Statement::While(while_stmt) => while_stmt.span,

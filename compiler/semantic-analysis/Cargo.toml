@@ -12,6 +12,7 @@ diagnostics = { path = "../infrastructure/diagnostics" }
 source-location = { path = "../infrastructure/source-location" }
 thiserror.workspace = true
 tracing.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
