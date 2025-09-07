@@ -1,0 +1,24 @@
+[package]
+name = "pattern-matching"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+# Workspace dependencies
+shared-types = { path = "../infrastructure/shared-types" }
+diagnostics = { path = "../infrastructure/diagnostics" }
+source-location = { path = "../infrastructure/source-location" }
+
+# External dependencies
+thiserror.workspace = true
+serde = { workspace = true }
+smallvec = "1.13"
+
+# For decision tree generation
+petgraph = "0.6"
+indexmap = "2.0"
+
+[dev-dependencies]
+proptest.workspace = true

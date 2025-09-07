@@ -1,0 +1,48 @@
+[package]
+name = "neurpm"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0"
+authors = ["NEURO Language Team"]
+description = "Package manager for NEURO programming language"
+keywords = ["neuro", "package-manager", "neural-networks", "ml"]
+categories = ["development-tools"]
+
+[[bin]]
+name = "neurpm"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace dependencies
+shared-types = { path = "../compiler/infrastructure/shared-types" }
+diagnostics = { path = "../compiler/infrastructure/diagnostics" }
+
+# External dependencies
+clap = { version = "4.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+thiserror = "1.0"
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tar = "0.4"
+flate2 = "1.0"
+sha2 = "0.10"
+semver = { version = "1.0", features = ["serde"] }
+url = "2.4"
+tempfile = "3.8"
+walkdir = "2.4"
+indexmap = { version = "2.0", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+env_logger = "0.11"
+
+# For config files
+dirs = "5.0"
+
+# For progress bars
+indicatif = "0.17"
+
+[dev-dependencies]
+tempfile = "3.8"
+tokio-test = "0.4"

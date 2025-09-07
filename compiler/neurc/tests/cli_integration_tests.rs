@@ -4,17 +4,20 @@ use std::process::Command;
 use std::fs;
 use tempfile::{tempdir, NamedTempFile};
 
-fn get_neurc_path() -> &'static str {
+fn get_neurc_path() -> std::path::PathBuf {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let workspace_dir = std::path::Path::new(manifest_dir).parent().unwrap().parent().unwrap();
+    
     if cfg!(debug_assertions) {
-        "./target/debug/neurc.exe"
+        workspace_dir.join("target").join("debug").join("neurc.exe")
     } else {
-        "./target/release/neurc.exe"
+        workspace_dir.join("target").join("release").join("neurc.exe")
     }
 }
 
 #[test]
 fn test_version_command() {
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("version")
         .output()
         .expect("Failed to execute neurc");
@@ -27,7 +30,7 @@ fn test_version_command() {
 
 #[test]
 fn test_help_command() {
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("--help")
         .output()
         .expect("Failed to execute neurc");
@@ -40,7 +43,7 @@ fn test_help_command() {
 
 #[test]
 fn test_eval_simple_expression() {
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("eval")
         .arg("2 + 3 * 4")
         .output()
@@ -53,7 +56,7 @@ fn test_eval_simple_expression() {
 
 #[test]
 fn test_eval_boolean_expression() {
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("eval")
         .arg("42 == 42")
         .output()
@@ -66,7 +69,7 @@ fn test_eval_boolean_expression() {
 
 #[test]
 fn test_eval_string_concatenation() {
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("eval")
         .arg(r#""Hello" + " World""#)
         .output()
@@ -82,7 +85,7 @@ fn test_tokenize_command() {
     let temp_file = NamedTempFile::new().unwrap();
     fs::write(&temp_file, "let x = 42;").unwrap();
     
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("tokenize")
         .arg(temp_file.path())
         .output()
@@ -101,7 +104,7 @@ fn test_parse_command() {
     let temp_file = NamedTempFile::new().unwrap();
     fs::write(&temp_file, "fn main() { let x = 42; }").unwrap();
     
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("parse")
         .arg(temp_file.path())
         .output()
@@ -117,7 +120,7 @@ fn test_check_valid_file() {
     let temp_file = NamedTempFile::new().unwrap();
     fs::write(&temp_file, "fn main() -> int { return 42; }").unwrap();
     
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("check")
         .arg(temp_file.path())
         .output()
@@ -134,7 +137,7 @@ fn test_check_invalid_file() {
     let temp_file = NamedTempFile::new().unwrap();
     fs::write(&temp_file, "fn invalid syntax {").unwrap();
     
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("check")
         .arg(temp_file.path())
         .output()
@@ -150,7 +153,7 @@ fn test_analyze_command() {
     let temp_file = NamedTempFile::new().unwrap();
     fs::write(&temp_file, "fn add(x: int, y: int) -> int { return x + y; }").unwrap();
     
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("analyze")
         .arg(temp_file.path())
         .output()
@@ -167,7 +170,7 @@ fn test_compile_command() {
     let temp_file = NamedTempFile::new().unwrap();
     fs::write(&temp_file, "fn main() { let x = 42; }").unwrap();
     
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("compile")
         .arg(temp_file.path())
         .output()
@@ -180,7 +183,7 @@ fn test_compile_command() {
 
 #[test]
 fn test_nonexistent_file() {
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("check")
         .arg("nonexistent_file.nr")
         .output()
@@ -196,7 +199,7 @@ fn test_verbose_flag() {
     let temp_file = NamedTempFile::new().unwrap();
     fs::write(&temp_file, "fn main() -> int { return 42; }").unwrap();
     
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("--verbose")
         .arg("check")
         .arg(temp_file.path())
@@ -215,7 +218,7 @@ fn test_verbose_flag() {
 
 #[test]
 fn test_eval_invalid_expression() {
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("eval")
         .arg("2 +")
         .output()
@@ -236,7 +239,7 @@ fn test_multiple_files_check() {
     fs::write(&file1, "fn test1() -> int { return 1; }").unwrap();
     fs::write(&file2, "fn test2() -> int { return 2; }").unwrap();
     
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("check")
         .arg(&file1)
         .arg(&file2)
@@ -253,7 +256,7 @@ fn test_empty_file() {
     let temp_file = NamedTempFile::new().unwrap();
     fs::write(&temp_file, "").unwrap();
     
-    let output = Command::new(get_neurc_path())
+    let output = Command::new(&get_neurc_path())
         .arg("check")
         .arg(temp_file.path())
         .output()
@@ -270,7 +273,7 @@ fn test_optimization_levels() {
     fs::write(&temp_file, "fn main() { let x = 42; }").unwrap();
     
     for opt_level in 0..=3 {
-        let output = Command::new(get_neurc_path())
+        let output = Command::new(&get_neurc_path())
             .arg("compile")
             .arg("--opt-level")
             .arg(opt_level.to_string())

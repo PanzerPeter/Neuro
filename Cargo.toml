@@ -13,6 +13,13 @@ members = [
     "compiler/module-system",
     "compiler/llvm-backend",
     "compiler/neurc",
+    
+    # Phase 1 Additional Components
+    "compiler/memory-management",
+    "compiler/tensor-operations",
+    "compiler/pattern-matching",
+    "compiler/macro-expansion",
+    "neurpm",
 ]
 
 [workspace.package]
