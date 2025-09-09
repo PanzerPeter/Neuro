@@ -234,4 +234,12 @@ impl Value {
     pub fn logical_not(&self) -> Value {
         Value::Boolean(!self.is_truthy())
     }
+
+    pub fn logical_and(&self, other: &Value) -> Value {
+        Value::Boolean(self.is_truthy() && other.is_truthy())
+    }
+
+    pub fn logical_or(&self, other: &Value) -> Value {
+        Value::Boolean(self.is_truthy() || other.is_truthy())
+    }
 }

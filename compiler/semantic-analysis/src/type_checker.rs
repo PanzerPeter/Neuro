@@ -106,6 +106,17 @@ impl<'a> TypeChecker<'a> {
                     }),
                 }
             }
+            BinaryOperator::LogicalAnd | BinaryOperator::LogicalOr => {
+                // Logical operators require boolean types
+                match (&left_type, &right_type) {
+                    (Type::Bool, Type::Bool) => Ok(Type::Bool),
+                    _ => Err(SemanticError::TypeMismatch {
+                        expected: "boolean types".to_string(),
+                        found: format!("{} and {}", left_type, right_type),
+                        span: bin.span,
+                    }),
+                }
+            }
         }
     }
 

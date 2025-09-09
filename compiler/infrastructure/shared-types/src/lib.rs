@@ -46,6 +46,9 @@ pub enum TokenType {
     LessEqual,    // <=
     Greater,      // >
     GreaterEqual, // >=
+    LogicalNot,   // !
+    LogicalAnd,   // &&
+    LogicalOr,    // ||
     
     // Punctuation
     LeftParen,

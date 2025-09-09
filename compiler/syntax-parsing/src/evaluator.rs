@@ -133,6 +133,8 @@ impl Evaluator {
             BinaryOperator::LessEqual => left.less_equal(&right).map_err(EvalError::new),
             BinaryOperator::Greater => left.greater_than(&right).map_err(EvalError::new),
             BinaryOperator::GreaterEqual => left.greater_equal(&right).map_err(EvalError::new),
+            BinaryOperator::LogicalAnd => Ok(left.logical_and(&right)),
+            BinaryOperator::LogicalOr => Ok(left.logical_or(&right)),
         }
     }
 

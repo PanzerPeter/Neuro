@@ -295,4 +295,4 @@ The compiler can now generate valid LLVM IR from NEURO source code, representing
 - Look at [examples](../../examples/README.md)
 - Review the [architecture guide](../architecture/README.md)
 
-Happy coding with NEURO! =�
+Happy coding with NEURO! 🚀

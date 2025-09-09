@@ -201,6 +201,8 @@ pub enum BinaryOperator {
     LessEqual,
     Greater,
     GreaterEqual,
+    LogicalAnd,
+    LogicalOr,
 }
 
 /// Unary expression (e.g., -x, !x)

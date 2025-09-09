@@ -459,7 +459,49 @@ impl Parser {
 
     /// Parse an expression
     fn parse_expression(&mut self) -> Result<Expression, ParseError> {
-        self.parse_equality()
+        self.parse_logical_or()
+    }
+
+    /// Parse logical OR expressions (||)
+    fn parse_logical_or(&mut self) -> Result<Expression, ParseError> {
+        let mut expr = self.parse_logical_and()?;
+
+        while let Some(op) = self.match_binary_op(&[
+            (TokenType::LogicalOr, BinaryOperator::LogicalOr),
+        ]) {
+            let operator = op;
+            let right = self.parse_logical_and()?;
+            let span = Span::new(expr.span().start, right.span().end);
+            expr = Expression::Binary(BinaryExpression {
+                left: Box::new(expr),
+                operator,
+                right: Box::new(right),
+                span,
+            });
+        }
+
+        Ok(expr)
+    }
+
+    /// Parse logical AND expressions (&&)
+    fn parse_logical_and(&mut self) -> Result<Expression, ParseError> {
+        let mut expr = self.parse_equality()?;
+
+        while let Some(op) = self.match_binary_op(&[
+            (TokenType::LogicalAnd, BinaryOperator::LogicalAnd),
+        ]) {
+            let operator = op;
+            let right = self.parse_equality()?;
+            let span = Span::new(expr.span().start, right.span().end);
+            expr = Expression::Binary(BinaryExpression {
+                left: Box::new(expr),
+                operator,
+                right: Box::new(right),
+                span,
+            });
+        }
+
+        Ok(expr)
     }
 
     /// Parse equality expressions (== !=)
@@ -557,6 +599,7 @@ impl Parser {
     fn parse_unary(&mut self) -> Result<Expression, ParseError> {
         if let Some(op) = self.match_unary_op(&[
             (TokenType::Minus, UnaryOperator::Negate),
+            (TokenType::LogicalNot, UnaryOperator::Not),
         ]) {
             let start_span = self.previous_span();
             let operand = self.parse_unary()?;

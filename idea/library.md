@@ -570,3 +570,6 @@ examples/
     ├── memory_pools.nr               # Memory pool usage
     ├── distributed_training.nr       # Multi-GPU training
     └── model_serving.nr              # Production model serving
+
+debug/
+debug files .nr format

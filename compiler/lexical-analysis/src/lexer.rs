@@ -115,11 +115,7 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     Ok(Some(Token::new(TokenType::NotEqual, Span::new(start_pos, self.position))))
                 } else {
-                    Err(LexError::UnexpectedCharacter {
-                        char: '!',
-                        line: start_line,
-                        column: start_column,
-                    })
+                    Ok(Some(Token::new(TokenType::LogicalNot, Span::new(start_pos, self.position))))
                 }
             }
             Some('<') => {
@@ -183,6 +179,32 @@ impl<'a> Lexer<'a> {
                     Ok(Some(Token::new(TokenType::DoubleColon, Span::new(start_pos, self.position))))
                 } else {
                     Ok(Some(Token::new(TokenType::Colon, Span::new(start_pos, self.position))))
+                }
+            }
+            Some('&') => {
+                self.advance();
+                if self.current_char == Some('&') {
+                    self.advance();
+                    Ok(Some(Token::new(TokenType::LogicalAnd, Span::new(start_pos, self.position))))
+                } else {
+                    Err(LexError::UnexpectedCharacter {
+                        char: '&',
+                        line: start_line,
+                        column: start_column,
+                    })
+                }
+            }
+            Some('|') => {
+                self.advance();
+                if self.current_char == Some('|') {
+                    self.advance();
+                    Ok(Some(Token::new(TokenType::LogicalOr, Span::new(start_pos, self.position))))
+                } else {
+                    Err(LexError::UnexpectedCharacter {
+                        char: '|',
+                        line: start_line,
+                        column: start_column,
+                    })
                 }
             }
             Some(ch) => {
