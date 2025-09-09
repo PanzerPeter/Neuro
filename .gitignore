@@ -122,5 +122,5 @@ Thumbs.db
 .env
 .claude/
 
-idea/
+idea/*
 debug/
