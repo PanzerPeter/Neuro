@@ -13,6 +13,9 @@ pub mod scope;
 pub mod type_checker;
 pub mod errors;
 
+#[cfg(test)]
+pub mod test_edge_cases;
+
 pub use analyzer::SemanticAnalyzer;
 pub use scope::{Scope, Symbol};
 pub use type_checker::TypeChecker;

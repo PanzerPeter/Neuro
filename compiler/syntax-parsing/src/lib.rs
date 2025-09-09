@@ -7,6 +7,9 @@ pub mod parser;
 pub mod error;
 pub mod evaluator;
 
+#[cfg(test)]
+pub mod test_parser_edge_cases;
+
 pub use parser::*;
 pub use error::*;
 pub use evaluator::*;

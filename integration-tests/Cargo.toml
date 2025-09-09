@@ -1,0 +1,11 @@
+[package]
+name = "integration-tests"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lexical-analysis = { path = "../compiler/lexical-analysis" }
+syntax-parsing = { path = "../compiler/syntax-parsing" }
+semantic-analysis = { path = "../compiler/semantic-analysis" }
+llvm-backend = { path = "../compiler/llvm-backend" }
+shared-types = { path = "../compiler/infrastructure/shared-types" }

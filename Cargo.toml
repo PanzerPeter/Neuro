@@ -20,7 +20,11 @@ members = [
     "compiler/pattern-matching",
     "compiler/macro-expansion",
     "neurpm",
+    
+    # Integration Tests
+    "integration-tests",
 ]
+
 
 [workspace.package]
 version = "0.1.0"

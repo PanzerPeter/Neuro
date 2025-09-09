@@ -8,6 +8,9 @@ pub mod lexer;
 pub mod tokenizer;
 pub mod error;
 
+#[cfg(test)]
+pub mod test_edge_cases;
+
 pub use lexer::*;
 pub use tokenizer::*;
 pub use error::*;

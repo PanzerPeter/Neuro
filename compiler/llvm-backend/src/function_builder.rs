@@ -143,6 +143,25 @@ impl TextBasedFunctionBuilder {
                 self.local_variables.insert(let_stmt.name.clone(), (alloca_name, var_type.clone()));
             },
             
+            Statement::Assignment(assign_stmt) => {
+                // Look up the variable
+                if let Some((alloca_name, var_type)) = self.local_variables.get(&assign_stmt.target).cloned() {
+                    let llvm_type = self.map_type_to_llvm(&var_type);
+                    let value = self.compile_expression(&assign_stmt.value)?;
+                    self.ir_lines.push(format!("  store {} {}, {} {}", llvm_type, value, llvm_type, alloca_name));
+                } else if let Some((param_name, var_type)) = self.parameters.get(&assign_stmt.target).cloned() {
+                    // Assignment to parameter
+                    let llvm_type = self.map_type_to_llvm(&var_type);
+                    let value = self.compile_expression(&assign_stmt.value)?;
+                    self.ir_lines.push(format!("  store {} {}, {} {}", llvm_type, value, llvm_type, param_name));
+                } else {
+                    return Err(LLVMError::CodeGeneration {
+                        message: format!("Undefined variable '{}' in assignment", assign_stmt.target),
+                        span: assign_stmt.span,
+                    });
+                }
+            },
+            
             Statement::Return(ret_stmt) => {
                 if let Some(expr) = &ret_stmt.value {
                     let return_value = self.compile_expression(expr)?;
@@ -159,6 +178,14 @@ impl TextBasedFunctionBuilder {
                 self.compile_expression(expr)?;
             },
             
+            Statement::If(if_stmt) => {
+                self.compile_if_statement(if_stmt)?;
+            },
+            
+            Statement::While(while_stmt) => {
+                self.compile_while_statement(while_stmt)?;
+            },
+            
             _ => {
                 return Err(LLVMError::CodeGeneration {
                     message: "Statement type not yet implemented".to_string(),
@@ -166,6 +193,74 @@ impl TextBasedFunctionBuilder {
                 });
             }
         }
+        
+        Ok(())
+    }
+    
+    /// Compile an if statement
+    fn compile_if_statement(&mut self, if_stmt: &shared_types::ast::IfStatement) -> Result<(), LLVMError> {
+        let cond_value = self.compile_expression(&if_stmt.condition)?;
+        
+        // Generate unique labels
+        let then_label = format!("if.then.{}", self.var_counter);
+        let else_label = format!("if.else.{}", self.var_counter);
+        let end_label = format!("if.end.{}", self.var_counter);
+        self.var_counter += 1;
+        
+        // Branch based on condition
+        if if_stmt.else_branch.is_some() {
+            self.ir_lines.push(format!("  br i1 {}, label %{}, label %{}", cond_value, then_label, else_label));
+        } else {
+            self.ir_lines.push(format!("  br i1 {}, label %{}, label %{}", cond_value, then_label, end_label));
+        }
+        
+        // Then block
+        self.ir_lines.push(format!("{}:", then_label));
+        for stmt in &if_stmt.then_branch.statements {
+            self.compile_statement(stmt)?;
+        }
+        self.ir_lines.push(format!("  br label %{}", end_label));
+        
+        // Else block (if present)
+        if let Some(else_block) = &if_stmt.else_branch {
+            self.ir_lines.push(format!("{}:", else_label));
+            for stmt in &else_block.statements {
+                self.compile_statement(stmt)?;
+            }
+            self.ir_lines.push(format!("  br label %{}", end_label));
+        }
+        
+        // End block
+        self.ir_lines.push(format!("{}:", end_label));
+        
+        Ok(())
+    }
+    
+    /// Compile a while statement
+    fn compile_while_statement(&mut self, while_stmt: &shared_types::ast::WhileStatement) -> Result<(), LLVMError> {
+        // Generate unique labels
+        let loop_header = format!("while.cond.{}", self.var_counter);
+        let loop_body = format!("while.body.{}", self.var_counter);
+        let loop_end = format!("while.end.{}", self.var_counter);
+        self.var_counter += 1;
+        
+        // Jump to condition check
+        self.ir_lines.push(format!("  br label %{}", loop_header));
+        
+        // Loop condition block
+        self.ir_lines.push(format!("{}:", loop_header));
+        let cond_value = self.compile_expression(&while_stmt.condition)?;
+        self.ir_lines.push(format!("  br i1 {}, label %{}, label %{}", cond_value, loop_body, loop_end));
+        
+        // Loop body
+        self.ir_lines.push(format!("{}:", loop_body));
+        for stmt in &while_stmt.body.statements {
+            self.compile_statement(stmt)?;
+        }
+        self.ir_lines.push(format!("  br label %{}", loop_header));
+        
+        // Loop end
+        self.ir_lines.push(format!("{}:", loop_end));
         
         Ok(())
     }
@@ -247,6 +342,9 @@ impl TextBasedFunctionBuilder {
             BinaryOperator::LessEqual => format!("  {} = icmp sle i32 {}, {}", result_name, left, right),
             BinaryOperator::Greater => format!("  {} = icmp sgt i32 {}, {}", result_name, left, right),
             BinaryOperator::GreaterEqual => format!("  {} = icmp sge i32 {}, {}", result_name, left, right),
+            BinaryOperator::LogicalAnd => format!("  {} = and i1 {}, {}", result_name, left, right),
+            BinaryOperator::LogicalOr => format!("  {} = or i1 {}, {}", result_name, left, right),
+            BinaryOperator::Modulo => format!("  {} = srem i32 {}, {}", result_name, left, right),
             _ => {
                 return Err(LLVMError::CodeGeneration {
                     message: format!("Binary operator {:?} not yet implemented", bin_expr.operator),
@@ -266,6 +364,7 @@ impl TextBasedFunctionBuilder {
         
         let instruction = match unary_expr.operator {
             UnaryOperator::Negate => format!("  {} = sub i32 0, {}", result_name, operand),
+            UnaryOperator::Not => format!("  {} = xor i1 {}, true", result_name, operand),
             _ => {
                 return Err(LLVMError::CodeGeneration {
                     message: format!("Unary operator {:?} not yet implemented", unary_expr.operator),

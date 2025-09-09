@@ -11,6 +11,7 @@ pub mod function_builder;
 pub mod module_builder;
 // pub mod optimization_passes; // Temporarily disabled - requires llvm_sys
 // pub mod type_mapping; // Temporarily disabled
+pub mod binary_generation;
 
 use shared_types::{Program, ast::Function, Span};
 use thiserror::Error;
@@ -123,6 +124,33 @@ impl LLVMBackend {
 pub fn compile_to_llvm(program: &Program, module_name: &str) -> Result<CompilationResult, LLVMError> {
     let mut backend = LLVMBackend::new(module_name)?;
     backend.compile_program(program)
+}
+
+/// Compile a NEURO program directly to native executable
+pub fn compile_to_executable<P: AsRef<std::path::Path>>(
+    program: &Program, 
+    module_name: &str,
+    output_path: P,
+) -> Result<std::path::PathBuf, LLVMError> {
+    use binary_generation::{BinaryGenerator, BinaryOptions, OptimizationLevel};
+    
+    // First compile to LLVM IR
+    let compilation_result = compile_to_llvm(program, module_name)?;
+    
+    // Set up binary generation
+    let output_dir = output_path.as_ref().parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let generator = BinaryGenerator::new(output_dir)?;
+    
+    let options = BinaryOptions {
+        output_path: output_path.as_ref().to_path_buf(),
+        optimization_level: OptimizationLevel::Default,
+        debug_info: false,
+        target_triple: Some("x86_64-pc-windows-msvc".to_string()),
+    };
+    
+    // Generate executable
+    generator.generate_executable(&compilation_result, &options)
 }
 
 #[cfg(test)]
