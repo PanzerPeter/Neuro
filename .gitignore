@@ -120,3 +120,4 @@ Thumbs.db
 *.log
 
 idea/*
+idea/
