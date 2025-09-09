@@ -337,7 +337,12 @@ impl Parser {
             )),
         };
 
-        let var_type = None; // TODO: Implement type annotation parsing
+        // Parse optional type annotation: : Type
+        let var_type = if self.match_token(&TokenType::Colon) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
         
         let initializer = if self.match_token(&TokenType::Assign) {
             Some(self.parse_expression()?)
@@ -697,7 +702,6 @@ impl Parser {
 
     /// Parse a type annotation
     fn parse_type(&mut self) -> Result<Type, ParseError> {
-        // For now, just parse basic types
         match &self.advance().token_type {
             TokenType::Identifier(name) => match name.as_str() {
                 "int" => Ok(Type::Int),
@@ -706,11 +710,76 @@ impl Parser {
                 "string" => Ok(Type::String),
                 _ => Ok(Type::Generic(name.clone())),
             },
+            TokenType::Keyword(Keyword::Tensor) => self.parse_tensor_type(),
             other => Err(ParseError::invalid_statement(
                 format!("Expected type, found {:?}", other),
                 self.previous_span(),
             )),
         }
+    }
+
+    /// Parse tensor type: Tensor<T, [dims...]>
+    fn parse_tensor_type(&mut self) -> Result<Type, ParseError> {
+        // Expect '<'
+        self.consume(TokenType::Less, "Expected '<' after 'Tensor'")?;
+        
+        // Parse element type
+        let element_type = Box::new(self.parse_type()?);
+        
+        // Expect ','
+        self.consume(TokenType::Comma, "Expected ',' after tensor element type")?;
+        
+        // Expect '['
+        self.consume(TokenType::LeftBracket, "Expected '[' for tensor dimensions")?;
+        
+        // Parse dimensions
+        let mut dimensions = Vec::new();
+        
+        // Handle empty dimensions []
+        if !self.check(&TokenType::RightBracket) {
+            loop {
+                // Parse dimension (integer literal or '?')
+                let token = self.advance();
+                let span = token.span;
+                match &token.token_type {
+                    TokenType::Integer(value) => {
+                        let value_str = value.clone();
+                        dimensions.push(value_str.parse::<usize>().map_err(|_| {
+                            ParseError::invalid_statement(
+                                format!("Invalid dimension size: {}", value_str),
+                                span,
+                            )
+                        })?);
+                    },
+                    TokenType::Identifier(name) if name == "?" => {
+                        // Dynamic dimension - use 0 as placeholder
+                        dimensions.push(0);
+                    },
+                    other => return Err(ParseError::invalid_statement(
+                        format!("Expected integer or '?' for tensor dimension, found {:?}", other),
+                        span,
+                    )),
+                }
+                
+                // Check for more dimensions
+                if self.match_token(&TokenType::Comma) {
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+        
+        // Expect ']'
+        self.consume(TokenType::RightBracket, "Expected ']' after tensor dimensions")?;
+        
+        // Expect '>'
+        self.consume(TokenType::Greater, "Expected '>' after tensor type parameters")?;
+        
+        Ok(Type::Tensor {
+            element_type,
+            shape: if dimensions.is_empty() { None } else { Some(dimensions) },
+        })
     }
 
     // Helper methods

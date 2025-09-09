@@ -80,9 +80,8 @@ yarn-error.log*
 .nyc_output/
 
 # === Versioned lock / package files you might want to ignore (optional) ===
-# Uncomment if you don't want to commit lockfiles for non-rust projects
-# package-lock.json
-# yarn.lock
+package-lock.json
+yarn.lock
 
 # === Misc / temporary ===
 *.lock
@@ -119,8 +118,5 @@ profile.json
 .DS_Store
 Thumbs.db
 *.log
-.env
-.claude/
 
 idea/*
-debug/

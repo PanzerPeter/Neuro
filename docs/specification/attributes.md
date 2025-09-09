@@ -4,6 +4,8 @@
 
 NEURO attributes are compiler directives that enable AI/ML-specific features. They provide a clean, declarative way to enable automatic differentiation, GPU acceleration, and memory management optimizations.
 
+**Current Status (Phase 1 Complete)**: The attribute parsing framework and infrastructure are fully implemented. Full attribute functionality will be completed in Phase 2.
+
 ## Core Attributes
 
 ### `#[grad]` - Automatic Differentiation
@@ -93,12 +95,12 @@ Attributes interact with the type system to enforce correctness:
 
 ## Implementation Status
 
-| Attribute | Phase 0 | Phase 1 | Phase 2 | Status |
-|-----------|---------|---------|---------|--------|
-| `#[grad]` | Parsing | Basic | Full | =� Planned |
-| `#[kernel]` | Parsing | - | Full | =� Planned |  
-| `#[gpu]` | Parsing | Hints | Full | =� Planned |
-| `#[pool]` | Parsing | - | Full | =� Planned |
+| Attribute | Phase 1 | Phase 2 | Status |
+|-----------|---------|---------|--------|
+| `#[grad]` | ✅ Framework | 📅 Full Implementation | Framework ready, full AD in Phase 2 |
+| `#[kernel]` | ✅ Parsing | 📅 GPU Compilation | Attribute parsed, GPU kernels in Phase 2 |  
+| `#[gpu]` | ✅ Framework | 📅 Full Implementation | Framework ready, full GPU in Phase 2 |
+| `#[pool]` | ✅ Framework | 📅 Full Implementation | Framework ready, advanced pools in Phase 2 |
 
 ## Future Extensions
 
