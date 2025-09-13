@@ -255,7 +255,6 @@ We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) 
 
 ### Quick Start for Contributors
 1. Fork the repository
-2. Pick a task from Phase 1 priorities in [`idea/todo.txt`](idea/todo.txt)
 3. Follow the TDD workflow in [`CONTRIBUTING.md`](CONTRIBUTING.md)
 4. Submit a pull request
 
@@ -273,15 +272,6 @@ We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) 
 NEURO is licensed under the [GNU General Public License v3.0](LICENSE).
 
 **Alpha Development Notice**: This project is in early development. APIs and language features are subject to change without notice. Not recommended for production use.
-
-## 🌟 Roadmap
-
-- **2025 Q1**: Phase 1 MVP with basic compilation
-- **2025 Q2**: Phase 2 AI features and GPU support  
-- **2025 Q3**: Phase 3 developer tooling
-- **2025 Q4**: Phase 4 production deployment features
-
-See [`idea/roadmap.txt`](idea/roadmap.txt) for detailed development timeline.
 
 ## 💬 Community
 
