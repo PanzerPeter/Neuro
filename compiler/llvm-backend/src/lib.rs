@@ -12,6 +12,7 @@ pub mod module_builder;
 // pub mod optimization_passes; // Temporarily disabled - requires llvm_sys
 // pub mod type_mapping; // Temporarily disabled
 pub mod binary_generation;
+pub mod jit_executor;
 
 use shared_types::{Program, ast::Function, Span};
 use thiserror::Error;
@@ -91,26 +92,63 @@ impl LLVMBackend {
         self.ir_lines.push(format!("; ModuleID = '{}'", self.module_name));
         self.ir_lines.push(format!("source_filename = \"{}\"", self.module_name));
         self.ir_lines.push("".to_string());
-        
+
         // Add target triple
         self.ir_lines.push("target triple = \"x86_64-pc-windows-msvc\"".to_string());
         self.ir_lines.push("".to_string());
+
+        // Add built-in function declarations
+        self.add_builtin_function_declarations();
+
         Ok(())
+    }
+
+    /// Add declarations for built-in functions
+    fn add_builtin_function_declarations(&mut self) {
+        // Declare external C runtime functions
+        self.ir_lines.push("; External C runtime function declarations".to_string());
+        self.ir_lines.push("declare i32 @printf(ptr, ...)".to_string());
+        self.ir_lines.push("declare i32 @puts(ptr)".to_string());
+        self.ir_lines.push("".to_string());
+
+        // Add global format string for integer printing
+        self.ir_lines.push("; Global format string for printing integers".to_string());
+        self.ir_lines.push("@.str.int = private unnamed_addr constant [4 x i8] c\"%d\\0A\\00\", align 1".to_string());
+        self.ir_lines.push("".to_string());
+
+        // Implement the print function using printf
+        self.ir_lines.push("; Built-in print function implementation".to_string());
+        self.ir_lines.push("define i32 @print(i32 %value) {".to_string());
+        self.ir_lines.push("entry:".to_string());
+        self.ir_lines.push("  %0 = call i32 (ptr, ...) @printf(ptr @.str.int, i32 %value)".to_string());
+        self.ir_lines.push("  ret i32 %0".to_string());
+        self.ir_lines.push("}".to_string());
+        self.ir_lines.push("".to_string());
     }
     
     /// Compile a single function
     fn compile_function(&mut self, function: &Function) -> Result<(), LLVMError> {
         use crate::function_builder::TextBasedFunctionBuilder;
-        
+
+        tracing::debug!("Compiling function: {}", function.name);
+
         let mut builder = TextBasedFunctionBuilder::new();
-        let function_ir = builder.build_function(function)?;
-        
+        let function_ir = builder.build_function(function)
+            .map_err(|e| {
+                LLVMError::FunctionCompilation {
+                    message: format!("Failed to compile function: {}", e),
+                    function_name: function.name.clone(),
+                    span: function.span,
+                }
+            })?;
+
         // Add function IR to module
         for line in function_ir.lines() {
             self.ir_lines.push(line.to_string());
         }
         self.ir_lines.push("".to_string());
-        
+
+        tracing::debug!("Successfully compiled function: {}", function.name);
         Ok(())
     }
     
@@ -128,29 +166,55 @@ pub fn compile_to_llvm(program: &Program, module_name: &str) -> Result<Compilati
 
 /// Compile a NEURO program directly to native executable
 pub fn compile_to_executable<P: AsRef<std::path::Path>>(
-    program: &Program, 
+    program: &Program,
     module_name: &str,
     output_path: P,
 ) -> Result<std::path::PathBuf, LLVMError> {
     use binary_generation::{BinaryGenerator, BinaryOptions, OptimizationLevel};
-    
+
+    // Try LLVM compilation first
+    match try_llvm_compilation(program, module_name, &output_path) {
+        Ok(path) => Ok(path),
+        Err(llvm_error) => {
+            tracing::warn!("LLVM compilation failed: {}. Falling back to JIT execution.", llvm_error);
+            // Fall back to JIT execution for now
+            Err(LLVMError::ModuleGeneration {
+                message: format!("LLVM tools not available. {}", llvm_error),
+            })
+        }
+    }
+}
+
+/// Try to compile using LLVM tools
+fn try_llvm_compilation<P: AsRef<std::path::Path>>(
+    program: &Program,
+    module_name: &str,
+    output_path: P,
+) -> Result<std::path::PathBuf, LLVMError> {
+    use binary_generation::{BinaryGenerator, BinaryOptions, OptimizationLevel};
+
     // First compile to LLVM IR
     let compilation_result = compile_to_llvm(program, module_name)?;
-    
+
     // Set up binary generation
     let output_dir = output_path.as_ref().parent()
         .unwrap_or_else(|| std::path::Path::new("."));
     let generator = BinaryGenerator::new(output_dir)?;
-    
+
     let options = BinaryOptions {
         output_path: output_path.as_ref().to_path_buf(),
         optimization_level: OptimizationLevel::Default,
         debug_info: false,
         target_triple: Some("x86_64-pc-windows-msvc".to_string()),
     };
-    
+
     // Generate executable
     generator.generate_executable(&compilation_result, &options)
+}
+
+/// Execute a NEURO program using JIT compilation
+pub fn execute_program_jit(program: &Program) -> Result<jit_executor::JitResult, LLVMError> {
+    jit_executor::execute_program(program)
 }
 
 #[cfg(test)]

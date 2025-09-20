@@ -9,6 +9,8 @@ pub mod parse;
 pub mod eval;
 pub mod analyze;
 pub mod llvm;
+pub mod build;
+pub mod run;
 pub mod version;
 
 pub use compile::*;
@@ -18,4 +20,6 @@ pub use parse::*;
 pub use eval::*;
 pub use analyze::*;
 pub use llvm::*;
+pub use build::*;
+pub use run::*;
 pub use version::*;

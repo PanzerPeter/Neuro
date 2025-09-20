@@ -105,19 +105,4 @@ vcpkg/
 *.war
 *.ear
 
-# redundant safe-guards
-/target/criterion/
-flamegraph.svg
-profile.json
-*.profraw
-.vscode/
-*.swp
-*~
-*.sublime-project
-*.sublime-workspace
-.DS_Store
-Thumbs.db
-*.log
-
-idea/*
-idea/
+.idea/

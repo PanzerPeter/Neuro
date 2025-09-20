@@ -32,6 +32,12 @@ fn main() {
         Commands::Llvm { file, opt_level, output } => {
             run_llvm(file, opt_level, output, cli.verbose)
         },
+        Commands::Build { file, output, opt_level, debug } => {
+            run_build(file, output, opt_level, debug, cli.verbose)
+        },
+        Commands::Run { file, opt_level } => {
+            run_run(file, opt_level, cli.verbose)
+        },
         Commands::Version => {
             run_version()
         },

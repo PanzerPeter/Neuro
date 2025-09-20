@@ -98,35 +98,35 @@ impl BinaryGenerator {
     /// Compile LLVM IR to object file using llc (LLVM static compiler)
     fn compile_ir_to_object(&self, ir_file: &Path, options: &BinaryOptions) -> Result<PathBuf, LLVMError> {
         let obj_file = ir_file.with_extension("o");
-        
+
         let llc_path = self.find_llc_path()?;
-        
+
         let mut cmd = Command::new(&llc_path);
         cmd.arg("-filetype=obj")
            .arg(&format!("-O{}", self.optimization_flag(options.optimization_level)))
            .arg("-o").arg(&obj_file)
            .arg(ir_file);
-        
+
         // Add target triple if specified
         if let Some(ref target) = options.target_triple {
             cmd.arg(&format!("-mtriple={}", target));
         }
-        
+
         tracing::debug!("Running llc command: {:?}", cmd);
-        
+
         let output = cmd.output().map_err(|e| {
             LLVMError::ModuleGeneration {
                 message: format!("Failed to run llc: {}. Make sure LLVM is installed and in PATH.", e),
             }
         })?;
-        
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(LLVMError::ModuleGeneration {
                 message: format!("llc failed: {}", stderr),
             });
         }
-        
+
         Ok(obj_file)
     }
     
@@ -156,24 +156,36 @@ impl BinaryGenerator {
         let mut cmd = Command::new(tool);
         cmd.arg("-o").arg(&exe_file)
            .arg(obj_file);
-        
+
         // Add debug info if requested
         if options.debug_info {
             cmd.arg("-g");
         }
+
+        // On Windows, let clang handle C runtime linking automatically
+        // (clang will automatically link with the appropriate runtime)
         
         tracing::debug!("Trying to link with {}: {:?}", tool, cmd);
         
-        let output = cmd.output().map_err(|_| {
+        let output = cmd.output().map_err(|e| {
             LLVMError::ModuleGeneration {
-                message: format!("{} not found or failed", tool),
+                message: format!("Failed to execute linker '{}': {}\n\nEnsure {} is installed and available in PATH", tool, e, tool),
             }
         })?;
-        
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
             return Err(LLVMError::ModuleGeneration {
-                message: format!("{} linking failed: {}", tool, stderr),
+                message: format!(
+                    "Linking failed with {} (exit code: {})\n\nSTDERR:\n{}\n\nSTDOUT:\n{}\n\nObject file: {}\nOutput path: {}\n\nCommon causes:\n• Undefined symbols (missing function implementations)\n• Missing runtime libraries\n• Incompatible object file format",
+                    tool,
+                    output.status.code().unwrap_or(-1),
+                    stderr,
+                    stdout,
+                    obj_file.display(),
+                    exe_file.display()
+                ),
             });
         }
         
@@ -195,7 +207,10 @@ impl BinaryGenerator {
             cmd.arg("/OUT:".to_string() + &exe_file.to_string_lossy())
                .arg(obj_file)
                .arg("/SUBSYSTEM:CONSOLE")
-               .arg("/ENTRY:main");
+               .arg("/ENTRY:main")
+               .arg("kernel32.lib")    // Windows kernel API
+               .arg("user32.lib")      // Windows user API
+               .arg("msvcrt.lib");     // Microsoft C runtime
             
             let output = cmd.output().map_err(|e| {
                 LLVMError::ModuleGeneration {
@@ -226,26 +241,27 @@ impl BinaryGenerator {
         // Try common LLVM installation paths
         let common_paths = vec![
             "/usr/bin",
-            "/usr/local/bin", 
+            "/usr/local/bin",
             "/opt/homebrew/bin",
             "C:\\Program Files\\LLVM\\bin",
             "C:\\LLVM\\bin",
+            "C:\\LLVM-191\\bin",  // Add user's specific LLVM path
         ];
-        
+
         for path in common_paths {
             let llc_path = PathBuf::from(path).join(if cfg!(windows) { "llc.exe" } else { "llc" });
             if llc_path.exists() {
                 return Some(PathBuf::from(path));
             }
         }
-        
+
         None
     }
     
     /// Find llc (LLVM static compiler) path
     fn find_llc_path(&self) -> Result<PathBuf, LLVMError> {
         let llc_name = if cfg!(windows) { "llc.exe" } else { "llc" };
-        
+
         // Try user-specified LLVM tools path
         if let Some(ref tools_path) = self.llvm_tools_path {
             let llc_path = tools_path.join(llc_name);
@@ -253,7 +269,7 @@ impl BinaryGenerator {
                 return Ok(llc_path);
             }
         }
-        
+
         // Try PATH
         if let Ok(output) = Command::new("where").arg(llc_name).output() {
             if output.status.success() {
@@ -263,7 +279,7 @@ impl BinaryGenerator {
                 }
             }
         }
-        
+
         // Try 'which' on Unix-like systems
         if let Ok(output) = Command::new("which").arg(llc_name).output() {
             if output.status.success() {
@@ -271,7 +287,7 @@ impl BinaryGenerator {
                 return Ok(PathBuf::from(path_str.trim()));
             }
         }
-        
+
         // Fallback to just the name and hope it's in PATH
         Ok(PathBuf::from(llc_name))
     }

@@ -84,6 +84,28 @@ pub enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Build NEURO source to executable
+    Build {
+        /// Input source file
+        file: PathBuf,
+        /// Output executable name
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Optimization level (0-3)
+        #[arg(short = 'O', long, default_value = "2")]
+        opt_level: u8,
+        /// Include debug information
+        #[arg(long)]
+        debug: bool,
+    },
+    /// Run NEURO program directly
+    Run {
+        /// Input source file
+        file: PathBuf,
+        /// Optimization level (0-3)
+        #[arg(short = 'O', long, default_value = "0")]
+        opt_level: u8,
+    },
     /// Show version information
     Version,
 }

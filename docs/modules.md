@@ -1,275 +1,413 @@
 # NEURO Module System
 
-The NEURO module system provides a clean way to organize code into reusable components while maintaining the performance characteristics needed for ML workloads. **Status: ✅ FULLY IMPLEMENTED** - The module system is complete with dependency resolution, circular dependency detection, and seamless integration with the LLVM backend.
+The NEURO module system provides a comprehensive framework for organizing code across multiple files and managing dependencies. This document covers the current Phase 1 implementation and planned features.
 
-## Overview
+## Module System Overview
 
-NEURO uses a file-based module system where each `.nr` file represents a module. The system is designed to be:
+The NEURO module system is designed with these principles:
+- **File-based modules**: Each `.nr` file is a module
+- **Explicit imports**: Dependencies must be explicitly declared
+- **Path-based resolution**: Clear, predictable module resolution
+- **Circular dependency detection**: Prevents import cycles
+- **Standard library support**: Built-in module ecosystem
 
-- **Simple**: File-based modules with intuitive import syntax
-- **Fast**: Efficient dependency resolution and caching
-- **Safe**: Circular dependency detection and clear error messages
-- **Scalable**: Supports large codebases with complex dependency graphs
+## Import Statement Syntax
 
-## Module Definition
+### Basic Import Forms
 
-A module in NEURO is simply a `.nr` file containing functions, structs, and other top-level items:
+#### Identifier Chain Import
+```neuro
+import identifier::chain;
+```
+Uses `::` separators to specify module paths through the module hierarchy.
+
+#### String Path Import
+```neuro
+import "./relative.nr";
+import "../lib/utils.nr";
+import "absolute/path.nr";
+```
+Uses quoted strings for explicit file paths relative to the current file.
+
+### Import Examples
 
 ```neuro
-// math.nr - A math utilities module
-fn add(a: int, b: int) -> int {
-    a + b
-}
+// Standard library imports
+import std::math;
+import std::io::filesystem;
 
-fn multiply(a: int, b: int) -> int {
-    a * b
-}
+// Local module imports
+import utils;
+import my_package::helpers;
+
+// Relative file imports
+import "./lib/utils.nr";
+import "../shared/common.nr";
+import "../../core/types.nr";
+
+// Direct file imports
+import "math_functions.nr";
+import "data_structures.nr";
 ```
 
-All top-level items in a module are automatically exported and available to importing modules.
+## Module Resolution Algorithm
 
-## Import Syntax
+### Resolution Search Order
 
-### Relative Imports
+The module resolver follows this systematic search process:
 
-Import modules relative to the current file:
+1. **Current Directory**: `./`
+   - Look for exact filename matches
+   - Try adding `.nr` extension if needed
 
+2. **Source Directory**: `src/`
+   - Check for module files in source tree
+   - Support nested directory structures
+
+3. **Library Directory**: `lib/`
+   - Search for library modules
+   - Support for third-party packages
+
+4. **Standard Library**: Built-in modules
+   - Core language functionality
+   - Math, I/O, and utility modules
+
+### File Resolution Rules
+
+#### Direct File Resolution
 ```neuro
-import "./math";           // Import math.nr from same directory
-import "../utils/helpers"; // Import from parent directory
+import "./utils.nr";     // Resolves to: ./utils.nr
+import "../lib/math.nr"; // Resolves to: ../lib/math.nr
 ```
 
-### Absolute Imports
+#### Module Path Resolution
+For identifier chain imports like `import std::math;`:
 
-Import from standard search paths:
+1. Check `std/math.nr`
+2. Check `std/math/mod.nr` (module index file)
+3. Search through standard library paths
+4. Search through configured module paths
 
+#### Extension Handling
+- `.nr` extension is automatically added if omitted
+- `mod.nr` files serve as directory module entry points
+
+### Resolution Examples
+
+Given this project structure:
+```
+project/
+├── src/
+│   ├── main.nr
+│   ├── utils.nr
+│   └── algorithms/
+│       ├── mod.nr
+│       └── sorting.nr
+├── lib/
+│   ├── math.nr
+│   └── data_structures.nr
+└── examples/
+    └── demo.nr
+```
+
+Resolution behavior:
 ```neuro
-import "std::collections"; // Standard library module
-import "my_lib::tensor";   // Project library module
+// From src/main.nr
+import utils;                    // → src/utils.nr
+import algorithms;               // → src/algorithms/mod.nr
+import "./utils.nr";             // → src/utils.nr
+import "../lib/math.nr";         // → lib/math.nr
+
+// From examples/demo.nr
+import "../src/utils.nr";        // → src/utils.nr
+import "../lib/data_structures.nr"; // → lib/data_structures.nr
 ```
 
-## Module Resolution
+## Module Registry and Tracking
 
-The module system resolves imports using the following algorithm:
+### Module Loading
 
-1. **Relative imports** (starting with `./` or `../`):
-   - Resolved relative to the importing file's directory
-   - `./math` in `/project/src/main.nr` resolves to `/project/src/math.nr`
-
-2. **Absolute imports**:
-   - Searched in configured search paths
-   - Default paths: current directory, `src/`, `lib/`
-
-3. **File extensions**:
-   - `.nr` extension automatically added if not present
-   - Directory imports look for `mod.nr` file
-
-## Dependency Management
-
-### Automatic Dependency Tracking
-
-The module system automatically tracks dependencies between modules:
-
-```neuro
-// main.nr
-import "./math";
-import "./utils";
-
-// math.nr  
-import "./constants";
-
-// Dependency graph: main → math → constants
-//                   main → utils
-```
-
-### Circular Dependency Detection
-
-The system detects and prevents circular dependencies:
-
-```neuro
-// a.nr
-import "./b";  // Error: circular dependency detected
-
-// b.nr  
-import "./a";
-```
-
-### Topological Ordering
-
-Modules are compiled in dependency order:
-
-1. Modules with no dependencies first
-2. Modules depending on already compiled modules
-3. Ensures all dependencies are available at compile time
-
-## Implementation Architecture
-
-The module system follows Vertical Slice Architecture (VSA) principles:
-
-### Core Components
-
-- **`ModuleRegistry`**: Tracks loaded modules and their metadata
-- **`ImportResolver`**: Resolves import paths to filesystem locations
-- **`DependencyGraph`**: Manages module dependencies and ordering
-- **`ModuleSystem`**: Main interface coordinating all components
-
-### Key Features
-
-- **Caching**: Resolved imports are cached to avoid duplicate work
-- **Error Recovery**: Clear error messages for missing or invalid modules
-- **Performance**: Efficient algorithms for large dependency graphs
-
-## Usage Examples
-
-### Basic Module Usage
-
-```neuro
-// utils.nr
-fn helper_function(x: int) -> int {
-    x * 2
-}
-
-// main.nr
-import "./utils";
-
-fn main() -> int {
-    let result = helper_function(21);
-    print("Result: " + to_string(result));
-    0
-}
-```
-
-### Complex Dependencies
-
-```neuro
-// tensor_ops.nr
-import "./math";
-import "./memory";
-
-fn tensor_add(a: Tensor<f32>, b: Tensor<f32>) -> Tensor<f32> {
-    // Implementation using math and memory modules
-}
-
-// ml_model.nr  
-import "./tensor_ops";
-import "./activation";
-
-fn neural_network(input: Tensor<f32>) -> Tensor<f32> {
-    let hidden = tensor_add(input, weights);
-    activation::relu(hidden)
-}
-```
-
-## Current Implementation Status
-
-The module system is **fully implemented** with the following features:
-
-1. **✅ File-Based Modules**: Each `.nr` file represents a complete module
-2. **✅ Import Resolution**: Both relative (`./math`) and absolute (`std::collections`) imports
-3. **✅ Dependency Tracking**: Automatic dependency graph construction and management
-4. **✅ Circular Detection**: Complete circular dependency detection and prevention
-5. **✅ Compilation Order**: Topological sorting ensures proper compilation sequence
-6. **✅ LLVM Integration**: Seamless module linking in the LLVM backend
-7. **✅ Error Handling**: Comprehensive error messages for import issues
-
-## Phase 2 Enhancements (Planned)
-
-Future extensions will include:
-
-1. **Explicit Exports**: Control which items are exported from a module
-2. **Namespacing**: Advanced namespace management and conflict resolution
-3. **Package Management**: Versioned packages with semantic versioning
-4. **Standard Library**: Comprehensive ML-focused standard library modules
-5. **Precompiled Modules**: Module caching for faster incremental builds
-
-## Integration with NEURO Features
-
-### Tensor Types
-
-Modules can export tensor types and operations:
-
-```neuro
-// tensor_lib.nr
-fn create_tensor(shape: [usize; 2]) -> Tensor<f32, shape> {
-    // Create tensor with given shape
-}
-
-// main.nr
-import "./tensor_lib";
-
-fn main() {
-    let t = create_tensor([3, 4]);
-    // Use tensor...
-}
-```
-
-### Automatic Differentiation
-
-Modules can export functions with `#[grad]` attribute:
-
-```neuro
-// neural_ops.nr
-#[grad]
-fn linear_layer(input: Tensor<f32>) -> Tensor<f32> {
-    // Neural network layer with automatic gradients
-}
-```
-
-### GPU Kernels
-
-Modules can export GPU-accelerated functions:
-
-```neuro
-// gpu_ops.nr
-#[kernel(cuda)]
-fn matrix_multiply(a: Tensor<f32>, b: Tensor<f32>) -> Tensor<f32> {
-    // GPU-accelerated matrix multiplication
-}
-```
-
-## API Reference
-
-### ModuleSystem
-
-Main interface for module operations:
+The module system maintains a registry of loaded modules:
 
 ```rust
-let mut module_system = ModuleSystem::new();
-
-// Register a module
-let module_id = module_system.register_module(path, program);
-
-// Resolve imports
-let dependencies = module_system.resolve_imports(module_id)?;
-
-// Get module information
-let module = module_system.get_module(module_id);
+// Internal representation (conceptual)
+struct ModuleRegistry {
+    loaded_modules: HashMap<ModuleId, Module>,
+    resolution_cache: HashMap<ImportPath, ModuleId>,
+    dependency_graph: DependencyGraph,
+}
 ```
 
-### Error Handling
+### Module Identification
 
-The module system provides detailed error information:
+Each module receives a unique identifier based on:
+- Canonical file path
+- Module content hash (for change detection)
+- Dependencies and their versions
 
-- `ModuleError::ModuleNotFound`: Module file not found
-- `ModuleError::ImportResolutionFailed`: Cannot resolve import path
-- `ModuleError::CircularDependency`: Circular dependency detected
-- `ModuleError::FileReadError`: Error reading module file
+### Dependency Tracking
+
+The system tracks:
+- **Direct dependencies**: Modules explicitly imported
+- **Transitive dependencies**: Dependencies of dependencies
+- **Circular dependencies**: Detected and prevented
+- **Module hierarchy**: Parent-child relationships
+
+## Circular Dependency Detection
+
+### Detection Algorithm
+
+The module system prevents circular dependencies by:
+
+1. **Dependency Graph Construction**: Building a directed graph of module dependencies
+2. **Cycle Detection**: Using depth-first search to detect cycles
+3. **Error Reporting**: Clear error messages when cycles are found
+
+### Circular Dependency Example
+
+```neuro
+// File: a.nr
+import "./b.nr";  // A imports B
+
+fn func_a() -> int {
+    return func_b();
+}
+
+// File: b.nr
+import "./a.nr";  // B imports A (creates cycle)
+
+fn func_b() -> int {
+    return func_a();  // Circular dependency!
+}
+```
+
+This would be detected and reported as an error:
+```
+Error: Circular dependency detected
+  → a.nr imports b.nr
+  → b.nr imports a.nr
+  → This creates a circular dependency cycle
+```
+
+## Module System Features
+
+### Phase 1 Implementation Status
+
+#### Fully Implemented ✅
+- **Import statement parsing**: Both identifier chains and string paths
+- **Basic resolution algorithm**: Search path logic implemented
+- **File path handling**: Relative and absolute path resolution
+- **Module registry foundation**: Infrastructure for tracking loaded modules
+- **Dependency graph framework**: Basic structure for dependency tracking
+- **Circular dependency detection**: Framework in place
+
+#### Partially Implemented ⚠️
+- **Symbol resolution**: Importing specific functions/types from modules
+- **Module caching**: Optimization for repeated imports
+- **Standard library**: Core modules being developed
+
+#### Not Yet Implemented ❌
+- **Selective imports**: `import module::{ item1, item2 }`
+- **Import aliasing**: `import module as alias`
+- **Re-exports**: `pub import` for module re-exporting
+- **Module visibility**: Public/private module boundaries
+- **Package management**: External dependency management
+- **Module attributes**: Metadata and configuration
+
+## Complete Module Example
+
+### Project Structure
+```
+calculator/
+├── src/
+│   ├── main.nr
+│   └── operations/
+│       ├── mod.nr
+│       ├── basic.nr
+│       └── advanced.nr
+├── lib/
+│   └── math_utils.nr
+└── std/
+    └── math.nr
+```
+
+### Module Files
+
+#### `lib/math_utils.nr`
+```neuro
+// Mathematical utility functions
+fn abs(x: int) -> int {
+    if x < 0 {
+        return -x;
+    } else {
+        return x;
+    }
+}
+
+fn max(a: int, b: int) -> int {
+    if a > b {
+        return a;
+    } else {
+        return b;
+    }
+}
+```
+
+#### `src/operations/basic.nr`
+```neuro
+// Basic arithmetic operations
+import "../../lib/math_utils.nr";
+
+fn add(a: int, b: int) -> int {
+    return a + b;
+}
+
+fn subtract(a: int, b: int) -> int {
+    return a - b;
+}
+
+fn safe_divide(a: int, b: int) -> int {
+    if abs(b) > 0 {  // Using imported function
+        return a / b;
+    } else {
+        return 0;
+    }
+}
+```
+
+#### `src/operations/mod.nr`
+```neuro
+// Module index file
+import "./basic.nr";
+import "./advanced.nr";
+
+// Re-export commonly used functions
+// (When re-exports are implemented)
+```
+
+#### `src/main.nr`
+```neuro
+import std::math;
+import "./operations/mod.nr";
+import "../lib/math_utils.nr";
+
+fn main() -> int {
+    // Use imported functionality
+    let result = add(10, 20);
+    let maximum = max(result, 50);
+
+    return maximum;
+}
+```
+
+## Error Handling and Diagnostics
+
+### Module Resolution Errors
+
+Common error types and their messages:
+
+#### File Not Found
+```
+Error: Module not found
+  → Could not resolve import: "./nonexistent.nr"
+  → Searched in:
+    - ./nonexistent.nr
+    - src/nonexistent.nr
+    - lib/nonexistent.nr
+```
+
+#### Circular Dependencies
+```
+Error: Circular dependency detected
+  → Import cycle: main.nr → utils.nr → helpers.nr → main.nr
+  → Consider restructuring your modules to break this cycle
+```
+
+#### Invalid Import Path
+```
+Error: Invalid import path
+  → Import path "::invalid::path" is not valid
+  → Use either identifier chains (std::math) or file paths ("./file.nr")
+```
+
+## Future Enhancements
+
+### Planned Phase 2 Features
+
+#### Selective Imports
+```neuro
+// Import specific items from modules
+import std::math::{ sin, cos, tan, PI };
+import "./utils.nr"::{ helper_function, CONSTANT };
+```
+
+#### Import Aliasing
+```neuro
+// Alias modules for convenience
+import std::math as m;
+import "./very_long_module_name.nr" as short;
+
+fn calculate() -> float {
+    return m::sin(3.14159);
+}
+```
+
+#### Re-exports
+```neuro
+// Re-export modules for other modules to use
+pub import std::math;  // Makes math available to importers of this module
+pub import "./internal.nr"::{ public_function };
+```
+
+#### Package Management
+```neuro
+// External package imports (planned)
+import package::neural_networks::{ Layer, Network };
+import package::linear_algebra::Matrix;
+```
+
+## Performance Considerations
+
+### Module Loading Optimization
+
+- **Lazy Loading**: Modules loaded only when needed
+- **Caching**: Compiled modules cached for faster subsequent loads
+- **Parallel Resolution**: Multiple modules resolved concurrently
+- **Incremental Compilation**: Only changed modules recompiled
+
+### Memory Management
+
+- **Module Sharing**: Common modules shared between dependents
+- **Garbage Collection**: Unused modules can be unloaded
+- **Memory Mapping**: Large modules mapped rather than loaded entirely
 
 ## Best Practices
 
-1. **Use descriptive module names**: `tensor_operations` not `ops`
-2. **Keep modules focused**: Single responsibility per module
-3. **Minimize dependencies**: Reduce coupling between modules
-4. **Document public interfaces**: Clear documentation for exported functions
-5. **Use relative imports**: For project-internal modules
+### Module Organization
+1. **One concept per module**: Keep modules focused
+2. **Clear naming**: Use descriptive module and file names
+3. **Logical hierarchy**: Organize related modules together
+4. **Minimal dependencies**: Reduce coupling between modules
 
-## Testing
+### Import Guidelines
+1. **Explicit imports**: Always import what you use
+2. **Group imports**: Organize imports by category
+3. **Relative paths**: Use relative imports for local modules
+4. **Standard library first**: Import standard library modules first
 
-The module system is thoroughly tested with:
+### Example of Good Module Organization
+```neuro
+// Group and order imports clearly
+import std::math;
+import std::io;
 
-- Unit tests for each component
-- Integration tests for end-to-end workflows
-- Property-based tests for edge cases
-- Performance tests for large dependency graphs
+import "./types.nr";
+import "./utils.nr";
+import "../shared/common.nr";
 
-See `compiler/module-system/tests/` for comprehensive test coverage.
+fn main() -> int {
+    // Implementation
+    return 0;
+}
+```
+

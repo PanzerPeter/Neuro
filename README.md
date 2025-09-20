@@ -3,7 +3,7 @@
 [![CI](https://github.com/PanzerPeter/Neuro/workflows/CI/badge.svg)](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-> **✅ Phase 1 COMPLETE**: NEURO has a fully functional compiler with complete frontend (lexer → parser → semantic analyzer) and working LLVM backend. All core compilation features are operational, including native code generation, tensor types, GPU compilation framework, and comprehensive CLI tools. Ready for Phase 2 development.
+> **✅ Phase 1 COMPLETE**: NEURO has a fully functional compiler with complete frontend (lexer → parser → semantic analyzer), working LLVM backend, and JIT execution capability. Core compilation features are operational including `neurc run` and `neurc build` commands, with fallback JIT execution when LLVM tools are unavailable. Ready for Phase 2 development.
 
 **NEURO** is a high-performance, AI-first programming language designed specifically for machine learning and neural network development. Built with Rust and LLVM, NEURO combines the performance of compiled languages with AI/ML-optimized features like automatic differentiation, tensor operations, and GPU acceleration.
 
@@ -56,10 +56,16 @@ fn train_model(model: &mut Model, data: Dataset) {
 ## 🛠️ Installation & Setup
 
 ### Prerequisites
-- Rust 1.70+ 
-- LLVM 18
+- **Rust 1.70+** - For building the compiler
+- **LLVM 18+** - For native code generation (llc, clang)
+- **C/C++ toolchain** - For linking (clang/gcc/MSVC)
 - (Optional) CUDA Toolkit for NVIDIA GPU support
 - (Optional) Vulkan SDK for cross-platform GPU support
+
+### Verified Working Configurations
+- ✅ **Windows 11** + LLVM 19.1.6 + Clang + MSVC
+- ✅ **Rust 1.75+** + Cargo workspace build
+- ✅ **Native executable generation** confirmed working
 
 ### From Source
 ```bash
@@ -75,6 +81,12 @@ export PATH=$PWD/target/release:$PATH
 ```bash
 neurc --version
 # NEURO Compiler (neurc) v0.1.0
+
+# Test compilation to verify LLVM integration
+echo 'fn main() -> int { return 42; }' > test.nr
+neurc build test.nr
+# 🎉 Successfully built executable: test.exe
+./test.exe  # Verify output
 ```
 
 ## 🎯 Phase 1 Status: ✅ COMPLETE
@@ -84,7 +96,7 @@ neurc --version
 **🚀 Complete Compiler Pipeline (Fully Functional)**
 - **Frontend Processing**: NEURO source → lexical analysis → parsing → semantic analysis ✅
 - **LLVM Backend**: Complete LLVM IR generation and native code compilation ✅
-- **CLI Tool (neurc)**: All commands working - check, tokenize, parse, eval, compile, llvm, version ✅
+- **CLI Tool (neurc)**: All commands working - check, tokenize, parse, eval, compile, llvm, run, build, version ✅
 - **Type System**: Full type inference, checking, and tensor type support ✅
 - **Expression Evaluation**: Direct expression computation and complex program execution ✅
 - **Native Compilation**: Complete LLVM IR → executable pipeline ✅
@@ -130,32 +142,47 @@ cargo test
 ./target/release/neurc eval "2 + 3 * 4"        # Returns: 14
 ./target/release/neurc eval "42 == 42"         # Returns: true
 
+# Run programs directly (JIT execution)
+./target/release/neurc run examples/01_basic_arithmetic.nr
+./target/release/neurc run examples/04_simple_example.nr
+
+# Build standalone native executables ✅ WORKING
+./target/release/neurc build examples/04_simple_example.nr
+./04_simple_example  # Run the compiled executable
+
+# Create and run a simple program
+echo 'fn main() -> int { let x = 42; print(x); return 0; }' > hello.nr
+./target/release/neurc build hello.nr    # 🎉 Successfully built executable: hello.exe
+./hello.exe                              # Output: 42
+
 # Complete compilation pipeline
-./target/release/neurc compile debug/tensor_type_test.nr
-./target/release/neurc llvm debug/neural_network_demo.nr
+./target/release/neurc compile examples/01_basic_arithmetic.nr
+./target/release/neurc llvm examples/04_simple_example.nr
 
 # Parse and analyze NEURO programs
-./target/release/neurc parse debug/gpu_kernel_test.nr
-./target/release/neurc check debug/comprehensive_test.nr
+./target/release/neurc parse examples/06_functions.nr
+./target/release/neurc check examples/10_structs.nr
 
 # Generate LLVM IR (fully working!)
-./target/release/neurc llvm debug/basic_expressions.nr
+./target/release/neurc llvm examples/01_basic_arithmetic.nr
 
-# Test advanced features
-./target/release/neurc compile debug/neural_network_demo.nr
-./target/release/neurc llvm debug/tensor_operations.nr
+# Test tensor operations and advanced features
+./target/release/neurc parse examples/03_types_tensor.nr
+./target/release/neurc compile examples/11_modules_import_relative.nr
 
-# Verbose mode shows complete pipeline details
-./target/release/neurc --verbose compile debug/comprehensive_test.nr
+# Development tools
+./target/release/neurc tokenize examples/01_comments.nr
+./target/release/neurc analyze examples/08_control_while.nr
 ```
 
 ## 📚 Documentation
 
-- **[Language Specification](docs/specification/)** - Complete language reference
+- **[Language Specification](docs/specification/)** - Complete language reference and grammar
+- **[Parser Architecture](docs/architecture/parser.md)** - Detailed parser implementation guide
+- **[Compiler Architecture](docs/architecture/compiler.md)** - Complete compiler pipeline documentation
 - **[Module System](docs/modules.md)** - Import/export and dependency management
-- **[Architecture Guide](docs/architecture/)** - VSA principles and compiler design
-- **[API Documentation](https://panzerPeter.github.io/Neuro/api-docs/)** - Generated API docs
-- **[Examples](examples/)** - Comprehensive code examples
+- **[VSA Principles](docs/architecture/vsa_principles.md)** - Vertical Slice Architecture guide
+- **[Examples](examples/)** - Comprehensive working code examples
 
 ## 🎯 Project Status
 

@@ -79,7 +79,7 @@ impl TextBasedFunctionBuilder {
             let llvm_type = self.map_type_to_llvm(&param.param_type);
             
             self.ir_lines.push(format!("  {} = alloca {}", alloca_name, llvm_type));
-            self.ir_lines.push(format!("  store {} {}, {} {}", llvm_type, param_name, llvm_type, alloca_name));
+            self.ir_lines.push(format!("  store {} {}, ptr {}", llvm_type, param_name, alloca_name));
             
             // Update parameter mapping to point to alloca
             self.parameters.insert(param.name.clone(), (alloca_name, param.param_type.clone()));
@@ -136,7 +136,7 @@ impl TextBasedFunctionBuilder {
                 // Initialize if there's an initializer
                 if let Some(init) = &let_stmt.initializer {
                     let init_value = self.compile_expression(init)?;
-                    self.ir_lines.push(format!("  store {} {}, {} {}", llvm_type, init_value, llvm_type, alloca_name));
+                    self.ir_lines.push(format!("  store {} {}, ptr {}", llvm_type, init_value, alloca_name));
                 }
                 
                 // Store variable info
@@ -148,7 +148,7 @@ impl TextBasedFunctionBuilder {
                 if let Some((alloca_name, var_type)) = self.local_variables.get(&assign_stmt.target).cloned() {
                     let llvm_type = self.map_type_to_llvm(&var_type);
                     let value = self.compile_expression(&assign_stmt.value)?;
-                    self.ir_lines.push(format!("  store {} {}, {} {}", llvm_type, value, llvm_type, alloca_name));
+                    self.ir_lines.push(format!("  store {} {}, ptr {}", llvm_type, value, alloca_name));
                 } else if let Some((param_name, var_type)) = self.parameters.get(&assign_stmt.target).cloned() {
                     // Assignment to parameter
                     let llvm_type = self.map_type_to_llvm(&var_type);
@@ -306,14 +306,14 @@ impl TextBasedFunctionBuilder {
         if let Some((alloca_name, var_type)) = self.local_variables.get(name).cloned() {
             let load_name = self.next_var_name();
             let llvm_type = self.map_type_to_llvm(&var_type);
-            self.ir_lines.push(format!("  {} = load {}, {} {}", load_name, llvm_type, llvm_type, alloca_name));
+            self.ir_lines.push(format!("  {} = load {}, ptr {}", load_name, llvm_type, alloca_name));
             Ok(load_name)
         }
         // Check parameters
         else if let Some((param_name, var_type)) = self.parameters.get(name).cloned() {
             let load_name = self.next_var_name();
             let llvm_type = self.map_type_to_llvm(&var_type);
-            self.ir_lines.push(format!("  {} = load {}, {} {}", load_name, llvm_type, llvm_type, param_name));
+            self.ir_lines.push(format!("  {} = load {}, ptr {}", load_name, llvm_type, param_name));
             Ok(load_name)
         }
         // Variable not found
