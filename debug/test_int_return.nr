@@ -1,4 +1,4 @@
-fn test() -> int {
+fn main() -> int {
     if true {
         let x = 1;
     }

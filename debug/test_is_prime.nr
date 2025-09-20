@@ -8,7 +8,7 @@ fn is_prime(n: int) -> bool {
     if n % 2 == 0 || n % 3 == 0 {
         return false;
     }
-    
+
     let i = 5;
     while i * i <= n {
         if n % i == 0 || n % (i + 2) == 0 {
@@ -17,4 +17,9 @@ fn is_prime(n: int) -> bool {
         i = i + 6;
     }
     return true;
+}
+
+fn main() -> int {
+    let result = is_prime(17);
+    return 0;
 }

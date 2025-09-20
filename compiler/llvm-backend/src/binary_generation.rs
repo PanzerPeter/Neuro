@@ -169,17 +169,30 @@ impl BinaryGenerator {
 
         // Use the clang from the LLVM installation we found
         if tool == "clang" {
-            // Try to use clang from the LLVM installation directory
+            let clang_name = if cfg!(windows) { "clang.exe" } else { "clang" };
+
+            // Try multiple paths to find clang
+            let clang_paths = vec![
+                // User's specific LLVM installation
+                PathBuf::from("C:\\LLVM-191\\bin").join(clang_name),
+                // Standard LLVM installation paths
+                PathBuf::from("C:\\Program Files\\LLVM\\bin").join(clang_name),
+                PathBuf::from("C:\\LLVM\\bin").join(clang_name),
+            ];
+
+            // Also check the detected LLVM tools path
             if let Some(ref llvm_path) = self.llvm_tools_path {
-                let clang_path = llvm_path.join("clang.exe");
+                let clang_path = llvm_path.join(clang_name);
                 if clang_path.exists() {
                     cmd = Command::new(clang_path);
                 }
             } else {
-                // Try the known LLVM location
-                let clang_path = PathBuf::from("C:\\LLVM-191\\bin\\clang.exe");
-                if clang_path.exists() {
-                    cmd = Command::new(clang_path);
+                // Try the predefined paths
+                for clang_path in &clang_paths {
+                    if clang_path.exists() {
+                        cmd = Command::new(clang_path);
+                        break;
+                    }
                 }
             }
         }
@@ -194,9 +207,10 @@ impl BinaryGenerator {
 
         // On Windows with clang, ensure proper C runtime linking
         if tool == "clang" && cfg!(windows) {
-            cmd.arg("-Wl,/NODEFAULTLIB:libcmt")  // Avoid library conflicts
-               .arg("-Wl,/DEFAULTLIB:msvcrt.lib")  // Use Microsoft C runtime
-               .arg("-Wl,/DEFAULTLIB:legacy_stdio_definitions.lib");  // For printf compatibility
+            cmd.arg("-lmsvcrt")  // Link Microsoft C runtime
+               .arg("-lkernel32")  // Windows kernel API
+               .arg("-luser32")    // Windows user API
+               .arg("-llegacy_stdio_definitions");  // For printf compatibility
         }
 
         tracing::debug!("Trying to link with {}: {:?}", tool, cmd);
@@ -244,7 +258,28 @@ impl BinaryGenerator {
                 exe_file
             };
 
-            let mut cmd = Command::new("link");
+            // Use full path to Microsoft's link.exe to avoid conflicts with Unix link command
+            let link_exe_paths = vec![
+                "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\BuildTools\\VC\\Tools\\MSVC\\14.29.30133\\bin\\Hostx64\\x64\\link.exe",
+                "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.30.30705\\bin\\Hostx64\\x64\\link.exe",
+                "C:\\Program Files\\Microsoft Visual Studio\\2019\\Community\\VC\\Tools\\MSVC\\14.29.30133\\bin\\Hostx64\\x64\\link.exe",
+                "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.30.30705\\bin\\Hostx64\\x64\\link.exe",
+            ];
+
+            let mut link_path = None;
+            for path in &link_exe_paths {
+                if PathBuf::from(path).exists() {
+                    link_path = Some(path);
+                    break;
+                }
+            }
+
+            let mut cmd = if let Some(path) = link_path {
+                Command::new(path)
+            } else {
+                // Fallback - try to find link.exe in PATH with explicit .exe extension
+                Command::new("link.exe")
+            };
             cmd.arg("/OUT:".to_string() + &exe_file.to_string_lossy())
                .arg(obj_file)
                .arg("/SUBSYSTEM:CONSOLE")

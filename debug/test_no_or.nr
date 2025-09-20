@@ -4,3 +4,8 @@ fn test(n: int) -> bool {
     }
     return false;
 }
+
+fn main() -> int {
+    let result = test(4);
+    return 0;
+}

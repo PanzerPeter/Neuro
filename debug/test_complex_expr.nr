@@ -5,3 +5,8 @@ fn test(n: int) -> bool {
     }
     return false;
 }
+
+fn main() -> int {
+    let result = test(10);
+    return 0;
+}

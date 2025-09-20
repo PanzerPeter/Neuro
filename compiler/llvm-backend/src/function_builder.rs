@@ -27,6 +27,9 @@ pub struct TextBasedFunctionBuilder {
 
     /// Generated IR lines
     ir_lines: Vec<String>,
+
+    /// Global string constants that need to be declared
+    string_constants: Vec<(String, String)>, // (global_name, string_value)
 }
 
 impl TextBasedFunctionBuilder {
@@ -38,6 +41,7 @@ impl TextBasedFunctionBuilder {
             parameters: HashMap::new(),
             function_signatures: HashMap::new(),
             ir_lines: Vec::new(),
+            string_constants: Vec::new(),
         }
     }
     
@@ -59,6 +63,7 @@ impl TextBasedFunctionBuilder {
         self.ir_lines.clear();
         self.local_variables.clear();
         self.parameters.clear();
+        self.string_constants.clear();
         self.var_counter = 0;
         
         // Generate function signature
@@ -103,8 +108,26 @@ impl TextBasedFunctionBuilder {
         self.ensure_function_return(&function.return_type)?;
         
         self.ir_lines.push("}".to_string());
-        
-        Ok(self.ir_lines.join("\n"))
+
+        // Prepend string constants to the function
+        let mut final_ir = Vec::new();
+
+        // Add string constants at the top
+        for (global_name, string_value) in &self.string_constants {
+            let str_len = string_value.len() + 1; // +1 for null terminator
+            let escaped_string = self.escape_string_for_llvm(string_value);
+            final_ir.push(format!("{} = private unnamed_addr constant [{} x i8] c\"{}\\00\", align 1",
+                global_name, str_len, escaped_string));
+        }
+
+        if !self.string_constants.is_empty() {
+            final_ir.push("".to_string()); // Empty line after string constants
+        }
+
+        // Add function IR
+        final_ir.extend(self.ir_lines.clone());
+
+        Ok(final_ir.join("\n"))
     }
     
     /// Map NEURO type to LLVM type string
@@ -369,11 +392,14 @@ impl TextBasedFunctionBuilder {
                 // For strings, we need to create a global constant
                 let global_name = format!("@.str.{}", self.var_counter);
                 self.var_counter += 1;
-                
-                // This is a simplification - in real LLVM IR, strings are more complex
-                let str_len = s.len() + 1;
-                Ok(format!("getelementptr inbounds ([{} x i8], [{} x i8]* {}, i64 0, i64 0)", 
-                    str_len, str_len, global_name))
+
+                // Store the string constant for later declaration
+                self.string_constants.push((global_name.clone(), s.clone()));
+
+                // Return reference to the string
+                let str_len = s.len() + 1; // +1 for null terminator
+                Ok(format!("getelementptr inbounds ([{} x i8], ptr {}, i64 0, i64 0)",
+                    str_len, global_name))
             },
         }
     }
@@ -610,5 +636,22 @@ impl TextBasedFunctionBuilder {
         if let Some(return_type) = &function.return_type {
             self.function_signatures.insert(function.name.clone(), return_type.clone());
         }
+    }
+
+    /// Escape a string for LLVM IR format
+    fn escape_string_for_llvm(&self, s: &str) -> String {
+        let mut escaped = String::new();
+        for ch in s.chars() {
+            match ch {
+                '\\' => escaped.push_str("\\\\"),
+                '"' => escaped.push_str("\\\""),
+                '\n' => escaped.push_str("\\0A"),
+                '\r' => escaped.push_str("\\0D"),
+                '\t' => escaped.push_str("\\09"),
+                c if c.is_ascii() && !c.is_ascii_control() && c != '\\' && c != '"' => escaped.push(c),
+                c => escaped.push_str(&format!("\\{:02X}", c as u8)),
+            }
+        }
+        escaped
     }
 }

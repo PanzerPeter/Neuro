@@ -5,3 +5,8 @@ fn test() -> int {
     }
     return i;
 }
+
+fn main() -> int {
+    let result = test();
+    return 0;
+}

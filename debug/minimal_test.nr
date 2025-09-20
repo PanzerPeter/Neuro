@@ -1,5 +1,6 @@
-fn test() {
+fn main() -> int {
     if true {
-        return;
+        return 1;
     }
+    return 0;
 }

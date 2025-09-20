@@ -104,5 +104,4 @@ vcpkg/
 *.jar
 *.war
 *.ear
-
 .idea/

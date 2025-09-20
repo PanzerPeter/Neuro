@@ -4,3 +4,8 @@ fn is_prime(n: int) -> bool {
     }
     return true;
 }
+
+fn main() -> int {
+    let result = is_prime(7);
+    return 0;
+}
