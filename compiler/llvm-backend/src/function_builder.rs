@@ -11,16 +11,20 @@ use crate::LLVMError;
 use std::collections::HashMap;
 
 /// Text-based builder for compiling NEURO functions to LLVM IR
+#[derive(Clone)]
 pub struct TextBasedFunctionBuilder {
     /// Current variable counter for generating unique SSA names
     var_counter: u32,
-    
+
     /// Symbol table for local variables
     local_variables: HashMap<String, (String, Type)>, // (llvm_name, type)
-    
+
     /// Function parameters
     parameters: HashMap<String, (String, Type)>, // (llvm_name, type)
-    
+
+    /// Function signature registry for return types
+    function_signatures: HashMap<String, Type>, // (function_name, return_type)
+
     /// Generated IR lines
     ir_lines: Vec<String>,
 }
@@ -32,6 +36,7 @@ impl TextBasedFunctionBuilder {
             var_counter: 0,
             local_variables: HashMap::new(),
             parameters: HashMap::new(),
+            function_signatures: HashMap::new(),
             ir_lines: Vec::new(),
         }
     }
@@ -46,7 +51,11 @@ impl TextBasedFunctionBuilder {
     /// Build a NEURO function into LLVM IR text
     pub fn build_function(&mut self, function: &Function) -> Result<String, LLVMError> {
         tracing::debug!("Compiling function: {}", function.name);
-        
+
+        // Register function signature for return type lookup
+        let return_type = function.return_type.as_ref().unwrap_or(&Type::Int).clone();
+        self.function_signatures.insert(function.name.clone(), return_type);
+
         self.ir_lines.clear();
         self.local_variables.clear();
         self.parameters.clear();
@@ -58,13 +67,13 @@ impl TextBasedFunctionBuilder {
         
         for (i, param) in function.parameters.iter().enumerate() {
             let llvm_type = self.map_type_to_llvm(&param.param_type);
-            param_types.push(llvm_type);
-            
-            // Store parameter info
             let param_name = format!("%param_{}", i);
+            param_types.push(format!("{} {}", llvm_type, param_name));
+
+            // Store parameter info
             self.parameters.insert(param.name.clone(), (param_name, param.param_type.clone()));
         }
-        
+
         // Function declaration
         let param_list = param_types.join(", ");
         self.ir_lines.push(format!("define {} @{}({}) {{", return_type, function.name, param_list));
@@ -121,26 +130,87 @@ impl TextBasedFunctionBuilder {
             None => "void".to_string(),
         }
     }
+
+    /// Infer the type of an expression (simplified type inference)
+    fn infer_expression_type(&self, expression: &Expression) -> Type {
+        match expression {
+            Expression::Literal(literal) => {
+                match literal {
+                    Literal::Integer(_, _) => Type::Int,
+                    Literal::Float(_, _) => Type::Float,
+                    Literal::Boolean(_, _) => Type::Bool,
+                    Literal::String(_, _) => Type::String,
+                }
+            },
+            Expression::Identifier(ident) => {
+                // Look up variable type
+                if let Some((_, var_type)) = self.local_variables.get(&ident.name) {
+                    var_type.clone()
+                } else if let Some((_, param_type)) = self.parameters.get(&ident.name) {
+                    param_type.clone()
+                } else {
+                    Type::Unknown
+                }
+            },
+            Expression::Binary(bin_expr) => {
+                // For comparison operators, result is always boolean
+                match bin_expr.operator {
+                    BinaryOperator::Equal | BinaryOperator::NotEqual |
+                    BinaryOperator::Less | BinaryOperator::LessEqual |
+                    BinaryOperator::Greater | BinaryOperator::GreaterEqual |
+                    BinaryOperator::LogicalAnd | BinaryOperator::LogicalOr => Type::Bool,
+                    _ => {
+                        // For arithmetic operators, use the type of the left operand
+                        self.infer_expression_type(&bin_expr.left)
+                    }
+                }
+            },
+            Expression::Unary(unary_expr) => {
+                match unary_expr.operator {
+                    UnaryOperator::Not => Type::Bool,
+                    UnaryOperator::Negate => self.infer_expression_type(&unary_expr.operand),
+                    _ => Type::Unknown,
+                }
+            },
+            Expression::Call(call_expr) => {
+                // Look up function return type
+                if let Expression::Identifier(ident) = call_expr.function.as_ref() {
+                    self.function_signatures.get(&ident.name).cloned().unwrap_or(Type::Unknown)
+                } else {
+                    Type::Unknown
+                }
+            },
+            _ => Type::Unknown,
+        }
+    }
     
     /// Compile a statement
     fn compile_statement(&mut self, statement: &Statement) -> Result<(), LLVMError> {
         match statement {
             Statement::Let(let_stmt) => {
-                let var_type = let_stmt.var_type.as_ref().unwrap_or(&Type::Unknown);
-                let llvm_type = self.map_type_to_llvm(var_type);
+                // Infer type from initializer if no explicit type is given
+                let var_type = if let Some(explicit_type) = &let_stmt.var_type {
+                    explicit_type.clone()
+                } else if let Some(init) = &let_stmt.initializer {
+                    self.infer_expression_type(init)
+                } else {
+                    Type::Unknown
+                };
+
+                let llvm_type = self.map_type_to_llvm(&var_type);
                 let alloca_name = format!("%{}_addr", let_stmt.name);
-                
+
                 // Create alloca
                 self.ir_lines.push(format!("  {} = alloca {}", alloca_name, llvm_type));
-                
+
                 // Initialize if there's an initializer
                 if let Some(init) = &let_stmt.initializer {
                     let init_value = self.compile_expression(init)?;
                     self.ir_lines.push(format!("  store {} {}, ptr {}", llvm_type, init_value, alloca_name));
                 }
-                
+
                 // Store variable info
-                self.local_variables.insert(let_stmt.name.clone(), (alloca_name, var_type.clone()));
+                self.local_variables.insert(let_stmt.name.clone(), (alloca_name, var_type));
             },
             
             Statement::Assignment(assign_stmt) => {
@@ -285,8 +355,16 @@ impl TextBasedFunctionBuilder {
     fn compile_literal(&mut self, literal: &Literal) -> Result<String, LLVMError> {
         match literal {
             Literal::Integer(i, _span) => Ok(i.to_string()),
-            Literal::Float(f, _span) => Ok(f.to_string()),
-            Literal::Boolean(b, _span) => Ok(if *b { "1" } else { "0" }.to_string()),
+            Literal::Float(f, _span) => {
+                // Ensure float literals have decimal points for LLVM IR
+                let formatted = format!("{}", f);
+                if formatted.contains('.') {
+                    Ok(formatted)
+                } else {
+                    Ok(format!("{}.0", formatted))
+                }
+            },
+            Literal::Boolean(b, _span) => Ok(if *b { "true" } else { "false" }.to_string()),
             Literal::String(s, _span) => {
                 // For strings, we need to create a global constant
                 let global_name = format!("@.str.{}", self.var_counter);
@@ -330,21 +408,91 @@ impl TextBasedFunctionBuilder {
         let left = self.compile_expression(&bin_expr.left)?;
         let right = self.compile_expression(&bin_expr.right)?;
         let result_name = self.next_var_name();
-        
+
+        // Determine operation type based on operands (simplified type inference)
+        let op_type = self.infer_expression_type(&bin_expr.left);
+        let llvm_type = self.map_type_to_llvm(&op_type);
+
         let instruction = match bin_expr.operator {
-            BinaryOperator::Add => format!("  {} = add i32 {}, {}", result_name, left, right),
-            BinaryOperator::Subtract => format!("  {} = sub i32 {}, {}", result_name, left, right),
-            BinaryOperator::Multiply => format!("  {} = mul i32 {}, {}", result_name, left, right),
-            BinaryOperator::Divide => format!("  {} = sdiv i32 {}, {}", result_name, left, right),
-            BinaryOperator::Equal => format!("  {} = icmp eq i32 {}, {}", result_name, left, right),
-            BinaryOperator::NotEqual => format!("  {} = icmp ne i32 {}, {}", result_name, left, right),
-            BinaryOperator::Less => format!("  {} = icmp slt i32 {}, {}", result_name, left, right),
-            BinaryOperator::LessEqual => format!("  {} = icmp sle i32 {}, {}", result_name, left, right),
-            BinaryOperator::Greater => format!("  {} = icmp sgt i32 {}, {}", result_name, left, right),
-            BinaryOperator::GreaterEqual => format!("  {} = icmp sge i32 {}, {}", result_name, left, right),
+            BinaryOperator::Add => {
+                if op_type == Type::Float {
+                    format!("  {} = fadd float {}, {}", result_name, left, right)
+                } else {
+                    format!("  {} = add i32 {}, {}", result_name, left, right)
+                }
+            },
+            BinaryOperator::Subtract => {
+                if op_type == Type::Float {
+                    format!("  {} = fsub float {}, {}", result_name, left, right)
+                } else {
+                    format!("  {} = sub i32 {}, {}", result_name, left, right)
+                }
+            },
+            BinaryOperator::Multiply => {
+                if op_type == Type::Float {
+                    format!("  {} = fmul float {}, {}", result_name, left, right)
+                } else {
+                    format!("  {} = mul i32 {}, {}", result_name, left, right)
+                }
+            },
+            BinaryOperator::Divide => {
+                if op_type == Type::Float {
+                    format!("  {} = fdiv float {}, {}", result_name, left, right)
+                } else {
+                    format!("  {} = sdiv i32 {}, {}", result_name, left, right)
+                }
+            },
+            BinaryOperator::Equal => {
+                if op_type == Type::Float {
+                    format!("  {} = fcmp oeq float {}, {}", result_name, left, right)
+                } else {
+                    format!("  {} = icmp eq i32 {}, {}", result_name, left, right)
+                }
+            },
+            BinaryOperator::NotEqual => {
+                if op_type == Type::Float {
+                    format!("  {} = fcmp one float {}, {}", result_name, left, right)
+                } else {
+                    format!("  {} = icmp ne i32 {}, {}", result_name, left, right)
+                }
+            },
+            BinaryOperator::Less => {
+                if op_type == Type::Float {
+                    format!("  {} = fcmp olt float {}, {}", result_name, left, right)
+                } else {
+                    format!("  {} = icmp slt i32 {}, {}", result_name, left, right)
+                }
+            },
+            BinaryOperator::LessEqual => {
+                if op_type == Type::Float {
+                    format!("  {} = fcmp ole float {}, {}", result_name, left, right)
+                } else {
+                    format!("  {} = icmp sle i32 {}, {}", result_name, left, right)
+                }
+            },
+            BinaryOperator::Greater => {
+                if op_type == Type::Float {
+                    format!("  {} = fcmp ogt float {}, {}", result_name, left, right)
+                } else {
+                    format!("  {} = icmp sgt i32 {}, {}", result_name, left, right)
+                }
+            },
+            BinaryOperator::GreaterEqual => {
+                if op_type == Type::Float {
+                    format!("  {} = fcmp oge float {}, {}", result_name, left, right)
+                } else {
+                    format!("  {} = icmp sge i32 {}, {}", result_name, left, right)
+                }
+            },
             BinaryOperator::LogicalAnd => format!("  {} = and i1 {}, {}", result_name, left, right),
             BinaryOperator::LogicalOr => format!("  {} = or i1 {}, {}", result_name, left, right),
-            BinaryOperator::Modulo => format!("  {} = srem i32 {}, {}", result_name, left, right),
+            BinaryOperator::Modulo => {
+                if op_type == Type::Float {
+                    format!("  {} = frem float {}, {}", result_name, left, right)
+                } else {
+                    format!("  {} = srem i32 {}, {}", result_name, left, right)
+                }
+            },
             _ => {
                 return Err(LLVMError::CodeGeneration {
                     message: format!("Binary operator {:?} not yet implemented", bin_expr.operator),
@@ -362,8 +510,17 @@ impl TextBasedFunctionBuilder {
         let operand = self.compile_expression(&unary_expr.operand)?;
         let result_name = self.next_var_name();
         
+        // Determine operation type
+        let op_type = self.infer_expression_type(&unary_expr.operand);
+
         let instruction = match unary_expr.operator {
-            UnaryOperator::Negate => format!("  {} = sub i32 0, {}", result_name, operand),
+            UnaryOperator::Negate => {
+                if op_type == Type::Float {
+                    format!("  {} = fsub float 0.0, {}", result_name, operand)
+                } else {
+                    format!("  {} = sub i32 0, {}", result_name, operand)
+                }
+            },
             UnaryOperator::Not => format!("  {} = xor i1 {}, true", result_name, operand),
             _ => {
                 return Err(LLVMError::CodeGeneration {
@@ -393,7 +550,7 @@ impl TextBasedFunctionBuilder {
         let args_str = args.join(", ");
         
         // Extract function name from the function expression
-        let function_name = match &*call_expr.function {
+        let function_name = match call_expr.function.as_ref() {
             Expression::Identifier(ident) => &ident.name,
             _ => {
                 return Err(LLVMError::CodeGeneration {
@@ -403,37 +560,19 @@ impl TextBasedFunctionBuilder {
             }
         };
         
-        // For now, assume all functions return i32
-        let instruction = format!("  {} = call i32 @{}({})", result_name, function_name, args_str);
+        // Determine return type from function signature registry
+        let return_type = self.function_signatures.get(function_name)
+            .cloned()
+            .unwrap_or(Type::Int); // Default to int if not found
+        let llvm_return_type = self.map_type_to_llvm(&return_type);
+
+        let instruction = format!("  {} = call {} @{}({})", result_name, llvm_return_type, function_name, args_str);
         self.ir_lines.push(instruction);
         
         Ok(result_name)
     }
     
     /// Infer the type of an expression (simplified)
-    fn infer_expression_type(&self, expression: &Expression) -> Type {
-        match expression {
-            Expression::Literal(lit) => match lit {
-                Literal::Integer(_, _) => Type::Int,
-                Literal::Float(_, _) => Type::Float,
-                Literal::Boolean(_, _) => Type::Bool,
-                Literal::String(_, _) => Type::String,
-            },
-            Expression::Identifier(ident) => {
-                if let Some((_, var_type)) = self.local_variables.get(&ident.name) {
-                    var_type.clone()
-                } else if let Some((_, var_type)) = self.parameters.get(&ident.name) {
-                    var_type.clone()
-                } else {
-                    Type::Unknown
-                }
-            },
-            Expression::Binary(_) => Type::Int, // Simplified
-            Expression::Unary(_) => Type::Int,  // Simplified
-            Expression::Call(_) => Type::Int,   // Simplified
-            _ => Type::Unknown,
-        }
-    }
     
     /// Ensure the function has a proper return
     fn ensure_function_return(&mut self, return_type: &Option<Type>) -> Result<(), LLVMError> {
@@ -464,5 +603,12 @@ impl TextBasedFunctionBuilder {
         }
         
         Ok(())
+    }
+
+    /// Register a function signature for type inference
+    pub fn register_function_signature(&mut self, function: &Function) {
+        if let Some(return_type) = &function.return_type {
+            self.function_signatures.insert(function.name.clone(), return_type.clone());
+        }
     }
 }

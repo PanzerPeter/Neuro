@@ -63,9 +63,10 @@ fn train_model(model: &mut Model, data: Dataset) {
 - (Optional) Vulkan SDK for cross-platform GPU support
 
 ### Verified Working Configurations
-- ✅ **Windows 11** + LLVM 19.1.6 + Clang + MSVC
+- ✅ **Windows 11** + LLVM 19.1.6 + Clang + MSVC (Installation at C:\LLVM-191\bin)
 - ✅ **Rust 1.75+** + Cargo workspace build
-- ✅ **Native executable generation** confirmed working
+- ✅ **Native executable generation** confirmed working with proper linking
+- ✅ **All compiler phases** working: Lexer → Parser → Semantic → LLVM IR → Native Code
 
 ### From Source
 ```bash
@@ -86,7 +87,10 @@ neurc --version
 echo 'fn main() -> int { return 42; }' > test.nr
 neurc build test.nr
 # 🎉 Successfully built executable: test.exe
-./test.exe  # Verify output
+./test.exe  # Exit code: 42 (programs return their computed values)
+
+# Note: If you see "LLVM tools not available", ensure llc and clang are in PATH
+# On Windows: Add C:\LLVM-191\bin to your PATH environment variable
 ```
 
 ## 🎯 Phase 1 Status: ✅ COMPLETE
@@ -142,9 +146,9 @@ cargo test
 ./target/release/neurc eval "2 + 3 * 4"        # Returns: 14
 ./target/release/neurc eval "42 == 42"         # Returns: true
 
-# Run programs directly (JIT execution)
-./target/release/neurc run examples/01_basic_arithmetic.nr
-./target/release/neurc run examples/04_simple_example.nr
+# Run programs directly (JIT/native execution)
+./target/release/neurc run examples/01_basic_arithmetic.nr    # Prints: 72, Exit code: 72
+./target/release/neurc run examples/04_simple_example.nr      # Prints: 40, Exit code: 40
 
 # Build standalone native executables ✅ WORKING
 ./target/release/neurc build examples/04_simple_example.nr
@@ -154,6 +158,9 @@ cargo test
 echo 'fn main() -> int { let x = 42; print(x); return 0; }' > hello.nr
 ./target/release/neurc build hello.nr    # 🎉 Successfully built executable: hello.exe
 ./hello.exe                              # Output: 42
+
+# Note: Programs return their calculated values as exit codes
+# This is normal behavior - exit codes show the result of computation
 
 # Complete compilation pipeline
 ./target/release/neurc compile examples/01_basic_arithmetic.nr

@@ -66,11 +66,19 @@ impl LLVMBackend {
         
         // Set up module metadata
         self.setup_module_metadata()?;
-        
-        // Compile all functions in the program
+
+        // First pass: register all function signatures
+        let mut builder = crate::function_builder::TextBasedFunctionBuilder::new();
         for item in &program.items {
             if let shared_types::ast::Item::Function(function) = item {
-                self.compile_function(function)?;
+                builder.register_function_signature(function);
+            }
+        }
+
+        // Second pass: compile all functions with known signatures
+        for item in &program.items {
+            if let shared_types::ast::Item::Function(function) = item {
+                self.compile_function_with_signatures(function, &builder)?;
             }
         }
         
@@ -133,6 +141,30 @@ impl LLVMBackend {
         tracing::debug!("Compiling function: {}", function.name);
 
         let mut builder = TextBasedFunctionBuilder::new();
+        let function_ir = builder.build_function(function)
+            .map_err(|e| {
+                LLVMError::FunctionCompilation {
+                    message: format!("Failed to compile function: {}", e),
+                    function_name: function.name.clone(),
+                    span: function.span,
+                }
+            })?;
+
+        // Add function IR to module
+        for line in function_ir.lines() {
+            self.ir_lines.push(line.to_string());
+        }
+        self.ir_lines.push("".to_string());
+
+        tracing::debug!("Successfully compiled function: {}", function.name);
+        Ok(())
+    }
+
+    /// Compile a single function with pre-registered signatures
+    fn compile_function_with_signatures(&mut self, function: &Function, signatures: &crate::function_builder::TextBasedFunctionBuilder) -> Result<(), LLVMError> {
+        tracing::debug!("Compiling function with signatures: {}", function.name);
+
+        let mut builder = signatures.clone();
         let function_ir = builder.build_function(function)
             .map_err(|e| {
                 LLVMError::FunctionCompilation {

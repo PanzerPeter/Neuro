@@ -132,17 +132,29 @@ impl BinaryGenerator {
     
     /// Link object file to executable
     fn link_object_to_executable(&self, obj_file: &Path, options: &BinaryOptions) -> Result<PathBuf, LLVMError> {
-        // Try different linkers in order of preference
-        let linkers = vec!["clang", "gcc", "ld"];
-        
-        for linker in linkers {
-            if let Ok(exe_file) = self.try_link_with_tool(linker, obj_file, options) {
+        // On Windows, try clang from LLVM installation first, then fallback to system linker
+        if cfg!(windows) {
+            // Try clang from our LLVM installation
+            if let Ok(exe_file) = self.try_link_with_tool("clang", obj_file, options) {
                 return Ok(exe_file);
             }
+
+            // Fallback to Windows system linker
+            return self.try_system_link(obj_file, options);
+        } else {
+            // On Unix-like systems, try different linkers in order of preference
+            let linkers = vec!["clang", "gcc", "ld"];
+
+            for linker in linkers {
+                if let Ok(exe_file) = self.try_link_with_tool(linker, obj_file, options) {
+                    return Ok(exe_file);
+                }
+            }
+
+            Err(LLVMError::ModuleGeneration {
+                message: "No suitable linker found".to_string(),
+            })
         }
-        
-        // If all linkers fail, try a direct system call
-        self.try_system_link(obj_file, options)
     }
     
     /// Try linking with a specific tool
@@ -152,8 +164,26 @@ impl BinaryGenerator {
         } else {
             self.output_dir.join(&options.output_path)
         };
-        
+
         let mut cmd = Command::new(tool);
+
+        // Use the clang from the LLVM installation we found
+        if tool == "clang" {
+            // Try to use clang from the LLVM installation directory
+            if let Some(ref llvm_path) = self.llvm_tools_path {
+                let clang_path = llvm_path.join("clang.exe");
+                if clang_path.exists() {
+                    cmd = Command::new(clang_path);
+                }
+            } else {
+                // Try the known LLVM location
+                let clang_path = PathBuf::from("C:\\LLVM-191\\bin\\clang.exe");
+                if clang_path.exists() {
+                    cmd = Command::new(clang_path);
+                }
+            }
+        }
+
         cmd.arg("-o").arg(&exe_file)
            .arg(obj_file);
 
@@ -162,9 +192,13 @@ impl BinaryGenerator {
             cmd.arg("-g");
         }
 
-        // On Windows, let clang handle C runtime linking automatically
-        // (clang will automatically link with the appropriate runtime)
-        
+        // On Windows with clang, ensure proper C runtime linking
+        if tool == "clang" && cfg!(windows) {
+            cmd.arg("-Wl,/NODEFAULTLIB:libcmt")  // Avoid library conflicts
+               .arg("-Wl,/DEFAULTLIB:msvcrt.lib")  // Use Microsoft C runtime
+               .arg("-Wl,/DEFAULTLIB:legacy_stdio_definitions.lib");  // For printf compatibility
+        }
+
         tracing::debug!("Trying to link with {}: {:?}", tool, cmd);
         
         let output = cmd.output().map_err(|e| {
@@ -201,30 +235,48 @@ impl BinaryGenerator {
                 options.output_path.clone()
             } else {
                 self.output_dir.join(&options.output_path)
-            }.with_extension("exe");
-            
+            };
+
+            // Ensure .exe extension
+            let exe_file = if exe_file.extension().is_none() {
+                exe_file.with_extension("exe")
+            } else {
+                exe_file
+            };
+
             let mut cmd = Command::new("link");
             cmd.arg("/OUT:".to_string() + &exe_file.to_string_lossy())
                .arg(obj_file)
                .arg("/SUBSYSTEM:CONSOLE")
                .arg("/ENTRY:main")
-               .arg("kernel32.lib")    // Windows kernel API
-               .arg("user32.lib")      // Windows user API
-               .arg("msvcrt.lib");     // Microsoft C runtime
-            
+               .arg("/DEFAULTLIB:kernel32.lib")    // Windows kernel API
+               .arg("/DEFAULTLIB:user32.lib")      // Windows user API
+               .arg("/DEFAULTLIB:msvcrt.lib")      // Microsoft C runtime
+               .arg("/DEFAULTLIB:legacy_stdio_definitions.lib"); // For printf compatibility
+
+            tracing::debug!("Trying Windows system link: {:?}", cmd);
+
             let output = cmd.output().map_err(|e| {
                 LLVMError::ModuleGeneration {
-                    message: format!("Windows link.exe failed: {}", e),
+                    message: format!("Windows link.exe failed: {}. Make sure Visual Studio Build Tools are installed.", e),
                 }
             })?;
-            
+
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
                 return Err(LLVMError::ModuleGeneration {
-                    message: format!("Windows linking failed: {}", stderr),
+                    message: format!(
+                        "Windows linking failed (exit code: {})\n\nSTDERR:\n{}\n\nSTDOUT:\n{}\n\nObject file: {}\nOutput: {}\n\nTip: Install Visual Studio Build Tools or use clang for linking.",
+                        output.status.code().unwrap_or(-1),
+                        stderr,
+                        stdout,
+                        obj_file.display(),
+                        exe_file.display()
+                    ),
                 });
             }
-            
+
             Ok(exe_file)
         }
         
@@ -240,12 +292,12 @@ impl BinaryGenerator {
     fn find_llvm_tools() -> Option<PathBuf> {
         // Try common LLVM installation paths
         let common_paths = vec![
+            "C:\\LLVM-191\\bin",  // User's specific LLVM path - try first
             "/usr/bin",
             "/usr/local/bin",
             "/opt/homebrew/bin",
             "C:\\Program Files\\LLVM\\bin",
             "C:\\LLVM\\bin",
-            "C:\\LLVM-191\\bin",  // Add user's specific LLVM path
         ];
 
         for path in common_paths {

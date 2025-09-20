@@ -93,17 +93,19 @@ pub fn run_run(
                 eprintln!("{}", stderr_str);
             }
 
-            // Check exit code
-            if !output.status.success() {
-                let exit_code = output.status.code().unwrap_or(-1);
-                if verbose {
-                    println!("==================");
-                    println!("Program exited with code: {}", exit_code);
-                }
-                return Err(anyhow!("Program exited with non-zero status code: {}", exit_code));
-            } else if verbose {
+            // Check exit code and report it
+            let exit_code = output.status.code().unwrap_or(-1);
+            if verbose {
                 println!("==================");
-                println!("Program completed successfully (exit code: 0)");
+                println!("Program exited with code: {}", exit_code);
+            } else {
+                // Always show exit code for non-verbose mode too
+                println!("Program exited with code: {}", exit_code);
+            }
+
+            // Only treat negative exit codes as errors (indicating system-level failures)
+            if exit_code < 0 {
+                return Err(anyhow!("Program failed with system error code: {}", exit_code));
             }
         }
         Err(llvm_error) => {
@@ -126,10 +128,13 @@ pub fn run_run(
             if verbose {
                 println!("==================");
                 println!("Program completed via JIT (exit code: {})", jit_result.exit_code);
+            } else {
+                println!("Program exited with code: {}", jit_result.exit_code);
             }
 
-            if jit_result.exit_code != 0 {
-                return Err(anyhow!("Program exited with non-zero status code: {}", jit_result.exit_code));
+            // Only treat negative exit codes as errors for JIT as well
+            if jit_result.exit_code < 0 {
+                return Err(anyhow!("Program failed with system error code: {}", jit_result.exit_code));
             }
         }
     }
