@@ -13,7 +13,7 @@ use tempfile::tempdir;
 /// Run a NEURO program directly (compile and execute)
 pub fn run_run(
     file: PathBuf,
-    opt_level: u8,
+    _opt_level: u8,
     verbose: bool,
 ) -> Result<()> {
     if verbose {

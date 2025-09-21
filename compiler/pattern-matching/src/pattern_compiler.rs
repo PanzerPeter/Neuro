@@ -232,7 +232,7 @@ impl PatternCompiler {
                 })
             },
             
-            InputPatternKind::Range { start, end, inclusive } => {
+            InputPatternKind::Range { start, end, inclusive: _ } => {
                 // For now, convert range to a special constructor
                 // In a full implementation, this would be handled in decision tree generation
                 let start_val = match start {
@@ -244,7 +244,7 @@ impl PatternCompiler {
                     }),
                 };
                 
-                let end_val = match end {
+                let _end_val = match end {
                     PatternLiteral::Int(n) => TestValue::Int(*n),
                     PatternLiteral::Char(c) => TestValue::Int(*c as i64),
                     _ => return Err(PatternError::UnsupportedPattern {
@@ -277,7 +277,7 @@ impl PatternCompiler {
                             })?;
                             subpatterns.push(CompiledPattern::Variable(name.clone()));
                         },
-                        TensorDimPattern::Range { start, end } => {
+                        TensorDimPattern::Range { start, end: _ } => {
                             // Create a range pattern (simplified)
                             subpatterns.push(CompiledPattern::Literal(TestValue::Int(*start as i64)));
                         },

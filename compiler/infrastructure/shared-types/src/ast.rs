@@ -178,6 +178,21 @@ pub struct Identifier {
     pub span: Span,
 }
 
+impl Identifier {
+    pub fn new(name: impl Into<String>, span: Span) -> Self {
+        Self {
+            name: name.into(),
+            span,
+        }
+    }
+}
+
+impl std::fmt::Display for Identifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
 /// Binary expression (e.g., a + b)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BinaryExpression {

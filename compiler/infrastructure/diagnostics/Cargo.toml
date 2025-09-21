@@ -8,5 +8,7 @@ repository.workspace = true
 
 [dependencies]
 shared-types = { path = "../shared-types" }
+source-location = { path = "../source-location" }
+serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

@@ -3,7 +3,6 @@
 use std::path::PathBuf;
 use std::fs;
 use anyhow::{Context, Result};
-use shared_types::Program;
 use lexical_analysis::Lexer;
 use syntax_parsing::Parser;
 use semantic_analysis::analyze_program;

@@ -7,7 +7,6 @@ pub mod diagnostic;
 pub mod report;
 pub mod severity;
 
-// Re-exports available but unused in current implementation
-// pub use diagnostic::*;
-// pub use report::*;
-// pub use severity::*;
+pub use diagnostic::*;
+pub use report::*;
+// Severity is already exported from diagnostic module

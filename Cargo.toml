@@ -8,17 +8,20 @@ members = [
     
     # Core Compiler Slices (initialized)
     "compiler/lexical-analysis",
-    "compiler/syntax-parsing", 
+    "compiler/syntax-parsing",
     "compiler/semantic-analysis",
     "compiler/module-system",
     "compiler/llvm-backend",
     "compiler/neurc",
-    
+
     # Phase 1 Additional Components
     "compiler/memory-management",
     "compiler/tensor-operations",
     "compiler/pattern-matching",
     "compiler/macro-expansion",
+
+    # Additional Infrastructure (only those with valid Cargo.toml)
+    "compiler/infrastructure/incremental",
     "neurpm",
     
     # Integration Tests
