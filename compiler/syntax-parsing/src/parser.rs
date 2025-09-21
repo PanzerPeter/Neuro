@@ -9,7 +9,7 @@ use shared_types::{
     Program, Item, Function, Parameter, Block, Statement, Expression, 
     ast::{Literal, Identifier, BinaryExpression, BinaryOperator, 
          UnaryExpression, UnaryOperator, CallExpression,
-         LetStatement, AssignmentStatement, ReturnStatement, IfStatement, WhileStatement,
+         LetStatement, ReturnStatement, IfStatement, WhileStatement,
          BreakStatement, ContinueStatement},
     Type,
 };

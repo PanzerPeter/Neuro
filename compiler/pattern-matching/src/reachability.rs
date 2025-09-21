@@ -151,6 +151,7 @@ pub struct DetailedReachabilityAnalyzer {
 
 #[derive(Debug, Clone)]
 struct PatternPath {
+    #[allow(dead_code)]
     pattern_id: usize,
     conditions: Vec<PathCondition>,
 }

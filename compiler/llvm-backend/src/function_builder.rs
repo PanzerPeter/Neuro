@@ -192,7 +192,7 @@ impl TextBasedFunctionBuilder {
                 match unary_expr.operator {
                     UnaryOperator::Not => Type::Bool,
                     UnaryOperator::Negate => self.infer_expression_type(&unary_expr.operand),
-                    _ => Type::Unknown,
+                    // Remove unreachable pattern - all unary operators are covered above
                 }
             },
             Expression::Call(call_expr) => {
@@ -437,7 +437,7 @@ impl TextBasedFunctionBuilder {
 
         // Determine operation type based on operands (simplified type inference)
         let op_type = self.infer_expression_type(&bin_expr.left);
-        let llvm_type = self.map_type_to_llvm(&op_type);
+        let _llvm_type = self.map_type_to_llvm(&op_type);
 
         let instruction = match bin_expr.operator {
             BinaryOperator::Add => {
@@ -519,12 +519,7 @@ impl TextBasedFunctionBuilder {
                     format!("  {} = srem i32 {}, {}", result_name, left, right)
                 }
             },
-            _ => {
-                return Err(LLVMError::CodeGeneration {
-                    message: format!("Binary operator {:?} not yet implemented", bin_expr.operator),
-                    span: bin_expr.span,
-                });
-            }
+            // All binary operators are implemented above
         };
         
         self.ir_lines.push(instruction);
@@ -548,12 +543,7 @@ impl TextBasedFunctionBuilder {
                 }
             },
             UnaryOperator::Not => format!("  {} = xor i1 {}, true", result_name, operand),
-            _ => {
-                return Err(LLVMError::CodeGeneration {
-                    message: format!("Unary operator {:?} not yet implemented", unary_expr.operator),
-                    span: unary_expr.span,
-                });
-            }
+            // All unary operators are covered above
         };
         
         self.ir_lines.push(instruction);

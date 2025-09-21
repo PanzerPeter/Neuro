@@ -135,6 +135,7 @@ impl LLVMBackend {
     }
     
     /// Compile a single function
+    #[allow(dead_code)]
     fn compile_function(&mut self, function: &Function) -> Result<(), LLVMError> {
         use crate::function_builder::TextBasedFunctionBuilder;
 
@@ -202,7 +203,7 @@ pub fn compile_to_executable<P: AsRef<std::path::Path>>(
     module_name: &str,
     output_path: P,
 ) -> Result<std::path::PathBuf, LLVMError> {
-    use binary_generation::{BinaryGenerator, BinaryOptions, OptimizationLevel};
+    // Binary generation tools are available but not used in this fallback implementation
 
     // Try LLVM compilation first
     match try_llvm_compilation(program, module_name, &output_path) {
@@ -223,10 +224,12 @@ fn try_llvm_compilation<P: AsRef<std::path::Path>>(
     module_name: &str,
     output_path: P,
 ) -> Result<std::path::PathBuf, LLVMError> {
-    use binary_generation::{BinaryGenerator, BinaryOptions, OptimizationLevel};
+    // Binary generation tools are available but not used in this fallback implementation
 
     // First compile to LLVM IR
     let compilation_result = compile_to_llvm(program, module_name)?;
+
+    use crate::binary_generation::{BinaryGenerator, BinaryOptions, OptimizationLevel};
 
     // Set up binary generation
     let output_dir = output_path.as_ref().parent()

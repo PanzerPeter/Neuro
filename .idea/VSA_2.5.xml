@@ -1,0 +1,426 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<vertical_slice_guidelines version="2.5" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <metadata>
+    <name>Vertical Slice Architecture - AI-Optimized Guidelines</name>
+    <created>2025-03-28</created>
+    <updated>2025-09-05</updated>
+    <scope>Software Architecture Pattern for AI Implementation</scope>
+    <description>VSA guidelines optimized specifically for AI code generation and architectural guidance</description>
+    <priority>High</priority>
+    <instruction>MUST follow all guidelines with clear AI decision points and default choices</instruction>
+  </metadata>
+
+  <activation_triggers>
+    <description>Clear conditions when AI should apply VSA principles</description>
+    <trigger priority="high">User mentions "vertical slice", "VSA", or "feature-based architecture"</trigger>
+    <trigger priority="high">Project structure shows feature-based folders (features/, slices/, etc.)</trigger>
+    <trigger priority="high">User asks about organizing code by business capabilities</trigger>
+    <trigger priority="medium">User mentions CQRS, MediatR, or command/query patterns</trigger>
+    <trigger priority="medium">User discusses microservices decomposition strategies</trigger>
+    <trigger priority="medium">User asks about reducing coupling between application layers</trigger>
+    <trigger priority="low">Code shows controllers with 5+ dependencies</trigger>
+    <trigger priority="low">User mentions technical debt or maintainability issues in complex multi-feature applications</trigger>
+  </activation_triggers>
+
+  <ai_constraints>
+    <description>Behavioral boundaries for AI when applying VSA</description>
+    <never>Suggest VSA for simple CRUD applications without clear business features</never>
+    <never>Apply VSA to single-entity operations without business complexity</never>
+    <always>Ask about business context before recommending slice boundaries</always>
+    <always>Validate that distinct business capabilities exist</always>
+    <default_to>Simpler solutions unless complexity is clearly evident</default_to>
+    <confidence_threshold>Require 3+ distinct business features before suggesting VSA</confidence_threshold>
+  </ai_constraints>
+
+  <pattern_detection>
+    <description>Code patterns that should trigger VSA recommendations</description>
+    <code_smells_that_suggest_vsa>
+      <smell weight="high">Controllers with >5 constructor dependencies</smell>
+      <smell weight="high">Services calling 3+ other service classes</smell>
+      <smell weight="medium">Multiple teams modifying same files frequently</smell>
+      <smell weight="medium">Features requiring changes across multiple layers</smell>
+      <smell weight="low">Generic repositories with complex query methods</smell>
+    </code_smells_that_suggest_vsa>
+    <code_patterns_that_indicate_readiness>
+      <pattern>Clear business domains with distinct workflows</pattern>
+      <pattern>Independent data models per business capability</pattern>
+      <pattern>Separate team ownership of different features</pattern>
+    </code_patterns_that_indicate_readiness>
+  </pattern_detection>
+
+  <implementation_priority>
+    <description>AI decision hierarchy for implementation focus</description>
+    <level_1 name="Foundation" default_choice="true">
+      <item priority="critical">Establish slice boundaries based on business capabilities</item>
+      <item priority="critical">Ensure slice independence with clear interfaces</item>
+      <item priority="high">Implement basic error handling within slices</item>
+    </level_1>
+    <level_2 name="Quality" apply_when="10+ slices OR team_size > 3">
+      <item priority="high">Add comprehensive testing per slice</item>
+      <item priority="high">Implement cross-cutting concerns (logging, auth)</item>
+      <item priority="medium">Establish consistent API patterns</item>
+    </level_2>
+    <level_3 name="Scale" apply_when="enterprise_context OR performance_issues">
+      <item priority="medium">Add monitoring and observability</item>
+      <item priority="low">Implement performance optimizations</item>
+      <item priority="low">Add advanced resilience patterns</item>
+    </level_3>
+  </implementation_priority>
+
+  <context_adaptation>
+    <description>AI context detection and response adjustment</description>
+    <small_project threshold="under_10_slices" default_response="simple">
+      <focus>Basic slice organization and independence</focus>
+      <skip>Complex monitoring, advanced patterns, extensive documentation</skip>
+      <simplify>Use minimal shared components, inline implementations</simplify>
+      <ai_behavior>Emphasize simplicity, avoid over-engineering</ai_behavior>
+    </small_project>
+    <medium_project threshold="10_to_50_slices" default_response="structured">
+      <focus>Consistent patterns, shared infrastructure</focus>
+      <add>Basic monitoring, standardized error handling</add>
+      <consider>Performance optimization for identified bottlenecks</consider>
+      <ai_behavior>Balance structure with pragmatism</ai_behavior>
+    </medium_project>
+    <enterprise_project threshold="over_50_slices" default_response="comprehensive">
+      <implement>Full monitoring, security, governance</implement>
+      <require>Comprehensive testing, observability</require>
+      <mandate>Consistent API design, resilience patterns</mandate>
+      <ai_behavior>Prioritize enterprise patterns and compliance</ai_behavior>
+    </enterprise_project>
+  </context_adaptation>
+
+  <ai_response_templates>
+    <description>Structured response patterns for common scenarios</description>
+    <scenario name="user_shows_layered_architecture" frequency="high">
+      <detect>Controllers, Services, Repositories in separate folders</detect>
+      <suggest>Convert to feature-based folders grouping related functionality</suggest>
+      <emphasize>Business capability organization over technical layering</emphasize>
+      <avoid>Mentioning complex enterprise patterns initially</avoid>
+      <example_structure>features/create_post/, features/manage_users/</example_structure>
+    </scenario>
+    <scenario name="user_asks_about_coupling" frequency="medium">
+      <detect>Questions about dependencies between components</detect>
+      <suggest>Slice independence through clear boundaries and interfaces</suggest>
+      <emphasize>Communication through events rather than direct calls</emphasize>
+      <provide>Decision tree for shared vs duplicated code</provide>
+    </scenario>
+    <scenario name="user_mentions_microservices" frequency="medium">
+      <detect>Discussion of service decomposition</detect>
+      <suggest>VSA as stepping stone to microservices</suggest>
+      <emphasize>Business capability alignment</emphasize>
+      <warn>Against premature service extraction</warn>
+    </scenario>
+  </ai_response_templates>
+
+  <validation_prompts>
+    <description>AI self-validation before recommending VSA</description>
+    <before_suggesting_vsa>
+      <check>Are there 3+ distinct business capabilities?</check>
+      <check>Is this more complex than simple CRUD operations?</check>
+      <check>Would traditional layering actually work fine here?</check>
+      <check>Does the user's context suggest team collaboration needs?</check>
+    </before_suggesting_vsa>
+    <before_complex_patterns>
+      <check>Has the user indicated enterprise-scale requirements?</check>
+      <check>Are there demonstrated performance or reliability issues?</check>
+      <check>Is the added complexity justified by clear benefits?</check>
+    </before_complex_patterns>
+  </validation_prompts>
+
+  <conflict_resolution>
+    <description>AI decision framework when principles conflict</description>
+    <primary_principle>Slice independence takes precedence over DRY principle</primary_principle>
+    <exception>Pure infrastructure (DB, logging, caching) can be shared</exception>
+    <exception>Domain utilities after 3+ duplications with maintenance burden</exception>
+    <default_choice>When uncertain, favor slice independence</default_choice>
+    <confidence_requirement>High confidence needed before suggesting shared abstractions</confidence_requirement>
+  </conflict_resolution>
+
+  <definition>
+    <core_concept>Feature-oriented code organization rather than technical layers</core_concept>
+    <organization>
+      <principle>Group components by business capability</principle>
+      <principle>Ensure high cohesion within slices</principle>
+      <principle>Maintain loose coupling between slices</principle>
+    </organization>
+    <slice_identification>
+      <criteria>Represents complete user workflow</criteria>
+      <criteria>Can be developed independently</criteria>
+      <criteria>Has measurable business value</criteria>
+      <criteria>Aligns with team boundaries</criteria>
+    </slice_identification>
+  </definition>
+
+  <decision_trees>
+    <decision_tree name="slice_boundary_identification" ai_default="conservative">
+      <condition>Does this represent a complete business use case?</condition>
+      <yes confidence="high">Create separate slice</yes>
+      <no>
+        <condition>Is this a variation with different business rules?</condition>
+        <yes confidence="medium">Extend existing slice with configuration</yes>
+        <no confidence="low">Include in broader business capability</no>
+      </no>
+    </decision_tree>
+
+    <decision_tree name="shared_component_decision" ai_default="duplicate">
+      <condition>Is this pure infrastructure with no business logic?</condition>
+      <yes confidence="high">Safe to share in infrastructure layer</yes>
+      <no>
+        <condition>Same logic in 3+ slices causing maintenance pain?</condition>
+        <yes>
+          <condition>Would sharing require coordination between slices?</condition>
+          <yes confidence="high">Keep duplicated - slice independence priority</yes>
+          <no confidence="medium">Consider extraction with versioned interface</no>
+        </yes>
+        <no confidence="high">Keep duplicated - premature optimization</no>
+      </no>
+    </decision_tree>
+
+    <decision_tree name="vsa_applicability" ai_default="simpler_solution">
+      <condition>Are there 3+ distinct business features?</condition>
+      <no confidence="high">Suggest traditional layered architecture</no>
+      <yes>
+        <condition>Do features have independent business value?</condition>
+        <no confidence="medium">Consider feature modules within layers</no>
+        <yes>
+          <condition>Multiple teams or complex workflows?</condition>
+          <yes confidence="high">Recommend full VSA approach</yes>
+          <no confidence="medium">Suggest lightweight VSA with simple structure</no>
+        </yes>
+      </yes>
+    </decision_tree>
+  </decision_trees>
+
+  <framework_patterns>
+    <dotnet>
+      <primary_tools>MediatR for command/query dispatch</primary_tools>
+      <structure>Feature folders with handlers and models</structure>
+      <example>
+        <![CDATA[
+// Features/CreatePost/CreatePostCommand.cs
+public record CreatePostCommand(string Title, string Content) : IRequest<int>;
+
+// Features/CreatePost/CreatePostHandler.cs  
+public class CreatePostHandler : IRequestHandler<CreatePostCommand, int>
+{
+    private readonly IPostRepository _repository;
+    
+    public async Task<int> Handle(CreatePostCommand request, CancellationToken ct)
+    {
+        var post = new Post(request.Title, request.Content);
+        await _repository.AddAsync(post);
+        return post.Id;
+    }
+}
+        ]]>
+      </example>
+    </dotnet>
+
+    <python>
+      <primary_tools>FastAPI with dependency injection</primary_tools>
+      <structure>Feature modules with handlers</structure>
+      <example>
+        <![CDATA[
+# features/create_post/handler.py
+class CreatePostHandler:
+    def __init__(self, repository: PostRepository):
+        self.repository = repository
+    
+    async def handle(self, command: CreatePostCommand) -> int:
+        post = Post(title=command.title, content=command.content)
+        return await self.repository.save(post)
+
+# features/create_post/router.py
+@router.post("/posts")
+async def create_post(command: CreatePostCommand, handler: CreatePostHandler = Depends()):
+    return await handler.handle(command)
+        ]]>
+      </example>
+    </python>
+
+    <typescript>
+      <primary_tools>Express/NestJS with modular structure</primary_tools>
+      <structure>Feature-based modules</structure>
+      <example>
+        <![CDATA[
+// features/create-post/create-post.service.ts
+export class CreatePostService {
+    constructor(private repository: PostRepository) {}
+    
+    async handle(command: CreatePostCommand): Promise<number> {
+        const post = new Post(command.title, command.content);
+        return await this.repository.save(post);
+    }
+}
+
+// features/create-post/create-post.controller.ts
+@Post('posts')
+async createPost(@Body() command: CreatePostCommand) {
+    return await this.createPostService.handle(command);
+}
+        ]]>
+      </example>
+    </typescript>
+  </framework_patterns>
+
+  <error_handling>
+    <principle>Each slice handles its own errors with consistent patterns</principle>
+    
+    <error_types>
+      <business_errors>
+        <description>Validation, authorization, business rule violations</description>
+        <handling>4xx status codes with actionable messages</handling>
+        <ai_approach>Always include validation at slice entry points</ai_approach>
+      </business_errors>
+      <infrastructure_errors>
+        <description>Database, network, external service failures</description>
+        <handling>5xx status codes, logging, retry logic</handling>
+        <ai_approach>Wrap external calls in try-catch with meaningful error messages</ai_approach>
+      </infrastructure_errors>
+    </error_types>
+
+    <patterns>
+      <pattern name="fail_fast" ai_default="true">
+        <description>Validate inputs early, fail immediately on invalid data</description>
+        <implementation>Input validation at command/query level</implementation>
+      </pattern>
+      <pattern name="graceful_degradation" ai_apply_when="external_dependencies">
+        <description>Handle external failures without breaking core functionality</description>
+        <implementation>Default values, cached responses, simplified workflows</implementation>
+      </pattern>
+    </patterns>
+  </error_handling>
+
+  <testing_strategies>
+    <ai_testing_priorities>
+      <priority_1>Unit tests for slice handlers (business logic)</priority_1>
+      <priority_2>Integration tests for slice boundaries</priority_2>
+      <priority_3>Contract tests for slice interfaces</priority_3>
+    </ai_testing_priorities>
+
+    <slice_testing>
+      <isolation>Test each slice independently with mocked dependencies</isolation>
+      <coverage>Focus on business logic, aim for 80%+ in handlers</coverage>
+      <scenarios>Happy path, validation failures, infrastructure errors</scenarios>
+    </slice_testing>
+
+    <example>
+      <![CDATA[
+// Test slice handler in isolation
+public class CreatePostHandlerTests
+{
+    [Fact]
+    public async Task Handle_ValidCommand_ReturnsPostId()
+    {
+        // Arrange
+        var mockRepo = new Mock<IPostRepository>();
+        var handler = new CreatePostHandler(mockRepo.Object);
+        var command = new CreatePostCommand("Title", "Content");
+        
+        // Act
+        var result = await handler.Handle(command, CancellationToken.None);
+        
+        // Assert
+        Assert.True(result > 0);
+        mockRepo.Verify(r => r.AddAsync(It.IsAny<Post>()), Times.Once);
+    }
+}
+      ]]>
+    </example>
+  </testing_strategies>
+
+  <cross_cutting_concerns>
+    <ai_implementation_order>
+      <step_1>Logging - inject ILogger into handlers</step_1>
+      <step_2>Validation - use data annotations or FluentValidation</step_2>
+      <step_3>Authorization - apply at controller/endpoint level</step_3>
+      <step_4>Caching - implement at slice boundary if needed</step_4>
+    </ai_implementation_order>
+
+    <logging>
+      <approach>Structured logging with slice context</approach>
+      <pattern>Include correlation IDs, user context, business events</pattern>
+    </logging>
+
+    <authorization>
+      <approach>Feature-based permissions at slice entry points</approach>
+      <pattern>Use attributes/decorators, avoid authorization logic in handlers</pattern>
+    </authorization>
+
+    <caching>
+      <approach>Cache at slice output level, not internally</approach>
+      <invalidation>Use events to coordinate cache invalidation across slices</invalidation>
+    </caching>
+  </cross_cutting_concerns>
+
+  <migration_strategies>
+    <ai_migration_approach>
+      <step_1>Identify clear business boundaries</step_1>
+      <step_2>Extract simplest, most isolated features first</step_2>
+      <step_3>Use strangler fig pattern for complex features</step_3>
+      <step_4>Maintain parallel running until confidence is high</step_4>
+    </ai_migration_approach>
+
+    <strangler_fig_pattern>
+      <description>Gradually replace legacy with VSA slices</description>
+      <implementation>Route new requests to VSA slices, legacy handles existing</implementation>
+      <safety>Feature flags for rollback, monitoring for comparison</safety>
+    </strangler_fig_pattern>
+  </migration_strategies>
+
+  <quick_reference>
+    <description>AI fast-lookup for common decisions</description>
+    <do>
+      <item>Organize by business features, not technical layers</item>
+      <item>Make slices independently testable</item>
+      <item>Accept code duplication for independence</item>
+      <item>Use events for cross-slice communication</item>
+      <item>Implement fail-fast validation</item>
+    </do>
+    <dont>
+      <item>Share business logic between slices</item>
+      <item>Create premature abstractions</item>
+      <item>Allow direct slice-to-slice method calls</item>
+      <item>Apply VSA to simple CRUD scenarios</item>
+      <item>Over-engineer for current needs</item>
+    </dont>
+    <ai_defaults>
+      <rule>When uncertain, choose simpler solution</rule>
+      <rule>Favor duplication over coupling</rule>
+      <rule>Start with basic structure, evolve as needed</rule>
+      <rule>Validate business complexity before suggesting VSA</rule>
+    </ai_defaults>
+  </quick_reference>
+
+  <anti_patterns>
+    <ai_warning_signs>
+      <pattern name="premature_vsa">Applying VSA to simple applications without business complexity</pattern>
+      <pattern name="shared_business_logic">Creating shared libraries for business rules between slices</pattern>
+      <pattern name="god_slice">Single slice handling multiple unrelated business capabilities</pattern>
+      <pattern name="chatty_slices">Excessive synchronous communication between slices</pattern>
+      <pattern name="technical_slices">Organizing by technical concerns instead of business features</pattern>
+    </ai_warning_signs>
+  </anti_patterns>
+
+  <suitability>
+    <ai_decision_matrix>
+      <high_fit confidence="high">
+        <criteria>Multiple distinct business features</criteria>
+        <criteria>Team collaboration complexity</criteria>
+        <criteria>Independent feature deployment needs</criteria>
+        <criteria>Clear business domain boundaries</criteria>
+      </high_fit>
+      <medium_fit confidence="medium">
+        <criteria>Growing application with emerging complexity</criteria>
+        <criteria>Migration from monolithic architecture</criteria>
+        <criteria>Event-driven requirements</criteria>
+      </medium_fit>
+      <low_fit confidence="high">
+        <criteria>Simple CRUD with minimal business logic</criteria>
+        <criteria>Single developer projects</criteria>
+        <criteria>Highly interconnected computational logic</criteria>
+        <criteria>Unclear business boundaries</criteria>
+      </low_fit>
+    </ai_decision_matrix>
+  </suitability>
+</vertical_slice_guidelines>

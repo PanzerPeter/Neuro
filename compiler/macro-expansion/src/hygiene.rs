@@ -22,7 +22,8 @@ pub struct HygieneContext {
 
 #[derive(Debug, Clone)]
 struct ScopeInfo {
-    depth: usize,
+    #[allow(dead_code)]
+    depth: usize, // Reserved for future scope depth tracking
     variables: HashMap<String, VariableInfo>,
     /// Macro-generated variables that need unique names
     generated_vars: HashSet<String>,
@@ -31,18 +32,23 @@ struct ScopeInfo {
 #[derive(Debug, Clone)]
 struct VariableInfo {
     name: String,
-    original_name: String,
+    #[allow(dead_code)]
+    original_name: String, // Reserved for hygiene tracking
     is_macro_generated: bool,
-    definition_span: Span,
+    #[allow(dead_code)]
+    definition_span: Span, // Reserved for error reporting
     scope_depth: usize,
 }
 
 #[derive(Debug, Clone)]
 struct ExpansionContext {
-    macro_name: String,
+    #[allow(dead_code)]
+    macro_name: String, // Reserved for macro hygiene tracking
     expansion_id: usize,
-    call_site_span: Span,
-    variables_in_scope: HashSet<String>,
+    #[allow(dead_code)]
+    call_site_span: Span, // Reserved for error reporting
+    #[allow(dead_code)]
+    variables_in_scope: HashSet<String>, // Reserved for hygiene analysis
 }
 
 impl HygieneContext {

@@ -5,7 +5,7 @@
 
 use shared_types::*;
 use std::collections::HashMap;
-use thiserror::Error;
+// use thiserror::Error; // Commented out as unused
 use serde::{Deserialize, Serialize};
 
 pub mod analyzer;

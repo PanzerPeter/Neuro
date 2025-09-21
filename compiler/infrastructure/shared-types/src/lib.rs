@@ -11,8 +11,8 @@ pub mod ast;
 pub mod value;
 
 pub use span::*;
-pub use literal::*;
-pub use identifier::*;
+// pub use literal::*; // Commented out due to ambiguous re-exports with ast::*
+// pub use identifier::*; // Commented out due to ambiguous re-exports with ast::*
 pub use attributes::*;
 pub use ast::*;
 pub use value::*;

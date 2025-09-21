@@ -3,6 +3,7 @@
 use crate::{NeuropmConfig, PackageId, InstalledPackage, NeuropmResult};
 
 pub struct PackageInstaller {
+    #[allow(dead_code)]
     config: NeuropmConfig,
 }
 

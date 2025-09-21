@@ -3,7 +3,7 @@
 //! Error types and handling for the NEURO lexer, providing detailed 
 //! error information for debugging and user feedback.
 
-use std::fmt;
+// Removed unused std::fmt import - using thiserror for Display impl
 use thiserror::Error;
 
 /// Errors that can occur during lexical analysis

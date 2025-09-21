@@ -3,7 +3,7 @@
 //! Error types and handling for the NEURO parser, providing detailed 
 //! error information for syntax errors and recovery.
 
-use shared_types::{Token, TokenType, Span};
+use shared_types::{TokenType, Span};
 use thiserror::Error;
 
 /// Errors that can occur during parsing

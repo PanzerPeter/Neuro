@@ -3,6 +3,7 @@
 use crate::{NeuropmConfig, NeuropmResult};
 
 pub struct PackageCache {
+    #[allow(dead_code)]
     config: NeuropmConfig,
 }
 

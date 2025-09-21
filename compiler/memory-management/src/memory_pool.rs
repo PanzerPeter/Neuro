@@ -184,7 +184,9 @@ mod tests {
     fn test_memory_allocation() {
         let pool = MemoryPool::new("test", 1024 * 1024).unwrap();
         let ptr = pool.allocate(100, 8).unwrap();
-        assert!(!ptr.as_ptr().is_null());
+        // Verify we got a valid allocation (NonNull is never null by definition)
+        // Just verify the pointer exists - no need to check for null since NonNull guarantees this
+        let _ = ptr;
     }
 
     #[test]

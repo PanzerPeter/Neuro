@@ -126,7 +126,7 @@ fn camel_case_helper(
     out: &mut dyn Output,
 ) -> HelperResult {
     let param = h.param(0).and_then(|v| v.value().as_str())
-        .ok_or_else(|| RenderError::new("camel_case helper requires a string parameter"))?;
+        .ok_or_else(|| RenderError::from(handlebars::RenderErrorReason::Other("camel_case helper requires a string parameter".to_string())))?;
     
     let camel_case = to_camel_case(param);
     out.write(&camel_case)?;
@@ -141,7 +141,7 @@ fn snake_case_helper(
     out: &mut dyn Output,
 ) -> HelperResult {
     let param = h.param(0).and_then(|v| v.value().as_str())
-        .ok_or_else(|| RenderError::new("snake_case helper requires a string parameter"))?;
+        .ok_or_else(|| RenderError::from(handlebars::RenderErrorReason::Other("snake_case helper requires a string parameter".to_string())))?;
     
     let snake_case = to_snake_case(param);
     out.write(&snake_case)?;
@@ -156,7 +156,7 @@ fn upper_case_helper(
     out: &mut dyn Output,
 ) -> HelperResult {
     let param = h.param(0).and_then(|v| v.value().as_str())
-        .ok_or_else(|| RenderError::new("upper_case helper requires a string parameter"))?;
+        .ok_or_else(|| RenderError::from(handlebars::RenderErrorReason::Other("upper_case helper requires a string parameter".to_string())))?;
     
     out.write(&param.to_uppercase())?;
     Ok(())
@@ -170,7 +170,7 @@ fn tensor_shape_helper(
     out: &mut dyn Output,
 ) -> HelperResult {
     let dimensions = h.param(0).and_then(|v| v.value().as_array())
-        .ok_or_else(|| RenderError::new("tensor_shape helper requires an array parameter"))?;
+        .ok_or_else(|| RenderError::from(handlebars::RenderErrorReason::Other("tensor_shape helper requires an array parameter".to_string())))?;
     
     let shape_str = dimensions.iter()
         .map(|dim| dim.as_u64().unwrap_or(0).to_string())
@@ -189,7 +189,7 @@ fn neural_layer_helper(
     out: &mut dyn Output,
 ) -> HelperResult {
     let layer_type = h.param(0).and_then(|v| v.value().as_str())
-        .ok_or_else(|| RenderError::new("neural_layer helper requires a layer type"))?;
+        .ok_or_else(|| RenderError::from(handlebars::RenderErrorReason::Other("neural_layer helper requires a layer type".to_string())))?;
     
     let input_size = h.param(1).and_then(|v| v.value().as_u64()).unwrap_or(128);
     let output_size = h.param(2).and_then(|v| v.value().as_u64()).unwrap_or(64);
@@ -225,7 +225,7 @@ fn type_size_helper(
     out: &mut dyn Output,
 ) -> HelperResult {
     let type_name = h.param(0).and_then(|v| v.value().as_str())
-        .ok_or_else(|| RenderError::new("type_size helper requires a type name"))?;
+        .ok_or_else(|| RenderError::from(handlebars::RenderErrorReason::Other("type_size helper requires a type name".to_string())))?;
     
     let size = match type_name {
         "f32" | "float32" => 4,
@@ -254,10 +254,10 @@ fn repeat_helper(
     out: &mut dyn Output,
 ) -> HelperResult {
     let count = h.param(0).and_then(|v| v.value().as_u64())
-        .ok_or_else(|| RenderError::new("repeat helper requires a count parameter"))? as usize;
+        .ok_or_else(|| RenderError::from(handlebars::RenderErrorReason::Other("repeat helper requires a count parameter".to_string())))? as usize;
     
     let template = h.param(1).and_then(|v| v.value().as_str())
-        .ok_or_else(|| RenderError::new("repeat helper requires a template parameter"))?;
+        .ok_or_else(|| RenderError::from(handlebars::RenderErrorReason::Other("repeat helper requires a template parameter".to_string())))?;
     
     for i in 0..count {
         let rendered = template.replace("{{@index}}", &i.to_string());
@@ -279,7 +279,7 @@ fn range_helper(
 ) -> HelperResult {
     let start = h.param(0).and_then(|v| v.value().as_u64()).unwrap_or(0) as usize;
     let end = h.param(1).and_then(|v| v.value().as_u64())
-        .ok_or_else(|| RenderError::new("range helper requires an end parameter"))? as usize;
+        .ok_or_else(|| RenderError::from(handlebars::RenderErrorReason::Other("range helper requires an end parameter".to_string())))? as usize;
     
     let range_str = (start..end)
         .map(|i| i.to_string())

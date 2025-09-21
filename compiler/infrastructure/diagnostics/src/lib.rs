@@ -7,9 +7,7 @@ pub mod diagnostic;
 pub mod report;
 pub mod severity;
 
-pub use diagnostic::*;
-pub use report::*;
-pub use severity::*;
-
-use shared_types::Span;
-use std::fmt;
+// Re-exports available but unused in current implementation
+// pub use diagnostic::*;
+// pub use report::*;
+// pub use severity::*;

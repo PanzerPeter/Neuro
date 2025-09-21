@@ -245,7 +245,7 @@ impl Default for ModuleBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shared_types::{Program, Import};
+    use shared_types::Program;
     
     #[test]
     fn test_module_builder_creation() {

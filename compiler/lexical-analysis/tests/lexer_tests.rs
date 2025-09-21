@@ -1,7 +1,7 @@
 //! Comprehensive tests for the NEURO lexer
 
 use lexical_analysis::{Lexer, LexError};
-use shared_types::{Token, TokenType, Keyword, Span};
+use shared_types::{TokenType, Keyword, Span};
 
 #[test]
 fn test_basic_tokens() {

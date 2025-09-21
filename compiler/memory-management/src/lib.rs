@@ -75,14 +75,14 @@ impl MemoryManager {
     /// Create or get a named memory pool
     pub fn get_pool(&self, name: &str) -> Result<Arc<memory_pool::MemoryPool>, MemoryError> {
         let pools = self.pools.read();
-        if let Some(pool) = pools.get(name) {
+        if let Some(_pool) = pools.get(name) {
             // Create a new pool with the same configuration instead of cloning
             return Ok(Arc::new(memory_pool::MemoryPool::new(name, self.config.default_pool_size)?));
         }
         drop(pools);
 
         let mut pools = self.pools.write();
-        if let Some(pool) = pools.get(name) {
+        if let Some(_pool) = pools.get(name) {
             return Ok(Arc::new(memory_pool::MemoryPool::new(name, self.config.default_pool_size)?));
         }
 

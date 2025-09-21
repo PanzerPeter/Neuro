@@ -13,9 +13,9 @@ pub use module_registry::*;
 pub use dependency_graph::*;
 pub use error::*;
 
-use shared_types::{Program, Import};
+use shared_types::Program;
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
+// use std::collections::HashMap; // Commented out as unused
 
 /// Main module system interface
 pub struct ModuleSystem {

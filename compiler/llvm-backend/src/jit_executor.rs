@@ -3,7 +3,7 @@
 //! This module provides a simple JIT-like execution environment that can run
 //! NEURO programs directly from the AST without requiring external linkers.
 
-use crate::{LLVMError, CompilationResult};
+use crate::LLVMError;
 use shared_types::{Program, ast::*};
 use std::collections::HashMap;
 
@@ -16,7 +16,7 @@ pub struct JitResult {
 
 /// Simple JIT executor for NEURO programs
 pub struct JitExecutor {
-    globals: HashMap<String, Value>,
+    _globals: HashMap<String, Value>, // Reserved for future global variable support
 }
 
 /// Runtime value representation
@@ -33,7 +33,7 @@ impl JitExecutor {
     /// Create a new JIT executor
     pub fn new() -> Self {
         Self {
-            globals: HashMap::new(),
+            _globals: HashMap::new(),
         }
     }
 
@@ -343,8 +343,10 @@ impl ExecutionContext {
 enum StatementResult {
     Continue,
     Return(Value),
-    Break,
-    ControlFlow,
+    #[allow(dead_code)]
+    Break, // Reserved for future loop support
+    #[allow(dead_code)]
+    ControlFlow, // Reserved for future control flow support
 }
 
 impl Default for JitExecutor {

@@ -15,4 +15,4 @@ pub use lexer::*;
 pub use tokenizer::*;
 pub use error::*;
 
-use shared_types::{Token, TokenType, Span};
+// Removed unused imports - types are re-exported from sub-modules
