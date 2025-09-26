@@ -91,6 +91,9 @@ yarn.lock
 *.backup
 *.orig
 
+# === Debug / test files ===
+debug/
+
 # === Cryptographic keys / certificates ===
 *.pem
 *.key

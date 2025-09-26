@@ -1,6 +1,0 @@
-fn main() -> int {
-    if true {
-        let x = 1;
-    }
-    return 42;
-}
