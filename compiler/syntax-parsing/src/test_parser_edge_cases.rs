@@ -2,9 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::Parser;
-    use shared_types::{TokenType, Keyword, Token, Span};
     use lexical_analysis::Lexer;
 
     /// Test parsing function with if statement followed by return statement

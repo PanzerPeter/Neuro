@@ -2,7 +2,6 @@
 
 use syntax_parsing::Parser;
 use lexical_analysis::Tokenizer;
-use shared_types::{Expression, Value, ast::Literal};
 
 #[test]
 fn test_parse_simple_arithmetic() {

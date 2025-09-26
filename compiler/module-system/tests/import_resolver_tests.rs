@@ -179,7 +179,6 @@ fn test_clear_cache() {
 #[cfg(test)]
 mod test_dependencies {
     // Add tempfile as a test dependency
-    use std::process::Command;
     
     #[test]
     #[ignore] // This is more of a setup verification

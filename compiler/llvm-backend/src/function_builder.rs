@@ -134,14 +134,14 @@ impl TextBasedFunctionBuilder {
     fn map_type_to_llvm(&self, neuro_type: &Type) -> String {
         match neuro_type {
             Type::Int => "i32".to_string(),
-            Type::Float => "float".to_string(),
+            Type::Float => "double".to_string(),
             Type::Bool => "i1".to_string(),
-            Type::String => "i8*".to_string(),
+            Type::String => "ptr".to_string(),
             Type::Unknown => "i32".to_string(), // Default to i32
             Type::Tensor { element_type, .. } => {
                 format!("{}*", self.map_type_to_llvm(element_type)) // Tensor as pointer
             },
-            Type::Function { .. } => "i8*".to_string(), // Function pointer
+            Type::Function { .. } => "ptr".to_string(), // Function pointer
             Type::Generic(_) => "i32".to_string(), // Default for generics
         }
     }
@@ -442,70 +442,70 @@ impl TextBasedFunctionBuilder {
         let instruction = match bin_expr.operator {
             BinaryOperator::Add => {
                 if op_type == Type::Float {
-                    format!("  {} = fadd float {}, {}", result_name, left, right)
+                    format!("  {} = fadd double {}, {}", result_name, left, right)
                 } else {
                     format!("  {} = add i32 {}, {}", result_name, left, right)
                 }
             },
             BinaryOperator::Subtract => {
                 if op_type == Type::Float {
-                    format!("  {} = fsub float {}, {}", result_name, left, right)
+                    format!("  {} = fsub double {}, {}", result_name, left, right)
                 } else {
                     format!("  {} = sub i32 {}, {}", result_name, left, right)
                 }
             },
             BinaryOperator::Multiply => {
                 if op_type == Type::Float {
-                    format!("  {} = fmul float {}, {}", result_name, left, right)
+                    format!("  {} = fmul double {}, {}", result_name, left, right)
                 } else {
                     format!("  {} = mul i32 {}, {}", result_name, left, right)
                 }
             },
             BinaryOperator::Divide => {
                 if op_type == Type::Float {
-                    format!("  {} = fdiv float {}, {}", result_name, left, right)
+                    format!("  {} = fdiv double {}, {}", result_name, left, right)
                 } else {
                     format!("  {} = sdiv i32 {}, {}", result_name, left, right)
                 }
             },
             BinaryOperator::Equal => {
                 if op_type == Type::Float {
-                    format!("  {} = fcmp oeq float {}, {}", result_name, left, right)
+                    format!("  {} = fcmp oeq double {}, {}", result_name, left, right)
                 } else {
                     format!("  {} = icmp eq i32 {}, {}", result_name, left, right)
                 }
             },
             BinaryOperator::NotEqual => {
                 if op_type == Type::Float {
-                    format!("  {} = fcmp one float {}, {}", result_name, left, right)
+                    format!("  {} = fcmp one double {}, {}", result_name, left, right)
                 } else {
                     format!("  {} = icmp ne i32 {}, {}", result_name, left, right)
                 }
             },
             BinaryOperator::Less => {
                 if op_type == Type::Float {
-                    format!("  {} = fcmp olt float {}, {}", result_name, left, right)
+                    format!("  {} = fcmp olt double {}, {}", result_name, left, right)
                 } else {
                     format!("  {} = icmp slt i32 {}, {}", result_name, left, right)
                 }
             },
             BinaryOperator::LessEqual => {
                 if op_type == Type::Float {
-                    format!("  {} = fcmp ole float {}, {}", result_name, left, right)
+                    format!("  {} = fcmp ole double {}, {}", result_name, left, right)
                 } else {
                     format!("  {} = icmp sle i32 {}, {}", result_name, left, right)
                 }
             },
             BinaryOperator::Greater => {
                 if op_type == Type::Float {
-                    format!("  {} = fcmp ogt float {}, {}", result_name, left, right)
+                    format!("  {} = fcmp ogt double {}, {}", result_name, left, right)
                 } else {
                     format!("  {} = icmp sgt i32 {}, {}", result_name, left, right)
                 }
             },
             BinaryOperator::GreaterEqual => {
                 if op_type == Type::Float {
-                    format!("  {} = fcmp oge float {}, {}", result_name, left, right)
+                    format!("  {} = fcmp oge double {}, {}", result_name, left, right)
                 } else {
                     format!("  {} = icmp sge i32 {}, {}", result_name, left, right)
                 }
@@ -514,7 +514,7 @@ impl TextBasedFunctionBuilder {
             BinaryOperator::LogicalOr => format!("  {} = or i1 {}, {}", result_name, left, right),
             BinaryOperator::Modulo => {
                 if op_type == Type::Float {
-                    format!("  {} = frem float {}, {}", result_name, left, right)
+                    format!("  {} = frem double {}, {}", result_name, left, right)
                 } else {
                     format!("  {} = srem i32 {}, {}", result_name, left, right)
                 }

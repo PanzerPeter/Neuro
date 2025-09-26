@@ -159,7 +159,7 @@ fn test_function_with_arrow_return() {
     let tokenizer = Tokenizer::new(source.to_string());
     let tokens = tokenizer.tokenize().unwrap();
     
-    let expected_sequence = vec![
+    let _expected_sequence = vec![
         TokenType::Keyword(Keyword::Fn),
         TokenType::Identifier("add".to_string()),
         TokenType::LeftParen,

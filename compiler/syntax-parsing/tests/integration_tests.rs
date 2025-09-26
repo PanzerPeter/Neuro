@@ -2,7 +2,7 @@
 
 use syntax_parsing::{Parser, Evaluator};
 use lexical_analysis::Lexer;
-use shared_types::{Value, Item, Statement, Expression};
+use shared_types::{Value, Item, Statement};
 
 /// Helper function to evaluate a NEURO expression from source code
 fn eval_expression(source: &str) -> Result<Value, Box<dyn std::error::Error>> {

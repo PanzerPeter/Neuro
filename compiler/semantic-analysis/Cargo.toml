@@ -16,3 +16,5 @@ serde.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+lexical-analysis = { path = "../lexical-analysis" }
+syntax-parsing = { path = "../syntax-parsing" }

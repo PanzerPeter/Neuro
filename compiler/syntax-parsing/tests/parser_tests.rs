@@ -3,9 +3,8 @@
 use syntax_parsing::{Parser, ParseError};
 use lexical_analysis::Lexer;
 use shared_types::{
-    Program, Item, Statement, Expression, 
-    ast::{Literal, BinaryExpression, BinaryOperator},
-    TokenType, Keyword,
+    Program, Item, Statement, Expression,
+    ast::{Literal, BinaryOperator},
 };
 
 /// Helper function to parse a string into an AST

@@ -92,10 +92,10 @@ def test_basic_features():
     for name, code, expected in tests:
         success, message = compile_and_run_code(code, expected)
         if success:
-            print(f"✅ {name}")
+            print(f"[PASS] {name}")
             passed += 1
         else:
-            print(f"❌ {name}: {message}")
+            print(f"[FAIL] {name}: {message}")
 
     return passed, len(tests)
 
@@ -133,10 +133,10 @@ def test_advanced_features():
     for name, code, expected in tests:
         success, message = compile_and_run_code(code, expected)
         if success:
-            print(f"✅ {name}")
+            print(f"[PASS] {name}")
             passed += 1
         else:
-            print(f"❌ {name}: {message}")
+            print(f"[FAIL] {name}: {message}")
 
     return passed, len(tests)
 
@@ -174,10 +174,10 @@ def test_compilation_only():
     for name, code in tests:
         success, message = compile_and_run_code(code)
         if success:
-            print(f"✅ {name}")
+            print(f"[PASS] {name}")
             passed += 1
         else:
-            print(f"❌ {name}: {message}")
+            print(f"[FAIL] {name}: {message}")
 
     return passed, len(tests)
 
@@ -203,16 +203,16 @@ def test_phase_1_features():
     for name, code, expected in tests:
         success, message = compile_and_run_code(code, expected)
         if success:
-            print(f"✅ {name}")
+            print(f"[PASS] {name}")
             passed += 1
         else:
-            print(f"❌ {name}: {message}")
+            print(f"[FAIL] {name}: {message}")
 
     return passed, len(tests)
 
 def main():
     """Main test runner"""
-    print("🧪 NEURO Language Features Test Suite")
+    print("*** NEURO Language Features Test Suite ***")
     print("=" * 50)
 
     basic_passed, basic_total = test_basic_features()
@@ -235,19 +235,19 @@ def main():
         print(f"Success rate: {success_rate:.1f}%")
 
         if success_rate >= 90.0:
-            print("🎉 EXCELLENT: Language features working well! Phase 1 Complete")
+            print("[EXCELLENT] Language features working well! Phase 1 Complete")
         elif success_rate >= 75.0:
-            print("✅ GOOD: Most language features working")
+            print("[GOOD] Most language features working")
         else:
-            print("⚠️  NEEDS WORK: Some language features need attention")
+            print("[NEEDS WORK] Some language features need attention")
 
         # Phase status reporting
         if success_rate >= 95.0:
-            print("\n🚀 STATUS: Ready for Phase 2 development!")
+            print("\n[STATUS] Ready for Phase 2 development!")
         elif success_rate >= 85.0:
-            print("\n🔧 STATUS: Phase 1 mostly complete, minor fixes needed")
+            print("\n[STATUS] Phase 1 mostly complete, minor fixes needed")
         else:
-            print("\n⚠️  STATUS: Phase 1 needs more work before Phase 2")
+            print("\n[STATUS] Phase 1 needs more work before Phase 2")
 
 if __name__ == "__main__":
     import sys

@@ -1,7 +1,7 @@
 //! Integration tests for the module system
 
-use module_system::{ModuleSystem, ModuleError, ModuleId};
-use shared_types::{Program, Item, Import, Function, Block, ast::Identifier};
+use module_system::{ModuleSystem, ModuleId};
+use shared_types::{Program, Item, Import, Function, Block};
 use shared_types::{Span, Type};
 use std::path::PathBuf;
 

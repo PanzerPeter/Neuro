@@ -162,7 +162,12 @@ impl BinaryGenerator {
         let exe_file = if options.output_path.is_absolute() {
             options.output_path.clone()
         } else {
-            self.output_dir.join(&options.output_path)
+            // Check if output_path already contains the output_dir to avoid double-joining
+            if options.output_path.starts_with(&self.output_dir) {
+                options.output_path.clone()
+            } else {
+                self.output_dir.join(&options.output_path)
+            }
         };
 
         let mut cmd = Command::new(tool);
@@ -248,7 +253,12 @@ impl BinaryGenerator {
             let exe_file = if options.output_path.is_absolute() {
                 options.output_path.clone()
             } else {
-                self.output_dir.join(&options.output_path)
+                // Check if output_path already contains the output_dir to avoid double-joining
+                if options.output_path.starts_with(&self.output_dir) {
+                    options.output_path.clone()
+                } else {
+                    self.output_dir.join(&options.output_path)
+                }
             };
 
             // Ensure .exe extension
@@ -258,28 +268,13 @@ impl BinaryGenerator {
                 exe_file
             };
 
-            // Use full path to Microsoft's link.exe to avoid conflicts with Unix link command
-            let link_exe_paths = vec![
-                "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\BuildTools\\VC\\Tools\\MSVC\\14.29.30133\\bin\\Hostx64\\x64\\link.exe",
-                "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.30.30705\\bin\\Hostx64\\x64\\link.exe",
-                "C:\\Program Files\\Microsoft Visual Studio\\2019\\Community\\VC\\Tools\\MSVC\\14.29.30133\\bin\\Hostx64\\x64\\link.exe",
-                "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.30.30705\\bin\\Hostx64\\x64\\link.exe",
-            ];
+            // Try to find Microsoft's link.exe using multiple strategies
+            let link_path = Self::find_msvc_link()
+                .ok_or_else(|| LLVMError::ModuleGeneration {
+                    message: "Microsoft Visual Studio Build Tools not found. Please install Visual Studio Build Tools or use clang for linking. The system 'link' command appears to be the GNU coreutils version which is incompatible with MSVC object files.".to_string(),
+                })?;
 
-            let mut link_path = None;
-            for path in &link_exe_paths {
-                if PathBuf::from(path).exists() {
-                    link_path = Some(path);
-                    break;
-                }
-            }
-
-            let mut cmd = if let Some(path) = link_path {
-                Command::new(path)
-            } else {
-                // Fallback - try to find link.exe in PATH with explicit .exe extension
-                Command::new("link.exe")
-            };
+            let mut cmd = Command::new(&link_path);
             cmd.arg("/OUT:".to_string() + &exe_file.to_string_lossy())
                .arg(obj_file)
                .arg("/SUBSYSTEM:CONSOLE")
@@ -293,7 +288,7 @@ impl BinaryGenerator {
 
             let output = cmd.output().map_err(|e| {
                 LLVMError::ModuleGeneration {
-                    message: format!("Windows link.exe failed: {}. Make sure Visual Studio Build Tools are installed.", e),
+                    message: format!("Microsoft link.exe failed: {}. Make sure Visual Studio Build Tools are installed.", e),
                 }
             })?;
 
@@ -339,6 +334,99 @@ impl BinaryGenerator {
             let llc_path = PathBuf::from(path).join(if cfg!(windows) { "llc.exe" } else { "llc" });
             if llc_path.exists() {
                 return Some(PathBuf::from(path));
+            }
+        }
+
+        None
+    }
+
+    /// Find Microsoft Visual Studio link.exe
+    #[cfg(target_os = "windows")]
+    fn find_msvc_link() -> Option<PathBuf> {
+        // First try using vswhere.exe to find Visual Studio installations
+        if let Some(link_path) = Self::find_link_with_vswhere() {
+            return Some(link_path);
+        }
+
+        // Fallback to hard-coded paths for common VS installations
+        let vs_paths = vec![
+            // VS 2022
+            "C:\\Program Files\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC",
+            "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC",
+            "C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional\\VC\\Tools\\MSVC",
+            "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC",
+            "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC",
+            // VS 2019
+            "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\BuildTools\\VC\\Tools\\MSVC",
+            "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community\\VC\\Tools\\MSVC",
+            "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Professional\\VC\\Tools\\MSVC",
+            "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Enterprise\\VC\\Tools\\MSVC",
+        ];
+
+        for vs_path in vs_paths {
+            if let Some(link_path) = Self::find_link_in_vs_path(vs_path) {
+                return Some(link_path);
+            }
+        }
+
+        None
+    }
+
+    #[cfg(target_os = "windows")]
+    fn find_link_with_vswhere() -> Option<PathBuf> {
+        let vswhere_path = "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe";
+
+        if !PathBuf::from(vswhere_path).exists() {
+            return None;
+        }
+
+        // Use vswhere to find the latest VS installation
+        let output = Command::new(vswhere_path)
+            .args(&[
+                "-latest",
+                "-products", "*",
+                "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property", "installationPath"
+            ])
+            .output()
+            .ok()?;
+
+        if output.status.success() {
+            let install_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !install_path.is_empty() {
+                let vs_tools_path = PathBuf::from(install_path).join("VC\\Tools\\MSVC");
+                return Self::find_link_in_vs_path(&vs_tools_path.to_string_lossy());
+            }
+        }
+
+        None
+    }
+
+    #[cfg(target_os = "windows")]
+    fn find_link_in_vs_path(vs_path: &str) -> Option<PathBuf> {
+        let vs_path = PathBuf::from(vs_path);
+        if !vs_path.exists() {
+            return None;
+        }
+
+        // Look for version directories (e.g., 14.29.30133, 14.30.30705, etc.)
+        if let Ok(entries) = std::fs::read_dir(&vs_path) {
+            for entry in entries.flatten() {
+                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                    // Try both x64 and x86 host architectures
+                    let potential_paths = vec![
+                        entry.path().join("bin\\Hostx64\\x64\\link.exe"),
+                        entry.path().join("bin\\Hostx86\\x64\\link.exe"),
+                        entry.path().join("bin\\Hostx64\\x86\\link.exe"),
+                        entry.path().join("bin\\Hostx86\\x86\\link.exe"),
+                    ];
+
+                    for link_path in potential_paths {
+                        if link_path.exists() {
+                            return Some(link_path);
+                        }
+                    }
+                }
             }
         }
 

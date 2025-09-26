@@ -32,7 +32,7 @@ def run_test_script(script_name):
 
 def main():
     """Main test runner"""
-    print("🚀 NEURO Compiler - Master Test Suite")
+    print("*** NEURO Compiler - Master Test Suite ***")
     print("=" * 60)
 
     test_scripts = [
@@ -43,15 +43,15 @@ def main():
     all_passed = True
 
     for script, description in test_scripts:
-        print(f"\n📋 Running {description}")
+        print(f"\n[*] Running {description}")
         print("-" * 40)
 
         success, stdout, stderr = run_test_script(script)
 
         if success:
-            print(f"✅ {description} - PASSED")
+            print(f"[PASS] {description} - PASSED")
         else:
-            print(f"❌ {description} - FAILED")
+            print(f"[FAIL] {description} - FAILED")
             all_passed = False
 
         # Print the output from the test script
@@ -61,17 +61,17 @@ def main():
             print(f"Errors: {stderr}")
 
     print("\n" + "=" * 60)
-    print("🏁 MASTER TEST SUITE RESULTS")
+    print("*** MASTER TEST SUITE RESULTS ***")
     print("=" * 60)
 
     if all_passed:
-        print("🎉 ALL TESTS PASSED!")
+        print("[SUCCESS] ALL TESTS PASSED!")
         print("The NEURO compiler is working correctly.")
-        print("✅ Ready for production use")
+        print("[OK] Ready for production use")
     else:
-        print("❌ SOME TESTS FAILED")
+        print("[ERROR] SOME TESTS FAILED")
         print("Review the test output above for details.")
-        print("⚠️  Not ready for production use")
+        print("[WARNING] Not ready for production use")
 
     return 0 if all_passed else 1
 
