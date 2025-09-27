@@ -79,6 +79,28 @@ From highest to lowest precedence:
 6. Logical AND: `&&`
 7. Logical OR: `||`
 
+## Match Expressions
+
+Pattern matching expressions allow conditional logic based on value matching:
+
+```neuro
+fn classify(x: int) -> int {
+    return match x {
+        0 => 100,
+        1 => 200,
+        2 => 300,
+        _ => 999
+    };
+}
+```
+
+Match expressions:
+- Evaluate the input expression once
+- Compare against patterns in order
+- Return the result of the first matching pattern
+- Support literal patterns and wildcard (`_`)
+- Can be nested and used in any expression context
+
 ## Examples
 
 ```neuro
@@ -89,11 +111,24 @@ fn main() -> int {
     // Logical expressions
     let ok = (x > 10) && (x == 20);  // ok = true
 
+    // Pattern matching
+    let category = match x {
+        0 => 1,
+        20 => 2,
+        _ => 3
+    };
+
+    // Match in function calls
+    let result = add(
+        match x { 20 => 10, _ => 0 },
+        match category { 2 => 5, _ => 1 }
+    );
+
     // Complex expressions
-    let result = -x + y / 2;
+    let complex = -x + y / 2;
     let valid = !finished || (count > 0 && ready);
 
-    return x;
+    return result;
 }
 ```
 

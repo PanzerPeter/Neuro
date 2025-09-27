@@ -27,10 +27,11 @@ impl<'a> TypeChecker<'a> {
             Expression::Call(call) => self.check_call_expression(call),
             Expression::Index(_) => Ok(Type::Unknown), // TODO: Implement array indexing
             Expression::Member(_) => Ok(Type::Unknown), // TODO: Implement member access
-            Expression::TensorLiteral(_) => Ok(Type::Tensor { 
-                element_type: Box::new(Type::Float), 
-                shape: None 
+            Expression::TensorLiteral(_) => Ok(Type::Tensor {
+                element_type: Box::new(Type::Float),
+                shape: None
             }),
+            Expression::Match(match_expr) => self.check_match_expression(match_expr),
         }
     }
 
@@ -191,6 +192,34 @@ impl<'a> TypeChecker<'a> {
                 name: function_name.clone(),
                 span: call.span,
             }),
+        }
+    }
+
+    /// Check the type of a match expression
+    fn check_match_expression(&self, match_expr: &shared_types::MatchExpression) -> Result<Type, SemanticError> {
+        // Check the expression being matched
+        let _expr_type = self.check_expression(&match_expr.expr)?;
+
+        // For now, just check that all arms have the same type
+        // In a full implementation, we'd check pattern compatibility
+        if let Some(first_arm) = match_expr.arms.first() {
+            let first_type = self.check_expression(&first_arm.body)?;
+
+            for arm in &match_expr.arms[1..] {
+                let arm_type = self.check_expression(&arm.body)?;
+                if arm_type != first_type && arm_type != Type::Unknown && first_type != Type::Unknown {
+                    return Err(SemanticError::TypeMismatch {
+                        expected: format!("{}", first_type),
+                        found: format!("{}", arm_type),
+                        span: arm.span,
+                    });
+                }
+            }
+
+            Ok(first_type)
+        } else {
+            // Empty match - this is probably an error, but for now return Unknown
+            Ok(Type::Unknown)
         }
     }
 }

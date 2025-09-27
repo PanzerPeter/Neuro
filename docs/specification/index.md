@@ -25,6 +25,7 @@ This section documents the NEURO language features implemented in Phase 1. Each 
 ### Advanced Features
 - `structs.md` - Struct declarations and field access
 - `modules_import.md` - Module system and import statements
+- `pattern_matching.md` - Pattern matching with match expressions
 
 ## Implementation Status
 
@@ -35,6 +36,8 @@ This section documents the NEURO language features implemented in Phase 1. Each 
 - Basic control flow (if/else, while loops)
 - Type inference for primitives
 - LLVM IR generation
+- Pattern matching with match expressions
+- Use statements (alternative import syntax)
 
 ### Partially Implemented ⚠️
 - Struct semantics (parsing complete, limited type integration)
@@ -45,9 +48,12 @@ This section documents the NEURO language features implemented in Phase 1. Each 
 The following features are designed but not yet implemented:
 - Attributes: `#[grad]`, `#[kernel]`, `#[gpu]` for ML-specific optimizations
 - For loops: `for item in collection` iteration syntax
-- Enums: Algebraic data types and pattern matching
+- Break and continue statements in loops
+- Enums: Algebraic data types
+- Advanced pattern matching: struct destructuring, guards, ranges
 - Member access: `object.field` expressions (parsed but not semantically analyzed)
 - Array indexing: `array[index]` expressions (parsed but not semantically analyzed)
+- Nested function definitions
 - Generic functions and types
 - Method call syntax
 - Closures and lambda expressions

@@ -102,7 +102,11 @@ pub enum Keyword {
     Import,
     Export,
     Module,
-    
+    Use,
+
+    // Pattern matching
+    Match,
+
     // Memory management
     Arc,
     Pool,
@@ -132,6 +136,8 @@ impl fmt::Display for Keyword {
             Keyword::Import => "import",
             Keyword::Export => "export",
             Keyword::Module => "module",
+            Keyword::Use => "use",
+            Keyword::Match => "match",
             Keyword::Arc => "Arc",
             Keyword::Pool => "Pool",
         };

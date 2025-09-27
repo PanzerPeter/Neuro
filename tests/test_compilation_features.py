@@ -162,7 +162,7 @@ def test_compilation_only():
          "use std::print; fn main() -> int { return 0; }"),
 
         ("Pattern matching (basic)",
-         "fn main() -> int { let x = 5; match x { 5 => return 1; _ => return 0; } }"),
+         "fn main() -> int { let x = 5; return match x { 5 => 1, _ => 0 }; }"),
 
         ("Boolean expressions",
          "fn main() -> int { let flag = true; let result = flag && (5 > 3) || false; if result { return 1; } return 0; }"),

@@ -105,6 +105,9 @@ impl<'a> Lexer<'a> {
                 if self.current_char == Some('=') {
                     self.advance();
                     Ok(Some(Token::new(TokenType::Equal, Span::new(start_pos, self.position))))
+                } else if self.current_char == Some('>') {
+                    self.advance();
+                    Ok(Some(Token::new(TokenType::Arrow, Span::new(start_pos, self.position))))
                 } else {
                     Ok(Some(Token::new(TokenType::Assign, Span::new(start_pos, self.position))))
                 }
@@ -330,6 +333,8 @@ impl<'a> Lexer<'a> {
             "import" => TokenType::Keyword(Keyword::Import),
             "export" => TokenType::Keyword(Keyword::Export),
             "module" => TokenType::Keyword(Keyword::Module),
+            "use" => TokenType::Keyword(Keyword::Use),
+            "match" => TokenType::Keyword(Keyword::Match),
             "Arc" => TokenType::Keyword(Keyword::Arc),
             "Pool" => TokenType::Keyword(Keyword::Pool),
             "true" => TokenType::Boolean(true),

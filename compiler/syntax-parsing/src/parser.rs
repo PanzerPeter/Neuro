@@ -90,6 +90,7 @@ impl Parser {
             TokenType::Keyword(Keyword::Fn) => Ok(Item::Function(self.parse_function()?)),
             TokenType::Keyword(Keyword::Struct) => Ok(Item::Struct(self.parse_struct()?)),
             TokenType::Keyword(Keyword::Import) => Ok(Item::Import(self.parse_import()?)),
+            TokenType::Keyword(Keyword::Use) => Ok(Item::Import(self.parse_use_statement()?)),
             // Add more item types here as needed
             _ => {
                 let span = self.current_span();
@@ -270,6 +271,48 @@ impl Parser {
         };
 
         self.consume(TokenType::Semicolon, "Expected ';' after import")?;
+        let end_span = self.previous_span();
+        let span = Span::new(start_span.start, end_span.end);
+
+        Ok(shared_types::Import { path, span })
+    }
+
+    /// Parse a use statement (similar to import but with different syntax)
+    fn parse_use_statement(&mut self) -> Result<shared_types::Import, ParseError> {
+        let start_span = self.advance().span; // consume 'use'
+
+        // Parse module path which can be: identifier::identifier::...
+        let mut path_parts = Vec::new();
+
+        // Get first identifier
+        let first_token = self.advance();
+        let path = match &first_token.token_type {
+            TokenType::Identifier(name) => {
+                path_parts.push(name.clone());
+
+                // Handle namespace path like std::math
+                while self.match_token(&TokenType::DoubleColon) {
+                    let next_token = self.advance();
+                    match &next_token.token_type {
+                        TokenType::Identifier(name) => path_parts.push(name.clone()),
+                        other => return Err(ParseError::unexpected_token(
+                            other.clone(),
+                            vec![TokenType::Identifier("module_name".to_string())],
+                            next_token.span,
+                        )),
+                    };
+                }
+
+                path_parts.join("::")
+            },
+            other => return Err(ParseError::unexpected_token(
+                other.clone(),
+                vec![TokenType::Identifier("module_name".to_string())],
+                first_token.span,
+            )),
+        };
+
+        self.consume(TokenType::Semicolon, "Expected ';' after use statement")?;
         let end_span = self.previous_span();
         let span = Span::new(start_span.start, end_span.end);
 
@@ -464,7 +507,12 @@ impl Parser {
 
     /// Parse an expression
     fn parse_expression(&mut self) -> Result<Expression, ParseError> {
-        self.parse_logical_or()
+        // Check for match expression first
+        if self.check(&TokenType::Keyword(Keyword::Match)) {
+            self.parse_match_expression()
+        } else {
+            self.parse_logical_or()
+        }
     }
 
     /// Parse logical OR expressions (||)
@@ -780,6 +828,97 @@ impl Parser {
             element_type,
             shape: if dimensions.is_empty() { None } else { Some(dimensions) },
         })
+    }
+
+    /// Parse a match expression: match expr { pattern => expr, ... }
+    fn parse_match_expression(&mut self) -> Result<Expression, ParseError> {
+        let start_span = self.advance().span; // consume 'match'
+
+        let expr = Box::new(self.parse_expression()?);
+
+        self.consume(TokenType::LeftBrace, "Expected '{' after match expression")?;
+
+        let mut arms = Vec::new();
+
+        while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
+            if self.match_token(&TokenType::Newline) {
+                continue;
+            }
+
+            let arm_start = self.current_span();
+
+            // Parse pattern
+            let pattern = self.parse_match_pattern()?;
+
+            // Expect '=>'
+            self.consume(TokenType::Arrow, "Expected '=>' after match pattern")?;
+
+            // Parse body expression
+            let body = self.parse_expression()?;
+
+            // Optional comma or semicolon
+            let _ = self.match_token(&TokenType::Comma) || self.match_token(&TokenType::Semicolon);
+
+            let arm_end = self.previous_span();
+            let arm_span = Span::new(arm_start.start, arm_end.end);
+
+            arms.push(shared_types::MatchArm {
+                pattern,
+                body,
+                span: arm_span,
+            });
+        }
+
+        let end_span = self.consume(TokenType::RightBrace, "Expected '}' after match arms")?;
+        let span = Span::new(start_span.start, end_span.end);
+
+        Ok(Expression::Match(shared_types::MatchExpression {
+            expr,
+            arms,
+            span,
+        }))
+    }
+
+    /// Parse a match pattern
+    fn parse_match_pattern(&mut self) -> Result<shared_types::MatchPattern, ParseError> {
+        let token = self.advance();
+
+        match &token.token_type {
+            TokenType::Integer(value) => {
+                let num: i64 = value.parse().map_err(|_| {
+                    ParseError::InvalidNumber {
+                        literal: value.clone(),
+                        span: token.span,
+                    }
+                })?;
+                Ok(shared_types::MatchPattern::Literal(Literal::Integer(num, token.span)))
+            }
+            TokenType::Float(value) => {
+                let num: f64 = value.parse().map_err(|_| {
+                    ParseError::InvalidNumber {
+                        literal: value.clone(),
+                        span: token.span,
+                    }
+                })?;
+                Ok(shared_types::MatchPattern::Literal(Literal::Float(num, token.span)))
+            }
+            TokenType::String(value) => {
+                Ok(shared_types::MatchPattern::Literal(Literal::String(value.clone(), token.span)))
+            }
+            TokenType::Boolean(value) => {
+                Ok(shared_types::MatchPattern::Literal(Literal::Boolean(*value, token.span)))
+            }
+            TokenType::Identifier(name) if name == "_" => {
+                Ok(shared_types::MatchPattern::Wildcard)
+            }
+            TokenType::Identifier(name) => {
+                Ok(shared_types::MatchPattern::Identifier(name.clone()))
+            }
+            _ => Err(ParseError::invalid_expression(
+                "Expected pattern in match arm",
+                token.span,
+            )),
+        }
     }
 
     // Helper methods

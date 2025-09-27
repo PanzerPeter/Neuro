@@ -18,6 +18,7 @@ flamegraph.svg
 *.so
 *.dll
 *.exe
+.neuro-cache/
 
 # Rust tooling / profiling / backups
 *.rs.bk

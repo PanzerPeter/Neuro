@@ -4,14 +4,21 @@ NEURO provides a module system for organizing code across multiple files and ena
 
 ## Import Statement Syntax
 
-### Basic Syntax
+NEURO supports two different import syntaxes:
+
+### Import Statement
 ```neuro
 import path;
 ```
 
-The `path` can be either:
-- An identifier chain: `a::b::c`
-- A string path: `"./file.nr"` or `"../lib/utils.nr"`
+### Use Statement
+```neuro
+use path;
+```
+
+Both syntaxes are functionally equivalent for identifier chains. The `path` can be:
+- An identifier chain: `a::b::c` (supported by both `import` and `use`)
+- A string path: `"./file.nr"` or `"../lib/utils.nr"` (currently only supported by `import`)
 
 ### Examples
 ```neuro
@@ -19,6 +26,12 @@ import std::math;              // Standard library module
 import "./lib/utils.nr";       // Relative file import
 import "../shared/common.nr";  // Parent directory import
 import my_module::functions;   // Nested module import
+
+// Use syntax (for identifier chains only)
+use std::math;                 // Standard library module
+// use "./lib/utils.nr";       // String paths not yet supported with use
+// use "../shared/common.nr";  // String paths not yet supported with use
+use my_module::functions;      // Nested module import
 ```
 
 ## Import Path Types
@@ -86,6 +99,10 @@ import std::math;
 import "./constants.nr";
 import "../lib/helpers.nr";
 import my_package::utilities;
+
+// Mixed import and use syntax
+use std::io;
+use "./config.nr";
 
 fn main() -> int {
     // Multiple imported modules available in scope

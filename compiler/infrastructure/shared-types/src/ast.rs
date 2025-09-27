@@ -160,6 +160,7 @@ pub enum Expression {
     Index(IndexExpression),
     Member(MemberExpression),
     TensorLiteral(TensorLiteral),
+    Match(MatchExpression),
 }
 
 /// Literal values
@@ -267,6 +268,30 @@ pub struct TensorLiteral {
     pub span: Span,
 }
 
+/// Match expression
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MatchExpression {
+    pub expr: Box<Expression>,
+    pub arms: Vec<MatchArm>,
+    pub span: Span,
+}
+
+/// Match arm with pattern and expression
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MatchArm {
+    pub pattern: MatchPattern,
+    pub body: Expression,
+    pub span: Span,
+}
+
+/// Simple pattern for matching
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MatchPattern {
+    Literal(Literal),
+    Identifier(String),
+    Wildcard, // _ pattern
+}
+
 impl Expression {
     /// Get the span of this expression
     pub fn span(&self) -> Span {
@@ -284,6 +309,7 @@ impl Expression {
             Expression::Index(idx) => idx.span,
             Expression::Member(mem) => mem.span,
             Expression::TensorLiteral(tensor) => tensor.span,
+            Expression::Match(match_expr) => match_expr.span,
         }
     }
 }
