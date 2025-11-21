@@ -1,0 +1,32 @@
+[package]
+name = "neurc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Infrastructure
+shared-types = { path = "../infrastructure/shared-types" }
+source-location = { path = "../infrastructure/source-location" }
+diagnostics = { path = "../infrastructure/diagnostics" }
+project-config = { path = "../infrastructure/project-config" }
+
+# Feature Slices
+lexical-analysis = { path = "../lexical-analysis" }
+syntax-parsing = { path = "../syntax-parsing" }
+semantic-analysis = { path = "../semantic-analysis" }
+control-flow = { path = "../control-flow" }
+llvm-backend = { path = "../llvm-backend" }
+
+# CLI Dependencies
+clap = { workspace = true }
+clap_complete = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
+anyhow = { workspace = true }
+
+[[bin]]
+name = "neurc"
+path = "src/main.rs"

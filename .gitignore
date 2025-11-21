@@ -1,0 +1,139 @@
+# ============================
+# Rust build artifacts
+# ============================
+/target/
+**/target/
+debug/
+release/
+*.pdb
+*.pdb.lock
+
+# Backup files created by rustc / editors
+**/*.rs.bk
+*.orig
+
+# Cargo
+# Uncomment if this is a library and you want consumers to generate their own lockfile
+# Cargo.lock
+
+# LLVM / compilation artifacts
+*.bc
+*.ll
+*.o
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.a
+*.lib
+
+# Profiling / debug
+*.dSYM/
+*.dwp
+*.gch
+
+# ============================
+# NEURO
+# ============================
+.neuro-cache/
+**/*.neuro-cache
+*.nrl
+*.nrm
+*.nrp
+
+# ============================
+# Test & Benchmark Artifacts
+# ============================
+tests/output/
+integration-tests/output/
+benchmarks/results/
+*.coverage
+*.lcov
+
+# ============================
+# Coverage tools
+# ============================
+*.profraw
+*.profdata
+coverage/
+tarpaulin-report.html
+cobertura.xml
+lcov.info
+
+# ============================
+# Documentation
+# ============================
+docs/_build/
+target/doc/
+book/
+mdbook/
+
+# ============================
+# Temporary files
+# ============================
+tmp/
+temp/
+*.tmp
+*.log
+*.cache
+.cache/
+
+# ============================
+# OS-specific
+# ============================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================
+# IDE / Editor
+# ============================
+.vscode/
+.idea/
+*.swp
+*.swo
+CLAUDE.md
+.claude/
+VSA_Rust_3_0.xml
+*~
+*.iml
+
+# JetBrains Rust tool directories
+/.fleet/
+cmake-build-*/
+
+# ============================
+# Python (for scripts/tooling)
+# ============================
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+env/
+build/
+dist/
+*.egg-info/
+
+# ============================
+# Node.js (for tooling / frontend)
+# ============================
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+.npm/
+.npm-cache/
+dist/
+build/
+
+# ============================
+# Generated files
+# ============================
+parser/src/grammar.rs
+lexer/src/generated/
+generated/
+gen/
+
+

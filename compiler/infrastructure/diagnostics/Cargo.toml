@@ -1,0 +1,16 @@
+[package]
+name = "diagnostics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+shared-types = { path = "../shared-types" }
+source-location = { path = "../source-location" }
+miette = { workspace = true }
+thiserror = { workspace = true }
+
+[lib]
+path = "src/lib.rs"

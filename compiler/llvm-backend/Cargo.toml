@@ -1,0 +1,17 @@
+[package]
+name = "llvm-backend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+shared-types = { path = "../infrastructure/shared-types" }
+diagnostics = { path = "../infrastructure/diagnostics" }
+inkwell = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+[lib]
+path = "src/lib.rs"
