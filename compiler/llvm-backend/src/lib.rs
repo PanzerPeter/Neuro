@@ -1,42 +1,1039 @@
 // NEURO Programming Language - LLVM Backend
 // Feature slice for LLVM IR generation and optimization
 
+use inkwell::builder::Builder;
+use inkwell::context::Context as LLVMContext;
+use inkwell::module::Module;
+use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
+use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::{FloatPredicate, IntPredicate, OptimizationLevel};
+use semantic_analysis::Type;
+use std::collections::HashMap;
+use syntax_parsing::{BinaryOp, Expr, FunctionDef, Item, Stmt, UnaryOp};
 use thiserror::Error;
 
-/// Code generation errors
+/// Code generation errors with detailed context
 #[derive(Debug, Error)]
 pub enum CodegenError {
-    #[error("failed to initialize LLVM context")]
-    InitializationFailed,
+    #[error("failed to initialize LLVM context: {0}")]
+    InitializationFailed(String),
 
-    #[error("type conversion error: {0}")]
-    TypeConversionError(String),
+    #[error("unsupported type: {0}")]
+    UnsupportedType(String),
+
+    #[error("undefined variable: {0}")]
+    UndefinedVariable(String),
+
+    #[error("undefined function: {0}")]
+    UndefinedFunction(String),
+
+    #[error("type mismatch: expected {expected}, found {found}")]
+    TypeMismatch { expected: String, found: String },
+
+    #[error("invalid operand type for operator {op}: {ty}")]
+    InvalidOperandType { op: String, ty: String },
 
     #[error("LLVM error: {0}")]
     LlvmError(String),
+
+    #[error("missing return statement in non-void function")]
+    MissingReturn,
+
+    #[error("internal compiler error: {0}")]
+    InternalError(String),
 }
 
-/// Code generator stub
-pub struct CodeGenerator {
-    // Phase 1: Stub implementation
-    // Will use inkwell for LLVM bindings
+pub type CodegenResult<T> = Result<T, CodegenError>;
+
+/// Maps NEURO semantic types to LLVM types
+pub(crate) struct TypeMapper<'ctx> {
+    context: &'ctx LLVMContext,
 }
 
-impl CodeGenerator {
-    pub fn new() -> Result<Self, CodegenError> {
-        // TODO: Initialize LLVM context
-        Ok(Self {})
+impl<'ctx> TypeMapper<'ctx> {
+    pub(crate) fn new(context: &'ctx LLVMContext) -> Self {
+        Self { context }
     }
 
-    pub fn generate(&mut self) -> Result<Vec<u8>, CodegenError> {
-        // TODO: Implement code generation
-        Ok(Vec::new())
+    /// Convert a NEURO semantic type to an LLVM type
+    pub(crate) fn map_type(&self, ty: &Type) -> CodegenResult<BasicTypeEnum<'ctx>> {
+        match ty {
+            Type::I32 => Ok(self.context.i32_type().into()),
+            Type::I64 => Ok(self.context.i64_type().into()),
+            Type::F32 => Ok(self.context.f32_type().into()),
+            Type::F64 => Ok(self.context.f64_type().into()),
+            Type::Bool => Ok(self.context.bool_type().into()),
+            Type::Void => Err(CodegenError::UnsupportedType(
+                "void type cannot be used as a value".to_string(),
+            )),
+            Type::Function { .. } => Err(CodegenError::UnsupportedType(
+                "function types as values not yet supported".to_string(),
+            )),
+            Type::Unknown => Err(CodegenError::InternalError(
+                "unknown type should not appear after type checking".to_string(),
+            )),
+        }
+    }
+
+    /// Check if a type is a floating-point type
+    pub(crate) fn is_float_type(ty: &Type) -> bool {
+        matches!(ty, Type::F32 | Type::F64)
+    }
+
+    /// Check if a type is an integer type
+    #[allow(dead_code)] // Reserved for future use in logical operators
+    pub(crate) fn is_int_type(ty: &Type) -> bool {
+        matches!(ty, Type::I32 | Type::I64 | Type::Bool)
     }
 }
 
-impl Default for CodeGenerator {
-    fn default() -> Self {
-        Self::new().unwrap()
+/// Code generation context containing LLVM state
+pub(crate) struct CodegenContext<'ctx> {
+    context: &'ctx LLVMContext,
+    module: Module<'ctx>,
+    builder: Builder<'ctx>,
+    type_mapper: TypeMapper<'ctx>,
+
+    /// Local variables in the current function (name -> pointer to stack allocation)
+    variables: HashMap<String, PointerValue<'ctx>>,
+
+    /// Types of local variables (needed for opaque pointers)
+    variable_types: HashMap<String, BasicTypeEnum<'ctx>>,
+
+    /// Function declarations (name -> LLVM function)
+    functions: HashMap<String, FunctionValue<'ctx>>,
+
+    /// Current function being compiled (for return type checking)
+    current_function: Option<FunctionValue<'ctx>>,
+
+    /// Type information for expressions (needed for operator codegen)
+    expr_types: HashMap<usize, Type>, // Maps expression span.start -> Type
+}
+
+impl<'ctx> CodegenContext<'ctx> {
+    pub(crate) fn new(context: &'ctx LLVMContext, module_name: &str) -> Self {
+        let module = context.create_module(module_name);
+        let builder = context.create_builder();
+        let type_mapper = TypeMapper::new(context);
+
+        Self {
+            context,
+            module,
+            builder,
+            type_mapper,
+            variables: HashMap::new(),
+            variable_types: HashMap::new(),
+            functions: HashMap::new(),
+            current_function: None,
+            expr_types: HashMap::new(),
+        }
+    }
+
+    /// Generate code for a literal expression
+    fn codegen_literal(&self, lit: &shared_types::Literal) -> CodegenResult<BasicValueEnum<'ctx>> {
+        match lit {
+            shared_types::Literal::Integer(val) => {
+                // Default to i32 for integer literals
+                Ok(self.context.i32_type().const_int(*val as u64, true).into())
+            }
+            shared_types::Literal::Float(val) => {
+                // Default to f64 for float literals
+                Ok(self.context.f64_type().const_float(*val).into())
+            }
+            shared_types::Literal::Boolean(val) => Ok(self
+                .context
+                .bool_type()
+                .const_int(*val as u64, false)
+                .into()),
+            shared_types::Literal::String(_) => Err(CodegenError::UnsupportedType(
+                "string literals not supported in Phase 1".to_string(),
+            )),
+        }
+    }
+
+    /// Generate code for an identifier (variable reference)
+    fn codegen_identifier(&self, name: &str) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let ptr = self
+            .variables
+            .get(name)
+            .ok_or_else(|| CodegenError::UndefinedVariable(name.to_string()))?;
+
+        let var_type = self.variable_types.get(name).ok_or_else(|| {
+            CodegenError::InternalError(format!("missing type for variable {}", name))
+        })?;
+
+        self.builder
+            .build_load(*var_type, *ptr, name)
+            .map_err(|e| CodegenError::LlvmError(format!("failed to load variable: {}", e)))
+    }
+
+    /// Generate code for a binary expression
+    fn codegen_binary(
+        &self,
+        left: &Expr,
+        op: BinaryOp,
+        right: &Expr,
+        left_ty: &Type,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let lhs = self.codegen_expr(left)?;
+        let rhs = self.codegen_expr(right)?;
+
+        match op {
+            // Arithmetic operators
+            BinaryOp::Add => {
+                if TypeMapper::is_float_type(left_ty) {
+                    Ok(self
+                        .builder
+                        .build_float_add(lhs.into_float_value(), rhs.into_float_value(), "addtmp")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_int_add(lhs.into_int_value(), rhs.into_int_value(), "addtmp")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            BinaryOp::Subtract => {
+                if TypeMapper::is_float_type(left_ty) {
+                    Ok(self
+                        .builder
+                        .build_float_sub(lhs.into_float_value(), rhs.into_float_value(), "subtmp")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_int_sub(lhs.into_int_value(), rhs.into_int_value(), "subtmp")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            BinaryOp::Multiply => {
+                if TypeMapper::is_float_type(left_ty) {
+                    Ok(self
+                        .builder
+                        .build_float_mul(lhs.into_float_value(), rhs.into_float_value(), "multmp")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_int_mul(lhs.into_int_value(), rhs.into_int_value(), "multmp")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            BinaryOp::Divide => {
+                if TypeMapper::is_float_type(left_ty) {
+                    Ok(self
+                        .builder
+                        .build_float_div(lhs.into_float_value(), rhs.into_float_value(), "divtmp")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_int_signed_div(lhs.into_int_value(), rhs.into_int_value(), "divtmp")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            BinaryOp::Modulo => {
+                if TypeMapper::is_float_type(left_ty) {
+                    Ok(self
+                        .builder
+                        .build_float_rem(lhs.into_float_value(), rhs.into_float_value(), "modtmp")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_int_signed_rem(lhs.into_int_value(), rhs.into_int_value(), "modtmp")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+
+            // Comparison operators
+            BinaryOp::Equal => {
+                if TypeMapper::is_float_type(left_ty) {
+                    Ok(self
+                        .builder
+                        .build_float_compare(
+                            FloatPredicate::OEQ,
+                            lhs.into_float_value(),
+                            rhs.into_float_value(),
+                            "eqtmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_int_compare(
+                            IntPredicate::EQ,
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            "eqtmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            BinaryOp::NotEqual => {
+                if TypeMapper::is_float_type(left_ty) {
+                    Ok(self
+                        .builder
+                        .build_float_compare(
+                            FloatPredicate::ONE,
+                            lhs.into_float_value(),
+                            rhs.into_float_value(),
+                            "netmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_int_compare(
+                            IntPredicate::NE,
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            "netmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            BinaryOp::Less => {
+                if TypeMapper::is_float_type(left_ty) {
+                    Ok(self
+                        .builder
+                        .build_float_compare(
+                            FloatPredicate::OLT,
+                            lhs.into_float_value(),
+                            rhs.into_float_value(),
+                            "lttmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_int_compare(
+                            IntPredicate::SLT,
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            "lttmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            BinaryOp::Greater => {
+                if TypeMapper::is_float_type(left_ty) {
+                    Ok(self
+                        .builder
+                        .build_float_compare(
+                            FloatPredicate::OGT,
+                            lhs.into_float_value(),
+                            rhs.into_float_value(),
+                            "gttmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_int_compare(
+                            IntPredicate::SGT,
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            "gttmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            BinaryOp::LessEqual => {
+                if TypeMapper::is_float_type(left_ty) {
+                    Ok(self
+                        .builder
+                        .build_float_compare(
+                            FloatPredicate::OLE,
+                            lhs.into_float_value(),
+                            rhs.into_float_value(),
+                            "letmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_int_compare(
+                            IntPredicate::SLE,
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            "letmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            BinaryOp::GreaterEqual => {
+                if TypeMapper::is_float_type(left_ty) {
+                    Ok(self
+                        .builder
+                        .build_float_compare(
+                            FloatPredicate::OGE,
+                            lhs.into_float_value(),
+                            rhs.into_float_value(),
+                            "getmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_int_compare(
+                            IntPredicate::SGE,
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            "getmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+
+            // Logical operators (short-circuit evaluation would require basic blocks, using simple AND/OR for Phase 1)
+            BinaryOp::And => Ok(self
+                .builder
+                .build_and(lhs.into_int_value(), rhs.into_int_value(), "andtmp")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .into()),
+            BinaryOp::Or => Ok(self
+                .builder
+                .build_or(lhs.into_int_value(), rhs.into_int_value(), "ortmp")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .into()),
+        }
+    }
+
+    /// Generate code for a unary expression
+    fn codegen_unary(
+        &self,
+        op: UnaryOp,
+        operand: &Expr,
+        operand_ty: &Type,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let val = self.codegen_expr(operand)?;
+
+        match op {
+            UnaryOp::Negate => {
+                if TypeMapper::is_float_type(operand_ty) {
+                    Ok(self
+                        .builder
+                        .build_float_neg(val.into_float_value(), "negtmp")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_int_neg(val.into_int_value(), "negtmp")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            UnaryOp::Not => Ok(self
+                .builder
+                .build_not(val.into_int_value(), "nottmp")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .into()),
+        }
+    }
+
+    /// Generate code for a function call
+    fn codegen_call(&self, func_name: &str, args: &[Expr]) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let function = self
+            .functions
+            .get(func_name)
+            .ok_or_else(|| CodegenError::UndefinedFunction(func_name.to_string()))?;
+
+        let mut arg_values = Vec::new();
+        for arg in args {
+            let val = self.codegen_expr(arg)?;
+            arg_values.push(BasicMetadataValueEnum::from(val));
+        }
+
+        let call_result = self
+            .builder
+            .build_call(*function, &arg_values, "calltmp")
+            .map_err(|e| CodegenError::LlvmError(format!("failed to build call: {}", e)))?;
+
+        call_result.try_as_basic_value().left().ok_or_else(|| {
+            CodegenError::InternalError(
+                "function call returned void when value expected".to_string(),
+            )
+        })
+    }
+
+    /// Generate code for an expression
+    fn codegen_expr(&self, expr: &Expr) -> CodegenResult<BasicValueEnum<'ctx>> {
+        match expr {
+            Expr::Literal(lit, _) => self.codegen_literal(lit),
+            Expr::Identifier(ident) => self.codegen_identifier(&ident.name),
+            Expr::Binary {
+                left,
+                op,
+                right,
+                span,
+            } => {
+                // Look up the type of the left operand (stored during type checking pass)
+                let left_ty = self.expr_types.get(&span.start).ok_or_else(|| {
+                    CodegenError::InternalError(
+                        "missing type information for expression".to_string(),
+                    )
+                })?;
+                self.codegen_binary(left, *op, right, left_ty)
+            }
+            Expr::Unary { op, operand, span } => {
+                let operand_ty = self.expr_types.get(&span.start).ok_or_else(|| {
+                    CodegenError::InternalError(
+                        "missing type information for expression".to_string(),
+                    )
+                })?;
+                self.codegen_unary(*op, operand, operand_ty)
+            }
+            Expr::Call { func, args, .. } => {
+                // For Phase 1, only simple identifier function calls
+                if let Expr::Identifier(ident) = &**func {
+                    self.codegen_call(&ident.name, args)
+                } else {
+                    Err(CodegenError::UnsupportedType(
+                        "complex function expressions not supported in Phase 1".to_string(),
+                    ))
+                }
+            }
+            Expr::Paren(inner, _) => self.codegen_expr(inner),
+        }
+    }
+
+    /// Generate code for a variable declaration statement
+    fn codegen_var_decl(&mut self, name: &str, init: Option<&Expr>) -> CodegenResult<()> {
+        // Get the type of the variable (we need to infer from initializer or explicit type)
+        let init_val = if let Some(expr) = init {
+            Some(self.codegen_expr(expr)?)
+        } else {
+            None
+        };
+
+        if let Some(val) = init_val {
+            let val_type = val.get_type();
+
+            // Allocate space on the stack
+            let alloca = self.builder.build_alloca(val_type, name).map_err(|e| {
+                CodegenError::LlvmError(format!("failed to allocate variable: {}", e))
+            })?;
+
+            // Store the initial value
+            self.builder.build_store(alloca, val).map_err(|e| {
+                CodegenError::LlvmError(format!("failed to store initial value: {}", e))
+            })?;
+
+            // Record the variable and its type
+            self.variables.insert(name.to_string(), alloca);
+            self.variable_types.insert(name.to_string(), val_type);
+        }
+
+        Ok(())
+    }
+
+    /// Generate code for a return statement
+    fn codegen_return(&self, value: Option<&Expr>) -> CodegenResult<()> {
+        if let Some(expr) = value {
+            let ret_val = self.codegen_expr(expr)?;
+            self.builder
+                .build_return(Some(&ret_val))
+                .map_err(|e| CodegenError::LlvmError(format!("failed to build return: {}", e)))?;
+        } else {
+            self.builder.build_return(None).map_err(|e| {
+                CodegenError::LlvmError(format!("failed to build void return: {}", e))
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Generate code for an if/else statement
+    fn codegen_if(
+        &mut self,
+        condition: &Expr,
+        then_block: &[Stmt],
+        else_if_blocks: &[(Expr, Vec<Stmt>)],
+        else_block: &Option<Vec<Stmt>>,
+    ) -> CodegenResult<()> {
+        let cond_val = self.codegen_expr(condition)?;
+
+        let parent_fn = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("if statement outside function".to_string())
+        })?;
+
+        let then_bb = self.context.append_basic_block(parent_fn, "then");
+        let else_bb = self.context.append_basic_block(parent_fn, "else");
+        let merge_bb = self.context.append_basic_block(parent_fn, "ifcont");
+
+        // Build conditional branch
+        self.builder
+            .build_conditional_branch(cond_val.into_int_value(), then_bb, else_bb)
+            .map_err(|e| {
+                CodegenError::LlvmError(format!("failed to build conditional branch: {}", e))
+            })?;
+
+        // Generate then block
+        self.builder.position_at_end(then_bb);
+        for stmt in then_block {
+            self.codegen_stmt(stmt)?;
+        }
+        // Only add branch if the block doesn't already end with a terminator
+        if then_bb.get_terminator().is_none() {
+            self.builder
+                .build_unconditional_branch(merge_bb)
+                .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
+        }
+
+        // Generate else-if and else blocks
+        self.builder.position_at_end(else_bb);
+        if !else_if_blocks.is_empty() || else_block.is_some() {
+            // For simplicity in Phase 1, chain else-if blocks as nested ifs
+            for (else_if_cond, else_if_stmts) in else_if_blocks {
+                self.codegen_if(else_if_cond, else_if_stmts, &[], &None)?;
+            }
+
+            if let Some(else_stmts) = else_block {
+                for stmt in else_stmts {
+                    self.codegen_stmt(stmt)?;
+                }
+            }
+        }
+        // Only add branch if the block doesn't already end with a terminator
+        if else_bb.get_terminator().is_none() {
+            self.builder
+                .build_unconditional_branch(merge_bb)
+                .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
+        }
+
+        // Continue at merge block
+        self.builder.position_at_end(merge_bb);
+
+        Ok(())
+    }
+
+    /// Generate code for a statement
+    fn codegen_stmt(&mut self, stmt: &Stmt) -> CodegenResult<()> {
+        match stmt {
+            Stmt::VarDecl { name, init, .. } => self.codegen_var_decl(&name.name, init.as_ref()),
+            Stmt::Return { value, .. } => self.codegen_return(value.as_ref()),
+            Stmt::If {
+                condition,
+                then_block,
+                else_if_blocks,
+                else_block,
+                ..
+            } => self.codegen_if(condition, then_block, else_if_blocks, else_block),
+            Stmt::Expr(expr) => {
+                self.codegen_expr(expr)?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Generate code for a function definition
+    fn codegen_function(
+        &mut self,
+        func_def: &FunctionDef,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        // Get function type information
+        let func_type_info = func_types
+            .get(&func_def.name.name)
+            .ok_or_else(|| CodegenError::UndefinedFunction(func_def.name.name.clone()))?;
+
+        let (param_types, return_type) = match func_type_info {
+            Type::Function { params, ret } => (params, &**ret),
+            _ => {
+                return Err(CodegenError::InternalError(
+                    "function type information is not a function type".to_string(),
+                ))
+            }
+        };
+
+        // Map parameter types to LLVM types
+        let mut llvm_param_types = Vec::new();
+        for param_ty in param_types {
+            let llvm_ty = self.type_mapper.map_type(param_ty)?;
+            llvm_param_types.push(BasicMetadataTypeEnum::from(llvm_ty));
+        }
+
+        // Map return type to LLVM type
+        let llvm_ret_type = if matches!(return_type, Type::Void) {
+            self.context.void_type().fn_type(&llvm_param_types, false)
+        } else {
+            let ret_basic_type = self.type_mapper.map_type(return_type)?;
+            ret_basic_type.fn_type(&llvm_param_types, false)
+        };
+
+        // Create the function
+        let function = self
+            .module
+            .add_function(&func_def.name.name, llvm_ret_type, None);
+
+        // Record the function for later calls
+        self.functions.insert(func_def.name.name.clone(), function);
+
+        // Create entry basic block
+        let entry = self.context.append_basic_block(function, "entry");
+        self.builder.position_at_end(entry);
+
+        // Set current function for return statements
+        self.current_function = Some(function);
+
+        // Clear variables for new function scope
+        self.variables.clear();
+        self.variable_types.clear();
+
+        // Allocate and store parameters
+        for (i, param) in func_def.params.iter().enumerate() {
+            let param_val = function
+                .get_nth_param(i as u32)
+                .ok_or_else(|| CodegenError::InternalError(format!("missing parameter {}", i)))?;
+
+            let param_type = param_val.get_type();
+
+            let alloca = self
+                .builder
+                .build_alloca(param_type, &param.name.name)
+                .map_err(|e| {
+                    CodegenError::LlvmError(format!("failed to allocate parameter: {}", e))
+                })?;
+
+            self.builder.build_store(alloca, param_val).map_err(|e| {
+                CodegenError::LlvmError(format!("failed to store parameter: {}", e))
+            })?;
+
+            self.variables.insert(param.name.name.clone(), alloca);
+            self.variable_types
+                .insert(param.name.name.clone(), param_type);
+        }
+
+        // Generate function body
+        for stmt in &func_def.body {
+            self.codegen_stmt(stmt)?;
+        }
+
+        // Ensure function has a return if it's non-void
+        if !matches!(return_type, Type::Void) {
+            let current_bb = self.builder.get_insert_block().ok_or_else(|| {
+                CodegenError::InternalError("no insert block after function body".to_string())
+            })?;
+
+            if current_bb.get_terminator().is_none() {
+                return Err(CodegenError::MissingReturn);
+            }
+        } else if let Some(current_bb) = self.builder.get_insert_block() {
+            // Add void return if missing
+            if current_bb.get_terminator().is_none() {
+                self.builder.build_return(None).map_err(|e| {
+                    CodegenError::LlvmError(format!("failed to build void return: {}", e))
+                })?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Store type information for expressions (needed for codegen)
+    pub(crate) fn store_expr_types(&mut self, items: &[Item]) -> CodegenResult<()> {
+        // We need to run type inference to get expression types
+        // For Phase 1, we'll use a simple visitor pattern
+        for item in items {
+            let Item::Function(func_def) = item;
+            self.visit_function_for_types(func_def)?;
+        }
+        Ok(())
+    }
+
+    fn visit_function_for_types(&mut self, func_def: &FunctionDef) -> CodegenResult<()> {
+        for stmt in &func_def.body {
+            self.visit_stmt_for_types(stmt)?;
+        }
+        Ok(())
+    }
+
+    fn visit_stmt_for_types(&mut self, stmt: &Stmt) -> CodegenResult<()> {
+        match stmt {
+            Stmt::VarDecl { init, .. } => {
+                if let Some(expr) = init {
+                    self.visit_expr_for_types(expr)?;
+                }
+            }
+            Stmt::Return { value, .. } => {
+                if let Some(expr) = value {
+                    self.visit_expr_for_types(expr)?;
+                }
+            }
+            Stmt::If {
+                condition,
+                then_block,
+                else_if_blocks,
+                else_block,
+                ..
+            } => {
+                self.visit_expr_for_types(condition)?;
+                for stmt in then_block {
+                    self.visit_stmt_for_types(stmt)?;
+                }
+                for (cond, stmts) in else_if_blocks {
+                    self.visit_expr_for_types(cond)?;
+                    for stmt in stmts {
+                        self.visit_stmt_for_types(stmt)?;
+                    }
+                }
+                if let Some(stmts) = else_block {
+                    for stmt in stmts {
+                        self.visit_stmt_for_types(stmt)?;
+                    }
+                }
+            }
+            Stmt::Expr(expr) => {
+                self.visit_expr_for_types(expr)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn visit_expr_for_types(&mut self, expr: &Expr) -> CodegenResult<()> {
+        match expr {
+            Expr::Literal(lit, span) => {
+                let ty = match lit {
+                    shared_types::Literal::Integer(_) => Type::I32,
+                    shared_types::Literal::Float(_) => Type::F64,
+                    shared_types::Literal::Boolean(_) => Type::Bool,
+                    shared_types::Literal::String(_) => {
+                        return Err(CodegenError::UnsupportedType(
+                            "string type not supported".to_string(),
+                        ))
+                    }
+                };
+                self.expr_types.insert(span.start, ty);
+            }
+            Expr::Binary {
+                left,
+                op,
+                right,
+                span,
+            } => {
+                self.visit_expr_for_types(left)?;
+                self.visit_expr_for_types(right)?;
+
+                // Infer the result type from the operator and left operand type
+                let left_ty = self
+                    .expr_types
+                    .get(&left.span().start)
+                    .ok_or_else(|| {
+                        CodegenError::InternalError("missing type for left operand".to_string())
+                    })?
+                    .clone();
+
+                let result_ty = match op {
+                    BinaryOp::Add
+                    | BinaryOp::Subtract
+                    | BinaryOp::Multiply
+                    | BinaryOp::Divide
+                    | BinaryOp::Modulo => left_ty.clone(),
+                    BinaryOp::Equal
+                    | BinaryOp::NotEqual
+                    | BinaryOp::Less
+                    | BinaryOp::Greater
+                    | BinaryOp::LessEqual
+                    | BinaryOp::GreaterEqual
+                    | BinaryOp::And
+                    | BinaryOp::Or => Type::Bool,
+                };
+
+                self.expr_types.insert(span.start, result_ty);
+                // Store left type for binary codegen
+                self.expr_types.insert(span.start + 1, left_ty);
+            }
+            Expr::Unary { operand, span, .. } => {
+                self.visit_expr_for_types(operand)?;
+                let operand_ty = self
+                    .expr_types
+                    .get(&operand.span().start)
+                    .ok_or_else(|| {
+                        CodegenError::InternalError("missing type for operand".to_string())
+                    })?
+                    .clone();
+                self.expr_types.insert(span.start, operand_ty.clone());
+                self.expr_types.insert(span.start + 1, operand_ty);
+            }
+            Expr::Call { args, .. } => {
+                for arg in args {
+                    self.visit_expr_for_types(arg)?;
+                }
+            }
+            Expr::Paren(inner, _) => {
+                self.visit_expr_for_types(inner)?;
+            }
+            Expr::Identifier(_) => {}
+        }
+        Ok(())
+    }
+}
+
+/// Compile NEURO AST to LLVM object code.
+///
+/// This is the main entry point for the LLVM backend. It takes a type-checked
+/// AST and generates LLVM IR, then compiles it to object code.
+///
+/// # Phase 1 Support
+///
+/// Currently supports:
+/// - Function definitions with parameters and return types
+/// - Primitive types: `i32`, `i64`, `f32`, `f64`, `bool`
+/// - Binary operators (arithmetic, comparison, logical)
+/// - Unary operators (negation, logical not)
+/// - Variable declarations
+/// - Function calls
+/// - If/else statements
+/// - Return statements
+///
+/// # Arguments
+///
+/// * `items` - Type-checked AST items (functions)
+///
+/// # Returns
+///
+/// * `Ok(Vec<u8>)` - LLVM object code (can be linked to executable)
+/// * `Err(CodegenError)` - Code generation failed
+///
+/// # Examples
+///
+/// ```ignore
+/// use syntax_parsing::parse;
+/// use semantic_analysis::type_check;
+/// use llvm_backend::compile;
+///
+/// let source = r#"
+///     func add(a: i32, b: i32) -> i32 {
+///         return a + b
+///     }
+/// "#;
+///
+/// let ast = parse(source)?;
+/// type_check(&ast)?;
+/// let object_code = compile(&ast)?;
+/// // Write object_code to file or link to executable
+/// ```
+pub fn compile(items: &[Item]) -> CodegenResult<Vec<u8>> {
+    // First, run type checking to get function signatures
+    semantic_analysis::type_check(items).map_err(|errors| {
+        CodegenError::InternalError(format!("type checking failed with {} errors", errors.len()))
+    })?;
+
+    // Extract function types (we need this for codegen)
+    let mut func_types = HashMap::new();
+    for item in items {
+        let Item::Function(func_def) = item;
+        // Re-create function type from definition
+        let mut param_types = Vec::new();
+        for param in &func_def.params {
+            let ty = resolve_syntax_type(&param.ty)?;
+            param_types.push(ty);
+        }
+
+        let return_type = if let Some(ret_ty) = &func_def.return_type {
+            resolve_syntax_type(ret_ty)?
+        } else {
+            Type::Void
+        };
+
+        let func_type = Type::Function {
+            params: param_types,
+            ret: Box::new(return_type),
+        };
+
+        func_types.insert(func_def.name.name.clone(), func_type);
+    }
+
+    // Initialize LLVM context
+    let context = LLVMContext::create();
+    let mut codegen_ctx = CodegenContext::new(&context, "neuro_module");
+
+    // Store type information for expressions
+    codegen_ctx.store_expr_types(items)?;
+
+    // Generate code for each function
+    for item in items {
+        let Item::Function(func_def) = item;
+        codegen_ctx.codegen_function(func_def, &func_types)?;
+    }
+
+    // Verify the module
+    if let Err(err) = codegen_ctx.module.verify() {
+        return Err(CodegenError::LlvmError(format!(
+            "module verification failed: {}",
+            err
+        )));
+    }
+
+    // Generate object code
+    let target_triple = inkwell::targets::TargetMachine::get_default_triple();
+    inkwell::targets::Target::initialize_native(&inkwell::targets::InitializationConfig::default())
+        .map_err(|e| CodegenError::InitializationFailed(e.to_string()))?;
+
+    let target = inkwell::targets::Target::from_triple(&target_triple)
+        .map_err(|e| CodegenError::InitializationFailed(format!("failed to get target: {}", e)))?;
+
+    let target_machine = target
+        .create_target_machine(
+            &target_triple,
+            "generic",
+            "",
+            OptimizationLevel::None,
+            inkwell::targets::RelocMode::Default,
+            inkwell::targets::CodeModel::Default,
+        )
+        .ok_or_else(|| {
+            CodegenError::InitializationFailed("failed to create target machine".to_string())
+        })?;
+
+    let object_code = target_machine
+        .write_to_memory_buffer(&codegen_ctx.module, inkwell::targets::FileType::Object)
+        .map_err(|e| CodegenError::LlvmError(format!("failed to generate object code: {}", e)))?;
+
+    Ok(object_code.as_slice().to_vec())
+}
+
+/// Helper function to resolve syntax-parsing types to semantic types
+fn resolve_syntax_type(ty: &syntax_parsing::Type) -> CodegenResult<Type> {
+    match ty {
+        syntax_parsing::Type::Named(ident) => match ident.name.as_str() {
+            "i32" => Ok(Type::I32),
+            "i64" => Ok(Type::I64),
+            "f32" => Ok(Type::F32),
+            "f64" => Ok(Type::F64),
+            "bool" => Ok(Type::Bool),
+            "void" => Ok(Type::Void),
+            name => Err(CodegenError::UnsupportedType(format!(
+                "unknown type: {}",
+                name
+            ))),
+        },
+        syntax_parsing::Type::Tensor { .. } => Err(CodegenError::UnsupportedType(
+            "tensor types not supported in Phase 1".to_string(),
+        )),
     }
 }
 
@@ -45,7 +1042,64 @@ mod tests {
     use super::*;
 
     #[test]
-    fn codegen_initialization() {
-        let _gen = CodeGenerator::new().unwrap();
+    fn test_type_mapper_primitives() {
+        let context = LLVMContext::create();
+        let mapper = TypeMapper::new(&context);
+
+        assert!(mapper.map_type(&Type::I32).is_ok());
+        assert!(mapper.map_type(&Type::I64).is_ok());
+        assert!(mapper.map_type(&Type::F32).is_ok());
+        assert!(mapper.map_type(&Type::F64).is_ok());
+        assert!(mapper.map_type(&Type::Bool).is_ok());
+        assert!(mapper.map_type(&Type::Void).is_err());
+    }
+
+    #[test]
+    fn test_type_predicates() {
+        assert!(TypeMapper::is_float_type(&Type::F32));
+        assert!(TypeMapper::is_float_type(&Type::F64));
+        assert!(!TypeMapper::is_float_type(&Type::I32));
+
+        assert!(TypeMapper::is_int_type(&Type::I32));
+        assert!(TypeMapper::is_int_type(&Type::I64));
+        assert!(TypeMapper::is_int_type(&Type::Bool));
+        assert!(!TypeMapper::is_int_type(&Type::F32));
+    }
+
+    #[test]
+    fn test_compile_simple_function() {
+        let source = r#"
+            func add(a: i32, b: i32) -> i32 {
+                return a + b
+            }
+        "#;
+
+        let items = syntax_parsing::parse(source).expect("parsing failed");
+        let result = compile(&items);
+
+        assert!(result.is_ok(), "compilation failed: {:?}", result.err());
+        let object_code = result.unwrap();
+        assert!(!object_code.is_empty(), "object code should not be empty");
+    }
+
+    #[test]
+    fn test_compile_milestone_program() {
+        let source = r#"
+            func add(a: i32, b: i32) -> i32 {
+                return a + b
+            }
+
+            func main() -> i32 {
+                val result = add(5, 3)
+                return result
+            }
+        "#;
+
+        let items = syntax_parsing::parse(source).expect("parsing failed");
+        let result = compile(&items);
+
+        assert!(result.is_ok(), "compilation failed: {:?}", result.err());
+        let object_code = result.unwrap();
+        assert!(!object_code.is_empty(), "object code should not be empty");
     }
 }

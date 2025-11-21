@@ -10,6 +10,7 @@ license.workspace = true
 shared-types = { path = "../infrastructure/shared-types" }
 source-location = { path = "../infrastructure/source-location" }
 diagnostics = { path = "../infrastructure/diagnostics" }
+syntax-parsing = { path = "../syntax-parsing" }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 

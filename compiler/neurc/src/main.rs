@@ -2,7 +2,9 @@
 // Main entry point for the neurc compiler
 
 use clap::{Parser, Subcommand};
+use std::fs;
 use std::path::PathBuf;
+use std::process;
 
 #[derive(Parser)]
 #[command(name = "neurc")]
@@ -65,15 +67,41 @@ fn main() {
         }
 
         Commands::Check { input } => {
-            println!("Checking: {:?}", input);
-            println!("NEURO compiler is in Phase 1 development");
-            println!("Type checking not yet implemented");
+            if let Err(e) = check_file(&input) {
+                eprintln!("Error: {}", e);
+                process::exit(1);
+            }
         }
 
         Commands::Version => {
             println!("neurc {}", env!("CARGO_PKG_VERSION"));
             println!("NEURO Programming Language Compiler");
             println!("Phase 1 - Alpha Development");
+        }
+    }
+}
+
+/// Check a NEURO source file for syntax and type errors
+fn check_file(path: &PathBuf) -> anyhow::Result<()> {
+    // Read source file
+    let source = fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("Failed to read file {:?}: {}", path, e))?;
+
+    // Parse the source code
+    let ast = syntax_parsing::parse(&source).map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
+
+    // Type check the program
+    match semantic_analysis::type_check(&ast) {
+        Ok(()) => {
+            println!("✓ Type checking passed for {:?}", path);
+            Ok(())
+        }
+        Err(errors) => {
+            eprintln!("Type errors found in {:?}:", path);
+            for (i, error) in errors.iter().enumerate() {
+                eprintln!("  {}. {}", i + 1, error);
+            }
+            Err(anyhow::anyhow!("{} type error(s) found", errors.len()))
         }
     }
 }

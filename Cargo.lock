@@ -566,7 +566,9 @@ dependencies = [
  "anyhow",
  "diagnostics",
  "inkwell",
+ "semantic-analysis",
  "shared-types",
+ "syntax-parsing",
  "thiserror",
 ]
 
@@ -942,6 +944,7 @@ dependencies = [
  "diagnostics",
  "shared-types",
  "source-location",
+ "syntax-parsing",
  "thiserror",
 ]
 

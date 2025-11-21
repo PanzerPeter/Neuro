@@ -47,11 +47,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Parse function definitions with parameters and return types
   - Parse statement blocks
   - Parse complete NEURO programs
-  - 30+ comprehensive tests for all statement types
+  - Parse if/else statements with multiple else-if clauses
+  - 62+ comprehensive tests for all statement types
   - Example program: [examples/hello.nr](examples/hello.nr)
 
+- **semantic-analysis**: Full type checking implementation (Phase 1)
+  - Type checking for primitive types: `i32`, `i64`, `f32`, `f64`, `bool`
+  - Function signature validation (parameters and return types)
+  - Expression type checking (binary ops, unary ops, literals, identifiers, function calls)
+  - Statement type checking (variable declarations, return statements, if/else, expressions)
+  - Lexical scoping with variable shadowing support
+  - Comprehensive error reporting with source spans
+  - Multiple error collection (fail-slow approach)
+  - 24 comprehensive tests including milestone program validation
+  - Public API: `type_check(items: &[Item]) -> Result<(), Vec<TypeError>>`
+
+- **llvm-backend**: Complete Phase 1 LLVM code generation
+  - LLVM IR generation via inkwell (LLVM 16+ support)
+  - Function codegen with parameters and return values
+  - Expression codegen: binary ops (arithmetic, comparison, logical), unary ops, function calls, literals, identifiers
+  - Statement codegen: variable declarations, return statements, if/else branching, expression statements
+  - Type mapping: NEURO types (i32, i64, f32, f64, bool) to LLVM types
+  - Basic block management for control flow
+  - Stack-based variable allocation (alloca)
+  - Object code emission for native target
+  - Support for opaque pointers (LLVM 15+)
+  - Public API: `compile(items: &[Item]) -> Result<Vec<u8>, CodegenError>`
+  - 2 integration tests (simple function, milestone program)
+  - Comprehensive error handling with detailed error messages
+  - Zero warnings (clippy clean)
+
 ### Planned
-- Control flow parsing (if/else statements)
-- Type system basics
-- LLVM code generation
-- End-to-end compilation of simple arithmetic programs
+- End-to-end compilation to executable in neurc compiler driver
+- Integration tests with program execution validation
+- Additional codegen optimizations

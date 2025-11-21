@@ -9,6 +9,8 @@ license.workspace = true
 [dependencies]
 shared-types = { path = "../infrastructure/shared-types" }
 diagnostics = { path = "../infrastructure/diagnostics" }
+syntax-parsing = { path = "../syntax-parsing" }
+semantic-analysis = { path = "../semantic-analysis" }
 inkwell = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
