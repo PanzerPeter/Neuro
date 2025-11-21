@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Parse function calls with arguments
   - Parse parenthesized expressions
   - Correct operator precedence and associativity
-  - 26 comprehensive tests including error cases
+  - Expression parsing: 26 comprehensive tests including error cases
 
 ### Fixed
 - lexical-analysis: Improved string error reporting (unterminated strings and invalid escapes)
@@ -48,7 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Parse statement blocks
   - Parse complete NEURO programs
   - Parse if/else statements with multiple else-if clauses
-  - 62+ comprehensive tests for all statement types
+  - Statement and function parsing: 39 additional tests
+  - Total syntax-parsing tests: 65 comprehensive tests
   - Example program: [examples/hello.nr](examples/hello.nr)
 
 - **semantic-analysis**: Full type checking implementation (Phase 1)
@@ -73,7 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Object code emission for native target
   - Support for opaque pointers (LLVM 15+)
   - Public API: `compile(items: &[Item]) -> Result<Vec<u8>, CodegenError>`
-  - 2 integration tests (simple function, milestone program)
+  - 4 comprehensive tests (simple arithmetic, milestone program, factorial, complex expressions)
   - Comprehensive error handling with detailed error messages
   - Zero warnings (clippy clean)
 

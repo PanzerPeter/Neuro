@@ -260,7 +260,7 @@ let binary_expr = Expr::Binary {
 
 ### Testing
 
-**Test coverage**: 62+ comprehensive tests
+**Test coverage**: 65 comprehensive tests
 
 Test categories:
 - Expression parsing (all operators, precedence)

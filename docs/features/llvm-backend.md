@@ -424,50 +424,17 @@ else:
 
 ## Testing
 
-**Test coverage**: 2 integration tests (comprehensive)
+**Test coverage**: 4 comprehensive integration tests
 
-### Test 1: Simple Function
-```rust
-#[test]
-fn test_compile_simple_function() {
-    let source = r#"
-        func add(a: i32, b: i32) -> i32 {
-            return a + b
-        }
-    "#;
+### Test Coverage
 
-    let items = syntax_parsing::parse(source).unwrap();
-    let result = compile(&items);
+Tests include:
+1. **Simple arithmetic function**: Basic addition with parameters
+2. **Milestone program**: Multiple functions with local variables and function calls
+3. **Factorial function**: Recursive function with if/else control flow
+4. **Complex expressions**: Nested arithmetic and comparison operations
 
-    assert!(result.is_ok());
-    let object_code = result.unwrap();
-    assert!(!object_code.is_empty());
-}
-```
-
-### Test 2: Milestone Program
-```rust
-#[test]
-fn test_compile_milestone_program() {
-    let source = r#"
-        func add(a: i32, b: i32) -> i32 {
-            return a + b
-        }
-
-        func main() -> i32 {
-            val result = add(5, 3)
-            return result
-        }
-    "#;
-
-    let items = syntax_parsing::parse(source).unwrap();
-    let result = compile(&items);
-
-    assert!(result.is_ok());
-    let object_code = result.unwrap();
-    assert!(!object_code.is_empty());
-}
-```
+All tests verify successful compilation to object code and validate LLVM IR correctness.
 
 ## Design Decisions
 

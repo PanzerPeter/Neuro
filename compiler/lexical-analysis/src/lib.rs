@@ -603,11 +603,11 @@ mod tests {
 
     #[test]
     fn tokenize_floats() {
-        let result = tokenize("3.14 0.5 2.0 1e10 1.5e-5").unwrap();
+        let result = tokenize("3.15 0.5 2.0 1e10 1.5e-5").unwrap();
         assert_eq!(result.len(), 6); // 5 floats + EOF
 
         match result[0].kind {
-            TokenKind::Float(f) => assert!((f - 3.14).abs() < 1e-10),
+            TokenKind::Float(f) => assert!((f - 3.15).abs() < 1e-10),
             _ => panic!("Expected float"),
         }
         match result[1].kind {
