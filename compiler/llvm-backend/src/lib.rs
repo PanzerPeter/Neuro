@@ -58,10 +58,20 @@ impl<'ctx> TypeMapper<'ctx> {
     /// Convert a NEURO semantic type to an LLVM type
     pub(crate) fn map_type(&self, ty: &Type) -> CodegenResult<BasicTypeEnum<'ctx>> {
         match ty {
+            // Signed integers
+            Type::I8 => Ok(self.context.i8_type().into()),
+            Type::I16 => Ok(self.context.i16_type().into()),
             Type::I32 => Ok(self.context.i32_type().into()),
             Type::I64 => Ok(self.context.i64_type().into()),
+            // Unsigned integers (LLVM doesn't distinguish signed/unsigned at type level)
+            Type::U8 => Ok(self.context.i8_type().into()),
+            Type::U16 => Ok(self.context.i16_type().into()),
+            Type::U32 => Ok(self.context.i32_type().into()),
+            Type::U64 => Ok(self.context.i64_type().into()),
+            // Floating point
             Type::F32 => Ok(self.context.f32_type().into()),
             Type::F64 => Ok(self.context.f64_type().into()),
+            // Other types
             Type::Bool => Ok(self.context.bool_type().into()),
             Type::Void => Err(CodegenError::UnsupportedType(
                 "void type cannot be used as a value".to_string(),
@@ -77,13 +87,12 @@ impl<'ctx> TypeMapper<'ctx> {
 
     /// Check if a type is a floating-point type
     pub(crate) fn is_float_type(ty: &Type) -> bool {
-        matches!(ty, Type::F32 | Type::F64)
+        ty.is_float()
     }
 
-    /// Check if a type is an integer type
-    #[allow(dead_code)] // Reserved for future use in logical operators
-    pub(crate) fn is_int_type(ty: &Type) -> bool {
-        matches!(ty, Type::I32 | Type::I64 | Type::Bool)
+    /// Check if a type is an unsigned integer type
+    pub(crate) fn is_unsigned_int(ty: &Type) -> bool {
+        ty.is_unsigned_int()
     }
 }
 
@@ -236,7 +245,19 @@ impl<'ctx> CodegenContext<'ctx> {
                         .build_float_div(lhs.into_float_value(), rhs.into_float_value(), "divtmp")
                         .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                         .into())
+                } else if TypeMapper::is_unsigned_int(left_ty) {
+                    // Unsigned integer division
+                    Ok(self
+                        .builder
+                        .build_int_unsigned_div(
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            "divtmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
                 } else {
+                    // Signed integer division
                     Ok(self
                         .builder
                         .build_int_signed_div(lhs.into_int_value(), rhs.into_int_value(), "divtmp")
@@ -251,7 +272,19 @@ impl<'ctx> CodegenContext<'ctx> {
                         .build_float_rem(lhs.into_float_value(), rhs.into_float_value(), "modtmp")
                         .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                         .into())
+                } else if TypeMapper::is_unsigned_int(left_ty) {
+                    // Unsigned integer modulo
+                    Ok(self
+                        .builder
+                        .build_int_unsigned_rem(
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            "modtmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
                 } else {
+                    // Signed integer modulo
                     Ok(self
                         .builder
                         .build_int_signed_rem(lhs.into_int_value(), rhs.into_int_value(), "modtmp")
@@ -323,7 +356,20 @@ impl<'ctx> CodegenContext<'ctx> {
                         )
                         .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                         .into())
+                } else if TypeMapper::is_unsigned_int(left_ty) {
+                    // Unsigned less than comparison
+                    Ok(self
+                        .builder
+                        .build_int_compare(
+                            IntPredicate::ULT,
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            "lttmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
                 } else {
+                    // Signed less than comparison
                     Ok(self
                         .builder
                         .build_int_compare(
@@ -348,7 +394,20 @@ impl<'ctx> CodegenContext<'ctx> {
                         )
                         .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                         .into())
+                } else if TypeMapper::is_unsigned_int(left_ty) {
+                    // Unsigned greater than comparison
+                    Ok(self
+                        .builder
+                        .build_int_compare(
+                            IntPredicate::UGT,
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            "gttmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
                 } else {
+                    // Signed greater than comparison
                     Ok(self
                         .builder
                         .build_int_compare(
@@ -373,7 +432,20 @@ impl<'ctx> CodegenContext<'ctx> {
                         )
                         .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                         .into())
+                } else if TypeMapper::is_unsigned_int(left_ty) {
+                    // Unsigned less than or equal comparison
+                    Ok(self
+                        .builder
+                        .build_int_compare(
+                            IntPredicate::ULE,
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            "letmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
                 } else {
+                    // Signed less than or equal comparison
                     Ok(self
                         .builder
                         .build_int_compare(
@@ -398,7 +470,20 @@ impl<'ctx> CodegenContext<'ctx> {
                         )
                         .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                         .into())
+                } else if TypeMapper::is_unsigned_int(left_ty) {
+                    // Unsigned greater than or equal comparison
+                    Ok(self
+                        .builder
+                        .build_int_compare(
+                            IntPredicate::UGE,
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            "getmp",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
                 } else {
+                    // Signed greater than or equal comparison
                     Ok(self
                         .builder
                         .build_int_compare(
@@ -1101,10 +1186,20 @@ pub fn compile(items: &[Item]) -> CodegenResult<Vec<u8>> {
 fn resolve_syntax_type(ty: &syntax_parsing::Type) -> CodegenResult<Type> {
     match ty {
         syntax_parsing::Type::Named(ident) => match ident.name.as_str() {
+            // Signed integers
+            "i8" => Ok(Type::I8),
+            "i16" => Ok(Type::I16),
             "i32" => Ok(Type::I32),
             "i64" => Ok(Type::I64),
+            // Unsigned integers
+            "u8" => Ok(Type::U8),
+            "u16" => Ok(Type::U16),
+            "u32" => Ok(Type::U32),
+            "u64" => Ok(Type::U64),
+            // Floating point
             "f32" => Ok(Type::F32),
             "f64" => Ok(Type::F64),
+            // Other types
             "bool" => Ok(Type::Bool),
             "void" => Ok(Type::Void),
             name => Err(CodegenError::UnsupportedType(format!(
@@ -1141,10 +1236,23 @@ mod tests {
         assert!(TypeMapper::is_float_type(&Type::F64));
         assert!(!TypeMapper::is_float_type(&Type::I32));
 
-        assert!(TypeMapper::is_int_type(&Type::I32));
-        assert!(TypeMapper::is_int_type(&Type::I64));
-        assert!(TypeMapper::is_int_type(&Type::Bool));
-        assert!(!TypeMapper::is_int_type(&Type::F32));
+        // Test integer type predicates
+        assert!(Type::I8.is_integer());
+        assert!(Type::I16.is_integer());
+        assert!(Type::I32.is_integer());
+        assert!(Type::I64.is_integer());
+        assert!(Type::U8.is_integer());
+        assert!(Type::U16.is_integer());
+        assert!(Type::U32.is_integer());
+        assert!(Type::U64.is_integer());
+        assert!(!Type::F32.is_integer());
+        assert!(!Type::Bool.is_integer());
+
+        // Test signed vs unsigned predicates
+        assert!(Type::I32.is_signed_int());
+        assert!(!Type::U32.is_signed_int());
+        assert!(TypeMapper::is_unsigned_int(&Type::U32));
+        assert!(!TypeMapper::is_unsigned_int(&Type::I32));
     }
 
     #[test]

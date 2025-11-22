@@ -7,14 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **semantic-analysis**: Extended primitive types support
+  - Added signed integer types: i8, i16 (complementing existing i32, i64)
+  - Added unsigned integer types: u8, u16, u32, u64
+  - New type predicates: is_signed_int(), is_unsigned_int(), is_integer(), is_float()
+  - Strict type compatibility: no implicit conversions between signed/unsigned or different widths
+  - 10 new comprehensive tests for extended types
+
+- **llvm-backend**: Signedness-aware code generation
+  - Updated TypeMapper to handle all extended integer types
+  - Signed vs unsigned division/modulo operations (build_int_signed_div vs build_int_unsigned_div)
+  - Signed vs unsigned comparison predicates (SLT/SGT/SLE/SGE vs ULT/UGT/ULE/UGE)
+  - Updated resolve_syntax_type to recognize new type names
+
+- **examples**: Added extended_types.nr demonstrating all new integer types
+
 ### Changed
-- **Roadmap**: Major expansion with comprehensive feature planning (v3.4)
-  - Phase 1: Adjusted to ~85% complete (core MVP done, 3 extended features pending)
-  - All phases expanded with detailed features from syntax specification
-  - Added language features: methods, traits, tuples, error handling, pipeline operators, spread operators, and more
+- **Roadmap**: Updated Phase 1 progress to ~92% complete (1 of 3 extended features done)
+- **semantic-analysis**: Type enum now includes 8 integer types (was 2)
+- **semantic-analysis**: Updated is_numeric() to include all integer types
 
 ### Pending for Phase 1 Completion
-- Extended primitive types (i8, i16, u8, u16, u32, u64)
 - String type with UTF-8 support
 - Expression-based returns (implicit return of last expression)
 

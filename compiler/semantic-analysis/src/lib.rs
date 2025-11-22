@@ -9,10 +9,20 @@ use thiserror::Error;
 /// Type representation for semantic analysis
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
+    // Signed integers (ordered by bit width)
+    I8,
+    I16,
     I32,
     I64,
+    // Unsigned integers (ordered by bit width)
+    U8,
+    U16,
+    U32,
+    U64,
+    // Floating point
     F32,
     F64,
+    // Other types
     Bool,
     Void,
     Function { params: Vec<Type>, ret: Box<Type> },
@@ -21,11 +31,22 @@ pub enum Type {
 
 impl Type {
     /// Check if this type is compatible with another type
+    ///
+    /// Type compatibility follows strict typing rules:
+    /// - Signed and unsigned integers are NOT compatible (even of same width)
+    /// - Different integer widths are NOT compatible
+    /// - No implicit conversions allowed
     pub(crate) fn is_compatible_with(&self, other: &Type) -> bool {
         match (self, other) {
-            // Exact matches
-            (Type::I32, Type::I32)
+            // Exact matches for all primitive types
+            (Type::I8, Type::I8)
+            | (Type::I16, Type::I16)
+            | (Type::I32, Type::I32)
             | (Type::I64, Type::I64)
+            | (Type::U8, Type::U8)
+            | (Type::U16, Type::U16)
+            | (Type::U32, Type::U32)
+            | (Type::U64, Type::U64)
             | (Type::F32, Type::F32)
             | (Type::F64, Type::F64)
             | (Type::Bool, Type::Bool)
@@ -57,15 +78,51 @@ impl Type {
         }
     }
 
-    /// Check if this is a numeric type
+    /// Check if this is a numeric type (any integer or float)
     pub(crate) fn is_numeric(&self) -> bool {
-        matches!(self, Type::I32 | Type::I64 | Type::F32 | Type::F64)
+        matches!(
+            self,
+            Type::I8
+                | Type::I16
+                | Type::I32
+                | Type::I64
+                | Type::U8
+                | Type::U16
+                | Type::U32
+                | Type::U64
+                | Type::F32
+                | Type::F64
+        )
     }
 
-    /// Check if this is an integer type
-    #[allow(dead_code)] // Reserved for future use in Phase 2+
-    pub(crate) fn is_integer(&self) -> bool {
-        matches!(self, Type::I32 | Type::I64)
+    /// Check if this is an integer type (signed or unsigned)
+    pub fn is_integer(&self) -> bool {
+        matches!(
+            self,
+            Type::I8
+                | Type::I16
+                | Type::I32
+                | Type::I64
+                | Type::U8
+                | Type::U16
+                | Type::U32
+                | Type::U64
+        )
+    }
+
+    /// Check if this is a signed integer type
+    pub fn is_signed_int(&self) -> bool {
+        matches!(self, Type::I8 | Type::I16 | Type::I32 | Type::I64)
+    }
+
+    /// Check if this is an unsigned integer type
+    pub fn is_unsigned_int(&self) -> bool {
+        matches!(self, Type::U8 | Type::U16 | Type::U32 | Type::U64)
+    }
+
+    /// Check if this is a floating-point type
+    pub fn is_float(&self) -> bool {
+        matches!(self, Type::F32 | Type::F64)
     }
 
     /// Check if this is a boolean type
@@ -225,10 +282,20 @@ impl TypeChecker {
     fn resolve_type(&mut self, ty: &syntax_parsing::Type) -> Result<Type, ()> {
         match ty {
             syntax_parsing::Type::Named(ident) => match ident.name.as_str() {
+                // Signed integers
+                "i8" => Ok(Type::I8),
+                "i16" => Ok(Type::I16),
                 "i32" => Ok(Type::I32),
                 "i64" => Ok(Type::I64),
+                // Unsigned integers
+                "u8" => Ok(Type::U8),
+                "u16" => Ok(Type::U16),
+                "u32" => Ok(Type::U32),
+                "u64" => Ok(Type::U64),
+                // Floating point
                 "f32" => Ok(Type::F32),
                 "f64" => Ok(Type::F64),
+                // Other types
                 "bool" => Ok(Type::Bool),
                 "void" => Ok(Type::Void),
                 name => {
@@ -784,6 +851,223 @@ mod tests {
 
         assert!(Type::Bool.is_bool());
         assert!(!Type::I32.is_bool());
+    }
+
+    #[test]
+    fn extended_type_compatibility() {
+        // All new integer types should be compatible with themselves
+        assert!(Type::I8.is_compatible_with(&Type::I8));
+        assert!(Type::I16.is_compatible_with(&Type::I16));
+        assert!(Type::U8.is_compatible_with(&Type::U8));
+        assert!(Type::U16.is_compatible_with(&Type::U16));
+        assert!(Type::U32.is_compatible_with(&Type::U32));
+        assert!(Type::U64.is_compatible_with(&Type::U64));
+
+        // Signed and unsigned of same width should NOT be compatible
+        assert!(!Type::I8.is_compatible_with(&Type::U8));
+        assert!(!Type::I16.is_compatible_with(&Type::U16));
+        assert!(!Type::I32.is_compatible_with(&Type::U32));
+        assert!(!Type::I64.is_compatible_with(&Type::U64));
+
+        // Different widths should NOT be compatible (even same signedness)
+        assert!(!Type::I8.is_compatible_with(&Type::I16));
+        assert!(!Type::I16.is_compatible_with(&Type::I32));
+        assert!(!Type::I32.is_compatible_with(&Type::I64));
+        assert!(!Type::U8.is_compatible_with(&Type::U16));
+        assert!(!Type::U16.is_compatible_with(&Type::U32));
+        assert!(!Type::U32.is_compatible_with(&Type::U64));
+
+        // Integers should NOT be compatible with floats
+        assert!(!Type::I8.is_compatible_with(&Type::F32));
+        assert!(!Type::U32.is_compatible_with(&Type::F64));
+
+        // Integers should NOT be compatible with bool
+        assert!(!Type::I16.is_compatible_with(&Type::Bool));
+        assert!(!Type::U64.is_compatible_with(&Type::Bool));
+    }
+
+    #[test]
+    fn extended_type_predicates() {
+        // Test is_numeric for all integer types
+        assert!(Type::I8.is_numeric());
+        assert!(Type::I16.is_numeric());
+        assert!(Type::I32.is_numeric());
+        assert!(Type::I64.is_numeric());
+        assert!(Type::U8.is_numeric());
+        assert!(Type::U16.is_numeric());
+        assert!(Type::U32.is_numeric());
+        assert!(Type::U64.is_numeric());
+        assert!(Type::F32.is_numeric());
+        assert!(Type::F64.is_numeric());
+        assert!(!Type::Bool.is_numeric());
+        assert!(!Type::Void.is_numeric());
+
+        // Test is_integer for all integer types
+        assert!(Type::I8.is_integer());
+        assert!(Type::I16.is_integer());
+        assert!(Type::I32.is_integer());
+        assert!(Type::I64.is_integer());
+        assert!(Type::U8.is_integer());
+        assert!(Type::U16.is_integer());
+        assert!(Type::U32.is_integer());
+        assert!(Type::U64.is_integer());
+        assert!(!Type::F32.is_integer());
+        assert!(!Type::F64.is_integer());
+        assert!(!Type::Bool.is_integer());
+
+        // Test is_signed_int
+        assert!(Type::I8.is_signed_int());
+        assert!(Type::I16.is_signed_int());
+        assert!(Type::I32.is_signed_int());
+        assert!(Type::I64.is_signed_int());
+        assert!(!Type::U8.is_signed_int());
+        assert!(!Type::U16.is_signed_int());
+        assert!(!Type::U32.is_signed_int());
+        assert!(!Type::U64.is_signed_int());
+        assert!(!Type::F32.is_signed_int());
+        assert!(!Type::Bool.is_signed_int());
+
+        // Test is_unsigned_int
+        assert!(!Type::I8.is_unsigned_int());
+        assert!(!Type::I16.is_unsigned_int());
+        assert!(!Type::I32.is_unsigned_int());
+        assert!(!Type::I64.is_unsigned_int());
+        assert!(Type::U8.is_unsigned_int());
+        assert!(Type::U16.is_unsigned_int());
+        assert!(Type::U32.is_unsigned_int());
+        assert!(Type::U64.is_unsigned_int());
+        assert!(!Type::F32.is_unsigned_int());
+        assert!(!Type::Bool.is_unsigned_int());
+
+        // Test is_float
+        assert!(!Type::I32.is_float());
+        assert!(!Type::U32.is_float());
+        assert!(Type::F32.is_float());
+        assert!(Type::F64.is_float());
+        assert!(!Type::Bool.is_float());
+    }
+
+    #[test]
+    fn type_check_extended_integers_i8() {
+        let source = r#"func test(a: i8, b: i8) -> i8 {
+            return a + b
+        }"#;
+        let items = syntax_parsing::parse(source).unwrap();
+        let result = type_check(&items);
+        assert!(
+            result.is_ok(),
+            "i8 arithmetic should type check: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn type_check_extended_integers_i16() {
+        let source = r#"func test(a: i16, b: i16) -> i16 {
+            val result: i16 = a * b
+            return result
+        }"#;
+        let items = syntax_parsing::parse(source).unwrap();
+        let result = type_check(&items);
+        assert!(
+            result.is_ok(),
+            "i16 arithmetic should type check: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn type_check_extended_integers_u8() {
+        let source = r#"func test(x: u8) -> u8 {
+            return x + x
+        }"#;
+        let items = syntax_parsing::parse(source).unwrap();
+        let result = type_check(&items);
+        assert!(
+            result.is_ok(),
+            "u8 arithmetic should type check: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn type_check_extended_integers_u16() {
+        let source = r#"func test(a: u16, b: u16) -> u16 {
+            return a - b
+        }"#;
+        let items = syntax_parsing::parse(source).unwrap();
+        let result = type_check(&items);
+        assert!(
+            result.is_ok(),
+            "u16 arithmetic should type check: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn type_check_extended_integers_u32() {
+        let source = r#"func test(a: u32, b: u32) -> u32 {
+            return a / b
+        }"#;
+        let items = syntax_parsing::parse(source).unwrap();
+        let result = type_check(&items);
+        assert!(
+            result.is_ok(),
+            "u32 arithmetic should type check: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn type_check_extended_integers_u64() {
+        let source = r#"func test(a: u64, b: u64) -> bool {
+            return a > b
+        }"#;
+        let items = syntax_parsing::parse(source).unwrap();
+        let result = type_check(&items);
+        assert!(
+            result.is_ok(),
+            "u64 comparison should type check: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn error_signed_unsigned_mismatch() {
+        let source = r#"func test(a: i32, b: u32) -> i32 {
+            return a + b
+        }"#;
+        let items = syntax_parsing::parse(source).unwrap();
+        let result = type_check(&items);
+        assert!(result.is_err(), "i32 + u32 should fail type check");
+        let errors = result.unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })));
+    }
+
+    #[test]
+    fn error_different_width_mismatch() {
+        let source = r#"func test(a: i8, b: i16) -> i8 {
+            return a + b
+        }"#;
+        let items = syntax_parsing::parse(source).unwrap();
+        let result = type_check(&items);
+        assert!(result.is_err(), "i8 + i16 should fail type check");
+        let errors = result.unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })));
+    }
+
+    #[test]
+    fn error_unsigned_with_float() {
+        let source = r#"func test(a: u32, b: f32) -> u32 {
+            return a + b
+        }"#;
+        let items = syntax_parsing::parse(source).unwrap();
+        let result = type_check(&items);
+        assert!(result.is_err(), "u32 + f32 should fail type check");
     }
 
     #[test]

@@ -1,11 +1,11 @@
 # NEURO Programming Language
 
-**Status:** Alpha Development - Phase 1 Core MVP Complete (~85%) (Not Production Ready)
+**Status:** Alpha Development - Phase 1 Core MVP Complete (~92%) (Not Production Ready)
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-142%20passing-success.svg)](#)
-[![Phase](https://img.shields.io/badge/phase-1%20~85%25-yellow.svg)](https://github.com/yourusername/neuro/blob/main/.idea/roadmap.md)
+[![Tests](https://img.shields.io/badge/tests-155%20passing-success.svg)](#)
+[![Phase](https://img.shields.io/badge/phase-1%20~92%25-yellow.svg)](https://github.com/yourusername/neuro/blob/main/.idea/roadmap.md)
 
 A modern, compiled programming language designed for high-performance AI development. NEURO combines the productivity of Python with the speed of C++, featuring static typing with inference, zero-cost abstractions, and native GPU acceleration.
 
@@ -148,24 +148,24 @@ cargo install --path compiler/neurc
 
 ## 🎉 Phase 1 Core MVP Complete!
 
-NEURO has successfully completed the **core MVP of Phase 1** (Roadmap v3.4) - **~85% Complete**
+NEURO has successfully completed the **core MVP of Phase 1** (Roadmap v3.4) - **~92% Complete**
 
-The compiler can now compile simple programs end-to-end from source code to native executables! Extended features (additional primitive types, strings, expression-based returns) are planned for completion.
+The compiler can now compile simple programs end-to-end from source code to native executables with full support for extended integer types! Remaining features (strings, expression-based returns) are in progress.
 
-### Current Capabilities (Phase 1 Core - Complete) ✅
+### Current Capabilities (Phase 1 - Complete) ✅
 
 - [x] **Lexical Analysis** - Complete tokenizer with Unicode support (28 tests)
 - [x] **Syntax Parsing** - Complete Pratt parser for expressions and recursive descent for statements (65 tests)
-- [x] **Semantic Analysis** - Full type checking with lexical scoping and error collection (24 tests)
-- [x] **LLVM Backend** - Complete code generation to native object code (4 tests)
+- [x] **Semantic Analysis** - Full type checking with lexical scoping and error collection (35 tests)
+- [x] **Extended Primitive Types** - All integer types: i8, i16, i32, i64, u8, u16, u32, u64 with signedness-aware codegen
+- [x] **LLVM Backend** - Complete code generation to native object code with signed/unsigned operations (4 tests)
 - [x] **CLI Compiler** - `neurc check` validates syntax and types
 - [x] **CLI Compiler** - `neurc compile` produces native executables
-- [x] **End-to-End Integration** - Full pipeline from source to binary (16 tests)
-- [x] **142 Tests Passing** - Comprehensive test coverage across all components
+- [x] **End-to-End Integration** - Full pipeline from source to binary (19 tests)
+- [x] **155 Tests Passing** - Comprehensive test coverage across all components
 
 ### Phase 1 Remaining Items
 
-- [ ] **Extended Primitive Types** - i8, i16, u8, u16, u32, u64
 - [ ] **String Type** - Basic UTF-8 string implementation
 - [ ] **Expression-based Returns** - Implicit return of last expression
 
