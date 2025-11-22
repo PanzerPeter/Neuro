@@ -108,6 +108,9 @@ pub(crate) struct CodegenContext<'ctx> {
 
     /// Type information for expressions (needed for operator codegen)
     expr_types: HashMap<usize, Type>, // Maps expression span.start -> Type
+
+    /// Variable type information during type collection (name -> Type)
+    type_env: HashMap<String, Type>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -126,6 +129,7 @@ impl<'ctx> CodegenContext<'ctx> {
             functions: HashMap::new(),
             current_function: None,
             expr_types: HashMap::new(),
+            type_env: HashMap::new(),
         }
     }
 
@@ -754,33 +758,77 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Store type information for expressions (needed for codegen)
-    pub(crate) fn store_expr_types(&mut self, items: &[Item]) -> CodegenResult<()> {
+    pub(crate) fn store_expr_types(
+        &mut self,
+        items: &[Item],
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
         // We need to run type inference to get expression types
         // For Phase 1, we'll use a simple visitor pattern
         for item in items {
             let Item::Function(func_def) = item;
-            self.visit_function_for_types(func_def)?;
+            self.visit_function_for_types(func_def, func_types)?;
         }
         Ok(())
     }
 
-    fn visit_function_for_types(&mut self, func_def: &FunctionDef) -> CodegenResult<()> {
+    fn visit_function_for_types(
+        &mut self,
+        func_def: &FunctionDef,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        // Clear type environment for new function
+        self.type_env.clear();
+
+        // Populate type environment with parameter types
+        let func_type_info = func_types
+            .get(&func_def.name.name)
+            .ok_or_else(|| CodegenError::UndefinedFunction(func_def.name.name.clone()))?;
+
+        let param_types = match func_type_info {
+            Type::Function { params, .. } => params,
+            _ => {
+                return Err(CodegenError::InternalError(
+                    "function type information is not a function type".to_string(),
+                ))
+            }
+        };
+
+        for (i, param) in func_def.params.iter().enumerate() {
+            let param_ty = param_types.get(i).ok_or_else(|| {
+                CodegenError::InternalError(format!("missing type for parameter {}", i))
+            })?;
+            self.type_env
+                .insert(param.name.name.clone(), param_ty.clone());
+        }
+
         for stmt in &func_def.body {
-            self.visit_stmt_for_types(stmt)?;
+            self.visit_stmt_for_types(stmt, func_types)?;
         }
         Ok(())
     }
 
-    fn visit_stmt_for_types(&mut self, stmt: &Stmt) -> CodegenResult<()> {
+    fn visit_stmt_for_types(
+        &mut self,
+        stmt: &Stmt,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
         match stmt {
-            Stmt::VarDecl { init, .. } => {
+            Stmt::VarDecl { name, init, .. } => {
                 if let Some(expr) = init {
-                    self.visit_expr_for_types(expr)?;
+                    self.visit_expr_for_types(expr, func_types)?;
+                    // Get the type of the initializer and store it for this variable
+                    let var_ty = self.expr_types.get(&expr.span().start).ok_or_else(|| {
+                        CodegenError::InternalError(
+                            "missing type for variable initializer".to_string(),
+                        )
+                    })?;
+                    self.type_env.insert(name.name.clone(), var_ty.clone());
                 }
             }
             Stmt::Return { value, .. } => {
                 if let Some(expr) = value {
-                    self.visit_expr_for_types(expr)?;
+                    self.visit_expr_for_types(expr, func_types)?;
                 }
             }
             Stmt::If {
@@ -790,30 +838,34 @@ impl<'ctx> CodegenContext<'ctx> {
                 else_block,
                 ..
             } => {
-                self.visit_expr_for_types(condition)?;
+                self.visit_expr_for_types(condition, func_types)?;
                 for stmt in then_block {
-                    self.visit_stmt_for_types(stmt)?;
+                    self.visit_stmt_for_types(stmt, func_types)?;
                 }
                 for (cond, stmts) in else_if_blocks {
-                    self.visit_expr_for_types(cond)?;
+                    self.visit_expr_for_types(cond, func_types)?;
                     for stmt in stmts {
-                        self.visit_stmt_for_types(stmt)?;
+                        self.visit_stmt_for_types(stmt, func_types)?;
                     }
                 }
                 if let Some(stmts) = else_block {
                     for stmt in stmts {
-                        self.visit_stmt_for_types(stmt)?;
+                        self.visit_stmt_for_types(stmt, func_types)?;
                     }
                 }
             }
             Stmt::Expr(expr) => {
-                self.visit_expr_for_types(expr)?;
+                self.visit_expr_for_types(expr, func_types)?;
             }
         }
         Ok(())
     }
 
-    fn visit_expr_for_types(&mut self, expr: &Expr) -> CodegenResult<()> {
+    fn visit_expr_for_types(
+        &mut self,
+        expr: &Expr,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
         match expr {
             Expr::Literal(lit, span) => {
                 let ty = match lit {
@@ -834,8 +886,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 right,
                 span,
             } => {
-                self.visit_expr_for_types(left)?;
-                self.visit_expr_for_types(right)?;
+                self.visit_expr_for_types(left, func_types)?;
+                self.visit_expr_for_types(right, func_types)?;
 
                 // Infer the result type from the operator and left operand type
                 let left_ty = self
@@ -867,7 +919,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.expr_types.insert(span.start + 1, left_ty);
             }
             Expr::Unary { operand, span, .. } => {
-                self.visit_expr_for_types(operand)?;
+                self.visit_expr_for_types(operand, func_types)?;
                 let operand_ty = self
                     .expr_types
                     .get(&operand.span().start)
@@ -878,15 +930,44 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.expr_types.insert(span.start, operand_ty.clone());
                 self.expr_types.insert(span.start + 1, operand_ty);
             }
-            Expr::Call { args, .. } => {
+            Expr::Call { func, args, span } => {
                 for arg in args {
-                    self.visit_expr_for_types(arg)?;
+                    self.visit_expr_for_types(arg, func_types)?;
+                }
+                // Get the return type of the function call
+                if let Expr::Identifier(ident) = &**func {
+                    let func_type = func_types
+                        .get(&ident.name)
+                        .ok_or_else(|| CodegenError::UndefinedFunction(ident.name.clone()))?;
+                    let ret_ty = match func_type {
+                        Type::Function { ret, .. } => &**ret,
+                        _ => {
+                            return Err(CodegenError::InternalError(
+                                "called object is not a function".to_string(),
+                            ))
+                        }
+                    };
+                    self.expr_types.insert(span.start, ret_ty.clone());
                 }
             }
-            Expr::Paren(inner, _) => {
-                self.visit_expr_for_types(inner)?;
+            Expr::Paren(inner, span) => {
+                self.visit_expr_for_types(inner, func_types)?;
+                // Parenthesized expressions have the same type as their inner expression
+                let inner_ty = self.expr_types.get(&inner.span().start).ok_or_else(|| {
+                    CodegenError::InternalError(
+                        "missing type for parenthesized expression".to_string(),
+                    )
+                })?;
+                self.expr_types.insert(span.start, inner_ty.clone());
             }
-            Expr::Identifier(_) => {}
+            Expr::Identifier(ident) => {
+                // Look up the type from the type environment
+                let ty = self
+                    .type_env
+                    .get(&ident.name)
+                    .ok_or_else(|| CodegenError::UndefinedVariable(ident.name.clone()))?;
+                self.expr_types.insert(ident.span.start, ty.clone());
+            }
         }
         Ok(())
     }
@@ -972,7 +1053,7 @@ pub fn compile(items: &[Item]) -> CodegenResult<Vec<u8>> {
     let mut codegen_ctx = CodegenContext::new(&context, "neuro_module");
 
     // Store type information for expressions
-    codegen_ctx.store_expr_types(items)?;
+    codegen_ctx.store_expr_types(items, &func_types)?;
 
     // Generate code for each function
     for item in items {

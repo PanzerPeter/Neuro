@@ -27,6 +27,10 @@ env_logger = { workspace = true }
 log = { workspace = true }
 anyhow = { workspace = true }
 
+# Compilation and Linking
+cc = "1.0"
+tempfile = "3.8"
+
 [[bin]]
 name = "neurc"
 path = "src/main.rs"

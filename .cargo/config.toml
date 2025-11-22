@@ -1,0 +1,5 @@
+# Cargo configuration for NEURO compiler
+
+[target.x86_64-pc-windows-msvc]
+# Add vcpkg library path for libxml2 and other LLVM dependencies
+rustflags = ["-L", "C:/vcpkg/installed/x64-windows-static/lib"]

@@ -73,7 +73,10 @@ lalrpop-util = "0.20"
 chumsky = "0.9"
 
 # LLVM Backend
-inkwell = { version = "0.4", features = ["llvm16-0"] }
+# Note: LLVM 18.1.8 is installed at C:\LLVM-1818
+# Using inkwell 0.6.0 with llvm18-1 feature for stable LLVM 18.1.8 support
+# Including all targets to avoid linking errors
+inkwell = { version = "0.6.0", features = ["llvm18-1", "target-all"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

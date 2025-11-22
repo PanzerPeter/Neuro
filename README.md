@@ -66,33 +66,83 @@ func main() -> Result<(), Error> {
 ### Prerequisites
 
 - Rust 1.70 or later
-- LLVM 16 or later
+- LLVM 18.1.8 (full development package required on Windows)
 - CMake 3.20+
+- vcpkg (Windows only, for libxml2 dependency)
+- MSVC 2022 or MinGW-w64 (Windows) / GCC or Clang (Unix)
 - (Optional) CUDA Toolkit 12.0+ for GPU support
 
 ### Building from Source
 
-```bash
-# Clone the repository
+#### Windows Installation
+
+```powershell
+# 1. Install LLVM 18.1.8 (full development package)
+# Download: clang+llvm-18.1.8-x86_64-pc-windows-msvc.tar.xz
+# From: https://github.com/llvm/llvm-project/releases/tag/llvmorg-18.1.8
+# Extract to: C:\LLVM-1818
+
+# 2. Set environment variable
+[System.Environment]::SetEnvironmentVariable('LLVM_SYS_181_PREFIX', 'C:\LLVM-1818', 'Machine')
+
+# 3. Add LLVM to PATH
+$machinePath = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
+[System.Environment]::SetEnvironmentVariable('Path', "$machinePath;C:\LLVM-1818\bin", 'Machine')
+
+# 4. Install vcpkg and libxml2
+cd C:\
+git clone https://github.com/Microsoft/vcpkg.git
+cd vcpkg
+.\bootstrap-vcpkg.bat
+.\vcpkg install libxml2:x64-windows-static
+.\vcpkg integrate install
+
+# 5. Clone and build the compiler
 git clone https://github.com/yourusername/neuro-lang.git
 cd neuro-lang
-
-# Build the compiler (Note: requires LLVM 16+)
 cargo build --release
 
-# Run tests (individual crates)
+# 6. Run tests
 cargo test -p lexical-analysis
 cargo test -p syntax-parsing
 cargo test -p semantic-analysis
 
-# Test the compiler
+# 7. Test the compiler
 cargo run -p neurc -- check examples/hello.nr
 
-# Install the compiler (optional)
+# 8. Install the compiler (optional)
 cargo install --path compiler/neurc
 ```
 
-**Known Issue (Windows)**: Full workspace tests (`cargo test --all`) may fail with LLVM linker errors on Windows if `libxml2` is not installed. The compiler itself builds and works correctly. Individual crate tests work fine. This is a test harness linking issue, not a runtime issue.
+#### Unix/Linux/macOS Installation
+
+```bash
+# 1. Install LLVM 18 (via package manager)
+# Ubuntu/Debian:
+wget https://apt.llvm.org/llvm.sh
+chmod +x llvm.sh
+sudo ./llvm.sh 18
+
+# macOS (Homebrew):
+brew install llvm@18
+
+# 2. Set environment variable
+export LLVM_SYS_181_PREFIX=/usr/lib/llvm-18  # Adjust path as needed
+echo 'export LLVM_SYS_181_PREFIX=/usr/lib/llvm-18' >> ~/.bashrc
+
+# 3. Clone and build
+git clone https://github.com/yourusername/neuro-lang.git
+cd neuro-lang
+cargo build --release
+
+# 4. Run tests
+cargo test --all
+
+# 5. Install the compiler
+cargo install --path compiler/neurc
+```
+
+**Note**: The `.cargo/config.toml` file is pre-configured with the vcpkg library path for Windows. On Unix systems, this configuration is ignored.
 
 ## Project Status
 
