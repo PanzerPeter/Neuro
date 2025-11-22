@@ -6,8 +6,7 @@ use clap::{Parser, Subcommand};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process;
-use tempfile::NamedTempFile;
+use std::process::{self, Command};
 
 #[derive(Parser)]
 #[command(name = "neurc")]
@@ -178,8 +177,18 @@ fn compile_file(input: &Path, output: Option<&Path>) -> Result<()> {
         .context("Failed to generate object code")?;
 
     // Write object code to temporary file
+    // On Windows, MSVC expects .obj extension; on Unix, .o is conventional
     log::debug!("Writing object file...");
-    let mut object_file = NamedTempFile::new().context("Failed to create temporary object file")?;
+    let object_extension = if cfg!(target_os = "windows") {
+        "obj"
+    } else {
+        "o"
+    };
+
+    let mut object_file = tempfile::Builder::new()
+        .suffix(&format!(".{}", object_extension))
+        .tempfile()
+        .context("Failed to create temporary object file")?;
 
     object_file
         .write_all(&object_code)
@@ -187,6 +196,12 @@ fn compile_file(input: &Path, output: Option<&Path>) -> Result<()> {
 
     // Ensure data is flushed to disk
     object_file.flush().context("Failed to flush object file")?;
+
+    // Persist the tempfile to prevent early deletion
+    // The linker needs the file to exist for the duration of the linking process
+    let (_, object_path) = object_file
+        .keep()
+        .context("Failed to persist temporary object file")?;
 
     // Determine output executable path
     let output_path = if let Some(out) = output {
@@ -203,8 +218,11 @@ fn compile_file(input: &Path, output: Option<&Path>) -> Result<()> {
 
     // Link object file to create executable
     log::debug!("Linking to create executable: {}", output_path.display());
-    link_object_to_executable(object_file.path(), &output_path)
+    link_object_to_executable(&object_path, &output_path)
         .context("Failed to link object file to executable")?;
+
+    // Clean up the temporary object file
+    let _ = fs::remove_file(&object_path);
 
     println!(
         "Successfully compiled {} -> {}",
@@ -217,7 +235,7 @@ fn compile_file(input: &Path, output: Option<&Path>) -> Result<()> {
 
 /// Link an object file to a native executable using the system linker.
 ///
-/// This function uses the `cc` crate to invoke the platform's C compiler/linker,
+/// This function invokes the platform's C compiler as a linker driver,
 /// which handles platform-specific linking requirements (C runtime, startup code, etc.).
 ///
 /// # Arguments
@@ -232,23 +250,135 @@ fn compile_file(input: &Path, output: Option<&Path>) -> Result<()> {
 ///
 /// # Implementation Notes
 ///
-/// - On Windows: Uses MSVC link.exe or MinGW ld (via cc crate detection)
-/// - On Unix: Uses ld or clang (via cc crate detection)
+/// - On Windows: Tries clang first (part of LLVM installation), then falls back to MSVC cl.exe
+/// - On Unix: Uses cc (gcc/clang) as linker driver
 /// - Automatically links against C runtime for startup code
 fn link_object_to_executable(object_path: &Path, output_path: &Path) -> Result<()> {
-    // Use cc crate to invoke the system linker
-    // This automatically handles platform-specific details:
-    // - Locating the linker (link.exe on Windows, ld on Unix)
-    // - Linking against C runtime
-    // - Handling startup code (_start, mainCRTStartup, etc.)
-    cc::Build::new()
-        .object(object_path)
-        .try_compile(&output_path.to_string_lossy())
+    #[cfg(target_os = "windows")]
+    {
+        link_windows(object_path, output_path)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        link_unix(object_path, output_path)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn link_windows(object_path: &Path, output_path: &Path) -> Result<()> {
+    // Try linking with clang first (it's available from LLVM installation)
+    // Clang acts as a linker driver and handles all the details
+    log::debug!("Attempting to link with clang");
+    let clang_result = Command::new("clang")
+        .arg(object_path)
+        .arg("-o")
+        .arg(output_path)
+        .arg("-Wl,/subsystem:console") // Pass subsystem flag to linker
+        .output();
+
+    match clang_result {
+        Ok(output) if output.status.success() => {
+            log::info!("Successfully linked with clang: {}", output_path.display());
+            return Ok(());
+        }
+        Ok(output) => {
+            log::debug!("Clang linking failed");
+            log::debug!("  stdout: {}", String::from_utf8_lossy(&output.stdout));
+            log::debug!("  stderr: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        Err(e) => {
+            log::debug!("Clang not available: {}", e);
+        }
+    }
+
+    // Try lld-link (LLVM's linker for Windows)
+    log::debug!("Attempting to link with lld-link");
+    let lld_result = Command::new("lld-link")
+        .arg(format!("/OUT:{}", output_path.display()))
+        .arg("/SUBSYSTEM:CONSOLE")
+        .arg("/ENTRY:main")
+        .arg(object_path)
+        .output();
+
+    match lld_result {
+        Ok(output) if output.status.success() => {
+            log::info!(
+                "Successfully linked with lld-link: {}",
+                output_path.display()
+            );
+            return Ok(());
+        }
+        Ok(output) => {
+            log::debug!("lld-link linking failed");
+            log::debug!("  stdout: {}", String::from_utf8_lossy(&output.stdout));
+            log::debug!("  stderr: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        Err(e) => {
+            log::debug!("lld-link not available: {}", e);
+        }
+    }
+
+    // Fall back to MSVC link.exe
+    // Note: We need to find the real MSVC link.exe, not Git's link utility
+    log::debug!("Attempting to link with MSVC link.exe via vcvarsall.bat");
+
+    // Try using cl.exe as a linker driver (it will find the right link.exe)
+    let output = Command::new("cl")
+        .arg("/nologo") // Suppress startup banner
+        .arg(object_path) // Input object file
+        .arg(format!("/Fe{}", output_path.display())) // Output executable (no colon, no space)
+        .arg("/link") // Following args are for the linker
+        .arg("/SUBSYSTEM:CONSOLE")
+        .arg("/ENTRY:main")
+        .output()
+        .context("Failed to execute MSVC cl.exe - ensure Visual Studio is installed and vcvarsall.bat has been run")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(anyhow::anyhow!(
+            "MSVC linking failed:\nstdout: {}\nstderr: {}\n\nNote: Ensure you have Visual Studio installed and are running from a Developer Command Prompt, or run vcvarsall.bat",
+            stdout,
+            stderr
+        ))
         .context(format!(
             "Failed to link object file {} to executable {}",
             object_path.display(),
             output_path.display()
-        ))?;
+        ));
+    }
 
+    log::info!("Successfully linked with MSVC: {}", output_path.display());
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn link_unix(object_path: &Path, output_path: &Path) -> Result<()> {
+    // On Unix, use cc (which is usually gcc or clang)
+    // The cc command acts as a linker driver
+    let output = Command::new("cc")
+        .arg(object_path)
+        .arg("-o")
+        .arg(output_path)
+        .output()
+        .context("Failed to execute cc - ensure a C compiler (gcc/clang) is installed")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(anyhow::anyhow!(
+            "Linking failed:\nstdout: {}\nstderr: {}",
+            stdout,
+            stderr
+        ))
+        .context(format!(
+            "Failed to link object file {} to executable {}",
+            object_path.display(),
+            output_path.display()
+        ));
+    }
+
+    log::info!("Successfully linked with cc: {}", output_path.display());
     Ok(())
 }

@@ -20,7 +20,7 @@ NEURO is a compiled programming language designed for AI workloads, featuring:
 - **Native compilation** via LLVM
 - **Vertical Slice Architecture** for maintainability
 
-**Current Status**: Phase 1 - 90% Complete (as of 2025-11-21)
+**Current Status**: Phase 1 - 100% Complete (as of 2025-11-22)
 
 ## Getting Started
 
@@ -44,10 +44,17 @@ func main() -> i32 {
 cargo run -p neurc -- check examples/hello.nr
 ```
 
-### Compiling (Phase 1 - In Progress)
+### Compiling
 
 ```bash
+# Compile a NEURO program to executable
 cargo run -p neurc -- compile examples/hello.nr
+
+# Compile with custom output path
+cargo run -p neurc -- compile examples/milestone.nr -o my_program
+
+# Run the compiled program (Windows)
+.\examples\hello.exe
 ```
 
 ## Architecture
@@ -278,12 +285,12 @@ See [CLAUDE.md](../CLAUDE.md) for detailed development guidelines.
 
 See [roadmap.md](../.idea/roadmap.md) for the complete development roadmap.
 
-### Phase 1 (Current - 90% Complete)
+### Phase 1 (100% Complete)
 - [x] Lexical Analysis
 - [x] Syntax Parsing
 - [x] Semantic Analysis (Type Checking)
 - [x] LLVM Code Generation
-- [ ] End-to-end Compilation (neurc driver integration)
+- [x] End-to-end Compilation (neurc driver integration)
 
 ### Phase 2 (Next)
 - [ ] Structs
@@ -394,11 +401,11 @@ NEURO is designed specifically for AI workloads with:
 
 ### Can I use NEURO now?
 
-Phase 1 is 90% complete. You can:
+Phase 1 is 100% complete. You can:
 - ✅ Parse NEURO programs
 - ✅ Type check programs
 - ✅ Generate LLVM object code
-- ⏳ Compile to executable (integration in progress)
+- ✅ Compile to native executables
 
 ### What's the roadmap?
 
@@ -429,5 +436,5 @@ GPL-3.0 - See [LICENSE](../LICENSE) for details.
 
 ---
 
-**Last Updated**: 2025-11-21
-**Version**: 0.1.0 (Phase 1 - 90% Complete)
+**Last Updated**: 2025-11-22
+**Version**: 0.2.0 (Phase 1 - 100% Complete)

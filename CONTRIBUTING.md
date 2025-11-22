@@ -34,8 +34,8 @@ NEURO is currently in **Phase 1 (alpha development)** - 90% complete. The projec
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/neuro-lang.git
-cd neuro-lang
+git clone https://github.com/PanzerPeter/Neuro.git
+cd Neuro
 
 # Build the workspace
 cargo build --workspace
