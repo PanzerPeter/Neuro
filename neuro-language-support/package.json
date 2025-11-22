@@ -1,0 +1,35 @@
+{
+  "name": "neuro-language-support",
+  "displayName": "NEURO Language Support",
+  "description": "Syntax highlighting for the NEURO programming language, designed for AI-optimized workloads.",
+  "version": "1.0.0",
+  "publisher": "NeuroTeam",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "neuro",
+        "aliases": [
+          "NEURO",
+          "neuro"
+        ],
+        "extensions": [
+          ".nr"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "neuro",
+        "scopeName": "source.neuro",
+        "path": "./syntaxes/neuro.tmLanguage.json"
+      }
+    ]
+  }
+}

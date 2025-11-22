@@ -315,6 +315,33 @@ Before contributing, please:
 - `.nrl` - NEURO library files (compiled modules)
 - `.nrp` - NEURO package definitions
 
+## VSCode Extension
+
+NEURO includes syntax highlighting support for VSCode. Currently available for local installation (marketplace publication planned for future release).
+
+### Local Installation
+
+```bash
+# Navigate to the extension directory
+cd neuro-language-support
+
+# Install vsce if not already installed
+npm install -g @vscode/vsce
+
+# Package the extension
+vsce package
+
+# Install the generated .vsix file in VSCode
+# In VSCode: Extensions (Ctrl+Shift+X) → ... → Install from VSIX
+# Select: neuro-language-support-1.0.0.vsix
+```
+
+**Features**:
+- Syntax highlighting for `.nr` files
+- Line and block comment toggling
+- Auto-closing brackets, quotes, and parentheses
+- Smart indentation
+
 ## Performance Targets
 
 - **Arithmetic Operations**: 2-5x slower than C++ (vs 100x for Python)
