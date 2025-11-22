@@ -98,7 +98,7 @@ cd vcpkg
 .\vcpkg integrate install
 
 # 5. Clone and build the compiler
-git clone https://github.com/yourusername/neuro-lang.git
+git clone https://github.com/PanzerPeter/Neuro.git
 cd neuro-lang
 cargo build --release
 
@@ -131,7 +131,7 @@ export LLVM_SYS_181_PREFIX=/usr/lib/llvm-18  # Adjust path as needed
 echo 'export LLVM_SYS_181_PREFIX=/usr/lib/llvm-18' >> ~/.bashrc
 
 # 3. Clone and build
-git clone https://github.com/yourusername/neuro-lang.git
+git clone https://github.com/PanzerPeter/Neuro.git
 cd neuro-lang
 cargo build --release
 
