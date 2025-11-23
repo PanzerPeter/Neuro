@@ -557,6 +557,25 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// Generate code for an assignment statement
+    fn codegen_assignment(&self, name: &str, value: &Expr) -> CodegenResult<()> {
+        // Generate code for the value expression
+        let val = self.codegen_expr(value)?;
+
+        // Lookup the variable pointer (must already exist)
+        let var_ptr = self
+            .variables
+            .get(name)
+            .ok_or_else(|| CodegenError::UndefinedVariable(name.to_string()))?;
+
+        // Store the new value into the variable
+        self.builder.build_store(*var_ptr, val).map_err(|e| {
+            CodegenError::LlvmError(format!("failed to store value in assignment: {}", e))
+        })?;
+
+        Ok(())
+    }
+
     /// Generate code for a return statement
     fn codegen_return(&self, value: Option<&Expr>) -> CodegenResult<()> {
         if let Some(expr) = value {
@@ -640,6 +659,7 @@ impl<'ctx> CodegenContext<'ctx> {
     fn codegen_stmt(&mut self, stmt: &Stmt) -> CodegenResult<()> {
         match stmt {
             Stmt::VarDecl { name, init, .. } => self.codegen_var_decl(&name.name, init.as_ref()),
+            Stmt::Assignment { target, value, .. } => self.codegen_assignment(&target.name, value),
             Stmt::Return { value, .. } => self.codegen_return(value.as_ref()),
             Stmt::If {
                 condition,
@@ -827,6 +847,10 @@ impl<'ctx> CodegenContext<'ctx> {
                     })?;
                     self.type_env.insert(name.name.clone(), var_ty.clone());
                 }
+            }
+            Stmt::Assignment { value, .. } => {
+                // Visit the value expression to collect its type
+                self.visit_expr_for_types(value, func_types)?;
             }
             Stmt::Return { value, .. } => {
                 if let Some(expr) = value {

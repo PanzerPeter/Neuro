@@ -387,6 +387,42 @@ impl Parser {
         Ok(Stmt::Return { value, span })
     }
 
+    /// Parse an assignment statement (identifier = expression)
+    pub(crate) fn parse_assignment_stmt(&mut self) -> ParseResult<Stmt> {
+        // Parse target identifier
+        let target_token = self.consume(TokenKind::Identifier(String::new()), "identifier")?;
+        let target = if let TokenKind::Identifier(name) = target_token.kind {
+            Identifier {
+                name,
+                span: target_token.span,
+            }
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                found: target_token.kind,
+                expected: "identifier".to_string(),
+                span: target_token.span,
+            });
+        };
+
+        self.skip_newlines();
+
+        // Consume '='
+        self.consume(TokenKind::Equal, "'='")?;
+
+        self.skip_newlines();
+
+        // Parse value expression
+        let value = self.parse_expr(Precedence::Lowest)?;
+
+        let span = target.span.merge(value.span());
+
+        Ok(Stmt::Assignment {
+            target,
+            value,
+            span,
+        })
+    }
+
     /// Parse an if/else statement
     pub(crate) fn parse_if_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
         self.skip_newlines();
@@ -433,6 +469,7 @@ impl Parser {
             .or_else(|| then_block.last())
             .map(|stmt| match stmt {
                 Stmt::VarDecl { span, .. } => *span,
+                Stmt::Assignment { span, .. } => *span,
                 Stmt::Return { span, .. } => *span,
                 Stmt::If { span, .. } => *span,
                 Stmt::Expr(e) => e.span(),
@@ -478,6 +515,22 @@ impl Parser {
                 let start_span = token.span;
                 self.advance(); // consume 'if'
                 self.parse_if_stmt(start_span)
+            }
+            TokenKind::Identifier(_) => {
+                // Check if this is an assignment (identifier = expr) or expression statement
+                // Lookahead to see if next token is '='
+                if self.current + 1 < self.tokens.len() {
+                    if let Some(next_token) = self.tokens.get(self.current + 1) {
+                        if matches!(next_token.kind, TokenKind::Equal) {
+                            // This is an assignment statement
+                            return self.parse_assignment_stmt();
+                        }
+                    }
+                }
+
+                // Otherwise, parse as expression statement
+                let expr = self.parse_expr(Precedence::Lowest)?;
+                Ok(Stmt::Expr(expr))
             }
             _ => {
                 // Expression statement
@@ -599,6 +652,7 @@ impl Parser {
             .last()
             .map(|s| match s {
                 Stmt::VarDecl { span, .. } => *span,
+                Stmt::Assignment { span, .. } => *span,
                 Stmt::Return { span, .. } => *span,
                 Stmt::If { span, .. } => *span,
                 Stmt::Expr(e) => e.span(),

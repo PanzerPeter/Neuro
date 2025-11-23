@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Variable Reassignment**: Full support for mutable variable assignment
+  - **syntax-parsing**: Assignment statement AST node and parsing logic
+  - **semantic-analysis**: Symbol table tracks mutability (SymbolInfo struct)
+  - **semantic-analysis**: Type checking for assignments with mutability enforcement
+  - **semantic-analysis**: New error type: AssignToImmutable
+  - **llvm-backend**: Code generation for assignment statements (store instructions)
+  - **neurc**: 3 comprehensive end-to-end integration tests
+  - Syntax: `mut x: i32 = 0; x = 10; x = x + 5`
+  - Type safety: Cannot assign to immutable variables (val)
+  - Type checking: Value type must match variable type
+
 - **semantic-analysis**: Extended primitive types support
   - Added signed integer types: i8, i16 (complementing existing i32, i64)
   - Added unsigned integer types: u8, u16, u32, u64
@@ -21,14 +32,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Signed vs unsigned comparison predicates (SLT/SGT/SLE/SGE vs ULT/UGT/ULE/UGE)
   - Updated resolve_syntax_type to recognize new type names
 
-- **examples**: Added extended_types.nr demonstrating all new integer types
+- **examples**:
+  - Added assignment_test.nr demonstrating mutable variable reassignment
+  - Added extended_types.nr demonstrating all new integer types
 
 ### Changed
-- **Roadmap**: Updated Phase 1 progress to ~92% complete (1 of 3 extended features done)
+- **Roadmap**: Updated Phase 1 progress to ~88% complete (2 of 4 extended features done)
 - **semantic-analysis**: Type enum now includes 8 integer types (was 2)
 - **semantic-analysis**: Updated is_numeric() to include all integer types
+- **semantic-analysis**: Symbol table now stores both type and mutability information
+
+### Fixed
+- **semantic-analysis**: Type checker now properly tracks mutability for variable declarations
 
 ### Pending for Phase 1 Completion
+- Type inference for numeric literals (integers default to i32, floats to f64)
 - String type with UTF-8 support
 - Expression-based returns (implicit return of last expression)
 

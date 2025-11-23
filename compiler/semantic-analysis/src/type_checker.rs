@@ -104,8 +104,8 @@ impl TypeChecker {
             },
 
             Expr::Identifier(ident) => {
-                if let Some(ty) = self.symbols.lookup(&ident.name) {
-                    Ok(ty.clone())
+                if let Some(symbol_info) = self.symbols.lookup(&ident.name) {
+                    Ok(symbol_info.ty.clone())
                 } else {
                     self.record_error(TypeError::UndefinedVariable {
                         name: ident.name.clone(),
@@ -300,7 +300,7 @@ impl TypeChecker {
                 name,
                 ty,
                 init,
-                mutable: _,
+                mutable,
                 span,
             } => {
                 // Resolve declared type if present
@@ -350,7 +350,9 @@ impl TypeChecker {
                 };
 
                 // Define variable in current scope
-                if let Err(duplicate_name) = self.symbols.define(name.name.clone(), final_ty) {
+                if let Err(duplicate_name) =
+                    self.symbols.define(name.name.clone(), final_ty, *mutable)
+                {
                     self.record_error(TypeError::VariableAlreadyDefined {
                         name: duplicate_name,
                         span: name.span,
@@ -359,6 +361,46 @@ impl TypeChecker {
                 }
 
                 Ok(())
+            }
+
+            Stmt::Assignment {
+                target,
+                value,
+                span,
+            } => {
+                // Check the value expression
+                let value_ty = self.check_expr(value)?;
+
+                // Lookup the target variable
+                if let Some(symbol_info) = self.symbols.lookup(&target.name) {
+                    // Check if variable is mutable
+                    if !symbol_info.mutable {
+                        self.record_error(TypeError::AssignToImmutable {
+                            name: target.name.clone(),
+                            span: target.span,
+                        });
+                        return Err(());
+                    }
+
+                    // Check type compatibility
+                    if !value_ty.is_compatible_with(&symbol_info.ty) {
+                        self.record_error(TypeError::Mismatch {
+                            expected: symbol_info.ty.clone(),
+                            found: value_ty,
+                            span: *span,
+                        });
+                        return Err(());
+                    }
+
+                    Ok(())
+                } else {
+                    // Variable not defined
+                    self.record_error(TypeError::UndefinedVariable {
+                        name: target.name.clone(),
+                        span: target.span,
+                    });
+                    Err(())
+                }
             }
 
             Stmt::Return { value, span } => {
@@ -482,12 +524,13 @@ impl TypeChecker {
         self.symbols.push_scope();
         self.current_function_return_type = Some(return_type.clone());
 
-        // Define parameters in function scope
+        // Define parameters in function scope (parameters are immutable by default)
         for (param, param_ty) in func.params.iter().zip(param_types.iter()) {
-            if let Err(duplicate_name) = self
-                .symbols
-                .define(param.name.name.clone(), param_ty.clone())
-            {
+            if let Err(duplicate_name) = self.symbols.define(
+                param.name.name.clone(),
+                param_ty.clone(),
+                false, // Function parameters are immutable
+            ) {
                 self.record_error(TypeError::VariableAlreadyDefined {
                     name: duplicate_name,
                     span: param.name.span,

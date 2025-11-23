@@ -16,6 +16,11 @@ pub enum Stmt {
         mutable: bool,
         span: Span,
     },
+    Assignment {
+        target: Identifier,
+        value: Expr,
+        span: Span,
+    },
     Return {
         value: Option<Expr>,
         span: Span,
