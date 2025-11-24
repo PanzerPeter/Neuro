@@ -754,25 +754,47 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         // Generate function body
-        for stmt in &func_def.body {
-            self.codegen_stmt(stmt)?;
-        }
+        // Handle expression-based returns: if the last statement is an expression
+        // and the function has a non-void return type, treat it as an implicit return
+        let has_implicit_return = !matches!(return_type, Type::Void)
+            && !func_def.body.is_empty()
+            && matches!(func_def.body.last(), Some(Stmt::Expr(_)));
 
-        // Ensure function has a return if it's non-void
-        if !matches!(return_type, Type::Void) {
-            let current_bb = self.builder.get_insert_block().ok_or_else(|| {
-                CodegenError::InternalError("no insert block after function body".to_string())
-            })?;
-
-            if current_bb.get_terminator().is_none() {
-                return Err(CodegenError::MissingReturn);
+        if has_implicit_return {
+            // Generate all statements except the last one
+            for stmt in &func_def.body[..func_def.body.len() - 1] {
+                self.codegen_stmt(stmt)?;
             }
-        } else if let Some(current_bb) = self.builder.get_insert_block() {
-            // Add void return if missing
-            if current_bb.get_terminator().is_none() {
-                self.builder.build_return(None).map_err(|e| {
-                    CodegenError::LlvmError(format!("failed to build void return: {}", e))
+
+            // Generate implicit return from the last expression
+            if let Some(Stmt::Expr(expr)) = func_def.body.last() {
+                let ret_val = self.codegen_expr(expr)?;
+                self.builder.build_return(Some(&ret_val)).map_err(|e| {
+                    CodegenError::LlvmError(format!("failed to build implicit return: {}", e))
                 })?;
+            }
+        } else {
+            // Generate all statements normally
+            for stmt in &func_def.body {
+                self.codegen_stmt(stmt)?;
+            }
+
+            // Ensure function has a return if it's non-void
+            if !matches!(return_type, Type::Void) {
+                let current_bb = self.builder.get_insert_block().ok_or_else(|| {
+                    CodegenError::InternalError("no insert block after function body".to_string())
+                })?;
+
+                if current_bb.get_terminator().is_none() {
+                    return Err(CodegenError::MissingReturn);
+                }
+            } else if let Some(current_bb) = self.builder.get_insert_block() {
+                // Add void return if missing
+                if current_bb.get_terminator().is_none() {
+                    self.builder.build_return(None).map_err(|e| {
+                        CodegenError::LlvmError(format!("failed to build void return: {}", e))
+                    })?;
+                }
             }
         }
 

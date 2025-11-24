@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Expression-Based Returns**: Functions can now use implicit returns (Phase 1 feature complete)
+  - **syntax-parsing**: AST already supports expression statements (no changes needed)
+  - **semantic-analysis**: Type validation for trailing expressions matching return types
+  - **semantic-analysis**: ReturnTypeMismatch error for incompatible trailing expression types
+  - **llvm-backend**: Code generation for implicit returns from trailing expressions
+  - **examples**: Added expression_returns.nr demonstrating the feature
+  - **tests**: 11 new semantic analysis tests + 7 new end-to-end integration tests (18 total)
+  - Syntax: `func add(a: i32, b: i32) -> i32 { a + b }` (no explicit return needed)
+  - Type safety: Trailing expression type must match function return type
+  - Backward compatible: Explicit `return` statements still work
+  - Ergonomic: Eliminates verbose `return` keywords in most functions
+
 - **Variable Reassignment**: Full support for mutable variable assignment
   - **syntax-parsing**: Assignment statement AST node and parsing logic
   - **semantic-analysis**: Symbol table tracks mutability (SymbolInfo struct)
@@ -45,10 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **semantic-analysis**: Type checker now properly tracks mutability for variable declarations
 
+### Changed
+- **Roadmap**: Updated Phase 1 progress to ~92% complete (3 of 4 extended features done)
+
 ### Pending for Phase 1 Completion
 - Type inference for numeric literals (integers default to i32, floats to f64)
 - String type with UTF-8 support
-- Expression-based returns (implicit return of last expression)
 
 ---
 

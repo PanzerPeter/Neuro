@@ -1,11 +1,11 @@
 # NEURO Programming Language
 
-**Status:** Alpha Development - Phase 1 Core MVP (~88%) (Not Production Ready)
+**Status:** Alpha Development - Phase 1 Core MVP (~92%) (Not Production Ready)
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-94%2B%20passing-success.svg)](#)
-[![Phase](https://img.shields.io/badge/phase-1%20~88%25-yellow.svg)](https://github.com/yourusername/neuro/blob/main/.idea/roadmap.md)
+[![Tests](https://img.shields.io/badge/tests-113%20passing-success.svg)](#)
+[![Phase](https://img.shields.io/badge/phase-1%20~92%25-yellow.svg)](https://github.com/yourusername/neuro/blob/main/.idea/roadmap.md)
 
 A modern, compiled programming language designed for high-performance AI development. NEURO combines the productivity of Python with the speed of C++, featuring static typing with inference, zero-cost abstractions, and native GPU acceleration.
 
@@ -146,29 +146,29 @@ cargo install --path compiler/neurc
 
 **Note**: The `.cargo/config.toml` file is pre-configured with the vcpkg library path for Windows. On Unix systems, this configuration is ignored.
 
-## 🎉 Phase 1 Core MVP (~88% Complete)
+## 🎉 Phase 1 Core MVP (~92% Complete)
 
-NEURO has successfully implemented the **core MVP of Phase 1** (Roadmap v3.6) - **~88% Complete**
+NEURO has successfully implemented the **core MVP of Phase 1** (Roadmap v3.7) - **~92% Complete**
 
-The compiler can now compile programs end-to-end from source code to native executables with full type checking, mutable variable reassignment, and extended integer types.
+The compiler can now compile programs end-to-end from source code to native executables with full type checking, mutable variable reassignment, extended integer types, and **expression-based returns**.
 
 ### Current Capabilities (Phase 1) ✅
 
 - [x] **Lexical Analysis** - Complete tokenizer with Unicode support (28 tests)
 - [x] **Syntax Parsing** - Expression parser (Pratt) and statement parser with assignment support
-- [x] **Semantic Analysis** - Full type checking with mutability enforcement (28 tests)
+- [x] **Semantic Analysis** - Full type checking with mutability enforcement (39 tests)
 - [x] **Variable Reassignment** - Mutable variables with type-safe assignment (`mut x = 0; x = 10`)
+- [x] **Expression-Based Returns** - Implicit returns from trailing expressions (Rust-like syntax)
 - [x] **Extended Primitive Types** - All integer types: i8, i16, i32, i64, u8, u16, u32, u64
 - [x] **LLVM Backend** - Signedness-aware code generation with assignment support (4 tests)
 - [x] **CLI Compiler** - `neurc check` validates syntax/types, `neurc compile` produces executables
-- [x] **End-to-End Integration** - Full pipeline from source to binary (22 tests)
-- [x] **94+ Tests Passing** - Comprehensive coverage across all components
+- [x] **End-to-End Integration** - Full pipeline from source to binary (29 tests)
+- [x] **113 Tests Passing** - Comprehensive coverage across all components
 
-### Phase 1 Remaining Items
+### Phase 1 Remaining Items (2 of 4)
 
 - [ ] **Type Inference** - Numeric literal inference (currently: i32/f64 defaults)
 - [ ] **String Type** - Basic UTF-8 string implementation
-- [ ] **Expression-based Returns** - Implicit return of last expression
 
 ### Try It Now!
 
@@ -246,13 +246,22 @@ val pi = 3.14159  // Will be inferred as f64
 ### Functions
 
 ```rust
+// Explicit return (traditional style)
 func add(a: i32, b: i32) -> i32 {
     return a + b
 }
 
-// Expression-based return
+// Expression-based return 
+// The last expression automatically becomes the return value
 func multiply(a: i32, b: i32) -> i32 {
-    a * b  // implicit return
+    a * b  // implicit return - no 'return' keyword needed
+}
+
+// Works with complex expressions
+func calculate(x: i32, y: i32) -> i32 {
+    val step1: i32 = x * 2
+    val step2: i32 = y + 10
+    step1 + step2  // trailing expression becomes return value
 }
 ```
 

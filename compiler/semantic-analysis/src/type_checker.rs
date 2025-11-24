@@ -543,6 +543,25 @@ impl TypeChecker {
             let _ = self.check_stmt(stmt);
         }
 
+        // Validate trailing expressions for expression-based returns
+        // If the last statement is an expression, it must match the return type
+        if !matches!(return_type, Type::Void) && !func.body.is_empty() {
+            if let Some(Stmt::Expr(expr)) = func.body.last() {
+                // Trailing expression - validate it matches return type
+                if let Ok(expr_type) = self.check_expr(expr) {
+                    if !expr_type.is_compatible_with(&return_type) {
+                        self.record_error(TypeError::ReturnTypeMismatch {
+                            expected: return_type.clone(),
+                            found: expr_type,
+                            span: expr.span(),
+                        });
+                    }
+                }
+                // Note: If check_expr failed, the error is already recorded
+            }
+            // Note: Other statement types at the end are allowed - LLVM will catch missing returns
+        }
+
         // Exit function scope
         self.symbols.pop_scope();
         self.current_function_return_type = None;

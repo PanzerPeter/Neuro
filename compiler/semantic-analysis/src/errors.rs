@@ -53,8 +53,8 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("missing return statement in function returning {expected:?}")]
-    MissingReturn { expected: Type },
+    #[error("missing return statement in function returning {expected:?} at {span:?}")]
+    MissingReturn { expected: Type, span: Span },
 
     #[error("unknown type name '{name}' at {span:?}")]
     UnknownTypeName { name: String, span: Span },
