@@ -16,12 +16,10 @@ pub use tokens::{Token, TokenKind};
 
 use logos::Logos;
 use shared_types::Span;
-use unicode_segmentation::UnicodeSegmentation;
 
 /// Lexer for the NEURO language
 pub struct Lexer<'source> {
     inner: logos::Lexer<'source, TokenKind>,
-    _source: &'source str,
 }
 
 impl<'source> Lexer<'source> {
@@ -29,35 +27,27 @@ impl<'source> Lexer<'source> {
     pub fn new(source: &'source str) -> Self {
         Self {
             inner: TokenKind::lexer(source),
-            _source: source,
         }
     }
 
     /// Check if a string is a valid identifier
+    ///
+    /// Follows Unicode XID standard: first character must be XID_Start or underscore,
+    /// remaining characters must be XID_Continue.
     pub fn is_valid_identifier(s: &str) -> bool {
-        if s.is_empty() {
-            return false;
-        }
-
-        let graphemes: Vec<&str> = s.graphemes(true).collect();
-        if graphemes.is_empty() {
-            return false;
-        }
+        let mut chars = s.chars();
 
         // Check first character
-        let first = graphemes[0];
-        if first != "_" && !first.chars().all(unicode_ident::is_xid_start) {
+        let Some(first) = chars.next() else {
+            return false;
+        };
+
+        if first != '_' && !unicode_ident::is_xid_start(first) {
             return false;
         }
 
         // Check remaining characters
-        for grapheme in &graphemes[1..] {
-            if !grapheme.chars().all(unicode_ident::is_xid_continue) {
-                return false;
-            }
-        }
-
-        true
+        chars.all(unicode_ident::is_xid_continue)
     }
 }
 
@@ -90,7 +80,7 @@ impl<'source> Iterator for Lexer<'source> {
 /// Convenience function to tokenize NEURO source code
 ///
 /// This is the main entry point for lexical analysis. It takes NEURO source code
-/// and produces a stream of tokens.
+/// and produces a stream of tokens. Returns early on the first lexical error.
 ///
 /// # Arguments
 ///
@@ -98,8 +88,8 @@ impl<'source> Iterator for Lexer<'source> {
 ///
 /// # Returns
 ///
-/// * `Ok(Vec<Token>)` - Successfully tokenized source
-/// * `Err(LexError)` - Lexical error (invalid character, unterminated string, etc.)
+/// * `Ok(Vec<Token>)` - Successfully tokenized source (includes EOF token)
+/// * `Err(LexError)` - First lexical error encountered (invalid character, unterminated string, etc.)
 ///
 /// # Examples
 ///
@@ -110,25 +100,17 @@ impl<'source> Iterator for Lexer<'source> {
 /// let tokens = tokenize(source)?;
 /// ```
 pub fn tokenize(source: &str) -> LexResult<Vec<Token>> {
-    let mut lexer = Lexer::new(source);
+    let lexer = Lexer::new(source);
     let mut tokens = Vec::new();
-    let mut errors = Vec::new();
 
-    for result in lexer.by_ref() {
-        match result {
-            Ok(token) => tokens.push(token),
-            Err(err) => errors.push(err),
-        }
+    // Collect tokens, returning early on first error
+    for result in lexer {
+        tokens.push(result?);
     }
 
     // Add EOF token
     let eof_span = Span::new(source.len(), source.len());
     tokens.push(Token::new(TokenKind::Eof, eof_span));
-
-    // If there were any errors, return the first one
-    if let Some(err) = errors.into_iter().next() {
-        return Err(err);
-    }
 
     Ok(tokens)
 }

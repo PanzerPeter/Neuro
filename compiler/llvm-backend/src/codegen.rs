@@ -75,9 +75,22 @@ impl<'ctx> CodegenContext<'ctx> {
                 .bool_type()
                 .const_int(*val as u64, false)
                 .into()),
-            shared_types::Literal::String(_) => Err(CodegenError::UnsupportedType(
-                "string literals not supported in Phase 1".to_string(),
-            )),
+            shared_types::Literal::String(s) => {
+                // Create a global string constant
+                // LLVM will automatically null-terminate the string and place it in read-only memory
+                let global_string =
+                    self.builder
+                        .build_global_string_ptr(s, "str")
+                        .map_err(|e| {
+                            CodegenError::LlvmError(format!(
+                                "failed to create string constant: {}",
+                                e
+                            ))
+                        })?;
+
+                // Return the pointer to the string
+                Ok(global_string.as_pointer_value().into())
+            }
         }
     }
 
@@ -920,11 +933,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     shared_types::Literal::Integer(_) => Type::I32,
                     shared_types::Literal::Float(_) => Type::F64,
                     shared_types::Literal::Boolean(_) => Type::Bool,
-                    shared_types::Literal::String(_) => {
-                        return Err(CodegenError::UnsupportedType(
-                            "string type not supported".to_string(),
-                        ))
-                    }
+                    shared_types::Literal::String(_) => Type::String,
                 };
                 self.expr_types.insert(span.start, ty);
             }

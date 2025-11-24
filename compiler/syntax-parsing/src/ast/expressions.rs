@@ -1,6 +1,8 @@
 // NEURO Programming Language - Syntax Parsing
 // Expression AST nodes
 
+use std::fmt;
+
 use shared_types::{Identifier, Literal, Span};
 
 /// Abstract Syntax Tree node for expressions
@@ -64,4 +66,33 @@ pub enum BinaryOp {
 pub enum UnaryOp {
     Negate,
     Not,
+}
+
+impl fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BinaryOp::Add => write!(f, "+"),
+            BinaryOp::Subtract => write!(f, "-"),
+            BinaryOp::Multiply => write!(f, "*"),
+            BinaryOp::Divide => write!(f, "/"),
+            BinaryOp::Modulo => write!(f, "%"),
+            BinaryOp::Equal => write!(f, "=="),
+            BinaryOp::NotEqual => write!(f, "!="),
+            BinaryOp::Less => write!(f, "<"),
+            BinaryOp::Greater => write!(f, ">"),
+            BinaryOp::LessEqual => write!(f, "<="),
+            BinaryOp::GreaterEqual => write!(f, ">="),
+            BinaryOp::And => write!(f, "&&"),
+            BinaryOp::Or => write!(f, "||"),
+        }
+    }
+}
+
+impl fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UnaryOp::Negate => write!(f, "-"),
+            UnaryOp::Not => write!(f, "!"),
+        }
+    }
 }

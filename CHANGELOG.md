@@ -7,7 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **lexical-analysis**: Optimized identifier validation performance
+  - Simplified `is_valid_identifier()` to use char-based iteration instead of grapheme clusters
+  - Removed unnecessary unicode-segmentation dependency usage
+  - Improved error handling in `tokenize()` to return early on first error (faster for invalid input)
+  - Removed unused `_source` field from Lexer struct (reduced memory footprint)
+  - All tests pass with no breaking changes
+
 ### Added
+- **String Type (Phase 1)**: Basic string type implementation complete
+  - **semantic-analysis**: Added `Type::String` variant to the type system
+  - **semantic-analysis**: Type checking for string literals, variables, parameters, and returns
+  - **semantic-analysis**: String type predicates (is_string()) and compatibility rules
+  - **lexical-analysis**: String tokenization already supported (escape sequences: \n, \t, \", \\, \xNN, \u{NNNN})
+  - **syntax-parsing**: String literal parsing already functional
+  - **llvm-backend**: LLVM IR generation for string literals as global constants
+  - **llvm-backend**: String type mapping to opaque pointers (LLVM 15+ compatible)
+  - **examples**: Added string_test.nr demonstrating string usage patterns
+  - **tests**: 12 new semantic analysis tests + 7 new end-to-end integration tests (19 total)
+  - Syntax: `val msg: string = "Hello, NEURO!"`, `func greet() -> string { "Hello" }`
+  - Type safety: Strict string type checking with no implicit conversions
+  - C-style strings: Null-terminated for Phase 1 (Phase 2 will add length tracking)
+  - Escape sequences: Full support for \n, \r, \t, \\, \", \0, \xNN, \u{NNNN}
+  - Immutable: String literals are read-only (mutable strings deferred to Phase 2)
+  - Phase 1 complete: This completes the last remaining Phase 1 extended feature
+
 - **Expression-Based Returns**: Functions can now use implicit returns (Phase 1 feature complete)
   - **syntax-parsing**: AST already supports expression statements (no changes needed)
   - **semantic-analysis**: Type validation for trailing expressions matching return types

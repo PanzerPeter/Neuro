@@ -165,6 +165,7 @@ fn resolve_syntax_type(ty: &syntax_parsing::Type) -> CodegenResult<Type> {
             "f64" => Ok(Type::F64),
             // Other types
             "bool" => Ok(Type::Bool),
+            "string" => Ok(Type::String),
             "void" => Ok(Type::Void),
             name => Err(CodegenError::UnsupportedType(format!(
                 "unknown type: {}",

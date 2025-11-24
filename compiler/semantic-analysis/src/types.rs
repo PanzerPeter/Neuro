@@ -1,6 +1,8 @@
 // NEURO Programming Language - Semantic Analysis
 // Type system definitions and type predicates
 
+use std::fmt;
+
 /// Type representation for semantic analysis
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -19,6 +21,7 @@ pub enum Type {
     F64,
     // Other types
     Bool,
+    String,
     Void,
     Function { params: Vec<Type>, ret: Box<Type> },
     Unknown,
@@ -45,6 +48,7 @@ impl Type {
             | (Type::F32, Type::F32)
             | (Type::F64, Type::F64)
             | (Type::Bool, Type::Bool)
+            | (Type::String, Type::String)
             | (Type::Void, Type::Void) => true,
 
             // Function types must match exactly
@@ -123,6 +127,43 @@ impl Type {
     /// Check if this is a boolean type
     pub(crate) fn is_bool(&self) -> bool {
         matches!(self, Type::Bool)
+    }
+
+    /// Check if this is a string type
+    #[allow(dead_code)]
+    pub(crate) fn is_string(&self) -> bool {
+        matches!(self, Type::String)
+    }
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Type::I8 => write!(f, "i8"),
+            Type::I16 => write!(f, "i16"),
+            Type::I32 => write!(f, "i32"),
+            Type::I64 => write!(f, "i64"),
+            Type::U8 => write!(f, "u8"),
+            Type::U16 => write!(f, "u16"),
+            Type::U32 => write!(f, "u32"),
+            Type::U64 => write!(f, "u64"),
+            Type::F32 => write!(f, "f32"),
+            Type::F64 => write!(f, "f64"),
+            Type::Bool => write!(f, "bool"),
+            Type::String => write!(f, "string"),
+            Type::Void => write!(f, "void"),
+            Type::Unknown => write!(f, "<error>"),
+            Type::Function { params, ret } => {
+                write!(f, "fn(")?;
+                for (i, param) in params.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", param)?;
+                }
+                write!(f, ") -> {}", ret)
+            }
+        }
     }
 }
 
@@ -264,5 +305,41 @@ mod tests {
 
         assert!(func1.is_compatible_with(&func2));
         assert!(!func1.is_compatible_with(&func3));
+    }
+
+    #[test]
+    fn string_type_compatibility() {
+        // String type should only be compatible with itself
+        assert!(Type::String.is_compatible_with(&Type::String));
+
+        // String should NOT be compatible with other types
+        assert!(!Type::String.is_compatible_with(&Type::I32));
+        assert!(!Type::String.is_compatible_with(&Type::Bool));
+        assert!(!Type::String.is_compatible_with(&Type::F64));
+        assert!(!Type::String.is_compatible_with(&Type::Void));
+
+        // Other types should NOT be compatible with String
+        assert!(!Type::I32.is_compatible_with(&Type::String));
+        assert!(!Type::Bool.is_compatible_with(&Type::String));
+    }
+
+    #[test]
+    fn string_type_predicates() {
+        // Test is_string predicate
+        assert!(Type::String.is_string());
+
+        // String is NOT numeric, integer, float, or bool
+        assert!(!Type::String.is_numeric());
+        assert!(!Type::String.is_integer());
+        assert!(!Type::String.is_float());
+        assert!(!Type::String.is_bool());
+        assert!(!Type::String.is_signed_int());
+        assert!(!Type::String.is_unsigned_int());
+
+        // Other types are NOT strings
+        assert!(!Type::I32.is_string());
+        assert!(!Type::Bool.is_string());
+        assert!(!Type::F64.is_string());
+        assert!(!Type::Void.is_string());
     }
 }

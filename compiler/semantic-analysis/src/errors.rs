@@ -9,7 +9,7 @@ use crate::types::Type;
 /// Type checking errors with source location information
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum TypeError {
-    #[error("type mismatch at {span:?}: expected {expected:?}, found {found:?}")]
+    #[error("type mismatch at {span:?}: expected {expected}, found {found}")]
     Mismatch {
         expected: Type,
         found: Type,
@@ -35,10 +35,10 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("cannot apply operator {op} to type {ty:?} at {span:?}")]
+    #[error("cannot apply operator {op} to type {ty} at {span:?}")]
     InvalidOperator { op: String, ty: Type, span: Span },
 
-    #[error("cannot apply binary operator {op} to types {left:?} and {right:?} at {span:?}")]
+    #[error("cannot apply binary operator {op} to types {left} and {right} at {span:?}")]
     InvalidBinaryOperator {
         op: String,
         left: Type,
@@ -46,20 +46,20 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("return type mismatch at {span:?}: expected {expected:?}, found {found:?}")]
+    #[error("return type mismatch at {span:?}: expected {expected}, found {found}")]
     ReturnTypeMismatch {
         expected: Type,
         found: Type,
         span: Span,
     },
 
-    #[error("missing return statement in function returning {expected:?} at {span:?}")]
+    #[error("missing return statement in function returning {expected} at {span:?}")]
     MissingReturn { expected: Type, span: Span },
 
     #[error("unknown type name '{name}' at {span:?}")]
     UnknownTypeName { name: String, span: Span },
 
-    #[error("cannot call non-function type {ty:?} at {span:?}")]
+    #[error("cannot call non-function type {ty} at {span:?}")]
     NotCallable { ty: Type, span: Span },
 
     #[error("variable '{name}' used without initialization at {span:?}")]

@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use shared_types::{Literal, Span};
+use shared_types::Literal;
 use syntax_parsing::{BinaryOp, Expr, FunctionDef, Item, Stmt, UnaryOp};
 
 use crate::errors::TypeError;
@@ -47,71 +47,68 @@ impl TypeChecker {
         !self.errors.is_empty()
     }
 
-    /// Convert syntax-parsing type to semantic type
-    fn resolve_type(&mut self, ty: &syntax_parsing::Type) -> Result<Type, ()> {
+    /// Convert syntax-parsing type to semantic type.
+    /// Returns None if the type is unknown (error is recorded).
+    fn resolve_type(&mut self, ty: &syntax_parsing::Type) -> Option<Type> {
         match ty {
             syntax_parsing::Type::Named(ident) => match ident.name.as_str() {
                 // Signed integers
-                "i8" => Ok(Type::I8),
-                "i16" => Ok(Type::I16),
-                "i32" => Ok(Type::I32),
-                "i64" => Ok(Type::I64),
+                "i8" => Some(Type::I8),
+                "i16" => Some(Type::I16),
+                "i32" => Some(Type::I32),
+                "i64" => Some(Type::I64),
                 // Unsigned integers
-                "u8" => Ok(Type::U8),
-                "u16" => Ok(Type::U16),
-                "u32" => Ok(Type::U32),
-                "u64" => Ok(Type::U64),
+                "u8" => Some(Type::U8),
+                "u16" => Some(Type::U16),
+                "u32" => Some(Type::U32),
+                "u64" => Some(Type::U64),
                 // Floating point
-                "f32" => Ok(Type::F32),
-                "f64" => Ok(Type::F64),
+                "f32" => Some(Type::F32),
+                "f64" => Some(Type::F64),
                 // Other types
-                "bool" => Ok(Type::Bool),
-                "void" => Ok(Type::Void),
+                "bool" => Some(Type::Bool),
+                "string" => Some(Type::String),
+                "void" => Some(Type::Void),
                 name => {
                     self.record_error(TypeError::UnknownTypeName {
                         name: name.to_string(),
                         span: ident.span,
                     });
-                    Err(())
+                    None
                 }
             },
-            syntax_parsing::Type::Tensor { .. } => {
+            syntax_parsing::Type::Tensor { span, .. } => {
                 // Tensor types are Phase 3, not supported in Phase 1
                 self.record_error(TypeError::UnknownTypeName {
                     name: "Tensor".to_string(),
-                    span: Span::new(0, 0),
+                    span: *span,
                 });
-                Err(())
+                None
             }
         }
     }
 
-    /// Check an expression and return its type
-    fn check_expr(&mut self, expr: &Expr) -> Result<Type, ()> {
+    /// Check an expression and return its type.
+    /// Returns None if there was an error (which has been recorded).
+    /// Use this for better error recovery - checking can continue with Unknown type.
+    fn check_expr(&mut self, expr: &Expr) -> Option<Type> {
         match expr {
             Expr::Literal(lit, _span) => match lit {
-                Literal::Integer(_) => Ok(Type::I32), // Default integer type
-                Literal::Float(_) => Ok(Type::F64),   // Default float type
-                Literal::Boolean(_) => Ok(Type::Bool),
-                Literal::String(_) => {
-                    // String type not in Phase 1 spec, treat as error
-                    self.record_error(TypeError::UnknownTypeName {
-                        name: "string".to_string(),
-                        span: expr.span(),
-                    });
-                    Err(())
-                }
+                Literal::Integer(_) => Some(Type::I32), // Default integer type
+                Literal::Float(_) => Some(Type::F64),   // Default float type
+                Literal::Boolean(_) => Some(Type::Bool),
+                Literal::String(_) => Some(Type::String), // String literals have string type
             },
 
             Expr::Identifier(ident) => {
                 if let Some(symbol_info) = self.symbols.lookup(&ident.name) {
-                    Ok(symbol_info.ty.clone())
+                    Some(symbol_info.ty.clone())
                 } else {
                     self.record_error(TypeError::UndefinedVariable {
                         name: ident.name.clone(),
                         span: ident.span,
                     });
-                    Err(())
+                    None
                 }
             }
 
@@ -121,8 +118,14 @@ impl TypeChecker {
                 right,
                 span,
             } => {
-                let left_ty = self.check_expr(left)?;
-                let right_ty = self.check_expr(right)?;
+                // Check both operands even if one fails, for better error reporting
+                let left_ty = self.check_expr(left).unwrap_or(Type::Unknown);
+                let right_ty = self.check_expr(right).unwrap_or(Type::Unknown);
+
+                // If either operand is Unknown (error), propagate Unknown
+                if matches!(left_ty, Type::Unknown) || matches!(right_ty, Type::Unknown) {
+                    return Some(Type::Unknown);
+                }
 
                 match op {
                     // Arithmetic operators: require numeric types, return same type
@@ -133,12 +136,12 @@ impl TypeChecker {
                     | BinaryOp::Modulo => {
                         if !left_ty.is_numeric() {
                             self.record_error(TypeError::InvalidBinaryOperator {
-                                op: format!("{:?}", op),
+                                op: op.to_string(),
                                 left: left_ty.clone(),
                                 right: right_ty.clone(),
                                 span: *span,
                             });
-                            return Err(());
+                            return Some(Type::Unknown);
                         }
 
                         if !left_ty.is_compatible_with(&right_ty) {
@@ -147,10 +150,10 @@ impl TypeChecker {
                                 found: right_ty,
                                 span: *span,
                             });
-                            return Err(());
+                            return Some(Type::Unknown);
                         }
 
-                        Ok(left_ty)
+                        Some(left_ty)
                     }
 
                     // Comparison operators: require compatible types, return bool
@@ -166,63 +169,73 @@ impl TypeChecker {
                                 found: right_ty,
                                 span: *span,
                             });
-                            return Err(());
+                            return Some(Type::Unknown);
                         }
-                        Ok(Type::Bool)
+                        Some(Type::Bool)
                     }
 
                     // Logical operators: require bool types, return bool
                     BinaryOp::And | BinaryOp::Or => {
+                        let mut has_error = false;
+
                         if !left_ty.is_bool() {
                             self.record_error(TypeError::InvalidBinaryOperator {
-                                op: format!("{:?}", op),
+                                op: op.to_string(),
                                 left: left_ty,
                                 right: right_ty.clone(),
                                 span: *span,
                             });
-                            return Err(());
+                            has_error = true;
                         }
 
                         if !right_ty.is_bool() {
                             self.record_error(TypeError::InvalidBinaryOperator {
-                                op: format!("{:?}", op),
+                                op: op.to_string(),
                                 left: Type::Bool,
                                 right: right_ty,
                                 span: *span,
                             });
-                            return Err(());
+                            has_error = true;
                         }
 
-                        Ok(Type::Bool)
+                        if has_error {
+                            Some(Type::Unknown)
+                        } else {
+                            Some(Type::Bool)
+                        }
                     }
                 }
             }
 
             Expr::Unary { op, operand, span } => {
-                let operand_ty = self.check_expr(operand)?;
+                let operand_ty = self.check_expr(operand).unwrap_or(Type::Unknown);
+
+                if matches!(operand_ty, Type::Unknown) {
+                    return Some(Type::Unknown);
+                }
 
                 match op {
                     UnaryOp::Negate => {
                         if !operand_ty.is_numeric() {
                             self.record_error(TypeError::InvalidOperator {
-                                op: "negate".to_string(),
+                                op: op.to_string(),
                                 ty: operand_ty,
                                 span: *span,
                             });
-                            return Err(());
+                            return Some(Type::Unknown);
                         }
-                        Ok(operand_ty)
+                        Some(operand_ty)
                     }
                     UnaryOp::Not => {
                         if !operand_ty.is_bool() {
                             self.record_error(TypeError::InvalidOperator {
-                                op: "not".to_string(),
+                                op: op.to_string(),
                                 ty: operand_ty,
                                 span: *span,
                             });
-                            return Err(());
+                            return Some(Type::Unknown);
                         }
-                        Ok(Type::Bool)
+                        Some(Type::Bool)
                     }
                 }
             }
@@ -232,11 +245,13 @@ impl TypeChecker {
                 let func_name = match &**func {
                     Expr::Identifier(ident) => &ident.name,
                     _ => {
+                        // Try to infer the type of the expression being called
+                        let expr_ty = self.check_expr(func).unwrap_or(Type::Unknown);
                         self.record_error(TypeError::NotCallable {
-                            ty: Type::Unknown,
+                            ty: expr_ty,
                             span: *span,
                         });
-                        return Err(());
+                        return Some(Type::Unknown);
                     }
                 };
 
@@ -248,7 +263,7 @@ impl TypeChecker {
                         name: func_name.clone(),
                         span: *span,
                     });
-                    return Err(());
+                    return Some(Type::Unknown);
                 };
 
                 // Extract parameter types and return type
@@ -259,7 +274,7 @@ impl TypeChecker {
                             ty: func_ty,
                             span: *span,
                         });
-                        return Err(());
+                        return Some(Type::Unknown);
                     }
                 };
 
@@ -270,12 +285,12 @@ impl TypeChecker {
                         found: args.len(),
                         span: *span,
                     });
-                    return Err(());
+                    // Continue checking argument types for better error reporting
                 }
 
-                // Check each argument type
+                // Check each argument type (continue even if count mismatch)
                 for (arg, expected_ty) in args.iter().zip(param_types.iter()) {
-                    if let Ok(arg_ty) = self.check_expr(arg) {
+                    if let Some(arg_ty) = self.check_expr(arg) {
                         if !arg_ty.is_compatible_with(expected_ty) {
                             self.record_error(TypeError::Mismatch {
                                 expected: expected_ty.clone(),
@@ -286,15 +301,17 @@ impl TypeChecker {
                     }
                 }
 
-                Ok(return_type)
+                Some(return_type)
             }
 
             Expr::Paren(inner, _) => self.check_expr(inner),
         }
     }
 
-    /// Check a statement
-    fn check_stmt(&mut self, stmt: &Stmt) -> Result<(), ()> {
+    /// Check a statement.
+    /// Returns None if there was a fatal error, Some(()) otherwise.
+    /// Non-fatal errors are recorded and checking continues.
+    fn check_stmt(&mut self, stmt: &Stmt) -> Option<()> {
         match stmt {
             Stmt::VarDecl {
                 name,
@@ -305,14 +322,14 @@ impl TypeChecker {
             } => {
                 // Resolve declared type if present
                 let declared_ty = if let Some(ty) = ty {
-                    Some(self.resolve_type(ty)?)
+                    self.resolve_type(ty)
                 } else {
                     None
                 };
 
                 // Check initializer type if present
                 let init_ty = if let Some(init_expr) = init {
-                    Some(self.check_expr(init_expr)?)
+                    self.check_expr(init_expr)
                 } else {
                     None
                 };
@@ -345,9 +362,14 @@ impl TypeChecker {
                             name: name.name.clone(),
                             span: *span,
                         });
-                        return Err(());
+                        return None;
                     }
                 };
+
+                // Skip Unknown types to avoid cascading errors
+                if matches!(final_ty, Type::Unknown) {
+                    return Some(());
+                }
 
                 // Define variable in current scope
                 if let Err(duplicate_name) =
@@ -357,10 +379,10 @@ impl TypeChecker {
                         name: duplicate_name,
                         span: name.span,
                     });
-                    return Err(());
+                    return None;
                 }
 
-                Ok(())
+                Some(())
             }
 
             Stmt::Assignment {
@@ -369,7 +391,7 @@ impl TypeChecker {
                 span,
             } => {
                 // Check the value expression
-                let value_ty = self.check_expr(value)?;
+                let value_ty = self.check_expr(value).unwrap_or(Type::Unknown);
 
                 // Lookup the target variable
                 if let Some(symbol_info) = self.symbols.lookup(&target.name) {
@@ -379,50 +401,52 @@ impl TypeChecker {
                             name: target.name.clone(),
                             span: target.span,
                         });
-                        return Err(());
+                        return None;
                     }
 
-                    // Check type compatibility
-                    if !value_ty.is_compatible_with(&symbol_info.ty) {
+                    // Check type compatibility (skip if value type is unknown)
+                    if !matches!(value_ty, Type::Unknown)
+                        && !value_ty.is_compatible_with(&symbol_info.ty)
+                    {
                         self.record_error(TypeError::Mismatch {
                             expected: symbol_info.ty.clone(),
                             found: value_ty,
                             span: *span,
                         });
-                        return Err(());
                     }
 
-                    Ok(())
+                    Some(())
                 } else {
                     // Variable not defined
                     self.record_error(TypeError::UndefinedVariable {
                         name: target.name.clone(),
                         span: target.span,
                     });
-                    Err(())
+                    None
                 }
             }
 
             Stmt::Return { value, span } => {
                 let return_ty = if let Some(expr) = value {
-                    self.check_expr(expr)?
+                    self.check_expr(expr).unwrap_or(Type::Unknown)
                 } else {
                     Type::Void
                 };
 
-                // Check against expected return type
+                // Check against expected return type (skip if return type is unknown)
                 if let Some(expected) = &self.current_function_return_type {
-                    if !return_ty.is_compatible_with(expected) {
+                    if !matches!(return_ty, Type::Unknown)
+                        && !return_ty.is_compatible_with(expected)
+                    {
                         self.record_error(TypeError::ReturnTypeMismatch {
                             expected: expected.clone(),
                             found: return_ty,
                             span: *span,
                         });
-                        return Err(());
                     }
                 }
 
-                Ok(())
+                Some(())
             }
 
             Stmt::If {
@@ -433,7 +457,7 @@ impl TypeChecker {
                 span: _,
             } => {
                 // Check condition is boolean
-                if let Ok(cond_ty) = self.check_expr(condition) {
+                if let Some(cond_ty) = self.check_expr(condition) {
                     if !cond_ty.is_bool() {
                         self.record_error(TypeError::Mismatch {
                             expected: Type::Bool,
@@ -452,7 +476,7 @@ impl TypeChecker {
 
                 // Check else-if blocks
                 for (else_if_cond, else_if_stmts) in else_if_blocks {
-                    if let Ok(cond_ty) = self.check_expr(else_if_cond) {
+                    if let Some(cond_ty) = self.check_expr(else_if_cond) {
                         if !cond_ty.is_bool() {
                             self.record_error(TypeError::Mismatch {
                                 expected: Type::Bool,
@@ -478,28 +502,44 @@ impl TypeChecker {
                     self.symbols.pop_scope();
                 }
 
-                Ok(())
+                Some(())
             }
 
             Stmt::Expr(expr) => {
                 let _ = self.check_expr(expr);
-                Ok(())
+                Some(())
             }
         }
     }
 
     /// Check a function definition
-    fn check_function(&mut self, func: &FunctionDef) -> Result<(), ()> {
+    fn check_function(&mut self, func: &FunctionDef) -> Option<()> {
+        // Check for duplicate parameter names
+        use std::collections::HashSet;
+        let mut param_names = HashSet::new();
+        for param in &func.params {
+            if !param_names.insert(&param.name.name) {
+                self.record_error(TypeError::VariableAlreadyDefined {
+                    name: param.name.name.clone(),
+                    span: param.name.span,
+                });
+            }
+        }
+
         // Resolve parameter types
         let mut param_types = Vec::new();
         for param in &func.params {
-            let param_ty = self.resolve_type(&param.ty)?;
-            param_types.push(param_ty);
+            if let Some(param_ty) = self.resolve_type(&param.ty) {
+                param_types.push(param_ty);
+            } else {
+                // Skip this parameter if type resolution failed
+                param_types.push(Type::Unknown);
+            }
         }
 
         // Resolve return type (default to Void if not specified)
         let return_type = if let Some(ret_ty) = &func.return_type {
-            self.resolve_type(ret_ty)?
+            self.resolve_type(ret_ty).unwrap_or(Type::Void)
         } else {
             Type::Void
         };
@@ -515,7 +555,7 @@ impl TypeChecker {
                 name: func.name.name.clone(),
                 span: func.name.span,
             });
-            return Err(());
+            return None;
         }
 
         self.functions.insert(func.name.name.clone(), func_ty);
@@ -526,6 +566,11 @@ impl TypeChecker {
 
         // Define parameters in function scope (parameters are immutable by default)
         for (param, param_ty) in func.params.iter().zip(param_types.iter()) {
+            // Skip Unknown types to avoid cascading errors
+            if matches!(param_ty, Type::Unknown) {
+                continue;
+            }
+
             if let Err(duplicate_name) = self.symbols.define(
                 param.name.name.clone(),
                 param_ty.clone(),
@@ -548,7 +593,7 @@ impl TypeChecker {
         if !matches!(return_type, Type::Void) && !func.body.is_empty() {
             if let Some(Stmt::Expr(expr)) = func.body.last() {
                 // Trailing expression - validate it matches return type
-                if let Ok(expr_type) = self.check_expr(expr) {
+                if let Some(expr_type) = self.check_expr(expr) {
                     if !expr_type.is_compatible_with(&return_type) {
                         self.record_error(TypeError::ReturnTypeMismatch {
                             expected: return_type.clone(),
@@ -566,7 +611,7 @@ impl TypeChecker {
         self.symbols.pop_scope();
         self.current_function_return_type = None;
 
-        Ok(())
+        Some(())
     }
 
     /// Check a complete program
@@ -575,6 +620,7 @@ impl TypeChecker {
         for item in items {
             match item {
                 Item::Function(func) => {
+                    // Continue checking even if function has errors
                     let _ = self.check_function(func);
                 }
             }
