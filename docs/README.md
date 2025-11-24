@@ -1,440 +1,409 @@
-# NEURO Compiler Documentation
+# NEURO Documentation
 
-Welcome to the NEURO compiler documentation! This documentation covers all implemented features, architecture decisions, and usage guides.
+Welcome to the NEURO compiler documentation. This guide covers everything from getting started to advanced compiler internals.
 
-## Table of Contents
+**Current Status**: Phase 1 (~92% Complete) - Alpha Development
 
-1. [Overview](#overview)
-2. [Getting Started](#getting-started)
-3. [Architecture](#architecture)
-4. [Feature Documentation](#feature-documentation)
-5. [Development](#development)
+## Quick Links
 
-## Overview
+- [Installation Guide](getting-started/installation.md) - Set up NEURO on your system
+- [Quick Start](getting-started/quick-start.md) - Get up and running in 5 minutes
+- [Language Reference](language-reference/types.md) - Complete language documentation
+- [Troubleshooting](guides/troubleshooting.md) - Common issues and solutions
 
-NEURO is a compiled programming language designed for AI workloads, featuring:
+## Documentation Structure
 
-- **Static typing** with type inference
+### Getting Started
+
+Perfect for newcomers to NEURO:
+
+- **[Installation Guide](getting-started/installation.md)** - Install NEURO on Windows, Linux, or macOS
+- **[Quick Start Guide](getting-started/quick-start.md)** - Basic usage and workflow
+- **[Your First Program](getting-started/first-program.md)** - Step-by-step tutorial
+
+### Language Reference
+
+Complete reference for the NEURO language:
+
+- **[Types](language-reference/types.md)** - Type system (primitives, integers, floats, booleans)
+- **[Variables](language-reference/variables.md)** - Variables, mutability, and reassignment
+- **[Functions](language-reference/functions.md)** - Function declarations, parameters, returns
+- **[Expressions](language-reference/expressions.md)** - Expression syntax and evaluation
+- **[Control Flow](language-reference/control-flow.md)** - If/else statements and conditionals
+- **[Operators](language-reference/operators.md)** - Arithmetic, comparison, logical operators
+
+### User Guides
+
+Practical guides for everyday use:
+
+- **[CLI Usage](guides/cli-usage.md)** - Complete command-line reference
+- **[Troubleshooting](guides/troubleshooting.md)** - Common problems and solutions
+
+### Compiler Architecture
+
+Deep dive into compiler internals:
+
+- **[Architecture Overview](compiler/architecture.md)** - VSA and design principles (coming soon)
+- **[Compilation Pipeline](compiler/compilation.md)** - End-to-end compilation process
+- **[Components](compiler/components/)** - Individual compiler components:
+  - [Lexical Analysis](compiler/components/lexical-analysis.md) - Tokenization
+  - [Syntax Parsing](compiler/components/syntax-parsing.md) - AST generation
+  - [Semantic Analysis](compiler/components/semantic-analysis.md) - Type checking
+  - [LLVM Backend](compiler/components/llvm-backend.md) - Code generation
+
+## What is NEURO?
+
+NEURO is a compiled programming language designed for high-performance AI development. It combines:
+
+- **Static typing** with inference for safety and performance
 - **Tensor primitives** for machine learning (Phase 3+)
 - **GPU acceleration** support (Phase 5+)
-- **Native compilation** via LLVM
-- **Vertical Slice Architecture** for maintainability
+- **Native compilation** via LLVM for maximum speed
+- **Modern syntax** inspired by Rust, Python, and Swift
 
-**Current Status**: Phase 1 - 100% Complete (as of 2025-11-22)
+## Current Status (Phase 1, ~92%)
 
-## Getting Started
+The compiler currently supports:
 
-### Installation
+### Implemented Features ✅
 
-See [README.md](../README.md) for installation instructions.
+- **Types**:
+  - Primitive types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool
+  - Function types
+  - Void type
 
-### Your First NEURO Program
+- **Variables**:
+  - Immutable variables (`val`)
+  - Mutable variables (`mut`)
+  - Variable reassignment
+  - Lexical scoping with shadowing
+
+- **Functions**:
+  - Function declarations with parameters
+  - Explicit return statements
+  - Expression-based returns (implicit returns)
+  - Recursion
+  - Forward references
+
+- **Control Flow**:
+  - If/else statements
+  - Else-if chaining
+  - Block scoping
+
+- **Operators**:
+  - Arithmetic: `+`, `-`, `*`, `/`, `%`
+  - Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
+  - Logical: `&&`, `||`, `!`
+  - Unary: `-`, `!`
+
+- **Compilation**:
+  - Full LLVM backend
+  - Native executable generation
+  - Comprehensive error messages
+  - 113 tests passing across all components
+
+### Pending Features (Phase 1 completion) ⏳
+
+- Type inference for numeric literals
+- Basic string type
+
+### Future Phases 🔮
+
+- **Phase 2**: Structs, arrays, loops, generics, module system
+- **Phase 3**: Tensor types and operations
+- **Phase 4**: Automatic differentiation
+- **Phase 5**: GPU acceleration (CUDA)
+- **Phase 6**: Neural network library
+
+See [Roadmap](../.idea/roadmap.md) for detailed timeline.
+
+## Example Programs
+
+### Hello World
 
 ```neuro
-// examples/hello.nr
 func main() -> i32 {
-    val message = "Hello, NEURO!"
     return 0
 }
 ```
-
-### Checking Types
-
-```bash
-cargo run -p neurc -- check examples/hello.nr
-```
-
-### Compiling
-
-```bash
-# Compile a NEURO program to executable
-cargo run -p neurc -- compile examples/hello.nr
-
-# Compile with custom output path
-cargo run -p neurc -- compile examples/milestone.nr -o my_program
-
-# Run the compiled program (Windows)
-.\examples\hello.exe
-```
-
-## Architecture
-
-NEURO uses **Vertical Slice Architecture (VSA)**, organizing code by business capabilities rather than technical layers.
-
-### Core Principles
-
-1. **Slice Independence**: Each feature is self-contained
-2. **Minimal Coupling**: Slices communicate through well-defined interfaces
-3. **Shared Infrastructure**: Common utilities (diagnostics, types) in infrastructure layer
-4. **Clear Boundaries**: `pub(crate)` by default, `pub` only for entry points
-
-### Project Structure
-
-```
-compiler/
-├── infrastructure/          # Shared utilities
-│   ├── shared-types/       # Common types (Span, Identifier, Literal)
-│   ├── source-location/    # Source location tracking
-│   ├── diagnostics/        # Error reporting framework
-│   └── project-config/     # Configuration management
-│
-├── lexical-analysis/       # ✅ Tokenization
-├── syntax-parsing/         # ✅ AST generation
-├── semantic-analysis/      # ✅ Type checking
-├── control-flow/           # ⏳ CFG analysis (future)
-├── llvm-backend/           # ✅ Code generation
-│
-└── neurc/                  # Compiler driver
-```
-
-### Compilation Pipeline
-
-```
-Source Code (.nr)
-    ↓
-[Lexical Analysis]  → Tokens
-    ↓
-[Syntax Parsing]    → AST
-    ↓
-[Semantic Analysis] → Type-checked AST
-    ↓
-[LLVM Backend]      → Object Code (.o)
-    ↓
-[Linker]            → Executable
-```
-
-## Feature Documentation
-
-### Phase 1 Features (Complete)
-
-| Feature | Status | Documentation |
-|---------|--------|---------------|
-| **Lexical Analysis** | ✅ Complete | [lexical-analysis.md](features/lexical-analysis.md) |
-| **Syntax Parsing** | ✅ Complete | [syntax-parsing.md](features/syntax-parsing.md) |
-| **Semantic Analysis** | ✅ Complete | [semantic-analysis.md](features/semantic-analysis.md) |
-| **LLVM Backend** | ✅ Complete | [llvm-backend.md](features/llvm-backend.md) |
-
-### Lexical Analysis
-
-Converts source code to tokens with full Unicode support.
-
-**Features**:
-- Keywords, operators, delimiters
-- Integer literals (decimal, binary, octal, hex)
-- Float literals with scientific notation
-- String literals with escape sequences
-- Line and block comments
-- Comprehensive error reporting
-
-[**Read Documentation →**](features/lexical-analysis.md)
-
-### Syntax Parsing
-
-Transforms tokens into an Abstract Syntax Tree (AST).
-
-**Features**:
-- Pratt parser for expressions (correct precedence)
-- Recursive descent for statements
-- Function definitions
-- If/else statements
-- Variable declarations
-- Error recovery
-
-[**Read Documentation →**](features/syntax-parsing.md)
-
-### Semantic Analysis
-
-Type checks and validates the AST.
-
-**Features**:
-- Primitive types (i32, i64, f32, f64, bool)
-- Function type checking
-- Lexical scoping with shadowing
-- Multiple error collection (fail-slow)
-- Comprehensive error messages with spans
-
-[**Read Documentation →**](features/semantic-analysis.md)
-
-### LLVM Backend
-
-Generates native object code via LLVM.
-
-**Features**:
-- LLVM IR generation (inkwell)
-- Function codegen with parameters
-- Expression codegen (all operators)
-- Statement codegen (variables, if/else, return)
-- Object code emission
-- Opaque pointer support (LLVM 15+)
-
-[**Read Documentation →**](features/llvm-backend.md)
-
-## Language Guide
-
-### Type System (Phase 1)
-
-**Primitive Types**:
-```neuro
-i32         // 32-bit signed integer
-i64         // 64-bit signed integer
-f32         // 32-bit float
-f64         // 64-bit float
-bool        // Boolean (true/false)
-```
-
-**Type Inference**:
-```neuro
-val x = 42        // Inferred as i32
-val y = 3.14      // Inferred as f64
-val z: i64 = 100  // Explicit type annotation
-```
-
-### Functions
-
-```neuro
-func add(a: i32, b: i32) -> i32 {
-    return a + b
-}
-
-func main() -> i32 {
-    val result = add(5, 3)
-    return result
-}
-```
-
-### Variables
-
-```neuro
-val immutable: i32 = 42      // Immutable (Phase 1)
-mut counter: i32 = 0          // Mutable (Phase 2+)
-```
-
-### Control Flow
-
-```neuro
-func max(a: i32, b: i32) -> i32 {
-    if a > b {
-        return a
-    } else if a < b {
-        return b
-    } else {
-        return 0
-    }
-}
-```
-
-### Operators
-
-**Arithmetic**: `+`, `-`, `*`, `/`, `%`
-**Comparison**: `==`, `!=`, `<`, `>`, `<=`, `>=`
-**Logical**: `&&`, `||`, `!`
-
-## Development
-
-### Building the Compiler
-
-```bash
-# Build entire workspace
-cargo build --workspace
-
-# Build specific slice
-cargo build -p llvm-backend
-
-# Build with release optimizations
-cargo build --workspace --release
-```
-
-### Running Tests
-
-```bash
-# Run all tests
-cargo test --all
-
-# Run tests for specific slice
-cargo test -p semantic-analysis
-
-# Run with output
-cargo test -- --nocapture
-```
-
-### Code Quality
-
-```bash
-# Format code
-cargo fmt --all
-
-# Run linter
-cargo clippy --all-targets --all-features -- -D warnings
-
-# Check formatting
-cargo fmt --all -- --check
-```
-
-### Adding a New Feature
-
-1. **Create crate**: `cargo new compiler/feature-name --lib`
-2. **Add to workspace**: Update root `Cargo.toml`
-3. **Design API**: Single public entry point
-4. **Implement**: Keep internals `pub(crate)`
-5. **Test**: Comprehensive unit and integration tests
-6. **Document**: Add to this documentation
-
-See [CLAUDE.md](../CLAUDE.md) for detailed development guidelines.
-
-## Roadmap
-
-See [roadmap.md](../.idea/roadmap.md) for the complete development roadmap.
-
-### Phase 1 (100% Complete)
-- [x] Lexical Analysis
-- [x] Syntax Parsing
-- [x] Semantic Analysis (Type Checking)
-- [x] LLVM Code Generation
-- [x] End-to-end Compilation (neurc driver integration)
-
-### Phase 2 (Next)
-- [ ] Structs
-- [ ] Arrays
-- [ ] Loops (while, for)
-- [ ] Enhanced type inference
-- [ ] Module system
-
-### Phase 3 (Future)
-- [ ] Static tensor types
-- [ ] Tensor operations
-- [ ] BLAS integration
-- [ ] Memory pooling
-
-### Phase 4+ (Advanced)
-- [ ] Automatic differentiation
-- [ ] GPU support (CUDA)
-- [ ] Neural network primitives
-- [ ] LSP server
-
-## Contributing
-
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for contribution guidelines.
-
-### Development Principles
-
-1. **98% Confidence**: Only commit changes you're highly confident about
-2. **Test First**: Write tests before implementation
-3. **VSA Compliance**: Maintain slice independence
-4. **Documentation**: Document as you code
-5. **Zero Warnings**: All code must pass clippy
-
-## Resources
-
-### Internal Documentation
-
-- [README.md](../README.md) - Project overview
-- [CLAUDE.md](../CLAUDE.md) - AI development guidelines
-- [VSA_Rust_3_0.xml](../VSA_Rust_3_0.xml) - Architecture specification
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - Contribution guide
-- [roadmap.md](../.idea/roadmap.md) - Development roadmap
-- [syntax.md](../.idea/syntax.md) - Language syntax reference
-- [library.md](../.idea/library.md) - Architecture documentation
-
-### External Resources
-
-- [Rust Book](https://doc.rust-lang.org/book/)
-- [LLVM Documentation](https://llvm.org/docs/)
-- [inkwell](https://thedan64.github.io/inkwell/)
-- [Crafting Interpreters](https://craftinginterpreters.com/)
-
-## Examples
 
 ### Factorial
 
 ```neuro
 func factorial(n: i32) -> i32 {
     if n <= 1 {
-        return 1
+        1  // Implicit return
     } else {
-        return n * factorial(n - 1)
+        n * factorial(n - 1)
     }
 }
 
 func main() -> i32 {
-    return factorial(5)  // Returns 120
+    factorial(5)  // Returns 120
 }
 ```
 
-### Fibonacci
+### Mutable Variables
 
 ```neuro
-func fibonacci(n: i32) -> i32 {
-    if n <= 1 {
-        return n
-    } else {
-        return fibonacci(n - 1) + fibonacci(n - 2)
-    }
-}
-
-func main() -> i32 {
-    return fibonacci(10)  // Returns 55
+func counter() -> i32 {
+    mut count: i32 = 0
+    count = count + 1
+    count = count + 1
+    count = count + 1
+    count  // Returns 3
 }
 ```
 
-### Arithmetic Expression
+More examples in [examples/](../examples/) directory.
 
-```neuro
-func calculate() -> i32 {
-    val a = 10
-    val b = 20
-    val c = 5
+## Development
 
-    val result = (a + b) * c - 15
-    return result  // Returns 135
-}
+### Building from Source
+
+```bash
+git clone https://github.com/PanzerPeter/Neuro.git
+cd Neuro
+cargo build --release
+cargo test --all
 ```
 
-## FAQ
+### Running the Compiler
 
-### What makes NEURO different?
+```bash
+# Check syntax and types
+cargo run -p neurc -- check examples/hello.nr
 
-NEURO is designed specifically for AI workloads with:
-- Native tensor support (Phase 3+)
-- GPU acceleration (Phase 5+)
-- Static type checking for safety
-- LLVM-based native compilation for performance
+# Compile to executable
+cargo run -p neurc -- compile examples/milestone.nr
 
-### Can I use NEURO now?
+# Run compiled program
+./examples/milestone  # Unix
+.\examples\milestone.exe  # Windows
+```
 
-Phase 1 is 100% complete. You can:
-- ✅ Parse NEURO programs
-- ✅ Type check programs
-- ✅ Generate LLVM object code
-- ✅ Compile to native executables
+### Contributing
 
-### What's the roadmap?
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
+- Code style guidelines
+- VSA architecture principles
+- Testing requirements
+- Pull request process
 
-See [roadmap.md](../.idea/roadmap.md) for the complete timeline. Phase 1 targets basic compilation, Phase 2 adds core language features, Phase 3 adds tensor support, Phase 4+ adds neural network features.
+## Getting Help
 
-### How can I contribute?
+### Documentation
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md). We welcome:
-- Bug reports
-- Feature requests
-- Documentation improvements
-- Code contributions (following VSA principles)
+- **Getting Started**: Start with [Installation](getting-started/installation.md)
+- **Language Questions**: Check [Language Reference](language-reference/types.md)
+- **Compiler Issues**: See [Troubleshooting](guides/troubleshooting.md)
+- **CLI Help**: Read [CLI Usage](guides/cli-usage.md)
 
-### What's VSA?
+### Support
 
-Vertical Slice Architecture organizes code by business features rather than technical layers. Each "slice" is self-contained with minimal dependencies. See [VSA_Rust_3_0.xml](../VSA_Rust_3_0.xml).
+- **Issues**: [GitHub Issues](https://github.com/PanzerPeter/Neuro/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/PanzerPeter/Neuro/discussions)
+- **Development**: See [CLAUDE.md](../CLAUDE.md)
 
-## License
+## Project Resources
 
-GPL-3.0 - See [LICENSE](../LICENSE) for details.
+### Core Documentation
+
+- [README.md](../README.md) - Project overview
+- [CHANGELOG.md](../CHANGELOG.md) - Version history
+- [CONTRIBUTING.md](../CONTRIBUTING.md) - Contribution guidelines
+- [LICENSE](../LICENSE) - GPL v3.0
+
+### Development Resources
+
+- [CLAUDE.md](../CLAUDE.md) - AI development guidelines
+- [VSA_Rust_3_0.xml](../VSA_Rust_3_0.xml) - Architecture specification
+- [Roadmap](../.idea/roadmap.md) - Development roadmap
+- [Syntax Guide](../.idea/syntax.md) - Language syntax reference
+
+### Tools
+
+- [VSCode Extension](../neuro-language-support/) - Syntax highlighting
+
+## Key Features by Phase
+
+### Phase 1 (Current, ~92%)
+
+Core compiler functionality:
+- Basic types and operations
+- Functions and control flow
+- Type checking
+- Native code generation
+
+### Phase 2 (Planned)
+
+Core language features:
+- Structs and custom types
+- Arrays and tuples
+- Loops (while, for)
+- Generics
+- Module system
+- Error handling (Result, Option)
+
+### Phase 3 (Planned)
+
+Tensor foundation:
+- Static tensor types
+- Tensor operations
+- BLAS integration
+- Shape checking
+
+### Phase 4 (Planned)
+
+Automatic differentiation:
+- Reverse-mode AD
+- Gradient computation
+- Training loop utilities
+
+### Phase 5 (Planned)
+
+GPU acceleration:
+- CUDA support
+- GPU kernels
+- Device memory management
+
+### Phase 6 (Planned)
+
+Neural network library:
+- Common layers (Dense, Conv2d, etc.)
+- Optimizers (SGD, Adam)
+- Loss functions
+- Model API
+
+## Architecture Principles
+
+NEURO uses **Vertical Slice Architecture (VSA)**:
+
+1. **Slice Independence**: Each feature is self-contained
+2. **Infrastructure Sharing**: Common utilities in infrastructure layer
+3. **Clear Boundaries**: Minimal public API, `pub(crate)` by default
+4. **No Cross-Slice Imports**: Features don't import from each other
+
+Benefits:
+- Independent development
+- Clear ownership
+- Better testability
+- Parallel compilation
+
+See [VSA_Rust_3_0.xml](../VSA_Rust_3_0.xml) for complete guidelines.
+
+## Compilation Pipeline
+
+```
+Source File (.nr)
+    ↓
+[Lexical Analysis]  → Tokenization
+    ↓
+[Syntax Parsing]    → AST Generation
+    ↓
+[Semantic Analysis] → Type Checking
+    ↓
+[LLVM Backend]      → Object Code (.o)
+    ↓
+[System Linker]     → Native Executable
+```
+
+Each stage is independent and can be tested separately. See [Compilation Pipeline](compiler/compilation.md) for details.
+
+## Testing
+
+The compiler includes comprehensive test coverage:
+
+- **Lexical Analysis**: 28 tests
+- **Syntax Parsing**: Tests for expression and statement parsing
+- **Semantic Analysis**: 39 tests
+- **LLVM Backend**: 4 integration tests
+- **End-to-End**: 29 integration tests
+- **Infrastructure**: 13 tests
+- **Total**: 113 tests passing
+
+Run tests:
+```bash
+cargo test --all
+```
+
+## Performance Targets
+
+### Phase 1 (Current)
+
+- Compilation time: <1s for small programs
+- Type checking: <100ms
+- No runtime overhead from language features
+
+### Future Phases
+
+- Arithmetic operations: 2-5x slower than C++ (vs 100x for Python)
+- Neural network training: Within 10% of PyTorch performance
+- Memory usage: 1-2x of equivalent C++ programs
+
+## Language Design Principles
+
+1. **Safety**: Static typing prevents errors at compile time
+2. **Performance**: Native compilation for maximum speed
+3. **Simplicity**: Clean, readable syntax
+4. **Explicitness**: Prefer explicit over implicit
+5. **Zero-cost abstractions**: High-level features with no runtime cost
+
+## Community and Ecosystem
+
+NEURO is an open-source project under active development:
+
+- **License**: GPL v3.0
+- **Language**: Rust 1.70+
+- **Target**: LLVM 18.1.8
+- **Stage**: Alpha (Phase 1)
+- **Stability**: Breaking changes expected
 
 ## Acknowledgments
 
-- Built with [Rust](https://www.rust-lang.org/)
-- LLVM bindings via [inkwell](https://github.com/TheDan64/inkwell)
-- Lexer powered by [logos](https://github.com/maciejhirsz/logos)
-- Inspired by modern compiler architecture
+NEURO draws inspiration from:
+
+- **Rust**: Ownership semantics, type system, syntax
+- **Python**: Simplicity, AI ecosystem integration
+- **Swift**: Modern language design principles
+- **Mojo**: AI-first design philosophy
+
+Built with:
+- [Rust](https://www.rust-lang.org/) - Systems programming language
+- [LLVM](https://llvm.org/) - Compiler infrastructure
+- [inkwell](https://github.com/TheDan64/inkwell) - Safe LLVM bindings
+- [logos](https://github.com/maciejhirsz/logos) - Lexer generator
+
+## Next Steps
+
+### For Users
+
+1. [Install NEURO](getting-started/installation.md)
+2. Follow the [Quick Start Guide](getting-started/quick-start.md)
+3. Write [Your First Program](getting-started/first-program.md)
+4. Explore the [Language Reference](language-reference/types.md)
+
+### For Contributors
+
+1. Read [CONTRIBUTING.md](../CONTRIBUTING.md)
+2. Study [VSA Architecture](../VSA_Rust_3_0.xml)
+3. Review [CLAUDE.md](../CLAUDE.md)
+4. Check the [Roadmap](../.idea/roadmap.md)
+
+### For Researchers
+
+1. Review [Architecture Documentation](compiler/components/)
+2. Study [Compilation Pipeline](compiler/compilation.md)
+3. Examine [Type System Design](language-reference/types.md)
+
+## Stay Updated
+
+- Watch the [GitHub repository](https://github.com/PanzerPeter/Neuro)
+- Check [CHANGELOG.md](../CHANGELOG.md) for updates
+- Follow development in [Roadmap](../.idea/roadmap.md)
 
 ---
 
-**Last Updated**: 2025-11-22
-**Version**: 0.2.0 (Phase 1 - 100% Complete)
+**Last Updated**: 2025-11-24
+**Version**: Phase 1 (~92% Complete)
+**Status**: Alpha Development
