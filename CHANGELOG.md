@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **syntax-parsing**: Comprehensive test suite with 117 tests
+  - **expression_tests.rs**: 34 tests covering literals, operators, function calls, precedence, and associativity
+  - **statement_tests.rs**: 20 tests for variable declarations, assignments, returns, and control flow
+  - **function_tests.rs**: 16 tests for function definitions, parameters, and bodies
+  - **error_tests.rs**: 31 tests for invalid syntax and edge cases
+  - **integration_tests.rs**: 16 tests for complete programs
+  - Test coverage exceeds 80% of parser code paths
+
+### Changed
+- **syntax-parsing**: Security and robustness improvements
+  - Added maximum expression nesting depth limit (256 levels) to prevent stack overflow attacks
+  - Added validation for duplicate parameter names in function definitions
+  - Fixed hardcoded span bug in binary operator error handling (now uses proper token span)
+  - New error variants: `MaxDepthExceeded` and `DuplicateParameter`
+
+### Fixed
+- **syntax-parsing**: Parser error handling improvements
+  - Fixed hardcoded `Span::new(0, 0)` in `token_to_binary_op` error path
+  - Now properly passes token span for accurate error reporting
+
+### Documented
+- **syntax-parsing**: Added TODO documentation for unused `Type::Tensor` variant
+  - Clearly marked as Phase 2 feature with example syntax
+  - Prevents confusion about incomplete implementation
+
 ### Changed
 - **infrastructure**: Code quality improvements and robustness enhancements
   - **source-location**: Fixed potential panic in `snippet()` method - now returns `Option<&str>`
@@ -41,18 +67,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Immutable: String literals are read-only (mutable strings deferred to Phase 2)
   - Phase 1 complete: This completes the last remaining Phase 1 extended feature
 
-- **Expression-Based Returns**: Functions can now use implicit returns (Phase 1 feature complete)
-  - **syntax-parsing**: AST already supports expression statements (no changes needed)
-  - **semantic-analysis**: Type validation for trailing expressions matching return types
-  - **semantic-analysis**: ReturnTypeMismatch error for incompatible trailing expression types
-  - **llvm-backend**: Code generation for implicit returns from trailing expressions
-  - **examples**: Added expression_returns.nr demonstrating the feature
-  - **tests**: 11 new semantic analysis tests + 7 new end-to-end integration tests (18 total)
-  - Syntax: `func add(a: i32, b: i32) -> i32 { a + b }` (no explicit return needed)
-  - Type safety: Trailing expression type must match function return type
-  - Backward compatible: Explicit `return` statements still work
-  - Ergonomic: Eliminates verbose `return` keywords in most functions
-
 - **Variable Reassignment**: Full support for mutable variable assignment
   - **syntax-parsing**: Assignment statement AST node and parsing logic
   - **semantic-analysis**: Symbol table tracks mutability (SymbolInfo struct)
@@ -76,16 +90,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Signed vs unsigned division/modulo operations (build_int_signed_div vs build_int_unsigned_div)
   - Signed vs unsigned comparison predicates (SLT/SGT/SLE/SGE vs ULT/UGT/ULE/UGE)
   - Updated resolve_syntax_type to recognize new type names
-
-- **examples**:
-  - Added assignment_test.nr demonstrating mutable variable reassignment
-  - Added extended_types.nr demonstrating all new integer types
-
-### Changed
-- **Roadmap**: Updated Phase 1 progress to ~88% complete (2 of 4 extended features done)
-- **semantic-analysis**: Type enum now includes 8 integer types (was 2)
-- **semantic-analysis**: Updated is_numeric() to include all integer types
-- **semantic-analysis**: Symbol table now stores both type and mutability information
 
 ### Fixed
 - **semantic-analysis**: Type checker now properly tracks mutability for variable declarations

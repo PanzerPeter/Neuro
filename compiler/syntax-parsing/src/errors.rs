@@ -18,6 +18,12 @@ pub enum ParseError {
     #[error("unexpected end of file, expected {expected}")]
     UnexpectedEof { expected: String },
 
+    #[error("maximum expression nesting depth ({0}) exceeded - possible infinite recursion")]
+    MaxDepthExceeded(usize),
+
+    #[error("duplicate parameter name '{name}' in function definition")]
+    DuplicateParameter { name: String, span: Span },
+
     #[error("lexical error: {0}")]
     LexError(#[from] LexError),
 }

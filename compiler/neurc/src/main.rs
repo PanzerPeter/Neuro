@@ -95,8 +95,25 @@ fn main() {
     }
 }
 
+/// Validate that a file has the .nr extension
+fn validate_source_file(path: &Path) -> Result<()> {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("nr") => Ok(()),
+        Some(other) => Err(anyhow::anyhow!(
+            "Invalid file extension '.{}'. NEURO source files must have .nr extension",
+            other
+        )),
+        None => Err(anyhow::anyhow!(
+            "File has no extension. NEURO source files must have .nr extension"
+        )),
+    }
+}
+
 /// Check a NEURO source file for syntax and type errors
 fn check_file(path: &PathBuf) -> anyhow::Result<()> {
+    // Validate file extension
+    validate_source_file(path)?;
+
     // Read source file
     let source = fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("Failed to read file {:?}: {}", path, e))?;
@@ -107,7 +124,7 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
     // Type check the program
     match semantic_analysis::type_check(&ast) {
         Ok(()) => {
-            println!("✓ Type checking passed for {:?}", path);
+            println!("Type checking passed for {:?}", path);
             Ok(())
         }
         Err(errors) => {
@@ -146,6 +163,9 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
 /// // Creates "program" (or "program.exe" on Windows)
 /// ```
 fn compile_file(input: &Path, output: Option<&Path>) -> Result<()> {
+    // Validate file extension
+    validate_source_file(input)?;
+
     // Read source file
     let source = fs::read_to_string(input)
         .context(format!("Failed to read source file: {}", input.display()))?;

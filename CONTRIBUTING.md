@@ -55,8 +55,6 @@ cargo fmt --all -- --check
 Before contributing, please read:
 
 1. [README.md](README.md) - Project overview
-2. [CLAUDE.md](CLAUDE.md) - Development guidelines and architecture
-3. [VSA_Rust_3_0.xml](VSA_Rust_3_0.xml) - Vertical Slice Architecture guidelines
 4. [docs/README.md](docs/README.md) - Technical documentation
 5. [.idea/roadmap.md](.idea/roadmap.md) - Development roadmap
 
@@ -116,7 +114,7 @@ All contributions MUST:
 4. **Pass all tests**: All existing tests must continue to pass
 5. **Be documented**: Public APIs must have doc comments (`///`)
 
-### Module Visibility (Critical for VSA)
+### Module Visibility
 
 ```rust
 // Default to pub(crate) for internal slice items
@@ -193,8 +191,6 @@ DON'T:
 - Import feature slices from other features
 - Use `unwrap()` in production code
 - Expose internals via permissive `pub`
-
-See [VSA_Rust_3_0.xml](VSA_Rust_3_0.xml) for complete guidelines.
 
 ## Testing Requirements
 

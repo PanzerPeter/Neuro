@@ -8,16 +8,24 @@ use crate::ast::{BinaryOp, Expr, FunctionDef, Item, Parameter, Stmt, Type, Unary
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 
+/// Maximum expression nesting depth to prevent stack overflow
+const MAX_EXPR_DEPTH: usize = 256;
+
 /// Parser for NEURO source code
 pub(crate) struct Parser {
     tokens: Vec<Token>,
     current: usize,
+    expr_depth: usize,
 }
 
 impl Parser {
     /// Create a new parser from a token stream
     pub fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, current: 0 }
+        Self {
+            tokens,
+            current: 0,
+            expr_depth: 0,
+        }
     }
 
     /// Get the current token without consuming it
@@ -83,6 +91,20 @@ impl Parser {
 
     /// Parse an expression with the given precedence
     pub fn parse_expr(&mut self, precedence: Precedence) -> ParseResult<Expr> {
+        // Check recursion depth to prevent stack overflow
+        if self.expr_depth >= MAX_EXPR_DEPTH {
+            return Err(ParseError::MaxDepthExceeded(MAX_EXPR_DEPTH));
+        }
+
+        self.expr_depth += 1;
+        let result = self.parse_expr_inner(precedence);
+        self.expr_depth -= 1;
+
+        result
+    }
+
+    /// Inner expression parsing implementation
+    fn parse_expr_inner(&mut self, precedence: Precedence) -> ParseResult<Expr> {
         self.skip_newlines();
 
         // Parse prefix expression
@@ -204,7 +226,7 @@ impl Parser {
                 let op_token = self.advance().ok_or(ParseError::UnexpectedEof {
                     expected: "operator".to_string(),
                 })?;
-                let op = self.token_to_binary_op(&op_token.kind)?;
+                let op = self.token_to_binary_op(&op_token)?;
                 let precedence = self.get_precedence(&op_token.kind);
                 let right = self.parse_expr(precedence)?;
                 let span = left.span().merge(right.span());
@@ -245,9 +267,9 @@ impl Parser {
         )
     }
 
-    /// Convert a token kind to a binary operator
-    fn token_to_binary_op(&self, kind: &TokenKind) -> ParseResult<BinaryOp> {
-        match kind {
+    /// Convert a token to a binary operator
+    fn token_to_binary_op(&self, token: &Token) -> ParseResult<BinaryOp> {
+        match &token.kind {
             TokenKind::Plus => Ok(BinaryOp::Add),
             TokenKind::Minus => Ok(BinaryOp::Subtract),
             TokenKind::Star => Ok(BinaryOp::Multiply),
@@ -262,9 +284,9 @@ impl Parser {
             TokenKind::AmpAmp => Ok(BinaryOp::And),
             TokenKind::PipePipe => Ok(BinaryOp::Or),
             _ => Err(ParseError::UnexpectedToken {
-                found: kind.clone(),
+                found: token.kind.clone(),
                 expected: "binary operator".to_string(),
-                span: Span::new(0, 0),
+                span: token.span,
             }),
         }
     }
@@ -581,7 +603,7 @@ impl Parser {
         self.consume(TokenKind::LeftParen, "'('")?;
         self.skip_newlines();
 
-        let mut params = Vec::new();
+        let mut params: Vec<Parameter> = Vec::new();
         if !self.check(&TokenKind::RightParen) {
             loop {
                 let param_start = self
@@ -615,6 +637,16 @@ impl Parser {
                     Type::Named(ident) => ident.span,
                     Type::Tensor { span, .. } => *span,
                 });
+
+                // Check for duplicate parameter name
+                for existing_param in &params {
+                    if existing_param.name.name == param_name.name {
+                        return Err(ParseError::DuplicateParameter {
+                            name: param_name.name.clone(),
+                            span: param_name.span,
+                        });
+                    }
+                }
 
                 params.push(Parameter {
                     name: param_name,
