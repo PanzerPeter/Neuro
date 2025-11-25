@@ -1,5 +1,41 @@
-// NEURO Programming Language - Diagnostics
-// Infrastructure component for diagnostic message infrastructure
+//! NEURO Programming Language - Diagnostics
+//!
+//! Infrastructure component for collecting and formatting compiler diagnostic messages
+//! (errors, warnings, hints, and informational messages).
+//!
+//! # Overview
+//!
+//! This crate provides:
+//! - Diagnostic severity levels (Error, Warning, Info, Hint)
+//! - Diagnostic error codes for categorization
+//! - Builder pattern for constructing diagnostics with spans and notes
+//! - Diagnostic collector for accumulating multiple diagnostics
+//!
+//! # Architecture
+//!
+//! Pure infrastructure with no business logic. Used throughout the compiler
+//! for error reporting and user feedback.
+//!
+//! # Examples
+//!
+//! ```
+//! use diagnostics::{Diagnostic, DiagnosticCode, DiagnosticCollector};
+//! use shared_types::Span;
+//!
+//! let mut collector = DiagnosticCollector::new();
+//!
+//! collector.add(
+//!     Diagnostic::error(DiagnosticCode::TypeError, "type mismatch".to_string())
+//!         .with_span(Span::new(10, 15))
+//!         .with_note("expected i32, found f64".to_string())
+//! );
+//!
+//! if collector.has_errors() {
+//!     for diag in collector.diagnostics() {
+//!         eprintln!("{}", diag);
+//!     }
+//! }
+//! ```
 
 use shared_types::Span;
 use thiserror::Error;
@@ -13,6 +49,17 @@ pub enum Severity {
     Hint,
 }
 
+impl std::fmt::Display for Severity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Severity::Error => write!(f, "error"),
+            Severity::Warning => write!(f, "warning"),
+            Severity::Info => write!(f, "info"),
+            Severity::Hint => write!(f, "hint"),
+        }
+    }
+}
+
 /// Diagnostic error codes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticCode {
@@ -20,6 +67,17 @@ pub enum DiagnosticCode {
     TypeError,
     NameError,
     Unknown,
+}
+
+impl std::fmt::Display for DiagnosticCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DiagnosticCode::SyntaxError => write!(f, "E0001"),
+            DiagnosticCode::TypeError => write!(f, "E0002"),
+            DiagnosticCode::NameError => write!(f, "E0003"),
+            DiagnosticCode::Unknown => write!(f, "E0000"),
+        }
+    }
 }
 
 /// A diagnostic message
@@ -61,6 +119,25 @@ impl Diagnostic {
     pub fn with_note(mut self, note: String) -> Self {
         self.notes.push(note);
         self
+    }
+}
+
+impl std::fmt::Display for Diagnostic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.severity)?;
+        write!(f, "[{}]", self.code)?;
+
+        if let Some(span) = self.span {
+            write!(f, " at {}..{}", span.start, span.end)?;
+        }
+
+        write!(f, ": {}", self.message)?;
+
+        for note in &self.notes {
+            write!(f, "\n  note: {}", note)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -122,5 +199,48 @@ mod tests {
 
         assert!(collector.has_errors());
         assert_eq!(collector.diagnostics().len(), 1);
+    }
+
+    #[test]
+    fn diagnostic_display_without_span() {
+        let diag = Diagnostic::error(DiagnosticCode::TypeError, "type mismatch".to_string());
+        let output = format!("{}", diag);
+        assert_eq!(output, "error[E0002]: type mismatch");
+    }
+
+    #[test]
+    fn diagnostic_display_with_span() {
+        let diag = Diagnostic::error(DiagnosticCode::SyntaxError, "unexpected token".to_string())
+            .with_span(Span::new(10, 15));
+        let output = format!("{}", diag);
+        assert_eq!(output, "error[E0001] at 10..15: unexpected token");
+    }
+
+    #[test]
+    fn diagnostic_display_with_notes() {
+        let diag = Diagnostic::warning(DiagnosticCode::Unknown, "unused variable".to_string())
+            .with_note("consider using underscore prefix".to_string())
+            .with_note("or remove the variable".to_string());
+        let output = format!("{}", diag);
+        assert_eq!(
+            output,
+            "warning[E0000]: unused variable\n  note: consider using underscore prefix\n  note: or remove the variable"
+        );
+    }
+
+    #[test]
+    fn severity_display() {
+        assert_eq!(format!("{}", Severity::Error), "error");
+        assert_eq!(format!("{}", Severity::Warning), "warning");
+        assert_eq!(format!("{}", Severity::Info), "info");
+        assert_eq!(format!("{}", Severity::Hint), "hint");
+    }
+
+    #[test]
+    fn diagnostic_code_display() {
+        assert_eq!(format!("{}", DiagnosticCode::SyntaxError), "E0001");
+        assert_eq!(format!("{}", DiagnosticCode::TypeError), "E0002");
+        assert_eq!(format!("{}", DiagnosticCode::NameError), "E0003");
+        assert_eq!(format!("{}", DiagnosticCode::Unknown), "E0000");
     }
 }
