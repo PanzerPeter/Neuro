@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **semantic-analysis**: Contextual type inference for numeric literals
+  - Integer and float literals now infer types from context (variable declarations, function parameters, return expressions, assignments)
+  - Range validation ensures literals fit within target type bounds (e.g., `300` cannot be assigned to `i8`)
+  - Defaults: integers default to `i32`, floats to `f64` when no context is available
+  - Large integers auto-promote to `i64` if they exceed `i32` range
+  - New error type: `IntegerLiteralOutOfRange` for literals that don't fit in target type
+  - 12 new unit tests for type inference scenarios in [type_checker.rs](compiler/semantic-analysis/src/type_checker.rs#L773-L1046)
+  - 8 new integration tests in [neurc/tests/type_inference.rs](compiler/neurc/tests/type_inference.rs)
+  - Example program demonstrating type inference: [type_inference_demo.nr](examples/type_inference_demo.nr)
+  - **Note**: Full code generation support in LLVM backend deferred (semantic analysis validates types correctly; backend integration requires typed IR)
+
 - **syntax-parsing**: Comprehensive test suite with 117 tests
   - **expression_tests.rs**: 34 tests covering literals, operators, function calls, precedence, and associativity
   - **statement_tests.rs**: 20 tests for variable declarations, assignments, returns, and control flow

@@ -4,7 +4,7 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-131%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-289%20passing-success.svg)](#)
 [![Phase](https://img.shields.io/badge/phase-1%20100%25%20complete-success.svg)](https://github.com/yourusername/neuro/blob/main/.idea/roadmap.md)
 
 A modern, compiled programming language designed for high-performance AI development. NEURO combines the productivity of Python with the speed of C++, featuring static typing with inference, zero-cost abstractions, and native GPU acceleration.
@@ -160,15 +160,12 @@ The compiler can now compile programs end-to-end from source code to native exec
 - [x] **Variable Reassignment** - Mutable variables with type-safe assignment (`mut x = 0; x = 10`)
 - [x] **Expression-Based Returns** - Implicit returns from trailing expressions (Rust-like syntax)
 - [x] **Extended Primitive Types** - All integer types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool
+- [x] **Type Inference for Numeric Literals** - Contextual type inference with range validation (semantic analysis complete; LLVM backend integration deferred)
 - [x] **String Type** - Full string literal support with escape sequences (\n, \t, \", \\, \xNN, \u{NNNN})
 - [x] **LLVM Backend** - Signedness-aware code generation with string support (4 tests)
 - [x] **CLI Compiler** - `neurc check` validates syntax/types, `neurc compile` produces executables
 - [x] **End-to-End Integration** - Full pipeline from source to binary (36 tests)
-- [x] **131 Tests Passing** - Comprehensive coverage across all components (19 new string tests)
-
-### Phase 1 Deferred Items
-
-- [ ] **Type Inference** - Numeric literal inference (deferred to Phase 2 - currently: i32/f64 defaults)
+- [x] **289 Tests Passing** - Comprehensive coverage across all components (20 new type inference tests)
 
 ### Try It Now!
 

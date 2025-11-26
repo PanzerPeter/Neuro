@@ -69,6 +69,7 @@ The compiler currently supports:
 
 - **Types**:
   - Primitive types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool
+  - Contextual type inference for numeric literals (with range validation)
   - String type with escape sequences (\n, \t, \", \\, \xNN, \u{NNNN})
   - Function types
   - Void type
@@ -101,11 +102,7 @@ The compiler currently supports:
   - Full LLVM backend
   - Native executable generation
   - Comprehensive error messages
-  - 131 tests passing across all components
-
-### Deferred Features
-
-- Type inference for numeric literals (deferred to Phase 2)
+  - 289 tests passing across all components (20 new type inference tests)
 
 ### Future Phases 🔮
 

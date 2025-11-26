@@ -67,4 +67,11 @@ pub enum TypeError {
 
     #[error("cannot assign to immutable variable '{name}' at {span:?}")]
     AssignToImmutable { name: String, span: Span },
+
+    #[error("integer literal {value} out of range for type {ty} at {span:?}")]
+    IntegerLiteralOutOfRange {
+        value: i64,
+        ty: Type,
+        span: Span,
+    },
 }
