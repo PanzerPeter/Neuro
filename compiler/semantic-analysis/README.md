@@ -26,6 +26,7 @@ Supports:
 - Function signature validation
 - Return type verification
 - Boolean condition validation for if/while control flow
+- Integer-bound validation for range-for loops (`for i in start..end`)
 - Loop control validation for `break` and `continue` (must be inside loops)
 - Variable shadowing detection
 

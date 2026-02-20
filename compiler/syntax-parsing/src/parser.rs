@@ -495,6 +495,7 @@ impl Parser {
                 Stmt::Return { span, .. } => *span,
                 Stmt::If { span, .. } => *span,
                 Stmt::While { span, .. } => *span,
+                Stmt::ForRange { span, .. } => *span,
                 Stmt::Break { span } => *span,
                 Stmt::Continue { span } => *span,
                 Stmt::Expr(e) => e.span(),
@@ -527,6 +528,7 @@ impl Parser {
                 Stmt::Return { span, .. } => *span,
                 Stmt::If { span, .. } => *span,
                 Stmt::While { span, .. } => *span,
+                Stmt::ForRange { span, .. } => *span,
                 Stmt::Break { span } => *span,
                 Stmt::Continue { span } => *span,
                 Stmt::Expr(e) => e.span(),
@@ -535,6 +537,74 @@ impl Parser {
 
         Ok(Stmt::While {
             condition,
+            body,
+            span: start_span.merge(end_span),
+        })
+    }
+
+    /// Parse a for-range statement: `for <ident> in <expr>..<expr> { ... }`
+    pub(crate) fn parse_for_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
+        self.skip_newlines();
+
+        let iterator_token = self.consume(TokenKind::Identifier(String::new()), "loop variable")?;
+        let iterator = if let TokenKind::Identifier(name) = iterator_token.kind {
+            Identifier {
+                name,
+                span: iterator_token.span,
+            }
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                found: iterator_token.kind,
+                expected: "loop variable".to_string(),
+                span: iterator_token.span,
+            });
+        };
+
+        self.skip_newlines();
+        self.consume(TokenKind::In, "'in'")?;
+        self.skip_newlines();
+
+        let start = self.parse_expr(Precedence::Lowest)?;
+        self.skip_newlines();
+
+        if self.check(&TokenKind::DotDotEqual) {
+            let token = self.advance().ok_or(ParseError::UnexpectedEof {
+                expected: "'..'".to_string(),
+            })?;
+            return Err(ParseError::UnexpectedToken {
+                found: token.kind,
+                expected: "'..' (exclusive range; '..=' is not yet supported)".to_string(),
+                span: token.span,
+            });
+        }
+
+        self.consume(TokenKind::DotDot, "'..'")?;
+        self.skip_newlines();
+
+        let end = self.parse_expr(Precedence::Lowest)?;
+        self.skip_newlines();
+
+        let body = self.parse_block()?;
+
+        let end_span = body
+            .last()
+            .map(|stmt| match stmt {
+                Stmt::VarDecl { span, .. } => *span,
+                Stmt::Assignment { span, .. } => *span,
+                Stmt::Return { span, .. } => *span,
+                Stmt::If { span, .. } => *span,
+                Stmt::While { span, .. } => *span,
+                Stmt::ForRange { span, .. } => *span,
+                Stmt::Break { span } => *span,
+                Stmt::Continue { span } => *span,
+                Stmt::Expr(e) => e.span(),
+            })
+            .unwrap_or(end.span());
+
+        Ok(Stmt::ForRange {
+            iterator,
+            start,
+            end,
             body,
             span: start_span.merge(end_span),
         })
@@ -575,6 +645,11 @@ impl Parser {
                 let start_span = token.span;
                 self.advance(); // consume 'while'
                 self.parse_while_stmt(start_span)
+            }
+            TokenKind::For => {
+                let start_span = token.span;
+                self.advance(); // consume 'for'
+                self.parse_for_stmt(start_span)
             }
             TokenKind::Break => {
                 let span = token.span;
@@ -736,6 +811,7 @@ impl Parser {
                 Stmt::Return { span, .. } => *span,
                 Stmt::If { span, .. } => *span,
                 Stmt::While { span, .. } => *span,
+                Stmt::ForRange { span, .. } => *span,
                 Stmt::Break { span } => *span,
                 Stmt::Continue { span } => *span,
                 Stmt::Expr(e) => e.span(),

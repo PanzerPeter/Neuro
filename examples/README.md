@@ -101,12 +101,28 @@ Control flow patterns with if/else statements.
 - Boolean comparisons
 - Multiple if statements
 - While loops
+- Range-for loops (`for i in start..end`)
 - Function composition
 
 **Compile and run:**
 ```bash
 cargo run -p neurc -- compile examples/control_flow.nr
 .\examples\control_flow.exe
+```
+
+### [for_range.nr](for_range.nr)
+Range-for loop iteration with exclusive upper bound.
+
+**Features:**
+- `for i in start..end` syntax
+- Integer range accumulation
+- Exclusive range upper bound semantics
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/for_range.nr
+.\examples\for_range.exe
+# Exit code: 10
 ```
 
 ## Phase 1 Limitations
@@ -117,7 +133,7 @@ While Phase 1 is feature-complete for its scope, there are known limitations:
 
 2. **Complex control flow:** Deeply nested if/else chains may not be recognized as having complete return coverage. Simple if/else patterns work reliably.
 
-3. **No for loops yet:** Range-based iteration remains planned for Phase 2.
+3. **Inclusive for ranges not yet available:** Use exclusive ranges (`start..end`). Inclusive ranges (`start..=end`) are still planned.
 
 4. **No strings yet:** String type is defined but not fully functional.
 

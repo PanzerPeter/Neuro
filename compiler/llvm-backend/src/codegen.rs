@@ -735,6 +735,138 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// Generate code for a for-range statement (`for i in start..end { ... }`).
+    fn codegen_for_range(
+        &mut self,
+        iterator: &shared_types::Identifier,
+        start: &Expr,
+        end: &Expr,
+        body: &[Stmt],
+    ) -> CodegenResult<()> {
+        let parent_fn = self
+            .current_function
+            .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
+
+        let start_val = self.codegen_expr(start)?;
+        let end_val = self.codegen_expr(end)?;
+        let iter_name = iterator.name.clone();
+
+        let iter_alloca = self
+            .builder
+            .build_alloca(start_val.get_type(), &iter_name)
+            .map_err(|e| CodegenError::LlvmError(format!("failed to allocate iterator: {}", e)))?;
+        self.builder
+            .build_store(iter_alloca, start_val)
+            .map_err(|e| {
+                CodegenError::LlvmError(format!("failed to initialize iterator: {}", e))
+            })?;
+
+        let previous_var = self.variables.insert(iter_name.clone(), iter_alloca);
+        let previous_var_type = self
+            .variable_types
+            .insert(iter_name.clone(), start_val.get_type());
+
+        let cond_bb = self.context.append_basic_block(parent_fn, "for.cond");
+        let body_bb = self.context.append_basic_block(parent_fn, "for.body");
+        let step_bb = self.context.append_basic_block(parent_fn, "for.step");
+        let exit_bb = self.context.append_basic_block(parent_fn, "for.exit");
+
+        let current_bb = self.builder.get_insert_block().ok_or_else(|| {
+            CodegenError::InternalError("no insert block before for-range".to_string())
+        })?;
+
+        if current_bb.get_terminator().is_none() {
+            self.builder
+                .build_unconditional_branch(cond_bb)
+                .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
+        }
+
+        self.builder.position_at_end(cond_bb);
+        let iter_val = self.codegen_identifier(&iter_name)?;
+        let iter_int = iter_val.into_int_value();
+        let end_int = end_val.into_int_value();
+
+        let iter_sem_ty = self
+            .expr_types
+            .get(&start.span().start)
+            .cloned()
+            .unwrap_or(Type::I32);
+        let cmp_predicate = if TypeMapper::is_unsigned_int(&iter_sem_ty) {
+            IntPredicate::ULT
+        } else {
+            IntPredicate::SLT
+        };
+
+        let cond_val = self
+            .builder
+            .build_int_compare(cmp_predicate, iter_int, end_int, "for.cond")
+            .map_err(|e| {
+                CodegenError::LlvmError(format!("failed to build for condition compare: {}", e))
+            })?;
+        self.builder
+            .build_conditional_branch(cond_val, body_bb, exit_bb)
+            .map_err(|e| {
+                CodegenError::LlvmError(format!("failed to build conditional branch: {}", e))
+            })?;
+
+        self.builder.position_at_end(body_bb);
+        self.loop_targets.push(LoopTargets {
+            continue_bb: step_bb,
+            break_bb: exit_bb,
+        });
+        for stmt in body {
+            if let Some(current_bb) = self.builder.get_insert_block() {
+                if current_bb.get_terminator().is_some() {
+                    break;
+                }
+            }
+            self.codegen_stmt(stmt)?;
+        }
+        let _ = self.loop_targets.pop();
+
+        if let Some(tail_bb) = self.builder.get_insert_block() {
+            if tail_bb.get_terminator().is_none() {
+                self.builder
+                    .build_unconditional_branch(step_bb)
+                    .map_err(|e| {
+                        CodegenError::LlvmError(format!("failed to build branch: {}", e))
+                    })?;
+            }
+        }
+
+        self.builder.position_at_end(step_bb);
+        let current_iter = self.codegen_identifier(&iter_name)?.into_int_value();
+        let one = current_iter.get_type().const_int(1, false);
+        let next_iter = self
+            .builder
+            .build_int_add(current_iter, one, "for.next")
+            .map_err(|e| CodegenError::LlvmError(format!("failed to increment iterator: {}", e)))?;
+        self.builder
+            .build_store(iter_alloca, next_iter)
+            .map_err(|e| {
+                CodegenError::LlvmError(format!("failed to store incremented iterator: {}", e))
+            })?;
+        self.builder
+            .build_unconditional_branch(cond_bb)
+            .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
+
+        self.builder.position_at_end(exit_bb);
+
+        if let Some(previous) = previous_var {
+            self.variables.insert(iter_name.clone(), previous);
+        } else {
+            self.variables.remove(&iter_name);
+        }
+
+        if let Some(previous_ty) = previous_var_type {
+            self.variable_types.insert(iter_name.clone(), previous_ty);
+        } else {
+            self.variable_types.remove(&iter_name);
+        }
+
+        Ok(())
+    }
+
     /// Generate code for a statement
     fn codegen_stmt(&mut self, stmt: &Stmt) -> CodegenResult<()> {
         match stmt {
@@ -751,6 +883,13 @@ impl<'ctx> CodegenContext<'ctx> {
             Stmt::While {
                 condition, body, ..
             } => self.codegen_while(condition, body),
+            Stmt::ForRange {
+                iterator,
+                start,
+                end,
+                body,
+                ..
+            } => self.codegen_for_range(iterator, start, end, body),
             Stmt::Break { .. } => {
                 let targets = self.loop_targets.last().ok_or_else(|| {
                     CodegenError::InternalError(
@@ -1033,6 +1172,24 @@ impl<'ctx> CodegenContext<'ctx> {
                 condition, body, ..
             } => {
                 self.visit_expr_for_types(condition, func_types)?;
+                for stmt in body {
+                    self.visit_stmt_for_types(stmt, func_types)?;
+                }
+            }
+            Stmt::ForRange {
+                iterator,
+                start,
+                end,
+                body,
+                ..
+            } => {
+                self.visit_expr_for_types(start, func_types)?;
+                self.visit_expr_for_types(end, func_types)?;
+
+                if let Some(iterator_ty) = self.expr_types.get(&start.span().start).cloned() {
+                    self.type_env.insert(iterator.name.clone(), iterator_ty);
+                }
+
                 for stmt in body {
                     self.visit_stmt_for_types(stmt, func_types)?;
                 }

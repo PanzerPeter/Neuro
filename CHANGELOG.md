@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **control-flow**: Added exclusive range `for` loops (`for i in 0..n`) end-to-end
+  - Added `Stmt::ForRange` AST node in `ast-types`
+  - Added parser support for `for <ident> in <expr>..<expr> { ... }`
+  - Added semantic validation for integer range bounds and loop-scoped iterator binding
+  - Added LLVM codegen with dedicated step block so `continue` advances the iterator correctly
+  - Added parser, semantic, and neurc integration tests for range-for loop behavior
 - **control-flow**: Added `break` and `continue` support for `while` loops end-to-end
   - Added `Stmt::Break` and `Stmt::Continue` AST nodes in `ast-types`
   - Added parser support for `break` and `continue` statements

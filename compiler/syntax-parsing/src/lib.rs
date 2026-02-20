@@ -32,7 +32,7 @@ use precedence::Precedence;
 /// - Function definitions with parameters and return types
 /// - Variable declarations (`val` and `mut`)
 /// - Expressions: literals, identifiers, binary/unary operators, function calls
-/// - Statements: variable declarations, if/else, while, break, continue, return, expression statements
+/// - Statements: variable declarations, if/else, while, for-range (`for i in start..end`), break, continue, return, expression statements
 /// - Type annotations for primitive types
 ///
 /// # Arguments

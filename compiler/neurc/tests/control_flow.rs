@@ -163,6 +163,51 @@ func main() -> i32 {
     assert_eq!(exit_code, 12, "Expected exit code 12 (1+2+4+5)");
 }
 
+#[test]
+fn test_for_range_loop_accumulation() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut sum: i32 = 0
+
+    for i in 0..5 {
+        sum = sum + i
+    }
+
+    return sum
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("for_range_sum.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 10, "Expected exit code 10 (0+1+2+3+4)");
+}
+
+#[test]
+fn test_for_range_loop_with_continue() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut sum: i32 = 0
+
+    for i in 0..6 {
+        if i == 3 {
+            continue
+        }
+        sum = sum + i
+    }
+
+    return sum
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("for_range_continue.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 12, "Expected exit code 12 (0+1+2+4+5)");
+}
+
 // Note: Deeply nested if/else chains may fail control flow analysis in Phase 1
 // The current implementation has limitations with complex control flow patterns
 // Simple if/else works, but deeply nested or complex chains may not be recognized

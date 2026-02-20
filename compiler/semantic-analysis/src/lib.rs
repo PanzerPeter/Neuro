@@ -38,7 +38,7 @@ use type_checker::TypeChecker;
 /// - Unary operators (negation, logical not)
 /// - Function calls
 /// - If/else statements
-/// - While loops with `break` and `continue` validation
+/// - While loops and range-for loops with `break` and `continue` validation
 /// - Return statements
 /// - Lexical scoping
 ///

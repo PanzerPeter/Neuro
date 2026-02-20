@@ -225,6 +225,19 @@ fn test_parse_nested_while_in_if() {
 }
 
 #[test]
+fn test_parse_for_range_statement() {
+    let source = r#"
+        func test() {
+            for i in 0..10 {
+                val x = i
+            }
+        }
+    "#;
+    let result = parse(source);
+    assert!(result.is_ok(), "Parse error: {:?}", result.err());
+}
+
+#[test]
 fn test_parse_expression_statement() {
     let source = r#"
         func test() {

@@ -29,7 +29,7 @@ Complete reference for the NEURO language:
 - **[Variables](language-reference/variables.md)** - Variables, mutability, and reassignment
 - **[Functions](language-reference/functions.md)** - Function declarations, parameters, returns
 - **[Expressions](language-reference/expressions.md)** - Expression syntax and evaluation
-- **[Control Flow](language-reference/control-flow.md)** - If/else statements and conditionals
+- **[Control Flow](language-reference/control-flow.md)** - If/else, while, and range-for loops
 - **[Operators](language-reference/operators.md)** - Arithmetic, comparison, logical operators
 
 ### User Guides
@@ -90,6 +90,8 @@ The compiler currently supports:
 - **Control Flow**:
   - If/else statements
   - Else-if chaining
+  - While loops
+  - Range-for loops (`for i in start..end`)
   - Block scoping
 
 - **Operators**:

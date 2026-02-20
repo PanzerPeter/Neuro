@@ -76,4 +76,7 @@ pub enum TypeError {
 
     #[error("'continue' used outside of a loop at {span:?}")]
     ContinueOutsideLoop { span: Span },
+
+    #[error("for-range bound must be an integer type, found {found} at {span:?}")]
+    InvalidForRangeType { found: Type, span: Span },
 }

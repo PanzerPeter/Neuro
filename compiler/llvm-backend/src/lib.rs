@@ -67,7 +67,7 @@ impl OptimizationLevelSetting {
 /// - Variable declarations
 /// - Function calls
 /// - If/else statements
-/// - While loops with `break` and `continue`
+/// - While loops and range-for loops with `break` and `continue`
 /// - Return statements
 ///
 /// # Arguments

@@ -155,6 +155,32 @@ while i < 10 {
 // while 42 { }  // Error: expected bool condition
 ```
 
+## For Loops (Exclusive Range)
+
+Use `for` to iterate over an exclusive integer range:
+
+```neuro
+for i in 0..10 {
+    // i takes values 0 through 9
+}
+```
+
+### For-Range Requirements
+
+- Range bounds must be integer-compatible expressions.
+- The upper bound is exclusive (`0..10` does not include `10`).
+- `..=` inclusive ranges are not yet supported.
+
+```neuro
+func sum_first_five() -> i32 {
+    mut sum: i32 = 0
+    for i in 0..5 {
+        sum = sum + i
+    }
+    return sum
+}
+```
+
 ## Break and Continue
 
 Use `break` to exit the nearest loop and `continue` to skip to the next iteration:

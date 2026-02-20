@@ -630,6 +630,66 @@ impl TypeChecker {
                 Some(())
             }
 
+            Stmt::ForRange {
+                iterator,
+                start,
+                end,
+                body,
+                span: _,
+            } => {
+                let start_ty = self.check_expr(start, None).unwrap_or(Type::Unknown);
+                if !matches!(start_ty, Type::Unknown) && !start_ty.is_integer() {
+                    self.record_error(TypeError::InvalidForRangeType {
+                        found: start_ty.clone(),
+                        span: start.span(),
+                    });
+                }
+
+                let end_ty = self
+                    .check_expr(end, Some(&start_ty))
+                    .unwrap_or(Type::Unknown);
+                if !matches!(end_ty, Type::Unknown) && !end_ty.is_integer() {
+                    self.record_error(TypeError::InvalidForRangeType {
+                        found: end_ty.clone(),
+                        span: end.span(),
+                    });
+                }
+
+                if !matches!(start_ty, Type::Unknown)
+                    && !matches!(end_ty, Type::Unknown)
+                    && !end_ty.is_compatible_with(&start_ty)
+                {
+                    self.record_error(TypeError::Mismatch {
+                        expected: start_ty.clone(),
+                        found: end_ty,
+                        span: end.span(),
+                    });
+                }
+
+                self.loop_depth += 1;
+                self.symbols.push_scope();
+
+                if !matches!(start_ty, Type::Unknown) {
+                    if let Err(duplicate_name) =
+                        self.symbols.define(iterator.name.clone(), start_ty, false)
+                    {
+                        self.record_error(TypeError::VariableAlreadyDefined {
+                            name: duplicate_name,
+                            span: iterator.span,
+                        });
+                    }
+                }
+
+                for stmt in body {
+                    let _ = self.check_stmt(stmt);
+                }
+
+                self.symbols.pop_scope();
+                self.loop_depth -= 1;
+
+                Some(())
+            }
+
             Stmt::Break { span } => {
                 if self.loop_depth == 0 {
                     self.record_error(TypeError::BreakOutsideLoop { span: *span });
@@ -1094,5 +1154,44 @@ mod tests {
         // Verify variable has i64 type
         let symbol_info = checker.symbols.lookup("x").unwrap();
         assert_eq!(symbol_info.ty, Type::I64);
+    }
+
+    #[test]
+    fn test_for_range_accepts_integer_bounds() {
+        let mut checker = TypeChecker::new();
+
+        let stmt = Stmt::ForRange {
+            iterator: make_ident("i"),
+            start: Expr::Literal(Literal::Integer(0), Span::new(0, 1)),
+            end: Expr::Literal(Literal::Integer(5), Span::new(4, 5)),
+            body: vec![Stmt::Continue {
+                span: Span::new(8, 16),
+            }],
+            span: Span::new(0, 16),
+        };
+
+        checker.check_stmt(&stmt);
+        assert!(!checker.has_errors());
+    }
+
+    #[test]
+    fn test_for_range_rejects_non_integer_bound() {
+        let mut checker = TypeChecker::new();
+
+        let stmt = Stmt::ForRange {
+            iterator: make_ident("i"),
+            start: Expr::Literal(Literal::Boolean(true), Span::new(0, 4)),
+            end: Expr::Literal(Literal::Integer(5), Span::new(7, 8)),
+            body: vec![],
+            span: Span::new(0, 12),
+        };
+
+        checker.check_stmt(&stmt);
+        assert!(checker.has_errors());
+
+        let errors = checker.into_errors();
+        assert!(errors
+            .iter()
+            .any(|error| matches!(error, TypeError::InvalidForRangeType { .. })));
     }
 }
