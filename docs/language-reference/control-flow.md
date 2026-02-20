@@ -155,6 +155,47 @@ while i < 10 {
 // while 42 { }  // Error: expected bool condition
 ```
 
+## Break and Continue
+
+Use `break` to exit the nearest loop and `continue` to skip to the next iteration:
+
+```neuro
+while condition {
+    if should_stop {
+        break
+    }
+
+    if should_skip {
+        continue
+    }
+
+    // normal loop body work
+}
+```
+
+### Break/Continue Requirements
+
+Both statements are only valid inside loops:
+
+```neuro
+func valid() -> i32 {
+    mut i: i32 = 0
+    while i < 10 {
+        i = i + 1
+        if i == 5 {
+            break
+        }
+    }
+    return i
+}
+
+// Invalid
+// func invalid() -> i32 {
+//     break      // Error: break used outside of a loop
+//     return 0
+// }
+```
+
 ## Examples
 
 ### Range Check

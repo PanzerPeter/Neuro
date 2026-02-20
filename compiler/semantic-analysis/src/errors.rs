@@ -70,4 +70,10 @@ pub enum TypeError {
 
     #[error("integer literal {value} out of range for type {ty} at {span:?}")]
     IntegerLiteralOutOfRange { value: i64, ty: Type, span: Span },
+
+    #[error("'break' used outside of a loop at {span:?}")]
+    BreakOutsideLoop { span: Span },
+
+    #[error("'continue' used outside of a loop at {span:?}")]
+    ContinueOutsideLoop { span: Span },
 }

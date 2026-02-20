@@ -36,6 +36,7 @@ Uses inkwell (LLVM bindings) to generate optimized machine code:
 - Function definitions and calls
 - Variable bindings (stack allocation)
 - If/else and while-loop control flow
+- Loop control statements: `break`, `continue`
 - Return statements
 - Basic type conversions
 

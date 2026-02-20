@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **control-flow**: Added `break` and `continue` support for `while` loops end-to-end
+  - Added `Stmt::Break` and `Stmt::Continue` AST nodes in `ast-types`
+  - Added parser support for `break` and `continue` statements
+  - Added semantic validation errors for loop-only usage (`BreakOutsideLoop`, `ContinueOutsideLoop`)
+  - Added LLVM codegen loop-target handling for `break`/`continue` control transfer
+  - Added parser, semantic, and neurc end-to-end tests for valid and invalid loop control
 - **control-flow**: Implemented `while` loops end-to-end (parser, semantic-analysis, LLVM backend)
   - Added `Stmt::While` AST node in `ast-types`
   - Added syntax support for `while <condition> { ... }`

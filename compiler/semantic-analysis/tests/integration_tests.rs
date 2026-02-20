@@ -351,6 +351,78 @@ fn error_while_condition_not_bool() {
 }
 
 #[test]
+fn type_check_break_inside_while_loop() {
+    let source = r#"func test() -> i32 {
+        mut i: i32 = 0
+        while true {
+            if i == 3 {
+                break
+            }
+            i = i + 1
+        }
+        return i
+    }"#;
+
+    let items = syntax_parsing::parse(source).unwrap();
+    let result = type_check(&items);
+    assert!(result.is_ok(), "Expected break in loop to type check");
+}
+
+#[test]
+fn type_check_continue_inside_while_loop() {
+    let source = r#"func test() -> i32 {
+        mut i: i32 = 0
+        mut sum: i32 = 0
+
+        while i < 5 {
+            i = i + 1
+            if i == 3 {
+                continue
+            }
+            sum = sum + i
+        }
+
+        return sum
+    }"#;
+
+    let items = syntax_parsing::parse(source).unwrap();
+    let result = type_check(&items);
+    assert!(result.is_ok(), "Expected continue in loop to type check");
+}
+
+#[test]
+fn error_break_outside_loop() {
+    let source = r#"func test() -> i32 {
+        break
+        return 0
+    }"#;
+
+    let items = syntax_parsing::parse(source).unwrap();
+    let result = type_check(&items);
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+    assert!(errors
+        .iter()
+        .any(|e| matches!(e, TypeError::BreakOutsideLoop { .. })));
+}
+
+#[test]
+fn error_continue_outside_loop() {
+    let source = r#"func test() -> i32 {
+        continue
+        return 0
+    }"#;
+
+    let items = syntax_parsing::parse(source).unwrap();
+    let result = type_check(&items);
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+    assert!(errors
+        .iter()
+        .any(|e| matches!(e, TypeError::ContinueOutsideLoop { .. })));
+}
+
+#[test]
 fn error_duplicate_variable() {
     let source = r#"func test() -> i32 {
         val x: i32 = 1

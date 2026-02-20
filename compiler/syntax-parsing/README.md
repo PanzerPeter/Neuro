@@ -19,7 +19,7 @@ Recursive descent parser with Pratt parsing for expression precedence. Supports:
 - Function definitions with parameters and return types
 - Variable declarations (val/mut)
 - Expressions (literals, binary/unary ops, function calls)
-- Statements (if/else, while, return, expression statements)
+- Statements (if/else, while, break, continue, return, expression statements)
 - Type annotations
 
 VSA 4.0 Note: AST types extracted to infrastructure/ast-types to eliminate

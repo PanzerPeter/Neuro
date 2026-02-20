@@ -495,6 +495,8 @@ impl Parser {
                 Stmt::Return { span, .. } => *span,
                 Stmt::If { span, .. } => *span,
                 Stmt::While { span, .. } => *span,
+                Stmt::Break { span } => *span,
+                Stmt::Continue { span } => *span,
                 Stmt::Expr(e) => e.span(),
             })
             .unwrap_or(start_span);
@@ -525,6 +527,8 @@ impl Parser {
                 Stmt::Return { span, .. } => *span,
                 Stmt::If { span, .. } => *span,
                 Stmt::While { span, .. } => *span,
+                Stmt::Break { span } => *span,
+                Stmt::Continue { span } => *span,
                 Stmt::Expr(e) => e.span(),
             })
             .unwrap_or(condition.span());
@@ -571,6 +575,16 @@ impl Parser {
                 let start_span = token.span;
                 self.advance(); // consume 'while'
                 self.parse_while_stmt(start_span)
+            }
+            TokenKind::Break => {
+                let span = token.span;
+                self.advance(); // consume 'break'
+                Ok(Stmt::Break { span })
+            }
+            TokenKind::Continue => {
+                let span = token.span;
+                self.advance(); // consume 'continue'
+                Ok(Stmt::Continue { span })
             }
             TokenKind::Identifier(_) => {
                 // Check if this is an assignment (identifier = expr) or expression statement
@@ -722,6 +736,8 @@ impl Parser {
                 Stmt::Return { span, .. } => *span,
                 Stmt::If { span, .. } => *span,
                 Stmt::While { span, .. } => *span,
+                Stmt::Break { span } => *span,
+                Stmt::Continue { span } => *span,
                 Stmt::Expr(e) => e.span(),
             })
             .unwrap_or(start.span);

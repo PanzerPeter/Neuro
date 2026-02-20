@@ -113,6 +113,56 @@ func main() -> i32 {
     assert_eq!(exit_code, 10, "Expected exit code 10 (0+1+2+3+4)");
 }
 
+#[test]
+fn test_while_loop_with_break() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut i: i32 = 0
+
+    while true {
+        if i == 4 {
+            break
+        }
+        i = i + 1
+    }
+
+    return i
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("while_break.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 4, "Expected exit code 4");
+}
+
+#[test]
+fn test_while_loop_with_continue() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut i: i32 = 0
+    mut sum: i32 = 0
+
+    while i < 5 {
+        i = i + 1
+        if i == 3 {
+            continue
+        }
+        sum = sum + i
+    }
+
+    return sum
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("while_continue.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 12, "Expected exit code 12 (1+2+4+5)");
+}
+
 // Note: Deeply nested if/else chains may fail control flow analysis in Phase 1
 // The current implementation has limitations with complex control flow patterns
 // Simple if/else works, but deeply nested or complex chains may not be recognized

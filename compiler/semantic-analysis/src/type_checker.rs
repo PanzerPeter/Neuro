@@ -20,6 +20,8 @@ pub(crate) struct TypeChecker {
     errors: Vec<TypeError>,
     /// Current function's return type (for validating return statements)
     current_function_return_type: Option<Type>,
+    /// Nesting depth of active loop statements.
+    loop_depth: u32,
 }
 
 impl TypeChecker {
@@ -29,6 +31,7 @@ impl TypeChecker {
             functions: HashMap::new(),
             errors: Vec::new(),
             current_function_return_type: None,
+            loop_depth: 0,
         }
     }
 
@@ -616,11 +619,29 @@ impl TypeChecker {
                     }
                 }
 
+                self.loop_depth += 1;
                 self.symbols.push_scope();
                 for stmt in body {
                     let _ = self.check_stmt(stmt);
                 }
                 self.symbols.pop_scope();
+                self.loop_depth -= 1;
+
+                Some(())
+            }
+
+            Stmt::Break { span } => {
+                if self.loop_depth == 0 {
+                    self.record_error(TypeError::BreakOutsideLoop { span: *span });
+                }
+
+                Some(())
+            }
+
+            Stmt::Continue { span } => {
+                if self.loop_depth == 0 {
+                    self.record_error(TypeError::ContinueOutsideLoop { span: *span });
+                }
 
                 Some(())
             }

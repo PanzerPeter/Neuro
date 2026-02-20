@@ -2,6 +2,7 @@
 // Code generation context and LLVM IR generation
 
 use ast_types::{BinaryOp, Expr, FunctionDef, Item, Stmt, UnaryOp};
+use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context as LLVMContext;
 use inkwell::module::Module;
@@ -13,6 +14,11 @@ use std::collections::HashMap;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::type_mapping::TypeMapper;
 use crate::types::Type;
+
+struct LoopTargets<'ctx> {
+    continue_bb: BasicBlock<'ctx>,
+    break_bb: BasicBlock<'ctx>,
+}
 
 pub(crate) struct CodegenContext<'ctx> {
     context: &'ctx LLVMContext,
@@ -37,6 +43,9 @@ pub(crate) struct CodegenContext<'ctx> {
 
     /// Variable type information during type collection (name -> Type)
     type_env: HashMap<String, Type>,
+
+    /// Active loop targets for break/continue statements.
+    loop_targets: Vec<LoopTargets<'ctx>>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -56,6 +65,7 @@ impl<'ctx> CodegenContext<'ctx> {
             current_function: None,
             expr_types: HashMap::new(),
             type_env: HashMap::new(),
+            loop_targets: Vec::new(),
         }
     }
 
@@ -697,14 +707,28 @@ impl<'ctx> CodegenContext<'ctx> {
             })?;
 
         self.builder.position_at_end(body_bb);
+        self.loop_targets.push(LoopTargets {
+            continue_bb: cond_bb,
+            break_bb: exit_bb,
+        });
         for stmt in body {
+            if let Some(current_bb) = self.builder.get_insert_block() {
+                if current_bb.get_terminator().is_some() {
+                    break;
+                }
+            }
             self.codegen_stmt(stmt)?;
         }
+        let _ = self.loop_targets.pop();
 
-        if body_bb.get_terminator().is_none() {
-            self.builder
-                .build_unconditional_branch(cond_bb)
-                .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
+        if let Some(tail_bb) = self.builder.get_insert_block() {
+            if tail_bb.get_terminator().is_none() {
+                self.builder
+                    .build_unconditional_branch(cond_bb)
+                    .map_err(|e| {
+                        CodegenError::LlvmError(format!("failed to build branch: {}", e))
+                    })?;
+            }
         }
 
         self.builder.position_at_end(exit_bb);
@@ -727,6 +751,50 @@ impl<'ctx> CodegenContext<'ctx> {
             Stmt::While {
                 condition, body, ..
             } => self.codegen_while(condition, body),
+            Stmt::Break { .. } => {
+                let targets = self.loop_targets.last().ok_or_else(|| {
+                    CodegenError::InternalError(
+                        "break used outside loop during codegen".to_string(),
+                    )
+                })?;
+
+                if let Some(current_bb) = self.builder.get_insert_block() {
+                    if current_bb.get_terminator().is_none() {
+                        self.builder
+                            .build_unconditional_branch(targets.break_bb)
+                            .map_err(|e| {
+                                CodegenError::LlvmError(format!(
+                                    "failed to build break branch: {}",
+                                    e
+                                ))
+                            })?;
+                    }
+                }
+
+                Ok(())
+            }
+            Stmt::Continue { .. } => {
+                let targets = self.loop_targets.last().ok_or_else(|| {
+                    CodegenError::InternalError(
+                        "continue used outside loop during codegen".to_string(),
+                    )
+                })?;
+
+                if let Some(current_bb) = self.builder.get_insert_block() {
+                    if current_bb.get_terminator().is_none() {
+                        self.builder
+                            .build_unconditional_branch(targets.continue_bb)
+                            .map_err(|e| {
+                                CodegenError::LlvmError(format!(
+                                    "failed to build continue branch: {}",
+                                    e
+                                ))
+                            })?;
+                    }
+                }
+
+                Ok(())
+            }
             Stmt::Expr(expr) => {
                 self.codegen_expr(expr)?;
                 Ok(())
@@ -969,6 +1037,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     self.visit_stmt_for_types(stmt, func_types)?;
                 }
             }
+            Stmt::Break { .. } | Stmt::Continue { .. } => {}
             Stmt::Expr(expr) => {
                 self.visit_expr_for_types(expr, func_types)?;
             }

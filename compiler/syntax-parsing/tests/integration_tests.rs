@@ -286,3 +286,45 @@ fn test_program_empty_functions() {
     let result = parse(source);
     assert!(result.is_ok(), "Parse error: {:?}", result.err());
 }
+
+#[test]
+fn test_complete_program_with_break_statement() {
+    let source = r#"
+        func main() -> i32 {
+            mut i: i32 = 0
+            while true {
+                if i == 3 {
+                    break
+                }
+                i = i + 1
+            }
+            return i
+        }
+    "#;
+
+    let result = parse(source);
+    assert!(result.is_ok(), "Parse error: {:?}", result.err());
+}
+
+#[test]
+fn test_complete_program_with_continue_statement() {
+    let source = r#"
+        func main() -> i32 {
+            mut i: i32 = 0
+            mut sum: i32 = 0
+
+            while i < 5 {
+                i = i + 1
+                if i == 3 {
+                    continue
+                }
+                sum = sum + i
+            }
+
+            return sum
+        }
+    "#;
+
+    let result = parse(source);
+    assert!(result.is_ok(), "Parse error: {:?}", result.err());
+}

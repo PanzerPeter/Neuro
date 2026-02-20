@@ -128,7 +128,7 @@ The compiler can now compile programs end-to-end from source code to native exec
 ### Current Capabilities (Phase 1)
 
 - **Lexical Analysis** - Complete tokenizer with Unicode support (28 tests)
-- **Syntax Parsing** - Expression parser (Pratt) and statement parser with assignment and while-loop support
+- **Syntax Parsing** - Expression parser (Pratt) and statement parser with assignment, while-loop, break, and continue support
 - **Semantic Analysis** - Full type checking with mutability enforcement (39 tests)
 - **Variable Reassignment** - Mutable variables with type-safe assignment (`mut x = 0; x = 10`)
 - **Expression-Based Returns** - Implicit returns from trailing expressions (Rust-like syntax)

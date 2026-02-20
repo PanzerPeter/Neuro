@@ -40,5 +40,13 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// Break out of the nearest enclosing loop.
+    Break {
+        span: Span,
+    },
+    /// Continue to the next iteration of the nearest enclosing loop.
+    Continue {
+        span: Span,
+    },
     Expr(Expr),
 }
