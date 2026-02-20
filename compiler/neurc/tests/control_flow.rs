@@ -90,6 +90,29 @@ func main() -> i32 {
     assert_eq!(exit_code, 2, "Expected exit code 2 (a || b)");
 }
 
+#[test]
+fn test_while_loop_accumulation() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut i: i32 = 0
+    mut sum: i32 = 0
+
+    while i < 5 {
+        sum = sum + i
+        i = i + 1
+    }
+
+    return sum
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("while_loop.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 10, "Expected exit code 10 (0+1+2+3+4)");
+}
+
 // Note: Deeply nested if/else chains may fail control flow analysis in Phase 1
 // The current implementation has limitations with complex control flow patterns
 // Simple if/else works, but deeply nested or complex chains may not be recognized

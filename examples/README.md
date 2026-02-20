@@ -100,9 +100,8 @@ Control flow patterns with if/else statements.
 **Features:**
 - Boolean comparisons
 - Multiple if statements
+- While loops
 - Function composition
-
-**Note:** Phase 1 has limitations with deeply nested if/else chains.
 
 **Compile and run:**
 ```bash
@@ -118,7 +117,7 @@ While Phase 1 is feature-complete for its scope, there are known limitations:
 
 2. **Complex control flow:** Deeply nested if/else chains may not be recognized as having complete return coverage. Simple if/else patterns work reliably.
 
-3. **No while/for loops:** Loop constructs are planned for Phase 2.
+3. **No for loops yet:** Range-based iteration remains planned for Phase 2.
 
 4. **No strings yet:** String type is defined but not fully functional.
 

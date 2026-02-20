@@ -53,12 +53,20 @@ fn bench_codegen(c: &mut Criterion) {
         let source = build_source(case);
         let items = syntax_parsing::parse(source).expect("benchmark source must parse");
 
-        group.bench_with_input(BenchmarkId::new("compile", case), &items, |b, parsed_items| {
-            b.iter(|| {
-                let result = compile(parsed_items, OptimizationLevelSetting::O2);
-                assert!(result.is_ok(), "benchmark compilation failed: {:?}", result.err());
-            })
-        });
+        group.bench_with_input(
+            BenchmarkId::new("compile", case),
+            &items,
+            |b, parsed_items| {
+                b.iter(|| {
+                    let result = compile(parsed_items, OptimizationLevelSetting::O2);
+                    assert!(
+                        result.is_ok(),
+                        "benchmark compilation failed: {:?}",
+                        result.err()
+                    );
+                })
+            },
+        );
     }
 
     group.finish();

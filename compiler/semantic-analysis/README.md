@@ -25,6 +25,7 @@ Supports:
 - Type checking for binary/unary operations
 - Function signature validation
 - Return type verification
+- Boolean condition validation for if/while control flow
 - Variable shadowing detection
 
 Current limitations (Phase 1):

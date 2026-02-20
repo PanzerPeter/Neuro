@@ -131,6 +131,30 @@ func nested(a: i32, b: i32) -> i32 {
 }
 ```
 
+## While Loops
+
+Use `while` to repeat a block while a boolean condition is true:
+
+```neuro
+while condition {
+    // loop body
+}
+```
+
+### While Requirements
+
+Loop conditions must be boolean expressions:
+
+```neuro
+mut i: i32 = 0
+while i < 10 {
+    i = i + 1
+}
+
+// Invalid
+// while 42 { }  // Error: expected bool condition
+```
+
 ## Examples
 
 ### Range Check
@@ -227,14 +251,10 @@ func is_positive_verbose(x: i32) -> bool {
 
 ## Future Features (Phase 2+)
 
-### Loops (Phase 2)
+### For Loops (Phase 2)
 
 ```neuro
 // Not yet implemented
-while condition {
-    // Repeat while condition is true
-}
-
 for i in 0..10 {
     // Iterate from 0 to 9
 }

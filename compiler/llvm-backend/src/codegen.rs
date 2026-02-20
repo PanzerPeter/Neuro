@@ -668,6 +668,49 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// Generate code for a while statement
+    fn codegen_while(&mut self, condition: &Expr, body: &[Stmt]) -> CodegenResult<()> {
+        let parent_fn = self
+            .current_function
+            .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
+
+        let cond_bb = self.context.append_basic_block(parent_fn, "while.cond");
+        let body_bb = self.context.append_basic_block(parent_fn, "while.body");
+        let exit_bb = self.context.append_basic_block(parent_fn, "while.exit");
+
+        let current_bb = self.builder.get_insert_block().ok_or_else(|| {
+            CodegenError::InternalError("no insert block before while".to_string())
+        })?;
+
+        if current_bb.get_terminator().is_none() {
+            self.builder
+                .build_unconditional_branch(cond_bb)
+                .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
+        }
+
+        self.builder.position_at_end(cond_bb);
+        let cond_val = self.codegen_expr(condition)?;
+        self.builder
+            .build_conditional_branch(cond_val.into_int_value(), body_bb, exit_bb)
+            .map_err(|e| {
+                CodegenError::LlvmError(format!("failed to build conditional branch: {}", e))
+            })?;
+
+        self.builder.position_at_end(body_bb);
+        for stmt in body {
+            self.codegen_stmt(stmt)?;
+        }
+
+        if body_bb.get_terminator().is_none() {
+            self.builder
+                .build_unconditional_branch(cond_bb)
+                .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
+        }
+
+        self.builder.position_at_end(exit_bb);
+        Ok(())
+    }
+
     /// Generate code for a statement
     fn codegen_stmt(&mut self, stmt: &Stmt) -> CodegenResult<()> {
         match stmt {
@@ -681,6 +724,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 else_block,
                 ..
             } => self.codegen_if(condition, then_block, else_if_blocks, else_block),
+            Stmt::While {
+                condition, body, ..
+            } => self.codegen_while(condition, body),
             Stmt::Expr(expr) => {
                 self.codegen_expr(expr)?;
                 Ok(())
@@ -913,6 +959,14 @@ impl<'ctx> CodegenContext<'ctx> {
                     for stmt in stmts {
                         self.visit_stmt_for_types(stmt, func_types)?;
                     }
+                }
+            }
+            Stmt::While {
+                condition, body, ..
+            } => {
+                self.visit_expr_for_types(condition, func_types)?;
+                for stmt in body {
+                    self.visit_stmt_for_types(stmt, func_types)?;
                 }
             }
             Stmt::Expr(expr) => {

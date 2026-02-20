@@ -32,5 +32,13 @@ pub enum Stmt {
         else_block: Option<Vec<Stmt>>,
         span: Span,
     },
+    /// While loop statement.
+    ///
+    /// Executes `body` repeatedly while `condition` evaluates to `true`.
+    While {
+        condition: Expr,
+        body: Vec<Stmt>,
+        span: Span,
+    },
     Expr(Expr),
 }

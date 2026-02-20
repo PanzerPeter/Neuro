@@ -185,8 +185,8 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
 
     // Generate LLVM object code
     log::debug!("Generating LLVM IR and object code...");
-    let optimization = OptimizationLevelSetting::from_u8(optimization)
-        .context("Invalid optimization level")?;
+    let optimization =
+        OptimizationLevelSetting::from_u8(optimization).context("Invalid optimization level")?;
 
     let object_code = llvm_backend::compile(&ast, optimization)
         .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))

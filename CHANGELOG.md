@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **control-flow**: Implemented `while` loops end-to-end (parser, semantic-analysis, LLVM backend)
+  - Added `Stmt::While` AST node in `ast-types`
+  - Added syntax support for `while <condition> { ... }`
+  - Enforced boolean loop conditions in type checker
+  - Added LLVM IR loop generation (`while.cond` / `while.body` / `while.exit` blocks)
+  - Added parser, semantic, and end-to-end integration tests for loop behavior
 - **neurc**: Added CLI contract integration tests for roadmap-claimed behavior
   - New test suite: [compiler/neurc/tests/cli_contract.rs](compiler/neurc/tests/cli_contract.rs)
   - Verifies `neurc check` success writes confirmation to stdout with empty stderr

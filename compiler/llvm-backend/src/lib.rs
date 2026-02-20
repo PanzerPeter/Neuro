@@ -269,10 +269,22 @@ mod tests {
 
     #[test]
     fn test_optimization_level_parsing() {
-        assert_eq!(OptimizationLevelSetting::from_u8(0).unwrap(), OptimizationLevelSetting::O0);
-        assert_eq!(OptimizationLevelSetting::from_u8(1).unwrap(), OptimizationLevelSetting::O1);
-        assert_eq!(OptimizationLevelSetting::from_u8(2).unwrap(), OptimizationLevelSetting::O2);
-        assert_eq!(OptimizationLevelSetting::from_u8(3).unwrap(), OptimizationLevelSetting::O3);
+        assert_eq!(
+            OptimizationLevelSetting::from_u8(0).unwrap(),
+            OptimizationLevelSetting::O0
+        );
+        assert_eq!(
+            OptimizationLevelSetting::from_u8(1).unwrap(),
+            OptimizationLevelSetting::O1
+        );
+        assert_eq!(
+            OptimizationLevelSetting::from_u8(2).unwrap(),
+            OptimizationLevelSetting::O2
+        );
+        assert_eq!(
+            OptimizationLevelSetting::from_u8(3).unwrap(),
+            OptimizationLevelSetting::O3
+        );
         assert!(OptimizationLevelSetting::from_u8(4).is_err());
     }
 }

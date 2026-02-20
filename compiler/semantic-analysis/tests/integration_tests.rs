@@ -91,6 +91,20 @@ fn type_check_nested_scopes() {
 }
 
 #[test]
+fn type_check_while_statement() {
+    let source = r#"func test() -> i32 {
+        mut i: i32 = 0
+        while i < 5 {
+            i = i + 1
+        }
+        return i
+    }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let result = type_check(&items);
+    assert!(result.is_ok());
+}
+
+#[test]
 fn type_check_variable_shadowing() {
     let source = r#"func test() -> i32 {
         val x: i32 = 1
@@ -308,6 +322,24 @@ fn error_if_condition_not_bool() {
             return 1
         }
         return 0
+    }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let result = type_check(&items);
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+    assert!(errors
+        .iter()
+        .any(|e| matches!(e, TypeError::Mismatch { .. })));
+}
+
+#[test]
+fn error_while_condition_not_bool() {
+    let source = r#"func test() -> i32 {
+        mut i: i32 = 0
+        while 42 {
+            i = i + 1
+        }
+        return i
     }"#;
     let items = syntax_parsing::parse(source).unwrap();
     let result = type_check(&items);

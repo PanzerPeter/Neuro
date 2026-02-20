@@ -601,6 +601,30 @@ impl TypeChecker {
                 Some(())
             }
 
+            Stmt::While {
+                condition,
+                body,
+                span: _,
+            } => {
+                if let Some(cond_ty) = self.check_expr(condition, Some(&Type::Bool)) {
+                    if !cond_ty.is_bool() {
+                        self.record_error(TypeError::Mismatch {
+                            expected: Type::Bool,
+                            found: cond_ty,
+                            span: condition.span(),
+                        });
+                    }
+                }
+
+                self.symbols.push_scope();
+                for stmt in body {
+                    let _ = self.check_stmt(stmt);
+                }
+                self.symbols.pop_scope();
+
+                Some(())
+            }
+
             Stmt::Expr(expr) => {
                 // Expression statements have no expected type context
                 let _ = self.check_expr(expr, None);

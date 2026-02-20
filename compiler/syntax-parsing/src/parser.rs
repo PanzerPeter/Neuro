@@ -494,6 +494,7 @@ impl Parser {
                 Stmt::Assignment { span, .. } => *span,
                 Stmt::Return { span, .. } => *span,
                 Stmt::If { span, .. } => *span,
+                Stmt::While { span, .. } => *span,
                 Stmt::Expr(e) => e.span(),
             })
             .unwrap_or(start_span);
@@ -503,6 +504,34 @@ impl Parser {
             then_block,
             else_if_blocks,
             else_block,
+            span: start_span.merge(end_span),
+        })
+    }
+
+    /// Parse a while statement
+    pub(crate) fn parse_while_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
+        self.skip_newlines();
+
+        let condition = self.parse_expr(Precedence::Lowest)?;
+        self.skip_newlines();
+
+        let body = self.parse_block()?;
+
+        let end_span = body
+            .last()
+            .map(|stmt| match stmt {
+                Stmt::VarDecl { span, .. } => *span,
+                Stmt::Assignment { span, .. } => *span,
+                Stmt::Return { span, .. } => *span,
+                Stmt::If { span, .. } => *span,
+                Stmt::While { span, .. } => *span,
+                Stmt::Expr(e) => e.span(),
+            })
+            .unwrap_or(condition.span());
+
+        Ok(Stmt::While {
+            condition,
+            body,
             span: start_span.merge(end_span),
         })
     }
@@ -537,6 +566,11 @@ impl Parser {
                 let start_span = token.span;
                 self.advance(); // consume 'if'
                 self.parse_if_stmt(start_span)
+            }
+            TokenKind::While => {
+                let start_span = token.span;
+                self.advance(); // consume 'while'
+                self.parse_while_stmt(start_span)
             }
             TokenKind::Identifier(_) => {
                 // Check if this is an assignment (identifier = expr) or expression statement
@@ -687,6 +721,7 @@ impl Parser {
                 Stmt::Assignment { span, .. } => *span,
                 Stmt::Return { span, .. } => *span,
                 Stmt::If { span, .. } => *span,
+                Stmt::While { span, .. } => *span,
                 Stmt::Expr(e) => e.span(),
             })
             .unwrap_or(start.span);

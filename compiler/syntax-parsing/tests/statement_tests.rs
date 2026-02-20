@@ -195,6 +195,36 @@ fn test_parse_nested_if_statements() {
 }
 
 #[test]
+fn test_parse_while_statement() {
+    let source = r#"
+        func test() {
+            mut x: i32 = 0
+            while x < 10 {
+                x = x + 1
+            }
+        }
+    "#;
+    let result = parse(source);
+    assert!(result.is_ok(), "Parse error: {:?}", result.err());
+}
+
+#[test]
+fn test_parse_nested_while_in_if() {
+    let source = r#"
+        func test() {
+            mut x: i32 = 0
+            if true {
+                while x < 3 {
+                    x = x + 1
+                }
+            }
+        }
+    "#;
+    let result = parse(source);
+    assert!(result.is_ok(), "Parse error: {:?}", result.err());
+}
+
+#[test]
 fn test_parse_expression_statement() {
     let source = r#"
         func test() {

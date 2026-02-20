@@ -34,7 +34,9 @@ impl<'source> Lexer<'source> {
 
     fn classify_error(&self, err: LexError, span: Span) -> LexError {
         match err {
-            LexError::UnexpectedChar { character: '\0', .. } => {
+            LexError::UnexpectedChar {
+                character: '\0', ..
+            } => {
                 let start = span.start;
                 if let Some(remaining) = self.source.get(start..) {
                     if remaining.starts_with('"') {
@@ -49,12 +51,7 @@ impl<'source> Lexer<'source> {
                     }
                 }
 
-                let character = self
-                    .inner
-                    .slice()
-                    .chars()
-                    .next()
-                    .unwrap_or('\0');
+                let character = self.inner.slice().chars().next().unwrap_or('\0');
                 LexError::UnexpectedChar { character, span }
             }
             other => other,

@@ -1,5 +1,5 @@
 // NEURO Example: Control flow
-// Demonstrates: if/else, boolean logic, comparisons
+// Demonstrates: if/else, while loops, boolean logic, comparisons
 //
 // Note: Phase 1 has limitations with deeply nested control flow
 // This example uses simple patterns that work within these limitations
@@ -28,6 +28,18 @@ func compare(x: i32, y: i32) -> i32 {
     return 3
 }
 
+func sum_to(limit: i32) -> i32 {
+    mut i: i32 = 0
+    mut acc: i32 = 0
+
+    while i < limit {
+        acc = acc + i
+        i = i + 1
+    }
+
+    return acc
+}
+
 func main() -> i32 {
     val num1: i32 = 42
     val num2: i32 = -10
@@ -36,7 +48,8 @@ func main() -> i32 {
     val pos_check: i32 = is_positive(num1)
     val neg_check: i32 = is_negative(num2)
     val cmp_result: i32 = compare(num1, num3)
+    val loop_sum: i32 = sum_to(5)
 
-    val result: i32 = pos_check + neg_check + cmp_result
+    val result: i32 = pos_check + neg_check + cmp_result + loop_sum
     return result
 }

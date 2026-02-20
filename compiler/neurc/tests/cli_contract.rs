@@ -45,7 +45,10 @@ func main() -> i32 {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    assert!(output.status.success(), "Expected success, stderr: {stderr}");
+    assert!(
+        output.status.success(),
+        "Expected success, stderr: {stderr}"
+    );
     assert!(
         stdout.contains("Type checking passed"),
         "Expected type-check success message in stdout, got: {stdout}"
