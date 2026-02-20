@@ -16,7 +16,7 @@ mod types;
 pub use errors::TypeError;
 pub use types::Type;
 
-use syntax_parsing::Item;
+use ast_types::Item;
 use type_checker::TypeChecker;
 
 /// Type check a NEURO program.

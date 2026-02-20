@@ -313,4 +313,4 @@ cargo run --release -p neurc -- compile program.nr
 - Check [Troubleshooting Guide](../guides/troubleshooting.md)
 - Read [Language Reference](../language-reference/types.md)
 - Report issues: https://github.com/PanzerPeter/Neuro/issues
-- Read CLAUDE.md for development guidelines
+- Read [CONTRIBUTING.md](../../CONTRIBUTING.md) for development guidelines

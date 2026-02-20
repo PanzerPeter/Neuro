@@ -3,9 +3,9 @@
 
 use inkwell::context::Context as LLVMContext;
 use inkwell::types::BasicTypeEnum;
-use semantic_analysis::Type;
 
 use crate::errors::{CodegenError, CodegenResult};
+use crate::types::Type;
 
 /// Maps NEURO semantic types to LLVM types
 pub(crate) struct TypeMapper<'ctx> {
@@ -47,9 +47,6 @@ impl<'ctx> TypeMapper<'ctx> {
             )),
             Type::Function { .. } => Err(CodegenError::UnsupportedType(
                 "function types as values not yet supported".to_string(),
-            )),
-            Type::Unknown => Err(CodegenError::InternalError(
-                "unknown type should not appear after type checking".to_string(),
             )),
         }
     }

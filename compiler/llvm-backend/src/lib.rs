@@ -3,24 +3,54 @@
 //
 // This slice follows Vertical Slice Architecture (VSA) principles:
 // - Self-contained code generation functionality
-// - Minimal dependencies (only infrastructure, syntax-parsing, and semantic-analysis)
+// - Minimal dependencies (only infrastructure and LLVM)
 // - Clear module boundaries with pub(crate) for internals
 // - Public API limited to compile() entry point
 
 mod codegen;
 mod errors;
 mod type_mapping;
+mod types;
 
 // Public exports
 pub use errors::{CodegenError, CodegenResult};
 
+use ast_types::Item;
 use inkwell::context::Context as LLVMContext;
-use inkwell::OptimizationLevel;
-use semantic_analysis::Type;
+use inkwell::OptimizationLevel as LlvmOptimizationLevel;
 use std::collections::HashMap;
-use syntax_parsing::Item;
+use types::Type;
 
 use codegen::CodegenContext;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptimizationLevelSetting {
+    O0,
+    O1,
+    O2,
+    O3,
+}
+
+impl OptimizationLevelSetting {
+    pub fn from_u8(level: u8) -> CodegenResult<Self> {
+        match level {
+            0 => Ok(Self::O0),
+            1 => Ok(Self::O1),
+            2 => Ok(Self::O2),
+            3 => Ok(Self::O3),
+            other => Err(CodegenError::InvalidOptimizationLevel(other)),
+        }
+    }
+
+    fn to_llvm(self) -> LlvmOptimizationLevel {
+        match self {
+            Self::O0 => LlvmOptimizationLevel::None,
+            Self::O1 => LlvmOptimizationLevel::Less,
+            Self::O2 => LlvmOptimizationLevel::Default,
+            Self::O3 => LlvmOptimizationLevel::Aggressive,
+        }
+    }
+}
 
 /// Compile NEURO AST to LLVM object code.
 ///
@@ -52,8 +82,7 @@ use codegen::CodegenContext;
 ///
 /// ```ignore
 /// use syntax_parsing::parse;
-/// use semantic_analysis::type_check;
-/// use llvm_backend::compile;
+/// use llvm_backend::{compile, OptimizationLevelSetting};
 ///
 /// let source = r#"
 ///     func add(a: i32, b: i32) -> i32 {
@@ -62,17 +91,11 @@ use codegen::CodegenContext;
 /// "#;
 ///
 /// let ast = parse(source)?;
-/// type_check(&ast)?;
-/// let object_code = compile(&ast)?;
+/// let object_code = compile(&ast, OptimizationLevelSetting::O2)?;
 /// // Write object_code to file or link to executable
 /// ```
-pub fn compile(items: &[Item]) -> CodegenResult<Vec<u8>> {
-    // First, run type checking to get function signatures
-    semantic_analysis::type_check(items).map_err(|errors| {
-        CodegenError::InternalError(format!("type checking failed with {} errors", errors.len()))
-    })?;
-
-    // Extract function types (we need this for codegen)
+pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> CodegenResult<Vec<u8>> {
+    // Extract function types from AST (caller is responsible for semantic validation)
     let mut func_types = HashMap::new();
     for item in items {
         let Item::Function(func_def) = item;
@@ -131,7 +154,7 @@ pub fn compile(items: &[Item]) -> CodegenResult<Vec<u8>> {
             &target_triple,
             "generic",
             "",
-            OptimizationLevel::None,
+            optimization.to_llvm(),
             inkwell::targets::RelocMode::Default,
             inkwell::targets::CodeModel::Default,
         )
@@ -146,10 +169,10 @@ pub fn compile(items: &[Item]) -> CodegenResult<Vec<u8>> {
     Ok(object_code.as_slice().to_vec())
 }
 
-/// Helper function to resolve syntax-parsing types to semantic types
-fn resolve_syntax_type(ty: &syntax_parsing::Type) -> CodegenResult<Type> {
+/// Helper function to resolve AST types to backend codegen types
+fn resolve_syntax_type(ty: &ast_types::Type) -> CodegenResult<Type> {
     match ty {
-        syntax_parsing::Type::Named(ident) => match ident.name.as_str() {
+        ast_types::Type::Named(ident) => match ident.name.as_str() {
             // Signed integers
             "i8" => Ok(Type::I8),
             "i16" => Ok(Type::I16),
@@ -172,7 +195,7 @@ fn resolve_syntax_type(ty: &syntax_parsing::Type) -> CodegenResult<Type> {
                 name
             ))),
         },
-        syntax_parsing::Type::Tensor { .. } => Err(CodegenError::UnsupportedType(
+        ast_types::Type::Tensor { .. } => Err(CodegenError::UnsupportedType(
             "tensor types not supported in Phase 1".to_string(),
         )),
     }
@@ -202,21 +225,7 @@ mod tests {
         assert!(TypeMapper::is_float_type(&Type::F64));
         assert!(!TypeMapper::is_float_type(&Type::I32));
 
-        // Test integer type predicates
-        assert!(Type::I8.is_integer());
-        assert!(Type::I16.is_integer());
-        assert!(Type::I32.is_integer());
-        assert!(Type::I64.is_integer());
-        assert!(Type::U8.is_integer());
-        assert!(Type::U16.is_integer());
-        assert!(Type::U32.is_integer());
-        assert!(Type::U64.is_integer());
-        assert!(!Type::F32.is_integer());
-        assert!(!Type::Bool.is_integer());
-
-        // Test signed vs unsigned predicates
-        assert!(Type::I32.is_signed_int());
-        assert!(!Type::U32.is_signed_int());
+        // Test unsigned integer predicate
         assert!(TypeMapper::is_unsigned_int(&Type::U32));
         assert!(!TypeMapper::is_unsigned_int(&Type::I32));
     }
@@ -230,7 +239,7 @@ mod tests {
         "#;
 
         let items = syntax_parsing::parse(source).expect("parsing failed");
-        let result = compile(&items);
+        let result = compile(&items, OptimizationLevelSetting::O0);
 
         assert!(result.is_ok(), "compilation failed: {:?}", result.err());
         let object_code = result.unwrap();
@@ -251,10 +260,19 @@ mod tests {
         "#;
 
         let items = syntax_parsing::parse(source).expect("parsing failed");
-        let result = compile(&items);
+        let result = compile(&items, OptimizationLevelSetting::O2);
 
         assert!(result.is_ok(), "compilation failed: {:?}", result.err());
         let object_code = result.unwrap();
         assert!(!object_code.is_empty(), "object code should not be empty");
+    }
+
+    #[test]
+    fn test_optimization_level_parsing() {
+        assert_eq!(OptimizationLevelSetting::from_u8(0).unwrap(), OptimizationLevelSetting::O0);
+        assert_eq!(OptimizationLevelSetting::from_u8(1).unwrap(), OptimizationLevelSetting::O1);
+        assert_eq!(OptimizationLevelSetting::from_u8(2).unwrap(), OptimizationLevelSetting::O2);
+        assert_eq!(OptimizationLevelSetting::from_u8(3).unwrap(), OptimizationLevelSetting::O3);
+        assert!(OptimizationLevelSetting::from_u8(4).is_err());
     }
 }

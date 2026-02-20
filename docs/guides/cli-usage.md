@@ -251,7 +251,12 @@ Typical compilation times (Phase 1):
 
 ### Optimization
 
-Currently only `-O0` (no optimization) is supported. Higher optimization levels pending Phase 1.5.
+`neurc compile` supports optimization levels `-O0` through `-O3`.
+
+- `-O0`: Fastest compile time, minimal optimization
+- `-O1`: Basic optimization
+- `-O2`: Balanced optimization (recommended default for release-like builds)
+- `-O3`: Maximum optimization
 
 ## Platform-Specific Notes
 
@@ -356,9 +361,8 @@ See [Troubleshooting Guide](troubleshooting.md) for common issues and solutions.
 
 ## Future Features
 
-### Planned for Phase 1.5+
+### Planned CLI Enhancements
 
-- Optimization levels: `-O1`, `-O2`, `-O3`
 - Debug information: `-g` flag
 - Position-independent code: `-fPIC`
 - Verbose output: `-v` flag

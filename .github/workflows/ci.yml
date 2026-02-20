@@ -56,8 +56,110 @@ jobs:
       - name: Check workspace
         run: cargo check --workspace
 
+  architecture:
+    name: Architecture
+    runs-on: ubuntu-latest
+    needs: [check, docs-consistency]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install LLVM 18
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 18
+          echo "LLVM_SYS_181_PREFIX=/usr/lib/llvm-18" >> $GITHUB_ENV
+
+      - name: Enforce VSA architecture boundaries
+        run: cargo test -p neurc --test architecture_tests --verbose
+
+  docs-consistency:
+    name: Docs Consistency
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check docs status consistency
+        run: python tools/check_docs_consistency.py
+
+  benchmark-regression:
+    name: Benchmark Regression
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install LLVM 18
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 18
+          echo "LLVM_SYS_181_PREFIX=/usr/lib/llvm-18" >> $GITHUB_ENV
+
+      - name: Run llvm-backend benchmarks
+        run: cargo bench -p llvm-backend --bench codegen_bench -- --sample-size 10
+
+      - name: Check benchmark regression budget
+        run: |
+          python tools/check_benchmark_regression.py \
+            --baseline tools/benchmarks/llvm_backend_codegen_baseline.json \
+            --results-root target/criterion \
+            --threshold-ratio 0.35
+
+  release-smoke:
+    name: Release Smoke
+    needs: architecture
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install LLVM 18 (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 18
+          echo "LLVM_SYS_181_PREFIX=/usr/lib/llvm-18" >> $GITHUB_ENV
+
+      - name: Install LLVM 18 (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install llvm@18
+          echo "LLVM_SYS_181_PREFIX=$(brew --prefix llvm@18)" >> $GITHUB_ENV
+
+      - name: Install LLVM 18 (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install llvm --version=18.1.8 --allow-downgrade -y
+          echo "LLVM_SYS_181_PREFIX=C:\Program Files\LLVM" >> $env:GITHUB_ENV
+
+      - name: Build release neurc
+        run: cargo build -p neurc --release
+
+      - name: Run release smoke tests (Windows)
+        if: matrix.os == 'windows-latest'
+        run: python tools/run_release_smoke_tests.py --neurc target/release/neurc.exe
+
+      - name: Run release smoke tests (Unix)
+        if: matrix.os != 'windows-latest'
+        run: python tools/run_release_smoke_tests.py --neurc target/release/neurc
+
   test:
     name: Test
+    needs: [architecture, benchmark-regression, release-smoke]
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -106,7 +208,7 @@ jobs:
       - name: Install LLVM 18 (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          choco install llvm --version=18.1.8 --allow-downgrade
+          choco install llvm --version=18.1.8 --allow-downgrade -y
           echo "LLVM_SYS_181_PREFIX=C:\Program Files\LLVM" >> $env:GITHUB_ENV
 
       - name: Run tests

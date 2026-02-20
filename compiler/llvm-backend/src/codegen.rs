@@ -1,18 +1,18 @@
 // NEURO Programming Language - LLVM Backend
 // Code generation context and LLVM IR generation
 
+use ast_types::{BinaryOp, Expr, FunctionDef, Item, Stmt, UnaryOp};
 use inkwell::builder::Builder;
 use inkwell::context::Context as LLVMContext;
 use inkwell::module::Module;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::{FloatPredicate, IntPredicate};
-use semantic_analysis::Type;
 use std::collections::HashMap;
-use syntax_parsing::{BinaryOp, Expr, FunctionDef, Item, Stmt, UnaryOp};
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::type_mapping::TypeMapper;
+use crate::types::Type;
 
 pub(crate) struct CodegenContext<'ctx> {
     context: &'ctx LLVMContext,

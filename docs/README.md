@@ -2,7 +2,7 @@
 
 Welcome to the NEURO compiler documentation. This guide covers everything from getting started to advanced compiler internals.
 
-**Current Status**: Phase 1 (100% Complete) ✅ - Alpha Development
+**Current Status**: Phase 1 (Core MVP Complete) - Alpha Development
 
 ## Quick Links
 
@@ -15,7 +15,7 @@ Welcome to the NEURO compiler documentation. This guide covers everything from g
 
 ### Getting Started
 
-Perfect for newcomers to NEURO:
+Recommended for new NEURO users:
 
 - **[Installation Guide](getting-started/installation.md)** - Install NEURO on Windows, Linux, or macOS
 - **[Quick Start Guide](getting-started/quick-start.md)** - Basic usage and workflow
@@ -43,7 +43,7 @@ Practical guides for everyday use:
 
 Deep dive into compiler internals:
 
-- **[Architecture Overview](compiler/architecture.md)** - VSA and design principles (coming soon)
+- **[Contribution Guidelines](../CONTRIBUTING.md)** - Architecture rules and contribution standards
 - **[Compilation Pipeline](compiler/compilation.md)** - End-to-end compilation process
 - **[Components](compiler/components/)** - Individual compiler components:
   - [Lexical Analysis](compiler/components/lexical-analysis.md) - Tokenization
@@ -53,7 +53,7 @@ Deep dive into compiler internals:
 
 ## What is NEURO?
 
-NEURO is a compiled programming language designed for high-performance AI development. It combines:
+NEURO is a compiled programming language with native code generation via LLVM. It combines:
 
 - **Static typing** with inference for safety and performance
 - **Tensor primitives** for machine learning (Phase 3+)
@@ -61,11 +61,11 @@ NEURO is a compiled programming language designed for high-performance AI develo
 - **Native compilation** via LLVM for maximum speed
 - **Modern syntax** inspired by Rust, Python, and Swift
 
-## Current Status (Phase 1, 100% Complete) ✅
+## Current Status (Phase 1, Core MVP Complete)
 
 The compiler currently supports:
 
-### Implemented Features ✅
+### Implemented Features
 
 - **Types**:
   - Primitive types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool
@@ -102,9 +102,9 @@ The compiler currently supports:
   - Full LLVM backend
   - Native executable generation
   - Comprehensive error messages
-  - 289 tests passing across all components (20 new type inference tests)
+  - 312 tests passing across all components
 
-### Future Phases 🔮
+### Planned Phases
 
 - **Phase 2**: Structs, arrays, loops, generics, module system
 - **Phase 3**: Tensor types and operations
@@ -112,7 +112,7 @@ The compiler currently supports:
 - **Phase 5**: GPU acceleration (CUDA)
 - **Phase 6**: Neural network library
 
-See [Roadmap](../.idea/roadmap.md) for detailed timeline.
+Phase goals are summarized here and refined through project discussions.
 
 ## Example Programs
 
@@ -200,7 +200,7 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 
 - **Issues**: [GitHub Issues](https://github.com/PanzerPeter/Neuro/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/PanzerPeter/Neuro/discussions)
-- **Development**: See [CLAUDE.md](../CLAUDE.md)
+- **Development**: See [CONTRIBUTING.md](../CONTRIBUTING.md)
 
 ## Project Resources
 
@@ -213,10 +213,8 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 
 ### Development Resources
 
-- [CLAUDE.md](../CLAUDE.md) - AI development guidelines
-- [VSA_Rust_3_0.xml](../VSA_Rust_3_0.xml) - Architecture specification
-- [Roadmap](../.idea/roadmap.md) - Development roadmap
-- [Syntax Guide](../.idea/syntax.md) - Language syntax reference
+- [CONTRIBUTING.md](../CONTRIBUTING.md) - Development workflow and architecture guidelines
+- [CHANGELOG.md](../CHANGELOG.md) - Change history and milestone tracking
 
 ### Tools
 
@@ -224,7 +222,7 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 
 ## Key Features by Phase
 
-### Phase 1 (Current, 100% Complete) ✅
+### Phase 1 (Current, Core MVP Complete)
 
 Core compiler functionality:
 - All primitive types (integers, floats, bool, string)
@@ -289,8 +287,6 @@ Benefits:
 - Better testability
 - Parallel compilation
 
-See [VSA_Rust_3_0.xml](../VSA_Rust_3_0.xml) for complete guidelines.
-
 ## Compilation Pipeline
 
 ```
@@ -311,22 +307,16 @@ Each stage is independent and can be tested separately. See [Compilation Pipelin
 
 ## Testing
 
-The compiler includes comprehensive test coverage:
+The compiler includes comprehensive test coverage.
 
-- **Lexical Analysis**: 28 tests
-- **Syntax Parsing**: Tests for expression and statement parsing
-- **Semantic Analysis**: 49 tests (includes 10 new string tests)
-- **LLVM Backend**: 4 integration tests
-- **End-to-End**: 36 integration tests (includes 7 new string tests)
-- **Infrastructure**: 14 tests
-- **Total**: 131 tests passing
+- **Total**: 312 tests passing across the workspace
 
 Run tests:
 ```bash
 cargo test --all
 ```
 
-## Performance Targets
+## Performance Goals
 
 ### Phase 1 (Current)
 
@@ -385,9 +375,8 @@ Built with:
 ### For Contributors
 
 1. Read [CONTRIBUTING.md](../CONTRIBUTING.md)
-2. Study [VSA Architecture](../VSA_Rust_3_0.xml)
-3. Review [CLAUDE.md](../CLAUDE.md)
-4. Check the [Roadmap](../.idea/roadmap.md)
+2. Review architecture and visibility rules in the contributing guide
+3. Check [CHANGELOG.md](../CHANGELOG.md) for recent direction
 
 ### For Researchers
 
@@ -399,10 +388,9 @@ Built with:
 
 - Watch the [GitHub repository](https://github.com/PanzerPeter/Neuro)
 - Check [CHANGELOG.md](../CHANGELOG.md) for updates
-- Follow development in [Roadmap](../.idea/roadmap.md)
 
 ---
 
-**Last Updated**: 2025-11-24
-**Version**: Phase 1 (100% Complete) ✅
+**Last Updated**: 2026-02-20
+**Version**: Phase 1 (Core MVP Complete)
 **Status**: Alpha Development - Ready for Phase 2

@@ -1,0 +1,13 @@
+[package]
+name = "ast-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+shared-types = { path = "../shared-types" }
+
+[lib]
+path = "src/lib.rs"

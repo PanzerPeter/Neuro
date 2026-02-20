@@ -60,8 +60,7 @@ pub enum ControlFlowError {
 
 /// Build control flow graph
 pub fn build_cfg() -> Result<ControlFlowGraph, ControlFlowError> {
-    // Phase 1: Simple stub implementation
-    // TODO: Implement CFG construction
+    // Placeholder implementation until full CFG construction is introduced.
     Ok(ControlFlowGraph::new())
 }
 

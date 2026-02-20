@@ -1,0 +1,7 @@
+{
+  "benchmarks": {
+    "codegen/compile/simple_function": 600000000,
+    "codegen/compile/milestone_program": 800000000,
+    "codegen/compile/factorial_program": 1200000000
+  }
+}

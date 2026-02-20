@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **lexical-analysis**: Correctly preserve specific lexical errors in `Lexer` iterator
+  - `InvalidEscape` and `UnterminatedString` are no longer masked as generic `UnexpectedChar`
+  - Unterminated string diagnostics now map to `LexError::UnterminatedString` consistently
+  - Tightened lexer tests to assert precise error variants
+
+### Documentation
+- Synchronized test totals in top-level docs
+  - Updated [README.md](README.md) badge and capability summary to **312 tests passing**
+  - Updated [docs/README.md](docs/README.md) to **312 tests passing**
+- Cleaned stale optimization guidance in [cli-usage.md](docs/guides/cli-usage.md) and [troubleshooting.md](docs/guides/troubleshooting.md)
+  - Removed outdated wording that treated `-O1..-O3` as future work
+  - Updated recommendations to reflect current optimization behavior
+
+### Architecture
+- Removed direct feature-slice dependency from `llvm-backend` to `semantic-analysis`
+  - `neurc` remains the single orchestration boundary for parse → type-check → codegen
+  - `llvm-backend` now uses backend-local type modeling for code generation decisions
+  - Architecture tests no longer allow this temporary exception
+
+### Infrastructure
+- CI now has a dedicated `Architecture` gate in [ci.yml](.github/workflows/ci.yml)
+  - Runs `cargo test -p neurc --test architecture_tests --verbose` on every push/PR
+  - The test matrix now depends on this gate so VSA boundary regressions fail fast
+- Added docs consistency gate in [ci.yml](.github/workflows/ci.yml)
+  - Runs `python tools/check_docs_consistency.py` on every push/PR
+  - Fails CI when test-count values drift between top-level docs
+- Added benchmark regression gate in [ci.yml](.github/workflows/ci.yml)
+  - Runs Criterion benchmarks for `llvm-backend` code generation
+  - Enforces threshold-based performance budgets via `tools/check_benchmark_regression.py`
+- Added cross-platform release smoke gate in [ci.yml](.github/workflows/ci.yml)
+  - Builds `neurc` in release mode on Linux, macOS, and Windows
+  - Compiles and executes representative examples via `tools/run_release_smoke_tests.py`
+- Repository hygiene cleanup
+  - Removed generated VSIX artifact from `neuro-language-support`
+  - Updated [.gitignore](.gitignore) to keep required repository metadata trackable while ignoring packaged VSIX outputs
+
+### Changed
+- Implemented real optimization level flow for compilation (`-O0..-O3`)
+  - `neurc` now validates and passes optimization level through to `llvm-backend`
+  - `llvm-backend` maps optimization levels to LLVM target machine settings
+  - Removed stale docs claiming optimization levels were deferred
+
+- Extracted AST types from syntax-parsing to new ast-types infrastructure crate
+  - Resolved cross-slice dependency violations (semantic-analysis and llvm-backend now depend on ast-types instead of syntax-parsing)
+  - syntax-parsing maintains backward compatibility via re-exports
+  - VSA 4.0 compliance: Feature slices now properly isolated, only depending on infrastructure
+- Added living documentation (README.md) to all compiler slices
+  - lexical-analysis, syntax-parsing, semantic-analysis, control-flow, llvm-backend, neurc
+  - Each README documents: Business Intent, Public Interface, Data Ownership, Implementation Details, Dependencies
+  - Follows VSA 4.0 Living Documentation requirements
+- Implemented architecture tests for automated VSA boundary verification
+  - Test for cross-slice dependencies (feature slices must only depend on infrastructure)
+  - Test for infrastructure isolation (infrastructure must not depend on features)
+  - Test for README.md presence and required sections
+  - Test for VSA 4.0 compliance (ast-types in infrastructure, pub(crate) usage documented)
+  - Tests run in neurc crate: `cargo test -p neurc --test architecture_tests`
+
 ### Added
 - **semantic-analysis**: Contextual type inference for numeric literals
   - Integer and float literals now infer types from context (variable declarations, function parameters, return expressions, assignments)
@@ -57,7 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Simplified `is_valid_identifier()` to use char-based iteration instead of grapheme clusters
   - Removed unnecessary unicode-segmentation dependency usage
   - Improved error handling in `tokenize()` to return early on first error (faster for invalid input)
-  - Removed unused `_source` field from Lexer struct (reduced memory footprint)
+  - Retained source access in `Lexer` for precise diagnostic classification and spans
   - All tests pass with no breaking changes
 
 ### Added

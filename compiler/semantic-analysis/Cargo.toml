@@ -8,11 +8,14 @@ license.workspace = true
 
 [dependencies]
 shared-types = { path = "../infrastructure/shared-types" }
+ast-types = { path = "../infrastructure/ast-types" }
 source-location = { path = "../infrastructure/source-location" }
 diagnostics = { path = "../infrastructure/diagnostics" }
-syntax-parsing = { path = "../syntax-parsing" }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
+
+[dev-dependencies]
+syntax-parsing = { path = "../syntax-parsing" }
 
 [lib]
 path = "src/lib.rs"

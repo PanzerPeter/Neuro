@@ -1,4 +1,4 @@
-// NEURO Programming Language - Syntax Parsing
+// NEURO Programming Language - AST Types
 // Expression AST nodes
 
 use std::fmt;

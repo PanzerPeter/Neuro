@@ -403,16 +403,15 @@ Executable is larger than expected.
 
 **Causes**:
 1. Debug information included
-2. No optimization (Phase 1 limitation)
+2. Lower optimization level selected for faster compile time
 
 **Solutions**:
 
 **Current** (Phase 1):
-- Executable size is unoptimized
+- Use `-O2` or `-O3` during `neurc compile` to reduce binary size and improve runtime performance
 - Typical size: 1-5 MB for simple programs
 
-**Future** (Phase 1.5+):
-- Optimization levels will reduce size
+**Further optimization options**:
 - Strip debug info with linker options
 
 ## Development Environment Issues
@@ -497,7 +496,7 @@ neurc compile program.nr
 2. Search GitHub issues
 3. Enable debug logging
 4. Create minimal reproduction
-5. Check CLAUDE.md for development guidelines
+5. Review CONTRIBUTING.md for development and reporting guidelines
 
 ### Reporting Issues
 
@@ -540,8 +539,7 @@ Include in bug reports:
 
 - GitHub Issues: https://github.com/PanzerPeter/Neuro/issues
 - Documentation: [README.md](../../README.md)
-- Development Guidelines: [CLAUDE.md](../../CLAUDE.md)
-- Architecture: [VSA_Rust_3_0.xml](../../VSA_Rust_3_0.xml)
+- Development Guidelines: [CONTRIBUTING.md](../../CONTRIBUTING.md)
 
 ## Known Limitations (Phase 1)
 
@@ -551,9 +549,9 @@ These are not bugs, but current limitations:
 2. **String type**: Basic support pending
 3. **Loops**: Not yet implemented (Phase 2)
 4. **Arrays**: Not yet implemented (Phase 2)
-5. **Optimization**: Only -O0 supported
+5. **Optimization**: `-O0` through `-O3` supported (higher levels may increase compile time)
 
-See [Roadmap](../../.idea/roadmap.md) for planned features.
+Planned features are tracked through project issues and changelog updates.
 
 ## Common Warnings
 
@@ -594,7 +592,7 @@ NEURO uses strict typing with no implicit conversions. Explicit conversion opera
 
 ### Why is compilation slow?
 
-Phase 1 uses `-O0` (no optimization). This prioritizes compilation speed over execution speed. Optimization levels coming in Phase 1.5+.
+Use `-O0` for fastest compile/debug loops and `-O2`/`-O3` for faster runtime binaries.
 
 ### How do I speed up development?
 

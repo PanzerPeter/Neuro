@@ -1,6 +1,6 @@
 # Semantic Analysis
 
-**Status**: ✅ Complete (Phase 1)
+**Status**: Complete (Phase 1)
 **Crate**: `compiler/semantic-analysis`
 **Entry Point**: `pub fn type_check(items: &[Item]) -> Result<(), Vec<TypeError>>`
 
@@ -11,7 +11,7 @@ The semantic analysis feature slice performs type checking and semantic validati
 ## Architecture
 
 This slice follows the **Vertical Slice Architecture** pattern:
-- **Dependencies**: `syntax-parsing` (AST types), `shared-types` (common types)
+- **Dependencies**: `ast-types` (AST types), `shared-types` (common values)
 - **Public API**: Single entry point (`type_check`)
 - **Public types**: `Type` enum (semantic type representation), `TypeError` enum
 - **Internal implementation**: Type checker logic is `pub(crate)`
@@ -432,7 +432,7 @@ func factorial(n: i32) -> i32 {
 }
 ```
 
-**Type check**: ✅ Pass
+**Type check**: Pass
 - `n` has type `i32`
 - `n <= 1` returns `bool` (valid condition)
 - `factorial(n - 1)` recursive call type checks

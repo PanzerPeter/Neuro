@@ -32,6 +32,9 @@ pub enum CodegenError {
 
     #[error("internal compiler error: {0}")]
     InternalError(String),
+
+    #[error("invalid optimization level: {0} (expected 0..=3)")]
+    InvalidOptimizationLevel(u8),
 }
 
 /// Result type for code generation operations

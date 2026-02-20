@@ -4,7 +4,7 @@ Thank you for your interest in contributing to the NEURO programming language! T
 
 ## Project Status
 
-NEURO is currently in **Phase 1 (alpha development)** - 90% complete. The project is building the minimal viable compiler with basic types, functions, and control flow. We welcome contributions, but please note:
+NEURO is currently in **Phase 1 (alpha development)** with the core MVP completed. The project is focused on stabilization and incremental improvements. We welcome contributions, but please note:
 
 - The project is in early alpha stage
 - Architecture and design are still evolving
@@ -26,7 +26,7 @@ NEURO is currently in **Phase 1 (alpha development)** - 90% complete. The projec
 ### Prerequisites
 
 - **Rust**: 1.70 or later
-- **LLVM**: 16 or later (for backend development)
+- **LLVM**: 18.1.8 (for backend development)
 - **Git**: For version control
 - **IDE**: VS Code with rust-analyzer recommended
 
@@ -55,15 +55,15 @@ cargo fmt --all -- --check
 Before contributing, please read:
 
 1. [README.md](README.md) - Project overview
-4. [docs/README.md](docs/README.md) - Technical documentation
-5. [.idea/roadmap.md](.idea/roadmap.md) - Development roadmap
+2. [docs/README.md](docs/README.md) - Technical documentation
+3. [CHANGELOG.md](CHANGELOG.md) - Recent changes and release notes
 
 ## Development Workflow
 
 ### Before You Start
 
 1. **Check existing issues**: Look for open issues or create a new one to discuss your idea
-2. **Read the roadmap**: Ensure your contribution aligns with the current phase
+2. **Review current priorities**: Ensure your contribution aligns with the current phase and open issues
 3. **Ask questions**: Use GitHub Discussions or Issues if you're unsure about anything
 
 ### Working on a Feature
@@ -270,12 +270,12 @@ Before creating a pull request, ensure:
 
 For your PR to be merged:
 
-- ✅ All CI checks pass
-- ✅ Code review approved by maintainer
-- ✅ No merge conflicts
-- ✅ Follows VSA architecture
-- ✅ Meets coding standards
-- ✅ Has adequate tests and documentation
+- All CI checks pass
+- Code review approved by maintainer
+- No merge conflicts
+- Follows VSA architecture
+- Meets coding standards
+- Has adequate tests and documentation
 
 ## Community Guidelines
 
@@ -315,7 +315,7 @@ If you're stuck:
 
 ### Future Areas (Phase 2+)
 
-See [roadmap.md](.idea/roadmap.md) for upcoming features:
+Planned feature areas include:
 - Structs and enums
 - Loops (while, for)
 - Module system
@@ -370,10 +370,9 @@ cargo doc --no-deps --workspace
 
 If you have questions about contributing:
 
-1. Read [CLAUDE.md](CLAUDE.md) for detailed development guidelines
-2. Check [docs/README.md](docs/README.md) for technical documentation
-3. Search existing issues and discussions
-4. Create a new issue or discussion
+1. Check [docs/README.md](docs/README.md) for technical documentation
+2. Search existing issues and discussions
+3. Create a new issue or discussion
 
 ## License
 
@@ -387,5 +386,5 @@ Thank you for contributing to NEURO! Every contribution, no matter how small, he
 
 **Note**: This is an alpha-stage project. Contribution guidelines may evolve as the project matures.
 
-**Last Updated**: 2025-11-21
-**Phase**: 1 (Alpha Development - 90% Complete)
+**Last Updated**: 2026-02-20
+**Phase**: 1 (Alpha Development - Core MVP Complete)

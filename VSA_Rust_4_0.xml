@@ -1,0 +1,720 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<vertical_slice_guidelines version="4.0" base="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <metadata>
+    <name>Vertical Slice Architecture - Universal Base Guidelines</name>
+    <created>2025-03-28</created>
+    <updated>2025-11-27</updated>
+    <scope>Language-agnostic core rules for Vertical Slice Architecture</scope>
+    <description>The single source of truth for VSA. Language-specific extensions MUST inherit this configuration. Defines the "What" and "Why", leaving the "How" to child configurations.</description>
+    <priority>Highest</priority>
+    <instruction>AI systems MUST enforce these rules exactly. Never suggest VSA without validated business complexity (≥3 distinct capabilities).</instruction>
+  </metadata>
+
+  <terminology_definitions>
+    <term name="Slice">A vertical cut through the system containing UI (API), Business Logic, and Data Access for a single business capability.</term>
+    <term name="Feature Folder">The physical directory containing all files for a Slice.</term>
+    <term name="Shared Kernel">The minimal amount of shared code (Infrastructure, Utils) allowed to exist outside slices.</term>
+  </terminology_definitions>
+
+  <activation_triggers>
+    <trigger priority="high">User mentions "vertical slice", "VSA", "feature-based", or "clean architecture"</trigger>
+    <trigger priority="high">Project structure contains `features/`, `slices/`, `capabilities/`, or `usecases/`</trigger>
+    <trigger priority="medium">User asks about "organizing by domain" or "DDD project structure"</trigger>
+    <trigger priority="medium">User complains about "God Services", "Fat Controllers", or merge conflicts in service layers</trigger>
+    <trigger priority="low">Code analysis reveals distinct business clusters entangled in horizontal layers</trigger>
+  </activation_triggers>
+
+  <ai_interaction_protocol>
+    <step sequence="1">
+      <action>Analyze Complexity</action>
+      <logic>If endpoint_count &lt; 10 AND team_size == 1, suppress VSA suggestion.</logic>
+    </step>
+    <step sequence="2">
+      <action>Interview User</action>
+      <prompt_template>"To ensure VSA is the right fit, could you list 2-3 distinct business capabilities (e.g., 'Checkout', 'Inventory Management') this system handles?"</prompt_template>
+    </step>
+    <step sequence="3">
+      <action>Propose Boundaries</action>
+      <logic>Suggest folder structure based on user answers before generating code.</logic>
+    </step>
+  </ai_interaction_protocol>
+
+  <ai_constraints>
+    <never>Suggest VSA for simple CRUD apps (use standard MVC/Layered).</never>
+    <never>Create "technical slices" (e.g., `Slices/Auth`, `Slices/Logging`). These are Cross-Cutting Concerns.</never>
+    <never>Allow business logic dependencies between slices (e.g., Slice A calling Slice B's service).</never>
+    <always>Require communication via Integration Events or public API contracts between slices.</always>
+    <always>Enforce high cohesion: Data Models (DTOs/Entities) specific to a slice MUST live inside that slice.</always>
+    <confidence_threshold>≥80% confidence in business domain boundaries required before code generation.</confidence_threshold>
+  </ai_constraints>
+
+  <core_principles>
+    <principle name="Cohesion over DRY">Things that change together stay together. Duplicate code if sharing creates coupling.</principle>
+    <principle name="Slice Independence">A slice should be deletable without causing compilation errors in other slices.</principle>
+    <principle name="Push Complexity Down">Controllers/Endpoints should be thin; logic lives in Handlers/Interactors.</principle>
+    <principle name="Explicit Dependencies">Inputs and outputs must be strictly typed. No "magic bags" of data.</principle>
+  </core_principles>
+
+  <slice_anatomy>
+    <mandatory_components>
+      <component>Entry Point (Controller/Endpoint/Event Consumer)</component>
+      <component>Input Model (DTO/Command/Query)</component>
+      <component>Business Logic (Handler/Service/UseCase)</component>
+    </mandatory_components>
+    <optional_components>
+      <component>Domain Model (if complex)</component>
+      <component>Persistence Logic (Repository/Query Object)</component>
+      <component>Output Model (ViewModel/Response)</component>
+    </optional_components>
+  </slice_anatomy>
+
+  <living_documentation>
+    <rule_id>VSA-DOC-001</rule_id>
+    <requirement>Every slice folder MUST contain a `README.md` file.</requirement>
+    <purpose>Acts as a "Context Anchor" for AI and Developers to understand the slice without reading every line of code.</purpose>
+    
+    <structure>
+      <section name="Title">The name of the Business Capability.</section>
+      <section name="Intent">"Why" this slice exists (Business Value).</section>
+      <section name="Contract">
+        <item>Inputs (Commands/Queries)</item>
+        <item>Outputs (Events/DTOs)</item>
+        <item>Dependencies (Services/Hardware)</item>
+      </section>
+      <section name="Data Ownership">
+        <item>Owned Tables/Collections</item>
+        <item>Read Models Subscribed To</item>
+      </section>
+      <section name="Strategy">High-level explanation of the implementation (e.g., "Uses a State Machine," "Wraps legacy API").</section>
+    </structure>
+
+    <maintenance_protocol>
+      <trigger event="code_modification">
+        <logic>
+          IF a file within the slice is modified,
+          AND the modification alters logic, data structure, or dependencies,
+          THEN the `README.md` MUST be updated in the same transaction.
+        </logic>
+      </trigger>
+      <ai_instruction>
+        When generating code changes for a slice, the AI MUST explicitly check if the `README.md` descriptions remain accurate. If the code drifts from the docs, the AI MUST generate a documentation update.
+      </ai_instruction>
+      <definition_of_done>A feature is not complete until its `README.md` accurately reflects the new code reality.</definition_of_done>
+    </maintenance_protocol>
+
+    <template>
+<![CDATA[
+# Slice: [Name]
+
+## 🎯 Business Intent
+[One sentence: What business problem does this solve?]
+
+## 🔌 Public Interface
+- **Trigger:** [e.g., POST /api/orders]
+- **Input:** `CreateOrderCommand`
+- **Output:** `OrderCreatedEvent`
+- **Reads:** [e.g., Inventory Table]
+- **Writes:** [e.g., Orders Table]
+
+## 🗃️ Data Ownership
+- **Owns:** orders, order_items
+- **Subscribes to:** InventoryUpdatedEvent (from Inventory slice)
+
+## ⚙️ Implementation Details
+[Brief notes on how it works. Mention algorithms, constraints, or specific patterns used.]
+
+## 🔗 Dependencies
+- [e.g., Uses 'EmailSender' from SharedKernel]
+]]>
+    </template>
+  </living_documentation>
+
+  <context_scaling>
+    <scale level="Small" criteria="< 15 Slices, 1 Team">
+      <approach>Relaxed.</approach>
+      <allow>Direct usage of ORM entities in simple slices.</allow>
+      <forbid>Complex event buses (use in-memory mediation).</forbid>
+    </scale>
+    <scale level="Medium" criteria="15-50 Slices, 2-3 Teams">
+      <approach>Standard VSA.</approach>
+      <require>Strict DTO separation (Input/Output vs Domain).</require>
+      <require>Slice-specific testing.</require>
+    </scale>
+    <scale level="Enterprise" criteria="> 50 Slices, Multiple Teams">
+      <approach>Strict.</approach>
+      <require>Full isolation. No shared database contexts (logical separation).</require>
+      <require>Contract testing between slices.</require>
+      <require>Observability standards per slice.</require>
+    </scale>
+  </context_scaling>
+
+  <migration_strategies>
+    <strategy name="Strangler Fig" applicability="Monolith to VSA">
+      <step>Identify one isolated business capability (the "vertical slice").</step>
+      <step>Implement new slice in parallel with old code.</step>
+      <step>Route traffic to new slice.</step>
+      <step>Delete old code only after verification.</step>
+    </strategy>
+    <strategy name="New Features First" applicability="Active Development">
+      <rule>All NEW features must be built as Vertical Slices.</rule>
+      <rule>Refactor old layers only when they must be touched for a new feature.</rule>
+    </strategy>
+  </migration_strategies>
+
+  <conflict_resolution>
+    <scenario name="Shared Logic" resolution="Duplicate">
+      <condition>If Logic X is used in Slice A and Slice B, and Logic X contains business rules.</condition>
+      <action>Copy Logic X into both slices. Do not create a 'CommonBusiness' library.</action>
+    </scenario>
+    <scenario name="Shared Infrastructure" resolution="Abstract">
+      <condition>If Logic Y is purely technical (logging, email sending, DB connection).</condition>
+      <action>Move to Shared Kernel / Infrastructure Project.</action>
+    </scenario>
+    <scenario name="Cross-Slice Query" resolution="Data Composition">
+      <condition>Slice A needs data owned by Slice B to display a UI.</condition>
+      <action>Use UI Composition (Gateway aggregator) or Read-Model replication. NEVER call Slice B's repository directly.</action>
+    </scenario>
+  </conflict_resolution>
+
+  <data_sovereignty_rules>
+    <principle>Each slice is the sole owner of its persistence schema and data. The database must never become a hidden coupling point between slices.</principle>
+    
+    <rules>
+      <rule id="DS-001" severity="blocker">A slice MUST own its tables/collections/documents. Ownership is declared in the slice README.md.</rule>
+      <rule id="DS-002" severity="blocker">No slice may perform SQL JOINs, Mongo aggregations, or any query that directly combines data from tables owned by different slices.</rule>
+      <rule id="DS-003" severity="blocker">Cross-slice data needs MUST be satisfied only through:
+        <option>Public API calls (synchronous, when latency allows)</option>
+        <option>Integration Events → dedicated read models (preferred for scalability)</option>
+        <option>UI/API Gateway composition (when data is only needed for presentation)</option>
+      </rule>
+      <rule id="DS-004" severity="critical">Database transactions MUST NOT span multiple slices. A transaction is confined to one slice only.</rule>
+      <rule id="DS-005" severity="high">In shared databases, table/collection names MUST be prefixed with the slice name (e.g., checkout_orders, inventory_stock).</rule>
+    </rules>
+
+    <enforcement_by_scale>
+      <small>Shared DB + naming convention + code reviews</small>
+      <medium>Separate DbContext/Schema per slice + arch tests blocking cross-context queries</medium>
+      <enterprise>Separate physical schemas or databases where feasible + contract tests for event schemas</enterprise>
+    </enforcement_by_scale>
+
+    <ai_instruction>
+      When generating or reviewing persistence code, the AI MUST verify that no query crosses slice boundaries. If a JOIN or foreign key reference to another slice's table is detected, the AI MUST reject the change and propose an event- or API-based alternative.
+    </ai_instruction>
+  </data_sovereignty_rules>
+
+  <refactoring_triggers>
+    <description>Objective indicators that a slice has outgrown its current boundaries and requires splitting. These are not suggestions — they are enforceable signals.</description>
+    
+    <triggers>
+      <trigger id="RT-001" severity="high">
+        <condition>Primary Handler/UseCase class exceeds 500 LOC (excluding blank lines/comments)</condition>
+        <action>Immediately propose splitting into multiple finer-grained slices</action>
+      </trigger>
+      <trigger id="RT-002" severity="high">
+        <condition>Slice implements >1 distinct business capability (detectable via README Intent section drift or multiple unrelated endpoints)</condition>
+        <action>Split along capability lines</action>
+      </trigger>
+      <trigger id="RT-003" severity="medium">
+        <condition>Slice README.md exceeds 120 lines OR requires scrolling >2 screens</condition>
+        <action>Slice has become a "context dumpster" — split</action>
+      </trigger>
+      <trigger id="RT-004" severity="medium">
+        <condition>Slice experiences frequent merge conflicts (>3 per month) or high churn rate</condition>
+        <action>Strong indicator of incorrect boundary — initiate boundary review</action>
+      </trigger>
+      <trigger id="RT-005" severity="medium">
+        <condition>Slice has >4 inbound dependencies from other slices (i.e., many slices call its endpoints or subscribe to its events)</condition>
+        <action>Slice may be a hidden "core domain" or utility — consider extracting shared kernel elements or publishing coarser events</action>
+      </trigger>
+    </triggers>
+
+    <ai_instruction>
+      During code generation or review, automatically scan for these triggers. If any trigger fires at severity=high, the AI MUST halt and propose concrete refactoring before proceeding.
+    </ai_instruction>
+  </refactoring_triggers>
+
+  <type_safety>
+    <rule priority="critical">Boundary contracts (API Request/Response) MUST be explicit types/classes, never generic Dictionaries/Maps.</rule>
+    <rule priority="high">External data MUST be validated and normalized at the slice boundary entry point.</rule>
+    <rule priority="medium">Avoid "Primitive Obsession" in domain models; use Value Objects where possible.</rule>
+  </type_safety>
+
+  <testing_requirements>
+    <unit_test>Focus on the Handler/UseCase. Mock the Data Access.</unit_test>
+    <integration_test>Focus on the Slice Boundary (API -> DB). Verify the whole slice works together.</integration_test>
+    <architecture_test>Ensure dependencies point Inwards (or follow VSA rules). Ensure Slices do not reference other Slices.</architecture_test>
+  </testing_requirements>
+
+  <extension_points>
+    <description>This document is deliberately language-agnostic. Language-specific configurations (C#, TypeScript, Java, Go, Rust, etc.) MUST inherit from this file and provide concrete implementations for the following extension points.</description>
+    
+    <instruction>
+      Child configurations MUST explicitly declare which extension points they implement and MUST NOT contradict the base rules.
+    </instruction>
+    
+    <points>
+      <point id="EP-PROJECT-STRUCTURE">
+        <name>Project & Folder Structure</name>
+        <description>Concrete folder layout, file naming conventions, Feature Folder template</description>
+      </point>
+      <point id="EP-ENDPOINT-DECLARATION">
+        <name>Endpoint / Controller Syntax</name>
+        <description>Minimal APIs, Controllers, Route Handlers, gRPC, GraphQL resolvers, etc.</description>
+      </point>
+      <point id="EP-HANDLER-PATTERN">
+        <name>Handler / UseCase Implementation</name>
+        <description>MediatR IRequestHandler, custom Interactor base class, functional style, etc.</description>
+      </point>
+      <point id="EP-VALIDATION">
+        <name>Request Validation</name>
+        <description>FluentValidation pipelines, DataAnnotations, Zod, Yup, etc.</description>
+      </point>
+      <point id="EP-PERSISTENCE">
+        <name>Persistence Configuration</name>
+        <description>EF Core DbContext per slice, Dapper, MongoDB collections, Repository patterns, etc.</description>
+      </point>
+      <point id="EP-DI-REGISTRATION">
+        <name>Dependency Injection Registration</name>
+        <description>Assembly scanning, manual registration, module pattern</description>
+      </point>
+      <point id="EP-TESTING">
+        <name>Testing Conventions</name>
+        <description>Test project structure, slice testing helpers, approval tests, arch unit tests</description>
+      </point>
+      <point id="EP-ARCH-TESTS">
+        <name>Architecture Tests</name>
+        <description>NetArchTest, ArchUnitNET, custom scripts enforcing no cross-slice references</description>
+      </point>
+      <point id="EP-README-TEMPLATE">
+        <name>Slice README Template (language-specific)</name>
+        <description>Optional language-specific additions to the base README template</description>
+      </point>
+    </points>
+  </extension_points>
+</vertical_slice_guidelines>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════ -->
+<!-- RUST LANGUAGE EXTENSION (Append to VSA 4.0 Base)                                -->
+<!-- ═══════════════════════════════════════════════════════════════════════════════ -->
+
+<rust_language_extension version="4.0" extends="base">
+  <metadata>
+    <language>Rust</language>
+    <primary_frameworks>Axum, Actix-web, Tower</primary_frameworks>
+    <key_idioms>Ownership, Zero-cost abstractions, Trait bounds, Module privacy</key_idioms>
+  </metadata>
+
+  <!-- EP-PROJECT-STRUCTURE -->
+  <project_structure>
+    <decision_tree>
+      <condition>&lt; 20 slices</condition>
+      <action>Single binary: src/features/{slice_name}/mod.rs</action>
+      <condition>≥ 20 slices OR compile time &gt; 2min</condition>
+      <action>Cargo Workspace: crates/{slice_name}/src/lib.rs</action>
+    </decision_tree>
+    
+    <module_organization>
+      <rule>Each slice = one Rust module (mod slice_name)</rule>
+      <rule>Handler function is the ONLY pub item exported from slice</rule>
+      <rule>Domain types, repository traits: pub(crate) or pub(in super)</rule>
+      <rule>Never pub use across slices - it creates hidden coupling</rule>
+    </module_organization>
+
+    <shared_kernel_location>
+      <single_binary>src/shared_kernel/ or src/infra/</single_binary>
+      <workspace>crates/infra/ (separate lib crate)</workspace>
+      <contents_allowed>DbPool, Error types, Tracing setup, Middleware</contents_allowed>
+      <contents_forbidden>Business logic, Domain models, Validators</contents_forbidden>
+    </shared_kernel_location>
+  </project_structure>
+
+  <!-- EP-ENDPOINT-DECLARATION -->
+  <endpoint_declaration>
+    <signature_pattern>
+      pub async fn handler(
+        State(deps): State&lt;Arc&lt;T&gt;&gt;,
+        Json(cmd): Json&lt;Command&gt;
+      ) -> Result&lt;impl IntoResponse, AppError&gt;
+    </signature_pattern>
+    
+    <ai_decision_points>
+      <when_to_use_arc>Shared state (DB pools, config) - wrap in Arc&lt;T&gt;</when_to_use_arc>
+      <when_to_use_generics>Multiple implementations exist - use State&lt;Arc&lt;dyn Trait&gt;&gt;</when_to_use_generics>
+      <when_to_use_concrete>Single implementation - use State&lt;Arc&lt;ConcreteRepo&gt;&gt; for performance</when_to_use_concrete>
+    </ai_decision_points>
+
+    <handler_responsibilities>
+      <do>Extract request, validate, call domain logic, map result to HTTP</do>
+      <dont>Implement business rules, perform calculations, construct complex objects</dont>
+      <max_loc>50 lines (if longer, extract domain functions)</max_loc>
+    </handler_responsibilities>
+  </endpoint_declaration>
+
+  <!-- EP-HANDLER-PATTERN -->
+  <handler_pattern>
+    <function_style>Pure functions over classes - async fn, not impl blocks on handlers</function_style>
+    <orchestration_only>Handler = glue code between framework and domain</orchestration_only>
+    
+    <domain_logic_location>
+      <simple_case>Free functions in same mod.rs</simple_case>
+      <complex_case>Methods on domain struct: impl Post { fn validate(&amp;self) }</complex_case>
+    </domain_logic_location>
+  </handler_pattern>
+
+  <!-- EP-VALIDATION -->
+  <validation>
+    <library>validator crate with derive macros</library>
+    <placement>On Command/Query structs at slice boundary</placement>
+    <timing>Immediately after deserialization, before domain logic</timing>
+    <error_mapping>ValidationErrors -> AppError::Validation -> 400 Bad Request</error_mapping>
+    
+    <ai_code_pattern>
+      #[derive(Deserialize, Validate)]
+      struct Command { ... }
+      
+      cmd.validate().map_err(AppError::Validation)?;
+    </ai_code_pattern>
+  </validation>
+
+  <!-- EP-PERSISTENCE -->
+  <persistence>
+    <abstraction_choice>
+      <use_trait>When testing with mocks OR multiple DB backends</use_trait>
+      <use_concrete>When single DB + integration tests sufficient</use_concrete>
+    </abstraction_choice>
+
+    <trait_pattern>
+      #[async_trait::async_trait]
+      pub trait Repository: Send + Sync + 'static {
+        async fn save(&amp;self, entity: T) -> Result&lt;ID&gt;;
+      }
+    </trait_pattern>
+
+    <critical_bounds>
+      <bound>Send + Sync + 'static on all async trait methods</bound>
+      <reason>Ensures types can cross .await boundaries and live in Arc</reason>
+    </critical_bounds>
+
+    <implementation_location>
+      <trait_definition>In slice module (pub(crate) trait)</trait_definition>
+      <concrete_impl>In slice module or separate adapter layer</concrete_impl>
+      <never>In shared_kernel - each slice owns its persistence</never>
+    </implementation_location>
+  </persistence>
+
+  <!-- EP-DI-REGISTRATION -->
+  <dependency_injection>
+    <rust_approach>No DI containers - use Axum State or generics</rust_approach>
+    
+    <decision_tree>
+      <condition>Only one implementation exists</condition>
+      <action>State&lt;Arc&lt;ConcreteType&gt;&gt; - zero-cost, no vtable</action>
+      
+      <condition>Multiple implementations OR need mocking</condition>
+      <action>State&lt;Arc&lt;dyn Trait&gt;&gt; - runtime dispatch</action>
+      
+      <condition>Implementation known at compile time but varies</condition>
+      <action>Generic handler: async fn handler&lt;R: Repository&gt;(repo: R) - monomorphization</action>
+    </decision_tree>
+
+    <state_construction>
+      <pattern>Build all dependencies in main.rs, wrap in Arc, pass to Router::with_state</pattern>
+      <anti_pattern>Creating new Arc inside handlers - means duplicate state</anti_pattern>
+    </state_construction>
+  </dependency_injection>
+
+  <!-- EP-TESTING -->
+  <testing>
+    <unit_tests>
+      <location>#[cfg(test)] mod tests at bottom of slice mod.rs</location>
+      <focus>Domain logic functions, validation rules</focus>
+      <mocking>mockall crate for trait mocks</mocking>
+    </unit_tests>
+
+    <integration_tests>
+      <location>tests/ directory (separate from src/)</location>
+      <approach>Spawn real server, use reqwest for HTTP calls</approach>
+      <database>Use test containers or in-memory SQLite</database>
+    </integration_tests>
+
+    <architecture_tests>
+      <tool>Custom scripts checking mod tree OR cargo-modules</tool>
+      <assertions>No cross-slice use statements, No shared business types</assertions>
+    </architecture_tests>
+  </testing>
+
+  <!-- EP-ERROR-HANDLING -->
+  <error_handling>
+    <slice_internal_errors>
+      <library>anyhow::Error for internal Result types</library>
+      <usage>Rich context with .context(), error chains</usage>
+    </slice_internal_errors>
+
+    <boundary_errors>
+      <library>thiserror for AppError enum visible to framework</library>
+      <structure>
+        enum AppError {
+          Validation(ValidationErrors),
+          NotFound,
+          Internal(anyhow::Error)
+        }
+      </structure>
+      <mapping>impl IntoResponse for AppError - converts to HTTP status codes</mapping>
+    </boundary_errors>
+
+    <conversion_point>At handler boundary: internal anyhow -> AppError -> HTTP response</conversion_point>
+    
+    <ai_pattern>
+      <internal>repo.save().await.context("Failed to save")?</internal>
+      <boundary>Ok(response) OR Err(AppError::Internal(err.into()))</boundary>
+    </ai_pattern>
+  </error_handling>
+
+  <!-- EP-ASYNC-CONCURRENCY -->
+  <async_patterns>
+    <runtime>Tokio (primary), async-std (alternative)</runtime>
+    
+    <critical_bounds>
+      <rule>Every type crossing .await MUST be Send</rule>
+      <rule>Every type in Arc MUST be Send + Sync</rule>
+      <check>If compiler says "future cannot be sent", add bounds to trait/struct</check>
+    </critical_bounds>
+
+    <slice_communication>
+      <synchronous>
+        <when>Immediate response needed AND same process</when>
+        <pattern>Direct async fn call between slices (avoid if possible)</pattern>
+      </synchronous>
+      
+      <asynchronous>
+        <when>Fire-and-forget OR decoupling needed</when>
+        <pattern>tokio::sync::mpsc for queues, broadcast for pub/sub</pattern>
+        <setup>Channel created in main.rs, sender cloned into State</setup>
+      </asynchronous>
+    </slice_communication>
+
+    <background_tasks>
+      <pattern>tokio::spawn(async move { ... })</pattern>
+      <requirement>Spawned future must be 'static + Send</requirement>
+      <common_error>Capturing &amp;references - clone or use Arc instead</common_error>
+    </background_tasks>
+  </async_patterns>
+
+  <!-- EP-CROSS-CUTTING-CONCERNS -->
+  <cross_cutting>
+    <logging>
+      <library>tracing + tracing-subscriber</library>
+      <handler_instrumentation>#[tracing::instrument(skip_all, fields(slice = "name"))]</handler_instrumentation>
+      <structured_fields>Add context via span.record() or instrument fields</structured_fields>
+    </logging>
+
+    <authorization>
+      <approach>Axum extractors or middleware layers</approach>
+      <per_slice_policy>Custom extractor checking permissions before handler runs</per_slice_policy>
+      <global_auth>Tower middleware applied to Router before with_state</global_auth>
+    </authorization>
+
+    <validation>Already covered - validator at boundary</validation>
+
+    <caching>
+      <approach>Tower Service layers wrapping handlers OR manual caching in handler</approach>
+      <level>Output level only - cache Response, not internal domain objects</level>
+    </caching>
+  </cross_cutting>
+
+  <!-- EP-TYPE-SAFETY -->
+  <type_safety>
+    <newtype_pattern>
+      <when>IDs, Email, Money - prevent mixing similar primitives</when>
+      <pattern>struct UserId(Uuid); - zero-cost wrapper</pattern>
+      <derive>#[derive(Debug, Clone, Copy, Serialize, Deserialize)]</derive>
+    </newtype_pattern>
+
+    <explicit_types>
+      <rule>Never use impl Trait in struct fields</rule>
+      <rule>Explicit types in public APIs (no auto type inference)</rule>
+      <rule>Numeric types: u32/i64, not "int"</rule>
+    </explicit_types>
+
+    <serde_safety>
+      <deny_unknown>#[serde(deny_unknown_fields)] on Commands for strict contracts</deny_unknown>
+      <rename>#[serde(rename_all = "camelCase")] for JS interop</rename>
+    </serde_safety>
+
+    <result_propagation>
+      <rule>Use ? operator consistently - avoid unwrap() in handlers</rule>
+      <rule>Return Result&lt;T, E&gt; from domain functions</rule>
+      <edge_case>main.rs can use unwrap for app startup failures</edge_case>
+    </result_propagation>
+  </type_safety>
+
+  <!-- EP-PERFORMANCE -->
+  <performance>
+    <zero_cost_abstractions>
+      <prefer>Generics (monomorphization) over trait objects where possible</prefer>
+      <accept>dyn Trait when runtime polymorphism genuinely needed</accept>
+    </zero_cost_abstractions>
+
+    <cloning>
+      <when_acceptable>Small types (Uuid, IDs), Arc clones (cheap - just ref count bump)</when_acceptable>
+      <when_avoid>Large structs, Vec, String - prefer references</when_avoid>
+    </cloning>
+
+    <compilation_times>
+      <threshold>If incremental build &gt; 30s for single slice change, extract to workspace</threshold>
+      <parallel>Workspace enables parallel crate compilation</parallel>
+    </compilation_times>
+  </performance>
+
+  <!-- AI DECISION MATRIX FOR RUST VSA -->
+  <ai_decision_matrix>
+    <scenario name="User asks about sharing code between slices">
+      <check>Is it infrastructure (DB, logging)?</check>
+      <yes>Move to shared_kernel with Arc injection</yes>
+      <no>
+        <check>Is it business logic?</check>
+        <yes>DUPLICATE - do not share business code</yes>
+        <no>
+          <check>Pure utility (date parsing)?</check>
+          <yes>shared_kernel::utils allowed</yes>
+        </no>
+      </no>
+    </scenario>
+
+    <scenario name="User has lifetime/borrow checker issues between slices">
+      <immediate_action>Suggest duplicating the struct - fighting lifetimes across slices is anti-pattern</immediate_action>
+      <explanation>Slice independence > DRY. Lifetimes entangle modules.</explanation>
+    </scenario>
+
+    <scenario name="User wants slices to communicate">
+      <check>Is response needed immediately?</check>
+      <yes>Consider if this is wrong boundary - might be same slice</yes>
+      <no>Use tokio::sync::mpsc or broadcast channels</no>
+    </scenario>
+
+    <scenario name="User asks about generic vs trait object">
+      <check>Is there only one implementation?</check>
+      <yes>Use concrete type in State&lt;Arc&lt;Concrete&gt;&gt;</yes>
+      <no>
+        <check>Known at compile time?</check>
+        <yes>Use generic: fn handler&lt;R: Repo&gt;</yes>
+        <no>Use trait object: State&lt;Arc&lt;dyn Trait&gt;&gt;</no>
+      </no>
+    </scenario>
+
+    <scenario name="Compilation is slow">
+      <check>Is project &gt; 20 slices?</check>
+      <yes>Migrate to Cargo Workspace immediately</yes>
+      <no>Profile with cargo-timings, check for overuse of generics</no>
+    </scenario>
+
+    <scenario name="How to handle slice needing data from another slice">
+      <never>Direct repository call or database JOIN</never>
+      <option_1>Publish event from owner slice, subscriber maintains read model</option_1>
+      <option_2>HTTP call to owner slice's public endpoint</option_2>
+      <option_3>Aggregate in API gateway layer (if just for UI)</option_3>
+      <choose>Option 1 for eventual consistency, Option 2 for strong consistency, Option 3 for presentation only</choose>
+    </scenario>
+  </ai_decision_matrix>
+
+  <!-- RUST-SPECIFIC ANTI-PATTERNS -->
+  <rust_anti_patterns>
+    <pattern name="Arc&lt;Mutex&lt;T&gt;&gt; shared across slices">
+      <problem>Mutable state coupling, defeats slice independence</problem>
+      <solution>Each slice owns its state, communicate via channels</solution>
+    </pattern>
+
+    <pattern name="Complex lifetime annotations crossing slices">
+      <problem>&lt;'a&gt; parameters linking slice lifetimes together</problem>
+      <solution>Clone data at boundaries, use owned types</solution>
+    </pattern>
+
+    <pattern name="Massive trait bounds on handlers">
+      <problem>Handler&lt;R: Repo + Clone + Send + Sync + Debug + ...&gt;</problem>
+      <solution>Slice is too complex, split it OR use concrete types</solution>
+    </pattern>
+
+    <pattern name="Leaking SQLx Row or Diesel models to API">
+      <problem>Database schema exposed as API contract</problem>
+      <solution>Map to dedicated Response DTOs at repository boundary</solution>
+    </pattern>
+
+    <pattern name="Using unwrap() in handlers">
+      <problem>Can panic and crash server</problem>
+      <solution>Return Result, use ? operator, handle errors gracefully</solution>
+    </pattern>
+
+    <pattern name="pub use re-exports between slices">
+      <problem>Hidden coupling through namespace pollution</problem>
+      <solution>Use explicit paths: features::slice_a::Type</solution>
+    </pattern>
+  </rust_anti_patterns>
+
+  <!-- AI RESPONSE CALIBRATION -->
+  <ai_response_patterns>
+    <when_suggesting_vsa>
+      <first>Confirm ≥ 3 distinct business capabilities exist</first>
+      <then>Propose module structure: src/features/{capability}/mod.rs</then>
+      <explain>Each capability = independent module with single pub handler</explain>
+      <warn>Fighting borrow checker means wrong boundaries - favor duplication</warn>
+    </when_suggesting_vsa>
+
+    <when_user_shows_layered_code>
+      <detect>src/controllers/, src/services/, src/repositories/ structure</detect>
+      <suggest>Reorganize into src/features/{business_capability}/</suggest>
+      <migrate>Start with most isolated feature, use strangler fig pattern</migrate>
+    </when_user_shows_layered_code>
+
+    <when_lifetime_issues_appear>
+      <detect>Error: "cannot infer lifetime", "borrowed value does not live long enough"</detect>
+      <first_check>Is this between slices?</first_check>
+      <yes>Recommend duplicating struct or using owned types</yes>
+      <no>Help resolve with standard lifetime techniques</no>
+    </when_lifetime_issues_appear>
+
+    <when_user_wants_shared_business_logic>
+      <response>
+        "In Rust VSA, we prioritize slice independence over DRY. 
+        Duplicate this logic in both slices. If it truly becomes a maintenance burden 
+        (changed in >3 places >3 times), then we can extract to shared_kernel - 
+        but shared business logic creates coupling we want to avoid."
+      </response>
+    </when_user_wants_shared_business_logic>
+  </ai_response_patterns>
+
+  <!-- QUICK REFERENCE FOR AI -->
+  <ai_quick_reference>
+    <always>
+      <item>Check for Send + Sync bounds on async traits</item>
+      <item>Validate at boundary (Command struct) before domain logic</item>
+      <item>Return Result&lt;T, AppError&gt; from handlers</item>
+      <item>Use pub(crate) for internal slice types</item>
+      <item>Instrument handlers with #[tracing::instrument]</item>
+    </always>
+
+    <never>
+      <item>Share mutable state (Mutex) across slices</item>
+      <item>Use unwrap() in production handler code</item>
+      <item>Create pub use re-exports between slices</item>
+      <item>Perform SQL JOINs across slice-owned tables</item>
+      <item>Put business logic in shared_kernel crate</item>
+    </never>
+
+    <prefer>
+      <item>Concrete types over trait objects (when single impl)</item>
+      <item>Owned types over lifetimes at boundaries</item>
+      <item>Duplication over coupling</item>
+      <item>Events/channels over direct slice calls</item>
+      <item>anyhow internally, thiserror at boundaries</item>
+    </prefer>
+
+    <warn_user_if>
+      <item>Handler function exceeds 50 LOC</item>
+      <item>Slice module exceeds 500 LOC</item>
+      <item>Seeing lifetime errors between slices</item>
+      <item>More than 4 generic bounds on handler</item>
+      <item>Compile time for single change exceeds 30 seconds</item>
+    </warn_user_if>
+  </ai_quick_reference>
+
+</rust_language_extension>

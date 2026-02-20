@@ -1,13 +1,9 @@
 // NEURO Programming Language - Syntax Parsing
-// AST module - Abstract Syntax Tree definitions
+// AST module - Re-exports from ast-types infrastructure
+//
+// NOTE (VSA 4.0): AST types have been extracted to infrastructure/ast-types
+// to maintain slice independence. This module now serves as a re-export layer
+// for backward compatibility within the slice.
 
-pub mod expressions;
-pub mod items;
-pub mod statements;
-pub mod types;
-
-// Re-export all AST types for convenient access
-pub use expressions::{BinaryOp, Expr, UnaryOp};
-pub use items::{FunctionDef, Item, Parameter};
-pub use statements::Stmt;
-pub use types::Type;
+// Re-export all AST types from infrastructure
+pub use ast_types::{BinaryOp, Expr, FunctionDef, Item, Parameter, Stmt, Type, UnaryOp};

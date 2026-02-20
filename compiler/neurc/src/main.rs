@@ -3,6 +3,7 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use llvm_backend::OptimizationLevelSetting;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -30,7 +31,7 @@ enum Commands {
         output: Option<PathBuf>,
 
         /// Optimization level (0-3)
-        #[arg(short = 'O', long, default_value = "0")]
+        #[arg(short = 'O', long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=3))]
         optimization: u8,
     },
 
@@ -56,17 +57,7 @@ fn main() {
             output,
             optimization,
         } => {
-            // Note: optimization level support deferred to Phase 1.5
-            // Currently always uses -O0 (no optimization)
-            if optimization != 0 {
-                log::warn!(
-                    "Optimization level -O{} requested, but only -O0 is supported in Phase 1",
-                    optimization
-                );
-                log::warn!("Compiling with -O0 (no optimization)");
-            }
-
-            if let Err(e) = compile_file(&input, output.as_deref()) {
+            if let Err(e) = compile_file(&input, output.as_deref(), optimization) {
                 eprintln!("Compilation failed: {}", e);
 
                 // Print error chain for detailed context
@@ -150,6 +141,7 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
 ///
 /// * `input` - Path to the input .nr source file
 /// * `output` - Optional path for the output executable (defaults to input name without extension)
+/// * `optimization` - Optimization level (0-3)
 ///
 /// # Returns
 ///
@@ -159,10 +151,10 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
 /// # Examples
 ///
 /// ```ignore
-/// compile_file(Path::new("program.nr"), None)?;
+/// compile_file(Path::new("program.nr"), None, 2)?;
 /// // Creates "program" (or "program.exe" on Windows)
 /// ```
-fn compile_file(input: &Path, output: Option<&Path>) -> Result<()> {
+fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result<()> {
     // Validate file extension
     validate_source_file(input)?;
 
@@ -171,6 +163,7 @@ fn compile_file(input: &Path, output: Option<&Path>) -> Result<()> {
         .context(format!("Failed to read source file: {}", input.display()))?;
 
     log::info!("Compiling {}", input.display());
+    log::info!("Using optimization level -O{}", optimization);
 
     // Parse the source code
     log::debug!("Parsing source...");
@@ -192,7 +185,10 @@ fn compile_file(input: &Path, output: Option<&Path>) -> Result<()> {
 
     // Generate LLVM object code
     log::debug!("Generating LLVM IR and object code...");
-    let object_code = llvm_backend::compile(&ast)
+    let optimization = OptimizationLevelSetting::from_u8(optimization)
+        .context("Invalid optimization level")?;
+
+    let object_code = llvm_backend::compile(&ast, optimization)
         .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
         .context("Failed to generate object code")?;
 

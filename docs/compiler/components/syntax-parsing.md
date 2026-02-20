@@ -1,6 +1,6 @@
 # Syntax Parsing
 
-**Status**: ✅ Complete (Phase 1)
+**Status**: Complete (Phase 1)
 **Crate**: `compiler/syntax-parsing`
 **Entry Point**: `pub fn parse(source: &str) -> Result<Vec<Item>, ParseError>`
 
@@ -11,7 +11,7 @@ The syntax parsing feature slice transforms a token stream from the lexer into a
 ## Architecture
 
 This slice follows the **Vertical Slice Architecture** pattern:
-- **Dependencies**: `lexical-analysis` (for tokenization), `shared-types` (for common types)
+- **Dependencies**: `lexical-analysis` (tokenization), `ast-types` (AST definitions), `shared-types` (common values)
 - **Public API**: Single entry point (`parse`)
 - **Internal implementation**: All parser internals are `pub(crate)`
 - **AST exports**: AST types (`Expr`, `Stmt`, `Item`) are public for downstream consumers
@@ -300,11 +300,11 @@ fn test_operator_precedence() {
 - PEG parser (chumsky, nom)
 
 **Why Pratt:**
-- ✅ Simple to implement and understand
-- ✅ Easy to extend with new operators
-- ✅ Correct precedence handling
-- ✅ Efficient (single pass)
-- ❌ Less composable than PEG parsers (accepted trade-off for simplicity)
+- Simple to implement and understand
+- Straightforward to extend with new operators
+- Correct precedence handling
+- Efficient (single pass)
+- Less composable than PEG parsers (accepted trade-off for this phase)
 
 ### Why Recursive Descent for Statements?
 

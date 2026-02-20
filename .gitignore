@@ -1,140 +1,424 @@
-# ============================
-# Rust build artifacts
-# ============================
+# ===================================================================
+# .gitignore - expanded for Rust projects (Cargo + multi-language/tooling)
+# - Keep / customize as needed
+# ===================================================================
+
+# ---------------------------
+# Rust / Cargo
+# ---------------------------
+# Build output
 /target/
 **/target/
-debug/
-release/
-*.pdb
-*.pdb.lock
+**/target/**
 
-# Backup files created by rustc / editors
+# Cargo metadata and caches
+.cargo/
+.cargo/registry/
+.cargo/git/
+.cargo-install/
+.cargo/config
+.cargo/env
+
+# Rust incremental / compilation artifacts
+*.rlib
+*.rmeta
+*.d
+*.dSYM/
+*.profraw
+*.profdata
+
+# Rust analyzer / language server
+rust-project.json
+.rustfmt.toml
+rustfmt.toml
+.rust-analyzer/
+.rustup/
+.rustup_toolchain_info
+
+# sccache / ccache
+.sccache/
+.ccache/
+
+# xargo / cross-compilation
+.xargo/
+cross/
+**/cross/
+
+# rustc backup / temporary files
 **/*.rs.bk
+*.rs.bk
 *.orig
 
-# Cargo
-# Uncomment if this is a library and you want consumers to generate their own lockfile
-# Cargo.lock
-
-# LLVM / compilation artifacts
-*.bc
-*.ll
+# ---------------------------
+# Binaries & native build artifacts
+# ---------------------------
+# native objects, libs, executables
 *.o
+*.a
 *.so
 *.dylib
 *.dll
 *.exe
 *.out
-*.a
 *.lib
+*.obj
+*.lo
+*.la
+*.class
+*.jar
+*.wasm
+*.wast
 
-# Profiling / debug
-*.dSYM/
+# static & generated libs
+*.bc
+*.ll
+
+# linker / package manager artifacts
+*.map
+*.sym
+
+# profiling / debug
 *.dwp
 *.gch
+*.pdb
+*.pdb.lock
+*.dmp
+core
+core.*
 
-# ============================
-# NEURO
-# ============================
-.neuro-cache/
-**/*.neuro-cache
-*.nrl
-*.nrm
-*.nrp
+# ---------------------------
+# WebAssembly / wasm-pack
+# ---------------------------
+pkg/
+pkg/*
+target/wasm32-*
+*.wasm
+*.wat
+wasm-pack-output/
 
-# ============================
-# Test & Benchmark Artifacts
-# ============================
+# ---------------------------
+# Generated sources / codegen
+# ---------------------------
+# common generated directories - adjust to your project layout
+generated/
+gen/
+**/generated/
+**/build/
+parser/src/grammar.rs
+lexer/src/generated/
+
+# ---------------------------
+# Documentation
+# ---------------------------
+/target/doc/
+docs/_build/
+book/
+mdbook/
+doc/
+site/
+site_output/
+
+# ---------------------------
+# Test / Benchmark / Coverage
+# ---------------------------
 tests/output/
 integration-tests/output/
 benchmarks/results/
 *.coverage
 *.lcov
-
-# ============================
-# Coverage tools
-# ============================
-*.profraw
-*.profdata
+lcov.info
 coverage/
 tarpaulin-report.html
 cobertura.xml
-lcov.info
+.vtest/
+.test_output/
+pytest_cache/
+.mypy_cache/
 
-# ============================
-# Documentation
-# ============================
-docs/_build/
-target/doc/
-book/
-mdbook/
-
-# ============================
-# Temporary files
-# ============================
+# ---------------------------
+# CI / artifacts / debug
+# ---------------------------
+# GitHub Actions, GitLab CI, others
+/.github/actions/cache/
+/.github/workflows/*.local.yml
+/.circleci/ci-outputs/
+/.gitlab/ci-artifacts/
+artifacts/
+release/
+dist/
+_build/
 tmp/
 temp/
-*.tmp
-*.log
-*.cache
-.cache/
 
-# ============================
-# OS-specific
-# ============================
-.DS_Store
-Thumbs.db
-desktop.ini
+# ---------------------------
+# Docker / containers
+# ---------------------------
+docker-compose.override.yml
+docker-compose.*.yml
+.docker/
+docker-images/
+docker-volumes/
+**/Dockerfile.*
+**/*.dockerfile
 
-# ============================
-# IDE / Editor
-# ============================
-.vscode/
-.idea/
-*.swp
-*.swo
-CLAUDE.md
-.claude/
-VSA_Rust_3_0.xml
-*~
-*.iml
-*.vsix
+# ---------------------------
+# Node / frontend tooling
+# ---------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+.pnp/
+.pnpm-store/
+.npm/
+.npm-cache/
+dist/
+build/
+out/
+.esbuild/
+.vite/
+.next/
+.nuxt/
+.svelte-kit/
 
-# JetBrains Rust tool directories
-/.fleet/
-cmake-build-*/
-
-# ============================
-# Python (for scripts/tooling)
-# ============================
+# ---------------------------
+# Python (scripts / tooling)
+# ---------------------------
 __pycache__/
 *.py[cod]
 *$py.class
 .Python
 venv/
 env/
+.venv/
+venv*/
+ENV/
 build/
 dist/
 *.egg-info/
+pip-wheel-metadata/
+.python-version
+.pip-cache/
+.mypy_cache/
+.tox/
+.coverage
+coverage.xml
+.pytest_cache/
 
-# ============================
-# Node.js (for tooling / frontend)
-# ============================
-node_modules/
-package-lock.json
-pnpm-lock.yaml
-yarn.lock
-.npm/
-.npm-cache/
-dist/
+# ---------------------------
+# Java / Gradle / Maven (if used)
+# ---------------------------
+/target/
+*.class
+*.jar
+*.war
+*.ear
+*.iml
+.idea/
+.gradle/
 build/
+.gradle/
+out/
 
-# ============================
-# Generated files
-# ============================
-parser/src/grammar.rs
-lexer/src/generated/
-generated/
-gen/
+# ---------------------------
+# IDEs / Editors
+# ---------------------------
+# VS Code
+.vscode/
+.vscode/**
+
+# JetBrains (IntelliJ, CLion, GoLand, Rider, etc.)
+.idea/
+*.iml
+.idea/**/
+workspace.xml
+tasks.xml
+*.iws
+.idea_modules/
+.idea/*
+
+# Visual Studio / Windows dev
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.vcxproj*
+*.vcxproj.user
+*.vcxproj.filters
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Emacs
+*~
+\#*\#
+.\#*
+.emacs.desktop
+.emacs.d/.cache/
+
+# Vim
+*.swp
+*.swo
+*.swn
+.*.sw?
+session.vim
+*.un~
+
+# Other editors
+*~ 
+*.bak
+*.orig
+*.save
+*.tmp
+
+# ---------------------------
+# OS-specific
+# ---------------------------
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# Windows
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~.nfs
+
+# ---------------------------
+# Secrets / keys / config
+# ---------------------------
+# Common env files: keep .env.example in repo and ignore actual envs
+.env
+.env.*
+.env.local
+.env.production.local
+.env.test
+!.env.example
+!.env.template
+!.env.*.example
+!.env.*.template
+secrets/
+secrets.json
+*.pem
+*.p12
+*.key
+*.csr
+*.crt
+*.jks
+*.asc
+*.gpg
+id_rsa
+id_rsa.pub
+*.pfx
+*.mobileprovision
+*.keystore
+
+# Local config / local credentials
+local_settings.py
+*.local
+credentials/
+credentials.json
+*.secret
+*.secret.*
+
+# Cloud / platform credentials
+.aws/
+.azure/
+.gcloud/
+.kube/
+kubeconfig
+*.kubeconfig
+
+# Common auth/token files
+.envrc.private
+.netrc
+_netrc
+.npmrc
+.pypirc
+pip.conf
+pip.ini
+poetry.toml
+
+# Infrastructure secret overrides
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+
+# Encryption/keyring artifacts
+*.agekey
+.sops-age-key.txt
+
+# ---------------------------
+# Certificates / provisioning
+# ---------------------------
+*.cer
+*.der
+
+# ---------------------------
+# Logs
+# ---------------------------
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+debug.log
+
+# ---------------------------
+# Misc / other tools
+# ---------------------------
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# VS Code extension packaged artifacts
+*.vsix
+
+# Nix
+result
+.nix-store/
+.nix-binary-cache/
+
+# direnv
+.envrc
+
+# EditorConfig temporary
+.editorconfig.lock
+
+# JetBrains Rust tool directories / Fleet
+/.fleet/
+cmake-build-*/
+
+# Generated coverage / profiling
+*.prof
+*.profraw
+*.profdata
+*.gcda
+*.gcno
+*.gcov
+*.lcov
+
+# PlatformIO / embedded
+.pio/
+.pioenvs/
+.arduino_builder/
+
+# Core dumps and crash reports
+*.core
+hs_err_pid*
+java_pid*
+crash.log
 nul
-

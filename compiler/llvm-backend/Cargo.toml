@@ -8,12 +8,19 @@ license.workspace = true
 
 [dependencies]
 shared-types = { path = "../infrastructure/shared-types" }
+ast-types = { path = "../infrastructure/ast-types" }
 diagnostics = { path = "../infrastructure/diagnostics" }
-syntax-parsing = { path = "../syntax-parsing" }
-semantic-analysis = { path = "../semantic-analysis" }
 inkwell = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+syntax-parsing = { path = "../syntax-parsing" }
+criterion = { workspace = true }
+
 [lib]
 path = "src/lib.rs"
+
+[[bench]]
+name = "codegen_bench"
+harness = false

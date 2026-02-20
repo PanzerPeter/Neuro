@@ -1,13 +1,13 @@
 # NEURO Programming Language
 
-**Status:** Alpha Development - Phase 1 Core MVP (100% Complete) ✅ (Not Production Ready)
+**Status:** Alpha Development - Phase 1 Core MVP Complete (Not Production Ready)
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-289%20passing-success.svg)](#)
-[![Phase](https://img.shields.io/badge/phase-1%20100%25%20complete-success.svg)](https://github.com/yourusername/neuro/blob/main/.idea/roadmap.md)
+[![Tests](https://img.shields.io/badge/tests-312%20passing-success.svg)](#)
+[![Phase](https://img.shields.io/badge/phase-1%20100%25%20complete-success.svg)](#phase-1-core-mvp-100-complete-)
 
-A modern, compiled programming language designed for high-performance AI development. NEURO combines the productivity of Python with the speed of C++, featuring static typing with inference, zero-cost abstractions, and native GPU acceleration.
+A modern, compiled programming language designed for high-performance development workflows. NEURO combines static typing, type inference, and native code generation via LLVM.
 
 ## What is NEURO?
 
@@ -15,55 +15,28 @@ NEURO is an Ahead-of-Time (AOT) compiled language built from the ground up for A
 
 ### Key Features
 
-- **First-Class Tensor Types**: Tensors are language primitives with compile-time shape verification
-- **Native Automatic Differentiation**: Built-in `@grad` attribute for zero-overhead backpropagation
-- **GPU Integration**: Native CUDA/Vulkan kernel generation with `@gpu` and `@kernel` attributes
-- **Performance**: Near-C++ performance with 2-5x overhead vs 100x for interpreted languages
-- **Modern Type System**: Type inference with static guarantees and generics
-- **Memory Management**: Automatic Reference Counting (ARC) with optional memory pool blocks
+- **Core Language Support**: Functions, variables, control flow, and expressions
+- **Static Typing + Inference**: Primitive types with contextual numeric inference
+- **LLVM Backend**: Native executable generation from `.nr` source files
+- **Compiler Tooling**: `neurc check` and `neurc compile` workflows
+- **Future AI Features**: Tensor operations, AD, and GPU features are planned for later phases
 
 ## Quick Example
 
-```rust
-import neuro.nn as nn
-import neuro.opt as opt
-
-@model
-struct MnistNet {
-    conv1: nn.Conv2d<in=1, out=32, k=3>,
-    pool: nn.MaxPool2d<2>,
-    fc: nn.Dense<128>,
-    out: nn.Dense<10>
+```neuro
+func add(a: i32, b: i32) -> i32 {
+    a + b
 }
 
-func main() -> Result<(), Error> {
-    val model = MnistNet::new()
-    mut optimizer = opt.Adam(model.params, lr=1e-3)
-
-    val dataset = load_mnist()?
-        .to_device(gpu(0))
-
-    pool {
-        for epoch in 0..10 {
-            for batch in dataset.batch(64) {
-                @grad(model) {
-                    val logits = model.forward(batch.x)
-                    val loss = nn.cross_entropy(logits, batch.y)
-                }
-                optimizer.step()
-            }
-            print(f"Epoch {epoch} complete")
-        }
-    }
-
-    model.save("mnist.nrm")?
-    Ok(())
+func main() -> i32 {
+    val result: i32 = add(5, 3)
+    result
 }
 ```
 
 ## Installation
 
-**Note:** NEURO is in active development. Installation instructions will be provided as the compiler matures.
+**Note:** NEURO is in active development. Installation and tooling requirements may change between releases.
 
 ### Prerequisites
 
@@ -146,26 +119,26 @@ cargo install --path compiler/neurc
 
 **Note**: The `.cargo/config.toml` file is pre-configured with the vcpkg library path for Windows. On Unix systems, this configuration is ignored.
 
-## 🎉 Phase 1 Core MVP (100% Complete) ✅
+## Phase 1 Core MVP Complete
 
-NEURO has successfully completed **Phase 1** (Roadmap v3.8) - **All features implemented!**
+NEURO has completed **Phase 1** (Roadmap v3.8) for the current core MVP scope.
 
 The compiler can now compile programs end-to-end from source code to native executables with full type checking, mutable variable reassignment, extended integer types, expression-based returns, and **string types**.
 
-### Current Capabilities (Phase 1) ✅
+### Current Capabilities (Phase 1)
 
-- [x] **Lexical Analysis** - Complete tokenizer with Unicode support (28 tests)
-- [x] **Syntax Parsing** - Expression parser (Pratt) and statement parser with assignment support
-- [x] **Semantic Analysis** - Full type checking with mutability enforcement (39 tests)
-- [x] **Variable Reassignment** - Mutable variables with type-safe assignment (`mut x = 0; x = 10`)
-- [x] **Expression-Based Returns** - Implicit returns from trailing expressions (Rust-like syntax)
-- [x] **Extended Primitive Types** - All integer types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool
-- [x] **Type Inference for Numeric Literals** - Contextual type inference with range validation (semantic analysis complete; LLVM backend integration deferred)
-- [x] **String Type** - Full string literal support with escape sequences (\n, \t, \", \\, \xNN, \u{NNNN})
-- [x] **LLVM Backend** - Signedness-aware code generation with string support (4 tests)
-- [x] **CLI Compiler** - `neurc check` validates syntax/types, `neurc compile` produces executables
-- [x] **End-to-End Integration** - Full pipeline from source to binary (36 tests)
-- [x] **289 Tests Passing** - Comprehensive coverage across all components (20 new type inference tests)
+- **Lexical Analysis** - Complete tokenizer with Unicode support (28 tests)
+- **Syntax Parsing** - Expression parser (Pratt) and statement parser with assignment support
+- **Semantic Analysis** - Full type checking with mutability enforcement (39 tests)
+- **Variable Reassignment** - Mutable variables with type-safe assignment (`mut x = 0; x = 10`)
+- **Expression-Based Returns** - Implicit returns from trailing expressions (Rust-like syntax)
+- **Extended Primitive Types** - All integer types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool
+- **Type Inference for Numeric Literals** - Contextual type inference with range validation (semantic analysis complete; LLVM backend integration deferred)
+- **String Type** - Full string literal support with escape sequences (\n, \t, \", \\, \xNN, \u{NNNN})
+- **LLVM Backend** - Signedness-aware code generation with string support (4 tests)
+- **CLI Compiler** - `neurc check` validates syntax/types, `neurc compile` produces executables
+- **End-to-End Integration** - Full pipeline from source to binary (36 tests)
+- **312 Tests Passing** - Comprehensive coverage across all components
 
 ### Try It Now!
 
@@ -236,8 +209,8 @@ mut counter: i32 = 0
 counter = counter + 1  // Type-safe reassignment
 counter = 42           // Can reassign multiple times
 
-// Type inference (Phase 2)
-val pi = 3.14159  // Will be inferred as f64
+// Contextual numeric inference
+val pi = 3.14159  // Inferred as f64
 ```
 
 ### Functions
@@ -263,6 +236,8 @@ func calculate(x: i32, y: i32) -> i32 {
 ```
 
 ### Tensor Types
+
+Planned for later phases:
 
 ```rust
 // Static tensor with compile-time shape checking
@@ -330,8 +305,7 @@ NEURO is an open-source project and welcomes contributions. However, please note
 4. Focus is on core compiler functionality (Phase 1)
 
 Before contributing, please:
-- Read the [VSA Guidelines](VSA_Rust_3_0.xml)
-- Check existing issues and roadmap
+- Check existing issues and current priorities
 - Discuss major changes in issues first
 
 ### Development Guidelines

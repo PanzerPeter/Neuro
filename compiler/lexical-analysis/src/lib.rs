@@ -19,6 +19,7 @@ use shared_types::Span;
 
 /// Lexer for the NEURO language
 pub struct Lexer<'source> {
+    source: &'source str,
     inner: logos::Lexer<'source, TokenKind>,
 }
 
@@ -26,7 +27,37 @@ impl<'source> Lexer<'source> {
     /// Create a new lexer for the given source code
     pub fn new(source: &'source str) -> Self {
         Self {
+            source,
             inner: TokenKind::lexer(source),
+        }
+    }
+
+    fn classify_error(&self, err: LexError, span: Span) -> LexError {
+        match err {
+            LexError::UnexpectedChar { character: '\0', .. } => {
+                let start = span.start;
+                if let Some(remaining) = self.source.get(start..) {
+                    if remaining.starts_with('"') {
+                        let end = remaining
+                            .find('\n')
+                            .map(|offset| start + offset)
+                            .unwrap_or(self.source.len());
+
+                        return LexError::UnterminatedString {
+                            span: Span::new(start, end),
+                        };
+                    }
+                }
+
+                let character = self
+                    .inner
+                    .slice()
+                    .chars()
+                    .next()
+                    .unwrap_or('\0');
+                LexError::UnexpectedChar { character, span }
+            }
+            other => other,
         }
     }
 
@@ -60,19 +91,7 @@ impl<'source> Iterator for Lexer<'source> {
 
         Some(match kind {
             Ok(kind) => Ok(Token::new(kind, span)),
-            Err(err) => {
-                // Try to provide better error messages
-                let slice = self.inner.slice();
-                if !slice.is_empty() {
-                    let ch = slice.chars().next().unwrap_or('\0');
-                    Err(LexError::UnexpectedChar {
-                        character: ch,
-                        span,
-                    })
-                } else {
-                    Err(err)
-                }
-            }
+            Err(err) => Err(self.classify_error(err, span)),
         })
     }
 }
@@ -389,11 +408,9 @@ func add(a: i32, b: i32) -> i32 {
     fn error_on_unterminated_string() {
         let result = tokenize(r#""unterminated"#);
         assert!(result.is_err());
-        // TODO: Improve error reporting to return UnterminatedString instead of UnexpectedChar
-        // Currently returns UnexpectedChar which is acceptable for Phase 1
         match result.unwrap_err() {
-            LexError::UnterminatedString { .. } | LexError::UnexpectedChar { .. } => {}
-            err => panic!("Expected string error, got: {:?}", err),
+            LexError::UnterminatedString { .. } => {}
+            err => panic!("Expected UnterminatedString, got: {:?}", err),
         }
     }
 
@@ -401,11 +418,9 @@ func add(a: i32, b: i32) -> i32 {
     fn error_on_invalid_escape() {
         let result = tokenize(r#""invalid\q""#);
         assert!(result.is_err());
-        // TODO: Improve error reporting to return InvalidEscape instead of UnexpectedChar
-        // Currently returns UnexpectedChar which is acceptable for Phase 1
         match result.unwrap_err() {
-            LexError::InvalidEscape { .. } | LexError::UnexpectedChar { .. } => {}
-            err => panic!("Expected string error, got: {:?}", err),
+            LexError::InvalidEscape { .. } => {}
+            err => panic!("Expected InvalidEscape, got: {:?}", err),
         }
     }
 

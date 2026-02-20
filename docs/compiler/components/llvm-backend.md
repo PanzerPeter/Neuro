@@ -1,6 +1,6 @@
 # LLVM Backend
 
-**Status**: ✅ Complete (Phase 1)
+**Status**: Complete (Phase 1)
 **Crate**: `compiler/llvm-backend`
 **Entry Point**: `pub fn compile(items: &[Item]) -> Result<Vec<u8>, CodegenError>`
 
@@ -11,7 +11,7 @@ The LLVM backend feature slice generates native object code from type-checked AS
 ## Architecture
 
 This slice follows the **Vertical Slice Architecture** pattern:
-- **Dependencies**: `syntax-parsing` (AST), `semantic-analysis` (type info), `inkwell` (LLVM)
+- **Dependencies**: `ast-types` (AST), `shared-types` (shared values), `inkwell` (LLVM)
 - **Public API**: Single entry point (`compile`)
 - **Internal implementation**: All codegen internals are `pub(crate)`
 - **Output**: Platform-specific object code (`.o` files)
@@ -21,27 +21,27 @@ This slice follows the **Vertical Slice Architecture** pattern:
 ### Code Generation Capabilities
 
 #### Function Generation
-- ✅ Function declarations with parameters and return types
-- ✅ Parameter allocation on stack
-- ✅ Function body code generation
-- ✅ Return path validation (ensures non-void functions return)
+- Function declarations with parameters and return types
+- Parameter allocation on stack
+- Function body code generation
+- Return path validation (ensures non-void functions return)
 
 #### Expression Generation
-- ✅ **Literals**: i32, i64, f32, f64, bool constants
-- ✅ **Identifiers**: Variable loads from stack
-- ✅ **Binary operators**:
+- **Literals**: i32, i64, f32, f64, bool constants
+- **Identifiers**: Variable loads from stack
+- **Binary operators**:
   - Arithmetic: `+`, `-`, `*`, `/`, `%`
   - Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
   - Logical: `&&`, `||`
-- ✅ **Unary operators**: `-` (negation), `!` (logical not)
-- ✅ **Function calls**: With type-checked arguments
-- ✅ **Parenthesized expressions**
+- **Unary operators**: `-` (negation), `!` (logical not)
+- **Function calls**: With type-checked arguments
+- **Parenthesized expressions**
 
 #### Statement Generation
-- ✅ **Variable declarations**: Stack-allocated locals
-- ✅ **Return statements**: With value or void
-- ✅ **If/else statements**: Proper basic block management
-- ✅ **Expression statements**: Side-effect expressions
+- **Variable declarations**: Stack-allocated locals
+- **Return statements**: With value or void
+- **If/else statements**: Proper basic block management
+- **Expression statements**: Side-effect expressions
 
 #### Type Mapping
 
@@ -80,7 +80,7 @@ Proper control flow with basic blocks:
 ```rust
 use syntax_parsing::parse;
 use semantic_analysis::type_check;
-use llvm_backend::compile;
+use llvm_backend::{compile, OptimizationLevelSetting};
 
 let source = r#"
     func add(a: i32, b: i32) -> i32 {
@@ -93,7 +93,7 @@ let ast = parse(source)?;
 type_check(&ast)?;
 
 // Generate object code
-let object_code = compile(&ast)?;
+let object_code = compile(&ast, OptimizationLevelSetting::O2)?;
 
 // Write to file
 std::fs::write("output.o", object_code)?;
@@ -119,17 +119,17 @@ let source = r#"
 
 let ast = parse(source)?;
 type_check(&ast)?;
-let object_code = compile(&ast)?;
+let object_code = compile(&ast, OptimizationLevelSetting::O2)?;
 
 // Object code can now be linked to create executable
 ```
 
 ## Code Generation Pipeline
 
-### Phase 1: Type Checking
+### Phase 1: Type Checking (orchestrated by neurc)
 
 ```rust
-// Run semantic analysis first
+// Run semantic analysis before calling llvm_backend::compile
 semantic_analysis::type_check(items)?;
 ```
 
@@ -446,11 +446,11 @@ All tests verify successful compilation to object code and validate LLVM IR corr
 - Custom code generator
 
 **Why inkwell:**
-- ✅ Safe Rust bindings
-- ✅ Type-safe LLVM API
-- ✅ Active maintenance
-- ✅ Good documentation
-- ✅ Prevents many LLVM usage errors at compile time
+- Safe Rust bindings
+- Type-safe LLVM API
+- Active maintenance
+- Good documentation
+- Helps prevent common LLVM usage errors at compile time
 
 ### Opaque Pointers (LLVM 15+)
 

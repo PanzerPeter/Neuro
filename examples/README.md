@@ -167,6 +167,6 @@ When adding new examples:
 
 ## See Also
 
-- [NEURO Language Syntax Guide](../.idea/syntax.md)
-- [Development Roadmap](../.idea/roadmap.md)
+- [Language Reference](../docs/language-reference/types.md)
+- [CHANGELOG](../CHANGELOG.md)
 - [Compiler Documentation](../docs/README.md)

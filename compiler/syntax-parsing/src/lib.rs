@@ -6,11 +6,6 @@
 // - Minimal dependencies (only infrastructure and lexical-analysis)
 // - Clear module boundaries with pub(crate) for internals
 // - Public API limited to parse() and parse_expr() entry points
-//
-// TECHNICAL DEBT (Phase 1): This slice is imported by semantic-analysis
-// This creates a cross-slice dependency that violates pure VSA.
-// Future (Phase 2+): Extract AST types to infrastructure/ast-types
-// For now, this dependency is acceptable for the minimal compiler pipeline.
 
 mod ast;
 mod errors;

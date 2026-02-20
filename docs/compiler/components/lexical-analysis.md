@@ -1,6 +1,6 @@
 # Lexical Analysis
 
-**Status**: ✅ Complete (Phase 1)
+**Status**: Complete (Phase 1)
 **Crate**: `compiler/lexical-analysis`
 **Entry Point**: `pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError>`
 

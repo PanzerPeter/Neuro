@@ -1,6 +1,6 @@
 # End-to-End Compilation
 
-**Status**: ✅ IMPLEMENTED (Phase 1 completion)
+**Status**: Implemented (Phase 1 completion)
 **Slice**: `compiler/neurc` (orchestrator)
 **Dependencies**: All Phase 1 slices (lexical-analysis, syntax-parsing, semantic-analysis, llvm-backend)
 
@@ -114,7 +114,7 @@ neurc compile <INPUT> [OPTIONS]
 
 **Options**:
 - `-o, --output <FILE>` - Output executable path
-- `-O <LEVEL>` - Optimization level (0-3) [Phase 1.5 - not yet implemented]
+- `-O <LEVEL>` - Optimization level (0-3)
 
 **Examples**:
 ```bash
@@ -182,28 +182,28 @@ parse(&source)
 
 ### Code Quality Metrics
 
-- ✅ **Zero Clippy Warnings**: Clean code analysis
-- ✅ **Comprehensive Documentation**: All public functions documented
-- ✅ **Error Handling**: Every failure path handled with context
-- ✅ **Resource Management**: RAII for temporary files (auto-cleanup)
-- ✅ **Cross-Platform**: Works on Windows, Linux, macOS
-- ✅ **Logging Support**: Debug logging via `log` crate
+- **Clippy Compliance**: Lint-clean in validated CI paths
+- **Documentation Coverage**: Public entry points are documented
+- **Error Handling**: Failure paths include contextual error messages
+- **Resource Management**: Temporary artifacts are managed via RAII
+- **Cross-Platform Support**: Works on Windows, Linux, and macOS
+- **Logging Support**: Debug logging via the `log` crate
 
 ### VSA Compliance
 
-- ✅ **Slice Independence**: neurc only orchestrates, no business logic
-- ✅ **Clear Boundaries**: Public API minimal and focused
-- ✅ **Infrastructure Sharing**: Uses all slices via public APIs
-- ✅ **Error Propagation**: Consistent Result<T, E> pattern
-- ✅ **No Cross-Slice Coupling**: Dependencies flow one direction
+- **Slice Independence**: `neurc` orchestrates slices and avoids feature business logic
+- **Clear Boundaries**: Public API remains minimal and focused
+- **Infrastructure Sharing**: Uses slice public APIs and shared infrastructure components
+- **Error Propagation**: Consistent `Result<T, E>`-based flow
+- **No Cross-Slice Coupling**: Dependency flow remains directional
 
 ### Rust Idioms
 
-- ✅ **Explicit Types**: All public APIs have explicit types
-- ✅ **Ownership Semantics**: Borrows for paths, moves for buffers
-- ✅ **Zero-Cost Abstractions**: No runtime overhead
-- ✅ **RAII**: Automatic cleanup of temporary files
-- ✅ **Error Handling**: Result<T, E> with `?` operator
+- **Explicit Types**: Public APIs use explicit type signatures
+- **Ownership Semantics**: Borrows and moves follow idiomatic ownership
+- **Zero-Cost Abstractions**: High-level constructs compile to efficient code
+- **RAII**: Temporary resources clean up automatically
+- **Error Handling**: Uses `Result<T, E>` and the `?` operator
 
 ## Testing Strategy
 
@@ -266,8 +266,8 @@ fn test_end_to_end_hello() {
 
 ## Known Limitations (Phase 1)
 
-1. **Optimization Levels**: Only -O0 (no optimization) supported
-   - Higher optimization levels (-O1, -O2, -O3) deferred to Phase 1.5
+1. **Optimization Levels**: `-O0` to `-O3` are supported
+    - Higher levels increase compile time but improve generated code quality
    - Warning printed if non-zero level requested
 
 2. **Linking Dependencies**: Requires system toolchain
@@ -280,7 +280,6 @@ fn test_end_to_end_hello() {
 
 ## Future Enhancements (Post-Phase 1)
 
-- Optimization level support (-O1, -O2, -O3)
 - Debug information generation (-g flag)
 - Position-independent code (-fPIC)
 - Cross-compilation support
@@ -456,8 +455,7 @@ cd C:\vcpkg
 
 ## References
 
-- [CLAUDE.md](../../CLAUDE.md) - Project development guidelines (includes LLVM 18.1.8 setup)
-- [VSA_Rust_3_0.xml](../../VSA_Rust_3_0.xml) - Vertical Slice Architecture
-- [roadmap.md](../../.idea/roadmap.md) - Development roadmap
+- [CONTRIBUTING.md](../../CONTRIBUTING.md) - Project development guidelines
+- [CHANGELOG.md](../../CHANGELOG.md) - Development progress and changes
 - [neurc/src/main.rs](../../compiler/neurc/src/main.rs) - Implementation
 - [LLVM 18.1.8 Release](https://github.com/llvm/llvm-project/releases/tag/llvmorg-18.1.8) - Official download

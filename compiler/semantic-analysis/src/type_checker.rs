@@ -3,8 +3,8 @@
 
 use std::collections::HashMap;
 
+use ast_types::{BinaryOp, Expr, FunctionDef, Item, Stmt, UnaryOp};
 use shared_types::{Literal, Span};
-use syntax_parsing::{BinaryOp, Expr, FunctionDef, Item, Stmt, UnaryOp};
 
 use crate::errors::TypeError;
 use crate::symbol_table::SymbolTable;
@@ -107,9 +107,9 @@ impl TypeChecker {
 
     /// Convert syntax-parsing type to semantic type.
     /// Returns None if the type is unknown (error is recorded).
-    fn resolve_type(&mut self, ty: &syntax_parsing::Type) -> Option<Type> {
+    fn resolve_type(&mut self, ty: &ast_types::Type) -> Option<Type> {
         match ty {
-            syntax_parsing::Type::Named(ident) => match ident.name.as_str() {
+            ast_types::Type::Named(ident) => match ident.name.as_str() {
                 // Signed integers
                 "i8" => Some(Type::I8),
                 "i16" => Some(Type::I16),
@@ -135,7 +135,7 @@ impl TypeChecker {
                     None
                 }
             },
-            syntax_parsing::Type::Tensor { span, .. } => {
+            ast_types::Type::Tensor { span, .. } => {
                 // Tensor types are Phase 3, not supported in Phase 1
                 self.record_error(TypeError::UnknownTypeName {
                     name: "Tensor".to_string(),
@@ -735,8 +735,8 @@ impl TypeChecker {
 mod tests {
     use super::*;
     use crate::errors::TypeError;
+    use ast_types::{Expr, FunctionDef, Parameter, Stmt};
     use shared_types::{Identifier, Span};
-    use syntax_parsing::{Expr, FunctionDef, Parameter, Stmt};
 
     fn make_ident(name: &str) -> Identifier {
         Identifier {
@@ -745,8 +745,8 @@ mod tests {
         }
     }
 
-    fn make_type(name: &str) -> syntax_parsing::Type {
-        syntax_parsing::Type::Named(make_ident(name))
+    fn make_type(name: &str) -> ast_types::Type {
+        ast_types::Type::Named(make_ident(name))
     }
 
     /// Helper to create a simple function for testing
@@ -801,7 +801,12 @@ mod tests {
         let mut checker = TypeChecker::new();
 
         // Define function
-        let func = make_function("foo", vec![("x".to_string(), "u32".to_string())], None, vec![]);
+        let func = make_function(
+            "foo",
+            vec![("x".to_string(), "u32".to_string())],
+            None,
+            vec![],
+        );
 
         checker.check_function(&func);
         assert!(!checker.has_errors());

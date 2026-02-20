@@ -65,9 +65,8 @@ func main() -> i32 {
     let exit_code = test
         .compile_and_run("negative.nr", source)
         .expect("Compilation or execution failed");
-    // Note: Exit codes are typically 0-255, but we can test the logic
-    // -10 + 5 = -5, which wraps to 251 on most systems (256 - 5)
-    // For now, let's just verify it compiles and runs
+    // Exit-code handling for negative returns is platform-dependent.
+    // This test verifies successful execution rather than a specific wrapped value.
     assert!(exit_code != 0, "Program should have executed");
 }
 
