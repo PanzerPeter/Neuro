@@ -23,3 +23,9 @@ Validate type correctness and scope rules of a parsed NEURO program before code 
 Fail-slow strategy: all type errors are collected in a single pass so the developer
 sees the complete error set in one compilation. `syntax-parsing` appears only in
 `[dev-dependencies]` (integration tests); it is not a production dependency.
+
+Struct checking uses a two-pass strategy within `check_program`: the first pass
+registers all `Item::Struct` definitions into `struct_defs` so that struct type names
+resolve correctly when encountered inside function signatures and bodies. The second
+pass runs `check_function` for each function. Struct types use nominal typing —
+two `Type::Struct` values are compatible iff their names are equal.

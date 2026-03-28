@@ -2,7 +2,7 @@
 
 NEURO is a statically typed language with explicit type annotations and planned type inference.
 
-## Current Status (Phase 1)
+## Current Status
 
 - Implemented: primitive types (integers, floats, booleans)
 - Implemented: extended integer types (`i8`-`i64`, `u8`-`u64`)
@@ -10,7 +10,7 @@ NEURO is a statically typed language with explicit type annotations and planned 
 - Implemented: void type
 - Implemented: contextual inference for numeric literals
 - Implemented: string type
-- Planned (Phase 2): structs
+- Implemented: structs (definition, instantiation, field access, field mutation)
 - Planned (Phase 2): arrays
 - Planned (Phase 2): tuples
 - Planned (Phase 2): generics
@@ -58,7 +58,7 @@ func demo_integers() -> i32 {
 }
 ```
 
-**Default Type**: Currently, integer literals without explicit type annotation default to `i32`. Type inference is pending in Phase 1.
+**Default Type**: Integer literals default to `i32` when no annotation is present. Contextual inference from declaration, parameter, and return context is implemented; range validation is enforced (e.g. `300` cannot be assigned to `i8`).
 
 ### Floating-Point Types
 
@@ -79,7 +79,7 @@ func demo_floats() -> f64 {
 }
 ```
 
-**Default Type**: Float literals default to `f64`. Type inference is pending in Phase 1.
+**Default Type**: Float literals default to `f64`. Contextual inference from declaration, parameter, and return context is implemented.
 
 ### Boolean Type
 
@@ -100,6 +100,81 @@ func demo_booleans() -> i32 {
 
 **Values**: `true` or `false`
 **Operations**: Logical operators (`&&`, `||`, `!`), comparison results
+
+## Struct Types
+
+Structs are user-defined types that group named fields. They use nominal typing — two structs with identical fields are distinct types.
+
+### Definition
+
+```neuro
+struct Point {
+    x: f64,
+    y: f64
+}
+
+struct Counter {
+    value: i32,
+    step: i32
+}
+```
+
+Fields are listed as `name: Type`, separated by commas or newlines. Any primitive type (or another struct type) is valid as a field type.
+
+### Instantiation
+
+```neuro
+val p = Point { x: 3.0, y: 4.0 }
+val c = Counter { value: 0, step: 1 }
+```
+
+All fields must be provided. Extra or missing fields are compile errors.
+
+### Field Access
+
+```neuro
+val x_coord = p.x   // reads field x from p
+val total = c.value + c.step
+```
+
+Field access resolves to the declared field type.
+
+### Field Mutation
+
+Field mutation is only allowed on `mut` bindings:
+
+```neuro
+mut cursor = Point { x: 0.0, y: 0.0 }
+cursor.x = 5.0   // OK: cursor is mut
+
+val fixed = Point { x: 1.0, y: 2.0 }
+fixed.x = 3.0    // Error: AssignToImmutableField
+```
+
+### Definition Order
+
+Structs can be used before they are defined in the source file — the compiler performs a pre-registration pass:
+
+```neuro
+func main() -> i32 {
+    val s = Score { value: 42 }
+    return s.value
+}
+
+struct Score {
+    value: i32
+}
+```
+
+### Type Errors
+
+| Error | Cause |
+|---|---|
+| `MissingStructField` | Struct literal omits a declared field |
+| `UnknownField` | Struct literal or access uses a field that doesn't exist |
+| `AssignToImmutableField` | Field assignment on a `val` binding |
+| `StructAlreadyDefined` | Two `struct` declarations share the same name |
+| `UnknownStruct` | Struct literal references an undeclared struct name |
 
 ## Void Type
 
@@ -123,19 +198,14 @@ func print_debug_explicit() -> void {
 
 ### Variable Declarations
 
-Type annotations are required for variable declarations in Phase 1:
+Type annotations are optional when the type can be inferred from context:
 
 ```neuro
 val x: i32 = 42              // Explicit type annotation
 val pi: f64 = 3.14159        // Explicit type annotation
 val flag: bool = true        // Explicit type annotation
-```
-
-**Planned (Phase 1 completion)**:
-```neuro
-val x = 42              // Will infer i32
-val pi = 3.14159        // Will infer f64
-val flag = true         // Will infer bool
+val n = 100                  // Inferred i32 (default for integer literals)
+val pi = 3.14159             // Inferred f64 (default for float literals)
 ```
 
 ### Function Parameters
@@ -213,23 +283,21 @@ func returns_i32() -> i32 {
 
 ## Type System Features
 
-### Phase 1 (Current, ~92%)
+### Phase 1 (Complete ✅)
 
 **Implemented**:
 - Primitive types (i8-i64, u8-u64, f32, f64, bool)
+- String type with fat pointer ABI (`{ ptr, i64 }`)
 - Explicit type annotations
+- Contextual numeric literal inference with range validation
 - Function types
 - Strict type checking
 - Type mismatch error reporting
 
-**Pending**:
-- Type inference for numeric literals
-- Basic string type
+### Phase 2 (In Progress)
 
-### Phase 2 (Planned)
-
+- ✅ Structs (user-defined types with nominal typing)
 - Type inference for variable declarations
-- Structs (user-defined types)
 - Arrays with fixed size
 - Tuples for grouping values
 - Generic functions with monomorphization

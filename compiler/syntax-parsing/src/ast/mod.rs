@@ -4,4 +4,7 @@
 // NOTE (VSA baseline): AST types live in infrastructure/ast-types
 // so that semantic-analysis and llvm-backend can consume them without
 // creating a cross-slice dependency on syntax-parsing.
-pub use ast_types::{BinaryOp, Expr, FunctionDef, Item, Parameter, Stmt, Type, UnaryOp};
+pub use ast_types::{
+    BinaryOp, Expr, FieldDef, FieldInit, FunctionDef, Item, Parameter, Stmt, StructDef, Type,
+    UnaryOp,
+};

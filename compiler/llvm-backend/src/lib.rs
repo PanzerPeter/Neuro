@@ -96,42 +96,58 @@ impl OptimizationLevelSetting {
 /// // Write object_code to file or link to executable
 /// ```
 pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> CodegenResult<Vec<u8>> {
+    // Collect struct definitions first so resolve_syntax_type can recognise struct names
+    // when processing function parameter and return types below.
+    let mut struct_defs: HashMap<String, Vec<(String, Type)>> = HashMap::new();
+    for item in items {
+        if let Item::Struct(def) = item {
+            let mut fields = Vec::new();
+            for field in &def.fields {
+                fields.push((field.name.name.clone(), resolve_syntax_type(&field.ty)?));
+            }
+            struct_defs.insert(def.name.name.clone(), fields);
+        }
+    }
+
     // Extract function types from AST (caller is responsible for semantic validation)
     let mut func_types = HashMap::new();
     for item in items {
-        let Item::Function(func_def) = item;
-        // Re-create function type from definition
-        let mut param_types = Vec::new();
-        for param in &func_def.params {
-            let ty = resolve_syntax_type(&param.ty)?;
-            param_types.push(ty);
+        if let Item::Function(func_def) = item {
+            let mut param_types = Vec::new();
+            for param in &func_def.params {
+                let ty = resolve_syntax_type(&param.ty)?;
+                param_types.push(ty);
+            }
+
+            let return_type = if let Some(ret_ty) = &func_def.return_type {
+                resolve_syntax_type(ret_ty)?
+            } else {
+                Type::Void
+            };
+
+            func_types.insert(
+                func_def.name.name.clone(),
+                Type::Function {
+                    params: param_types,
+                    ret: Box::new(return_type),
+                },
+            );
         }
-
-        let return_type = if let Some(ret_ty) = &func_def.return_type {
-            resolve_syntax_type(ret_ty)?
-        } else {
-            Type::Void
-        };
-
-        let func_type = Type::Function {
-            params: param_types,
-            ret: Box::new(return_type),
-        };
-
-        func_types.insert(func_def.name.name.clone(), func_type);
     }
 
     // Initialize LLVM context
     let context = LLVMContext::create();
     let mut codegen_ctx = CodegenContext::new(&context, "neuro_module");
+    codegen_ctx.set_struct_defs(struct_defs);
 
     // Store type information for expressions
     codegen_ctx.store_expr_types(items, &func_types)?;
 
     // Generate code for each function
     for item in items {
-        let Item::Function(func_def) = item;
-        codegen_ctx.codegen_function(func_def, &func_types)?;
+        if let Item::Function(func_def) = item {
+            codegen_ctx.codegen_function(func_def, &func_types)?;
+        }
     }
 
     // Verify the module
@@ -195,10 +211,9 @@ fn resolve_syntax_type(ty: &ast_types::Type) -> CodegenResult<Type> {
             "bool" => Ok(Type::Bool),
             "string" => Ok(Type::String),
             "void" => Ok(Type::Void),
-            name => Err(CodegenError::UnsupportedType(format!(
-                "unknown type: {}",
-                name
-            ))),
+            // Struct types are recognised here as named types; their field layout is
+            // resolved later by CodegenContext when it has access to struct_defs.
+            name => Ok(Type::Struct(name.to_string())),
         },
         ast_types::Type::Tensor { .. } => Err(CodegenError::UnsupportedType(
             "tensor types not supported in Phase 1".to_string(),

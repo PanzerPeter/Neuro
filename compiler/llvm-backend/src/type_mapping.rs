@@ -52,6 +52,13 @@ impl<'ctx> TypeMapper<'ctx> {
             Type::Function { .. } => Err(CodegenError::UnsupportedType(
                 "function types as values not yet supported".to_string(),
             )),
+            // Struct types must be built via CodegenContext::get_struct_llvm_type,
+            // which has access to field definitions. Calling map_type directly on
+            // a struct (e.g. for a function parameter) is not supported in Phase 2.
+            Type::Struct(name) => Err(CodegenError::UnsupportedType(format!(
+                "struct '{}' as a function parameter or return type is not yet supported",
+                name
+            ))),
         }
     }
 

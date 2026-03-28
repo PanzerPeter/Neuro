@@ -23,7 +23,12 @@ pub enum Type {
     Bool,
     String,
     Void,
-    Function { params: Vec<Type>, ret: Box<Type> },
+    Function {
+        params: Vec<Type>,
+        ret: Box<Type>,
+    },
+    /// User-defined struct type, identified by name (nominal typing).
+    Struct(std::string::String),
     Unknown,
 }
 
@@ -69,6 +74,9 @@ impl Type {
                         .all(|(a, b)| a.is_compatible_with(b))
                     && r1.is_compatible_with(r2)
             }
+
+            // Struct types match by name (nominal typing)
+            (Type::Struct(a), Type::Struct(b)) => a == b,
 
             // Unknown type for error recovery
             (Type::Unknown, _) | (_, Type::Unknown) => true,
@@ -153,6 +161,7 @@ impl fmt::Display for Type {
             Type::String => write!(f, "string"),
             Type::Void => write!(f, "void"),
             Type::Unknown => write!(f, "<error>"),
+            Type::Struct(name) => write!(f, "{}", name),
             Type::Function { params, ret } => {
                 write!(f, "fn(")?;
                 for (i, param) in params.iter().enumerate() {

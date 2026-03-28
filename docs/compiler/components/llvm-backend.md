@@ -3,7 +3,7 @@
 **Status**: Complete (Phase 1)
 **Crate**: `compiler/llvm-backend`
 **Library**: inkwell 0.8.0 (LLVM 20 bindings)
-**Build requirement**: `LLVM_SYS_200_PREFIX=/usr/lib/llvm20`
+**Build requirement**: `LLVM_SYS_201_PREFIX=/usr/lib/llvm20`
 
 ## Overview
 
@@ -77,7 +77,7 @@ Integer instructions are selected based on signedness:
    b. Allocate parameters on stack (alloca + store)
    c. Generate body statements
 5. Verify LLVM module (catches malformed IR)
-6. Initialize native target (LLVM_SYS_200_PREFIX)
+6. Initialize native target (LLVM_SYS_201_PREFIX)
 7. Create target machine for the host triple
 8. Emit object code to memory buffer
 ```
@@ -157,7 +157,7 @@ entry:
 
 Run with:
 ```bash
-LLVM_SYS_200_PREFIX=/usr/lib/llvm20 cargo test -p llvm-backend
+LLVM_SYS_201_PREFIX=/usr/lib/llvm20 cargo test -p llvm-backend
 ```
 
 ## Design Decisions
@@ -183,7 +183,7 @@ The `OptimizationLevelSetting` enum maps to LLVM's optimization levels:
 
 ## Future: MLIR Integration (Phase 3+)
 
-When tensor types are introduced, `melior` (Rust MLIR bindings for LLVM/MLIR 20) will be added alongside inkwell. Both crates link against the same LLVM 20 dylib via `LLVM_SYS_200_PREFIX`.
+When tensor types are introduced, `melior` (Rust MLIR bindings for LLVM/MLIR 20) will be added alongside inkwell. Both crates link against the same LLVM 20 dylib via `LLVM_SYS_201_PREFIX`.
 
 The planned lowering strategy:
 

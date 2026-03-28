@@ -79,4 +79,34 @@ pub enum TypeError {
 
     #[error("for-range bound must be an integer type, found {found} at {span:?}")]
     InvalidForRangeType { found: Type, span: Span },
+
+    #[error("struct '{name}' already defined at {span:?}")]
+    StructAlreadyDefined { name: String, span: Span },
+
+    #[error("unknown struct '{name}' at {span:?}")]
+    UnknownStruct { name: String, span: Span },
+
+    #[error("struct '{struct_name}' has no field '{field_name}' at {span:?}")]
+    UnknownField {
+        struct_name: String,
+        field_name: String,
+        span: Span,
+    },
+
+    #[error("missing field '{field_name}' in struct literal for '{struct_name}' at {span:?}")]
+    MissingStructField {
+        struct_name: String,
+        field_name: String,
+        span: Span,
+    },
+
+    #[error("field '{field_name}' provided more than once in struct literal at {span:?}")]
+    DuplicateStructField { field_name: String, span: Span },
+
+    #[error("cannot assign to field '{field_name}' of immutable binding '{var_name}' at {span:?}")]
+    AssignToImmutableField {
+        var_name: String,
+        field_name: String,
+        span: Span,
+    },
 }

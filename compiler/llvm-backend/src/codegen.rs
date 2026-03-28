@@ -1,11 +1,12 @@
 // NEURO Programming Language - LLVM Backend
 // Code generation context and LLVM IR generation
 
-use ast_types::{BinaryOp, Expr, FunctionDef, Item, Stmt, UnaryOp};
+use ast_types::{BinaryOp, Expr, FieldInit, FunctionDef, Item, Stmt, UnaryOp};
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context as LLVMContext;
 use inkwell::module::Module;
+use inkwell::types::StructType;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{
     BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue, PointerValue,
@@ -48,6 +49,15 @@ pub(crate) struct CodegenContext<'ctx> {
 
     /// Active loop targets for break/continue statements.
     loop_targets: Vec<LoopTargets<'ctx>>,
+
+    /// Struct field definitions (name → ordered [(field_name, field_type)]).
+    /// Populated before code generation begins; used by GEP and insertvalue.
+    struct_defs: HashMap<String, Vec<(String, Type)>>,
+
+    /// Maps FieldAccess span.start → struct name of the object.
+    /// Needed because FieldAccess and its first sub-expression (the object Identifier)
+    /// share the same span.start, causing expr_types collisions.
+    fa_struct_names: HashMap<usize, String>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -68,7 +78,29 @@ impl<'ctx> CodegenContext<'ctx> {
             expr_types: HashMap::new(),
             type_env: HashMap::new(),
             loop_targets: Vec::new(),
+            struct_defs: HashMap::new(),
+            fa_struct_names: HashMap::new(),
         }
+    }
+
+    /// Populate the struct definition table before code generation begins.
+    pub(crate) fn set_struct_defs(&mut self, defs: HashMap<String, Vec<(String, Type)>>) {
+        self.struct_defs = defs;
+    }
+
+    /// Build (or reconstruct) the LLVM struct type for a named struct.
+    ///
+    /// LLVM deduplicates anonymous struct types by structure, so reconstructing
+    /// the type each call is safe and avoids storing LLVM types in the context.
+    fn get_struct_llvm_type(&self, name: &str) -> CodegenResult<StructType<'ctx>> {
+        let def = self.struct_defs.get(name).ok_or_else(|| {
+            CodegenError::UnsupportedType(format!("unknown struct type '{}'", name))
+        })?;
+        let mut field_llvm_types = Vec::new();
+        for (_, field_ty) in def {
+            field_llvm_types.push(self.type_mapper.map_type(field_ty)?);
+        }
+        Ok(self.context.struct_type(&field_llvm_types, false))
     }
 
     /// Generate code for a literal expression
@@ -643,6 +675,164 @@ impl<'ctx> CodegenContext<'ctx> {
         })
     }
 
+    /// Build a struct aggregate value from a struct literal expression.
+    fn codegen_struct_literal(
+        &self,
+        name: &str,
+        fields: &[FieldInit],
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let llvm_ty = self.get_struct_llvm_type(name)?;
+        let def = self
+            .struct_defs
+            .get(name)
+            .ok_or_else(|| CodegenError::UnsupportedType(format!("unknown struct '{}'", name)))?;
+
+        let mut agg = llvm_ty.get_undef();
+        for field_init in fields {
+            let idx = def
+                .iter()
+                .position(|(n, _)| n == &field_init.name.name)
+                .ok_or_else(|| {
+                    CodegenError::InternalError(format!(
+                        "struct '{}' has no field '{}'",
+                        name, field_init.name.name
+                    ))
+                })?;
+            let val = self.codegen_expr(&field_init.value)?;
+            agg = self
+                .builder
+                .build_insert_value(
+                    agg,
+                    val,
+                    idx as u32,
+                    &format!("{}.{}", name, field_init.name.name),
+                )
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .into_struct_value();
+        }
+        Ok(agg.into())
+    }
+
+    /// Load a single field from a struct variable.
+    fn codegen_field_access(
+        &self,
+        object: &Expr,
+        field_name: &str,
+        struct_name: &str,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let (ptr, llvm_ty) = self.get_struct_ptr_and_type(object, struct_name)?;
+
+        let def = self.struct_defs.get(struct_name).ok_or_else(|| {
+            CodegenError::UnsupportedType(format!("unknown struct '{}'", struct_name))
+        })?;
+        let (idx, (_, field_ty)) = def
+            .iter()
+            .enumerate()
+            .find(|(_, (n, _))| n == field_name)
+            .ok_or_else(|| {
+                CodegenError::InternalError(format!(
+                    "struct '{}' has no field '{}'",
+                    struct_name, field_name
+                ))
+            })?;
+
+        let field_ptr = self
+            .builder
+            .build_struct_gep(llvm_ty, ptr, idx as u32, &format!("{}.ptr", field_name))
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+        let llvm_field_ty = self.type_mapper.map_type(field_ty)?;
+        self.builder
+            .build_load(llvm_field_ty, field_ptr, field_name)
+            .map_err(|e| CodegenError::LlvmError(format!("failed to load field: {}", e)))
+    }
+
+    /// Store a value into a field of a named struct variable.
+    fn codegen_field_assignment(
+        &self,
+        object_name: &str,
+        field_name: &str,
+        value: &Expr,
+    ) -> CodegenResult<()> {
+        let ptr = self
+            .variables
+            .get(object_name)
+            .copied()
+            .ok_or_else(|| CodegenError::UndefinedVariable(object_name.to_string()))?;
+
+        let struct_ty = self
+            .type_env
+            .get(object_name)
+            .ok_or_else(|| {
+                CodegenError::InternalError(format!("no type for variable '{}'", object_name))
+            })?
+            .clone();
+
+        let struct_name = match struct_ty {
+            Type::Struct(ref n) => n.clone(),
+            _ => {
+                return Err(CodegenError::UnsupportedType(format!(
+                    "'{}' is not a struct",
+                    object_name
+                )))
+            }
+        };
+
+        let llvm_struct_ty = self.get_struct_llvm_type(&struct_name)?;
+        let def = self.struct_defs.get(&struct_name).ok_or_else(|| {
+            CodegenError::UnsupportedType(format!("unknown struct '{}'", struct_name))
+        })?;
+
+        let idx = def
+            .iter()
+            .position(|(n, _)| n == field_name)
+            .ok_or_else(|| {
+                CodegenError::InternalError(format!(
+                    "struct '{}' has no field '{}'",
+                    struct_name, field_name
+                ))
+            })?;
+
+        let field_ptr = self
+            .builder
+            .build_struct_gep(
+                llvm_struct_ty,
+                ptr,
+                idx as u32,
+                &format!("{}.ptr", field_name),
+            )
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+        let val = self.codegen_expr(value)?;
+        self.builder
+            .build_store(field_ptr, val)
+            .map_err(|e| CodegenError::LlvmError(format!("failed to store field: {}", e)))?;
+        Ok(())
+    }
+
+    /// Get the alloca pointer and LLVM struct type for a struct object expression.
+    /// Only simple identifier objects are supported (no chained access).
+    fn get_struct_ptr_and_type(
+        &self,
+        object: &Expr,
+        struct_name: &str,
+    ) -> CodegenResult<(PointerValue<'ctx>, StructType<'ctx>)> {
+        match object {
+            Expr::Identifier(ident) => {
+                let ptr = self
+                    .variables
+                    .get(&ident.name)
+                    .copied()
+                    .ok_or_else(|| CodegenError::UndefinedVariable(ident.name.clone()))?;
+                let llvm_ty = self.get_struct_llvm_type(struct_name)?;
+                Ok((ptr, llvm_ty))
+            }
+            _ => Err(CodegenError::UnsupportedType(
+                "chained field access is not yet supported".to_string(),
+            )),
+        }
+    }
+
     /// Generate code for an expression
     fn codegen_expr(&self, expr: &Expr) -> CodegenResult<BasicValueEnum<'ctx>> {
         match expr {
@@ -683,6 +873,32 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             Expr::Paren(inner, _) => self.codegen_expr(inner),
+
+            Expr::StructLiteral { name, fields, .. } => {
+                self.codegen_struct_literal(&name.name, fields)
+            }
+
+            Expr::FieldAccess {
+                object,
+                field,
+                span,
+            } => {
+                // The struct name for this field access was stored in fa_struct_names during
+                // type collection (keyed by the FieldAccess span.start). We cannot use
+                // expr_types here because the FieldAccess and its first sub-expression
+                // (the object Identifier) share the same span.start, and the later insert
+                // of the field type overwrites the earlier insert of the struct type.
+                let struct_name = self
+                    .fa_struct_names
+                    .get(&span.start)
+                    .ok_or_else(|| {
+                        CodegenError::InternalError(
+                            "missing struct name for field access".to_string(),
+                        )
+                    })?
+                    .clone();
+                self.codegen_field_access(object, &field.name, &struct_name)
+            }
         }
     }
 
@@ -1080,6 +1296,13 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 Ok(())
             }
+            Stmt::FieldAssignment {
+                object,
+                field,
+                value,
+                ..
+            } => self.codegen_field_assignment(&object.name, &field.name, value),
+
             Stmt::Expr(expr) => {
                 self.codegen_expr(expr)?;
                 Ok(())
@@ -1219,11 +1442,10 @@ impl<'ctx> CodegenContext<'ctx> {
         items: &[Item],
         func_types: &HashMap<String, Type>,
     ) -> CodegenResult<()> {
-        // We need to run type inference to get expression types
-        // For Phase 1, we'll use a simple visitor pattern
         for item in items {
-            let Item::Function(func_def) = item;
-            self.visit_function_for_types(func_def, func_types)?;
+            if let Item::Function(func_def) = item {
+                self.visit_function_for_types(func_def, func_types)?;
+            }
         }
         Ok(())
     }
@@ -1341,6 +1563,15 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             Stmt::Break { .. } | Stmt::Continue { .. } => {}
+            Stmt::FieldAssignment { value, object, .. } => {
+                self.visit_expr_for_types(value, func_types)?;
+                // Ensure the object variable is in type_env so field access codegen can resolve it
+                if !self.type_env.contains_key(&object.name) {
+                    if let Some(ty) = self.expr_types.get(&object.span.start).cloned() {
+                        self.type_env.insert(object.name.clone(), ty);
+                    }
+                }
+            }
             Stmt::Expr(expr) => {
                 self.visit_expr_for_types(expr, func_types)?;
             }
@@ -1450,6 +1681,53 @@ impl<'ctx> CodegenContext<'ctx> {
                     .get(&ident.name)
                     .ok_or_else(|| CodegenError::UndefinedVariable(ident.name.clone()))?;
                 self.expr_types.insert(ident.span.start, ty.clone());
+            }
+
+            Expr::StructLiteral { name, fields, span } => {
+                for field_init in fields {
+                    self.visit_expr_for_types(&field_init.value, func_types)?;
+                }
+                self.expr_types
+                    .insert(span.start, Type::Struct(name.name.clone()));
+            }
+
+            Expr::FieldAccess {
+                object,
+                field,
+                span,
+            } => {
+                self.visit_expr_for_types(object, func_types)?;
+
+                let struct_name = match self.expr_types.get(&object.span().start).cloned() {
+                    Some(Type::Struct(n)) => n,
+                    _ => {
+                        return Err(CodegenError::InternalError(
+                            "field access on non-struct type during type collection".to_string(),
+                        ))
+                    }
+                };
+
+                // Store the struct name keyed by the FieldAccess span so codegen_expr can
+                // retrieve it without colliding with the object Identifier's expr_types entry
+                // (both share the same span.start when the object is a bare identifier).
+                self.fa_struct_names.insert(span.start, struct_name.clone());
+
+                let field_ty = self
+                    .struct_defs
+                    .get(&struct_name)
+                    .and_then(|def| {
+                        def.iter()
+                            .find(|(n, _)| n == &field.name)
+                            .map(|(_, ty)| ty.clone())
+                    })
+                    .ok_or_else(|| {
+                        CodegenError::InternalError(format!(
+                            "unknown field '{}' on struct '{}'",
+                            field.name, struct_name
+                        ))
+                    })?;
+
+                self.expr_types.insert(span.start, field_ty);
             }
         }
         Ok(())

@@ -25,7 +25,7 @@ pub mod items;
 pub mod statements;
 pub mod types;
 
-pub use expressions::{BinaryOp, Expr, UnaryOp};
-pub use items::{FunctionDef, Item, Parameter};
+pub use expressions::{BinaryOp, Expr, FieldInit, UnaryOp};
+pub use items::{FieldDef, FunctionDef, Item, Parameter, StructDef};
 pub use statements::Stmt;
 pub use types::Type;

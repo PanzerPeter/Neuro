@@ -16,7 +16,13 @@ pub(crate) enum Type {
     Bool,
     String,
     Void,
-    Function { params: Vec<Type>, ret: Box<Type> },
+    Function {
+        params: Vec<Type>,
+        ret: Box<Type>,
+    },
+    /// User-defined struct, identified by name. Field layout is resolved via the
+    /// CodegenContext struct_defs table rather than embedding it in the type.
+    Struct(std::string::String),
 }
 
 impl Type {

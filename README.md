@@ -5,7 +5,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-334%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-348%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP complete · Phase 1.5 (backend upgrade + memory safety refactor) in progress
 
@@ -60,7 +60,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 is complete. The following features are fully implemented and tested (**334 Tests Passing**):
+Phase 1 is complete. The following features are fully implemented and tested (**348 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -69,6 +69,7 @@ Phase 1 is complete. The following features are fully implemented and tested (**
 | **Control Flow** | if/else/elif, while loops, range-for (`for i in 0..n`), break, continue |
 | **Mutable Variables** | `val` (immutable) and `mut` (mutable) with type-safe reassignment |
 | **String Type** | Literals with full escape sequence support (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==` and `!=` for byte-level comparison |
+| **Structs** | Definition, instantiation (`Name { field: value }`), field read (`obj.field`), field mutation on `mut` bindings; nominal typing; definition-order independent |
 | **LLVM Backend** | Native executable generation via inkwell 0.8.0 (LLVM 20) |
 | **CLI** | `neurc check` (type-check only) and `neurc compile` (produces native binary) |
 
@@ -94,7 +95,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
 
 # 3. Set the LLVM prefix for the build system
-export LLVM_SYS_200_PREFIX=/usr/lib/llvm20
+export LLVM_SYS_201_PREFIX=/usr/lib/llvm20
 # Add to ~/.bashrc or ~/.zshrc to make permanent
 
 # 4. Clone and build
@@ -116,8 +117,8 @@ cargo install --path compiler/neurc
 wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 20
 
 # 2. Set the LLVM prefix
-export LLVM_SYS_200_PREFIX=/usr/lib/llvm-20
-echo 'export LLVM_SYS_200_PREFIX=/usr/lib/llvm-20' >> ~/.bashrc
+export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20
+echo 'export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20' >> ~/.bashrc
 
 # 3. Clone and build
 git clone https://github.com/PanzerPeter/Neuro.git
@@ -130,8 +131,8 @@ cargo build --release
 ```bash
 # 1. Install LLVM 20
 brew install llvm@20
-export LLVM_SYS_200_PREFIX=$(brew --prefix llvm@20)
-echo "export LLVM_SYS_200_PREFIX=$(brew --prefix llvm@20)" >> ~/.zshrc
+export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)
+echo "export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)" >> ~/.zshrc
 
 # 2. Clone and build
 git clone https://github.com/PanzerPeter/Neuro.git
@@ -211,6 +212,32 @@ func sum(n: i32) -> i32 {
 }
 ```
 
+### Structs
+
+```neuro
+struct Point {
+    x: f64,
+    y: f64
+}
+
+func distance(p: Point) -> f64 {
+    // field read
+    val dx = p.x
+    val dy = p.y
+    dx * dx + dy * dy   // placeholder (no sqrt yet)
+}
+
+func main() -> i32 {
+    val origin = Point { x: 0.0, y: 0.0 }
+
+    // field mutation requires mut binding
+    mut cursor = Point { x: 3.0, y: 4.0 }
+    cursor.x = 1.0
+
+    return 0
+}
+```
+
 ### Planned (Phase 3+): Tensor Types
 
 ```neuro
@@ -276,7 +303,7 @@ Tensor/AI path: AST → NEURO High-Level IR
 |:---:|---|:---:|
 | **1** | Core MVP — types, functions, control flow, LLVM backend | ✅ Complete |
 | **1.5** | Backend upgrade (LLVM 20), string fat pointers, ownership semantics | 🔄 In progress |
-| **2** | Structs, enums, pattern matching, module system, error handling | 📋 Planned |
+| **2** | Structs, enums, pattern matching, module system, error handling | 🔄 In progress (structs ✅) |
 | **3** | Tensor types, MLIR lowering, DLPack, pool allocator | 📋 Planned |
 | **4** | Automatic differentiation via Enzyme MLIR | 📋 Planned |
 | **5** | GPU acceleration via MLIR GPU dialects (nvgpu/rocdl/Triton) | 📋 Planned |
@@ -288,10 +315,10 @@ Tensor/AI path: AST → NEURO High-Level IR
 
 ```bash
 # Build the full workspace
-LLVM_SYS_200_PREFIX=/usr/lib/llvm20 cargo build --workspace
+LLVM_SYS_201_PREFIX=/usr/lib/llvm20 cargo build --workspace
 
 # Run all tests
-LLVM_SYS_200_PREFIX=/usr/lib/llvm20 cargo test --workspace
+LLVM_SYS_201_PREFIX=/usr/lib/llvm20 cargo test --workspace
 
 # Lint
 cargo clippy --workspace --all-targets -- -D warnings

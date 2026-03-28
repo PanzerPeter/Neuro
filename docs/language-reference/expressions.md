@@ -52,6 +52,28 @@ double(square(x))           // Nested calls
 max(min(a, b), c)           // Multiple nesting
 ```
 
+### Struct Literal Expressions
+
+Construct a struct value by naming all fields:
+
+```neuro
+val p = Point { x: 3.0, y: 4.0 }
+val c = Counter { value: 0, step: 1 }
+```
+
+All fields must be present; duplicate or unknown fields are compile errors.
+
+### Field Access Expressions
+
+Read a field from a struct value:
+
+```neuro
+val x = p.x          // reads field x — type is f64
+val total = c.value + c.step
+```
+
+Field access binds tighter than function calls in the precedence table.
+
 ### Parenthesized Expressions
 
 Control evaluation order:
@@ -67,7 +89,9 @@ Higher precedence operators evaluate first:
 
 | Precedence | Operators | Associativity | Description |
 |------------|-----------|---------------|-------------|
-| 7 (Highest) | `-` (unary), `!` | Right | Unary negation, logical NOT |
+| 9 (Highest) | `.` | Left | Field access |
+| 8 | `(…)` | Left | Function call |
+| 7 | `-` (unary), `!` | Right | Unary negation, logical NOT |
 | 6 | `*`, `/`, `%` | Left | Multiplication, division, modulo |
 | 5 | `+`, `-` | Left | Addition, subtraction |
 | 4 | `<`, `>`, `<=`, `>=` | Left | Comparisons |

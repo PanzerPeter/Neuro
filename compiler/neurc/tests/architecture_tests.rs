@@ -146,6 +146,12 @@ fn test_all_slices_have_context_md() {
         "compiler/control-flow",
         "compiler/llvm-backend",
         "compiler/neurc",
+        // Infrastructure slices also require CONTEXT.md (VSA 4.3 AC-011)
+        "compiler/infrastructure/shared-types",
+        "compiler/infrastructure/ast-types",
+        "compiler/infrastructure/diagnostics",
+        "compiler/infrastructure/source-location",
+        "compiler/infrastructure/project-config",
     ];
 
     for slice_path in &all_slices {

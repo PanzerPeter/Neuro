@@ -13,7 +13,10 @@ mod parser;
 mod precedence;
 
 // Public exports
-pub use ast::{BinaryOp, Expr, FunctionDef, Item, Parameter, Stmt, Type, UnaryOp};
+pub use ast::{
+    BinaryOp, Expr, FieldDef, FieldInit, FunctionDef, Item, Parameter, Stmt, StructDef, Type,
+    UnaryOp,
+};
 pub use errors::{ParseError, ParseResult};
 
 use lexical_analysis::tokenize;

@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **parser/semantic/codegen**: Struct types — definition, instantiation, field access, and field mutation
+  - `struct Name { field: Type, ... }` declarations parsed as `Item::Struct`
+  - Struct literal expressions `Name { field: value, ... }` with full type checking
+  - Field read via `.field` infix (`Expr::FieldAccess`), codegen via LLVM `build_struct_gep` + `build_load`
+  - Field write `obj.field = value` on `mut` bindings (`Stmt::FieldAssignment`), codegen via `build_struct_gep` + `build_store`
+  - Two-pass semantic analysis: structs pre-registered before function bodies are checked, so definition order doesn't matter
+  - Nominal typing: `Type::Struct(name)` matched by name; struct-literal fields validated for presence, uniqueness, and type
+  - Immutability enforced: mutating a field of a `val` binding is a compile error (`AssignToImmutableField`)
+  - `no_struct_lit` parser flag prevents `{ }` after bare identifiers from being parsed as struct literals inside `if`/`while`/`for` conditions
+  - 10 integration tests in `compiler/neurc/tests/structs.rs` covering all acceptance criteria
+  - `examples/structs.nr` runnable example
+
 - **codegen**: String equality operators `==` and `!=`
   - Lowered to length check (fast path) + `memcmp` call via external libc symbol
   - `select` keeps `memcmp` safe when lengths differ (passes `n=0`)

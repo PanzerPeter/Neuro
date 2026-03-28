@@ -41,12 +41,14 @@ jobs:
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install LLVM 20
-        run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 20
-          sudo apt-get install -y libpolly-20-dev
-          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
+        uses: KyleMayes/install-llvm-action@v2
+        id: llvm
+        with:
+          version: "20"
+
+      - name: Set LLVM_SYS_201_PREFIX
+        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm.outputs.llvm-path }}" >> $GITHUB_ENV
+        shell: bash
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -68,12 +70,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install LLVM 20
-        run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 20
-          sudo apt-get install -y libpolly-20-dev
-          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
+        uses: KyleMayes/install-llvm-action@v2
+        id: llvm
+        with:
+          version: "20"
+
+      - name: Set LLVM_SYS_201_PREFIX
+        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm.outputs.llvm-path }}" >> $GITHUB_ENV
+        shell: bash
 
       - name: Enforce VSA architecture boundaries
         run: cargo test -p neurc --test architecture_tests --verbose
@@ -99,12 +103,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install LLVM 20
-        run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 20
-          sudo apt-get install -y libpolly-20-dev
-          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
+        uses: KyleMayes/install-llvm-action@v2
+        id: llvm
+        with:
+          version: "20"
+
+      - name: Set LLVM_SYS_201_PREFIX
+        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm.outputs.llvm-path }}" >> $GITHUB_ENV
+        shell: bash
 
       - name: Run llvm-backend benchmarks
         run: cargo bench -p llvm-backend --bench codegen_bench -- --sample-size 10
@@ -129,29 +135,15 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install LLVM 20 (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 20
-          sudo apt-get install -y libpolly-20-dev
-          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
+      - name: Install LLVM 20
+        uses: KyleMayes/install-llvm-action@v2
+        id: llvm
+        with:
+          version: "20"
 
-      - name: Install LLVM 20 (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew install llvm@20
-          echo "LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)" >> $GITHUB_ENV
-
-      - name: Install LLVM 20 (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $ProgressPreference = 'SilentlyContinue'
-          Invoke-WebRequest "https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.0/LLVM-20.1.0-win64.exe" -OutFile "$env:TEMP\llvm.exe"
-          Start-Process -Wait "$env:TEMP\llvm.exe" -ArgumentList "/S"
-          echo "LLVM_SYS_201_PREFIX=C:\Program Files\LLVM" >> $env:GITHUB_ENV
+      - name: Set LLVM_SYS_201_PREFIX
+        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm.outputs.llvm-path }}" >> $GITHUB_ENV
+        shell: bash
 
       - name: Build release neurc
         run: cargo build -p neurc --release
@@ -198,29 +190,15 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install LLVM 20 (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 20
-          sudo apt-get install -y libpolly-20-dev
-          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
+      - name: Install LLVM 20
+        uses: KyleMayes/install-llvm-action@v2
+        id: llvm
+        with:
+          version: "20"
 
-      - name: Install LLVM 20 (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew install llvm@20
-          echo "LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)" >> $GITHUB_ENV
-
-      - name: Install LLVM 20 (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $ProgressPreference = 'SilentlyContinue'
-          Invoke-WebRequest "https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.0/LLVM-20.1.0-win64.exe" -OutFile "$env:TEMP\llvm.exe"
-          Start-Process -Wait "$env:TEMP\llvm.exe" -ArgumentList "/S"
-          echo "LLVM_SYS_201_PREFIX=C:\Program Files\LLVM" >> $env:GITHUB_ENV
+      - name: Set LLVM_SYS_201_PREFIX
+        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm.outputs.llvm-path }}" >> $GITHUB_ENV
+        shell: bash
 
       - name: Run tests
         run: cargo test --all --verbose
@@ -235,12 +213,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install LLVM 20
-        run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 20
-          sudo apt-get install -y libpolly-20-dev
-          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
+        uses: KyleMayes/install-llvm-action@v2
+        id: llvm
+        with:
+          version: "20"
+
+      - name: Set LLVM_SYS_201_PREFIX
+        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm.outputs.llvm-path }}" >> $GITHUB_ENV
+        shell: bash
 
       - name: Build workspace (debug)
         run: cargo build --workspace --verbose
@@ -267,12 +247,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install LLVM 20
-        run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 20
-          sudo apt-get install -y libpolly-20-dev
-          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
+        uses: KyleMayes/install-llvm-action@v2
+        id: llvm
+        with:
+          version: "20"
+
+      - name: Set LLVM_SYS_201_PREFIX
+        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm.outputs.llvm-path }}" >> $GITHUB_ENV
+        shell: bash
 
       - name: Install tarpaulin
         run: cargo install cargo-tarpaulin

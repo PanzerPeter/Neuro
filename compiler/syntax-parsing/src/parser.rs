@@ -4,7 +4,10 @@
 use lexical_analysis::{Token, TokenKind};
 use shared_types::{Identifier, Literal, Span};
 
-use crate::ast::{BinaryOp, Expr, FunctionDef, Item, Parameter, Stmt, Type, UnaryOp};
+use crate::ast::{
+    BinaryOp, Expr, FieldDef, FieldInit, FunctionDef, Item, Parameter, Stmt, StructDef, Type,
+    UnaryOp,
+};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 
@@ -16,6 +19,9 @@ pub(crate) struct Parser {
     tokens: Vec<Token>,
     current: usize,
     expr_depth: usize,
+    /// When true, an identifier followed by `{` is NOT parsed as a struct literal.
+    /// Set to true inside if/while/for conditions to prevent consuming the block's `{`.
+    no_struct_lit: bool,
 }
 
 impl Parser {
@@ -25,6 +31,7 @@ impl Parser {
             tokens,
             current: 0,
             expr_depth: 0,
+            no_struct_lit: false,
         }
     }
 
@@ -143,11 +150,18 @@ impl Parser {
             TokenKind::True => Ok(Expr::Literal(Literal::Boolean(true), token.span)),
             TokenKind::False => Ok(Expr::Literal(Literal::Boolean(false), token.span)),
 
-            // Identifiers
-            TokenKind::Identifier(name) => Ok(Expr::Identifier(Identifier {
-                name,
-                span: token.span,
-            })),
+            // Identifiers — or struct literals when followed by `{`
+            TokenKind::Identifier(name) => {
+                let ident = Identifier {
+                    name,
+                    span: token.span,
+                };
+                if !self.no_struct_lit && self.check(&TokenKind::LeftBrace) {
+                    self.parse_struct_literal(ident)
+                } else {
+                    Ok(Expr::Identifier(ident))
+                }
+            }
 
             // Unary operators
             TokenKind::Minus => {
@@ -217,6 +231,31 @@ impl Parser {
                 Ok(Expr::Call {
                     func: Box::new(left),
                     args,
+                    span,
+                })
+            }
+
+            // Field access: `expr.field`
+            TokenKind::Dot => {
+                self.advance(); // consume '.'
+                let field_token =
+                    self.consume(TokenKind::Identifier(String::new()), "field name")?;
+                let field = if let TokenKind::Identifier(name) = field_token.kind {
+                    Identifier {
+                        name,
+                        span: field_token.span,
+                    }
+                } else {
+                    return Err(ParseError::UnexpectedToken {
+                        found: field_token.kind,
+                        expected: "field name".to_string(),
+                        span: field_token.span,
+                    });
+                };
+                let span = left.span().merge(field.span);
+                Ok(Expr::FieldAccess {
+                    object: Box::new(left),
+                    field,
                     span,
                 })
             }
@@ -304,6 +343,7 @@ impl Parser {
             TokenKind::Plus | TokenKind::Minus => Precedence::Sum,
             TokenKind::Star | TokenKind::Slash | TokenKind::Percent => Precedence::Product,
             TokenKind::LeftParen => Precedence::Call,
+            TokenKind::Dot => Precedence::FieldAccess,
             _ => Precedence::Lowest,
         }
     }
@@ -449,8 +489,9 @@ impl Parser {
     pub(crate) fn parse_if_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
         self.skip_newlines();
 
-        // Parse condition expression
+        self.no_struct_lit = true;
         let condition = self.parse_expr(Precedence::Lowest)?;
+        self.no_struct_lit = false;
         self.skip_newlines();
 
         // Parse then block
@@ -498,6 +539,7 @@ impl Parser {
                 Stmt::ForRange { span, .. } => *span,
                 Stmt::Break { span } => *span,
                 Stmt::Continue { span } => *span,
+                Stmt::FieldAssignment { span, .. } => *span,
                 Stmt::Expr(e) => e.span(),
             })
             .unwrap_or(start_span);
@@ -515,7 +557,9 @@ impl Parser {
     pub(crate) fn parse_while_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
         self.skip_newlines();
 
+        self.no_struct_lit = true;
         let condition = self.parse_expr(Precedence::Lowest)?;
+        self.no_struct_lit = false;
         self.skip_newlines();
 
         let body = self.parse_block()?;
@@ -531,6 +575,7 @@ impl Parser {
                 Stmt::ForRange { span, .. } => *span,
                 Stmt::Break { span } => *span,
                 Stmt::Continue { span } => *span,
+                Stmt::FieldAssignment { span, .. } => *span,
                 Stmt::Expr(e) => e.span(),
             })
             .unwrap_or(condition.span());
@@ -564,6 +609,8 @@ impl Parser {
         self.consume(TokenKind::In, "'in'")?;
         self.skip_newlines();
 
+        // Range expressions must not be struct literals or `{` would be consumed
+        self.no_struct_lit = true;
         let start = self.parse_expr(Precedence::Lowest)?;
         self.skip_newlines();
 
@@ -582,6 +629,7 @@ impl Parser {
         self.skip_newlines();
 
         let end = self.parse_expr(Precedence::Lowest)?;
+        self.no_struct_lit = false;
         self.skip_newlines();
 
         let body = self.parse_block()?;
@@ -597,6 +645,7 @@ impl Parser {
                 Stmt::ForRange { span, .. } => *span,
                 Stmt::Break { span } => *span,
                 Stmt::Continue { span } => *span,
+                Stmt::FieldAssignment { span, .. } => *span,
                 Stmt::Expr(e) => e.span(),
             })
             .unwrap_or(end.span());
@@ -662,18 +711,31 @@ impl Parser {
                 Ok(Stmt::Continue { span })
             }
             TokenKind::Identifier(_) => {
-                // Check if this is an assignment (identifier = expr) or expression statement
-                // Lookahead to see if next token is '='
+                // Lookahead to distinguish:
+                //   ident = expr          → assignment
+                //   ident.field = expr    → field assignment
+                //   anything else         → expression statement
                 if self.current + 1 < self.tokens.len() {
                     if let Some(next_token) = self.tokens.get(self.current + 1) {
                         if matches!(next_token.kind, TokenKind::Equal) {
-                            // This is an assignment statement
                             return self.parse_assignment_stmt();
+                        }
+                        if matches!(next_token.kind, TokenKind::Dot) {
+                            // Check for ident.field = expr (two more tokens ahead)
+                            if let (Some(field_tok), Some(eq_tok)) = (
+                                self.tokens.get(self.current + 2),
+                                self.tokens.get(self.current + 3),
+                            ) {
+                                if matches!(field_tok.kind, TokenKind::Identifier(_))
+                                    && matches!(eq_tok.kind, TokenKind::Equal)
+                                {
+                                    return self.parse_field_assignment_stmt();
+                                }
+                            }
                         }
                     }
                 }
 
-                // Otherwise, parse as expression statement
                 let expr = self.parse_expr(Precedence::Lowest)?;
                 Ok(Stmt::Expr(expr))
             }
@@ -814,6 +876,7 @@ impl Parser {
                 Stmt::ForRange { span, .. } => *span,
                 Stmt::Break { span } => *span,
                 Stmt::Continue { span } => *span,
+                Stmt::FieldAssignment { span, .. } => *span,
                 Stmt::Expr(e) => e.span(),
             })
             .unwrap_or(start.span);
@@ -827,23 +890,25 @@ impl Parser {
         })
     }
 
-    /// Parse top-level items (currently only functions in Phase 1)
+    /// Parse top-level items: function or struct definitions
     pub(crate) fn parse_program(&mut self) -> ParseResult<Vec<Item>> {
         let mut items = Vec::new();
 
         self.skip_newlines();
         while !self.is_at_end() {
-            // For Phase 1, we only support function definitions
             if self.check(&TokenKind::Func) {
                 let func = self.parse_function()?;
                 items.push(Item::Function(func));
+            } else if self.check(&TokenKind::Struct) {
+                let s = self.parse_struct_def()?;
+                items.push(Item::Struct(s));
             } else {
                 let token = self.peek().ok_or(ParseError::UnexpectedEof {
-                    expected: "function definition".to_string(),
+                    expected: "function or struct definition".to_string(),
                 })?;
                 return Err(ParseError::UnexpectedToken {
                     found: token.kind.clone(),
-                    expected: "function definition".to_string(),
+                    expected: "function or struct definition".to_string(),
                     span: token.span,
                 });
             }
@@ -851,5 +916,178 @@ impl Parser {
         }
 
         Ok(items)
+    }
+
+    /// Parse a struct definition: `struct Name { field: Type, ... }`
+    pub(crate) fn parse_struct_def(&mut self) -> ParseResult<StructDef> {
+        let start = self.consume(TokenKind::Struct, "'struct'")?;
+        self.skip_newlines();
+
+        let name_token = self.consume(TokenKind::Identifier(String::new()), "struct name")?;
+        let name = if let TokenKind::Identifier(n) = name_token.kind {
+            Identifier {
+                name: n,
+                span: name_token.span,
+            }
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                found: name_token.kind,
+                expected: "struct name".to_string(),
+                span: name_token.span,
+            });
+        };
+
+        self.skip_newlines();
+        self.consume(TokenKind::LeftBrace, "'{'")?;
+        self.skip_newlines();
+
+        let mut fields: Vec<FieldDef> = Vec::new();
+        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            let field_name_token =
+                self.consume(TokenKind::Identifier(String::new()), "field name")?;
+            let field_name = if let TokenKind::Identifier(n) = field_name_token.kind {
+                Identifier {
+                    name: n,
+                    span: field_name_token.span,
+                }
+            } else {
+                return Err(ParseError::UnexpectedToken {
+                    found: field_name_token.kind,
+                    expected: "field name".to_string(),
+                    span: field_name_token.span,
+                });
+            };
+
+            self.skip_newlines();
+            self.consume(TokenKind::Colon, "':'")?;
+            self.skip_newlines();
+
+            let field_ty = self.parse_type()?;
+            let field_span = field_name.span.merge(match &field_ty {
+                Type::Named(ident) => ident.span,
+                Type::Tensor { span, .. } => *span,
+            });
+
+            fields.push(FieldDef {
+                name: field_name,
+                ty: field_ty,
+                span: field_span,
+            });
+
+            self.skip_newlines();
+            if self.check(&TokenKind::Comma) {
+                self.advance(); // consume ','
+                self.skip_newlines();
+            } else {
+                break;
+            }
+        }
+
+        let close = self.consume(TokenKind::RightBrace, "'}'")?;
+
+        Ok(StructDef {
+            name,
+            fields,
+            span: start.span.merge(close.span),
+        })
+    }
+
+    /// Parse a struct literal expression: `TypeName { field: expr, ... }`
+    ///
+    /// The `name` identifier has already been consumed by `parse_prefix`.
+    pub(crate) fn parse_struct_literal(&mut self, name: Identifier) -> ParseResult<Expr> {
+        self.consume(TokenKind::LeftBrace, "'{'")?;
+        self.skip_newlines();
+
+        let mut fields: Vec<FieldInit> = Vec::new();
+        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            let field_name_token =
+                self.consume(TokenKind::Identifier(String::new()), "field name")?;
+            let field_name = if let TokenKind::Identifier(n) = field_name_token.kind {
+                Identifier {
+                    name: n,
+                    span: field_name_token.span,
+                }
+            } else {
+                return Err(ParseError::UnexpectedToken {
+                    found: field_name_token.kind,
+                    expected: "field name".to_string(),
+                    span: field_name_token.span,
+                });
+            };
+
+            self.skip_newlines();
+            self.consume(TokenKind::Colon, "':'")?;
+            self.skip_newlines();
+
+            let value = self.parse_expr(Precedence::Lowest)?;
+            let field_span = field_name.span.merge(value.span());
+
+            fields.push(FieldInit {
+                name: field_name,
+                value: Box::new(value),
+                span: field_span,
+            });
+
+            self.skip_newlines();
+            if self.check(&TokenKind::Comma) {
+                self.advance(); // consume ','
+                self.skip_newlines();
+            } else {
+                break;
+            }
+        }
+
+        let close = self.consume(TokenKind::RightBrace, "'}'")?;
+        let span = name.span.merge(close.span);
+
+        Ok(Expr::StructLiteral { name, fields, span })
+    }
+
+    /// Parse a field assignment statement: `object.field = value`
+    pub(crate) fn parse_field_assignment_stmt(&mut self) -> ParseResult<Stmt> {
+        let object_token = self.consume(TokenKind::Identifier(String::new()), "variable name")?;
+        let object = if let TokenKind::Identifier(n) = object_token.kind {
+            Identifier {
+                name: n,
+                span: object_token.span,
+            }
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                found: object_token.kind,
+                expected: "variable name".to_string(),
+                span: object_token.span,
+            });
+        };
+
+        self.consume(TokenKind::Dot, "'.'")?;
+
+        let field_token = self.consume(TokenKind::Identifier(String::new()), "field name")?;
+        let field = if let TokenKind::Identifier(n) = field_token.kind {
+            Identifier {
+                name: n,
+                span: field_token.span,
+            }
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                found: field_token.kind,
+                expected: "field name".to_string(),
+                span: field_token.span,
+            });
+        };
+
+        self.skip_newlines();
+        self.consume(TokenKind::Equal, "'='")?;
+        self.skip_newlines();
+
+        let value = self.parse_expr(Precedence::Lowest)?;
+        let span = object.span.merge(value.span());
+
+        Ok(Stmt::FieldAssignment {
+            object,
+            field,
+            value,
+            span,
+        })
     }
 }

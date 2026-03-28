@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use ast_types::{BinaryOp, Expr, FunctionDef, Item, Stmt, UnaryOp};
+use ast_types::{BinaryOp, Expr, FieldInit, FunctionDef, Item, Stmt, StructDef, UnaryOp};
 use shared_types::{Literal, Span};
 
 use crate::errors::TypeError;
@@ -16,6 +16,8 @@ pub(crate) struct TypeChecker {
     symbols: SymbolTable,
     /// Function signatures (global scope)
     functions: HashMap<String, Type>,
+    /// Struct definitions: name → ordered list of (field_name, field_type)
+    struct_defs: HashMap<String, Vec<(String, Type)>>,
     /// Collected type errors
     errors: Vec<TypeError>,
     /// Current function's return type (for validating return statements)
@@ -29,6 +31,7 @@ impl TypeChecker {
         Self {
             symbols: SymbolTable::new(),
             functions: HashMap::new(),
+            struct_defs: HashMap::new(),
             errors: Vec::new(),
             current_function_return_type: None,
             loop_depth: 0,
@@ -131,11 +134,15 @@ impl TypeChecker {
                 "string" => Some(Type::String),
                 "void" => Some(Type::Void),
                 name => {
-                    self.record_error(TypeError::UnknownTypeName {
-                        name: name.to_string(),
-                        span: ident.span,
-                    });
-                    None
+                    if self.struct_defs.contains_key(name) {
+                        Some(Type::Struct(name.to_string()))
+                    } else {
+                        self.record_error(TypeError::UnknownTypeName {
+                            name: name.to_string(),
+                            span: ident.span,
+                        });
+                        None
+                    }
                 }
             },
             ast_types::Type::Tensor { span, .. } => {
@@ -393,6 +400,117 @@ impl TypeChecker {
             Expr::Paren(inner, _) => {
                 // Propagate expected type through parentheses
                 self.check_expr(inner, expected)
+            }
+
+            Expr::StructLiteral { name, fields, span } => {
+                let def = if let Some(d) = self.struct_defs.get(&name.name).cloned() {
+                    d
+                } else {
+                    self.record_error(TypeError::UnknownStruct {
+                        name: name.name.clone(),
+                        span: name.span,
+                    });
+                    return None;
+                };
+
+                // Track which fields have been provided to detect duplicates and missing fields
+                let mut seen: HashMap<String, Span> = HashMap::new();
+                for FieldInit {
+                    name: fname,
+                    value,
+                    span: fspan,
+                } in fields
+                {
+                    if let Some(prev_span) = seen.insert(fname.name.clone(), *fspan) {
+                        let _ = prev_span;
+                        self.record_error(TypeError::DuplicateStructField {
+                            field_name: fname.name.clone(),
+                            span: *fspan,
+                        });
+                        continue;
+                    }
+
+                    let expected_field_ty = def
+                        .iter()
+                        .find(|(n, _)| n == &fname.name)
+                        .map(|(_, t)| t.clone());
+
+                    if let Some(ref expected_ty) = expected_field_ty {
+                        if let Some(actual_ty) = self.check_expr(value, Some(expected_ty)) {
+                            if !actual_ty.is_compatible_with(expected_ty) {
+                                self.record_error(TypeError::Mismatch {
+                                    expected: expected_ty.clone(),
+                                    found: actual_ty,
+                                    span: value.span(),
+                                });
+                            }
+                        }
+                    } else {
+                        self.record_error(TypeError::UnknownField {
+                            struct_name: name.name.clone(),
+                            field_name: fname.name.clone(),
+                            span: *fspan,
+                        });
+                        // Still check the value expression for cascaded errors
+                        let _ = self.check_expr(value, None);
+                    }
+                }
+
+                // Report any fields that are in the definition but missing from the literal
+                for (field_name, _) in &def {
+                    if !seen.contains_key(field_name) {
+                        self.record_error(TypeError::MissingStructField {
+                            struct_name: name.name.clone(),
+                            field_name: field_name.clone(),
+                            span: *span,
+                        });
+                    }
+                }
+
+                Some(Type::Struct(name.name.clone()))
+            }
+
+            Expr::FieldAccess {
+                object,
+                field,
+                span,
+            } => {
+                let obj_ty = self.check_expr(object, None).unwrap_or(Type::Unknown);
+                if matches!(obj_ty, Type::Unknown) {
+                    return Some(Type::Unknown);
+                }
+
+                let struct_name = match &obj_ty {
+                    Type::Struct(n) => n.clone(),
+                    other => {
+                        self.record_error(TypeError::UnknownField {
+                            struct_name: other.to_string(),
+                            field_name: field.name.clone(),
+                            span: *span,
+                        });
+                        return Some(Type::Unknown);
+                    }
+                };
+
+                let def = self.struct_defs.get(&struct_name).cloned();
+                if let Some(def) = def {
+                    if let Some((_, field_ty)) = def.iter().find(|(n, _)| n == &field.name) {
+                        Some(field_ty.clone())
+                    } else {
+                        self.record_error(TypeError::UnknownField {
+                            struct_name,
+                            field_name: field.name.clone(),
+                            span: field.span,
+                        });
+                        Some(Type::Unknown)
+                    }
+                } else {
+                    self.record_error(TypeError::UnknownStruct {
+                        name: struct_name,
+                        span: *span,
+                    });
+                    Some(Type::Unknown)
+                }
             }
         }
     }
@@ -706,6 +824,76 @@ impl TypeChecker {
                 Some(())
             }
 
+            Stmt::FieldAssignment {
+                object,
+                field,
+                value,
+                span,
+            } => {
+                let symbol = if let Some(s) = self.symbols.lookup(&object.name) {
+                    s.clone()
+                } else {
+                    self.record_error(TypeError::UndefinedVariable {
+                        name: object.name.clone(),
+                        span: object.span,
+                    });
+                    return None;
+                };
+
+                if !symbol.mutable {
+                    self.record_error(TypeError::AssignToImmutableField {
+                        var_name: object.name.clone(),
+                        field_name: field.name.clone(),
+                        span: *span,
+                    });
+                    return None;
+                }
+
+                let struct_name = match &symbol.ty {
+                    Type::Struct(n) => n.clone(),
+                    other => {
+                        self.record_error(TypeError::UnknownField {
+                            struct_name: other.to_string(),
+                            field_name: field.name.clone(),
+                            span: field.span,
+                        });
+                        return None;
+                    }
+                };
+
+                let field_ty = {
+                    let def = self.struct_defs.get(&struct_name).cloned();
+                    if let Some(def) = def {
+                        def.iter()
+                            .find(|(n, _)| n == &field.name)
+                            .map(|(_, t)| t.clone())
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some(expected_ty) = field_ty {
+                    if let Some(actual_ty) = self.check_expr(value, Some(&expected_ty)) {
+                        if !actual_ty.is_compatible_with(&expected_ty) {
+                            self.record_error(TypeError::Mismatch {
+                                expected: expected_ty,
+                                found: actual_ty,
+                                span: *span,
+                            });
+                        }
+                    }
+                } else {
+                    self.record_error(TypeError::UnknownField {
+                        struct_name,
+                        field_name: field.name.clone(),
+                        span: field.span,
+                    });
+                    return None;
+                }
+
+                Some(())
+            }
+
             Stmt::Expr(expr) => {
                 // Expression statements have no expected type context
                 let _ = self.check_expr(expr, None);
@@ -816,15 +1004,43 @@ impl TypeChecker {
         Some(())
     }
 
+    /// Register a struct definition without checking field initializers.
+    /// Called in the pre-registration pass so that structs can be referenced
+    /// by functions and other structs defined later in the file.
+    fn register_struct(&mut self, def: &StructDef) -> Option<()> {
+        if self.struct_defs.contains_key(&def.name.name) {
+            self.record_error(TypeError::StructAlreadyDefined {
+                name: def.name.name.clone(),
+                span: def.name.span,
+            });
+            return None;
+        }
+
+        let mut fields: Vec<(String, Type)> = Vec::new();
+        for field in &def.fields {
+            if let Some(ty) = self.resolve_type(&field.ty) {
+                fields.push((field.name.name.clone(), ty));
+            }
+        }
+
+        self.struct_defs.insert(def.name.name.clone(), fields);
+        Some(())
+    }
+
     /// Check a complete program
     pub(crate) fn check_program(&mut self, items: &[Item]) -> Result<(), ()> {
-        // Phase 1: Only function definitions are supported
+        // Pre-registration pass: register struct definitions so that struct type
+        // names resolve correctly when encountered inside function signatures and bodies.
         for item in items {
-            match item {
-                Item::Function(func) => {
-                    // Continue checking even if function has errors
-                    let _ = self.check_function(func);
-                }
+            if let Item::Struct(def) = item {
+                let _ = self.register_struct(def);
+            }
+        }
+
+        // Full-check pass: check function bodies (check_function also registers signatures)
+        for item in items {
+            if let Item::Function(func) = item {
+                let _ = self.check_function(func);
             }
         }
 

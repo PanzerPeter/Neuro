@@ -5,6 +5,14 @@ use std::fmt;
 
 use shared_types::{Identifier, Literal, Span};
 
+/// A single field initializer in a struct literal: `field_name: expr`
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldInit {
+    pub name: Identifier,
+    pub value: Box<Expr>,
+    pub span: Span,
+}
+
 /// Abstract Syntax Tree node for expressions
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
@@ -27,6 +35,18 @@ pub enum Expr {
         span: Span,
     },
     Paren(Box<Expr>, Span),
+    /// Struct literal: `Point { x: 1.0, y: 2.0 }`
+    StructLiteral {
+        name: Identifier,
+        fields: Vec<FieldInit>,
+        span: Span,
+    },
+    /// Field access: `expr.field_name`
+    FieldAccess {
+        object: Box<Expr>,
+        field: Identifier,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -39,6 +59,8 @@ impl Expr {
             Expr::Call { span, .. } => *span,
             Expr::Unary { span, .. } => *span,
             Expr::Paren(_, span) => *span,
+            Expr::StructLiteral { span, .. } => *span,
+            Expr::FieldAccess { span, .. } => *span,
         }
     }
 }

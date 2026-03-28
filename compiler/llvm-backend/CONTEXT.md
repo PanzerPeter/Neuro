@@ -42,6 +42,16 @@ declared as an external libc symbol. `memcmp` is universally available on all su
 platforms (Linux, macOS). The length check uses `select` to pass `n=0` to `memcmp` when
 lengths differ, keeping it safe without requiring additional basic blocks.
 
+## Struct ABI
+User-defined struct types are lowered to anonymous LLVM struct types `{ T0, T1, ... }`
+with fields in declaration order (no padding insertion — LLVM handles natural alignment).
+Struct values are stored on the stack via `alloca` and initialised field-by-field with
+`insertvalue`. Field reads use `getelementptr` + `load`; field writes use
+`getelementptr` + `store`. Struct types are not yet supported as function parameters
+or return types (Phase 2+ limitation; the type mapper returns an error for those cases).
+Field layout is held in `CodegenContext.struct_defs`; `get_struct_llvm_type` rebuilds
+the anonymous LLVM struct type on demand (LLVM deduplicates by structure).
+
 ## Future: MLIR Integration (Phase 3+)
 When tensor operations are introduced, `melior` (Rust MLIR bindings, targeting the same
 LLVM 20 / MLIR 20 installation) will be added alongside inkwell. The lowering strategy

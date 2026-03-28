@@ -59,5 +59,12 @@ pub enum Stmt {
     Continue {
         span: Span,
     },
+    /// Field assignment on a struct binding: `object.field = value`
+    FieldAssignment {
+        object: Identifier,
+        field: Identifier,
+        value: Expr,
+        span: Span,
+    },
     Expr(Expr),
 }

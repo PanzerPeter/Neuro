@@ -27,7 +27,7 @@ source ~/.cargo/env
 rustup component add clippy rustfmt rust-analyzer
 
 # 3. Set LLVM prefix (add to ~/.bashrc or ~/.zshrc for permanence)
-export LLVM_SYS_200_PREFIX=/usr/lib/llvm20
+export LLVM_SYS_201_PREFIX=/usr/lib/llvm20
 
 # 4. Clone and build
 git clone https://github.com/PanzerPeter/Neuro.git
@@ -59,8 +59,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
 
 # 4. Set LLVM prefix
-export LLVM_SYS_200_PREFIX=/usr/lib/llvm-20
-echo 'export LLVM_SYS_200_PREFIX=/usr/lib/llvm-20' >> ~/.bashrc
+export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20
+echo 'export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20' >> ~/.bashrc
 source ~/.bashrc
 
 # 5. Clone and build
@@ -81,8 +81,8 @@ cargo test --workspace
 brew install llvm@20
 
 # 2. Set LLVM prefix
-export LLVM_SYS_200_PREFIX=$(brew --prefix llvm@20)
-echo "export LLVM_SYS_200_PREFIX=$(brew --prefix llvm@20)" >> ~/.zshrc
+export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)
+echo "export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)" >> ~/.zshrc
 source ~/.zshrc
 
 # 3. Install Rust (if not already installed)
@@ -126,7 +126,7 @@ All tests should pass:
 
 ```bash
 cargo test --workspace
-# Expected: 334 tests passing, 0 failing
+# Expected: 348 tests passing, 0 failing
 ```
 
 ---
@@ -135,14 +135,14 @@ cargo test --workspace
 
 ### "No suitable version of LLVM was found"
 
-`LLVM_SYS_200_PREFIX` is not set or points to the wrong directory.
+`LLVM_SYS_201_PREFIX` is not set or points to the wrong directory.
 
 ```bash
 # Verify it is set
-echo $LLVM_SYS_200_PREFIX
+echo $LLVM_SYS_201_PREFIX
 
 # Verify it contains an LLVM installation
-ls $LLVM_SYS_200_PREFIX/lib/cmake/llvm/LLVMConfig.cmake
+ls $LLVM_SYS_201_PREFIX/lib/cmake/llvm/LLVMConfig.cmake
 ```
 
 Make sure the export is in your shell rc file and that you have sourced it in the current session.

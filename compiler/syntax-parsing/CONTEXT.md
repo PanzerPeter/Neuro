@@ -24,3 +24,8 @@ The direct dependency on lexical-analysis is a deliberate intra-pipeline couplin
 not a VSA cross-slice violation. syntax-parsing is the sole consumer of the token
 stream; externalising tokenisation would create an unnecessary coordination step in
 neurc. The architecture test carries an explicit allowlist entry for this pairing.
+
+Struct literal disambiguation: the `Parser` carries a `no_struct_lit: bool` flag set
+to `true` while parsing if/while/for conditions. This prevents `Identifier { ... }`
+from consuming the `{` that opens the body block — the same disambiguation strategy
+used by Rust.

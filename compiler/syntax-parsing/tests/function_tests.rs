@@ -17,6 +17,7 @@ fn test_parse_empty_function() {
             assert!(func.return_type.is_none());
             assert_eq!(func.body.len(), 0);
         }
+        _ => panic!("expected function item"),
     }
 }
 
@@ -32,6 +33,7 @@ fn test_parse_function_with_return_type() {
             assert_eq!(func.name.name, "get_number");
             assert!(func.return_type.is_some());
         }
+        _ => panic!("expected function item"),
     }
 }
 
@@ -46,6 +48,7 @@ fn test_parse_function_with_one_parameter() {
             assert_eq!(func.params.len(), 1);
             assert_eq!(func.params[0].name.name, "x");
         }
+        _ => panic!("expected function item"),
     }
 }
 
@@ -61,6 +64,7 @@ fn test_parse_function_with_multiple_parameters() {
             assert_eq!(func.params[0].name.name, "a");
             assert_eq!(func.params[1].name.name, "b");
         }
+        _ => panic!("expected function item"),
     }
 }
 
@@ -74,6 +78,7 @@ fn test_parse_function_with_many_parameters() {
         Item::Function(func) => {
             assert_eq!(func.params.len(), 5);
         }
+        _ => panic!("expected function item"),
     }
 }
 
@@ -93,6 +98,7 @@ fn test_parse_function_with_body() {
         Item::Function(func) => {
             assert_eq!(func.body.len(), 3);
         }
+        _ => panic!("expected function item"),
     }
 }
 

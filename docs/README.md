@@ -93,7 +93,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.8.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 334 tests passing across all components
+- 348 tests passing across all components
 
 ## Compilation Pipeline
 
@@ -161,7 +161,7 @@ More examples in [examples/](../examples/).
 ```bash
 # Arch Linux / CachyOS
 sudo pacman -S llvm20
-export LLVM_SYS_200_PREFIX=/usr/lib/llvm20
+export LLVM_SYS_201_PREFIX=/usr/lib/llvm20
 
 git clone https://github.com/PanzerPeter/Neuro.git
 cd Neuro
@@ -177,7 +177,7 @@ See [Installation Guide](getting-started/installation.md) for other distribution
 |---|---|---|
 | 1 | Core MVP | **Complete** |
 | 1.5 | LLVM 20 upgrade, string fat pointers, ownership groundwork | In progress |
-| 2 | Structs, enums, pattern matching, module system | Planned |
+| 2 | Structs, enums, pattern matching, module system | In progress (structs ✅) |
 | 3 | Tensor types, MLIR (linalg/tensor), DLPack, pool allocator | Planned |
 | 4 | Automatic differentiation via Enzyme MLIR | Planned |
 | 5 | GPU acceleration via MLIR GPU dialects | Planned |
