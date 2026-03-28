@@ -148,7 +148,7 @@
       "patterns": [
         {
           "name": "storage.type.primitive.neuro",
-          "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|string|Tensor)\\b"
+          "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|string)\\b"
         }
       ]
     },
@@ -164,7 +164,7 @@
       "patterns": [
         {
           "name": "keyword.operator.neuro",
-          "match": "[+\\-*/%!=<>&|^~@?]|==|!=|<=|>=|&&|\\|\\||<<|>>|\\|\\>|\\>\\>|\\.\\.|\\."
+          "match": "[+\\-*/%!=<>&|^~@?]|==|!=|<=|>=|&&|\\|\\||<<|>>|\\.\\.|\\."
         }
       ]
     },

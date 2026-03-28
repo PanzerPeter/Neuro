@@ -1,4 +1,4 @@
-//! Architecture Tests for VSA 4.0 Compliance
+//! Architecture Tests for VSA Baseline Compliance
 //!
 //! These tests verify that the NEURO compiler maintains Vertical Slice Architecture
 //! boundaries. They ensure that:
@@ -74,7 +74,8 @@ fn test_no_cross_slice_dependencies() {
                     .to_str()
                     .unwrap();
 
-                // Allow lexical-analysis dependency in syntax-parsing (valid pipeline ordering)
+                // syntax-parsing calls tokenize() directly; keeping the tokeniser call
+                // inside this slice means neurc calls parse(), not orchestrate-then-parse.
                 if slice_path == &"compiler/syntax-parsing" && slice_name == "lexical-analysis" {
                     continue;
                 }
@@ -136,7 +137,7 @@ fn test_infrastructure_no_slice_dependencies() {
 }
 
 #[test]
-fn test_all_slices_have_readme() {
+fn test_all_slices_have_context_md() {
     let root = workspace_root();
     let all_slices = vec![
         "compiler/lexical-analysis",
@@ -148,36 +149,31 @@ fn test_all_slices_have_readme() {
     ];
 
     for slice_path in &all_slices {
-        let readme_path = root.join(slice_path).join("README.md");
+        let context_path = root.join(slice_path).join("CONTEXT.md");
         assert!(
-            readme_path.exists(),
-            "VSA 4.0 REQUIREMENT: Slice {} must have README.md for living documentation",
+            context_path.exists(),
+            "VSA 4.3 Section 12: Slice {} must have CONTEXT.md (AI contract file)",
             slice_path
         );
 
-        let readme_content = fs::read_to_string(&readme_path)
-            .unwrap_or_else(|_| panic!("Failed to read {}", readme_path.display()));
+        let context_content = fs::read_to_string(&context_path)
+            .unwrap_or_else(|_| panic!("Failed to read {}/CONTEXT.md", slice_path));
 
-        // Verify README has required sections
-        assert!(
-            readme_content.contains("## Business Intent") || readme_content.contains("## Intent"),
-            "README.md in {} must have 'Business Intent' section",
-            slice_path
-        );
+        for section in &[
+            "## Purpose",
+            "## Entry Point",
+            "## Data Ownership",
+            "## Shared Kernel",
+        ] {
+            assert!(
+                context_content.contains(section),
+                "CONTEXT.md in {} is missing '{}' section",
+                slice_path,
+                section
+            );
+        }
 
-        assert!(
-            readme_content.contains("## Public Interface"),
-            "README.md in {} must have 'Public Interface' section",
-            slice_path
-        );
-
-        assert!(
-            readme_content.contains("## Dependencies"),
-            "README.md in {} must have 'Dependencies' section",
-            slice_path
-        );
-
-        println!("✓ {} has compliant README.md", slice_path);
+        println!("✓ {} has compliant CONTEXT.md", slice_path);
     }
 }
 
@@ -204,7 +200,7 @@ fn test_ast_types_in_infrastructure() {
     let ast_types_cargo = root.join("compiler/infrastructure/ast-types/Cargo.toml");
     assert!(
         ast_types_cargo.exists(),
-        "ast-types infrastructure crate must exist (VSA 4.0 requirement)"
+        "ast-types infrastructure crate must exist (VSA requirement)"
     );
 
     // Verify syntax-parsing doesn't define AST types anymore

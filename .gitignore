@@ -7,9 +7,7 @@
 # Rust / Cargo
 # ---------------------------
 # Build output
-/target/
 **/target/
-**/target/**
 
 # Cargo metadata and caches
 .cargo/
@@ -117,6 +115,8 @@ mdbook/
 doc/
 site/
 site_output/
+CLAUDE.md
+.claude/
 
 # ---------------------------
 # Test / Benchmark / Coverage
@@ -211,16 +211,12 @@ coverage.xml
 # ---------------------------
 # Java / Gradle / Maven (if used)
 # ---------------------------
-/target/
 *.class
 *.jar
 *.war
 *.ear
-*.iml
-.idea/
 .gradle/
 build/
-.gradle/
 out/
 
 # ---------------------------
@@ -233,12 +229,10 @@ out/
 # JetBrains (IntelliJ, CLion, GoLand, Rider, etc.)
 .idea/
 *.iml
-.idea/**/
 workspace.xml
 tasks.xml
 *.iws
 .idea_modules/
-.idea/*
 
 # Visual Studio / Windows dev
 *.suo
@@ -422,3 +416,4 @@ hs_err_pid*
 java_pid*
 crash.log
 nul
+VSA_4_3.xml

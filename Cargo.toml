@@ -49,11 +49,11 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.85"
 authors = ["NEURO Contributors"]
 license = "GPL-3.0"
-repository = "https://github.com/yourusername/neuro-lang"
-homepage = "https://github.com/yourusername/neuro-lang"
+repository = "https://github.com/PanzerPeter/Neuro"
+homepage = "https://github.com/PanzerPeter/Neuro"
 keywords = ["compiler", "ai", "machine-learning", "tensor", "neural-networks"]
 categories = ["development-tools", "science"]
 
@@ -74,10 +74,12 @@ lalrpop-util = "0.20"
 chumsky = "0.9"
 
 # LLVM Backend
-# Note: LLVM 18.1.8 is installed at C:\LLVM-1818
-# Using inkwell 0.6.0 with llvm18-1 feature for stable LLVM 18.1.8 support
-# Including all targets to avoid linking errors
-inkwell = { version = "0.6.0", features = ["llvm18-1", "target-all"] }
+# Requires LLVM 20 installed system-wide with MLIR enabled.
+# On CachyOS/Arch: sudo pacman -S llvm20
+# LLVM_SYS_200_PREFIX must point to the LLVM 20 installation (e.g. /usr/lib/llvm20).
+# Feature flag is llvm20-1 (inkwell 0.8.0 uses the minor-version suffix scheme).
+# inkwell 0.8.0 requires Rust 1.85+.
+inkwell = { version = "0.8.0", features = ["llvm20-1", "target-all"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

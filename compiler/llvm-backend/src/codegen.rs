@@ -502,7 +502,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_call(*function, &arg_values, "calltmp")
             .map_err(|e| CodegenError::LlvmError(format!("failed to build call: {}", e)))?;
 
-        call_result.try_as_basic_value().left().ok_or_else(|| {
+        call_result.try_as_basic_value().basic().ok_or_else(|| {
             CodegenError::InternalError(
                 "function call returned void when value expected".to_string(),
             )

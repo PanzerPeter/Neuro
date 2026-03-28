@@ -1,9 +1,7 @@
 // NEURO Programming Language - Syntax Parsing
-// AST module - Re-exports from ast-types infrastructure
+// AST module
 //
-// NOTE (VSA 4.0): AST types have been extracted to infrastructure/ast-types
-// to maintain slice independence. This module now serves as a re-export layer
-// for backward compatibility within the slice.
-
-// Re-export all AST types from infrastructure
+// NOTE (VSA baseline): AST types live in infrastructure/ast-types
+// so that semantic-analysis and llvm-backend can consume them without
+// creating a cross-slice dependency on syntax-parsing.
 pub use ast_types::{BinaryOp, Expr, FunctionDef, Item, Parameter, Stmt, Type, UnaryOp};

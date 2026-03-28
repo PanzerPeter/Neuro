@@ -4,9 +4,9 @@
 //! used across compiler slices. This crate contains pure data structures with no
 //! business logic.
 //!
-//! # VSA 4.0 Compliance
+//! # VSA Baseline Compliance
 //!
-//! This is a pure infrastructure crate following VSA 4.0 principles. AST types
+//! This is a pure infrastructure crate following VSA baseline principles. AST types
 //! were extracted from syntax-parsing slice to eliminate cross-slice dependencies
 //! and maintain slice independence.
 //!
@@ -25,7 +25,6 @@ pub mod items;
 pub mod statements;
 pub mod types;
 
-// Re-export all AST types for convenient access
 pub use expressions::{BinaryOp, Expr, UnaryOp};
 pub use items::{FunctionDef, Item, Parameter};
 pub use statements::Stmt;
