@@ -146,8 +146,11 @@ jobs:
 
       - name: Install LLVM 20 (Windows)
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
-          choco install llvm --version=20.1.0 --allow-downgrade -y
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest "https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.0/LLVM-20.1.0-win64.exe" -OutFile "$env:TEMP\llvm.exe"
+          Start-Process -Wait "$env:TEMP\llvm.exe" -ArgumentList "/S"
           echo "LLVM_SYS_201_PREFIX=C:\Program Files\LLVM" >> $env:GITHUB_ENV
 
       - name: Build release neurc
@@ -212,8 +215,11 @@ jobs:
 
       - name: Install LLVM 20 (Windows)
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
-          choco install llvm --version=20.1.0 --allow-downgrade -y
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest "https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.0/LLVM-20.1.0-win64.exe" -OutFile "$env:TEMP\llvm.exe"
+          Start-Process -Wait "$env:TEMP\llvm.exe" -ArgumentList "/S"
           echo "LLVM_SYS_201_PREFIX=C:\Program Files\LLVM" >> $env:GITHUB_ENV
 
       - name: Run tests
