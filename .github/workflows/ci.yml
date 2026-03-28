@@ -45,6 +45,7 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 20
+          sudo apt-get install -y libpolly-20-dev
           echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
 
       - name: Check formatting
@@ -71,6 +72,7 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 20
+          sudo apt-get install -y libpolly-20-dev
           echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
 
       - name: Enforce VSA architecture boundaries
@@ -101,6 +103,7 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 20
+          sudo apt-get install -y libpolly-20-dev
           echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
 
       - name: Run llvm-backend benchmarks
@@ -132,6 +135,7 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 20
+          sudo apt-get install -y libpolly-20-dev
           echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
 
       - name: Install LLVM 20 (macOS)
@@ -197,6 +201,7 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 20
+          sudo apt-get install -y libpolly-20-dev
           echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
 
       - name: Install LLVM 20 (macOS)
@@ -228,6 +233,7 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 20
+          sudo apt-get install -y libpolly-20-dev
           echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
 
       - name: Build workspace (debug)
@@ -259,6 +265,7 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 20
+          sudo apt-get install -y libpolly-20-dev
           echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
 
       - name: Install tarpaulin

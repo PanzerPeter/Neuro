@@ -60,7 +60,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 is complete. The following features are fully implemented and tested (334 tests passing):
+Phase 1 is complete. The following features are fully implemented and tested (**334 Tests Passing**):
 
 | Feature | Details |
 |---|---|
