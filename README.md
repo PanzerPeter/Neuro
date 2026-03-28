@@ -271,7 +271,7 @@ vsce package
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture guidelines, coding standards, and the pull request process.
 
-The project is in early alpha. Breaking changes are expected. Focus contributions on Phase 1.5 and Phase 2 items from the [roadmap](.idea/roadmap.md).
+The project is in early alpha. Breaking changes are expected. Focus contributions on Phase 1.5 and Phase 2 items.
 
 ## License
 

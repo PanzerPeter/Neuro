@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Purpose`, `Entry Point`, `Data Ownership`, `Shared Kernel`
 - **workspace**: Repository and homepage URLs updated to `github.com/PanzerPeter/Neuro`
 - **workspace**: `Cargo.lock` format upgraded to version 4 (Cargo 1.85+)
+- **neurc**: Improved linker detection with detailed error messages
 
 ### Added
 
@@ -44,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Boolean loop condition enforcement in type checker
   - LLVM IR: `while.cond` / `while.body` / `while.exit` basic blocks
 
+- **neurc**: `neurc compile <file.nr>` produces executables on Linux, macOS, Windows
+  - Multi-stage linker fallback: clang → lld-link → MSVC/cc
+  - Platform-specific object file handling
+  - 16 end-to-end integration tests
+
 - **neurc**: CLI contract integration test suite (`tests/cli_contract.rs`)
   - `neurc check` success path writes to stdout, empty stderr
   - `neurc check` type errors return non-zero exit and print diagnostics to stderr
@@ -54,6 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Range validation: `300` cannot be assigned to `i8`
   - Defaults: integers → `i32`, floats → `f64`; large integers auto-promote to `i64`
   - `IntegerLiteralOutOfRange` error type
+
+- **semantic-analysis**: Full type checking
+  - Types: i32, i64, f32, f64, bool
+  - Function signature validation and lexical scoping with variable shadowing
+  - Multiple-error collection (fail-slow strategy)
+  - 24 tests
 
 - **semantic-analysis / lexical-analysis / llvm-backend**: String type (Phase 1)
   - `Type::String` in the type system; string literal checking and propagation
@@ -71,12 +83,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Unsigned: u8, u16, u32, u64
   - Signedness-aware codegen: `sdiv`/`udiv`, `srem`/`urem`, `icmp s*/u*`
 
+- **llvm-backend**: Complete LLVM code generation
+  - Function codegen with parameters and return values
+  - Expression codegen (arithmetic, comparison, logical)
+  - Statement codegen (variables, return, if/else)
+  - Object code emission for the native target
+  - 4 tests
+
+- **syntax-parsing**: Statement and function parsing
+  - Variable declarations, return statements, expression statements
+  - Function definitions with parameters and return types
+  - If/else with multiple else-if clauses
+  - 39 additional tests (65 total)
+
 - **syntax-parsing**: Comprehensive test suite (117 tests)
   - `expression_tests.rs` (34), `statement_tests.rs` (20), `function_tests.rs` (16),
     `error_tests.rs` (31), `integration_tests.rs` (16)
 
 ### Fixed
 
+- **neurc**: Object file linking race condition with tempfile cleanup
+- **llvm-backend**: Type inference for identifiers and function calls
 - **lexical-analysis**: `InvalidEscape` and `UnterminatedString` no longer masked as `UnexpectedChar`
 - **syntax-parsing**: Hardcoded `Span::new(0, 0)` in `token_to_binary_op` error path replaced with the token's actual span
 - **syntax-parsing**: Added maximum expression nesting depth (256) to prevent stack overflow
@@ -102,49 +129,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI: benchmark regression gate (`tools/check_benchmark_regression.py`) for `llvm-backend`
 - CI: cross-platform release smoke gate — builds `neurc` on Linux, macOS, Windows
   and executes representative examples via `tools/run_release_smoke_tests.py`
-
----
-
-## [0.2.0] - 2025-11-22
-
-### Phase 1 Core MVP Complete (~85%)
-
-End-to-end compilation pipeline from source code to native executables is working.
-
-### Added
-
-- **neurc**: `neurc compile <file.nr>` produces executables on Linux, macOS, Windows
-  - Multi-stage linker fallback: clang → lld-link → MSVC/cc
-  - Platform-specific object file handling
-  - 16 end-to-end integration tests
-
-- **semantic-analysis**: Full type checking
-  - Types: i32, i64, f32, f64, bool
-  - Function signature validation and lexical scoping with variable shadowing
-  - Multiple-error collection (fail-slow strategy)
-  - 24 tests
-
-- **llvm-backend**: Complete LLVM code generation
-  - Function codegen with parameters and return values
-  - Expression codegen (arithmetic, comparison, logical)
-  - Statement codegen (variables, return, if/else)
-  - Object code emission for the native target
-  - 4 tests
-
-- **syntax-parsing**: Statement and function parsing
-  - Variable declarations, return statements, expression statements
-  - Function definitions with parameters and return types
-  - If/else with multiple else-if clauses
-  - 39 additional tests (65 total)
-
-### Fixed
-
-- **neurc**: Object file linking race condition with tempfile cleanup
-- **llvm-backend**: Type inference for identifiers and function calls
-
-### Changed
-
-- **neurc**: Improved linker detection with detailed error messages
 
 ---
 
