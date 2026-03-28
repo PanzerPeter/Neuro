@@ -156,7 +156,11 @@ pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> Codege
             "generic",
             "",
             optimization.to_llvm(),
-            inkwell::targets::RelocMode::Default,
+            // PIC relocation model is required so the emitted object can be linked into
+            // a PIE executable (the default on modern Linux distributions). RelocMode::Default
+            // maps to Static on some targets, which emits R_X86_64_32 relocations that ld
+            // rejects with -pie.
+            inkwell::targets::RelocMode::PIC,
             inkwell::targets::CodeModel::Default,
         )
         .ok_or_else(|| {

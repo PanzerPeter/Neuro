@@ -35,13 +35,17 @@ impl<'ctx> TypeMapper<'ctx> {
             Type::F64 => Ok(self.context.f64_type().into()),
             // Other types
             Type::Bool => Ok(self.context.bool_type().into()),
-            // String type: represented as ptr (opaque pointer to null-terminated byte array)
-            // Phase 1: C-style strings for simplicity (LLVM 15+ uses opaque pointers)
-            // Phase 2: Upgrade to {ptr, i64} struct for length tracking
-            Type::String => Ok(self
-                .context
-                .ptr_type(inkwell::AddressSpace::default())
-                .into()),
+            // String fat pointer: { ptr, i64 } where ptr points to null-terminated UTF-8
+            // bytes in read-only memory and i64 holds the byte count excluding the null.
+            // O(1) length access without scanning; prerequisite for the ownership system.
+            Type::String => {
+                let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+                let len_type = self.context.i64_type();
+                Ok(self
+                    .context
+                    .struct_type(&[ptr_type.into(), len_type.into()], false)
+                    .into())
+            }
             Type::Void => Err(CodegenError::UnsupportedType(
                 "void type cannot be used as a value".to_string(),
             )),

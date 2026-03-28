@@ -77,18 +77,13 @@ pub struct BuildConfig {
     pub target: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub enum OptimizationLevel {
+    #[default]
     O0,
     O1,
     O2,
     O3,
-}
-
-impl Default for OptimizationLevel {
-    fn default() -> Self {
-        Self::O0
-    }
 }
 
 #[derive(Debug, Error)]

@@ -1,28 +1,44 @@
 # NEURO Programming Language
 
-**Status:** Alpha — Phase 1 Core MVP Complete, Phase 1.5 (backend upgrade + memory safety refactor) in progress
+> A modern, compiled language designed for high-performance AI development.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
 [![Tests](https://img.shields.io/badge/tests-334%20passing-success.svg)](#)
 
-A modern, compiled programming language designed for high-performance AI development. NEURO compiles directly to native code via LLVM 20, combining static typing, type inference, and a planned MLIR/Enzyme pipeline for tensor operations and automatic differentiation.
+**Status:** Alpha — Phase 1 Core MVP complete · Phase 1.5 (backend upgrade + memory safety refactor) in progress
 
-## What is NEURO?
+---
 
-NEURO is an Ahead-of-Time (AOT) compiled language built from the ground up for AI workloads. Unlike Python (an interpreted glue language), NEURO generates native code through an LLVM 20 backend, with a roadmap toward MLIR-based tensor operations, IR-level automatic differentiation via Enzyme, and GPU acceleration via MLIR GPU dialects.
+## Table of Contents
 
-### Current Capabilities (Phase 1 Complete)
+- [Overview](#overview)
+- [Quick Example](#quick-example)
+- [Current Capabilities](#current-capabilities)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Language Syntax](#language-syntax)
+- [Architecture](#architecture)
+- [Roadmap](#roadmap)
+- [Development](#development)
+- [VSCode Extension](#vscode-extension)
+- [File Extensions](#file-extensions)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
 
-- **Static Typing + Inference** — All integer types (i8–u64), f32/f64, bool, string, with contextual numeric literal inference
-- **Functions** — Parameters, explicit and expression-based implicit returns, recursion, forward references
-- **Control Flow** — if/else/elif, while loops, range-for (`for i in 0..n`), break, continue
-- **Mutable Variables** — `val` (immutable) and `mut` (mutable) with type-safe reassignment
-- **String Type** — Literals with full escape sequence support (\n, \t, \", \\, \xNN, \u{NNNN})
-- **LLVM Backend** — Native executable generation via inkwell 0.8.0 (LLVM 20)
-- **CLI** — `neurc check` (type-check only) and `neurc compile` (produces native binary)
-- **334 tests passing** across all compiler components
+---
+
+## Overview
+
+NEURO is an Ahead-of-Time (AOT) compiled language built from the ground up for AI workloads. Unlike Python — an interpreted glue language — NEURO generates native code through an LLVM 20 backend, with a roadmap toward:
+
+- **MLIR-based tensor operations** for static, shape-verified tensor types
+- **IR-level automatic differentiation** via Enzyme
+- **GPU acceleration** via MLIR GPU dialects (nvgpu, rocdl, Triton)
+
+---
 
 ## Quick Example
 
@@ -40,12 +56,32 @@ func main() -> i32 {
 }
 ```
 
+---
+
+## Current Capabilities
+
+Phase 1 is complete. The following features are fully implemented and tested (334 tests passing):
+
+| Feature | Details |
+|---|---|
+| **Static Typing + Inference** | All integer types (i8–u64), f32/f64, bool, string; contextual numeric literal inference |
+| **Functions** | Parameters, explicit and expression-based implicit returns, recursion, forward references |
+| **Control Flow** | if/else/elif, while loops, range-for (`for i in 0..n`), break, continue |
+| **Mutable Variables** | `val` (immutable) and `mut` (mutable) with type-safe reassignment |
+| **String Type** | Literals with full escape sequence support (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==` and `!=` for byte-level comparison |
+| **LLVM Backend** | Native executable generation via inkwell 0.8.0 (LLVM 20) |
+| **CLI** | `neurc check` (type-check only) and `neurc compile` (produces native binary) |
+
+---
+
 ## Installation
 
 ### Prerequisites
 
 - **Rust** 1.85 or later
 - **LLVM 20** with development libraries
+
+---
 
 ### Arch Linux / CachyOS
 
@@ -69,7 +105,7 @@ cargo build --release
 # 5. Run tests
 cargo test --workspace
 
-# 6. Install the compiler (optional)
+# 6. (Optional) Install the compiler globally
 cargo install --path compiler/neurc
 ```
 
@@ -79,7 +115,7 @@ cargo install --path compiler/neurc
 # 1. Install LLVM 20
 wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 20
 
-# 2. Set prefix
+# 2. Set the LLVM prefix
 export LLVM_SYS_200_PREFIX=/usr/lib/llvm-20
 echo 'export LLVM_SYS_200_PREFIX=/usr/lib/llvm-20' >> ~/.bashrc
 
@@ -92,17 +128,23 @@ cargo build --release
 ### macOS (Homebrew)
 
 ```bash
+# 1. Install LLVM 20
 brew install llvm@20
 export LLVM_SYS_200_PREFIX=$(brew --prefix llvm@20)
 echo "export LLVM_SYS_200_PREFIX=$(brew --prefix llvm@20)" >> ~/.zshrc
-git clone https://github.com/PanzerPeter/Neuro.git && cd Neuro
+
+# 2. Clone and build
+git clone https://github.com/PanzerPeter/Neuro.git
+cd Neuro
 cargo build --release
 ```
+
+---
 
 ## Usage
 
 ```bash
-# Type-check a source file
+# Type-check a source file (no binary produced)
 cargo run -p neurc -- check examples/hello.nr
 
 # Compile to a native executable
@@ -114,6 +156,8 @@ cargo run -p neurc -- compile examples/factorial.nr
 # After cargo install --path compiler/neurc:
 neurc compile examples/factorial.nr
 ```
+
+---
 
 ## Language Syntax
 
@@ -175,14 +219,18 @@ val weights: Tensor<f32, [784, 128]> = ...
 
 // Automatic differentiation (Phase 4)
 @grad(model) {
-    val loss = model.forward(batch) .cross_entropy(labels)
+    val loss = model.forward(batch).cross_entropy(labels)
     model.backward(loss)
 }
 ```
 
+---
+
 ## Architecture
 
-NEURO follows **Vertical Slice Architecture (VSA)** — organized by language features, not technical layers.
+NEURO follows **Vertical Slice Architecture (VSA)** — organized by language feature, not technical layer.
+
+### Workspace Layout
 
 ```
 compiler/
@@ -201,6 +249,7 @@ compiler/
 
 ### Compilation Pipeline
 
+**Current (Phase 1):**
 ```
 Source (.nr)
   → Lexical Analysis   (tokens)
@@ -210,7 +259,7 @@ Source (.nr)
   → System Linker      (native executable)
 ```
 
-**Planned pipeline extension (Phase 3+):**
+**Planned extension (Phase 3+):**
 ```
 Tensor/AI path: AST → NEURO High-Level IR
   → MLIR (linalg/tensor/func/arith, LLVM 20 / MLIR 20)
@@ -219,10 +268,26 @@ Tensor/AI path: AST → NEURO High-Level IR
   → inkwell → native code
 ```
 
+---
+
+## Roadmap
+
+| Phase | Goal | Status |
+|:---:|---|:---:|
+| **1** | Core MVP — types, functions, control flow, LLVM backend | ✅ Complete |
+| **1.5** | Backend upgrade (LLVM 20), string fat pointers, ownership semantics | 🔄 In progress |
+| **2** | Structs, enums, pattern matching, module system, error handling | 📋 Planned |
+| **3** | Tensor types, MLIR lowering, DLPack, pool allocator | 📋 Planned |
+| **4** | Automatic differentiation via Enzyme MLIR | 📋 Planned |
+| **5** | GPU acceleration via MLIR GPU dialects (nvgpu/rocdl/Triton) | 📋 Planned |
+| **6** | Neural network standard library, Python FFI via DLPack | 📋 Planned |
+
+---
+
 ## Development
 
 ```bash
-# Build workspace
+# Build the full workspace
 LLVM_SYS_200_PREFIX=/usr/lib/llvm20 cargo build --workspace
 
 # Run all tests
@@ -235,17 +300,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
-## Roadmap
-
-| Phase | Goal | Status |
-|---|---|---|
-| 1 | Core MVP (types, functions, control flow, LLVM backend) | **Complete** |
-| 1.5 | Backend upgrade (LLVM 20), string fat pointers, ownership semantics | In progress |
-| 2 | Structs, enums, pattern matching, module system, error handling | Planned |
-| 3 | Tensor types, MLIR lowering, DLPack, pool allocator | Planned |
-| 4 | Automatic differentiation via Enzyme MLIR | Planned |
-| 5 | GPU acceleration via MLIR GPU dialects (nvgpu/rocdl/Triton) | Planned |
-| 6 | Neural network standard library, Python FFI via DLPack | Planned |
+---
 
 ## VSCode Extension
 
@@ -255,8 +310,10 @@ Syntax highlighting for `.nr` files is included in `neuro-language-support/`.
 cd neuro-language-support
 npm install -g @vscode/vsce
 vsce package
-# Install the generated .vsix via VSCode → Extensions → Install from VSIX
+# Install the generated .vsix via: VSCode → Extensions → Install from VSIX
 ```
+
+---
 
 ## File Extensions
 
@@ -267,11 +324,15 @@ vsce package
 | `.nrm` | Serialized model/matrix data |
 | `.nrp` | Package definitions |
 
+---
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture guidelines, coding standards, and the pull request process.
 
-The project is in early alpha. Breaking changes are expected. Focus contributions on Phase 1.5 and Phase 2 items.
+The project is in early alpha — breaking changes are expected. Contributions should focus on **Phase 1.5** and **Phase 2** items.
+
+---
 
 ## License
 

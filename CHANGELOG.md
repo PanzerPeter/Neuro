@@ -9,8 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **codegen**: String equality operators `==` and `!=`
+  - Lowered to length check (fast path) + `memcmp` call via external libc symbol
+  - `select` keeps `memcmp` safe when lengths differ (passes `n=0`)
+  - 4 integration tests added to `neurc/tests/string_type.rs`
+  - `docs/language-reference/operators.md` and `README.md` updated
+
+### Fixed
+
+- **codegen**: `codegen_if` branch check used the stale `then_bb`/`else_bb` reference
+  after nested control flow moved the builder to an inner merge block — replaced with
+  `builder.get_insert_block()` check (mirrors the existing pattern in `codegen_while`)
+- **codegen**: `codegen_binary` read `span.start` (result type, e.g. `Bool`) instead of
+  `span.start + 1` (left-operand type) — this silently broke float comparisons and
+  prevented string equality dispatch
+
 ### Changed
 
+- **codegen**: String type now uses fat pointer `{ ptr, i64 }` ABI instead of bare `ptr`
+  - `type_mapping.rs`: `Type::String` maps to anonymous LLVM struct `{ ptr, i64 }`
+  - `codegen.rs`: string literals built via `insertvalue` instructions; field 0 = pointer to
+    null-terminated UTF-8 bytes in `.rodata`, field 1 = byte count excluding null terminator
+  - `lib.rs`: target machine relocation model changed from `RelocMode::Default` to
+    `RelocMode::PIC` so emitted object files are linkable into PIE executables on modern Linux
+  - `llvm-backend/CONTEXT.md`: String ABI section added documenting the fat pointer layout
+- **infra**: `OptimizationLevel` default impl replaced with `#[derive(Default)]` + `#[default]`
+  on `O0` (clippy `derivable_impls`)
 - **llvm-backend**: Upgraded inkwell `0.6.0` (LLVM 18) → `0.8.0` (LLVM 20)
   - Updated `[workspace.dependencies]` inkwell feature flag to `llvm20-1`
   - Raised minimum Rust version (`rust-version`) from `1.70` to `1.85`

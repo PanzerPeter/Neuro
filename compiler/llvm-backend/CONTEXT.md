@@ -27,6 +27,21 @@ prefix (e.g. `/usr/lib/llvm20`) before building.
 that type checking always precedes code generation. `syntax-parsing` appears only in
 `[dev-dependencies]` for integration tests.
 
+## String ABI
+`string` values are represented as an anonymous LLVM struct `{ ptr, i64 }`:
+- field 0 (`ptr`): pointer to null-terminated UTF-8 bytes in read-only memory (`.rodata`)
+- field 1 (`i64`): byte count of the string **excluding** the null terminator
+
+The struct is passed and returned by value. On x86-64 SysV this fits in two registers
+(rax/rdx or equivalent), so no sret indirection is needed for typical string functions.
+The semantic type `Type::String` in `semantic-analysis` is unchanged; the fat pointer
+layout is a backend implementation detail invisible to other slices.
+
+`==` and `!=` on strings are lowered to a length check followed by a `memcmp` call
+declared as an external libc symbol. `memcmp` is universally available on all supported
+platforms (Linux, macOS). The length check uses `select` to pass `n=0` to `memcmp` when
+lengths differ, keeping it safe without requiring additional basic blocks.
+
 ## Future: MLIR Integration (Phase 3+)
 When tensor operations are introduced, `melior` (Rust MLIR bindings, targeting the same
 LLVM 20 / MLIR 20 installation) will be added alongside inkwell. The lowering strategy

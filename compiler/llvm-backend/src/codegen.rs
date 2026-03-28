@@ -7,7 +7,9 @@ use inkwell::builder::Builder;
 use inkwell::context::Context as LLVMContext;
 use inkwell::module::Module;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
-use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::values::{
+    BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue, PointerValue,
+};
 use inkwell::{FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 
@@ -86,8 +88,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .const_int(*val as u64, false)
                 .into()),
             shared_types::Literal::String(s) => {
-                // Create a global string constant
-                // LLVM will automatically null-terminate the string and place it in read-only memory
+                // Place the UTF-8 bytes in read-only memory; LLVM appends the null terminator.
                 let global_string =
                     self.builder
                         .build_global_string_ptr(s, "str")
@@ -98,8 +99,35 @@ impl<'ctx> CodegenContext<'ctx> {
                             ))
                         })?;
 
-                // Return the pointer to the string
-                Ok(global_string.as_pointer_value().into())
+                // byte count excludes the null terminator — callers should not rely on it
+                let byte_len = self.context.i64_type().const_int(s.len() as u64, false);
+
+                // Build { ptr, i64 } via insertvalue instructions rather than a constant
+                // aggregate so that LLVM emits a PC-relative reference for the pointer field,
+                // which is required for PIE/PIC builds (avoids R_X86_64_32 relocations).
+                let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+                let fat_ptr_type = self
+                    .context
+                    .struct_type(&[ptr_type.into(), self.context.i64_type().into()], false);
+
+                let with_ptr = self
+                    .builder
+                    .build_insert_value(
+                        fat_ptr_type.get_undef(),
+                        global_string.as_pointer_value(),
+                        0,
+                        "str.ptr",
+                    )
+                    .map_err(|e| CodegenError::LlvmError(format!("failed to insert ptr: {}", e)))?
+                    .into_struct_value();
+
+                let fat_ptr = self
+                    .builder
+                    .build_insert_value(with_ptr, byte_len, 1, "str.fat")
+                    .map_err(|e| CodegenError::LlvmError(format!("failed to insert len: {}", e)))?
+                    .into_struct_value();
+
+                Ok(fat_ptr.into())
             }
         }
     }
@@ -118,6 +146,103 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder
             .build_load(*var_type, *ptr, name)
             .map_err(|e| CodegenError::LlvmError(format!("failed to load variable: {}", e)))
+    }
+
+    /// Get the external `memcmp` declaration, inserting it on first use.
+    /// memcmp(s1: ptr, s2: ptr, n: i64) -> i32 — libc, always available on Linux/macOS.
+    fn get_or_declare_memcmp(&self) -> FunctionValue<'ctx> {
+        if let Some(f) = self.module.get_function("memcmp") {
+            return f;
+        }
+        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let fn_type = self.context.i32_type().fn_type(
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                self.context.i64_type().into(),
+            ],
+            false,
+        );
+        self.module
+            .add_function("memcmp", fn_type, Some(inkwell::module::Linkage::External))
+    }
+
+    /// Compare two string fat-pointers for byte-level equality.
+    ///
+    /// Uses the length field for an O(1) short-circuit before falling back to
+    /// `memcmp`. When lengths differ the length passed to `memcmp` is set to 0
+    /// (memcmp with n=0 returns 0), so `len_eq` being false drives the final AND
+    /// to false without reading out-of-bounds memory.
+    fn codegen_string_eq(
+        &self,
+        lhs: BasicValueEnum<'ctx>,
+        rhs: BasicValueEnum<'ctx>,
+    ) -> CodegenResult<IntValue<'ctx>> {
+        let lhs_struct = lhs.into_struct_value();
+        let rhs_struct = rhs.into_struct_value();
+
+        let ptr1 = self
+            .builder
+            .build_extract_value(lhs_struct, 0, "s1.ptr")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_pointer_value();
+        let len1 = self
+            .builder
+            .build_extract_value(lhs_struct, 1, "s1.len")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_int_value();
+
+        let ptr2 = self
+            .builder
+            .build_extract_value(rhs_struct, 0, "s2.ptr")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_pointer_value();
+        let len2 = self
+            .builder
+            .build_extract_value(rhs_struct, 1, "s2.len")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_int_value();
+
+        let len_eq = self
+            .builder
+            .build_int_compare(IntPredicate::EQ, len1, len2, "len_eq")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+        let zero_len = self.context.i64_type().const_int(0, false);
+        let cmp_len = self
+            .builder
+            .build_select(len_eq, len1, zero_len, "cmp_len")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+        let memcmp_fn = self.get_or_declare_memcmp();
+        let call = self
+            .builder
+            .build_call(
+                memcmp_fn,
+                &[ptr1.into(), ptr2.into(), cmp_len.into()],
+                "memcmp_res",
+            )
+            .map_err(|e| CodegenError::LlvmError(format!("failed to call memcmp: {}", e)))?;
+
+        let memcmp_val = call
+            .try_as_basic_value()
+            .basic()
+            .ok_or_else(|| CodegenError::InternalError("memcmp returned void".to_string()))?
+            .into_int_value();
+
+        let content_eq = self
+            .builder
+            .build_int_compare(
+                IntPredicate::EQ,
+                memcmp_val,
+                self.context.i32_type().const_int(0, false),
+                "content_eq",
+            )
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+        self.builder
+            .build_and(len_eq, content_eq, "str_eq")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))
     }
 
     /// Generate code for a binary expression
@@ -235,7 +360,9 @@ impl<'ctx> CodegenContext<'ctx> {
 
             // Comparison operators
             BinaryOp::Equal => {
-                if TypeMapper::is_float_type(left_ty) {
+                if matches!(left_ty, Type::String) {
+                    Ok(self.codegen_string_eq(lhs, rhs)?.into())
+                } else if TypeMapper::is_float_type(left_ty) {
                     Ok(self
                         .builder
                         .build_float_compare(
@@ -260,7 +387,14 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             BinaryOp::NotEqual => {
-                if TypeMapper::is_float_type(left_ty) {
+                if matches!(left_ty, Type::String) {
+                    let eq = self.codegen_string_eq(lhs, rhs)?;
+                    Ok(self
+                        .builder
+                        .build_not(eq, "str_ne")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else if TypeMapper::is_float_type(left_ty) {
                     Ok(self
                         .builder
                         .build_float_compare(
@@ -520,8 +654,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 right,
                 span,
             } => {
-                // Look up the type of the left operand (stored during type checking pass)
-                let left_ty = self.expr_types.get(&span.start).ok_or_else(|| {
+                // The left-operand type is stored at span.start + 1 by visit_expr_for_types.
+                // span.start holds the result type (e.g. Bool for comparisons), which is not
+                // what codegen_binary needs when dispatching on the operand kind.
+                let left_ty = self.expr_types.get(&(span.start + 1)).ok_or_else(|| {
                     CodegenError::InternalError(
                         "missing type information for expression".to_string(),
                     )
@@ -644,11 +780,17 @@ impl<'ctx> CodegenContext<'ctx> {
         for stmt in then_block {
             self.codegen_stmt(stmt)?;
         }
-        // Only add branch if the block doesn't already end with a terminator
-        if then_bb.get_terminator().is_none() {
-            self.builder
-                .build_unconditional_branch(merge_bb)
-                .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
+        // After nested control flow the builder may be positioned at a block that is NOT
+        // then_bb (e.g. the merge block of an inner if).  Checking then_bb would miss that
+        // case, so we check whichever block the builder currently occupies.
+        if let Some(current_bb) = self.builder.get_insert_block() {
+            if current_bb.get_terminator().is_none() {
+                self.builder
+                    .build_unconditional_branch(merge_bb)
+                    .map_err(|e| {
+                        CodegenError::LlvmError(format!("failed to build branch: {}", e))
+                    })?;
+            }
         }
 
         // Generate else-if and else blocks
@@ -665,11 +807,15 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
         }
-        // Only add branch if the block doesn't already end with a terminator
-        if else_bb.get_terminator().is_none() {
-            self.builder
-                .build_unconditional_branch(merge_bb)
-                .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
+        // Same: check current insert block, not the fixed else_bb, for the same reason.
+        if let Some(current_bb) = self.builder.get_insert_block() {
+            if current_bb.get_terminator().is_none() {
+                self.builder
+                    .build_unconditional_branch(merge_bb)
+                    .map_err(|e| {
+                        CodegenError::LlvmError(format!("failed to build branch: {}", e))
+                    })?;
+            }
         }
 
         // Continue at merge block

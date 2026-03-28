@@ -101,7 +101,7 @@ val is_gte: bool = 10 >= 5  // true
 val at_least: bool = x >= min
 ```
 
-**Types**: Work with numeric types and booleans
+**Types**: Work with numeric types, booleans, and strings (`==`/`!=` only)
 **Requirement**: Both operands must be the same type
 
 ## Logical Operators
@@ -235,6 +235,7 @@ Both operands must be the same type.
 `==`, `!=`, `<`, `>`, `<=`, `>=` work with:
 - All numeric types (same type required)
 - `bool` (only `==` and `!=`)
+- `string` (only `==` and `!=`) — byte-level equality via length check + `memcmp`
 
 ### Logical Operators
 

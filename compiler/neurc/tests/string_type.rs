@@ -155,3 +155,86 @@ func main() -> i32 {
         .expect("Multiple string functions compilation or execution failed");
     assert_eq!(exit_code, 0);
 }
+
+#[test]
+fn test_string_equality_equal() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val a: string = "hello"
+    val b: string = "hello"
+    if a == b {
+        return 0
+    }
+    return 1
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("string_eq_equal.nr", source)
+        .expect("String equality (equal) compilation or execution failed");
+    assert_eq!(exit_code, 0);
+}
+
+#[test]
+fn test_string_equality_not_equal() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val a: string = "hello"
+    val b: string = "world"
+    if a != b {
+        return 0
+    }
+    return 1
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("string_eq_not_equal.nr", source)
+        .expect("String equality (not-equal) compilation or execution failed");
+    assert_eq!(exit_code, 0);
+}
+
+#[test]
+fn test_string_equality_different_lengths() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val short: string = "hi"
+    val longer: string = "hello"
+    if short != longer {
+        return 0
+    }
+    return 1
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("string_eq_diff_len.nr", source)
+        .expect("String equality (different lengths) compilation or execution failed");
+    assert_eq!(exit_code, 0);
+}
+
+#[test]
+fn test_string_equality_empty() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val a: string = ""
+    val b: string = ""
+    val c: string = "x"
+    if a == b {
+        if a != c {
+            return 0
+        }
+    }
+    return 1
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("string_eq_empty.nr", source)
+        .expect("String equality (empty strings) compilation or execution failed");
+    assert_eq!(exit_code, 0);
+}
