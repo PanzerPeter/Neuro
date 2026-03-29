@@ -109,4 +109,32 @@ pub enum TypeError {
         field_name: String,
         span: Span,
     },
+
+    #[error("struct '{struct_name}' has no method '{method_name}' at {span:?}")]
+    MethodNotFound {
+        struct_name: String,
+        method_name: String,
+        span: Span,
+    },
+
+    #[error("impl block for '{type_name}' at {span:?}: '{self_param}' methods are not yet supported (ownership semantics pending)")]
+    UnsupportedSelfParam {
+        type_name: String,
+        self_param: String,
+        span: Span,
+    },
+
+    #[error("unknown type '{type_name}' in path expression '{type_name}::{member}' at {span:?}")]
+    UnknownPathType {
+        type_name: String,
+        member: String,
+        span: Span,
+    },
+
+    #[error("'{type_name}' has no associated function '{member}' at {span:?}")]
+    UnknownAssociatedFunction {
+        type_name: String,
+        member: String,
+        span: Span,
+    },
 }

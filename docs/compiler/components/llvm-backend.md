@@ -38,7 +38,8 @@ pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> Codege
 | `f32` | `float` |
 | `f64` | `double` |
 | `bool` | `i1` |
-| `string` | opaque pointer (`ptr`, LLVM 15+ style) |
+| `string` | anonymous struct `{ ptr, i64 }` (fat pointer: data ptr + byte length) |
+| user struct | anonymous LLVM struct `{ T0, T1, ... }` with fields in declaration order |
 | `void` | `void` |
 
 ### Expressions
@@ -49,6 +50,9 @@ pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> Codege
 - Unary operators: `-`, `!`
 - Function calls (value-returning and void)
 - Parenthesized expressions
+- Struct literals — `alloca` + field-by-field `insertvalue`
+- Field access — `getelementptr` + `load`
+- Path expressions (`TypeName::func(args)`) — associated function calls
 
 ### Statements
 
@@ -59,6 +63,7 @@ pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> Codege
 - `while` loops — `while.cond` / `while.body` / `while.exit` blocks
 - Range-for loops (`for i in start..end`) — dedicated step block so `continue` advances correctly
 - `break` and `continue` — branch to loop exit/step blocks
+- Field assignment (`obj.field = value`) — `getelementptr` + `store`
 
 ### Signedness
 
@@ -69,7 +74,7 @@ Integer instructions are selected based on signedness:
 ## Code Generation Pipeline
 
 ```
-1. Extract function type signatures from AST
+1. Pre-pass: register struct definitions and extract all function/method signatures (including mangled method names `StructName__methodName`)
 2. Initialize LLVM context + module (via inkwell)
 3. Pre-pass: collect expression types for instruction selection
 4. For each function:
@@ -85,6 +90,20 @@ Integer instructions are selected based on signedness:
 ## Opaque Pointers (LLVM 15+)
 
 LLVM 15 removed typed pointers. All pointers are now opaque (`ptr`). The backend tracks the NEURO type alongside every pointer in `variable_types: HashMap<String, BasicTypeEnum>` and supplies the type explicitly to every `build_load()` call.
+
+## String ABI
+
+`string` values are represented as an anonymous LLVM struct `{ ptr, i64 }`:
+- **field 0** (`ptr`): pointer to null-terminated UTF-8 bytes in `.rodata`
+- **field 1** (`i64`): byte count excluding the null terminator
+
+The fat pointer is passed and returned by value. On x86-64 SysV this fits in two registers (no sret needed). `==` and `!=` lower to a length check followed by a `memcmp` against an external libc symbol; a `select` passes `n=0` to `memcmp` when lengths differ, keeping it safe.
+
+## Struct and Method ABI
+
+User-defined structs are lowered to anonymous LLVM struct types `{ T0, T1, ... }` with fields in declaration order. All struct values are stack-allocated via `alloca`; field reads use `getelementptr` + `load`, field writes use `getelementptr` + `store`.
+
+`impl` methods are lowered to free functions with a mangled name `StructName__methodName`. For `&self` instance methods the struct is passed by value as the first LLVM parameter (`self`). Associated functions (no `self`) have no implicit first parameter and are called via `TypeName::func(args)`.
 
 ## Error Types
 

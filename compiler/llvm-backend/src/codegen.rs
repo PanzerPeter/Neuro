@@ -1,7 +1,9 @@
 // NEURO Programming Language - LLVM Backend
 // Code generation context and LLVM IR generation
 
-use ast_types::{BinaryOp, Expr, FieldInit, FunctionDef, Item, Stmt, UnaryOp};
+use ast_types::{
+    BinaryOp, Expr, FieldInit, FunctionDef, ImplDef, Item, MethodDef, SelfParam, Stmt, UnaryOp,
+};
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context as LLVMContext;
@@ -675,6 +677,190 @@ impl<'ctx> CodegenContext<'ctx> {
         })
     }
 
+    /// Call a method: load the receiver as a value and prepend it to the argument list.
+    ///
+    /// For `&self` methods the struct is passed by value — this is sound because
+    /// `&self` methods are read-only; mutations inside the method body do not
+    /// propagate back to the caller (ownership semantics are pending).
+    fn codegen_method_call(
+        &self,
+        mangled_name: &str,
+        receiver: &Expr,
+        args: &[Expr],
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let function = self
+            .functions
+            .get(mangled_name)
+            .ok_or_else(|| CodegenError::UndefinedFunction(mangled_name.to_string()))?;
+
+        // Load the receiver struct value.
+        let self_val = self.codegen_expr(receiver)?;
+        let mut arg_values: Vec<BasicMetadataValueEnum> =
+            vec![BasicMetadataValueEnum::from(self_val)];
+
+        for arg in args {
+            let val = self.codegen_expr(arg)?;
+            arg_values.push(BasicMetadataValueEnum::from(val));
+        }
+
+        let call_result = self
+            .builder
+            .build_call(*function, &arg_values, "calltmp")
+            .map_err(|e| CodegenError::LlvmError(format!("failed to build method call: {}", e)))?;
+
+        call_result.try_as_basic_value().basic().ok_or_else(|| {
+            CodegenError::InternalError("method call returned void when value expected".to_string())
+        })
+    }
+
+    /// Generate LLVM functions for all supported methods in an `impl` block.
+    pub(crate) fn codegen_impl(
+        &mut self,
+        impl_def: &ImplDef,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        let struct_name = &impl_def.type_name.name;
+        for method in &impl_def.methods {
+            if matches!(
+                method.self_param,
+                Some(SelfParam::RefMut) | Some(SelfParam::Owned)
+            ) {
+                continue;
+            }
+            self.codegen_method(method, struct_name, func_types)?;
+        }
+        Ok(())
+    }
+
+    /// Generate an LLVM function for a single method.
+    ///
+    /// The method is lowered to a free function under its mangled name
+    /// (`StructName__methodName`). For `&self` methods the struct is the first
+    /// parameter, named `self`, passed by value.
+    fn codegen_method(
+        &mut self,
+        method: &MethodDef,
+        struct_name: &str,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        let mangled = format!("{}__{}", struct_name, method.name.name);
+
+        let func_type_info = func_types
+            .get(&mangled)
+            .ok_or_else(|| CodegenError::UndefinedFunction(mangled.clone()))?;
+
+        let (param_types, return_type) = match func_type_info {
+            Type::Function { params, ret } => (params, &**ret),
+            _ => {
+                return Err(CodegenError::InternalError(
+                    "method type information is not a function type".to_string(),
+                ))
+            }
+        };
+
+        let mut llvm_param_types = Vec::new();
+        for param_ty in param_types {
+            let llvm_ty = if let Type::Struct(name) = param_ty {
+                self.get_struct_llvm_type(name)?.into()
+            } else {
+                self.type_mapper.map_type(param_ty)?
+            };
+            llvm_param_types.push(BasicMetadataTypeEnum::from(llvm_ty));
+        }
+
+        let llvm_ret_type = if matches!(return_type, Type::Void) {
+            self.context.void_type().fn_type(&llvm_param_types, false)
+        } else if let Type::Struct(name) = return_type {
+            self.get_struct_llvm_type(name)?
+                .fn_type(&llvm_param_types, false)
+        } else {
+            let ret_basic_type = self.type_mapper.map_type(return_type)?;
+            ret_basic_type.fn_type(&llvm_param_types, false)
+        };
+
+        let function = self.module.add_function(&mangled, llvm_ret_type, None);
+        self.functions.insert(mangled.clone(), function);
+
+        let entry = self.context.append_basic_block(function, "entry");
+        self.builder.position_at_end(entry);
+        self.current_function = Some(function);
+        self.variables.clear();
+        self.variable_types.clear();
+
+        // Bind parameters: param[0] is `self` for instance methods.
+        let non_self_start = if method.self_param.is_some() { 1 } else { 0 };
+
+        if method.self_param.is_some() {
+            // Allocate and store the `self` struct value.
+            let self_val = function
+                .get_nth_param(0)
+                .ok_or_else(|| CodegenError::InternalError("missing self parameter".to_string()))?;
+            let self_type = self_val.get_type();
+            let alloca = self
+                .builder
+                .build_alloca(self_type, "self")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder
+                .build_store(alloca, self_val)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.variables.insert("self".to_string(), alloca);
+            self.variable_types.insert("self".to_string(), self_type);
+        }
+
+        for (i, param) in method.params.iter().enumerate() {
+            let param_val = function
+                .get_nth_param((non_self_start + i) as u32)
+                .ok_or_else(|| CodegenError::InternalError(format!("missing parameter {}", i)))?;
+            let param_type = param_val.get_type();
+            let alloca = self
+                .builder
+                .build_alloca(param_type, &param.name.name)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder
+                .build_store(alloca, param_val)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.variables.insert(param.name.name.clone(), alloca);
+            self.variable_types
+                .insert(param.name.name.clone(), param_type);
+        }
+
+        let has_implicit_return = !matches!(return_type, Type::Void)
+            && !method.body.is_empty()
+            && matches!(method.body.last(), Some(Stmt::Expr(_)));
+
+        if has_implicit_return {
+            for stmt in &method.body[..method.body.len() - 1] {
+                self.codegen_stmt(stmt)?;
+            }
+            if let Some(Stmt::Expr(expr)) = method.body.last() {
+                let ret_val = self.codegen_expr(expr)?;
+                self.builder
+                    .build_return(Some(&ret_val))
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            }
+        } else {
+            for stmt in &method.body {
+                self.codegen_stmt(stmt)?;
+            }
+            if !matches!(return_type, Type::Void) {
+                let current_bb = self.builder.get_insert_block().ok_or_else(|| {
+                    CodegenError::InternalError("no insert block after method body".to_string())
+                })?;
+                if current_bb.get_terminator().is_none() {
+                    return Err(CodegenError::MissingReturn);
+                }
+            } else if let Some(current_bb) = self.builder.get_insert_block() {
+                if current_bb.get_terminator().is_none() {
+                    self.builder
+                        .build_return(None)
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Build a struct aggregate value from a struct literal expression.
     fn codegen_struct_literal(
         &self,
@@ -862,15 +1048,52 @@ impl<'ctx> CodegenContext<'ctx> {
                 })?;
                 self.codegen_unary(*op, operand, operand_ty)
             }
-            Expr::Call { func, args, .. } => {
-                // For Phase 1, only simple identifier function calls
-                if let Expr::Identifier(ident) = &**func {
-                    self.codegen_call(&ident.name, args)
-                } else {
-                    Err(CodegenError::UnsupportedType(
-                        "complex function expressions not supported in Phase 1".to_string(),
-                    ))
+            Expr::Call { func, args, span } => {
+                match &**func {
+                    Expr::Identifier(ident) => self.codegen_call(&ident.name, args),
+
+                    // Method call: `instance.method(args)` — pass self as first arg
+                    Expr::FieldAccess { field, .. } => {
+                        let struct_name = self
+                            .fa_struct_names
+                            .get(&span.start)
+                            .ok_or_else(|| {
+                                CodegenError::InternalError(
+                                    "missing struct name for method call".to_string(),
+                                )
+                            })?
+                            .clone();
+                        let mangled = format!("{}__{}", struct_name, field.name);
+                        // `object` is the FieldAccess's own object sub-expression.
+                        // Extract it from the func expression.
+                        let object = if let Expr::FieldAccess { object, .. } = &**func {
+                            object
+                        } else {
+                            unreachable!()
+                        };
+                        self.codegen_method_call(&mangled, object, args)
+                    }
+
+                    // Associated function call: `TypeName::func(args)`
+                    Expr::Path {
+                        type_name, member, ..
+                    } => {
+                        let mangled = format!("{}__{}", type_name.name, member.name);
+                        self.codegen_call(&mangled, args)
+                    }
+
+                    _ => Err(CodegenError::UnsupportedType(
+                        "unsupported call expression".to_string(),
+                    )),
                 }
+            }
+
+            Expr::Path { .. } => {
+                // A path expression used outside of a call position has no value
+                // representation at runtime; semantic analysis should have caught this.
+                Err(CodegenError::InternalError(
+                    "path expression used outside of call position".to_string(),
+                ))
             }
             Expr::Paren(inner, _) => self.codegen_expr(inner),
 
@@ -1443,9 +1666,75 @@ impl<'ctx> CodegenContext<'ctx> {
         func_types: &HashMap<String, Type>,
     ) -> CodegenResult<()> {
         for item in items {
-            if let Item::Function(func_def) = item {
-                self.visit_function_for_types(func_def, func_types)?;
+            match item {
+                Item::Function(func_def) => {
+                    self.visit_function_for_types(func_def, func_types)?;
+                }
+                Item::Impl(impl_def) => {
+                    self.visit_impl_for_types(impl_def, func_types)?;
+                }
+                Item::Struct(_) => {}
             }
+        }
+        Ok(())
+    }
+
+    /// Walk an impl block's method bodies to populate the type-info maps.
+    fn visit_impl_for_types(
+        &mut self,
+        impl_def: &ImplDef,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        let struct_name = &impl_def.type_name.name;
+        for method in &impl_def.methods {
+            if matches!(
+                method.self_param,
+                Some(SelfParam::RefMut) | Some(SelfParam::Owned)
+            ) {
+                continue;
+            }
+            self.visit_method_for_types(method, struct_name, func_types)?;
+        }
+        Ok(())
+    }
+
+    fn visit_method_for_types(
+        &mut self,
+        method: &MethodDef,
+        struct_name: &str,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        let mangled = format!("{}__{}", struct_name, method.name.name);
+        self.type_env.clear();
+
+        let func_type_info = func_types
+            .get(&mangled)
+            .ok_or_else(|| CodegenError::UndefinedFunction(mangled.clone()))?;
+
+        let param_types = match func_type_info {
+            Type::Function { params, .. } => params,
+            _ => {
+                return Err(CodegenError::InternalError(
+                    "method type is not a function type".to_string(),
+                ))
+            }
+        };
+
+        // param_types[0] is `self` for instance methods; bind it in type_env.
+        if method.self_param.is_some() {
+            self.type_env
+                .insert("self".to_string(), Type::Struct(struct_name.to_string()));
+        }
+
+        let non_self_start = if method.self_param.is_some() { 1 } else { 0 };
+        for (i, param) in method.params.iter().enumerate() {
+            if let Some(ty) = param_types.get(non_self_start + i) {
+                self.type_env.insert(param.name.name.clone(), ty.clone());
+            }
+        }
+
+        for stmt in &method.body {
+            self.visit_stmt_for_types(stmt, func_types)?;
         }
         Ok(())
     }
@@ -1648,20 +1937,83 @@ impl<'ctx> CodegenContext<'ctx> {
                 for arg in args {
                     self.visit_expr_for_types(arg, func_types)?;
                 }
-                // Get the return type of the function call
-                if let Expr::Identifier(ident) = &**func {
-                    let func_type = func_types
-                        .get(&ident.name)
-                        .ok_or_else(|| CodegenError::UndefinedFunction(ident.name.clone()))?;
-                    let ret_ty = match func_type {
-                        Type::Function { ret, .. } => &**ret,
-                        _ => {
-                            return Err(CodegenError::InternalError(
-                                "called object is not a function".to_string(),
-                            ))
-                        }
-                    };
-                    self.expr_types.insert(span.start, ret_ty.clone());
+
+                match &**func {
+                    Expr::Identifier(ident) => {
+                        let func_type = func_types
+                            .get(&ident.name)
+                            .ok_or_else(|| CodegenError::UndefinedFunction(ident.name.clone()))?;
+                        let ret_ty = match func_type {
+                            Type::Function { ret, .. } => &**ret,
+                            _ => {
+                                return Err(CodegenError::InternalError(
+                                    "called object is not a function".to_string(),
+                                ))
+                            }
+                        };
+                        self.expr_types.insert(span.start, ret_ty.clone());
+                    }
+
+                    // Method call: `instance.method(args)`
+                    Expr::FieldAccess { object, field, .. } => {
+                        self.visit_expr_for_types(object, func_types)?;
+                        let struct_name = match self.expr_types.get(&object.span().start).cloned() {
+                            Some(Type::Struct(n)) => n,
+                            _ => {
+                                return Err(CodegenError::InternalError(
+                                    "method call on non-struct type during type collection"
+                                        .to_string(),
+                                ))
+                            }
+                        };
+                        let mangled = format!("{}__{}", struct_name, field.name);
+                        let func_type = func_types
+                            .get(&mangled)
+                            .ok_or_else(|| CodegenError::UndefinedFunction(mangled.clone()))?;
+                        let ret_ty = match func_type {
+                            Type::Function { ret, .. } => (**ret).clone(),
+                            _ => {
+                                return Err(CodegenError::InternalError(
+                                    "method type is not a function".to_string(),
+                                ))
+                            }
+                        };
+                        self.expr_types.insert(span.start, ret_ty);
+                        // Store struct name so codegen_expr can reconstruct the mangled name.
+                        self.fa_struct_names.insert(span.start, struct_name);
+                    }
+
+                    // Associated function call: `TypeName::func(args)`
+                    Expr::Path {
+                        type_name, member, ..
+                    } => {
+                        let mangled = format!("{}__{}", type_name.name, member.name);
+                        let func_type = func_types
+                            .get(&mangled)
+                            .ok_or_else(|| CodegenError::UndefinedFunction(mangled.clone()))?;
+                        let ret_ty = match func_type {
+                            Type::Function { ret, .. } => (**ret).clone(),
+                            _ => {
+                                return Err(CodegenError::InternalError(
+                                    "associated function type is not a function".to_string(),
+                                ))
+                            }
+                        };
+                        self.expr_types.insert(span.start, ret_ty);
+                    }
+
+                    _ => {}
+                }
+            }
+
+            Expr::Path {
+                type_name,
+                member,
+                span,
+            } => {
+                let mangled = format!("{}__{}", type_name.name, member.name);
+                if let Some(Type::Function { ret, .. }) = func_types.get(&mangled) {
+                    self.expr_types.insert(span.start, (**ret).clone());
                 }
             }
             Expr::Paren(inner, span) => {

@@ -40,15 +40,17 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install LLVM 20
-        uses: KyleMayes/install-llvm-action@v2
-        id: llvm
-        with:
-          version: "20"
-
-      - name: Set LLVM_SYS_201_PREFIX
-        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm.outputs.llvm-path }}" >> $GITHUB_ENV
-        shell: bash
+      - name: Install LLVM 20 (Linux)
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -q
+          sudo apt-get install -y llvm-20 llvm-20-dev
+          # Verify the build script can locate llvm-config before cargo runs.
+          /usr/lib/llvm-20/bin/llvm-config --version
+          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -69,15 +71,16 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install LLVM 20
-        uses: KyleMayes/install-llvm-action@v2
-        id: llvm
-        with:
-          version: "20"
-
-      - name: Set LLVM_SYS_201_PREFIX
-        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm.outputs.llvm-path }}" >> $GITHUB_ENV
-        shell: bash
+      - name: Install LLVM 20 (Linux)
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -q
+          sudo apt-get install -y llvm-20 llvm-20-dev
+          /usr/lib/llvm-20/bin/llvm-config --version
+          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
 
       - name: Enforce VSA architecture boundaries
         run: cargo test -p neurc --test architecture_tests --verbose
@@ -102,15 +105,16 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install LLVM 20
-        uses: KyleMayes/install-llvm-action@v2
-        id: llvm
-        with:
-          version: "20"
-
-      - name: Set LLVM_SYS_201_PREFIX
-        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm.outputs.llvm-path }}" >> $GITHUB_ENV
-        shell: bash
+      - name: Install LLVM 20 (Linux)
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -q
+          sudo apt-get install -y llvm-20 llvm-20-dev
+          /usr/lib/llvm-20/bin/llvm-config --version
+          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
 
       - name: Run llvm-backend benchmarks
         run: cargo bench -p llvm-backend --bench codegen_bench -- --sample-size 10
@@ -135,14 +139,43 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install LLVM 20
+      # ── Linux ──────────────────────────────────────────────────────────────
+      - name: Install LLVM 20 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -q
+          sudo apt-get install -y llvm-20 llvm-20-dev
+          /usr/lib/llvm-20/bin/llvm-config --version
+          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
+
+      # ── macOS ──────────────────────────────────────────────────────────────
+      - name: Install LLVM 20 (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install llvm@20
+          LLVM_PREFIX="$(brew --prefix llvm@20)"
+          "$LLVM_PREFIX/bin/llvm-config" --version
+          echo "LLVM_SYS_201_PREFIX=$LLVM_PREFIX" >> $GITHUB_ENV
+
+      # ── Windows ────────────────────────────────────────────────────────────
+      # KyleMayes/install-llvm-action distributes pre-built archives that
+      # include llvm-config.exe; it is reliable on Windows where the APT
+      # approach is not applicable.
+      - name: Install LLVM 20 (Windows)
+        if: runner.os == 'Windows'
         uses: KyleMayes/install-llvm-action@v2
-        id: llvm
+        id: llvm-win
         with:
           version: "20"
 
-      - name: Set LLVM_SYS_201_PREFIX
-        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm.outputs.llvm-path }}" >> $GITHUB_ENV
+      - name: Set LLVM_SYS_201_PREFIX (Windows)
+        if: runner.os == 'Windows'
+        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm-win.outputs.llvm-path }}" >> $GITHUB_ENV
         shell: bash
 
       - name: Build release neurc
@@ -190,14 +223,40 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install LLVM 20
+      # ── Linux ──────────────────────────────────────────────────────────────
+      - name: Install LLVM 20 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -q
+          sudo apt-get install -y llvm-20 llvm-20-dev
+          /usr/lib/llvm-20/bin/llvm-config --version
+          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
+
+      # ── macOS ──────────────────────────────────────────────────────────────
+      - name: Install LLVM 20 (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install llvm@20
+          LLVM_PREFIX="$(brew --prefix llvm@20)"
+          "$LLVM_PREFIX/bin/llvm-config" --version
+          echo "LLVM_SYS_201_PREFIX=$LLVM_PREFIX" >> $GITHUB_ENV
+
+      # ── Windows ────────────────────────────────────────────────────────────
+      - name: Install LLVM 20 (Windows)
+        if: runner.os == 'Windows'
         uses: KyleMayes/install-llvm-action@v2
-        id: llvm
+        id: llvm-win
         with:
           version: "20"
 
-      - name: Set LLVM_SYS_201_PREFIX
-        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm.outputs.llvm-path }}" >> $GITHUB_ENV
+      - name: Set LLVM_SYS_201_PREFIX (Windows)
+        if: runner.os == 'Windows'
+        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm-win.outputs.llvm-path }}" >> $GITHUB_ENV
         shell: bash
 
       - name: Run tests
@@ -212,15 +271,16 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install LLVM 20
-        uses: KyleMayes/install-llvm-action@v2
-        id: llvm
-        with:
-          version: "20"
-
-      - name: Set LLVM_SYS_201_PREFIX
-        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm.outputs.llvm-path }}" >> $GITHUB_ENV
-        shell: bash
+      - name: Install LLVM 20 (Linux)
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -q
+          sudo apt-get install -y llvm-20 llvm-20-dev
+          /usr/lib/llvm-20/bin/llvm-config --version
+          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
 
       - name: Build workspace (debug)
         run: cargo build --workspace --verbose
@@ -246,19 +306,23 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install LLVM 20
-        uses: KyleMayes/install-llvm-action@v2
-        id: llvm
-        with:
-          version: "20"
-
-      - name: Set LLVM_SYS_201_PREFIX
-        run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm.outputs.llvm-path }}" >> $GITHUB_ENV
-        shell: bash
+      - name: Install LLVM 20 (Linux)
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -q
+          sudo apt-get install -y llvm-20 llvm-20-dev
+          /usr/lib/llvm-20/bin/llvm-config --version
+          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
 
       - name: Install tarpaulin
         run: cargo install cargo-tarpaulin
 
+      # tarpaulin re-invokes rustc with its own instrumentation flags but
+      # inherits the process environment, so LLVM_SYS_201_PREFIX written to
+      # $GITHUB_ENV in the step above is visible here without any extra work.
       - name: Generate coverage
         run: cargo tarpaulin --all --verbose --timeout 300 --out Xml
 
@@ -280,5 +344,7 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit
 
+      # No LLVM needed — cargo-audit only reads Cargo.lock; it does not
+      # compile any LLVM-dependent crates.
       - name: Run security audit
         run: cargo audit

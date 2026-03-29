@@ -33,16 +33,16 @@ NEURO is in **Phase 1.5** — Phase 1 (core MVP) is complete and the project is 
 ```bash
 # Arch Linux / CachyOS
 sudo pacman -S llvm20
-export LLVM_SYS_200_PREFIX=/usr/lib/llvm20
+export LLVM_SYS_201_PREFIX=/usr/lib/llvm20
 # Add to ~/.bashrc / ~/.zshrc to make permanent
 
 # Ubuntu / Debian
 wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 20
-export LLVM_SYS_200_PREFIX=/usr/lib/llvm-20
+export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20
 
 # macOS
 brew install llvm@20
-export LLVM_SYS_200_PREFIX=$(brew --prefix llvm@20)
+export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)
 ```
 
 ```bash

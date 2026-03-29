@@ -116,6 +116,8 @@ pub enum TokenKind {
     // Logical operators
     #[token("&&")]
     AmpAmp,
+    #[token("&")]
+    Amp,
     #[token("||")]
     PipePipe,
     #[token("!")]
@@ -226,6 +228,7 @@ impl Token {
             TokenKind::Less => "<",
             TokenKind::Greater => ">",
             TokenKind::AmpAmp => "&&",
+            TokenKind::Amp => "&",
             TokenKind::PipePipe => "||",
             TokenKind::Bang => "!",
             TokenKind::Equal => "=",

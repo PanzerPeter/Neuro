@@ -24,17 +24,22 @@ This slice follows the **Vertical Slice Architecture** pattern:
 
 ```rust
 pub enum Type {
-    I32,        // 32-bit signed integer
-    I64,        // 64-bit signed integer
-    F32,        // 32-bit floating point
-    F64,        // 64-bit floating point
-    Bool,       // Boolean
-    Void,       // No return value
-    Function {  // Function type
+    // Signed integers
+    I8, I16, I32, I64,
+    // Unsigned integers
+    U8, U16, U32, U64,
+    // Floating point
+    F32, F64,
+    Bool,
+    String,
+    Void,
+    /// Named struct type — nominal: two Struct values are equal iff names match
+    Struct(String),
+    Function {
         params: Vec<Type>,
         ret: Box<Type>,
     },
-    Unknown,    // Error recovery only
+    Unknown, // Error recovery
 }
 ```
 
@@ -158,63 +163,40 @@ assert_eq!(errors.len(), 2);
 
 ```rust
 pub enum TypeError {
-    Mismatch {
-        expected: Type,
-        found: Type,
-        span: Span,
-    },
-    UndefinedVariable {
-        name: String,
-        span: Span,
-    },
-    UndefinedFunction {
-        name: String,
-        span: Span,
-    },
-    VariableAlreadyDefined {
-        name: String,
-        span: Span,
-    },
-    FunctionAlreadyDefined {
-        name: String,
-        span: Span,
-    },
-    ArgumentCountMismatch {
-        expected: usize,
-        found: usize,
-        span: Span,
-    },
-    InvalidOperator {
-        op: String,
-        ty: Type,
-        span: Span,
-    },
-    InvalidBinaryOperator {
-        op: String,
-        left: Type,
-        right: Type,
-        span: Span,
-    },
-    ReturnTypeMismatch {
-        expected: Type,
-        found: Type,
-        span: Span,
-    },
-    MissingReturn {
-        expected: Type,
-    },
-    UnknownTypeName {
-        name: String,
-        span: Span,
-    },
-    NotCallable {
-        ty: Type,
-        span: Span,
-    },
-    UninitializedVariable {
-        name: String,
-        span: Span,
-    },
+    Mismatch { expected: Type, found: Type, span: Span },
+    UndefinedVariable { name: String, span: Span },
+    UndefinedFunction { name: String, span: Span },
+    VariableAlreadyDefined { name: String, span: Span },
+    FunctionAlreadyDefined { name: String, span: Span },
+    ArgumentCountMismatch { expected: usize, found: usize, span: Span },
+    InvalidOperator { op: String, ty: Type, span: Span },
+    InvalidBinaryOperator { op: String, left: Type, right: Type, span: Span },
+    ReturnTypeMismatch { expected: Type, found: Type, span: Span },
+    MissingReturn { expected: Type, span: Span },
+    UnknownTypeName { name: String, span: Span },
+    NotCallable { ty: Type, span: Span },
+    UninitializedVariable { name: String, span: Span },
+    // Mutability
+    AssignToImmutable { name: String, span: Span },
+    AssignToImmutableField { var_name: String, field_name: String, span: Span },
+    // Integer literals
+    IntegerLiteralOutOfRange { value: i64, ty: Type, span: Span },
+    // Control flow
+    BreakOutsideLoop { span: Span },
+    ContinueOutsideLoop { span: Span },
+    InvalidForRangeType { found: Type, span: Span },
+    // Structs
+    StructAlreadyDefined { name: String, span: Span },
+    UnknownStruct { name: String, span: Span },
+    UnknownField { struct_name: String, field_name: String, span: Span },
+    MissingStructField { struct_name: String, field_name: String, span: Span },
+    DuplicateStructField { field_name: String, span: Span },
+    // Methods
+    MethodNotFound { struct_name: String, method_name: String, span: Span },
+    UnsupportedSelfParam { type_name: String, self_param: String, span: Span },
+    // Path expressions
+    UnknownPathType { type_name: String, member: String, span: Span },
+    UnknownAssociatedFunction { type_name: String, member: String, span: Span },
 }
 ```
 
@@ -228,15 +210,18 @@ All errors include span information for precise error reporting.
 struct TypeChecker {
     /// Symbol table for variables (with lexical scoping)
     symbols: SymbolTable,
-
-    /// Function signatures (global scope)
+    /// All function signatures including mangled method names
     functions: HashMap<String, Type>,
-
+    /// Struct definitions: name → ordered [(field_name, field_type)]
+    struct_defs: HashMap<String, Vec<(String, Type)>>,
+    /// Methods per struct: struct_name → method_name → mangled key
+    impl_methods: HashMap<String, HashMap<String, String>>,
     /// Collected errors (fail-slow approach)
     errors: Vec<TypeError>,
-
     /// Current function's return type (for return validation)
     current_function_return_type: Option<Type>,
+    /// Active loop nesting depth (for break/continue validation)
+    loop_depth: u32,
 }
 ```
 
@@ -245,14 +230,19 @@ struct TypeChecker {
 ```rust
 struct SymbolTable {
     /// Stack of scopes (innermost scope is last)
-    scopes: Vec<HashMap<String, Type>>,
+    scopes: Vec<HashMap<String, SymbolInfo>>,
+}
+
+struct SymbolInfo {
+    ty: Type,
+    mutable: bool,
 }
 
 impl SymbolTable {
-    fn push_scope(&mut self);     // Enter new scope
-    fn pop_scope(&mut self);       // Exit scope
-    fn define(&mut self, name: String, ty: Type);
-    fn lookup(&self, name: &str) -> Option<&Type>;
+    fn push_scope(&mut self);
+    fn pop_scope(&mut self);
+    fn define(&mut self, name: String, info: SymbolInfo);
+    fn lookup(&self, name: &str) -> Option<&SymbolInfo>;
 }
 ```
 
@@ -275,7 +265,7 @@ No inference for:
 
 ## Testing
 
-**Test coverage**: 24 comprehensive tests
+**Test coverage**: 78 tests
 
 Test categories:
 - **Positive tests**: Valid programs that should type check
@@ -346,31 +336,38 @@ if condition {
 
 ## Type Checking Algorithm
 
-### Two-Pass Algorithm
+### Three-Pass Algorithm
 
-**Pass 1: Collect function signatures**
+**Pass 1: Register struct definitions**
 ```rust
 for item in items {
-    if let Item::Function(func) = item {
-        let func_type = extract_signature(func);
-        functions.insert(func.name, func_type);
+    if let Item::Struct(def) = item {
+        self.register_struct(def);
     }
 }
 ```
 
-**Pass 2: Type check function bodies**
+**Pass 2: Register impl method signatures** (uses struct types from Pass 1)
 ```rust
 for item in items {
-    if let Item::Function(func) = item {
-        check_function_body(func);
+    if let Item::Impl(def) = item {
+        self.register_impl(def); // Mangles names as StructName__methodName
     }
 }
 ```
 
-This allows:
-- Forward function references
-- Recursive functions
-- Functions calling functions defined later
+**Pass 3: Type-check function and method bodies**
+```rust
+for item in items {
+    match item {
+        Item::Function(func) => self.check_function(func),
+        Item::Impl(def) => self.check_impl(def),
+        Item::Struct(_) => {}
+    }
+}
+```
+
+This order guarantees: all struct types are known before method signatures are parsed (Pass 2), and all function/method signatures are known before any body is checked (Pass 3), enabling forward references, mutual recursion, and definition-order independence.
 
 ### Expression Type Checking
 
@@ -442,23 +439,24 @@ func factorial(n: i32) -> i32 {
 
 ```neuro
 func bad_example() -> i32 {
-    val x = "string"       // x has type string (inferred)
-    return x + 1           // Error: can't add string and i32
+    val x = "hello"      // x has type string
+    return x + 1         // Error: can't add string and i32
 }
 ```
 
 **Errors**:
-1. `TypeError::UnsupportedType`: String literals not in Phase 1
-2. `TypeError::InvalidBinaryOperator`: Can't apply `+` to these types
+1. `TypeError::InvalidBinaryOperator`: Cannot apply `+` to `string` and `i32`
 
 ## Future Enhancements (Post-Phase 1)
 
 ### Phase 2: Enhanced Type System
-- [ ] **Type inference**: Infer function return types
-- [ ] **Generic functions**: Monomorphization
-- [ ] **Structs**: User-defined types
+- [x] **Structs**: User-defined types with nominal typing
+- [x] **Methods**: `impl` blocks with `&self` instance methods and associated functions
+- [ ] **Enums**: Algebraic data types with associated data
+- [ ] **Pattern matching**: `match` with exhaustiveness checking
 - [ ] **Arrays**: Fixed-size arrays `[i32; 10]`
 - [ ] **Explicit conversions**: `as i64`, `as f32`
+- [ ] **Generic functions**: Monomorphization
 
 ### Phase 3: Tensor Types
 - [ ] **Static tensor types**: `Tensor<f32, [3, 3]>`

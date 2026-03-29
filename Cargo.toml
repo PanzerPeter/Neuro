@@ -47,7 +47,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.85"
 authors = ["NEURO Contributors"]
@@ -76,7 +76,7 @@ chumsky = "0.9"
 # LLVM Backend
 # Requires LLVM 20 installed system-wide with MLIR enabled.
 # On CachyOS/Arch: sudo pacman -S llvm20
-# LLVM_SYS_200_PREFIX must point to the LLVM 20 installation (e.g. /usr/lib/llvm20).
+# LLVM_SYS_201_PREFIX must point to the LLVM 20 installation (e.g. /usr/lib/llvm20).
 # Feature flag is llvm20-1 (inkwell 0.8.0 uses the minor-version suffix scheme).
 # inkwell 0.8.0 requires Rust 1.85+.
 inkwell = { version = "0.8.0", features = ["llvm20-1", "target-all"] }

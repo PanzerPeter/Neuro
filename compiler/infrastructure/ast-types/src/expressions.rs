@@ -47,6 +47,13 @@ pub enum Expr {
         field: Identifier,
         span: Span,
     },
+    /// Path expression: `TypeName::member` — used for associated function references.
+    /// Appears as the `func` of `Expr::Call` when calling `Point::new(args)`.
+    Path {
+        type_name: Identifier,
+        member: Identifier,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -61,6 +68,7 @@ impl Expr {
             Expr::Paren(_, span) => *span,
             Expr::StructLiteral { span, .. } => *span,
             Expr::FieldAccess { span, .. } => *span,
+            Expr::Path { span, .. } => *span,
         }
     }
 }

@@ -15,7 +15,7 @@ mod types;
 // Public exports
 pub use errors::{CodegenError, CodegenResult};
 
-use ast_types::Item;
+use ast_types::{Item, SelfParam};
 use inkwell::context::Context as LLVMContext;
 use inkwell::OptimizationLevel as LlvmOptimizationLevel;
 use std::collections::HashMap;
@@ -112,26 +112,70 @@ pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> Codege
     // Extract function types from AST (caller is responsible for semantic validation)
     let mut func_types = HashMap::new();
     for item in items {
-        if let Item::Function(func_def) = item {
-            let mut param_types = Vec::new();
-            for param in &func_def.params {
-                let ty = resolve_syntax_type(&param.ty)?;
-                param_types.push(ty);
+        match item {
+            Item::Function(func_def) => {
+                let mut param_types = Vec::new();
+                for param in &func_def.params {
+                    let ty = resolve_syntax_type(&param.ty)?;
+                    param_types.push(ty);
+                }
+
+                let return_type = if let Some(ret_ty) = &func_def.return_type {
+                    resolve_syntax_type(ret_ty)?
+                } else {
+                    Type::Void
+                };
+
+                func_types.insert(
+                    func_def.name.name.clone(),
+                    Type::Function {
+                        params: param_types,
+                        ret: Box::new(return_type),
+                    },
+                );
             }
 
-            let return_type = if let Some(ret_ty) = &func_def.return_type {
-                resolve_syntax_type(ret_ty)?
-            } else {
-                Type::Void
-            };
+            Item::Impl(impl_def) => {
+                let struct_name = &impl_def.type_name.name;
+                for method in &impl_def.methods {
+                    // Only &self and associated functions are supported; others were
+                    // rejected by semantic analysis and must not reach codegen.
+                    if matches!(
+                        method.self_param,
+                        Some(SelfParam::RefMut) | Some(SelfParam::Owned)
+                    ) {
+                        continue;
+                    }
 
-            func_types.insert(
-                func_def.name.name.clone(),
-                Type::Function {
-                    params: param_types,
-                    ret: Box::new(return_type),
-                },
-            );
+                    let mangled = format!("{}__{}", struct_name, method.name.name);
+                    let mut param_types: Vec<Type> = Vec::new();
+
+                    // Implicit `self` parameter for instance methods.
+                    if method.self_param.is_some() {
+                        param_types.push(Type::Struct(struct_name.clone()));
+                    }
+
+                    for param in &method.params {
+                        param_types.push(resolve_syntax_type(&param.ty)?);
+                    }
+
+                    let return_type = if let Some(ret_ty) = &method.return_type {
+                        resolve_syntax_type(ret_ty)?
+                    } else {
+                        Type::Void
+                    };
+
+                    func_types.insert(
+                        mangled,
+                        Type::Function {
+                            params: param_types,
+                            ret: Box::new(return_type),
+                        },
+                    );
+                }
+            }
+
+            Item::Struct(_) => {}
         }
     }
 
@@ -143,10 +187,16 @@ pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> Codege
     // Store type information for expressions
     codegen_ctx.store_expr_types(items, &func_types)?;
 
-    // Generate code for each function
+    // Generate code for each function and impl method
     for item in items {
-        if let Item::Function(func_def) = item {
-            codegen_ctx.codegen_function(func_def, &func_types)?;
+        match item {
+            Item::Function(func_def) => {
+                codegen_ctx.codegen_function(func_def, &func_types)?;
+            }
+            Item::Impl(impl_def) => {
+                codegen_ctx.codegen_impl(impl_def, &func_types)?;
+            }
+            Item::Struct(_) => {}
         }
     }
 

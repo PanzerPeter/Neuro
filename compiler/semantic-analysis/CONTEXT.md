@@ -24,8 +24,27 @@ Fail-slow strategy: all type errors are collected in a single pass so the develo
 sees the complete error set in one compilation. `syntax-parsing` appears only in
 `[dev-dependencies]` (integration tests); it is not a production dependency.
 
-Struct checking uses a two-pass strategy within `check_program`: the first pass
-registers all `Item::Struct` definitions into `struct_defs` so that struct type names
-resolve correctly when encountered inside function signatures and bodies. The second
-pass runs `check_function` for each function. Struct types use nominal typing —
-two `Type::Struct` values are compatible iff their names are equal.
+Three-pass strategy within `check_program`:
+1. Pre-register all `Item::Struct` definitions into `struct_defs`.
+2. Pre-register all `Item::Impl` method signatures into `functions` (mangled as
+   `StructName__methodName`) and into `impl_methods` (struct → method → mangled key).
+3. Full-check pass: `check_function` for each `Item::Function`, `check_impl` for each
+   `Item::Impl`.
+
+Struct types use nominal typing — two `Type::Struct` values are compatible iff their
+names are equal.
+
+`impl` method scoping: `check_impl` binds `self` as an immutable variable of the
+struct type, then binds the remaining parameters, before checking the method body.
+
+Method calls (`instance.method(args)`) are recognised in `check_expr` when the `Call`
+node's `func` is a `FieldAccess`. The object's struct type drives a lookup into
+`impl_methods` to find the mangled function name, then arity and argument types are
+validated against the registered signature (skipping param[0] which is `self`).
+
+Associated function calls (`TypeName::func(args)`) are recognised in `check_expr`
+when the `Call` node's `func` is an `Expr::Path`. The mangled name is reconstructed
+as `TypeName__funcName` and looked up directly in `functions`.
+
+`&mut self` and consuming `self` methods are rejected at registration time with
+`UnsupportedSelfParam` until ownership semantics land (Phase 1.5).

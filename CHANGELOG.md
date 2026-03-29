@@ -9,7 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.1.1] - 2026-03-28
+
 ### Added
+
+- **parser/semantic/codegen**: `impl` blocks — methods and associated functions on structs
+  - `impl TypeName { func method(&self) ... func assoc(args) ... }` parsed as `Item::Impl`
+  - `&self` instance methods lowered to LLVM free functions under mangled names `StructName__methodName`; struct passed by value as first parameter
+  - Associated functions (no `self`) called via `TypeName::func(args)` path syntax; `Expr::Path` AST node added
+  - Method calls `instance.method(args)` recognised in semantic analysis and codegen via `Call { func: FieldAccess }` shape
+  - `&mut self` and consuming `self` rejected at semantic analysis with actionable error until ownership semantics land
+  - Three-pass `check_program`: struct pre-registration → impl signature registration → body checking
+  - `Amp` (`&`) token added to lexer; logos longest-match keeps `&&` as `AmpAmp`
+  - 8 new integration tests covering all acceptance criteria
 
 - **parser/semantic/codegen**: Struct types — definition, instantiation, field access, and field mutation
   - `struct Name { field: Type, ... }` declarations parsed as `Item::Struct`
@@ -28,43 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `select` keeps `memcmp` safe when lengths differ (passes `n=0`)
   - 4 integration tests added to `neurc/tests/string_type.rs`
   - `docs/language-reference/operators.md` and `README.md` updated
-
-### Fixed
-
-- **codegen**: `codegen_if` branch check used the stale `then_bb`/`else_bb` reference
-  after nested control flow moved the builder to an inner merge block — replaced with
-  `builder.get_insert_block()` check (mirrors the existing pattern in `codegen_while`)
-- **codegen**: `codegen_binary` read `span.start` (result type, e.g. `Bool`) instead of
-  `span.start + 1` (left-operand type) — this silently broke float comparisons and
-  prevented string equality dispatch
-
-### Changed
-
-- **codegen**: String type now uses fat pointer `{ ptr, i64 }` ABI instead of bare `ptr`
-  - `type_mapping.rs`: `Type::String` maps to anonymous LLVM struct `{ ptr, i64 }`
-  - `codegen.rs`: string literals built via `insertvalue` instructions; field 0 = pointer to
-    null-terminated UTF-8 bytes in `.rodata`, field 1 = byte count excluding null terminator
-  - `lib.rs`: target machine relocation model changed from `RelocMode::Default` to
-    `RelocMode::PIC` so emitted object files are linkable into PIE executables on modern Linux
-  - `llvm-backend/CONTEXT.md`: String ABI section added documenting the fat pointer layout
-- **infra**: `OptimizationLevel` default impl replaced with `#[derive(Default)]` + `#[default]`
-  on `O0` (clippy `derivable_impls`)
-- **llvm-backend**: Upgraded inkwell `0.6.0` (LLVM 18) → `0.8.0` (LLVM 20)
-  - Updated `[workspace.dependencies]` inkwell feature flag to `llvm20-1`
-  - Raised minimum Rust version (`rust-version`) from `1.70` to `1.85`
-  - `LLVM_SYS_200_PREFIX` is now the required build-time env var (e.g. `/usr/lib/llvm20`)
-  - Fixed `codegen.rs`: `try_as_basic_value().left()` → `.basic()` (inkwell 0.8 `ValueKind` API)
-  - Updated `compiler/llvm-backend/CONTEXT.md` with LLVM 20 reference and future MLIR plan
-  - Updated `.idea/roadmap.md` (v4.1) and `.idea/idea.md` with accurate backend stack,
-    MLIR lowering strategy, Enzyme MLIR dialect plan, and GPU dialect paths
-- **architecture-tests**: Renamed `test_all_slices_have_readme` → `test_all_slices_have_context_md`
-  — README.md files replaced by CONTEXT.md across all slices; required sections updated to
-  `Purpose`, `Entry Point`, `Data Ownership`, `Shared Kernel`
-- **workspace**: Repository and homepage URLs updated to `github.com/PanzerPeter/Neuro`
-- **workspace**: `Cargo.lock` format upgraded to version 4 (Cargo 1.85+)
-- **neurc**: Improved linker detection with detailed error messages
-
-### Added
 
 - **control-flow**: Exclusive range `for` loops (`for i in 0..n`) end-to-end
   - `Stmt::ForRange` AST node in `ast-types`
@@ -137,6 +114,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **syntax-parsing**: Comprehensive test suite (117 tests)
   - `expression_tests.rs` (34), `statement_tests.rs` (20), `function_tests.rs` (16),
     `error_tests.rs` (31), `integration_tests.rs` (16)
+
+### Fixed
+
+- **codegen**: `codegen_if` branch check used the stale `then_bb`/`else_bb` reference
+  after nested control flow moved the builder to an inner merge block — replaced with
+  `builder.get_insert_block()` check (mirrors the existing pattern in `codegen_while`)
+- **codegen**: `codegen_binary` read `span.start` (result type, e.g. `Bool`) instead of
+  `span.start + 1` (left-operand type) — this silently broke float comparisons and
+  prevented string equality dispatch
+
+### Changed
+
+- **codegen**: String type now uses fat pointer `{ ptr, i64 }` ABI instead of bare `ptr`
+  - `type_mapping.rs`: `Type::String` maps to anonymous LLVM struct `{ ptr, i64 }`
+  - `codegen.rs`: string literals built via `insertvalue` instructions; field 0 = pointer to
+    null-terminated UTF-8 bytes in `.rodata`, field 1 = byte count excluding null terminator
+  - `lib.rs`: target machine relocation model changed from `RelocMode::Default` to
+    `RelocMode::PIC` so emitted object files are linkable into PIE executables on modern Linux
+  - `llvm-backend/CONTEXT.md`: String ABI section added documenting the fat pointer layout
+- **infra**: `OptimizationLevel` default impl replaced with `#[derive(Default)]` + `#[default]`
+  on `O0` (clippy `derivable_impls`)
+- **llvm-backend**: Upgraded inkwell `0.6.0` (LLVM 18) → `0.8.0` (LLVM 20)
+  - Updated `[workspace.dependencies]` inkwell feature flag to `llvm20-1`
+  - Raised minimum Rust version (`rust-version`) from `1.70` to `1.85`
+  - `LLVM_SYS_201_PREFIX` is now the required build-time env var (e.g. `/usr/lib/llvm20`)
+  - Fixed `codegen.rs`: `try_as_basic_value().left()` → `.basic()` (inkwell 0.8 `ValueKind` API)
+  - Updated `compiler/llvm-backend/CONTEXT.md` with LLVM 20 reference and future MLIR plan
+  - Updated `.idea/roadmap.md` (v4.1) and `.idea/idea.md` with accurate backend stack,
+    MLIR lowering strategy, Enzyme MLIR dialect plan, and GPU dialect paths
+- **architecture-tests**: Renamed `test_all_slices_have_readme` → `test_all_slices_have_context_md`
+  — README.md files replaced by CONTEXT.md across all slices; required sections updated to
+  `Purpose`, `Entry Point`, `Data Ownership`, `Shared Kernel`
+- **workspace**: Repository and homepage URLs updated to `github.com/PanzerPeter/Neuro`
+- **workspace**: `Cargo.lock` format upgraded to version 4 (Cargo 1.85+)
+- **neurc**: Improved linker detection with detailed error messages
 
 ### Fixed
 

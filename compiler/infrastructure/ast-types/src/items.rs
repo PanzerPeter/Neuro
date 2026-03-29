@@ -40,9 +40,48 @@ pub struct StructDef {
     pub span: Span,
 }
 
+/// The `self` parameter kind in a method signature.
+///
+/// `RefMut` and `Owned` are parsed but rejected by semantic analysis until
+/// ownership semantics are introduced (Phase 1.5).
+#[derive(Debug, Clone, PartialEq)]
+pub enum SelfParam {
+    /// `&self` — immutable borrow; lowered to pass-by-value in codegen
+    Ref,
+    /// `&mut self` — mutable borrow; not yet supported
+    RefMut,
+    /// `self` — consuming; not yet supported
+    Owned,
+}
+
+/// A method inside an `impl` block.
+///
+/// Methods with `self_param: None` are associated functions (called via
+/// `TypeName::func_name(args)`). Methods with `self_param: Some(_)` are
+/// instance methods (called via `instance.method_name(args)`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MethodDef {
+    pub name: Identifier,
+    /// None for associated functions, Some for instance methods.
+    pub self_param: Option<SelfParam>,
+    pub params: Vec<Parameter>,
+    pub return_type: Option<Type>,
+    pub body: Vec<Stmt>,
+    pub span: Span,
+}
+
+/// An `impl` block associating methods with a named struct type.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImplDef {
+    pub type_name: Identifier,
+    pub methods: Vec<MethodDef>,
+    pub span: Span,
+}
+
 /// Top-level AST item
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     Function(FunctionDef),
     Struct(StructDef),
+    Impl(ImplDef),
 }

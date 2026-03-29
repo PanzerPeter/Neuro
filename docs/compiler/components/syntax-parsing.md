@@ -25,7 +25,8 @@ This slice follows the **Vertical Slice Architecture** pattern:
 ```rust
 pub enum Item {
     Function(FunctionDef),
-    // Future: Struct, Enum, Trait, Import, etc.
+    Struct(StructDef),
+    Impl(ImplDef),
 }
 
 pub struct FunctionDef {
@@ -34,6 +35,40 @@ pub struct FunctionDef {
     pub return_type: Option<Type>,
     pub body: Vec<Stmt>,
     pub span: Span,
+}
+
+pub struct StructDef {
+    pub name: Identifier,
+    pub fields: Vec<FieldDef>,
+    pub span: Span,
+}
+
+pub struct FieldDef {
+    pub name: Identifier,
+    pub ty: Type,
+    pub span: Span,
+}
+
+pub struct ImplDef {
+    pub type_name: Identifier,
+    pub methods: Vec<MethodDef>,
+    pub span: Span,
+}
+
+pub struct MethodDef {
+    pub name: Identifier,
+    /// None = associated function; Some = instance method
+    pub self_param: Option<SelfParam>,
+    pub params: Vec<Parameter>,
+    pub return_type: Option<Type>,
+    pub body: Vec<Stmt>,
+    pub span: Span,
+}
+
+pub enum SelfParam {
+    Ref,    // &self — supported
+    RefMut, // &mut self — rejected until ownership lands
+    Owned,  // self — rejected until ownership lands
 }
 ```
 
@@ -48,6 +83,17 @@ pub enum Stmt {
         mutable: bool,
         span: Span,
     },
+    Assign {
+        name: Identifier,
+        value: Expr,
+        span: Span,
+    },
+    FieldAssignment {
+        object: Expr,
+        field: Identifier,
+        value: Expr,
+        span: Span,
+    },
     Return {
         value: Option<Expr>,
         span: Span,
@@ -57,6 +103,24 @@ pub enum Stmt {
         then_block: Vec<Stmt>,
         else_if_blocks: Vec<(Expr, Vec<Stmt>)>,
         else_block: Option<Vec<Stmt>>,
+        span: Span,
+    },
+    While {
+        condition: Expr,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    ForRange {
+        var: Identifier,
+        start: Expr,
+        end: Expr,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    Break {
+        span: Span,
+    },
+    Continue {
         span: Span,
     },
     Expr(Expr),
@@ -86,6 +150,24 @@ pub enum Expr {
         span: Span,
     },
     Paren(Box<Expr>, Span),
+    /// Struct literal: `Point { x: 1.0, y: 2.0 }`
+    StructLiteral {
+        name: Identifier,
+        fields: Vec<FieldInit>,
+        span: Span,
+    },
+    /// Field access: `expr.field_name`
+    FieldAccess {
+        object: Box<Expr>,
+        field: Identifier,
+        span: Span,
+    },
+    /// Path expression: `TypeName::member` — callee of associated function calls
+    Path {
+        type_name: Identifier,
+        member: Identifier,
+        span: Span,
+    },
 }
 ```
 
@@ -130,6 +212,14 @@ for item in ast {
             println!("Function: {}", func_def.name.name);
             println!("  Parameters: {}", func_def.params.len());
             println!("  Body statements: {}", func_def.body.len());
+        }
+        Item::Struct(struct_def) => {
+            println!("Struct: {}", struct_def.name.name);
+            println!("  Fields: {}", struct_def.fields.len());
+        }
+        Item::Impl(impl_def) => {
+            println!("Impl for: {}", impl_def.type_name.name);
+            println!("  Methods: {}", impl_def.methods.len());
         }
     }
 }
@@ -260,7 +350,7 @@ let binary_expr = Expr::Binary {
 
 ### Testing
 
-**Test coverage**: 65 comprehensive tests
+**Test coverage**: 122 comprehensive tests
 
 Test categories:
 - Expression parsing (all operators, precedence)
@@ -372,11 +462,23 @@ pub struct Parameter { ... }
 
 ## Grammar Reference
 
-### EBNF Grammar (Phase 1)
+### EBNF Grammar (Phase 1 + Phase 2 structs/methods)
+
+Structs and `impl` blocks are now supported as top-level items.
 
 ```ebnf
 program        ::= item*
 item           ::= function_def
+                 | struct_def
+                 | impl_def
+
+struct_def     ::= "struct" IDENTIFIER "{" field_list? "}"
+field_list     ::= field_def ("," field_def)* ","?
+field_def      ::= IDENTIFIER ":" type
+
+impl_def       ::= "impl" IDENTIFIER "{" method_def* "}"
+method_def     ::= "func" IDENTIFIER "(" self_param? params? ")" ("->" type)? "{" statement* "}"
+self_param     ::= "&" "self" | "&" "mut" "self" | "self"
 
 function_def   ::= "func" IDENTIFIER "(" parameters? ")" ("->" type)? "{" statement* "}"
 parameters     ::= parameter ("," parameter)*

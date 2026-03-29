@@ -5,7 +5,8 @@ Provide the canonical Abstract Syntax Tree (AST) node definitions shared by all 
 
 ## Entry Point
 - Type: Library (no entry function — pure data)
-- Public types: `Item`, `Expr`, `Stmt`, `BinaryOp`, `UnaryOp`, `TypeAnnotation`, `FunctionParam`
+- Public types: `Item`, `Expr`, `Stmt`, `BinaryOp`, `UnaryOp`, `TypeAnnotation`, `FunctionParam`,
+  `ImplDef`, `MethodDef`, `SelfParam`
 
 ## Data Ownership
 - Tables: none
@@ -18,3 +19,11 @@ Provide the canonical Abstract Syntax Tree (AST) node definitions shared by all 
 
 ## Notes
 Extracted from `syntax-parsing` to eliminate the cross-slice dependency that `semantic-analysis` and `llvm-backend` previously had on `syntax-parsing`. All three consumer slices now depend only on this infrastructure crate, not on each other. `syntax-parsing/src/ast/mod.rs` re-exports all types from here for backwards compatibility.
+
+`Item::Impl` carries an `ImplDef` (type name + list of `MethodDef`). Each `MethodDef` holds an
+`Option<SelfParam>` distinguishing associated functions (`None`) from instance methods (`Some`).
+`SelfParam::Ref` (`&self`) is the only variant currently supported end-to-end; `RefMut` and
+`Owned` are parsed but rejected by semantic analysis until ownership semantics land.
+
+`Expr::Path { type_name, member, span }` represents `TypeName::member` path expressions used as
+the callee of associated-function calls (`Point::new(args)`).

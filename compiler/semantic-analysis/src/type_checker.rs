@@ -3,7 +3,9 @@
 
 use std::collections::HashMap;
 
-use ast_types::{BinaryOp, Expr, FieldInit, FunctionDef, Item, Stmt, StructDef, UnaryOp};
+use ast_types::{
+    BinaryOp, Expr, FieldInit, FunctionDef, ImplDef, Item, SelfParam, Stmt, StructDef, UnaryOp,
+};
 use shared_types::{Literal, Span};
 
 use crate::errors::TypeError;
@@ -14,10 +16,14 @@ use crate::types::Type;
 pub(crate) struct TypeChecker {
     /// Symbol table for variables
     symbols: SymbolTable,
-    /// Function signatures (global scope)
+    /// Function signatures (global scope) — includes mangled method names
     functions: HashMap<String, Type>,
     /// Struct definitions: name → ordered list of (field_name, field_type)
     struct_defs: HashMap<String, Vec<(String, Type)>>,
+    /// Methods per struct: struct_name → method_name → mangled function key in `functions`
+    ///
+    /// The mangled key follows the convention `StructName__methodName`.
+    impl_methods: HashMap<String, HashMap<String, String>>,
     /// Collected type errors
     errors: Vec<TypeError>,
     /// Current function's return type (for validating return statements)
@@ -32,6 +38,7 @@ impl TypeChecker {
             symbols: SymbolTable::new(),
             functions: HashMap::new(),
             struct_defs: HashMap::new(),
+            impl_methods: HashMap::new(),
             errors: Vec::new(),
             current_function_return_type: None,
             loop_depth: 0,
@@ -154,6 +161,55 @@ impl TypeChecker {
                 None
             }
         }
+    }
+
+    /// Type-check a plain identifier call (free function or previously registered
+    /// method with a mangled name). Extracted so the `Call` arm can delegate here.
+    fn check_plain_call(
+        &mut self,
+        func_name: &str,
+        args: &[ast_types::Expr],
+        span: shared_types::Span,
+    ) -> Option<Type> {
+        let func_ty = if let Some(ty) = self.functions.get(func_name) {
+            ty.clone()
+        } else {
+            self.record_error(TypeError::UndefinedFunction {
+                name: func_name.to_string(),
+                span,
+            });
+            return Some(Type::Unknown);
+        };
+
+        let (param_types, return_type) = match func_ty {
+            Type::Function { params, ret } => (params, *ret),
+            _ => {
+                self.record_error(TypeError::NotCallable { ty: func_ty, span });
+                return Some(Type::Unknown);
+            }
+        };
+
+        if args.len() != param_types.len() {
+            self.record_error(TypeError::ArgumentCountMismatch {
+                expected: param_types.len(),
+                found: args.len(),
+                span,
+            });
+        }
+
+        for (arg, expected_ty) in args.iter().zip(param_types.iter()) {
+            if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
+                if !arg_ty.is_compatible_with(expected_ty) {
+                    self.record_error(TypeError::Mismatch {
+                        expected: expected_ty.clone(),
+                        found: arg_ty,
+                        span: arg.span(),
+                    });
+                }
+            }
+        }
+
+        Some(return_type)
     }
 
     /// Check an expression and return its type.
@@ -333,68 +389,179 @@ impl TypeChecker {
             }
 
             Expr::Call { func, args, span } => {
-                // Get function name (for Phase 1, only identifier calls supported)
-                let func_name = match &**func {
-                    Expr::Identifier(ident) => &ident.name,
+                match &**func {
+                    Expr::Identifier(ident) => self.check_plain_call(&ident.name, args, *span),
+
+                    // Method call: `instance.method(args)`
+                    // The object type determines which struct's methods to search.
+                    Expr::FieldAccess {
+                        object,
+                        field,
+                        span: fa_span,
+                    } => {
+                        let obj_ty = self.check_expr(object, None).unwrap_or(Type::Unknown);
+                        if matches!(obj_ty, Type::Unknown) {
+                            return Some(Type::Unknown);
+                        }
+                        let struct_name = match &obj_ty {
+                            Type::Struct(n) => n.clone(),
+                            other => {
+                                self.record_error(TypeError::MethodNotFound {
+                                    struct_name: other.to_string(),
+                                    method_name: field.name.clone(),
+                                    span: *fa_span,
+                                });
+                                return Some(Type::Unknown);
+                            }
+                        };
+
+                        let mangled = match self
+                            .impl_methods
+                            .get(&struct_name)
+                            .and_then(|m| m.get(&field.name))
+                        {
+                            Some(k) => k.clone(),
+                            None => {
+                                self.record_error(TypeError::MethodNotFound {
+                                    struct_name,
+                                    method_name: field.name.clone(),
+                                    span: *fa_span,
+                                });
+                                return Some(Type::Unknown);
+                            }
+                        };
+
+                        // The mangled function's first parameter is `self` (the struct).
+                        // Callers provide only the non-self arguments, so we skip param[0]
+                        // when checking arity and types.
+                        let func_ty = self.functions.get(&mangled).cloned();
+                        let (param_types, return_type) = match func_ty {
+                            Some(Type::Function { params, ret }) => (params, *ret),
+                            _ => return Some(Type::Unknown),
+                        };
+
+                        // param_types[0] is the implicit `self`; user-visible params start at [1]
+                        let visible_params = if param_types.is_empty() {
+                            &param_types[..]
+                        } else {
+                            &param_types[1..]
+                        };
+
+                        if args.len() != visible_params.len() {
+                            self.record_error(TypeError::ArgumentCountMismatch {
+                                expected: visible_params.len(),
+                                found: args.len(),
+                                span: *span,
+                            });
+                        }
+
+                        for (arg, expected_ty) in args.iter().zip(visible_params.iter()) {
+                            if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
+                                if !arg_ty.is_compatible_with(expected_ty) {
+                                    self.record_error(TypeError::Mismatch {
+                                        expected: expected_ty.clone(),
+                                        found: arg_ty,
+                                        span: arg.span(),
+                                    });
+                                }
+                            }
+                        }
+
+                        Some(return_type)
+                    }
+
+                    // Associated function call: `TypeName::func(args)`
+                    Expr::Path {
+                        type_name,
+                        member,
+                        span: path_span,
+                    } => {
+                        if !self.struct_defs.contains_key(&type_name.name) {
+                            self.record_error(TypeError::UnknownPathType {
+                                type_name: type_name.name.clone(),
+                                member: member.name.clone(),
+                                span: *path_span,
+                            });
+                            return Some(Type::Unknown);
+                        }
+
+                        let mangled = format!("{}__{}", type_name.name, member.name);
+                        let func_ty = if let Some(ty) = self.functions.get(&mangled) {
+                            ty.clone()
+                        } else {
+                            self.record_error(TypeError::UnknownAssociatedFunction {
+                                type_name: type_name.name.clone(),
+                                member: member.name.clone(),
+                                span: *path_span,
+                            });
+                            return Some(Type::Unknown);
+                        };
+
+                        let (param_types, return_type) = match func_ty {
+                            Type::Function { params, ret } => (params, *ret),
+                            _ => return Some(Type::Unknown),
+                        };
+
+                        if args.len() != param_types.len() {
+                            self.record_error(TypeError::ArgumentCountMismatch {
+                                expected: param_types.len(),
+                                found: args.len(),
+                                span: *span,
+                            });
+                        }
+
+                        for (arg, expected_ty) in args.iter().zip(param_types.iter()) {
+                            if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
+                                if !arg_ty.is_compatible_with(expected_ty) {
+                                    self.record_error(TypeError::Mismatch {
+                                        expected: expected_ty.clone(),
+                                        found: arg_ty,
+                                        span: arg.span(),
+                                    });
+                                }
+                            }
+                        }
+
+                        Some(return_type)
+                    }
+
                     _ => {
-                        // Try to infer the type of the expression being called
                         let expr_ty = self.check_expr(func, None).unwrap_or(Type::Unknown);
                         self.record_error(TypeError::NotCallable {
                             ty: expr_ty,
                             span: *span,
                         });
-                        return Some(Type::Unknown);
+                        Some(Type::Unknown)
                     }
-                };
+                }
+            }
 
-                // Look up function signature
-                let func_ty = if let Some(ty) = self.functions.get(func_name) {
-                    ty.clone()
-                } else {
-                    self.record_error(TypeError::UndefinedFunction {
-                        name: func_name.clone(),
+            Expr::Path {
+                type_name,
+                member,
+                span,
+            } => {
+                // Standalone path expression (not used as a call target).
+                // Validate the struct and member exist; the type is a function type.
+                if !self.struct_defs.contains_key(&type_name.name) {
+                    self.record_error(TypeError::UnknownPathType {
+                        type_name: type_name.name.clone(),
+                        member: member.name.clone(),
                         span: *span,
                     });
                     return Some(Type::Unknown);
-                };
-
-                // Extract parameter types and return type
-                let (param_types, return_type) = match func_ty {
-                    Type::Function { params, ret } => (params, *ret),
-                    _ => {
-                        self.record_error(TypeError::NotCallable {
-                            ty: func_ty,
-                            span: *span,
-                        });
-                        return Some(Type::Unknown);
-                    }
-                };
-
-                // Check argument count
-                if args.len() != param_types.len() {
-                    self.record_error(TypeError::ArgumentCountMismatch {
-                        expected: param_types.len(),
-                        found: args.len(),
+                }
+                let mangled = format!("{}__{}", type_name.name, member.name);
+                if let Some(ty) = self.functions.get(&mangled) {
+                    Some(ty.clone())
+                } else {
+                    self.record_error(TypeError::UnknownAssociatedFunction {
+                        type_name: type_name.name.clone(),
+                        member: member.name.clone(),
                         span: *span,
                     });
-                    // Continue checking argument types for better error reporting
+                    Some(Type::Unknown)
                 }
-
-                // Check each argument type with expected parameter type
-                // This enables type inference for numeric literals in function arguments
-                for (arg, expected_ty) in args.iter().zip(param_types.iter()) {
-                    if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
-                        if !arg_ty.is_compatible_with(expected_ty) {
-                            self.record_error(TypeError::Mismatch {
-                                expected: expected_ty.clone(),
-                                found: arg_ty,
-                                span: arg.span(),
-                            });
-                        }
-                    }
-                }
-
-                Some(return_type)
             }
 
             Expr::Paren(inner, _) => {
@@ -1027,20 +1194,199 @@ impl TypeChecker {
         Some(())
     }
 
+    /// Register all method signatures from an `impl` block into the global
+    /// function table under mangled names (`StructName__methodName`).
+    ///
+    /// Unsupported self-param variants (`&mut self`, consuming `self`) are
+    /// rejected here so they never reach codegen.
+    fn register_impl(&mut self, def: &ImplDef) -> Option<()> {
+        if !self.struct_defs.contains_key(&def.type_name.name) {
+            self.record_error(TypeError::UnknownStruct {
+                name: def.type_name.name.clone(),
+                span: def.type_name.span,
+            });
+            return None;
+        }
+
+        let struct_name = def.type_name.name.clone();
+
+        // Accumulate (method_name, mangled_key) to insert into impl_methods after
+        // all mutable borrows of `self` for type resolution are finished.
+        let mut method_entries: Vec<(String, String)> = Vec::new();
+
+        for method in &def.methods {
+            // Reject self-param variants that require ownership semantics.
+            match &method.self_param {
+                Some(SelfParam::RefMut) => {
+                    self.errors.push(TypeError::UnsupportedSelfParam {
+                        type_name: struct_name.clone(),
+                        self_param: "&mut self".to_string(),
+                        span: method.span,
+                    });
+                    continue;
+                }
+                Some(SelfParam::Owned) => {
+                    self.errors.push(TypeError::UnsupportedSelfParam {
+                        type_name: struct_name.clone(),
+                        self_param: "self".to_string(),
+                        span: method.span,
+                    });
+                    continue;
+                }
+                _ => {}
+            }
+
+            let mangled = format!("{}__{}", struct_name, method.name.name);
+
+            // Build the full parameter type list: implicit `self` first for instance methods.
+            let mut param_types: Vec<Type> = Vec::new();
+            if method.self_param.is_some() {
+                param_types.push(Type::Struct(struct_name.clone()));
+            }
+            for param in &method.params {
+                if let Some(ty) = self.resolve_type(&param.ty) {
+                    param_types.push(ty);
+                } else {
+                    param_types.push(Type::Unknown);
+                }
+            }
+
+            let return_type = if let Some(ret_ty) = &method.return_type {
+                self.resolve_type(ret_ty).unwrap_or(Type::Void)
+            } else {
+                Type::Void
+            };
+
+            let func_ty = Type::Function {
+                params: param_types,
+                ret: Box::new(return_type),
+            };
+
+            if self.functions.contains_key(&mangled) {
+                self.record_error(TypeError::FunctionAlreadyDefined {
+                    name: mangled.clone(),
+                    span: method.name.span,
+                });
+                continue;
+            }
+
+            self.functions.insert(mangled.clone(), func_ty);
+            method_entries.push((method.name.name.clone(), mangled));
+        }
+
+        // Insert collected entries now that all borrows of `self` are released.
+        let method_map = self.impl_methods.entry(struct_name).or_default();
+        for (name, mangled) in method_entries {
+            method_map.insert(name, mangled);
+        }
+
+        Some(())
+    }
+
+    /// Type-check the body of each method in an `impl` block.
+    fn check_impl(&mut self, def: &ImplDef) {
+        let struct_name = def.type_name.name.clone();
+
+        for method in &def.methods {
+            // Skip methods that were already rejected during registration.
+            if matches!(
+                method.self_param,
+                Some(SelfParam::RefMut) | Some(SelfParam::Owned)
+            ) {
+                continue;
+            }
+
+            let mangled = format!("{}__{}", struct_name, method.name.name);
+
+            let func_ty = match self.functions.get(&mangled).cloned() {
+                Some(ty) => ty,
+                None => continue,
+            };
+
+            let (param_types, return_type) = match func_ty {
+                Type::Function { params, ret } => (params, *ret),
+                _ => continue,
+            };
+
+            self.symbols.push_scope();
+            self.current_function_return_type = Some(return_type.clone());
+
+            // Bind `self` as an immutable variable of the struct type (for &self methods).
+            if method.self_param.is_some() {
+                let self_ty = Type::Struct(struct_name.clone());
+                let _ = self.symbols.define("self".to_string(), self_ty, false);
+            }
+
+            // Bind remaining parameters (skip param[0] which is the implicit self).
+            let non_self_params = if method.self_param.is_some() && !param_types.is_empty() {
+                &param_types[1..]
+            } else {
+                &param_types[..]
+            };
+
+            for (param, param_ty) in method.params.iter().zip(non_self_params.iter()) {
+                if matches!(param_ty, Type::Unknown) {
+                    continue;
+                }
+                if let Err(dup) =
+                    self.symbols
+                        .define(param.name.name.clone(), param_ty.clone(), false)
+                {
+                    self.record_error(TypeError::VariableAlreadyDefined {
+                        name: dup,
+                        span: param.name.span,
+                    });
+                }
+            }
+
+            for stmt in &method.body {
+                let _ = self.check_stmt(stmt);
+            }
+
+            // Validate trailing expression return (same rule as free functions).
+            if !matches!(return_type, Type::Void) && !method.body.is_empty() {
+                if let Some(Stmt::Expr(expr)) = method.body.last() {
+                    if let Some(expr_type) = self.check_expr(expr, Some(&return_type)) {
+                        if !expr_type.is_compatible_with(&return_type) {
+                            self.record_error(TypeError::ReturnTypeMismatch {
+                                expected: return_type.clone(),
+                                found: expr_type,
+                                span: expr.span(),
+                            });
+                        }
+                    }
+                }
+            }
+
+            self.symbols.pop_scope();
+            self.current_function_return_type = None;
+        }
+    }
+
     /// Check a complete program
     pub(crate) fn check_program(&mut self, items: &[Item]) -> Result<(), ()> {
-        // Pre-registration pass: register struct definitions so that struct type
-        // names resolve correctly when encountered inside function signatures and bodies.
+        // Pass 1: register struct definitions so type names resolve in method signatures.
         for item in items {
             if let Item::Struct(def) = item {
                 let _ = self.register_struct(def);
             }
         }
 
-        // Full-check pass: check function bodies (check_function also registers signatures)
+        // Pass 2: register impl method signatures (uses struct_defs from pass 1).
         for item in items {
-            if let Item::Function(func) = item {
-                let _ = self.check_function(func);
+            if let Item::Impl(def) = item {
+                let _ = self.register_impl(def);
+            }
+        }
+
+        // Pass 3: check function and method bodies.
+        for item in items {
+            match item {
+                Item::Function(func) => {
+                    let _ = self.check_function(func);
+                }
+                Item::Impl(def) => self.check_impl(def),
+                Item::Struct(_) => {}
             }
         }
 
