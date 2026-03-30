@@ -99,6 +99,19 @@ pub enum TokenKind {
     #[token("%")]
     Percent,
 
+    // Compound assignment operators (must appear before single-char arithmetic tokens
+    // in the logos dispatch table; longest-match ensures += beats + then =)
+    #[token("+=")]
+    PlusEqual,
+    #[token("-=")]
+    MinusEqual,
+    #[token("*=")]
+    StarEqual,
+    #[token("/=")]
+    SlashEqual,
+    #[token("%=")]
+    PercentEqual,
+
     // Comparison operators (two-character ops must come before single-character)
     #[token("==")]
     EqualEqual,
@@ -221,6 +234,11 @@ impl Token {
             TokenKind::Star => "*",
             TokenKind::Slash => "/",
             TokenKind::Percent => "%",
+            TokenKind::PlusEqual => "+=",
+            TokenKind::MinusEqual => "-=",
+            TokenKind::StarEqual => "*=",
+            TokenKind::SlashEqual => "/=",
+            TokenKind::PercentEqual => "%=",
             TokenKind::EqualEqual => "==",
             TokenKind::NotEqual => "!=",
             TokenKind::LessEqual => "<=",

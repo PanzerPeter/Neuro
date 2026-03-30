@@ -181,6 +181,41 @@ val x: i32 = 10
 // x = 20  // Error: cannot assign to immutable variable
 ```
 
+## Compound Assignment Operators
+
+Shorthand for updating a mutable variable in-place. Each form is equivalent to
+a plain assignment with the corresponding binary operator on the right-hand side.
+
+| Operator | Equivalent to |
+|----------|---------------|
+| `x += n` | `x = x + n`  |
+| `x -= n` | `x = x - n`  |
+| `x *= n` | `x = x * n`  |
+| `x /= n` | `x = x / n`  |
+| `x %= n` | `x = x % n`  |
+
+```neuro
+mut score: i32 = 100
+score += 50    // 150
+score -= 25    // 125
+score *= 2     // 250
+score /= 5     // 50
+score %= 13    // 11
+```
+
+```neuro
+mut sum: i32 = 0
+mut i: i32 = 1
+while i <= 10 {
+    sum += i
+    i += 1
+}
+```
+
+**Requirement**: Left-hand side must be a `mut` variable
+**Type checking**: Same rules as the underlying binary operator apply
+**Note**: Compound assignment on struct fields (`point.x += 1.0`) is not yet supported
+
 ## Operator Precedence
 
 From highest to lowest:

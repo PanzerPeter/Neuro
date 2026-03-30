@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **lexer/parser**: Compound assignment operators `+=`, `-=`, `*=`, `/=`, `%=`
+  - Five new token variants in `lexical-analysis`; logos longest-match ensures `+=` etc. are consumed as single tokens
+  - `parse_compound_assignment_stmt` desugars `target OP= rhs` → `Stmt::Assignment { value: Expr::Binary }` at parse time
+  - No new AST nodes; semantic analysis and codegen unchanged
+  - 8 integration tests covering all operators, loop accumulator patterns, and desugar equivalence
+
 ---
 
 ## [0.1.1] - 2026-03-28

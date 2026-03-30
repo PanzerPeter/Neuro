@@ -24,3 +24,7 @@ Unicode identifiers are accepted without a hand-written scanner.
 `classify_error` exists because Logos surfaces all unrecognised input as a generic
 error; reclassifying to `UnterminatedString` gives the diagnostic layer a precise,
 actionable error kind.
+
+Compound assignment tokens (`PlusEqual`, `MinusEqual`, `StarEqual`, `SlashEqual`,
+`PercentEqual`) are declared alongside arithmetic operators. Logos uses longest-match,
+so `+=` is always consumed as a single token rather than `+` then `=`.

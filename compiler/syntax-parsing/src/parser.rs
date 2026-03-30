@@ -515,6 +515,65 @@ impl Parser {
         })
     }
 
+    /// Parse a compound assignment statement, desugaring into a plain assignment.
+    /// `target OP= rhs` → `target = target OP rhs` — no new AST nodes required.
+    pub(crate) fn parse_compound_assignment_stmt(&mut self) -> ParseResult<Stmt> {
+        let target_token = self.consume(TokenKind::Identifier(String::new()), "identifier")?;
+        let target = if let TokenKind::Identifier(name) = target_token.kind {
+            Identifier {
+                name,
+                span: target_token.span,
+            }
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                found: target_token.kind,
+                expected: "identifier".to_string(),
+                span: target_token.span,
+            });
+        };
+
+        self.skip_newlines();
+
+        let op_token = self.advance().ok_or(ParseError::UnexpectedEof {
+            expected: "compound assignment operator".to_string(),
+        })?;
+
+        let binary_op = match op_token.kind {
+            TokenKind::PlusEqual => BinaryOp::Add,
+            TokenKind::MinusEqual => BinaryOp::Subtract,
+            TokenKind::StarEqual => BinaryOp::Multiply,
+            TokenKind::SlashEqual => BinaryOp::Divide,
+            TokenKind::PercentEqual => BinaryOp::Modulo,
+            _ => {
+                return Err(ParseError::UnexpectedToken {
+                    found: op_token.kind,
+                    expected: "compound assignment operator".to_string(),
+                    span: op_token.span,
+                })
+            }
+        };
+
+        self.skip_newlines();
+
+        let rhs = self.parse_expr(Precedence::Lowest)?;
+
+        let target_expr = Expr::Identifier(target.clone());
+        let binary_span = target.span.merge(rhs.span());
+        let value = Expr::Binary {
+            left: Box::new(target_expr),
+            op: binary_op,
+            right: Box::new(rhs),
+            span: binary_span,
+        };
+        let span = target.span.merge(value.span());
+
+        Ok(Stmt::Assignment {
+            target,
+            value,
+            span,
+        })
+    }
+
     /// Parse an if/else statement
     pub(crate) fn parse_if_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
         self.skip_newlines();
@@ -743,12 +802,23 @@ impl Parser {
             TokenKind::Identifier(_) => {
                 // Lookahead to distinguish:
                 //   ident = expr          → assignment
+                //   ident OP= expr        → compound assignment (desugared)
                 //   ident.field = expr    → field assignment
                 //   anything else         → expression statement
                 if self.current + 1 < self.tokens.len() {
                     if let Some(next_token) = self.tokens.get(self.current + 1) {
                         if matches!(next_token.kind, TokenKind::Equal) {
                             return self.parse_assignment_stmt();
+                        }
+                        if matches!(
+                            next_token.kind,
+                            TokenKind::PlusEqual
+                                | TokenKind::MinusEqual
+                                | TokenKind::StarEqual
+                                | TokenKind::SlashEqual
+                                | TokenKind::PercentEqual
+                        ) {
+                            return self.parse_compound_assignment_stmt();
                         }
                         if matches!(next_token.kind, TokenKind::Dot) {
                             // Check for ident.field = expr (two more tokens ahead)

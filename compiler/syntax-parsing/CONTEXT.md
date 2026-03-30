@@ -42,3 +42,9 @@ node appears as the `func` of an `Expr::Call` for associated function calls like
 
 The `Amp` (`&`) token was added to the lexer to support self-parameter parsing.
 logos uses longest-match so `&&` still tokenizes as `AmpAmp`.
+
+Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`): `parse_statement` detects
+compound-assignment tokens via a one-token lookahead and calls
+`parse_compound_assignment_stmt`, which desugars `target OP= rhs` into
+`Stmt::Assignment { target, value: Expr::Binary { target, OP, rhs } }` at parse
+time. No new AST nodes; semantic analysis and codegen are unaffected.
