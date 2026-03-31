@@ -600,7 +600,9 @@ impl Parser {
                 self.advance(); // consume 'if'
                 self.skip_newlines();
 
+                self.no_struct_lit = true;
                 let else_if_condition = self.parse_expr(Precedence::Lowest)?;
+                self.no_struct_lit = false;
                 self.skip_newlines();
 
                 let else_if_block = self.parse_block()?;

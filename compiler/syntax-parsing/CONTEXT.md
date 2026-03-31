@@ -26,9 +26,10 @@ stream; externalising tokenisation would create an unnecessary coordination step
 neurc. The architecture test carries an explicit allowlist entry for this pairing.
 
 Struct literal disambiguation: the `Parser` carries a `no_struct_lit: bool` flag set
-to `true` while parsing if/while/for conditions. This prevents `Identifier { ... }`
-from consuming the `{` that opens the body block — the same disambiguation strategy
-used by Rust.
+to `true` while parsing if/while/for conditions and `else if` conditions. This prevents
+`Identifier { ... }` from consuming the `{` that opens the body block — the same
+disambiguation strategy used by Rust. All condition sites (primary `if`, every `else if`
+arm, and `while`) must set and clear the flag symmetrically.
 
 `impl` blocks: `parse_program` dispatches on `TokenKind::Impl` → `parse_impl_def`,
 which parses `impl TypeName { method* }`. Each method is parsed by `parse_method_def`,

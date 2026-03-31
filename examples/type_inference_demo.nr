@@ -22,18 +22,11 @@ func demonstrate_float_inference() -> i32 {
     return 0
 }
 
-// Type inference in function parameters
-func add_i16(a: i16, b: i16) -> i16 {
-    a + b
-}
-
-func add_u64(a: u64, b: u64) -> u64 {
-    a + b
-}
-
-func demonstrate_function_param_inference() -> i32 {
-    val result1: i16 = add_i16(100, 200)  // Literals 100, 200 infer as i16
-    val result2: u64 = add_u64(1000, 2000) // Literals 1000, 2000 infer as u64
+// Default type inference (no context)
+func demonstrate_defaults() -> i32 {
+    val default_int = 42       // Defaults to i32
+    val default_float = 2.5    // Defaults to f64
+    val large_int = 5000000000 // Auto-promotes to i64 (too large for i32)
 
     return 0
 }
@@ -43,27 +36,12 @@ func get_i32() -> i32 {
     42  // Literal 42 infers as i32 from return type
 }
 
-func get_i64() -> i64 {
-    5000000000  // Literal 5000000000 infers as i64 from return type
-}
-
-// Default type inference (no context)
-func demonstrate_defaults() -> i32 {
-    val default_int = 42      // Defaults to i32
-    val default_float = 2.5   // Defaults to f64
-    val large_int = 5000000000 // Auto-promotes to i64 (too large for i32)
-
-    return 0
-}
-
 // Main entry point
 func main() -> i32 {
-    val _ = demonstrate_variable_inference()
-    val _ = demonstrate_float_inference()
-    val _ = demonstrate_function_param_inference()
-    val _ = get_i32()
-    val _ = get_i64()
-    val _ = demonstrate_defaults()
+    val v1 = demonstrate_variable_inference()
+    val v2 = demonstrate_float_inference()
+    val v3 = demonstrate_defaults()
+    val v4 = get_i32()
 
-    return 0
+    return v1 + v2 + v3 + v4
 }

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **parser**: `else if` condition — `no_struct_lit` guard missing
+  - Setting `no_struct_lit = true` around each `else if` condition prevents a bare
+    identifier (e.g. `else if isValid {`) from having its block-opening `{` consumed
+    as a struct literal opener, corrupting the parse tree
+- **codegen**: `else if … else` chain — final `else` body executed unconditionally
+  - Replaced the flat loop over `else_if_blocks` with a recursive `split_first` call
+    that passes the remaining arms and the `else_block` down, keeping each arm
+    mutually exclusive with all subsequent arms
+
 ### Added
 
 - **lexer/parser**: Compound assignment operators `+=`, `-=`, `*=`, `/=`, `%=`

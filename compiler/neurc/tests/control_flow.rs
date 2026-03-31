@@ -212,3 +212,35 @@ func main() -> i32 {
 // The current implementation has limitations with complex control flow patterns
 // Simple if/else works, but deeply nested or complex chains may not be recognized
 // as having complete return coverage. This is a known limitation for Phase 2.
+
+#[test]
+fn test_else_if_bare_identifier_condition() {
+    // A bare identifier as an `else if` condition previously caused the parser to
+    // consume the block-opening `{` as a struct literal, corrupting the parse tree.
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val x: i32 = 5
+    val is_big: bool = false
+    val is_medium: bool = true
+    mut result: i32 = 0
+
+    if x > 10 {
+        result = 3
+    } else if is_big {
+        result = 2
+    } else if is_medium {
+        result = 1
+    } else {
+        result = 0
+    }
+
+    return result
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("else_if_identifier.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 1, "Expected exit code 1 (is_medium branch)");
+}

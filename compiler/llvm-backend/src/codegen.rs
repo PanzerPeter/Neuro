@@ -1232,18 +1232,16 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         }
 
-        // Generate else-if and else blocks
+        // Generate else-if and else blocks.
+        // Each else-if arm is the condition of the next level: the remaining arms and
+        // the final else become the recursive else_if/else_block so they remain mutually
+        // exclusive with the current arm.
         self.builder.position_at_end(else_bb);
-        if !else_if_blocks.is_empty() || else_block.is_some() {
-            // For simplicity in Phase 1, chain else-if blocks as nested ifs
-            for (else_if_cond, else_if_stmts) in else_if_blocks {
-                self.codegen_if(else_if_cond, else_if_stmts, &[], &None)?;
-            }
-
-            if let Some(else_stmts) = else_block {
-                for stmt in else_stmts {
-                    self.codegen_stmt(stmt)?;
-                }
+        if let Some(((elif_cond, elif_stmts), rest)) = else_if_blocks.split_first() {
+            self.codegen_if(elif_cond, elif_stmts, rest, else_block)?;
+        } else if let Some(else_stmts) = else_block {
+            for stmt in else_stmts {
+                self.codegen_stmt(stmt)?;
             }
         }
         // Same: check current insert block, not the fixed else_bb, for the same reason.

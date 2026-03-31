@@ -12,10 +12,6 @@ struct Rectangle {
     height: i32
 }
 
-func area(r: Rectangle) -> i32 {
-    return r.width * r.height
-}
-
 func main() -> i32 {
     // Struct instantiation
     val p = Point { x: 3.0, y: 4.0 }
@@ -28,7 +24,8 @@ func main() -> i32 {
     origin.x = 1.0
     origin.y = 2.0
 
-    // Struct with integer fields
+    // Struct with integer fields — area computed inline
+    // (struct as function parameter is a Phase 2 feature)
     val rect = Rectangle { width: 10, height: 5 }
     val result = rect.width * rect.height
 

@@ -71,6 +71,17 @@ node's `func` is a `FieldAccess`. `fa_struct_names` (keyed by the `Call` span st
 carries the struct name so `codegen_method_call` can reconstruct the mangled name without
 re-querying the AST.
 
+## if / else-if / else Lowering
+
+`codegen_if` lowers an `if/else if+/else?` chain by treating it as a binary tree:
+- Each call creates three basic blocks — `then`, `else`, `ifcont` (merge).
+- The `else` block either hosts the final `else` body directly or recursively calls
+  `codegen_if` with the first remaining `else_if` arm, passing the rest of the arms
+  and the original `else_block` to that recursive call.
+- This `split_first` recursion ensures every arm is mutually exclusive with all
+  subsequent arms; the final `else` body is only reachable when all preceding
+  conditions are false.
+
 ## Future: MLIR Integration (Phase 3+)
 When tensor operations are introduced, `melior` (Rust MLIR bindings, targeting the same
 LLVM 20 / MLIR 20 installation) will be added alongside inkwell. The lowering strategy
