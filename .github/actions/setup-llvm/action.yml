@@ -1,0 +1,40 @@
+name: "Setup LLVM 20"
+description: "Installs LLVM 20 for compiling the Neuro compiler and sets LLVM_SYS_201_PREFIX"
+inputs: {}
+runs:
+  using: "composite"
+  steps:
+    - name: Install LLVM 20 (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+          | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+        echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" \
+          | sudo tee /etc/apt/sources.list.d/llvm.list
+        sudo apt-get update -q
+        sudo apt-get install -y llvm-20 llvm-20-dev
+        /usr/lib/llvm-20/bin/llvm-config --version
+        echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
+
+    - name: Install LLVM 20 (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew update
+        brew install llvm@20
+        LLVM_PREFIX="$(brew --prefix llvm@20)"
+        "$LLVM_PREFIX/bin/llvm-config" --version
+        echo "LLVM_SYS_201_PREFIX=$LLVM_PREFIX" >> $GITHUB_ENV
+
+    - name: Install LLVM 20 (Windows)
+      if: runner.os == 'Windows'
+      uses: KyleMayes/install-llvm-action@v2
+      id: llvm-win
+      with:
+        version: "20"
+        
+    - name: Set LLVM_SYS_201_PREFIX (Windows)
+      if: runner.os == 'Windows'
+      shell: bash
+      run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm-win.outputs.llvm-path }}" >> $GITHUB_ENV

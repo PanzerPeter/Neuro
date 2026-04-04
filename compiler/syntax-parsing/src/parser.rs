@@ -705,18 +705,14 @@ impl Parser {
         let start = self.parse_expr(Precedence::Lowest)?;
         self.skip_newlines();
 
+        let mut inclusive = false;
         if self.check(&TokenKind::DotDotEqual) {
-            let token = self.advance().ok_or(ParseError::UnexpectedEof {
-                expected: "'..'".to_string(),
-            })?;
-            return Err(ParseError::UnexpectedToken {
-                found: token.kind,
-                expected: "'..' (exclusive range; '..=' is not yet supported)".to_string(),
-                span: token.span,
-            });
+            self.advance();
+            inclusive = true;
+        } else {
+            self.consume(TokenKind::DotDot, "'..' or '..='")?;
         }
 
-        self.consume(TokenKind::DotDot, "'..'")?;
         self.skip_newlines();
 
         let end = self.parse_expr(Precedence::Lowest)?;
@@ -745,6 +741,7 @@ impl Parser {
             iterator,
             start,
             end,
+            inclusive,
             body,
             span: start_span.merge(end_span),
         })

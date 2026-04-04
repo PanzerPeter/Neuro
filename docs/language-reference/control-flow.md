@@ -155,27 +155,32 @@ while i < 10 {
 // while 42 { }  // Error: expected bool condition
 ```
 
-## For Loops (Exclusive Range)
+## For Loops
 
-Use `for` to iterate over an exclusive integer range:
+Use `for` to iterate over an integer range. Ranges can be exclusive (`..`) or inclusive (`..=`):
 
 ```neuro
+// Exclusive range: 0, 1, 2, ..., 9
 for i in 0..10 {
     // i takes values 0 through 9
+}
+
+// Inclusive range: 1, 2, ..., 5
+for j in 1..=5 {
+    // j takes values 1 through 5
 }
 ```
 
 ### For-Range Requirements
 
 - Range bounds must be integer-compatible expressions.
-- The upper bound is exclusive (`0..10` does not include `10`).
-- `..=` inclusive ranges are not yet supported.
+- The iteration variable is implicitly declared and its type is inferred from the range bounds.
 
 ```neuro
 func sum_first_five() -> i32 {
     mut sum: i32 = 0
-    for i in 0..5 {
-        sum = sum + i
+    for i in 0..=5 {
+        sum = sum + i // 0 + 1 + 2 + 3 + 4 + 5 = 15
     }
     return sum
 }
@@ -321,10 +326,7 @@ func is_positive_verbose(x: i32) -> bool {
 ### For Loops (Phase 2)
 
 ```neuro
-// Not yet implemented
-for i in 0..10 {
-    // Iterate from 0 to 9
-}
+// In Phase 1.5, both 0..10 and 0..=10 are supported
 ```
 
 ### Pattern Matching (Phase 2)

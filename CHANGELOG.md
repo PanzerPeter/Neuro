@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **ast-types/parser/codegen**: Inclusive range `..=` in `for` loops (§1.6)
+  - `ForRange` AST node now handles an `inclusive: bool` flag.
+  - `for i in 0..=10` emits an inclusive upper bound (`<=`) instead of exclusive (`<`).
 - **lexer/parser**: Compound assignment operators `+=`, `-=`, `*=`, `/=`, `%=`
   - Five new token variants in `lexical-analysis`; logos longest-match ensures `+=` etc. are consumed as single tokens
   - `parse_compound_assignment_stmt` desugars `target OP= rhs` → `Stmt::Assignment { value: Expr::Binary }` at parse time

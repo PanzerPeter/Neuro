@@ -121,8 +121,23 @@ Range-for loop iteration with exclusive upper bound.
 **Compile and run:**
 ```bash
 cargo run -p neurc -- compile examples/for_range.nr
-.\examples\for_range.exe
+./examples/for_range
 # Exit code: 10
+```
+
+### [for_range_inclusive.nr](for_range_inclusive.nr)
+Range-for loop iteration with an inclusive upper bound.
+
+**Features:**
+- `for i in start..=end` syntax
+- Integer range accumulation
+- Inclusive range upper bound semantics
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/for_range_inclusive.nr
+./examples/for_range_inclusive
+# Exit code: 15
 ```
 
 ## Phase 1 Limitations
@@ -133,11 +148,9 @@ While Phase 1 is feature-complete for its scope, there are known limitations:
 
 2. **Complex control flow:** Deeply nested if/else chains may not be recognized as having complete return coverage. Simple if/else patterns work reliably.
 
-3. **Inclusive for ranges not yet available:** Use exclusive ranges (`start..end`). Inclusive ranges (`start..=end`) are still planned.
+3. **No strings yet:** String type is defined but not fully functional.
 
-4. **No strings yet:** String type is defined but not fully functional.
-
-5. **No arrays or structs:** These are Phase 2 features.
+4. **No arrays or structs:** These are Phase 2 features.
 
 ## Compiling Examples
 

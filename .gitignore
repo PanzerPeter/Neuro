@@ -417,3 +417,12 @@ java_pid*
 crash.log
 nul
 VSA_4_3.xml
+# ---------------------------
+# NEURO Examples
+# ---------------------------
+# Ignore compiled executables in the examples directory
+# Everything without an extension in examples/ is considered an executable
+examples/*
+!examples/*.nr
+!examples/*.md
+!examples/*/

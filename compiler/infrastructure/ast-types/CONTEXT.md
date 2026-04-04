@@ -27,3 +27,6 @@ Extracted from `syntax-parsing` to eliminate the cross-slice dependency that `se
 
 `Expr::Path { type_name, member, span }` represents `TypeName::member` path expressions used as
 the callee of associated-function calls (`Point::new(args)`).
+
+## Recent Updates
+- 2026-04-04: Added `inclusive: bool` to `Stmt::ForRange` to support `..=` inclusive range iteration.

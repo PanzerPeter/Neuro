@@ -919,6 +919,7 @@ impl TypeChecker {
                 iterator,
                 start,
                 end,
+                inclusive: _,
                 body,
                 span: _,
             } => {
@@ -1726,6 +1727,7 @@ mod tests {
             iterator: make_ident("i"),
             start: Expr::Literal(Literal::Integer(0), Span::new(0, 1)),
             end: Expr::Literal(Literal::Integer(5), Span::new(4, 5)),
+            inclusive: false,
             body: vec![Stmt::Continue {
                 span: Span::new(8, 16),
             }],
@@ -1744,6 +1746,7 @@ mod tests {
             iterator: make_ident("i"),
             start: Expr::Literal(Literal::Boolean(true), Span::new(0, 4)),
             end: Expr::Literal(Literal::Integer(5), Span::new(7, 8)),
+            inclusive: false,
             body: vec![],
             span: Span::new(0, 12),
         };

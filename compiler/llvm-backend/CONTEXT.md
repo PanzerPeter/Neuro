@@ -88,3 +88,6 @@ LLVM 20 / MLIR 20 installation) will be added alongside inkwell. The lowering st
 will be: AST → NEURO High-Level IR → MLIR dialects (linalg/tensor/func/arith) →
 Enzyme MLIR AD pass → GPU dialects (nvgpu/rocdl) or `llvm` dialect → inkwell for final
 LLVM IR emission. inkwell remains the terminal code-emission layer in all paths.
+
+## Recent Updates
+- 2026-04-04: Updated `codegen_for_range` to accept `inclusive: bool` from `Stmt::ForRange` and generate `<=` (`ULE`/`SLE`) instead of `<` (`ULT`/`SLT`) comparison instructions when true.

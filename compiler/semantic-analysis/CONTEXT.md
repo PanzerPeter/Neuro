@@ -48,3 +48,6 @@ as `TypeName__funcName` and looked up directly in `functions`.
 
 `&mut self` and consuming `self` methods are rejected at registration time with
 `UnsupportedSelfParam` until ownership semantics land (Phase 1.5).
+
+## Recent Updates
+- 2026-04-04: Updated `type_checker` to correctly destructure the new `inclusive` flag on `Stmt::ForRange`. No integer validation rules changed as bounds checking works the same for inclusive and exclusive endpoints.

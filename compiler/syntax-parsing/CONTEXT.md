@@ -49,3 +49,6 @@ compound-assignment tokens via a one-token lookahead and calls
 `parse_compound_assignment_stmt`, which desugars `target OP= rhs` into
 `Stmt::Assignment { target, value: Expr::Binary { target, OP, rhs } }` at parse
 time. No new AST nodes; semantic analysis and codegen are unaffected.
+
+## Recent Updates
+- 2026-04-04: Enabled parsing of `..=` for inclusive `for` ranges.

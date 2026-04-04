@@ -1324,6 +1324,7 @@ impl<'ctx> CodegenContext<'ctx> {
         iterator: &shared_types::Identifier,
         start: &Expr,
         end: &Expr,
+        inclusive: bool,
         body: &[Stmt],
     ) -> CodegenResult<()> {
         let parent_fn = self
@@ -1374,10 +1375,11 @@ impl<'ctx> CodegenContext<'ctx> {
             .get(&start.span().start)
             .cloned()
             .unwrap_or(Type::I32);
-        let cmp_predicate = if TypeMapper::is_unsigned_int(&iter_sem_ty) {
-            IntPredicate::ULT
-        } else {
-            IntPredicate::SLT
+        let cmp_predicate = match (TypeMapper::is_unsigned_int(&iter_sem_ty), inclusive) {
+            (true, true) => IntPredicate::ULE,
+            (true, false) => IntPredicate::ULT,
+            (false, true) => IntPredicate::SLE,
+            (false, false) => IntPredicate::SLT,
         };
 
         let cond_val = self
@@ -1470,9 +1472,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 iterator,
                 start,
                 end,
+                inclusive,
                 body,
                 ..
-            } => self.codegen_for_range(iterator, start, end, body),
+            } => self.codegen_for_range(iterator, start, end, *inclusive, body),
             Stmt::Break { .. } => {
                 let targets = self.loop_targets.last().ok_or_else(|| {
                     CodegenError::InternalError(
@@ -1835,6 +1838,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 iterator,
                 start,
                 end,
+                inclusive: _,
                 body,
                 ..
             } => {

@@ -40,14 +40,15 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// For loop over an exclusive numeric range.
+    /// For loop over a numeric range.
     ///
-    /// Executes `body` for each value of `iterator` from `start` up to (but not including)
-    /// `end`.
+    /// Executes `body` for each value of `iterator` from `start` up to
+    /// `end`. Whether `end` is included depends on `inclusive`.
     ForRange {
         iterator: Identifier,
         start: Expr,
         end: Expr,
+        inclusive: bool,
         body: Vec<Stmt>,
         span: Span,
     },
