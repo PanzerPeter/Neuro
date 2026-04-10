@@ -109,11 +109,13 @@ impl<'source> Iterator for Lexer<'source> {
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```
 /// use lexical_analysis::tokenize;
 ///
-/// let source = "func add(a: i32, b: i32) -> i32 { return a + b }";
-/// let tokens = tokenize(source)?;
+/// fn main() {
+///     let source = "func add(a: i32, b: i32) -> i32 { return a + b }";
+///     let tokens = tokenize(source).unwrap();
+/// }
 /// ```
 pub fn tokenize(source: &str) -> LexResult<Vec<Token>> {
     let lexer = Lexer::new(source);

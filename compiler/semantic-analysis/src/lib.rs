@@ -53,22 +53,24 @@ use type_checker::TypeChecker;
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```
 /// use syntax_parsing::parse;
 /// use semantic_analysis::type_check;
 ///
-/// let source = r#"
-///     func add(a: i32, b: i32) -> i32 {
-///         return a + b
-///     }
-/// "#;
+/// fn main() {
+///     let source = r#"
+///         func add(a: i32, b: i32) -> i32 {
+///             return a + b
+///         }
+///     "#;
 ///
-/// let ast = parse(source).unwrap();
-/// match type_check(&ast) {
-///     Ok(()) => println!("Program is type-correct"),
-///     Err(errors) => {
-///         for error in errors {
-///             eprintln!("Type error: {}", error);
+///     let ast = parse(source).unwrap();
+///     match type_check(&ast) {
+///         Ok(()) => println!("Program is type-correct"),
+///         Err(errors) => {
+///             for error in errors {
+///                 eprintln!("Type error: {}", error);
+///             }
 ///         }
 ///     }
 /// }

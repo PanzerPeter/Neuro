@@ -81,19 +81,21 @@ impl OptimizationLevelSetting {
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```
 /// use syntax_parsing::parse;
 /// use llvm_backend::{compile, OptimizationLevelSetting};
 ///
-/// let source = r#"
-///     func add(a: i32, b: i32) -> i32 {
-///         return a + b
-///     }
-/// "#;
+/// fn main() {
+///     let source = r#"
+///         func add(a: i32, b: i32) -> i32 {
+///             return a + b
+///         }
+///     "#;
 ///
-/// let ast = parse(source)?;
-/// let object_code = compile(&ast, OptimizationLevelSetting::O2)?;
-/// // Write object_code to file or link to executable
+///     let ast = parse(source).unwrap();
+///     let object_code = compile(&ast, OptimizationLevelSetting::O2).unwrap();
+///     // Write object_code to file or link to executable
+/// }
 /// ```
 pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> CodegenResult<Vec<u8>> {
     // Collect struct definitions first so resolve_syntax_type can recognise struct names

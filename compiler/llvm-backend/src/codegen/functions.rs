@@ -1,0 +1,350 @@
+use ast_types::*;
+use inkwell::types::*;
+use inkwell::values::*;
+use std::collections::HashMap;
+
+use crate::errors::{CodegenError, CodegenResult};
+use crate::types::Type;
+
+use super::context::CodegenContext;
+
+impl<'ctx> CodegenContext<'ctx> {
+    /// Generate code for a function call
+    pub(crate) fn codegen_call(
+        &self,
+        func_name: &str,
+        args: &[Expr],
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let function = self
+            .functions
+            .get(func_name)
+            .ok_or_else(|| CodegenError::UndefinedFunction(func_name.to_string()))?;
+
+        let mut arg_values = Vec::new();
+        for arg in args {
+            let val = self.codegen_expr(arg)?;
+            arg_values.push(BasicMetadataValueEnum::from(val));
+        }
+
+        let call_result = self
+            .builder
+            .build_call(*function, &arg_values, "calltmp")
+            .map_err(|e| CodegenError::LlvmError(format!("failed to build call: {}", e)))?;
+
+        call_result.try_as_basic_value().basic().ok_or_else(|| {
+            CodegenError::InternalError(
+                "function call returned void when value expected".to_string(),
+            )
+        })
+    }
+
+    /// Call a method: load the receiver as a value and prepend it to the argument list.
+    ///
+    /// For `&self` methods the struct is passed by value — this is sound because
+    /// `&self` methods are read-only; mutations inside the method body do not
+    /// propagate back to the caller (ownership semantics are pending).
+    pub(crate) fn codegen_method_call(
+        &self,
+        mangled_name: &str,
+        receiver: &Expr,
+        args: &[Expr],
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let function = self
+            .functions
+            .get(mangled_name)
+            .ok_or_else(|| CodegenError::UndefinedFunction(mangled_name.to_string()))?;
+
+        // Load the receiver struct value.
+        let self_val = self.codegen_expr(receiver)?;
+        let mut arg_values: Vec<BasicMetadataValueEnum> =
+            vec![BasicMetadataValueEnum::from(self_val)];
+
+        for arg in args {
+            let val = self.codegen_expr(arg)?;
+            arg_values.push(BasicMetadataValueEnum::from(val));
+        }
+
+        let call_result = self
+            .builder
+            .build_call(*function, &arg_values, "calltmp")
+            .map_err(|e| CodegenError::LlvmError(format!("failed to build method call: {}", e)))?;
+
+        call_result.try_as_basic_value().basic().ok_or_else(|| {
+            CodegenError::InternalError("method call returned void when value expected".to_string())
+        })
+    }
+
+    /// Generate LLVM functions for all supported methods in an `impl` block.
+    pub(crate) fn codegen_impl(
+        &mut self,
+        impl_def: &ImplDef,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        let struct_name = &impl_def.type_name.name;
+        for method in &impl_def.methods {
+            if matches!(
+                method.self_param,
+                Some(SelfParam::RefMut) | Some(SelfParam::Owned)
+            ) {
+                continue;
+            }
+            self.codegen_method(method, struct_name, func_types)?;
+        }
+        Ok(())
+    }
+
+    /// Generate an LLVM function for a single method.
+    ///
+    /// The method is lowered to a free function under its mangled name
+    /// (`StructName__methodName`). For `&self` methods the struct is the first
+    /// parameter, named `self`, passed by value.
+    pub(crate) fn codegen_method(
+        &mut self,
+        method: &MethodDef,
+        struct_name: &str,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        let mangled = format!("{}__{}", struct_name, method.name.name);
+
+        let func_type_info = func_types
+            .get(&mangled)
+            .ok_or_else(|| CodegenError::UndefinedFunction(mangled.clone()))?;
+
+        let (param_types, return_type) = match func_type_info {
+            Type::Function { params, ret } => (params, &**ret),
+            _ => {
+                return Err(CodegenError::InternalError(
+                    "method type information is not a function type".to_string(),
+                ))
+            }
+        };
+
+        let mut llvm_param_types = Vec::new();
+        for param_ty in param_types {
+            let llvm_ty = if let Type::Struct(name) = param_ty {
+                self.get_struct_llvm_type(name)?.into()
+            } else {
+                self.type_mapper.map_type(param_ty)?
+            };
+            llvm_param_types.push(BasicMetadataTypeEnum::from(llvm_ty));
+        }
+
+        let llvm_ret_type = if matches!(return_type, Type::Void) {
+            self.context.void_type().fn_type(&llvm_param_types, false)
+        } else if let Type::Struct(name) = return_type {
+            self.get_struct_llvm_type(name)?
+                .fn_type(&llvm_param_types, false)
+        } else {
+            let ret_basic_type = self.type_mapper.map_type(return_type)?;
+            ret_basic_type.fn_type(&llvm_param_types, false)
+        };
+
+        let function = self.module.add_function(&mangled, llvm_ret_type, None);
+        self.functions.insert(mangled.clone(), function);
+
+        let entry = self.context.append_basic_block(function, "entry");
+        self.builder.position_at_end(entry);
+        self.current_function = Some(function);
+        self.variables.clear();
+        self.variable_types.clear();
+
+        // Bind parameters: param[0] is `self` for instance methods.
+        let non_self_start = if method.self_param.is_some() { 1 } else { 0 };
+
+        if method.self_param.is_some() {
+            // Allocate and store the `self` struct value.
+            let self_val = function
+                .get_nth_param(0)
+                .ok_or_else(|| CodegenError::InternalError("missing self parameter".to_string()))?;
+            let self_type = self_val.get_type();
+            let alloca = self
+                .builder
+                .build_alloca(self_type, "self")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder
+                .build_store(alloca, self_val)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.variables.insert("self".to_string(), alloca);
+            self.variable_types.insert("self".to_string(), self_type);
+        }
+
+        for (i, param) in method.params.iter().enumerate() {
+            let param_val = function
+                .get_nth_param((non_self_start + i) as u32)
+                .ok_or_else(|| CodegenError::InternalError(format!("missing parameter {}", i)))?;
+            let param_type = param_val.get_type();
+            let alloca = self
+                .builder
+                .build_alloca(param_type, &param.name.name)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder
+                .build_store(alloca, param_val)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.variables.insert(param.name.name.clone(), alloca);
+            self.variable_types
+                .insert(param.name.name.clone(), param_type);
+        }
+
+        let has_implicit_return = !matches!(return_type, Type::Void)
+            && !method.body.is_empty()
+            && matches!(method.body.last(), Some(Stmt::Expr(_)));
+
+        if has_implicit_return {
+            for stmt in &method.body[..method.body.len() - 1] {
+                self.codegen_stmt(stmt)?;
+            }
+            if let Some(Stmt::Expr(expr)) = method.body.last() {
+                let ret_val = self.codegen_expr(expr)?;
+                self.builder
+                    .build_return(Some(&ret_val))
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            }
+        } else {
+            for stmt in &method.body {
+                self.codegen_stmt(stmt)?;
+            }
+            if !matches!(return_type, Type::Void) {
+                let current_bb = self.builder.get_insert_block().ok_or_else(|| {
+                    CodegenError::InternalError("no insert block after method body".to_string())
+                })?;
+                if current_bb.get_terminator().is_none() {
+                    return Err(CodegenError::MissingReturn);
+                }
+            } else if let Some(current_bb) = self.builder.get_insert_block() {
+                if current_bb.get_terminator().is_none() {
+                    self.builder
+                        .build_return(None)
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Generate code for a function definition
+    pub(crate) fn codegen_function(
+        &mut self,
+        func_def: &FunctionDef,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        // Get function type information
+        let func_type_info = func_types
+            .get(&func_def.name.name)
+            .ok_or_else(|| CodegenError::UndefinedFunction(func_def.name.name.clone()))?;
+
+        let (param_types, return_type) = match func_type_info {
+            Type::Function { params, ret } => (params, &**ret),
+            _ => {
+                return Err(CodegenError::InternalError(
+                    "function type information is not a function type".to_string(),
+                ))
+            }
+        };
+
+        // Map parameter types to LLVM types
+        let mut llvm_param_types = Vec::new();
+        for param_ty in param_types {
+            let llvm_ty = self.type_mapper.map_type(param_ty)?;
+            llvm_param_types.push(BasicMetadataTypeEnum::from(llvm_ty));
+        }
+
+        // Map return type to LLVM type
+        let llvm_ret_type = if matches!(return_type, Type::Void) {
+            self.context.void_type().fn_type(&llvm_param_types, false)
+        } else {
+            let ret_basic_type = self.type_mapper.map_type(return_type)?;
+            ret_basic_type.fn_type(&llvm_param_types, false)
+        };
+
+        // Create the function
+        let function = self
+            .module
+            .add_function(&func_def.name.name, llvm_ret_type, None);
+
+        // Record the function for later calls
+        self.functions.insert(func_def.name.name.clone(), function);
+
+        // Create entry basic block
+        let entry = self.context.append_basic_block(function, "entry");
+        self.builder.position_at_end(entry);
+
+        // Set current function for return statements
+        self.current_function = Some(function);
+
+        // Clear variables for new function scope
+        self.variables.clear();
+        self.variable_types.clear();
+
+        // Allocate and store parameters
+        for (i, param) in func_def.params.iter().enumerate() {
+            let param_val = function
+                .get_nth_param(i as u32)
+                .ok_or_else(|| CodegenError::InternalError(format!("missing parameter {}", i)))?;
+
+            let param_type = param_val.get_type();
+
+            let alloca = self
+                .builder
+                .build_alloca(param_type, &param.name.name)
+                .map_err(|e| {
+                    CodegenError::LlvmError(format!("failed to allocate parameter: {}", e))
+                })?;
+
+            self.builder.build_store(alloca, param_val).map_err(|e| {
+                CodegenError::LlvmError(format!("failed to store parameter: {}", e))
+            })?;
+
+            self.variables.insert(param.name.name.clone(), alloca);
+            self.variable_types
+                .insert(param.name.name.clone(), param_type);
+        }
+
+        // Generate function body
+        // Handle expression-based returns: if the last statement is an expression
+        // and the function has a non-void return type, treat it as an implicit return
+        let has_implicit_return = !matches!(return_type, Type::Void)
+            && !func_def.body.is_empty()
+            && matches!(func_def.body.last(), Some(Stmt::Expr(_)));
+
+        if has_implicit_return {
+            // Generate all statements except the last one
+            for stmt in &func_def.body[..func_def.body.len() - 1] {
+                self.codegen_stmt(stmt)?;
+            }
+
+            // Generate implicit return from the last expression
+            if let Some(Stmt::Expr(expr)) = func_def.body.last() {
+                let ret_val = self.codegen_expr(expr)?;
+                self.builder.build_return(Some(&ret_val)).map_err(|e| {
+                    CodegenError::LlvmError(format!("failed to build implicit return: {}", e))
+                })?;
+            }
+        } else {
+            // Generate all statements normally
+            for stmt in &func_def.body {
+                self.codegen_stmt(stmt)?;
+            }
+
+            // Ensure function has a return if it's non-void
+            if !matches!(return_type, Type::Void) {
+                let current_bb = self.builder.get_insert_block().ok_or_else(|| {
+                    CodegenError::InternalError("no insert block after function body".to_string())
+                })?;
+
+                if current_bb.get_terminator().is_none() {
+                    return Err(CodegenError::MissingReturn);
+                }
+            } else if let Some(current_bb) = self.builder.get_insert_block() {
+                // Add void return if missing
+                if current_bb.get_terminator().is_none() {
+                    self.builder.build_return(None).map_err(|e| {
+                        CodegenError::LlvmError(format!("failed to build void return: {}", e))
+                    })?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
