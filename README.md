@@ -2,12 +2,12 @@
 
 > A modern, compiled language designed for high-performance AI development.
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![License: GPL-3.0 + NEURO Exceptions](https://img.shields.io/badge/License-GPLv3%20%2B%20Exceptions-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
 [![Tests](https://img.shields.io/badge/tests-357%20passing-success.svg)](#)
 
-**Status:** Alpha — Phase 1 Core MVP complete · Phase 1.5 (backend upgrade + memory safety refactor) in progress
+**Status:** Alpha — Phase 1 Core MVP complete · Phase 1.5 & Phase 2 in progress
 
 ---
 
@@ -66,7 +66,7 @@ Phase 1 is complete and Phase 2 is in progress. The following features are fully
 |---|---|
 | **Static Typing + Inference** | All integer types (i8–u64), f32/f64, bool, string; contextual numeric literal inference |
 | **Functions** | Parameters, explicit and expression-based implicit returns, recursion, forward references |
-| **Control Flow** | if/else/elif, while loops, range-for (`for i in 0..n`), break, continue |
+| **Control Flow** | if/else/elif, while loops, range-for (`for i in 0..n` and `0..=n`), break, continue |
 | **Mutable Variables** | `val` (immutable) and `mut` (mutable) with type-safe reassignment |
 | **String Type** | Literals with full escape sequence support (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==` and `!=` for byte-level comparison |
 | **Structs** | Definition, instantiation (`Name { field: value }`), field read (`obj.field`), field mutation on `mut` bindings; nominal typing; definition-order independent |
@@ -364,7 +364,9 @@ The project is in early alpha — breaking changes are expected. Contributions s
 
 ## License
 
-[GNU General Public License v3.0](LICENSE). Alpha-stage software — not production ready.
+Licensed under the [GNU General Public License v3.0 with NEURO Exceptions](LICENSE).
+
+This software is an Alpha release. The license includes mandatory redistribution terms to preserve attribution, enforce alpha-status disclosure, and limit liability (e.g., barring use in safety-critical deployments without acknowledgement). See [LICENSE](LICENSE) for the full breakdown and redistribution checklist.
 
 ## Acknowledgments
 

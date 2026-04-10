@@ -1,6 +1,6 @@
 # NEURO Documentation
 
-**Status**: Phase 1 Complete, Phase 1.5 in progress — Alpha Development
+**Status**: Phase 1 Complete, Phase 1.5 & Phase 2 in progress — Alpha Development
 
 ## Quick Links
 
@@ -177,7 +177,7 @@ See [Installation Guide](getting-started/installation.md) for other distribution
 |---|---|---|
 | 1 | Core MVP | **Complete** |
 | 1.5 | LLVM 20 upgrade, string fat pointers, ownership groundwork | In progress |
-| 2 | Structs, enums, pattern matching, module system | In progress (structs ✅) |
+| 2 | Structs, enums, pattern matching, module system | In progress (structs, methods) |
 | 3 | Tensor types, MLIR (linalg/tensor), DLPack, pool allocator | Planned |
 | 4 | Automatic differentiation via Enzyme MLIR | Planned |
 | 5 | GPU acceleration via MLIR GPU dialects | Planned |
@@ -209,10 +209,10 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 - [README.md](../README.md) — project overview
 - [CHANGELOG.md](../CHANGELOG.md) — version history
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — contribution guidelines and architecture rules
-- [LICENSE](../LICENSE) — GPL v3.0
+- [LICENSE](../LICENSE) — GPL v3.0 with NEURO Exceptions
 
 ---
 
-**Last Updated**: 2026-03-28
-**Version**: Phase 1 Complete / Phase 1.5 in progress
+**Last Updated**: 2026-04-10
+**Version**: Phase 1 Complete / Phase 1.5 & Phase 2 in progress
 **Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.8.0

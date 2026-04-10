@@ -257,16 +257,14 @@ cargo run -p neurc -- check examples/hello.nr
 
 ## Current Contribution Priorities
 
-### Phase 1.5 (active)
+### Phase 1.5 (activ)
 
 - Refactor string type from C-style null-terminated pointers to fat pointers (`ptr`, `len`)
 - Introduce basic ownership/borrow checker groundwork
 - MLIR bindings setup (`melior` crate, LLVM/MLIR 20)
 
-### Phase 2 (next)
+### Phase 2 (active)
 
-- Structs (definition, instantiation, field access)
-- Methods on structs (`impl` blocks with `self`)
 - Enums with associated data
 - Pattern matching (exhaustiveness checking)
 - `Result<T, E>` and `Option<T>` types
@@ -280,4 +278,4 @@ cargo run -p neurc -- check examples/hello.nr
 
 ## License
 
-By contributing to NEURO, you agree your contributions will be licensed under [GPL v3.0](LICENSE).
+By contributing to NEURO, you agree your contributions will be licensed under the [GNU General Public License v3.0 with NEURO Exceptions](LICENSE), which includes alpha-phase transparency and liability limits.

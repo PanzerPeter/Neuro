@@ -1,0 +1,541 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<vertical_slice_guidelines version="4.3" base="true">
+
+    <!-- ================================================================
+    VSA 4.3 — Solo-Agent Base Rules
+    Context: 1 human + 1 AI agent | 20–50K LOC | No backward compat
+    Priority: Highest. Treat every rule as a compiler error.
+    Violations of blocker-severity rules MUST be refused.
+    State the rule ID. Propose a compliant alternative.
+    ================================================================ -->
+
+    <metadata>
+        <n>Vertical Slice Architecture — Solo-Agent AI Base Guidelines</n>
+        <version>4.3</version>
+        <created>2026-03-17</created>
+        <supersedes>4.2</supersedes>
+        <priority>Highest</priority>
+    </metadata>
+
+
+    <!-- ================================================================
+    SECTION 1 — TERMINOLOGY
+    ================================================================ -->
+    <terminology>
+        <term name="Slice">One business capability owning its own entry point, logic, and data. Zero runtime dependency on other Slices.</term>
+        <term name="Feature Folder">The physical directory for a Slice. ALL files for that capability live here. No exceptions.</term>
+        <term name="Shared Kernel">Infrastructure adapters and pure domain utilities. ZERO business logic permitted.</term>
+        <term name="Integration Event">Immutable fact emitted by a Slice after a state change. Consumed asynchronously. Describes what happened, not what to do next.</term>
+        <term name="Public Read Model">A read-only DTO a Slice exposes explicitly for cross-slice synchronous reads. A contract, not a model leak.</term>
+        <term name="Domain Utility">A pure function or value type with zero side effects. Shared Kernel eligible only when it contains no slice-specific rules.</term>
+        <term name="CONTEXT.md">Machine-readable contract file at each Slice root. The AI's cross-session memory for that Slice. Not documentation.</term>
+    </terminology>
+
+
+    <!-- ================================================================
+    SECTION 2 — PROJECT CONTEXT
+    All other sections are interpreted through these constraints.
+    ================================================================ -->
+    <project_context>
+        <mode>solo-agent</mode>
+        <backward_compatibility>disabled</backward_compatibility>
+
+        <rule id="CTX-001" severity="blocker">
+            No migration paths, compatibility shims, versioned endpoints, deprecated code paths, or adapter layers.
+            If a better design exists, refactor completely.
+        </rule>
+
+        <rule id="CTX-002" severity="blocker" name="Chunked Refactoring Protocol">
+            Large structural changes (DTO rename, slice split, schema change, file restructure) MUST NOT be attempted
+            in a single response. When a refactor affects more than one file, the AI MUST:
+            1. Output a numbered execution plan listing every file to be changed.
+            2. Pause and ask: "Plan complete. Proceed to Step 1?"
+            3. Execute one step per response upon explicit developer confirmation.
+            4. End each step with: "Step N complete. Proceed to Step N+1?" or "Refactor complete."
+            Leaving old and new patterns coexisting after any single step is FORBIDDEN — each step must be internally consistent.
+            Silence or non-response is NOT confirmation. The developer must explicitly approve each step.
+        </rule>
+
+        <rule id="CTX-003" severity="high">
+            No team-onboarding docs, contribution guides, or changelogs unless explicitly requested.
+        </rule>
+
+        <rule id="CTX-004" severity="high">
+            Generated code must be production-grade. No scaffolding, no stubs, no "implement later" placeholders
+            unless the developer explicitly requests a skeleton.
+        </rule>
+    </project_context>
+
+
+    <!-- ================================================================
+    SECTION 3 — AI HARD CONSTRAINTS
+    Canonical rules live in the sections referenced. These entries are
+    enforcement anchors: violations here are blocker-equivalent regardless
+    of the severity declared in the canonical section.
+    ================================================================ -->
+    <ai_constraints>
+
+        <!-- Architectural boundaries -->
+        <never id="AC-001">Create Technical Slices (e.g., Slices/Authorization, Slices/EmailSender, Slices/Cache). These are Shared Kernel concerns.</never>
+        <never id="AC-002">Allow any Slice to import, instantiate, or call the internal classes, handlers, repositories, or entities of another Slice. Only Public Read Models and Integration Events cross slice boundaries.</never>
+        <never id="AC-006">Generate backward-compatible constructs: versioned interfaces, deprecated annotations, adapter wrappers, or migration-comment TODOs. → See CTX-001.</never>
+        <never id="AC-008">Generate internal barrel/index files inside a Slice. Barrel files are permitted only at the Slice root to define its public export surface.</never>
+
+        <!-- Code hygiene — canonical rules in Sections 7, 8, 9 -->
+        <never id="AC-003">Generate commented-out code or dead code blocks. → See CM-002.</never>
+        <never id="AC-004">Leave stub implementations unfinished (NotImplementedException, pass, todo!()) unless the developer explicitly requests a skeleton. → See CTX-004.</never>
+        <never id="AC-005">Use generic file names: utils, helpers, common, misc, shared, base, manager, processor, or handler without a Feature prefix. → See Section 7 forbidden list.</never>
+        <never id="AC-007">Write comments that describe WHAT the code does. Comments explain WHY only. → See CM-001.</never>
+
+        <!-- Mandatory outputs -->
+        <always id="AC-009">
+            Require explicit, named Input and Output DTOs at every Slice entry point.
+            Never return an internal domain model directly from an entry point.
+            Exception: at Small scale (1–14 Slices, per Section 13), the Output DTO may be omitted
+            when the DB entity shape exactly matches the required response shape and no transformation is needed.
+        </always>
+        <always id="AC-010">Validate input at the Slice boundary before it reaches the Handler. Validation is mandatory, not optional. → See Section 7, EP-VALIDATION.</always>
+        <always id="AC-011">Update the affected Slice's CONTEXT.md in the same response as any interface, schema, or event change. Never let CONTEXT.md fall out of sync. → See Section 12.</always>
+        <always id="AC-012">Apply guard clauses and early returns at the top of every function. Nested conditional depth beyond 2 MUST be refactored before delivery. → See CQ-001.</always>
+        <always id="AC-013">Use named constants for every magic number, magic string, and configuration value. → See CM-004.</always>
+
+        <schema_confirmation>
+            Before generating any persistence schema, output the proposed schema as part of the Boundary Proposal.
+            Do not proceed to implementation until the developer explicitly confirms in writing.
+            Silence, absence of objection, or topic continuation is NOT approval.
+        </schema_confirmation>
+    </ai_constraints>
+
+
+    <!-- ================================================================
+    SECTION 4 — AI INTERACTION PROTOCOL
+    ================================================================ -->
+    <ai_interaction_protocol>
+
+        <step sequence="1" name="Complexity Check">
+            If fewer than 5 distinct business operations AND clearly a prototype or utility script,
+            warn that VSA adds structural overhead. Proceed only on developer confirmation or
+            if the project is already established as VSA.
+        </step>
+
+        <step sequence="2" name="Boundary Proposal">
+            Before writing implementation code, output:
+            (a) Slice name and its single business responsibility.
+            (b) Full file/folder tree.
+            (c) Input DTO, Output DTO, and Handler signature.
+            (d) Persistence schema if applicable (triggers schema_confirmation).
+            Infer from context first. Ask ONE clarifying question only if a boundary is genuinely ambiguous after inference.
+        </step>
+
+        <step sequence="3" name="Completeness Check">
+            After generating a Slice, verify all mandatory components exist:
+            Entry Point, Input Model, Validator, Handler, CONTEXT.md.
+            Generate any missing component before ending the response.
+        </step>
+
+        <step sequence="4" name="Consistency Scan">
+            After any change, report:
+            - Other Slices affected by the interface or schema change.
+            - Stale CONTEXT.md files referencing the modified surface.
+            - Shared Kernel utilities that may have absorbed business logic.
+            Do not silently leave inconsistencies.
+        </step>
+    </ai_interaction_protocol>
+
+
+    <!-- ================================================================
+    SECTION 5 — CORE PRINCIPLES
+    ================================================================ -->
+    <core_principles>
+
+        <principle name="Cohesion over DRY">
+            <rule>
+                Always duplicate business logic across Slices.
+                Do NOT create a shared module based on the AI's prediction of future divergence —
+                LLMs cannot reliably predict domain evolution.
+                Business logic moves to the Shared Kernel as a Domain Utility ONLY when the developer
+                issues the explicit command: /abstract [LogicName]
+                Without that command, duplication is the default and correct action.
+                Never create a CommonBusiness or SharedLogic module.
+            </rule>
+            <exception id="PURE-FN-EXCEPTION">
+                Pure functions with zero side effects representing a universal domain concept
+                (e.g., Money arithmetic, VAT calculation, slug generation) are Shared Kernel eligible
+                from initial creation WITHOUT requiring an /abstract command.
+                A function qualifies only when: (a) it has zero side effects, (b) it contains no
+                branch logic tied to any specific Slice's business rules, and (c) it is genuinely
+                universal — applicable identically across any Slice that might use it.
+            </exception>
+        </principle>
+
+        <principle name="Slice Independence">
+            <rule>
+                Deleting a Slice folder plus its DI registration and event subscriptions
+                must leave the project in a compilable, fully functional state.
+                If deletion requires modifying code inside another Slice, the boundaries are wrong.
+            </rule>
+        </principle>
+
+        <principle name="Transactional Integrity">
+            <rule>
+                One Slice = One Transaction. Never coordinate DB transactions across Slice boundaries.
+                Multi-slice state changes use the Saga pattern via Integration Events.
+            </rule>
+        </principle>
+
+        <principle name="Error Handling">
+            <rule>
+                Slices MUST NOT use exceptions for business flow control.
+                Return a Result/Either type from Handler to Entry Point.
+                Exceptions are reserved for unexpected infrastructure failures only.
+            </rule>
+        </principle>
+
+        <principle name="Single Responsibility per Slice">
+            <rule>
+                A Slice performs exactly one primary business action.
+                If the Slice name requires the word "and," split it.
+                The business action must be expressible in one imperative sentence without conjunctions.
+            </rule>
+        </principle>
+
+        <principle name="No Speculative Generality">
+            <rule>
+                Do not generate abstractions, interfaces, or extension points for capabilities that do not yet exist.
+                Build for the current requirement. Introduce extensibility at the moment it is needed.
+            </rule>
+        </principle>
+    </core_principles>
+
+
+    <!-- ================================================================
+    SECTION 6 — SLICE ANATOMY
+    ================================================================ -->
+    <slice_anatomy>
+        <mandatory>
+            <component role="Entry Point">Routes, HTTP binding, Entry Point → Handler call, Result → protocol response. Zero business logic.</component>
+            <component role="Input Model">Immutable DTO/Command/Query. Named [Feature]Command or [Feature]Query.</component>
+            <component role="Validator">Enforces all invariants checkable without a DB call. DB checks (uniqueness, existence) belong in the Handler.</component>
+            <component role="Handler">Single class. Orchestrates domain logic, persistence, event publishing. The only business logic location.</component>
+            <component role="CONTEXT.md">Machine-readable contract. Updated on every interface or schema change. See Section 12.</component>
+        </mandatory>
+        <optional>
+            <component role="Domain Model">Required only when the Slice has complex encapsulated invariants. Omit for simple CRUD.</component>
+            <component role="Repository">Required when the Handler has more than one DB operation or a non-trivial query. Small scale: inline persistence in Handler is permitted.</component>
+            <component role="Output Model">Named [Feature]Response. Required when response shape differs from the DB entity. At Small scale, may be omitted when shapes match exactly — see AC-009.</component>
+            <component role="Projection">Required only for cross-slice synchronous reads. Exposes slice data without leaking internal models.</component>
+        </optional>
+    </slice_anatomy>
+
+
+    <!-- ================================================================
+    SECTION 7 — FILE NAMING CONVENTIONS
+    ================================================================ -->
+    <file_naming_conventions>
+
+        <convention id="FN-001">
+            Pattern: [FeatureName].[Role].[ext]
+            FeatureName = PascalCase business capability (PlaceOrder, RegisterUser, GenerateInvoice).
+            Role = drawn exclusively from the Role Vocabulary below.
+        </convention>
+
+        <role_vocabulary>
+            <role name="Handler">The UseCase/Handler class. One per Slice.</role>
+            <role name="Command">A mutating Input DTO.</role>
+            <role name="Query">A read-only Input DTO.</role>
+            <role name="Validator">Input validation logic.</role>
+            <role name="Repository">Data access abstraction.</role>
+            <role name="Response">Output DTO returned from the entry point.</role>
+            <role name="Endpoint">Entry point: controller, route, or consumer.</role>
+            <role name="Model">Domain or persistence model internal to the Slice.</role>
+            <role name="Event">Integration event emitted by the Slice.</role>
+            <role name="Projection">Public Read Model for cross-slice reads.</role>
+            <role name="DomainService">Complex domain logic with zero infrastructure dependencies.</role>
+        </role_vocabulary>
+
+        <convention id="FN-002">
+            Test files: [FeatureName].[Role].Test.[ext]
+            Co-located in a /tests subfolder within the Feature Folder.
+            Example: PlaceOrder.Handler.Test.ts
+        </convention>
+
+        <convention id="FN-003">
+            Shared Kernel files: [ConceptName].[Role].[ext]
+            ConceptName is a domain concept, never a technical descriptor.
+            Examples: Money.ValueObject.ts | Logger.Adapter.ts | DatabaseConnection.Config.ts
+        </convention>
+
+        <forbidden>utils | helpers | common | misc | shared | manager | processor | base (without feature prefix) | index (except Slice public barrel)</forbidden>
+    </file_naming_conventions>
+
+
+    <!-- ================================================================
+    SECTION 8 — COMMENT POLICY
+    ================================================================ -->
+    <comment_policy>
+
+        <rule id="CM-001" severity="high">
+            Comments explain WHY, never WHAT.
+            WRONG: // Loop through orders and sum the totals
+            RIGHT: // Summed here rather than in the DB query because tax calculation requires hydrated domain objects.
+        </rule>
+
+        <rule id="CM-002" severity="blocker">
+            Dead code MUST be deleted, never commented out. Use version control for history.
+        </rule>
+
+        <rule id="CM-003" severity="high">
+            TODO comments MUST include reason and context.
+            WRONG: // TODO: fix this
+            RIGHT: // TODO: Replace with event-driven approach once the Notification slice is implemented.
+        </rule>
+
+        <rule id="CM-004" severity="medium">
+            Replace magic numbers and non-obvious strings with named constants.
+            If the constant name is not self-explanatory, add a WHY comment at the declaration — not at the usage site.
+            WRONG: const timeout = 30000; // 30 second timeout
+            RIGHT: const SESSION_EXPIRY_MS = 30_000; // Matches the upstream auth provider's token TTL.
+        </rule>
+
+        <rule id="CM-005" severity="medium">
+            Auto-generated doc comments that restate the function or parameter name are FORBIDDEN.
+            Exception: public API surface methods with non-obvious behavior or constraints.
+        </rule>
+
+        <rule id="CM-006" severity="low">
+            Section divider comments (// ===== INIT =====) are FORBIDDEN.
+            A file requiring dividers to be navigable violates single responsibility. Split it.
+        </rule>
+
+        <rule id="CM-007" severity="high">
+            Non-obvious business rules embedded in code MUST have a WHY comment explaining the business constraint.
+            Example: // Orders under €10 ineligible per carrier contract FUL-2024-03.
+        </rule>
+    </comment_policy>
+
+
+    <!-- ================================================================
+    SECTION 9 — CODE QUALITY CONSTRAINTS
+    ================================================================ -->
+    <code_quality_constraints>
+
+        <rule id="CQ-001" severity="high">Guard clauses and early returns at the top of every function. Happy path = least indented path. Depth &gt; 2 MUST be refactored before delivery.</rule>
+        <rule id="CQ-002" severity="high">No unused imports, unused variables, unused parameters, or unreachable code in any generated output.</rule>
+        <rule id="CQ-003" severity="medium">Single nameable responsibility per function. Prefer extraction when a method exceeds 60 lines.</rule>
+        <rule id="CQ-004" severity="high">Boolean parameters that alter execution path are FORBIDDEN. Use separate explicitly named functions. WRONG: processOrder(order, isDraft: true) RIGHT: saveDraftOrder(order) | submitOrder(order)</rule>
+        <rule id="CQ-005" severity="medium">Nested ternaries limited to depth 1. Complex conditional assignment uses if/else or a lookup structure.</rule>
+        <rule id="CQ-006" severity="medium">No generic abstractions, base classes, or factory patterns for a single concrete implementation. Abstract only when two or more concrete implementations exist.</rule>
+        <rule id="CQ-007" severity="low">Prefer explicit over implicit. Avoid clever one-liners that sacrifice readability for brevity.</rule>
+        <rule id="CQ-008" severity="medium">Config files include only actively used keys. No commented-out configuration options as reference.</rule>
+    </code_quality_constraints>
+
+
+    <!-- ================================================================
+    SECTION 10 — DATA SOVEREIGNTY
+    ================================================================ -->
+    <data_sovereignty_rules>
+
+        <rule id="DS-001" severity="blocker">A Slice MUST own its tables/collections exclusively. Only the owning Slice may write to them.</rule>
+        <rule id="DS-002" severity="blocker">No SQL JOINs, subqueries, or cross-collection aggregations between tables owned by different Slices.</rule>
+        <rule id="DS-003" severity="critical">
+            Cross-slice data sync:
+            (a) Mutations: async via Integration Events only.
+            (b) Reads: sync via an explicitly defined Public Read Model only. Never reference the owning Slice's internal DTO, entity, or repository.
+        </rule>
+        <rule id="DS-004" severity="high">Shared database table naming: [slicename]_[tablename] (lowercase snake_case). Example: ordering_lines, catalog_products.</rule>
+        <rule id="DS-005" severity="high">Integration Event schemas are immutable once published. Schema changes require a new event type. This is the only permitted deprecation scenario in this ruleset.</rule>
+    </data_sovereignty_rules>
+
+
+    <!-- ================================================================
+    SECTION 11 — REFACTORING TRIGGERS
+    When any trigger fires: HALT, report the trigger ID,
+    propose a concrete fix, wait for explicit confirmation before continuing.
+    ================================================================ -->
+    <refactoring_triggers>
+
+        <trigger id="RT-001" severity="blocker">
+            <condition>Handler/UseCase exceeds 300 lines OR has more than 5 injected dependencies.</condition>
+            <action>Halt. Identify sub-operations. Propose a split into separate named Commands. Present the plan before writing code.</action>
+        </trigger>
+
+        <trigger id="RT-002" severity="high">
+            <condition>CONTEXT.md Purpose requires "and" to describe the Slice's responsibility, or describes two distinct outcomes.</condition>
+            <action>Propose splitting into two named Slices. Present CONTEXT.md outlines for both before writing code.</action>
+        </trigger>
+
+        <trigger id="RT-003" severity="high">
+            <condition>A Shared Kernel utility contains conditional logic tied to a specific business scenario.</condition>
+            <action>Flag as God Utility. Move the business branch into the relevant Slice. The Shared Kernel function must remain pure.</action>
+        </trigger>
+
+        <trigger id="RT-004" severity="high">
+            <condition>A Slice imports more than one other Slice's Public Read Model OR subscribes to more than three Integration Events.</condition>
+            <action>Flag boundary misalignment. Propose Read Model replication or a boundary redraw.</action>
+        </trigger>
+
+        <trigger id="RT-005" severity="medium">
+            <condition>Identical validation logic duplicated across three or more Slices.</condition>
+            <action>
+                Flag the duplication. Propose moving it to a Shared Kernel Domain Utility with a WHY comment.
+                Do NOT proceed with abstraction until the developer explicitly issues: /abstract [ValidatorName]
+                This is consistent with the Cohesion over DRY principle (Section 5). Confirmation alone is insufficient.
+            </action>
+        </trigger>
+    </refactoring_triggers>
+
+
+    <!-- ================================================================
+    SECTION 12 — LIVING CONTEXT DOCUMENTATION (CONTEXT.md)
+    ================================================================ -->
+    <living_documentation>
+        <rule>Every Slice MUST have a CONTEXT.md. It is a mandatory Slice component.</rule>
+        <rule>
+            Update CONTEXT.md in the SAME response as any change to:
+            Input/Output DTO | DB table or collection | Published or consumed event |
+            Slice name, Handler name, or Entry Point | Shared Kernel dependency.
+        </rule>
+
+        <template>
+            <![CDATA[
+            # [SliceName]
+
+            ## Purpose
+            [One sentence. The single business action this slice performs.]
+
+            ## Entry Point
+            - Type: [HTTP POST | HTTP GET | Event Consumer | CLI | ...]
+            - Input: `[CommandName | QueryName]`
+            - Output: `[ResponseName | void]`
+
+            ## Data Ownership
+            - Tables: `[slicename_tablename]`
+            - Events Published: `[EventName]` (omit if none)
+            - Events Consumed: `[EventName]` (omit if none)
+            - Public Read Model: `[ProjectionName]` (omit if none)
+
+            ## Shared Kernel
+            - [UtilityName] — [why] (omit section if none)
+
+            ## Notes
+            [Non-obvious design decisions or constraints only. Omit for straightforward slices.]
+            ]]>
+        </template>
+    </living_documentation>
+
+
+    <!-- ================================================================
+    SECTION 13 — CONTEXT SCALING
+    ================================================================ -->
+    <context_scaling>
+
+        <scale level="Small" criteria="1–14 Slices">
+            <permitted>DB entities used directly in Handlers. No Repository required.</permitted>
+            <permitted>Single shared DbContext or DB connection.</permitted>
+            <permitted>In-memory event bus.</permitted>
+            <permitted>Output Model omitted when the DB entity shape exactly matches the required response and no transformation is needed. See AC-009 for the full rule.</permitted>
+            <required>All AC, DS, FN, CM, CQ rules apply without exception.</required>
+            <required>Input validation is always mandatory.</required>
+        </scale>
+
+        <scale level="Medium" criteria="15–40 Slices">
+            <required>Strict DTO separation: Input Model, Output Model, and DB Entity are distinct types.</required>
+            <required>Repository or Query Object for all non-trivial persistence.</required>
+            <required>Slice-specific DbContext or namespace-isolated collection.</required>
+            <required>Full CONTEXT.md template.</required>
+        </scale>
+
+        <scale level="Large" criteria="41+ Slices">
+            <required>All Medium requirements.</required>
+            <required>Dedicated DbContext per Slice with no shared entity registration.</required>
+            <required>Outbox Pattern for all Integration Events.</required>
+            <required>Explicit Projection types for all cross-slice reads.</required>
+            <required>Architecture test suite enforcing no-cross-slice-reference rule. Generated once per project setup, not per Slice.</required>
+        </scale>
+    </context_scaling>
+
+
+    <!-- ================================================================
+    SECTION 14 — CONFLICT RESOLUTION
+    ================================================================ -->
+    <conflict_resolution>
+
+        <scenario name="Shared Business Logic">
+            <condition>Business logic used in two or more Slices.</condition>
+            <action>
+                Duplicate by default.
+                Move to Shared Kernel ONLY on explicit /abstract [LogicName] command from the developer.
+                Exception: pure functions with zero side effects representing a universal domain concept
+                (e.g., Money arithmetic, VAT calculation, slug generation) may be placed in the Shared Kernel
+                from initial creation without an /abstract command, provided they meet all criteria of
+                the PURE-FN-EXCEPTION defined in Section 5.
+            </action>
+        </scenario>
+
+        <scenario name="Shared Infrastructure Logic">
+            <condition>Purely technical logic: logging, email transport, DB connection, HTTP client.</condition>
+            <action>Move to Shared Kernel. Implementation must be a generic adapter with zero awareness of any specific Slice.</action>
+        </scenario>
+
+        <scenario name="Cross-Slice Read">
+            <condition>Slice A needs data owned by Slice B to compose a response.</condition>
+            <action>Option 1 (infrequent reads): Gateway Aggregator at the entry point layer. Option 2 (frequent reads): Slice A maintains a Read Model replica kept in sync via Integration Events. FORBIDDEN: calling Slice B's repository, handler, or entity directly.</action>
+        </scenario>
+
+        <scenario name="Ambiguous Slice Ownership">
+            <condition>A new feature could belong to two existing Slices.</condition>
+            <action>Identify which existing Slice's single responsibility would change. That Slice is the owner. If both would change, create a new Slice.</action>
+        </scenario>
+    </conflict_resolution>
+
+
+    <!-- ================================================================
+    SECTION 15 — TESTING
+    ================================================================ -->
+    <testing_standards>
+        <rule id="TS-001" severity="high">
+            Generate tests ONLY when the developer appends --test to the prompt.
+            Without --test, generate no test files.
+        </rule>
+
+        <rule id="TS-002" severity="high">
+            When --test is present, generate one Integration Test covering the full Slice
+            from entry point through Handler to the real or in-memory database.
+            The test MUST assert on actual system state after execution
+            (record persisted, event published) — not only the return value.
+            Test file: [FeatureName].Integration.Test.[ext], co-located in /tests within the Feature Folder.
+        </rule>
+
+        <rule id="TS-003" severity="medium">
+            Exception: if the Slice Handler contains complex branching or non-trivial domain calculations,
+            also generate a targeted Unit Test for that logic in isolation.
+            Mock only infrastructure boundaries (repository, event bus, external services).
+            Do NOT mock domain services or value objects.
+            Test file: [FeatureName].Handler.Test.[ext]
+        </rule>
+    </testing_standards>
+
+
+    <!-- ================================================================
+    SECTION 16 — EXTENSION POINTS
+    Child configs MUST inherit this file and implement all mandatory
+    points. Child configs MUST NOT contradict any rule above.
+    ================================================================ -->
+    <extension_points>
+        <instruction>Child configurations MUST declare which extension points they implement.</instruction>
+
+        <point id="EP-PROJECT-STRUCTURE"  mandatory="true"  contract="Concrete folder layout implementing [Feature]/[Feature].[Role].[ext]. Full Feature Folder template with all mandatory components."/>
+        <point id="EP-FILE-NAMING"        mandatory="true"  contract="Language casing rules (PascalCase|snake_case|kebab-case). Role Vocabulary mapped to idiomatic language names."/>
+        <point id="EP-ENDPOINT"           mandatory="true"  contract="Concrete Entry Point syntax: Minimal API | Controller | Route Handler | gRPC | GraphQL | CLI | Message Consumer."/>
+        <point id="EP-HANDLER"            mandatory="true"  contract="Concrete Handler pattern with Result/Either return type implementation."/>
+        <point id="EP-VALIDATION"         mandatory="true"  contract="Concrete validation wired at Slice boundary before Handler. Must show pipeline integration."/>
+        <point id="EP-RESULT-TYPE"        mandatory="true"  contract="Concrete Result/Either implementation replacing exceptions for all business outcomes."/>
+        <point id="EP-PERSISTENCE"        mandatory="true"  contract="Persistence pattern per scale: Small (inline) | Medium (Repository) | Large (Slice DbContext). Table naming convention implementation."/>
+        <point id="EP-DI-REGISTRATION"    mandatory="true"  contract="Slice self-registration supporting delete-folder-remove-registration compile test."/>
+        <point id="EP-TESTING"            mandatory="true"  contract="Integration test setup (real/in-memory DB). Confirm test file co-location in Feature Folder."/>
+        <point id="EP-EVENT-BUS"          mandatory="false" contract="Event bus per scale: Small (in-memory) | Medium (in-process persistent) | Large (Outbox + external broker)."/>
+        <point id="EP-ARCH-TESTS"         mandatory="false" contract="Automated no-cross-slice-reference enforcement. Mandatory at Large scale (41+ Slices)."/>
+        <point id="EP-CONTEXT-TEMPLATE"   mandatory="false" contract="Language-specific CONTEXT.md additions (e.g., migration file names, package references). Must not contradict base template."/>
+    </extension_points>
+
+</vertical_slice_guidelines>
