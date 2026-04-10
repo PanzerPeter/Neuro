@@ -9,7 +9,7 @@
 
 mod errors;
 mod symbol_table;
-mod type_checker;
+pub(crate) mod type_checkers;
 mod types;
 
 // Public exports
@@ -17,7 +17,7 @@ pub use errors::TypeError;
 pub use types::Type;
 
 use ast_types::Item;
-use type_checker::TypeChecker;
+use type_checkers::TypeChecker;
 
 /// Type check a NEURO program.
 ///
