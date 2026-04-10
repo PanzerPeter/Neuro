@@ -54,6 +54,12 @@ pub enum Expr {
         member: Identifier,
         span: Span,
     },
+    /// Type cast (`expr as type`)
+    Cast {
+        expr: Box<Expr>,
+        target_type: crate::Type,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -69,6 +75,7 @@ impl Expr {
             Expr::StructLiteral { span, .. } => *span,
             Expr::FieldAccess { span, .. } => *span,
             Expr::Path { span, .. } => *span,
+            Expr::Cast { span, .. } => *span,
         }
     }
 }

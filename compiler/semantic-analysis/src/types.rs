@@ -102,6 +102,28 @@ impl Type {
         )
     }
 
+    /// Check if this type can be explicitly cast from `from_type` using `as`.
+    pub fn is_valid_cast(&self, from: &Type) -> bool {
+        match (from, self) {
+            // Integer to integer
+            (t1, t2) if t1.is_integer() && t2.is_integer() => true,
+            // Integer to float
+            (t1, t2) if t1.is_integer() && (t2 == &Type::F32 || t2 == &Type::F64) => true,
+            // Float to integer
+            (t1, t2) if (t1 == &Type::F32 || t1 == &Type::F64) && t2.is_integer() => true,
+            // Float to float
+            (t1, t2)
+                if (t1 == &Type::F32 || t1 == &Type::F64)
+                    && (t2 == &Type::F32 || t2 == &Type::F64) =>
+            {
+                true
+            }
+            // Bool to integer
+            (Type::Bool, t2) if t2.is_integer() => true,
+            _ => false,
+        }
+    }
+
     /// Check if this is an integer type (signed or unsigned)
     pub fn is_integer(&self) -> bool {
         matches!(

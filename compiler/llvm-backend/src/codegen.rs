@@ -1022,6 +1022,14 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for an expression
     fn codegen_expr(&self, expr: &Expr) -> CodegenResult<BasicValueEnum<'ctx>> {
         match expr {
+            Expr::Cast {
+                expr: inner_expr,
+                target_type,
+                span,
+            } => {
+                let llvm_ty = crate::types::Type::from_ast(target_type);
+                self.codegen_cast(inner_expr, &llvm_ty, span)
+            }
             Expr::Literal(lit, _) => self.codegen_literal(lit),
             Expr::Identifier(ident) => self.codegen_identifier(&ident.name),
             Expr::Binary {
@@ -1122,6 +1130,139 @@ impl<'ctx> CodegenContext<'ctx> {
                     .clone();
                 self.codegen_field_access(object, &field.name, &struct_name)
             }
+        }
+    }
+
+    /// Generate an `as` type cast cast from inner to target
+    fn codegen_cast(
+        &self,
+        inner: &Expr,
+        target_type: &crate::types::Type,
+        span: &shared_types::Span,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let value = self.codegen_expr(inner)?;
+        let inner_ty = self.expr_types.get(&(span.start + 1)).ok_or_else(|| {
+            CodegenError::InternalError("missing type information for cast".to_string())
+        })?;
+
+        if inner_ty == target_type {
+            return Ok(value);
+        }
+
+        let target_llvm = self.type_mapper.map_type(target_type)?;
+
+        match (inner_ty, target_type) {
+            // Bool to int
+            (crate::types::Type::Bool, t2) if t2.is_integer() => {
+                let int_value = value.into_int_value();
+                Ok(self
+                    .builder
+                    .build_int_z_extend(int_value, target_llvm.into_int_type(), "cast_bool")
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                    .into())
+            }
+            // Float to Int
+            (t1, t2) if t1.is_float() && t2.is_integer() => {
+                let float_value = value.into_float_value();
+                if t2.is_unsigned_int() {
+                    Ok(self
+                        .builder
+                        .build_float_to_unsigned_int(
+                            float_value,
+                            target_llvm.into_int_type(),
+                            "cast_f2u",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_float_to_signed_int(
+                            float_value,
+                            target_llvm.into_int_type(),
+                            "cast_f2s",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            // Int to Float
+            (t1, t2) if t1.is_integer() && t2.is_float() => {
+                let int_value = value.into_int_value();
+                if t1.is_unsigned_int() {
+                    Ok(self
+                        .builder
+                        .build_unsigned_int_to_float(
+                            int_value,
+                            target_llvm.into_float_type(),
+                            "cast_u2f",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_signed_int_to_float(
+                            int_value,
+                            target_llvm.into_float_type(),
+                            "cast_s2f",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            // Float to Float
+            (t1, t2) if t1.is_float() && t2.is_float() => {
+                let float_value = value.into_float_value();
+                // F32 to F64 is Ext, F64 to F32 is Trunc
+                // Assuming Type::F32 and Type::F64 only
+                if matches!(t2, crate::types::Type::F64) {
+                    Ok(self
+                        .builder
+                        .build_float_ext(float_value, target_llvm.into_float_type(), "cast_f2f")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_float_trunc(float_value, target_llvm.into_float_type(), "cast_f2f")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            // Int to Int
+            (t1, t2) if t1.is_integer() && t2.is_integer() => {
+                let int_value = value.into_int_value();
+                let from_width = int_value.get_type().get_bit_width();
+                let to_width = target_llvm.into_int_type().get_bit_width();
+
+                if to_width > from_width {
+                    if t1.is_unsigned_int() {
+                        Ok(self
+                            .builder
+                            .build_int_z_extend(int_value, target_llvm.into_int_type(), "cast_ext")
+                            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                            .into())
+                    } else {
+                        Ok(self
+                            .builder
+                            .build_int_s_extend(int_value, target_llvm.into_int_type(), "cast_ext")
+                            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                            .into())
+                    }
+                } else if to_width < from_width {
+                    Ok(self
+                        .builder
+                        .build_int_truncate(int_value, target_llvm.into_int_type(), "cast_trunc")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(value)
+                }
+            }
+            _ => Err(CodegenError::InternalError(
+                "Invalid cast reached backend".to_string(),
+            )),
         }
     }
 
@@ -1876,6 +2017,18 @@ impl<'ctx> CodegenContext<'ctx> {
         func_types: &HashMap<String, Type>,
     ) -> CodegenResult<()> {
         match expr {
+            Expr::Cast {
+                expr: inner,
+                target_type,
+                span,
+            } => {
+                self.visit_expr_for_types(inner, func_types)?;
+                let inner_ty = self.expr_types.get(&inner.span().start).unwrap().clone();
+                let llvm_ty = crate::types::Type::from_ast(target_type);
+                self.expr_types.insert(span.start, llvm_ty);
+                // Store inner type safely for codegen
+                self.expr_types.insert(span.start + 1, inner_ty);
+            }
             Expr::Literal(lit, span) => {
                 let ty = match lit {
                     shared_types::Literal::Integer(_) => Type::I32,

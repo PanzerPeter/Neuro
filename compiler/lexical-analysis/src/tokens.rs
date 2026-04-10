@@ -18,6 +18,8 @@ pub enum TokenKind {
     Val,
     #[token("mut")]
     Mut,
+    #[token("as")]
+    As,
     #[token("if")]
     If,
     #[token("else")]
@@ -204,6 +206,7 @@ impl Token {
             TokenKind::Func => "func",
             TokenKind::Val => "val",
             TokenKind::Mut => "mut",
+            TokenKind::As => "as",
             TokenKind::If => "if",
             TokenKind::Else => "else",
             TokenKind::Return => "return",

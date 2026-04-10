@@ -102,3 +102,31 @@ func main() -> i32 {
 // Note: Float operations are supported but not tested here
 // because exit codes are integers. Float support is verified
 // by the compiler's type system and codegen tests.
+
+#[test]
+fn test_type_casts() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val a: i32 = 42
+    val f: f64 = a as f64
+    val b: f64 = 3.14
+    val c: i32 = b as i32
+    
+    val small: i8 = -10
+    val big: i32 = small as i32
+    
+    val flag: bool = true
+    val flag_num: i32 = flag as i32
+    
+    return c + big + flag_num // 3 + -10 + 1 = -6, wrapping to 250 in u8 exit code
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("type_casts.nr", source)
+        .expect("Compilation or execution failed");
+
+    // 3 + (-10) + 1 = -6, returns 250 as i32 is returned as exit code
+    assert_eq!(exit_code as i8, -6, "Expected exit code -6");
+}

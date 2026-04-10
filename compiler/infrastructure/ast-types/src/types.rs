@@ -20,3 +20,13 @@ pub enum Type {
         span: Span,
     },
 }
+
+impl Type {
+    /// Get the span of this type annotation
+    pub fn span(&self) -> Span {
+        match self {
+            Type::Named(ident) => ident.span,
+            Type::Tensor { span, .. } => *span,
+        }
+    }
+}

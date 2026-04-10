@@ -250,7 +250,7 @@ func strict_types() -> i32 {
 }
 ```
 
-Even compatible types require explicit conversion (Phase 2 feature).
+Even compatible types require explicit conversion.
 
 ### Function Type Checking
 
@@ -428,20 +428,27 @@ val is_valid: bool = true
 val is_valid: i32 = 1  // Less clear
 ```
 
-## Type Conversion (Phase 2)
+## Type Conversion
 
-Explicit type conversions will be available in Phase 2:
+Explicit type conversions are supported via the `as` operator. There are no implicit type conversions in NEURO.
 
 ```neuro
-// Future feature (not yet implemented)
 func convert_types() -> i64 {
     val x: i32 = 42
-    val y: i64 = x as i64  // Explicit conversion
+    val y: i64 = x as i64      // Explicit conversion (widening)
+    val f: f64 = y as f64      // Int to float
+    
+    val pi: f64 = 3.14
+    val trunc: i32 = pi as i32 // Float to int (truncates)
+    
+    val flag: bool = true
+    val num: i32 = flag as i32 // Boolean to int (1)
+    
     return y
 }
 ```
 
-Until then, all types must match exactly.
+The compiler will reject invalid casts (e.g. casting a string to an integer).
 
 ## Examples
 
@@ -449,14 +456,13 @@ Until then, all types must match exactly.
 
 ```neuro
 func compute(a: i32, b: f64) -> f64 {
-    // Error in Phase 1: cannot mix i32 and f64
-    // return a + b  // Type mismatch
+    // Mix i32 and f64 by casting one
+    // return a + b  // ERROR: Type mismatch
 
-    // Future (Phase 2): explicit conversion
-    // return (a as f64) + b
+    // Explicit conversion
+    return (a as f64) + b
 
-    // Phase 1 workaround: use same types
-    return b * 2.0
+    
 }
 ```
 

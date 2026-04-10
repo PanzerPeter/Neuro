@@ -64,7 +64,7 @@ Phase 1 is complete and Phase 2 is in progress. The following features are fully
 
 | Feature | Details |
 |---|---|
-| **Static Typing + Inference** | All integer types (i8–u64), f32/f64, bool, string; contextual numeric literal inference |
+| **Static Typing + Inference** | All integer types (i8–u64), f32/f64, bool, string; explicit `as` casting; contextual numeric literal inference |
 | **Functions** | Parameters, explicit and expression-based implicit returns, recursion, forward references |
 | **Control Flow** | if/else/elif, while loops, range-for (`for i in 0..n` and `0..=n`), break, continue |
 | **Mutable Variables** | `val` (immutable) and `mut` (mutable) with type-safe reassignment |

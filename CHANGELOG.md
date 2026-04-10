@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **semantic**: add support for explicit numeric type casts
+  - `as` type cast expressions now parsed via Pratt precedence `Cast` level
+  - Supports numeric width conversions, signed/unsigned matching, float to int, and bool to int casts
+  - Lowered natively into LLVM type conversions (`zext`, `sext`, `trunc`, `fpext`, `fptrunc`, `fptosi`, `fptoui`, `sitofp`, `uitofp`, etc)
+
 ### Fixed
 
 - **parser**: `else if` condition — `no_struct_lit` guard missing

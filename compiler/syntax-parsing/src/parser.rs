@@ -290,6 +290,19 @@ impl Parser {
                 })
             }
 
+            // Type casts
+            TokenKind::As => {
+                self.advance(); // consume 'as'
+                let target_type = self.parse_type()?;
+                let span = left.span().merge(target_type.span());
+
+                Ok(Expr::Cast {
+                    expr: Box::new(left),
+                    target_type,
+                    span,
+                })
+            }
+
             // Binary operators
             kind if self.is_binary_op(kind) => {
                 let op_token = self.advance().ok_or(ParseError::UnexpectedEof {
@@ -372,6 +385,7 @@ impl Parser {
             | TokenKind::GreaterEqual => Precedence::Comparison,
             TokenKind::Plus | TokenKind::Minus => Precedence::Sum,
             TokenKind::Star | TokenKind::Slash | TokenKind::Percent => Precedence::Product,
+            TokenKind::As => Precedence::Cast,
             TokenKind::LeftParen => Precedence::Call,
             TokenKind::Dot => Precedence::FieldAccess,
             _ => Precedence::Lowest,

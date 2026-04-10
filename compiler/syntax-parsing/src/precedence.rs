@@ -11,6 +11,7 @@ pub(crate) enum Precedence {
     Comparison,  // < > <= >=
     Sum,         // + -
     Product,     // * / %
+    Cast,        // as
     Unary,       // - !
     Call,        // function calls
     FieldAccess, // . (member access, binds tighter than call)

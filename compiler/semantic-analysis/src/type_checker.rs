@@ -388,6 +388,33 @@ impl TypeChecker {
                 }
             }
 
+            Expr::Cast {
+                expr,
+                target_type,
+                span,
+            } => {
+                let from_type = self.check_expr(expr, None)?;
+                if matches!(from_type, Type::Unknown) {
+                    return Some(Type::Unknown);
+                }
+
+                let to_type = self.resolve_type(target_type)?;
+                if matches!(to_type, Type::Unknown) {
+                    return Some(Type::Unknown);
+                }
+
+                if to_type.is_valid_cast(&from_type) {
+                    Some(to_type)
+                } else {
+                    self.record_error(TypeError::Mismatch {
+                        expected: to_type.clone(),
+                        found: from_type,
+                        span: *span,
+                    });
+                    Some(Type::Unknown)
+                }
+            }
+
             Expr::Call { func, args, span } => {
                 match &**func {
                     Expr::Identifier(ident) => self.check_plain_call(&ident.name, args, *span),

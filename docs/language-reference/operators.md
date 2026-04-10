@@ -160,6 +160,28 @@ val not_flag: bool = !flag
 **Types**: Works with boolean type only
 **Returns**: boolean
 
+## Type Casting Operator (`as`)
+
+Performs an explicit numeric or boolean type conversion.
+
+```neuro
+val n: i32 = 42
+val x: f64 = n as f64          // widen integer to float
+val y: i64 = n as i64          // widen to larger integer
+
+val pi: f64 = 3.14159
+val trunc: i32 = pi as i32     // truncate toward zero → 3
+
+val flag: bool = true
+val one: i32 = flag as i32     // false → 0, true → 1
+```
+
+**Types**: Works with numeric types and booleans.
+**Rules**:
+- Widening integers zero-extends (unsigned) or sign-extends (signed).
+- Floats to integers truncate towards zero.
+- Booleans to integers map `false → 0` and `true → 1`.
+
 ## Assignment Operator (`=`)
 
 ### Variable Assignment
