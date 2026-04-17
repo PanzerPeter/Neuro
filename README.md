@@ -45,10 +45,9 @@ NEURO is an Ahead-of-Time (AOT) compiled language built from the ground up for A
 ```neuro
 func factorial(n: i32) -> i32 {
     if n <= 1 {
-        1
-    } else {
-        n * factorial(n - 1)
+        return 1
     }
+    return n * factorial(n - 1)
 }
 
 func main() -> i32 {
@@ -74,6 +73,10 @@ Phase 1 is complete and Phase 2 is in progress. The following features are fully
 | **Methods** | `impl` blocks with `&self` instance methods; associated functions called via `TypeName::func(args)`; `&mut self` / consuming `self` rejected until ownership lands |
 | **LLVM Backend** | Native executable generation via inkwell 0.8.0 (LLVM 20) |
 | **CLI** | `neurc check` (type-check only) and `neurc compile` (produces native binary) |
+
+### Current Memory Model
+
+No ownership or destructor system exists yet. Stack-allocated values (integers, booleans, structs with no heap fields) are reclaimed automatically on function return via LLVM's `alloca`. Heap-allocated data — the backing buffer of every `string` value — is currently **leaked**. This is a known limitation of the alpha and is the primary motivation for Phase 1.5's ownership and borrow checker work. Do not use the current compiler for production workloads that allocate unbounded strings.
 
 ---
 
@@ -175,9 +178,10 @@ val name: string = "NEURO"
 mut counter: i32 = 0
 counter = counter + 1
 
-// Type inference from context
+// Type inference works for both val and mut
 val pi = 3.14159   // inferred f64
 val n  = 100       // inferred i32
+mut count = 0      // inferred i32; type annotation optional
 ```
 
 ### Functions
@@ -242,11 +246,13 @@ func main() -> i32 {
 
 ### Planned (Phase 3+): Tensor Types
 
+Tensor types and compile-time shape verification require the MLIR lowering infrastructure planned for Phase 3. Shape constraints (`[784, 128]`) are encoded as static type parameters and verified at compile time via the MLIR type system — this is not a simple feature and depends on both the `melior` bindings and a typed High-Level IR (`neuro-hir`) that does not yet exist.
+
 ```neuro
-// Static tensor with compile-time shape verification
+// Static tensor — shape verified at compile time (Phase 3)
 val weights: Tensor<f32, [784, 128]> = ...
 
-// Automatic differentiation (Phase 4)
+// Automatic differentiation via Enzyme MLIR (Phase 4)
 @grad(model) {
     val loss = model.forward(batch).cross_entropy(labels)
     model.backward(loss)

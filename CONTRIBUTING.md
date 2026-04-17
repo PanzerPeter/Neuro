@@ -4,7 +4,7 @@ Thank you for your interest in contributing to the NEURO programming language co
 
 ## Project Status
 
-NEURO is in **Phase 1.5** — Phase 1 (core MVP) is complete and the project is now stabilizing the backend (LLVM 20 upgrade, string fat pointers) and preparing for Phase 2 (structs, enums, module system). We welcome contributions, but note:
+NEURO is in **Phase 1.5 / Phase 2** — Phase 1 (core MVP) is complete, the LLVM 20 backend and string fat pointers have landed, and Phase 2 is underway (structs ✅, methods ✅). Remaining Phase 2 work covers enums, pattern matching, and the module system. We welcome contributions, but note:
 
 - Architecture and design are still evolving
 - Breaking changes are expected between minor versions
@@ -248,26 +248,30 @@ cargo audit
 # Verbose logging
 RUST_LOG=debug cargo run -p neurc -- check examples/hello.nr
 
-# Dump tokens
-cargo run -p neurc -- tokens examples/hello.nr
-
 # Check types without codegen
 cargo run -p neurc -- check examples/hello.nr
+
+# Compile to native binary
+cargo run -p neurc -- compile examples/hello.nr
 ```
 
 ## Current Contribution Priorities
 
-### Phase 1.5 (activ)
+### Phase 1.5 (active)
 
-- Refactor string type from C-style null-terminated pointers to fat pointers (`ptr`, `len`)
-- Introduce basic ownership/borrow checker groundwork
+- Ownership and borrow checker groundwork
+- Remaining §1 language features: bitwise operators (`&`, `|`, `^`, `~`, `<<`), integer literal suffixes (`42i64`, `255u8`), if/block expressions as values (`val abs = if x >= 0 { x } else { -x }`), string interpolation, nested block comments
 - MLIR bindings setup (`melior` crate, LLVM/MLIR 20)
 
 ### Phase 2 (active)
 
+- Structs ✅ — definition, instantiation, field access, mutation
+- Methods ✅ — `impl` blocks with `&self` instance methods and associated functions
+- Tuples and destructuring
 - Enums with associated data
 - Pattern matching (exhaustiveness checking)
 - `Result<T, E>` and `Option<T>` types
+- Error propagation operator (`?`)
 - Multi-file compilation and `import` statements
 
 ### Non-Code Contributions
