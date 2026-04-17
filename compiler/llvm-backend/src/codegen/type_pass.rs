@@ -252,7 +252,15 @@ impl<'ctx> CodegenContext<'ctx> {
                 span,
             } => {
                 self.visit_expr_for_types(inner, func_types)?;
-                let inner_ty = self.expr_types.get(&inner.span().start).unwrap().clone();
+                let inner_ty = self
+                    .expr_types
+                    .get(&inner.span().start)
+                    .ok_or_else(|| {
+                        CodegenError::InternalError(
+                            "cast inner expression type not found".to_string(),
+                        )
+                    })?
+                    .clone();
                 let llvm_ty = crate::types::Type::from_ast(target_type);
                 self.expr_types.insert(span.start, llvm_ty);
                 // Store inner type safely for codegen

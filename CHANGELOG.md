@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Supports numeric width conversions, signed/unsigned matching, float to int, and bool to int casts
   - Lowered natively into LLVM type conversions (`zext`, `sext`, `trunc`, `fpext`, `fptrunc`, `fptosi`, `fptoui`, `sitofp`, `uitofp`, etc)
 
+- **ast-types/parser/codegen**: Inclusive range `..=` in `for` loops (§1.6)
+  - `ForRange` AST node now handles an `inclusive: bool` flag.
+  - `for i in 0..=10` emits an inclusive upper bound (`<=`) instead of exclusive (`<`).
+- **lexer/parser**: Compound assignment operators `+=`, `-=`, `*=`, `/=`, `%=`
+  - Five new token variants in `lexical-analysis`; logos longest-match ensures `+=` etc. are consumed as single tokens
+  - `parse_compound_assignment_stmt` desugars `target OP= rhs` → `Stmt::Assignment { value: Expr::Binary }` at parse time
+  - No new AST nodes; semantic analysis and codegen unchanged
+  - 8 integration tests covering all operators, loop accumulator patterns, and desugar equivalence
+
 ### Fixed
 
 - **parser**: `else if` condition — `no_struct_lit` guard missing
@@ -40,17 +49,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Replaced the flat loop over `else_if_blocks` with a recursive `split_first` call
     that passes the remaining arms and the `else_block` down, keeping each arm
     mutually exclusive with all subsequent arms
-
-### Added
-
-- **ast-types/parser/codegen**: Inclusive range `..=` in `for` loops (§1.6)
-  - `ForRange` AST node now handles an `inclusive: bool` flag.
-  - `for i in 0..=10` emits an inclusive upper bound (`<=`) instead of exclusive (`<`).
-- **lexer/parser**: Compound assignment operators `+=`, `-=`, `*=`, `/=`, `%=`
-  - Five new token variants in `lexical-analysis`; logos longest-match ensures `+=` etc. are consumed as single tokens
-  - `parse_compound_assignment_stmt` desugars `target OP= rhs` → `Stmt::Assignment { value: Expr::Binary }` at parse time
-  - No new AST nodes; semantic analysis and codegen unchanged
-  - 8 integration tests covering all operators, loop accumulator patterns, and desugar equivalence
 
 ---
 

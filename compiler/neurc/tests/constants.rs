@@ -130,7 +130,10 @@ func main() -> i32 {
 "#;
     let source_path = test.write_source("const_non_const_rhs.nr", source);
     let result = test.compile(&source_path);
-    assert!(result.is_err(), "const with function-call RHS should be rejected");
+    assert!(
+        result.is_err(),
+        "const with function-call RHS should be rejected"
+    );
 }
 
 // ── AC5: Duplicate const is rejected ─────────────────────────────────────────
@@ -165,5 +168,8 @@ func main() -> i32 {
 "#;
     let source_path = test.write_source("duplicate_func_const.nr", source);
     let result = test.compile(&source_path);
-    assert!(result.is_err(), "duplicate function-body const should be rejected");
+    assert!(
+        result.is_err(),
+        "duplicate function-body const should be rejected"
+    );
 }

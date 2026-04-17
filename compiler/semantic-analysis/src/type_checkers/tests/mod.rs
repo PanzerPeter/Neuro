@@ -1,4 +1,3 @@
-
 use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::Type;
