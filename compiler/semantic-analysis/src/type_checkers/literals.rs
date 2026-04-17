@@ -1,11 +1,9 @@
 use super::TypeChecker;
+use crate::errors::TypeError;
 use crate::types::Type;
 use shared_types::Span;
-use crate::errors::TypeError;
 
 impl TypeChecker {
-
-
     /// Check if an integer literal fits within the range of a target type
     pub(crate) fn check_integer_range(&self, value: i64, target_ty: &Type) -> bool {
         match target_ty {
@@ -21,10 +19,14 @@ impl TypeChecker {
         }
     }
 
-
     /// Infer the type of an integer literal based on expected type
     /// Returns the inferred type and whether it's valid
-    pub(crate) fn infer_integer_type(&mut self, value: i64, expected: Option<&Type>, span: Span) -> Type {
+    pub(crate) fn infer_integer_type(
+        &mut self,
+        value: i64,
+        expected: Option<&Type>,
+        span: Span,
+    ) -> Type {
         if let Some(exp_ty) = expected {
             // If expected type is an integer type, try to use it
             if exp_ty.is_integer() {
@@ -51,7 +53,6 @@ impl TypeChecker {
             Type::I64
         }
     }
-
 
     /// Infer the type of a float literal based on expected type
     pub(crate) fn infer_float_type(&self, expected: Option<&Type>) -> Type {

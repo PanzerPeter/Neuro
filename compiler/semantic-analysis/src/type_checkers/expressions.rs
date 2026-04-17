@@ -1,15 +1,13 @@
-use std::collections::HashMap;
-use shared_types::Span;
-use ast_types::FieldInit;
 use super::TypeChecker;
-use crate::types::Type;
 use crate::errors::TypeError;
-use ast_types::{Expr, BinaryOp, UnaryOp};
+use crate::types::Type;
+use ast_types::FieldInit;
+use ast_types::{BinaryOp, Expr, UnaryOp};
 use shared_types::Literal;
+use shared_types::Span;
+use std::collections::HashMap;
 
 impl TypeChecker {
-
-
     /// Type-check a plain identifier call (free function or previously registered
     /// method with a mangled name). Extracted so the `Call` arm can delegate here.
     pub(crate) fn check_plain_call(
@@ -59,7 +57,6 @@ impl TypeChecker {
         Some(return_type)
     }
 
-
     /// Check an expression and return its type.
     /// Returns None if there was an error (which has been recorded).
     /// Use this for better error recovery - checking can continue with Unknown type.
@@ -83,9 +80,11 @@ impl TypeChecker {
             },
 
             Expr::Identifier(ident) => {
-                // Identifiers return their stored type, ignoring expected type
+                // Variables take priority; constants are a fallback so locals can shadow consts.
                 if let Some(symbol_info) = self.symbols.lookup(&ident.name) {
                     Some(symbol_info.ty.clone())
+                } else if let Some(const_ty) = self.constants.get(&ident.name).cloned() {
+                    Some(const_ty)
                 } else {
                     self.record_error(TypeError::UndefinedVariable {
                         name: ident.name.clone(),

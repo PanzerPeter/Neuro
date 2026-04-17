@@ -78,10 +78,22 @@ pub struct ImplDef {
     pub span: Span,
 }
 
+/// A compile-time constant declaration at module scope.
+///
+/// The type annotation is mandatory; the value must be a constant expression.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConstDef {
+    pub name: Identifier,
+    pub ty: Type,
+    pub value: super::expressions::Expr,
+    pub span: Span,
+}
+
 /// Top-level AST item
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     Function(FunctionDef),
     Struct(StructDef),
     Impl(ImplDef),
+    Const(ConstDef),
 }

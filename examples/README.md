@@ -140,6 +140,22 @@ cargo run -p neurc -- compile examples/for_range_inclusive.nr
 # Exit code: 15
 ```
 
+### [constants.nr](constants.nr)
+Compile-time constants at module and function scope.
+
+**Features:**
+- `const NAME: Type = expr` at module scope
+- `const` inside function bodies
+- Constant arithmetic (references between consts)
+- Forward references (function uses const defined later in file)
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/constants.nr
+./examples/constants
+# Exit code: 51
+```
+
 ## Phase 1 Limitations
 
 While Phase 1 is feature-complete for its scope, there are known limitations:

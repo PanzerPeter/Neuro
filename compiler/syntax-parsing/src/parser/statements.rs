@@ -8,6 +8,45 @@ use crate::precedence::Precedence;
 use super::Parser;
 
 impl Parser {
+    /// Parse a const declaration statement: `const NAME: Type = expr`
+    pub(crate) fn parse_const_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
+        let name_token = self.consume(TokenKind::Identifier(String::new()), "constant name")?;
+        let name = if let TokenKind::Identifier(n) = name_token.kind {
+            Identifier {
+                name: n,
+                span: name_token.span,
+            }
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                found: name_token.kind,
+                expected: "constant name".to_string(),
+                span: name_token.span,
+            });
+        };
+
+        self.skip_newlines();
+        self.consume(TokenKind::Colon, "':'")?;
+        self.skip_newlines();
+
+        let ty = self.parse_type()?;
+
+        self.skip_newlines();
+        self.consume(TokenKind::Equal, "'='")?;
+        self.skip_newlines();
+
+        let value = self.parse_expr(Precedence::Lowest)?;
+        let span = start_span.merge(value.span());
+
+        Ok(Stmt::Const {
+            name,
+            ty,
+            value,
+            span,
+        })
+    }
+}
+
+impl Parser {
     /// Parse a variable declaration statement (val/mut)
     pub(crate) fn parse_var_decl(&mut self, mutable: bool, start_span: Span) -> ParseResult<Stmt> {
         let name_token = self.consume(TokenKind::Identifier(String::new()), "variable name")?;
@@ -240,10 +279,7 @@ impl Parser {
 
         let body = self.parse_block()?;
 
-        let end_span = body
-            .last()
-            .map(stmt_span)
-            .unwrap_or(condition.span());
+        let end_span = body.last().map(stmt_span).unwrap_or(condition.span());
 
         Ok(Stmt::While {
             condition,
@@ -295,10 +331,7 @@ impl Parser {
 
         let body = self.parse_block()?;
 
-        let end_span = body
-            .last()
-            .map(stmt_span)
-            .unwrap_or(end.span());
+        let end_span = body.last().map(stmt_span).unwrap_or(end.span());
 
         Ok(Stmt::ForRange {
             iterator,
@@ -330,6 +363,12 @@ impl Parser {
                 self.advance(); // consume 'mut'
                 self.skip_newlines();
                 self.parse_var_decl(true, start_span)
+            }
+            TokenKind::Const => {
+                let start_span = token.span;
+                self.advance(); // consume 'const'
+                self.skip_newlines();
+                self.parse_const_stmt(start_span)
             }
             TokenKind::Return => {
                 let start_span = token.span;
@@ -538,6 +577,7 @@ impl Parser {
 pub(super) fn stmt_span(stmt: &Stmt) -> shared_types::Span {
     match stmt {
         Stmt::VarDecl { span, .. } => *span,
+        Stmt::Const { span, .. } => *span,
         Stmt::Assignment { span, .. } => *span,
         Stmt::Return { span, .. } => *span,
         Stmt::If { span, .. } => *span,

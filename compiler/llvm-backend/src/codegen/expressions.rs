@@ -8,6 +8,65 @@ use crate::types::Type;
 
 use super::context::CodegenContext;
 
+/// Rust-level representation of a folded constant value.
+///
+/// Arithmetic is performed in Rust (wrapping for integers, IEEE-754 for floats)
+/// so we never need inkwell's `const_*` arithmetic methods, which have an
+/// inconsistent availability across feature configurations.
+#[derive(Clone, Debug)]
+enum FoldedConst {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Str(String),
+}
+
+impl FoldedConst {
+    fn from_literal(lit: &shared_types::Literal) -> Self {
+        match lit {
+            shared_types::Literal::Integer(v) => FoldedConst::Int(*v),
+            shared_types::Literal::Float(v) => FoldedConst::Float(*v),
+            shared_types::Literal::Boolean(v) => FoldedConst::Bool(*v),
+            shared_types::Literal::String(s) => FoldedConst::Str(s.clone()),
+        }
+    }
+
+    fn from_llvm(bv: BasicValueEnum<'_>) -> CodegenResult<Self> {
+        match bv {
+            BasicValueEnum::IntValue(i) => {
+                // LLVM stores booleans as i1 integers; anything else is a general int.
+                if i.get_type().get_bit_width() == 1 {
+                    Ok(FoldedConst::Bool(i.get_zero_extended_constant() != Some(0)))
+                } else {
+                    Ok(FoldedConst::Int(
+                        i.get_sign_extended_constant().unwrap_or(0),
+                    ))
+                }
+            }
+            BasicValueEnum::FloatValue(f) => Ok(FoldedConst::Float(
+                f.get_constant().map(|(v, _)| v).unwrap_or(0.0),
+            )),
+            BasicValueEnum::StructValue(_) => Err(CodegenError::InternalError(
+                "cannot reconstruct string const for nested evaluation".into(),
+            )),
+            _ => Err(CodegenError::InternalError(
+                "unexpected LLVM value kind in const context".into(),
+            )),
+        }
+    }
+
+    fn cast_to(self, target: &Type) -> Self {
+        match (self, target) {
+            (FoldedConst::Int(i), t) if t.is_integer() => FoldedConst::Int(i),
+            (FoldedConst::Int(i), t) if t.is_float() => FoldedConst::Float(i as f64),
+            (FoldedConst::Float(f), t) if t.is_integer() => FoldedConst::Int(f as i64),
+            (FoldedConst::Float(f), t) if t.is_float() => FoldedConst::Float(f),
+            (FoldedConst::Bool(b), t) if t.is_integer() => FoldedConst::Int(b as i64),
+            (v, _) => v,
+        }
+    }
+}
+
 impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a literal expression
     pub(crate) fn codegen_literal(
@@ -73,8 +132,14 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// Generate code for an identifier (variable reference)
+    /// Generate code for an identifier (variable reference).
+    ///
+    /// Checks `const_values` first so a local variable can shadow a same-named constant.
     pub(crate) fn codegen_identifier(&self, name: &str) -> CodegenResult<BasicValueEnum<'ctx>> {
+        if let Some(val) = self.const_values.get(name) {
+            return Ok(*val);
+        }
+
         let ptr = self
             .variables
             .get(name)
@@ -87,6 +152,150 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder
             .build_load(*var_type, *ptr, name)
             .map_err(|e| CodegenError::LlvmError(format!("failed to load variable: {}", e)))
+    }
+
+    /// Evaluate a constant expression to a compile-time LLVM value.
+    ///
+    /// Only valid for expressions that passed `is_const_expr` in semantic analysis.
+    /// Folds the expression in Rust first, then creates an LLVM constant value.
+    pub(crate) fn codegen_const_expr(
+        &self,
+        expr: &ast_types::Expr,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let folded = Self::fold_const(expr, &self.const_values)?;
+        Ok(self.const_folded_to_llvm(&folded))
+    }
+
+    /// Rust-level constant folder. Returns a `FoldedConst` scalar.
+    fn fold_const(
+        expr: &ast_types::Expr,
+        consts: &std::collections::HashMap<String, BasicValueEnum<'_>>,
+    ) -> CodegenResult<FoldedConst> {
+        match expr {
+            ast_types::Expr::Literal(lit, _) => Ok(FoldedConst::from_literal(lit)),
+            ast_types::Expr::Paren(inner, _) => Self::fold_const(inner, consts),
+            ast_types::Expr::Unary { op, operand, .. } => {
+                let v = Self::fold_const(operand, consts)?;
+                match op {
+                    ast_types::UnaryOp::Negate => match v {
+                        FoldedConst::Int(i) => Ok(FoldedConst::Int(i.wrapping_neg())),
+                        FoldedConst::Float(f) => Ok(FoldedConst::Float(-f)),
+                        _ => Err(CodegenError::InternalError(
+                            "negate on non-numeric const".into(),
+                        )),
+                    },
+                    ast_types::UnaryOp::Not => match v {
+                        FoldedConst::Bool(b) => Ok(FoldedConst::Bool(!b)),
+                        _ => Err(CodegenError::InternalError("not on non-bool const".into())),
+                    },
+                }
+            }
+            ast_types::Expr::Binary {
+                left, op, right, ..
+            } => {
+                let l = Self::fold_const(left, consts)?;
+                let r = Self::fold_const(right, consts)?;
+                use ast_types::BinaryOp;
+                match (l, r) {
+                    (FoldedConst::Int(a), FoldedConst::Int(b)) => match op {
+                        BinaryOp::Add => Ok(FoldedConst::Int(a.wrapping_add(b))),
+                        BinaryOp::Subtract => Ok(FoldedConst::Int(a.wrapping_sub(b))),
+                        BinaryOp::Multiply => Ok(FoldedConst::Int(a.wrapping_mul(b))),
+                        BinaryOp::Divide => {
+                            if b == 0 {
+                                Err(CodegenError::InternalError("const division by zero".into()))
+                            } else {
+                                Ok(FoldedConst::Int(a.wrapping_div(b)))
+                            }
+                        }
+                        BinaryOp::Modulo => {
+                            if b == 0 {
+                                Err(CodegenError::InternalError(
+                                    "const remainder by zero".into(),
+                                ))
+                            } else {
+                                Ok(FoldedConst::Int(a.wrapping_rem(b)))
+                            }
+                        }
+                        BinaryOp::Equal => Ok(FoldedConst::Bool(a == b)),
+                        BinaryOp::NotEqual => Ok(FoldedConst::Bool(a != b)),
+                        BinaryOp::Less => Ok(FoldedConst::Bool(a < b)),
+                        BinaryOp::Greater => Ok(FoldedConst::Bool(a > b)),
+                        BinaryOp::LessEqual => Ok(FoldedConst::Bool(a <= b)),
+                        BinaryOp::GreaterEqual => Ok(FoldedConst::Bool(a >= b)),
+                        BinaryOp::And => Ok(FoldedConst::Bool(a != 0 && b != 0)),
+                        BinaryOp::Or => Ok(FoldedConst::Bool(a != 0 || b != 0)),
+                    },
+                    (FoldedConst::Float(a), FoldedConst::Float(b)) => match op {
+                        BinaryOp::Add => Ok(FoldedConst::Float(a + b)),
+                        BinaryOp::Subtract => Ok(FoldedConst::Float(a - b)),
+                        BinaryOp::Multiply => Ok(FoldedConst::Float(a * b)),
+                        BinaryOp::Divide => Ok(FoldedConst::Float(a / b)),
+                        BinaryOp::Modulo => Ok(FoldedConst::Float(a % b)),
+                        BinaryOp::Equal => Ok(FoldedConst::Bool(a == b)),
+                        BinaryOp::NotEqual => Ok(FoldedConst::Bool(a != b)),
+                        BinaryOp::Less => Ok(FoldedConst::Bool(a < b)),
+                        BinaryOp::Greater => Ok(FoldedConst::Bool(a > b)),
+                        BinaryOp::LessEqual => Ok(FoldedConst::Bool(a <= b)),
+                        BinaryOp::GreaterEqual => Ok(FoldedConst::Bool(a >= b)),
+                        _ => Err(CodegenError::InternalError(
+                            "unsupported binary op on float const".into(),
+                        )),
+                    },
+                    _ => Err(CodegenError::InternalError(
+                        "type mismatch in const binary expression".into(),
+                    )),
+                }
+            }
+            ast_types::Expr::Cast {
+                expr: inner,
+                target_type,
+                ..
+            } => {
+                let v = Self::fold_const(inner, consts)?;
+                let target = crate::types::Type::from_ast(target_type);
+                Ok(v.cast_to(&target))
+            }
+            ast_types::Expr::Identifier(ident) => {
+                // Reconstruct FoldedConst from an already-emitted LLVM const value.
+                let bv = consts
+                    .get(&ident.name)
+                    .copied()
+                    .ok_or_else(|| CodegenError::UndefinedVariable(ident.name.clone()))?;
+                FoldedConst::from_llvm(bv)
+            }
+            _ => Err(CodegenError::InternalError(
+                "non-constant expression in const context".into(),
+            )),
+        }
+    }
+
+    fn const_folded_to_llvm(&self, v: &FoldedConst) -> BasicValueEnum<'ctx> {
+        match v {
+            FoldedConst::Int(i) => self.context.i32_type().const_int(*i as u64, true).into(),
+            FoldedConst::Float(f) => self.context.f64_type().const_float(*f).into(),
+            FoldedConst::Bool(b) => self.context.bool_type().const_int(*b as u64, false).into(),
+            FoldedConst::Str(s) => {
+                let bytes: Vec<_> = s
+                    .bytes()
+                    .chain(std::iter::once(0u8))
+                    .map(|b| self.context.i8_type().const_int(b as u64, false))
+                    .collect();
+                let arr = self.context.i8_type().const_array(&bytes);
+                let global = self.module.add_global(arr.get_type(), None, "str.data");
+                global.set_initializer(&arr);
+                global.set_constant(true);
+                global.set_linkage(inkwell::module::Linkage::Private);
+                let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+                let len = self.context.i64_type().const_int(s.len() as u64, false);
+                let fat_type = self
+                    .context
+                    .struct_type(&[ptr_type.into(), self.context.i64_type().into()], false);
+                fat_type
+                    .const_named_struct(&[global.as_pointer_value().into(), len.into()])
+                    .into()
+            }
+        }
     }
 
     /// Compare two string fat-pointers for byte-level equality.

@@ -137,4 +137,17 @@ pub enum TypeError {
         member: String,
         span: Span,
     },
+
+    #[error("constant '{name}' already defined at {span:?}")]
+    ConstAlreadyDefined { name: String, span: Span },
+
+    #[error("constant expression required at {span:?}: only literals, arithmetic on literals, and references to other constants are allowed")]
+    InvalidConstExpr { span: Span },
+
+    #[error("const '{name}' references undefined constant '{referenced}' at {span:?}")]
+    UndefinedConst {
+        name: String,
+        referenced: String,
+        span: Span,
+    },
 }

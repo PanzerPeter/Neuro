@@ -89,5 +89,28 @@ will be: AST → NEURO High-Level IR → MLIR dialects (linalg/tensor/func/arith
 Enzyme MLIR AD pass → GPU dialects (nvgpu/rocdl) or `llvm` dialect → inkwell for final
 LLVM IR emission. inkwell remains the terminal code-emission layer in all paths.
 
+## Constant Declarations ABI
+Module-level consts are emitted as `@NAME = internal constant TYPE VALUE` LLVM globals before
+any function definitions. Their LLVM value is also stored in `CodegenContext.const_values` so
+that identifier references inside function bodies resolve without loading from the global.
+
+Function-body `Stmt::Const` nodes fold the constant expression in Rust (via `FoldedConst`) and
+store the resulting `BasicValueEnum` in `const_values` for the duration of the function scope.
+No `alloca` is emitted; consts are purely compile-time values.
+
+Constant folding uses a pure Rust `FoldedConst { Int(i64), Float(f64), Bool(bool), Str(String) }`
+enum rather than inkwell's const-arithmetic API (which has inconsistent availability across
+inkwell versions). All arithmetic is performed in Rust with wrapping semantics for integers and
+IEEE-754 for floats; a single `const_int`/`const_float`/`const_struct` call creates the final
+LLVM value.
+
+`global_const_types: HashMap<String, Type>` in `CodegenContext` carries module-level const
+types and is re-seeded into `type_env` after each `type_env.clear()` in
+`visit_function_for_types` and `visit_method_for_types`, so the type-inference pass can resolve
+const identifiers inside function bodies.
+
 ## Recent Updates
 - 2026-04-04: Updated `codegen_for_range` to accept `inclusive: bool` from `Stmt::ForRange` and generate `<=` (`ULE`/`SLE`) instead of `<` (`ULT`/`SLT`) comparison instructions when true.
+- 2026-04-16: Implemented §1.3 const declarations end-to-end: `codegen_global_const`,
+  `codegen_const_expr`, `FoldedConst` folder, `const_values`/`global_const_types` maps,
+  `Stmt::Const` codegen, and type-pass support.

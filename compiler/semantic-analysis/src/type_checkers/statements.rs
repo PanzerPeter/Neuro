@@ -1,11 +1,9 @@
 use super::TypeChecker;
-use crate::types::Type;
 use crate::errors::TypeError;
+use crate::types::Type;
 use ast_types::Stmt;
 
 impl TypeChecker {
-
-
     /// Check a statement.
     /// Returns None if there was a fatal error, Some(()) otherwise.
     /// Non-fatal errors are recorded and checking continues.
@@ -383,6 +381,42 @@ impl TypeChecker {
                     return None;
                 }
 
+                Some(())
+            }
+
+            Stmt::Const {
+                name,
+                ty,
+                value,
+                span,
+            } => {
+                if self.constants.contains_key(&name.name) {
+                    self.record_error(TypeError::ConstAlreadyDefined {
+                        name: name.name.clone(),
+                        span: name.span,
+                    });
+                    return None;
+                }
+
+                let declared_ty = self.resolve_type(ty)?;
+
+                if !self.is_const_expr(value) {
+                    self.record_error(TypeError::InvalidConstExpr { span: value.span() });
+                    return None;
+                }
+
+                if let Some(expr_ty) = self.check_expr(value, Some(&declared_ty)) {
+                    if !expr_ty.is_compatible_with(&declared_ty) {
+                        self.record_error(TypeError::Mismatch {
+                            expected: declared_ty.clone(),
+                            found: expr_ty,
+                            span: *span,
+                        });
+                        return None;
+                    }
+                }
+
+                self.constants.insert(name.name.clone(), declared_ty);
                 Some(())
             }
 

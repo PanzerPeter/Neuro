@@ -415,10 +415,32 @@ impl<'ctx> CodegenContext<'ctx> {
                 ..
             } => self.codegen_field_assignment(&object.name, &field.name, value),
 
+            Stmt::Const { name, value, .. } => {
+                let val = self.codegen_const_expr(value)?;
+                self.const_values.insert(name.name.clone(), val);
+                Ok(())
+            }
+
             Stmt::Expr(expr) => {
                 self.codegen_expr(expr)?;
                 Ok(())
             }
         }
+    }
+
+    /// Emit a module-level constant as an LLVM global constant and cache its value.
+    pub(crate) fn codegen_global_const(&mut self, def: &ast_types::ConstDef) -> CodegenResult<()> {
+        let val = self.codegen_const_expr(&def.value)?;
+        let llvm_ty = val.get_type();
+
+        let global = self.module.add_global(llvm_ty, None, &def.name.name);
+        global.set_initializer(&val);
+        global.set_constant(true);
+        global.set_linkage(inkwell::module::Linkage::Internal);
+
+        // Cache the value directly so identifier resolution returns the constant without
+        // emitting a load — consts are values, not memory locations.
+        self.const_values.insert(def.name.name.clone(), val);
+        Ok(())
     }
 }

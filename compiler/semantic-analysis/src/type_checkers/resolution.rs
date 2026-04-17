@@ -1,10 +1,8 @@
 use super::TypeChecker;
-use crate::types::Type;
 use crate::errors::TypeError;
+use crate::types::Type;
 
 impl TypeChecker {
-
-
     /// Convert syntax-parsing type to semantic type.
     /// Returns None if the type is unknown (error is recorded).
     pub(crate) fn resolve_type(&mut self, ty: &ast_types::Type) -> Option<Type> {

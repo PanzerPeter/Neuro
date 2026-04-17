@@ -13,6 +13,16 @@ impl<'ctx> CodegenContext<'ctx> {
         items: &[Item],
         func_types: &HashMap<String, Type>,
     ) -> CodegenResult<()> {
+        // Pre-pass: collect module-level const types so identifiers referencing them
+        // resolve correctly inside function bodies (visit_function_for_types clears
+        // type_env before each function; global_const_types is re-seeded each time).
+        for item in items {
+            if let Item::Const(def) = item {
+                let ty = crate::types::Type::from_ast(&def.ty);
+                self.global_const_types.insert(def.name.name.clone(), ty);
+            }
+        }
+
         for item in items {
             match item {
                 Item::Function(func_def) => {
@@ -21,7 +31,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 Item::Impl(impl_def) => {
                     self.visit_impl_for_types(impl_def, func_types)?;
                 }
-                Item::Struct(_) => {}
+                Item::Const(_) | Item::Struct(_) => {}
             }
         }
         Ok(())
@@ -54,6 +64,9 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<()> {
         let mangled = format!("{}__{}", struct_name, method.name.name);
         self.type_env.clear();
+        for (name, ty) in &self.global_const_types.clone() {
+            self.type_env.insert(name.clone(), ty.clone());
+        }
 
         let func_type_info = func_types
             .get(&mangled)
@@ -92,8 +105,11 @@ impl<'ctx> CodegenContext<'ctx> {
         func_def: &FunctionDef,
         func_types: &HashMap<String, Type>,
     ) -> CodegenResult<()> {
-        // Clear type environment for new function
         self.type_env.clear();
+        // Re-seed with module-level consts so references to them resolve inside the body.
+        for (name, ty) in &self.global_const_types.clone() {
+            self.type_env.insert(name.clone(), ty.clone());
+        }
 
         // Populate type environment with parameter types
         let func_type_info = func_types
@@ -199,6 +215,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 for stmt in body {
                     self.visit_stmt_for_types(stmt, func_types)?;
                 }
+            }
+            Stmt::Const {
+                name, ty, value, ..
+            } => {
+                self.visit_expr_for_types(value, func_types)?;
+                let const_ty = crate::types::Type::from_ast(ty);
+                self.type_env.insert(name.name.clone(), const_ty);
             }
             Stmt::Break { .. } | Stmt::Continue { .. } => {}
             Stmt::FieldAssignment { value, object, .. } => {

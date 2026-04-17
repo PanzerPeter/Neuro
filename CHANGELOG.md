@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **lexer/parser/semantic/codegen**: `const` declarations (§1.3)
+  - `const NAME: Type = expr` at module scope and inside function bodies
+  - Module-level consts emitted as `@NAME = internal constant` LLVM globals; visible
+    to all functions via a pre-registration pass (forward references work regardless
+    of source order)
+  - Function-body consts folded in Rust (`FoldedConst`) and stored as compile-time
+    values — no `alloca` emitted
+  - RHS must be a constant expression (literals, arithmetic/unary/cast on literals,
+    or identifiers of previously declared consts); function calls and runtime values
+    are rejected with `InvalidConstExpr`
+  - Duplicate const names are rejected at both module and function scope
+  - 9 integration tests covering: module const, multiple consts, body const,
+    arithmetic folding, forward references, and rejection of non-const/duplicate RHS
+
 - **semantic**: add support for explicit numeric type casts
   - `as` type cast expressions now parsed via Pratt precedence `Cast` level
   - Supports numeric width conversions, signed/unsigned matching, float to int, and bool to int casts

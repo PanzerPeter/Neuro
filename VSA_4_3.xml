@@ -13,8 +13,16 @@
         <n>Vertical Slice Architecture — Solo-Agent AI Base Guidelines</n>
         <version>4.3</version>
         <created>2026-03-17</created>
+        <revised>2026-04-16</revised>
         <supersedes>4.2</supersedes>
         <priority>Highest</priority>
+        <revision_notes>
+            4.3 rev1: CTX-002 replaced — Chunked Refactoring Protocol removed.
+            Replaced with Atomic Full-Scope Execution: multi-file changes execute completely
+            in one response. Schema changes remain a hard gate. RT-001 through RT-005 updated
+            from halt-and-confirm to flag-and-proceed inline, consistent with current agent
+            context capacity. /abstract command gate in RT-005 preserved by design.
+        </revision_notes>
     </metadata>
 
 
@@ -45,15 +53,26 @@
             If a better design exists, refactor completely.
         </rule>
 
-        <rule id="CTX-002" severity="blocker" name="Chunked Refactoring Protocol">
-            Large structural changes (DTO rename, slice split, schema change, file restructure) MUST NOT be attempted
-            in a single response. When a refactor affects more than one file, the AI MUST:
-            1. Output a numbered execution plan listing every file to be changed.
-            2. Pause and ask: "Plan complete. Proceed to Step 1?"
-            3. Execute one step per response upon explicit developer confirmation.
-            4. End each step with: "Step N complete. Proceed to Step N+1?" or "Refactor complete."
-            Leaving old and new patterns coexisting after any single step is FORBIDDEN — each step must be internally consistent.
-            Silence or non-response is NOT confirmation. The developer must explicitly approve each step.
+        <rule id="CTX-002" severity="blocker" name="Atomic Full-Scope Execution">
+            Large structural changes (DTO rename, slice split, file restructure, multi-slice refactor) MUST be
+            executed completely and atomically in a single response. Partial execution leaving old and new
+            patterns coexisting is FORBIDDEN.
+
+            When a refactor affects two or more files, the AI MUST:
+            1. Open the response with a numbered Execution Manifest listing every file to be created,
+               modified, or deleted — with a one-line description of each change.
+            2. Execute all items in the Manifest, in order, within the same response.
+            3. Close with a Consistency Declaration: a brief summary confirming no stale references,
+               no dangling imports, and no orphaned types remain.
+
+            Exception — HARD GATE (pause required):
+            Schema changes (new table, column addition/removal, renamed column, index change) MUST still
+            follow the schema_confirmation gate defined in Section 3 before any implementation is written.
+            All other changes proceed without interruption.
+
+            Rationale: Modern agents operate with sufficient context capacity to deliver consistent
+            multi-file changes in one pass. Step-by-step confirmation cycles impose coordination overhead
+            without safety benefit for non-schema changes.
         </rule>
 
         <rule id="CTX-003" severity="high">
@@ -356,30 +375,45 @@
 
         <trigger id="RT-001" severity="blocker">
             <condition>Handler/UseCase exceeds 300 lines OR has more than 5 injected dependencies.</condition>
-            <action>Halt. Identify sub-operations. Propose a split into separate named Commands. Present the plan before writing code.</action>
+            <action>
+                Flag the trigger inline. Identify sub-operations. Output the proposed split as a named
+                Command list at the top of the response, then execute the full split atomically in the same
+                response per CTX-002. Do NOT halt for confirmation unless a schema change is involved.
+            </action>
         </trigger>
 
         <trigger id="RT-002" severity="high">
             <condition>CONTEXT.md Purpose requires "and" to describe the Slice's responsibility, or describes two distinct outcomes.</condition>
-            <action>Propose splitting into two named Slices. Present CONTEXT.md outlines for both before writing code.</action>
+            <action>
+                Flag the trigger inline. Output CONTEXT.md outlines for both proposed Slices at the top of the
+                response, then execute the full split atomically per CTX-002.
+                If the correct boundary is genuinely ambiguous after inference, ask ONE targeted question before proceeding.
+            </action>
         </trigger>
 
         <trigger id="RT-003" severity="high">
             <condition>A Shared Kernel utility contains conditional logic tied to a specific business scenario.</condition>
-            <action>Flag as God Utility. Move the business branch into the relevant Slice. The Shared Kernel function must remain pure.</action>
+            <action>
+                Flag as God Utility inline. Move the business branch into the relevant Slice atomically in the same
+                response. The Shared Kernel function must be left pure upon completion.
+            </action>
         </trigger>
 
         <trigger id="RT-004" severity="high">
             <condition>A Slice imports more than one other Slice's Public Read Model OR subscribes to more than three Integration Events.</condition>
-            <action>Flag boundary misalignment. Propose Read Model replication or a boundary redraw.</action>
+            <action>
+                Flag boundary misalignment inline. State the proposed resolution (Read Model replication or boundary
+                redraw) and execute the correction atomically in the same response per CTX-002.
+            </action>
         </trigger>
 
         <trigger id="RT-005" severity="medium">
             <condition>Identical validation logic duplicated across three or more Slices.</condition>
             <action>
-                Flag the duplication. Propose moving it to a Shared Kernel Domain Utility with a WHY comment.
-                Do NOT proceed with abstraction until the developer explicitly issues: /abstract [ValidatorName]
-                This is consistent with the Cohesion over DRY principle (Section 5). Confirmation alone is insufficient.
+                Flag the duplication inline with a WHY comment and the names of the affected Slices.
+                Do NOT abstract automatically. Abstraction requires an explicit developer command: /abstract [ValidatorName]
+                This gate is intentional and consistent with the Cohesion over DRY principle (Section 5).
+                Upon receiving /abstract [ValidatorName], execute the move atomically per CTX-002.
             </action>
         </trigger>
     </refactoring_triggers>

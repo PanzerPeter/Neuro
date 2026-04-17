@@ -28,3 +28,9 @@ actionable error kind.
 Compound assignment tokens (`PlusEqual`, `MinusEqual`, `StarEqual`, `SlashEqual`,
 `PercentEqual`) are declared alongside arithmetic operators. Logos uses longest-match,
 so `+=` is always consumed as a single token rather than `+` then `=`.
+
+`TokenKind::Const` was added as a reserved keyword for compile-time constant declarations
+(`const NAME: Type = expr`). It sits between `Mut` and `As` in declaration order.
+
+## Recent Updates
+- 2026-04-16: Added `TokenKind::Const` keyword token for §1.3 const declarations.

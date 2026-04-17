@@ -30,3 +30,5 @@ the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
 - 2026-04-04: Added `inclusive: bool` to `Stmt::ForRange` to support `..=` inclusive range iteration.
+- 2026-04-16: Added `ConstDef` struct and `Item::Const(ConstDef)` for module-level constants (§1.3).
+  Added `Stmt::Const { name, ty, value, span }` for function-body constants.

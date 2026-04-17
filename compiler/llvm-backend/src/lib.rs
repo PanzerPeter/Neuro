@@ -177,7 +177,7 @@ pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> Codege
                 }
             }
 
-            Item::Struct(_) => {}
+            Item::Struct(_) | Item::Const(_) => {}
         }
     }
 
@@ -186,8 +186,16 @@ pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> Codege
     let mut codegen_ctx = CodegenContext::new(&context, "neuro_module");
     codegen_ctx.set_struct_defs(struct_defs);
 
-    // Store type information for expressions
+    // Store type information for expressions (including const types for identifier resolution)
     codegen_ctx.store_expr_types(items, &func_types)?;
+
+    // Emit module-level constants as LLVM global constants before any function.
+    // This ensures all globals are defined before function bodies reference them.
+    for item in items {
+        if let Item::Const(def) = item {
+            codegen_ctx.codegen_global_const(def)?;
+        }
+    }
 
     // Generate code for each function and impl method
     for item in items {
@@ -198,7 +206,7 @@ pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> Codege
             Item::Impl(impl_def) => {
                 codegen_ctx.codegen_impl(impl_def, &func_types)?;
             }
-            Item::Struct(_) => {}
+            Item::Const(_) | Item::Struct(_) => {}
         }
     }
 

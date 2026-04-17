@@ -67,5 +67,14 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
+    /// Compile-time constant declaration inside a function body.
+    ///
+    /// The type annotation is mandatory; the value must be a constant expression.
+    Const {
+        name: Identifier,
+        ty: Type,
+        value: Expr,
+        span: Span,
+    },
     Expr(Expr),
 }

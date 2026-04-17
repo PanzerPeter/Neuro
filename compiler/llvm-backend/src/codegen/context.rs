@@ -5,8 +5,8 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context as LLVMContext;
 use inkwell::module::Module;
-use inkwell::types::{BasicTypeEnum};
-use inkwell::values::{FunctionValue, PointerValue};
+use inkwell::types::BasicTypeEnum;
+use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 use std::collections::HashMap;
 
 use crate::type_mapping::TypeMapper;
@@ -60,6 +60,14 @@ pub(crate) struct CodegenContext<'ctx> {
     /// Needed because FieldAccess and its first sub-expression (the object Identifier)
     /// share the same span.start, causing expr_types collisions.
     pub(crate) fa_struct_names: HashMap<usize, String>,
+
+    /// Evaluated constant values (both module-level and function-level).
+    /// `codegen_identifier` checks this before `variables` to allow locals to shadow consts.
+    pub(crate) const_values: HashMap<String, BasicValueEnum<'ctx>>,
+
+    /// Types of module-level constants, pre-populated so `visit_function_for_types`
+    /// can seed `type_env` after each clear.
+    pub(crate) global_const_types: HashMap<String, Type>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -82,6 +90,8 @@ impl<'ctx> CodegenContext<'ctx> {
             loop_targets: Vec::new(),
             struct_defs: HashMap::new(),
             fa_struct_names: HashMap::new(),
+            const_values: HashMap::new(),
+            global_const_types: HashMap::new(),
         }
     }
 

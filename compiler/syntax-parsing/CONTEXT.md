@@ -52,3 +52,6 @@ time. No new AST nodes; semantic analysis and codegen are unaffected.
 
 ## Recent Updates
 - 2026-04-04: Enabled parsing of `..=` for inclusive `for` ranges.
+- 2026-04-16: Added `parse_const_def()` (module-level `const NAME: Type = expr`) and
+  `parse_const_stmt()` (function-body const). `parse_program` dispatches on `TokenKind::Const`
+  → `parse_const_def`; `parse_stmt` dispatches similarly for body consts.

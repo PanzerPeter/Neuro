@@ -2,6 +2,73 @@
 
 Variables store values that can be used and manipulated in your programs.
 
+## Compile-Time Constants
+
+Use `const` to declare compile-time constants. Constants must have an explicit type
+annotation and a *constant expression* as their value.
+
+```neuro
+const MAX_RETRIES: i32 = 3
+const BASE: i32 = 10
+const DOUBLED: i32 = BASE * 2   // arithmetic on other consts is allowed
+```
+
+**Key points**:
+- Declared with `const` keyword
+- Type annotation is required
+- RHS must be a constant expression: literals, arithmetic/unary/cast on literals,
+  or identifiers that refer to previously declared `const` names
+- Function calls and runtime values are not allowed as `const` initializers
+- No ownership or lifetime — consts do not participate in the borrow checker
+- Module-level consts are visible to all functions regardless of source order
+- Function-body consts are scoped to the enclosing function
+
+### Module-Level Constants
+
+```neuro
+const LEARNING_RATE_SCALE: i32 = 100
+const MAX_EPOCHS: i32 = 50
+
+func train() -> i32 {
+    return MAX_EPOCHS * LEARNING_RATE_SCALE   // 5000
+}
+```
+
+### Function-Body Constants
+
+```neuro
+func compute_threshold(base: i32) -> i32 {
+    const FACTOR: i32 = 4
+    return base * FACTOR
+}
+```
+
+### Constant Expressions
+
+Valid RHS forms for `const`:
+
+| Form | Example |
+|---|---|
+| Integer literal | `42`, `0xFF`, `0b1010` |
+| Float literal | `3.14`, `1.0e-3` |
+| Bool literal | `true`, `false` |
+| String literal | `"hello"` |
+| Unary op on const expr | `-MAX`, `!FLAG` |
+| Binary op on const exprs | `A * 2`, `A + B` |
+| Cast of const expr | `BASE as f32` |
+| Another `const` name | `DOUBLED` (if `DOUBLED` is a `const`) |
+
+### Constants vs Variables
+
+| | `const` | `val` | `mut` |
+|---|---|---|---|
+| Keyword | `const` | `val` | `mut` |
+| Mutable | no | no | yes |
+| Scope | module or function | function/block | function/block |
+| RHS | constant expr only | any expr | any expr |
+| Ownership | none | yes | yes |
+| LLVM emission | global constant | stack alloca | stack alloca |
+
 ## Variable Declaration
 
 ### Immutable Variables

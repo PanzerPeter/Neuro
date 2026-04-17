@@ -2,8 +2,8 @@ use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
 use crate::ast::{
-    Expr, FieldDef, FieldInit, FunctionDef, ImplDef, Item, MethodDef, Parameter, SelfParam,
-    StructDef, Type,
+    ConstDef, Expr, FieldDef, FieldInit, FunctionDef, ImplDef, Item, MethodDef, Parameter,
+    SelfParam, StructDef, Type,
 };
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
@@ -12,7 +12,7 @@ use super::statements::stmt_span;
 use super::Parser;
 
 impl Parser {
-    /// Parse top-level items: function, struct, or impl definitions
+    /// Parse top-level items: function, struct, impl, or const definitions
     pub(crate) fn parse_program(&mut self) -> ParseResult<Vec<Item>> {
         let mut items = Vec::new();
 
@@ -27,13 +27,16 @@ impl Parser {
             } else if self.check(&TokenKind::Impl) {
                 let impl_def = self.parse_impl_def()?;
                 items.push(Item::Impl(impl_def));
+            } else if self.check(&TokenKind::Const) {
+                let c = self.parse_const_def()?;
+                items.push(Item::Const(c));
             } else {
                 let token = self.peek().ok_or(ParseError::UnexpectedEof {
-                    expected: "function, struct, or impl definition".to_string(),
+                    expected: "function, struct, impl, or const definition".to_string(),
                 })?;
                 return Err(ParseError::UnexpectedToken {
                     found: token.kind.clone(),
-                    expected: "function, struct, or impl definition".to_string(),
+                    expected: "function, struct, impl, or const definition".to_string(),
                     span: token.span,
                 });
             }
@@ -41,6 +44,46 @@ impl Parser {
         }
 
         Ok(items)
+    }
+
+    /// Parse a module-level constant: `const NAME: Type = expr`
+    pub(crate) fn parse_const_def(&mut self) -> ParseResult<ConstDef> {
+        let start = self.consume(TokenKind::Const, "'const'")?;
+        self.skip_newlines();
+
+        let name_token = self.consume(TokenKind::Identifier(String::new()), "constant name")?;
+        let name = if let TokenKind::Identifier(n) = name_token.kind {
+            Identifier {
+                name: n,
+                span: name_token.span,
+            }
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                found: name_token.kind,
+                expected: "constant name".to_string(),
+                span: name_token.span,
+            });
+        };
+
+        self.skip_newlines();
+        self.consume(TokenKind::Colon, "':'")?;
+        self.skip_newlines();
+
+        let ty = self.parse_type()?;
+
+        self.skip_newlines();
+        self.consume(TokenKind::Equal, "'='")?;
+        self.skip_newlines();
+
+        let value = self.parse_expr(Precedence::Lowest)?;
+        let span = start.span.merge(value.span());
+
+        Ok(ConstDef {
+            name,
+            ty,
+            value,
+            span,
+        })
     }
 
     /// Parse a function definition
@@ -139,10 +182,7 @@ impl Parser {
 
         let body = self.parse_block()?;
 
-        let end_span = body
-            .last()
-            .map(stmt_span)
-            .unwrap_or(start.span);
+        let end_span = body.last().map(stmt_span).unwrap_or(start.span);
 
         Ok(FunctionDef {
             name,
@@ -422,10 +462,7 @@ impl Parser {
         self.skip_newlines();
         let body = self.parse_block()?;
 
-        let end_span = body
-            .last()
-            .map(stmt_span)
-            .unwrap_or(start.span);
+        let end_span = body.last().map(stmt_span).unwrap_or(start.span);
 
         Ok(MethodDef {
             name,
