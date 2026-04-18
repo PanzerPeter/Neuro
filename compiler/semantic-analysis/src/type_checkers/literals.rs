@@ -1,7 +1,7 @@
 use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::Type;
-use shared_types::Span;
+use shared_types::{IntSuffix, Span};
 
 impl TypeChecker {
     /// Check if an integer literal fits within the range of a target type
@@ -54,6 +54,27 @@ impl TypeChecker {
         }
     }
 
+    /// Resolve the type for a suffix-annotated integer literal, range-checking
+    /// the value against the suffix type.
+    pub(crate) fn infer_suffixed_integer_type(
+        &mut self,
+        value: i64,
+        suffix: &IntSuffix,
+        span: Span,
+    ) -> Type {
+        let ty = suffix_to_type(suffix);
+        if self.check_integer_range(value, &ty) {
+            ty
+        } else {
+            self.record_error(TypeError::IntegerLiteralOutOfRange {
+                value,
+                ty: ty.clone(),
+                span,
+            });
+            Type::Unknown
+        }
+    }
+
     /// Infer the type of a float literal based on expected type
     pub(crate) fn infer_float_type(&self, expected: Option<&Type>) -> Type {
         if let Some(exp_ty) = expected {
@@ -65,5 +86,18 @@ impl TypeChecker {
 
         // Default to f64
         Type::F64
+    }
+}
+
+pub(crate) fn suffix_to_type(suffix: &IntSuffix) -> Type {
+    match suffix {
+        IntSuffix::I8 => Type::I8,
+        IntSuffix::I16 => Type::I16,
+        IntSuffix::I32 => Type::I32,
+        IntSuffix::I64 => Type::I64,
+        IntSuffix::U8 => Type::U8,
+        IntSuffix::U16 => Type::U16,
+        IntSuffix::U32 => Type::U32,
+        IntSuffix::U64 => Type::U64,
     }
 }

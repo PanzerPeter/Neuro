@@ -24,7 +24,7 @@ enum FoldedConst {
 impl FoldedConst {
     fn from_literal(lit: &shared_types::Literal) -> Self {
         match lit {
-            shared_types::Literal::Integer(v) => FoldedConst::Int(*v),
+            shared_types::Literal::Integer(v, _) => FoldedConst::Int(*v),
             shared_types::Literal::Float(v) => FoldedConst::Float(*v),
             shared_types::Literal::Boolean(v) => FoldedConst::Bool(*v),
             shared_types::Literal::String(s) => FoldedConst::Str(s.clone()),
@@ -74,9 +74,15 @@ impl<'ctx> CodegenContext<'ctx> {
         lit: &shared_types::Literal,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         match lit {
-            shared_types::Literal::Integer(val) => {
-                // Default to i32 for integer literals
-                Ok(self.context.i32_type().const_int(*val as u64, true).into())
+            shared_types::Literal::Integer(val, suffix_opt) => {
+                use shared_types::IntSuffix;
+                let llvm_ty = match suffix_opt {
+                    None | Some(IntSuffix::I32) | Some(IntSuffix::U32) => self.context.i32_type(),
+                    Some(IntSuffix::I8) | Some(IntSuffix::U8) => self.context.i8_type(),
+                    Some(IntSuffix::I16) | Some(IntSuffix::U16) => self.context.i16_type(),
+                    Some(IntSuffix::I64) | Some(IntSuffix::U64) => self.context.i64_type(),
+                };
+                Ok(llvm_ty.const_int(*val as u64, true).into())
             }
             shared_types::Literal::Float(val) => {
                 // Default to f64 for float literals

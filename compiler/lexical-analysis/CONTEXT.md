@@ -35,3 +35,4 @@ so `+=` is always consumed as a single token rather than `+` then `=`.
 ## Recent Updates
 - 2026-04-16: Added `TokenKind::Const` keyword token for §1.3 const declarations.
 - 2026-04-18: Added bitwise operator tokens for §1.4: `Pipe` (`|`), `Caret` (`^`), `Tilde` (`~`), `LeftShift` (`<<`). `Amp` (`&`) was already present. `LeftShift` is declared before `Less` so logos longest-match always picks `<<` over `<`.
+- 2026-04-18: Added integer literal type suffixes §1.4. `IntegerSuffixToken { value: i64, suffix: IntSuffix }` (pub) carries a parsed suffix. `TokenKind::IntegerSuffix(IntegerSuffixToken)` is emitted by four new regexes (decimal, binary, octal, hex each with suffix group `(i8|i16|...|u64)`) at `priority = 2` so logos maximal munch always picks `42i64` as a single token instead of `Integer(42)` + `Identifier("i64")`.

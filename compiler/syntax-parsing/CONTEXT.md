@@ -1,7 +1,7 @@
 # syntax-parsing
 
 ## Purpose
-Transform a NEURO token stream into a typed Abstract Syntax Tree that subsequent compiler stages can traverse.
+Transform a Neuro token stream into a typed Abstract Syntax Tree that subsequent compiler stages can traverse.
 
 ## Entry Point
 - Type: Library function
@@ -51,6 +51,8 @@ compound-assignment tokens via a one-token lookahead and calls
 time. No new AST nodes; semantic analysis and codegen are unaffected.
 
 ## Recent Updates
+- 2026-04-18: Integer literal type suffixes §1.4. `parse_prefix` handles `TokenKind::IntegerSuffix(tok)` → `Literal::Integer(tok.value, Some(tok.suffix))`; plain `TokenKind::Integer(n)` now produces `Literal::Integer(n, None)`.
+
 - 2026-04-04: Enabled parsing of `..=` for inclusive `for` ranges.
 - 2026-04-16: Added `parse_const_def()` (module-level `const NAME: Type = expr`) and
   `parse_const_stmt()` (function-body const). `parse_program` dispatches on `TokenKind::Const`

@@ -100,6 +100,19 @@ impl Identifier {
     }
 }
 
+/// Type suffix on an integer literal (e.g., the `i64` in `42i64`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntSuffix {
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+}
+
 /// Literal value types supported in the language.
 ///
 /// These represent constant values that appear directly in the source code.
@@ -107,8 +120,9 @@ impl Identifier {
 /// the literal, not by the literal itself.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
-    /// Integer literal (e.g., `42`, `-17`)
-    Integer(i64),
+    /// Integer literal, optionally suffixed (e.g., `42`, `42i64`, `255u8`).
+    /// When the suffix is present it overrides contextual type inference.
+    Integer(i64, Option<IntSuffix>),
     /// Floating-point literal (e.g., `3.14`, `-0.5`)
     Float(f64),
     /// String literal (e.g., `"hello"`)
@@ -172,9 +186,9 @@ mod tests {
 
     #[test]
     fn literal_integer() {
-        let lit = Literal::Integer(42);
-        assert_eq!(lit, Literal::Integer(42));
-        assert_ne!(lit, Literal::Integer(43));
+        let lit = Literal::Integer(42, None);
+        assert_eq!(lit, Literal::Integer(42, None));
+        assert_ne!(lit, Literal::Integer(43, None));
     }
 
     #[test]

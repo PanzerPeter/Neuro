@@ -12,7 +12,7 @@ mod tokens;
 
 // Public exports
 pub use errors::{LexError, LexResult};
-pub use tokens::{Token, TokenKind};
+pub use tokens::{IntegerSuffixToken, Token, TokenKind};
 
 use logos::Logos;
 use shared_types::Span;
@@ -135,6 +135,7 @@ pub fn tokenize(source: &str) -> LexResult<Vec<Token>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared_types::IntSuffix;
 
     #[test]
     fn tokenize_empty_source() {
@@ -213,6 +214,76 @@ mod tests {
         assert!(matches!(result[0].kind, TokenKind::Integer(0b1010)));
         assert!(matches!(result[1].kind, TokenKind::Integer(0o755)));
         assert!(matches!(result[2].kind, TokenKind::Integer(0xDEADBEEF)));
+    }
+
+    #[test]
+    fn tokenize_integer_suffixes_decimal() {
+        let result = tokenize("42i64 255u8 1000i32 0u16").unwrap();
+        assert_eq!(result.len(), 5); // 4 suffixed integers + EOF
+        match &result[0].kind {
+            TokenKind::IntegerSuffix(tok) => {
+                assert_eq!(tok.value, 42);
+                assert_eq!(tok.suffix, IntSuffix::I64);
+            }
+            _ => panic!("expected IntegerSuffix"),
+        }
+        match &result[1].kind {
+            TokenKind::IntegerSuffix(tok) => {
+                assert_eq!(tok.value, 255);
+                assert_eq!(tok.suffix, IntSuffix::U8);
+            }
+            _ => panic!("expected IntegerSuffix"),
+        }
+        match &result[2].kind {
+            TokenKind::IntegerSuffix(tok) => {
+                assert_eq!(tok.value, 1000);
+                assert_eq!(tok.suffix, IntSuffix::I32);
+            }
+            _ => panic!("expected IntegerSuffix"),
+        }
+        match &result[3].kind {
+            TokenKind::IntegerSuffix(tok) => {
+                assert_eq!(tok.value, 0);
+                assert_eq!(tok.suffix, IntSuffix::U16);
+            }
+            _ => panic!("expected IntegerSuffix"),
+        }
+    }
+
+    #[test]
+    fn tokenize_integer_suffixes_other_bases() {
+        let result = tokenize("0b1010i32 0o755u64 0xFFu8").unwrap();
+        assert_eq!(result.len(), 4); // 3 suffixed integers + EOF
+        match &result[0].kind {
+            TokenKind::IntegerSuffix(tok) => {
+                assert_eq!(tok.value, 0b1010);
+                assert_eq!(tok.suffix, IntSuffix::I32);
+            }
+            _ => panic!("expected IntegerSuffix"),
+        }
+        match &result[1].kind {
+            TokenKind::IntegerSuffix(tok) => {
+                assert_eq!(tok.value, 0o755);
+                assert_eq!(tok.suffix, IntSuffix::U64);
+            }
+            _ => panic!("expected IntegerSuffix"),
+        }
+        match &result[2].kind {
+            TokenKind::IntegerSuffix(tok) => {
+                assert_eq!(tok.value, 0xFF);
+                assert_eq!(tok.suffix, IntSuffix::U8);
+            }
+            _ => panic!("expected IntegerSuffix"),
+        }
+    }
+
+    #[test]
+    fn unsuffixed_integers_unchanged() {
+        // Ensure plain integers still produce Integer tokens, not IntegerSuffix
+        let result = tokenize("42 0 1000").unwrap();
+        assert!(matches!(result[0].kind, TokenKind::Integer(42)));
+        assert!(matches!(result[1].kind, TokenKind::Integer(0)));
+        assert!(matches!(result[2].kind, TokenKind::Integer(1000)));
     }
 
     #[test]

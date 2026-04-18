@@ -55,7 +55,11 @@ impl Parser {
         })?;
 
         match token.kind {
-            TokenKind::Integer(n) => Ok(Expr::Literal(Literal::Integer(n), token.span)),
+            TokenKind::Integer(n) => Ok(Expr::Literal(Literal::Integer(n, None), token.span)),
+            TokenKind::IntegerSuffix(tok) => Ok(Expr::Literal(
+                Literal::Integer(tok.value, Some(tok.suffix)),
+                token.span,
+            )),
             TokenKind::Float(f) => Ok(Expr::Literal(Literal::Float(f), token.span)),
             TokenKind::String(s) => Ok(Expr::Literal(Literal::String(s), token.span)),
             TokenKind::True => Ok(Expr::Literal(Literal::Boolean(true), token.span)),

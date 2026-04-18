@@ -47,7 +47,7 @@ fn test_integer_literal_infers_from_variable_declaration() {
     let stmt = Stmt::VarDecl {
         name: make_ident("x"),
         ty: Some(make_type("i64")),
-        init: Some(Expr::Literal(Literal::Integer(42), Span::new(0, 2))),
+        init: Some(Expr::Literal(Literal::Integer(42, None), Span::new(0, 2))),
         mutable: false,
         span: Span::new(0, 10),
     };
@@ -80,7 +80,7 @@ fn test_integer_literal_infers_from_function_parameter() {
     // Call with literal
     let call_expr = Expr::Call {
         func: Box::new(Expr::Identifier(make_ident("foo"))),
-        args: vec![Expr::Literal(Literal::Integer(42), Span::new(0, 2))],
+        args: vec![Expr::Literal(Literal::Integer(42, None), Span::new(0, 2))],
         span: Span::new(0, 10),
     };
 
@@ -97,7 +97,7 @@ fn test_integer_literal_out_of_range_i8() {
     let stmt = Stmt::VarDecl {
         name: make_ident("x"),
         ty: Some(make_type("i8")),
-        init: Some(Expr::Literal(Literal::Integer(300), Span::new(0, 3))),
+        init: Some(Expr::Literal(Literal::Integer(300, None), Span::new(0, 3))),
         mutable: false,
         span: Span::new(0, 10),
     };
@@ -124,7 +124,7 @@ fn test_integer_literal_negative_u32() {
     let stmt = Stmt::VarDecl {
         name: make_ident("x"),
         ty: Some(make_type("u32")),
-        init: Some(Expr::Literal(Literal::Integer(-42), Span::new(0, 3))),
+        init: Some(Expr::Literal(Literal::Integer(-42, None), Span::new(0, 3))),
         mutable: false,
         span: Span::new(0, 10),
     };
@@ -176,7 +176,7 @@ fn test_literal_inference_in_return() {
         vec![],
         Some("i16".to_string()),
         vec![Stmt::Expr(Expr::Literal(
-            Literal::Integer(42),
+            Literal::Integer(42, None),
             Span::new(0, 2),
         ))],
     );
@@ -195,7 +195,7 @@ fn test_literal_inference_in_assignment() {
     let decl = Stmt::VarDecl {
         name: make_ident("x"),
         ty: Some(make_type("u64")),
-        init: Some(Expr::Literal(Literal::Integer(100), Span::new(0, 3))),
+        init: Some(Expr::Literal(Literal::Integer(100, None), Span::new(0, 3))),
         mutable: true,
         span: Span::new(0, 15),
     };
@@ -205,7 +205,7 @@ fn test_literal_inference_in_assignment() {
 
     let assign = Stmt::Assignment {
         target: make_ident("x"),
-        value: Expr::Literal(Literal::Integer(200), Span::new(0, 3)),
+        value: Expr::Literal(Literal::Integer(200, None), Span::new(0, 3)),
         span: Span::new(0, 7),
     };
 
@@ -222,7 +222,7 @@ fn test_literal_defaults_to_i32_without_context() {
     let stmt = Stmt::VarDecl {
         name: make_ident("x"),
         ty: None,
-        init: Some(Expr::Literal(Literal::Integer(42), Span::new(0, 2))),
+        init: Some(Expr::Literal(Literal::Integer(42, None), Span::new(0, 2))),
         mutable: false,
         span: Span::new(0, 10),
     };
@@ -267,7 +267,7 @@ fn test_literal_inference_in_binary_operation() {
     let decl_x = Stmt::VarDecl {
         name: make_ident("x"),
         ty: Some(make_type("i16")),
-        init: Some(Expr::Literal(Literal::Integer(10), Span::new(0, 2))),
+        init: Some(Expr::Literal(Literal::Integer(10, None), Span::new(0, 2))),
         mutable: false,
         span: Span::new(0, 10),
     };
@@ -281,7 +281,7 @@ fn test_literal_inference_in_binary_operation() {
         init: Some(Expr::Binary {
             left: Box::new(Expr::Identifier(make_ident("x"))),
             op: BinaryOp::Add,
-            right: Box::new(Expr::Literal(Literal::Integer(5), Span::new(0, 1))),
+            right: Box::new(Expr::Literal(Literal::Integer(5, None), Span::new(0, 1))),
             span: Span::new(0, 5),
         }),
         mutable: false,
@@ -302,7 +302,7 @@ fn test_large_literal_auto_promotes_to_i64() {
         name: make_ident("x"),
         ty: None,
         init: Some(Expr::Literal(
-            Literal::Integer(5000000000),
+            Literal::Integer(5000000000, None),
             Span::new(0, 10),
         )),
         mutable: false,
@@ -323,8 +323,8 @@ fn test_for_range_accepts_integer_bounds() {
 
     let stmt = Stmt::ForRange {
         iterator: make_ident("i"),
-        start: Expr::Literal(Literal::Integer(0), Span::new(0, 1)),
-        end: Expr::Literal(Literal::Integer(5), Span::new(4, 5)),
+        start: Expr::Literal(Literal::Integer(0, None), Span::new(0, 1)),
+        end: Expr::Literal(Literal::Integer(5, None), Span::new(4, 5)),
         inclusive: false,
         body: vec![Stmt::Continue {
             span: Span::new(8, 16),
@@ -343,7 +343,7 @@ fn test_for_range_rejects_non_integer_bound() {
     let stmt = Stmt::ForRange {
         iterator: make_ident("i"),
         start: Expr::Literal(Literal::Boolean(true), Span::new(0, 4)),
-        end: Expr::Literal(Literal::Integer(5), Span::new(7, 8)),
+        end: Expr::Literal(Literal::Integer(5, None), Span::new(7, 8)),
         inclusive: false,
         body: vec![],
         span: Span::new(0, 12),

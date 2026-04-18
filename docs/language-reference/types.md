@@ -60,6 +60,17 @@ func demo_integers() -> i32 {
 
 **Default Type**: Integer literals default to `i32` when no annotation is present. Contextual inference from declaration, parameter, and return context is implemented; range validation is enforced (e.g. `300` cannot be assigned to `i8`).
 
+**Type Suffixes**: A suffix appended directly to an integer literal overrides contextual inference and pins the type:
+
+```neuro
+val a = 42i64      // i64, no annotation needed
+val b = 255u8      // u8
+val c = 0xFFu8     // hex literal with suffix
+val d = 0b1010i32  // binary literal with suffix
+```
+
+Valid suffixes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`. The value is range-checked against the suffix type at compile time — `300u8` is a compile error.
+
 ### Floating-Point Types
 
 | Type | Size | Precision | Range (approx) |

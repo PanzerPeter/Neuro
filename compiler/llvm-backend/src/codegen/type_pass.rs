@@ -278,7 +278,15 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             Expr::Literal(lit, span) => {
                 let ty = match lit {
-                    shared_types::Literal::Integer(_) => Type::I32,
+                    shared_types::Literal::Integer(_, suffix_opt) => {
+                        use shared_types::IntSuffix;
+                        match suffix_opt {
+                            None | Some(IntSuffix::I32) | Some(IntSuffix::U32) => Type::I32,
+                            Some(IntSuffix::I8) | Some(IntSuffix::U8) => Type::I8,
+                            Some(IntSuffix::I16) | Some(IntSuffix::U16) => Type::I16,
+                            Some(IntSuffix::I64) | Some(IntSuffix::U64) => Type::I64,
+                        }
+                    }
                     shared_types::Literal::Float(_) => Type::F64,
                     shared_types::Literal::Boolean(_) => Type::Bool,
                     shared_types::Literal::String(_) => Type::String,

@@ -2,9 +2,17 @@
 // Token type definitions
 
 use logos::Logos;
-use shared_types::Span;
+use shared_types::{IntSuffix, Span};
 
 use crate::errors::LexError;
+
+/// Carries both the numeric value and the explicit type suffix of a suffixed
+/// integer literal (e.g. `42i64`, `255u8`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct IntegerSuffixToken {
+    pub value: i64,
+    pub suffix: IntSuffix,
+}
 
 /// Token types in the NEURO language
 #[derive(Debug, Clone, PartialEq, Logos)]
@@ -75,6 +83,30 @@ pub enum TokenKind {
     #[regex(r"[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?", parse_float)]
     #[regex(r"[0-9][0-9_]*[eE][+-]?[0-9][0-9_]*", parse_float)]
     Float(f64),
+
+    // Suffixed integer literals (higher priority than plain; logos maximal munch picks the longer
+    // match for `42i64` → IntegerSuffix rather than Integer(42) + Identifier("i64")).
+    #[regex(
+        r"[0-9][0-9_]*(i8|i16|i32|i64|u8|u16|u32|u64)",
+        parse_decimal_suffix,
+        priority = 2
+    )]
+    #[regex(
+        r"0[bB][01][01_]*(i8|i16|i32|i64|u8|u16|u32|u64)",
+        parse_binary_suffix,
+        priority = 2
+    )]
+    #[regex(
+        r"0[oO][0-7][0-7_]*(i8|i16|i32|i64|u8|u16|u32|u64)",
+        parse_octal_suffix,
+        priority = 2
+    )]
+    #[regex(
+        r"0[xX][0-9a-fA-F][0-9a-fA-F_]*(i8|i16|i32|i64|u8|u16|u32|u64)",
+        parse_hex_suffix,
+        priority = 2
+    )]
+    IntegerSuffix(IntegerSuffixToken),
 
     #[regex(r"0[bB][01][01_]*", parse_binary)]
     #[regex(r"0[oO][0-7][0-7_]*", parse_octal)]
@@ -242,6 +274,7 @@ impl Token {
             TokenKind::SelfUpper => "Self",
             TokenKind::Identifier(s) => s,
             TokenKind::Integer(_) => "<integer>",
+            TokenKind::IntegerSuffix(_) => "<integer>",
             TokenKind::Float(_) => "<float>",
             TokenKind::String(_) => "<string>",
             TokenKind::Plus => "+",
@@ -429,4 +462,90 @@ fn parse_string(lex: &mut logos::Lexer<TokenKind>) -> Result<String, LexError> {
 fn parse_string_catch_all(lex: &mut logos::Lexer<TokenKind>) -> Result<String, LexError> {
     // Try to parse the string, which will report any invalid escapes
     parse_string(lex)
+}
+
+// ── Suffixed integer helpers ──────────────────────────────────────────────────
+
+/// Maps the suffix string (e.g. "i64") to `IntSuffix`. Panics for unexpected
+/// inputs — the logos regex guarantees the suffix is one of the eight variants.
+fn parse_int_suffix(suffix: &str) -> IntSuffix {
+    match suffix {
+        "i8" => IntSuffix::I8,
+        "i16" => IntSuffix::I16,
+        "i32" => IntSuffix::I32,
+        "i64" => IntSuffix::I64,
+        "u8" => IntSuffix::U8,
+        "u16" => IntSuffix::U16,
+        "u32" => IntSuffix::U32,
+        "u64" => IntSuffix::U64,
+        // Safety: the regex only admits the eight suffixes above.
+        _ => unreachable!("unexpected suffix '{}'", suffix),
+    }
+}
+
+fn parse_decimal_suffix(lex: &mut logos::Lexer<TokenKind>) -> Result<IntegerSuffixToken, LexError> {
+    let raw = lex.slice();
+    let suffix_start = raw.find(|c: char| c.is_alphabetic()).unwrap_or(raw.len());
+    let digits = raw[..suffix_start].replace('_', "");
+    let value = digits.parse::<i64>().map_err(|_| LexError::InvalidNumber {
+        text: raw.to_string(),
+        span: Span::new(lex.span().start, lex.span().end),
+    })?;
+    Ok(IntegerSuffixToken {
+        value,
+        suffix: parse_int_suffix(&raw[suffix_start..]),
+    })
+}
+
+fn parse_binary_suffix(lex: &mut logos::Lexer<TokenKind>) -> Result<IntegerSuffixToken, LexError> {
+    let raw = lex.slice();
+    let suffix_start = raw[2..]
+        .find(|c: char| c.is_alphabetic())
+        .map(|i| i + 2)
+        .unwrap_or(raw.len());
+    let digits = raw[2..suffix_start].replace('_', "");
+    let value = i64::from_str_radix(&digits, 2).map_err(|_| LexError::InvalidNumber {
+        text: raw.to_string(),
+        span: Span::new(lex.span().start, lex.span().end),
+    })?;
+    Ok(IntegerSuffixToken {
+        value,
+        suffix: parse_int_suffix(&raw[suffix_start..]),
+    })
+}
+
+fn parse_octal_suffix(lex: &mut logos::Lexer<TokenKind>) -> Result<IntegerSuffixToken, LexError> {
+    let raw = lex.slice();
+    let suffix_start = raw[2..]
+        .find(|c: char| c.is_alphabetic())
+        .map(|i| i + 2)
+        .unwrap_or(raw.len());
+    let digits = raw[2..suffix_start].replace('_', "");
+    let value = i64::from_str_radix(&digits, 8).map_err(|_| LexError::InvalidNumber {
+        text: raw.to_string(),
+        span: Span::new(lex.span().start, lex.span().end),
+    })?;
+    Ok(IntegerSuffixToken {
+        value,
+        suffix: parse_int_suffix(&raw[suffix_start..]),
+    })
+}
+
+fn parse_hex_suffix(lex: &mut logos::Lexer<TokenKind>) -> Result<IntegerSuffixToken, LexError> {
+    let raw = lex.slice();
+    // Skip "0x" prefix; find first alphabetic that is NOT a hex digit (a-f/A-F)
+    let after_prefix = &raw[2..];
+    let suffix_start = after_prefix
+        .find(|c: char| c.is_alphabetic() && !matches!(c, 'a'..='f' | 'A'..='F'))
+        .map(|i| i + 2)
+        .unwrap_or(raw.len());
+    let digits = raw[2..suffix_start].replace('_', "");
+    let value = i64::from_str_radix(&digits, 16).map_err(|_| LexError::InvalidNumber {
+        text: raw.to_string(),
+        span: Span::new(lex.span().start, lex.span().end),
+    })?;
+    Ok(IntegerSuffixToken {
+        value,
+        suffix: parse_int_suffix(&raw[suffix_start..]),
+    })
 }

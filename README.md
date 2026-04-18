@@ -5,7 +5,7 @@
 [![License: GPL-3.0 + Neuro Exceptions](https://img.shields.io/badge/License-GPLv3%20%2B%20Exceptions-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-397%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-406%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP complete · Phase 1.5 & Phase 2 in progress
 
@@ -59,11 +59,11 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 is complete and Phase 2 is in progress. The following features are fully implemented and tested (**397 Tests Passing**):
+Phase 1 is complete and Phase 2 is in progress. The following features are fully implemented and tested (**406 Tests Passing**):
 
 | Feature | Details |
 |---|---|
-| **Static Typing + Inference** | All integer types (i8–u64), f32/f64, bool, string; explicit `as` casting; contextual numeric literal inference |
+| **Static Typing + Inference** | All integer types (i8–u64), f32/f64, bool, string; explicit `as` casting; contextual numeric literal inference; integer literal type suffixes (`42i64`, `255u8`) |
 | **Functions** | Parameters, explicit and expression-based implicit returns, recursion, forward references |
 | **Control Flow** | if/else/elif, while loops, range-for (`for i in 0..n` and `0..=n`), break, continue |
 | **Mutable Variables** | `val` (immutable) and `mut` (mutable) with type-safe reassignment |
@@ -85,8 +85,11 @@ No ownership or destructor system exists yet. Stack-allocated values (integers, 
 
 ### Prerequisites
 
-- **Rust** 1.85 or later
-- **LLVM 20** with development libraries
+| Requirement | Version | Notes |
+|---|---|---|
+| **Rust** | 1.85+ | Install via [rustup](https://rustup.rs/) |
+| **LLVM 20** | 20.x with dev libs | Platform instructions below |
+| **C linker** | any | `gcc`/`clang` on Linux/macOS; MSVC on Windows |
 
 ---
 
@@ -96,20 +99,19 @@ No ownership or destructor system exists yet. Stack-allocated values (integers, 
 # 1. Install LLVM 20
 sudo pacman -S llvm20
 
-# 2. Install Rust via rustup
+# 2. Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
 
-# 3. Set the LLVM prefix for the build system
+# 3. Set the LLVM prefix (add to ~/.bashrc or ~/.zshrc to persist)
 export LLVM_SYS_201_PREFIX=/usr/lib/llvm20
-# Add to ~/.bashrc or ~/.zshrc to make permanent
 
 # 4. Clone and build
 git clone https://github.com/PanzerPeter/Neuro.git
 cd Neuro
 cargo build --release
 
-# 5. Run tests
+# 5. Run the test suite
 cargo test --workspace
 
 # 6. (Optional) Install the compiler globally
@@ -119,17 +121,29 @@ cargo install --path compiler/neurc
 ### Ubuntu / Debian
 
 ```bash
-# 1. Install LLVM 20
-wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 20
+# 1. Install LLVM 20 via the official APT script
+wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 20
+# Alternatively, use the full dev package set:
+# sudo apt-get install llvm-20 llvm-20-dev llvm-20-tools libpolly-20-dev
 
-# 2. Set the LLVM prefix
+# 2. Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+
+# 3. Set the LLVM prefix (add to ~/.bashrc to persist)
 export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20
 echo 'export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20' >> ~/.bashrc
 
-# 3. Clone and build
+# 4. Clone and build
 git clone https://github.com/PanzerPeter/Neuro.git
 cd Neuro
 cargo build --release
+
+# 5. Run the test suite
+cargo test --workspace
+
+# 6. (Optional) Install the compiler globally
+cargo install --path compiler/neurc
 ```
 
 ### macOS (Homebrew)
@@ -137,14 +151,115 @@ cargo build --release
 ```bash
 # 1. Install LLVM 20
 brew install llvm@20
-export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)
+
+# 2. Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+
+# 3. Set the LLVM prefix (add to ~/.zshrc or ~/.bash_profile to persist)
+export LLVM_SYS_201_PREFIX="$(brew --prefix llvm@20)"
 echo "export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)" >> ~/.zshrc
 
-# 2. Clone and build
+# 4. Clone and build
+git clone https://github.com/PanzerPeter/Neuro.git
+cd Neuro
+cargo build --release
+
+# 5. Run the test suite
+cargo test --workspace
+
+# 6. (Optional) Install the compiler globally
+cargo install --path compiler/neurc
+```
+
+### Windows 10 / 11 (x64)
+
+Windows requires the **MSVC toolchain** (not GNU). Make sure Visual Studio Build
+Tools 2019 or later are installed with the **C++ build tools** workload before
+proceeding.
+
+**Step 1 — Install Visual Studio Build Tools**
+
+Download from [visualstudio.microsoft.com/downloads](https://visualstudio.microsoft.com/downloads/)
+→ *Tools for Visual Studio* → *Build Tools for Visual Studio 2022*.
+Select the **Desktop development with C++** workload.
+
+**Step 2 — Install Rust**
+
+Download and run `rustup-init.exe` from [rustup.rs](https://rustup.rs/).
+When prompted, choose *1) Proceed with standard installation*. Rustup will
+automatically select the `stable-x86_64-pc-windows-msvc` default toolchain.
+
+Open a **new** PowerShell window after installation so the `cargo` and `rustc`
+commands are on your `PATH`.
+
+**Step 3 — Install LLVM 20**
+
+Download the official Windows installer from the LLVM GitHub releases page:
+
+```powershell
+# PowerShell — download and run the installer silently
+$version = "20.1.4"
+$url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/LLVM-$version-win64.exe"
+Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\llvm-installer.exe" -UseBasicParsing
+Start-Process "$env:TEMP\llvm-installer.exe" -ArgumentList "/S /D=C:\LLVM" -Wait
+```
+
+Or download and run the installer manually — install to `C:\LLVM` (or any path
+without spaces).
+
+**Step 4 — Set the LLVM environment variable**
+
+```powershell
+# Set permanently for your user account (no admin required)
+[Environment]::SetEnvironmentVariable(
+    "LLVM_SYS_201_PREFIX", "C:\LLVM",
+    [EnvironmentVariableTarget]::User
+)
+# Also add C:\LLVM\bin to your PATH
+$current = [Environment]::GetEnvironmentVariable("Path", "User")
+[Environment]::SetEnvironmentVariable("Path", "$current;C:\LLVM\bin", "User")
+```
+
+Close and reopen PowerShell so the changes take effect, then verify:
+
+```powershell
+llvm-config --version   # should print 20.x.y
+```
+
+**Step 5 — Clone and build**
+
+```powershell
 git clone https://github.com/PanzerPeter/Neuro.git
 cd Neuro
 cargo build --release
 ```
+
+**Step 6 — Run the test suite**
+
+```powershell
+cargo test --workspace
+```
+
+**Step 7 — (Optional) Install the compiler globally**
+
+```powershell
+cargo install --path compiler/neurc
+# The binary is placed in %USERPROFILE%\.cargo\bin\neurc.exe
+# which is already on PATH after rustup setup.
+```
+
+> **Troubleshooting Windows build errors**
+>
+> - *`llvm-sys` build script cannot find LLVM*: confirm `LLVM_SYS_201_PREFIX`
+>   is set in the **current** shell session (`echo $env:LLVM_SYS_201_PREFIX`)
+>   and points to a directory that contains `bin\llvm-config.exe`.
+> - *`link.exe` not found*: the MSVC Build Tools are not on `PATH`. Run the
+>   build from a **Developer PowerShell** / **x64 Native Tools Command Prompt**
+>   or install the *C++ build tools* workload as described in Step 1.
+> - *Version mismatch (`llvm-sys-201` requires LLVM 20)*: an older LLVM is on
+>   `PATH`. Set `LLVM_SYS_201_PREFIX` explicitly to the LLVM 20 prefix and
+>   ensure `C:\LLVM\bin` precedes any other LLVM entries in `PATH`.
 
 ---
 
@@ -311,7 +426,7 @@ Tensor/AI path: AST → Neuro High-Level IR
 | Phase | Goal | Status |
 |:---:|---|:---:|
 | **1** | Core MVP — types, functions, control flow, LLVM backend | ✅ Complete |
-| **1.5** | Backend upgrade (LLVM 20), string fat pointers, ownership semantics | 🔄 In progress |
+| **1.5** | key updates, string fat pointers, ownership semantics | 🔄 In progress |
 | **2** | Structs, enums, pattern matching, module system, error handling | 🔄 In progress (structs ✅, methods ✅) |
 | **3** | Tensor types, MLIR lowering, DLPack, pool allocator | 📋 Planned |
 | **4** | Automatic differentiation via Enzyme MLIR | 📋 Planned |
@@ -322,18 +437,32 @@ Tensor/AI path: AST → Neuro High-Level IR
 
 ## Development
 
+Set `LLVM_SYS_201_PREFIX` for your platform before running any Cargo command
+(see [Installation](#installation) for the correct path per OS).
+
 ```bash
 # Build the full workspace
-LLVM_SYS_201_PREFIX=/usr/lib/llvm20 cargo build --workspace
+cargo build --workspace
 
 # Run all tests
-LLVM_SYS_201_PREFIX=/usr/lib/llvm20 cargo test --workspace
+cargo test --workspace
 
 # Lint
 cargo clippy --workspace --all-targets -- -D warnings
 
-# Format
+# Format check
+cargo fmt --all -- --check
+
+# Apply formatting
 cargo fmt --all
+```
+
+On Windows, use PowerShell or a Developer Command Prompt. The env var must be
+set in the current session; prefix it inline if needed:
+
+```powershell
+$env:LLVM_SYS_201_PREFIX = "C:\LLVM"
+cargo build --workspace
 ```
 
 ---

@@ -173,6 +173,22 @@ cargo run -p neurc -- compile examples/bitwise_ops.nr
 # Exit code: 1  (READ flag set; WRITE toggled off; EXECUTE never set)
 ```
 
+### [integer_suffixes.nr](integer_suffixes.nr)
+Integer literal type suffixes (`42i64`, `255u8`, `0xFFu8`, `0b1010i32`).
+
+**Features:**
+- All eight suffix variants: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
+- Suffix pins the type without an explicit annotation (`val x = 42i64` infers `i64`)
+- Works with decimal, hex, binary, and octal literals
+- Range violations rejected at compile time (`300u8` is a compile error)
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/integer_suffixes.nr
+./examples/integer_suffixes
+# Exit code: 0
+```
+
 ## Known Limitations
 
 - No arrays yet (Phase 2+)
@@ -202,6 +218,7 @@ For example:
 - factorial.nr returns 120 (5!)
 - fibonacci.nr returns 55 (fibonacci(10))
 - milestone.nr returns 8 (5 + 3)
+- integer_suffixes.nr returns 0 (sum_bytes(10u8, 20u8) - 30)
 
 ## Testing
 

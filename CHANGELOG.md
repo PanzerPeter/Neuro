@@ -11,6 +11,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.12.2] - 2026-04-18
+
+### Documentation
+- Added complete Windows 10/11 installation guide to README (MSVC Build Tools,
+  rustup, LLVM 20 installer, env var setup, PATH, troubleshooting).
+- Aligned Linux/macOS installation sections: added Rust install step and
+  `cargo install` step to Ubuntu/Debian and macOS sections.
+- Replaced hardcoded Linux-only `LLVM_SYS_201_PREFIX=…` prefix in the
+  Development section with a platform-neutral note and a Windows PowerShell
+  snippet.
+
+---
+
+## [1.12.1] - 2026-04-18
+
+### Fixed
+- Windows CI: NSIS installer called with single-string `/S /D=C:\LLVM` argument
+  (array form caused silent misparse, leaving llvm-config in the default path).
+- Windows CI: upgraded pinned LLVM from 20.1.2 → 20.1.4; switched download
+  from `Invoke-WebRequest` to `curl.exe` for reliability on large binaries.
+- Windows CI: added fallback path search (`C:\Program Files\LLVM`) and PATH
+  scan so the step self-heals if the custom install dir is ignored.
+- Verify step: replaced `"$LLVM_SYS_201_PREFIX/bin/llvm-config"` with plain
+  `llvm-config` (from PATH) to avoid Git Bash backslash path failures on
+  Windows runners.
+
+---
+
+## [1.12.0] - 2026-04-18
+
+### Added
+
+- **lexer**: Integer literal type suffixes §1.4 — `42i64`, `255u8`, `0xFFu8`, `0b1010i32`
+  - All eight suffix variants: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
+  - New `TokenKind::IntegerSuffix(IntegerSuffixToken)` emitted by four new regexes (decimal,
+    binary, octal, hex) at `priority = 2`; logos maximal munch picks `42i64` as one token
+  - `IntegerSuffixToken { value: i64, suffix: IntSuffix }` exported from `lexical-analysis`
+  - `IntSuffix` enum added to `shared-types`; `Literal::Integer` now carries `Option<IntSuffix>`
+- **parser**: `parse_prefix` maps `IntegerSuffix` tokens to `Literal::Integer(v, Some(s))`
+- **semantic**: Suffix present → `infer_suffixed_integer_type` bypasses contextual inference,
+  range-checks value, returns the suffix type; `300u8` is a compile error
+- **codegen**: `codegen_literal` emits correct LLVM integer width (i8/i16/i32/i64) for suffix;
+  `type_pass` infers correct expression type for binary ops on suffixed literals
+- **tests**: 6 new integration tests; total 406 passing (was 397)
+
+---
+
 ## [1.11.9] - 2026-04-18
 
 ### Fixed

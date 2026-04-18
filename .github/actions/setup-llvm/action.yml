@@ -62,52 +62,77 @@ runs:
         } >> "$GITHUB_ENV"
 
     # ── Windows ────────────────────────────────────────────────────────────────
-    # KyleMayes/install-llvm-action does not ship static libs required by
-    # llvm-sys in static mode. We use winget/choco + official LLVM release
-    # installer instead, which places a complete installation under
-    # C:\Program Files\LLVM.
+    # KyleMayes/install-llvm-action ships prebuilt shared libs only; llvm-sys
+    # on MSVC requires static libs, so we use the official NSIS installer from
+    # the LLVM GitHub releases page instead.
+    #
+    # NSIS silent-install notes:
+    #   - /S enables headless mode
+    #   - /D= sets the install dir and MUST be the last argument, passed as a
+    #     single string (not an array) so PowerShell doesn't add extra quoting
+    #   - curl.exe (inbox on Windows Server 2022) is more reliable than
+    #     Invoke-WebRequest for large binary downloads
     - name: Install LLVM 20 (Windows)
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'
 
-        $version  = "20.1.2"   # pin to a specific patch for reproducibility
+        $version   = "20.1.4"   # pin to a specific patch for reproducibility
         $installer = "$env:TEMP\llvm-installer.exe"
-        $url = "https://github.com/llvm/llvm-project/releases/download/" +
-               "llvmorg-$version/LLVM-$version-win64.exe"
+        $url       = "https://github.com/llvm/llvm-project/releases/download/" +
+                     "llvmorg-$version/LLVM-$version-win64.exe"
+        $targetDir = 'C:\LLVM'
 
         Write-Host "Downloading LLVM $version from $url"
-        Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+        # curl.exe is more reliable than Invoke-WebRequest for large files
+        curl.exe -fsSL -o $installer $url
+        if ($LASTEXITCODE -ne 0) { throw "curl download failed (exit $LASTEXITCODE)" }
 
-        Write-Host "Running silent install…"
-        Start-Process -FilePath $installer `
-          -ArgumentList '/S', '/D=C:\LLVM' `
-          -Wait -NoNewWindow
+        Write-Host "Running silent NSIS install to $targetDir ..."
+        # Single-string ArgumentList: NSIS parses its own raw command line via
+        # GetCommandLine(), so /D= must be last and must not be quoted.
+        $proc = Start-Process -FilePath $installer `
+                  -ArgumentList "/S /D=$targetDir" `
+                  -Wait -PassThru
+        Write-Host "Installer exit code: $($proc.ExitCode)"
 
-        $llvmConfig = 'C:\LLVM\bin\llvm-config.exe'
-        if (-not (Test-Path $llvmConfig)) {
-          Write-Error "llvm-config not found after install"
-          exit 1
+        # Locate llvm-config — fall back to the default NSIS path if /D= was
+        # ignored (older NSIS builds sometimes do this).
+        $candidates = @("$targetDir\bin\llvm-config.exe",
+                        'C:\Program Files\LLVM\bin\llvm-config.exe')
+        $llvmConfig = $null
+        foreach ($c in $candidates) {
+          if (Test-Path $c) { $llvmConfig = $c; $targetDir = Split-Path (Split-Path $c); break }
+        }
+        if (-not $llvmConfig) {
+          # Last resort: check PATH (e.g. if a system-wide LLVM is already present)
+          $inPath = Get-Command llvm-config.exe -ErrorAction SilentlyContinue
+          if ($inPath) {
+            $llvmConfig = $inPath.Path
+            $targetDir  = Split-Path (Split-Path $llvmConfig)
+          } else {
+            throw "llvm-config.exe not found after install (exit code $($proc.ExitCode)). Searched: $($candidates -join ', ')"
+          }
         }
 
         $detected = & $llvmConfig --version
-        Write-Host "Installed LLVM version: $detected"
+        Write-Host "Detected LLVM version: $detected  (prefix: $targetDir)"
         if ($detected -notmatch '^20\.') {
-          Write-Error "Unexpected LLVM version: $detected"
-          exit 1
+          throw "Unexpected LLVM version '$detected' — expected 20.x"
         }
 
         # Persist env for subsequent steps
-        "LLVM_SYS_201_PREFIX=C:\LLVM"      | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-        "C:\LLVM\bin"                        | Out-File $env:GITHUB_PATH -Append -Encoding utf8
+        "LLVM_SYS_201_PREFIX=$targetDir" | Out-File $env:GITHUB_ENV  -Append -Encoding utf8
+        "$targetDir\bin"                  | Out-File $env:GITHUB_PATH -Append -Encoding utf8
 
-        # llvm-sys on Windows with MSVC links statically — do NOT set LLVM_LINK_LLVM_DYLIB
+        # llvm-sys on Windows/MSVC links statically — do NOT set LLVM_LINK_LLVM_DYLIB
 
     - name: Verify LLVM prefix is set
       shell: bash
       run: |
         : "${LLVM_SYS_201_PREFIX:?LLVM_SYS_201_PREFIX is not set — LLVM install failed}"
         echo "LLVM_SYS_201_PREFIX = $LLVM_SYS_201_PREFIX"
-        # Confirm llvm-config is reachable and reports the correct major version
-        "$LLVM_SYS_201_PREFIX/bin/llvm-config" --version
+        # Use llvm-config from PATH (bin dir was added above) to avoid
+        # backslash path issues on Windows runners using Git Bash.
+        llvm-config --version

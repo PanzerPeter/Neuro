@@ -3,8 +3,7 @@ use crate::errors::TypeError;
 use crate::types::Type;
 use ast_types::FieldInit;
 use ast_types::{BinaryOp, Expr, UnaryOp};
-use shared_types::Literal;
-use shared_types::Span;
+use shared_types::{Literal, Span};
 use std::collections::HashMap;
 
 impl TypeChecker {
@@ -67,9 +66,12 @@ impl TypeChecker {
     pub(crate) fn check_expr(&mut self, expr: &Expr, expected: Option<&Type>) -> Option<Type> {
         match expr {
             Expr::Literal(lit, span) => match lit {
-                Literal::Integer(value) => {
-                    // Use contextual type inference for integer literals
-                    Some(self.infer_integer_type(*value, expected, *span))
+                Literal::Integer(value, suffix_opt) => {
+                    if let Some(suffix) = suffix_opt {
+                        Some(self.infer_suffixed_integer_type(*value, suffix, *span))
+                    } else {
+                        Some(self.infer_integer_type(*value, expected, *span))
+                    }
                 }
                 Literal::Float(_) => {
                     // Use contextual type inference for float literals

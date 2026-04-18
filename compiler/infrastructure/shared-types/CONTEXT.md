@@ -5,7 +5,7 @@ Provide lightweight, zero-business-logic data structures used universally across
 
 ## Entry Point
 - Type: Library (no entry function — pure data)
-- Public types: `Span`, `Identifier`, `Literal`
+- Public types: `Span`, `Identifier`, `Literal`, `IntSuffix`
 
 ## Data Ownership
 - Tables: none
@@ -18,3 +18,8 @@ No upstream dependencies within the NEURO workspace. This is the lowest-level in
 
 ## Notes
 `Span` is a half-open byte-offset range `[start, end)` used by every AST node and token for accurate error reporting. `Identifier` wraps a `String` name with a `Span`. `Literal` enumerates all compile-time constant value kinds (integer, float, string, bool).
+
+`IntSuffix` is a `Copy` enum enumerating the eight integer literal type suffixes (`I8`–`U64`). It is carried by `Literal::Integer(i64, Option<IntSuffix>)`: `None` means no suffix was written (contextual inference applies); `Some(s)` means the suffix overrides inference and pins the type.
+
+## Recent Updates
+- 2026-04-18: Added `IntSuffix` enum; changed `Literal::Integer(i64)` → `Literal::Integer(i64, Option<IntSuffix>)` to carry explicit type suffixes from the lexer through to semantic analysis.

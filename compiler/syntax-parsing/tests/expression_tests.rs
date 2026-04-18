@@ -10,7 +10,7 @@ fn test_parse_integer_literal() {
     assert!(result.is_ok());
     let expr = result.unwrap();
     match expr {
-        Expr::Literal(Literal::Integer(n), _) => assert_eq!(n, 42),
+        Expr::Literal(Literal::Integer(n, _), _) => assert_eq!(n, 42),
         _ => panic!("Expected integer literal, got {:?}", expr),
     }
 }
@@ -242,7 +242,7 @@ fn test_parse_parenthesized_expression() {
     let expr = result.unwrap();
     match expr {
         Expr::Paren(inner, _) => match *inner {
-            Expr::Literal(Literal::Integer(n), _) => assert_eq!(n, 42),
+            Expr::Literal(Literal::Integer(n, _), _) => assert_eq!(n, 42),
             _ => panic!("Expected integer literal inside parens"),
         },
         _ => panic!("Expected parenthesized expression, got {:?}", expr),
@@ -260,7 +260,7 @@ fn test_parse_complex_parenthesized() {
         } => {
             assert_eq!(op, BinaryOp::Multiply);
             assert!(matches!(*left, Expr::Paren(_, _)));
-            assert!(matches!(*right, Expr::Literal(Literal::Integer(4), _)));
+            assert!(matches!(*right, Expr::Literal(Literal::Integer(4, _), _)));
         }
         _ => panic!("Expected binary expression, got {:?}", expr),
     }
@@ -332,7 +332,7 @@ fn test_operator_precedence_mul_over_add() {
             op, left, right, ..
         } => {
             assert_eq!(op, BinaryOp::Add);
-            assert!(matches!(*left, Expr::Literal(Literal::Integer(2), _)));
+            assert!(matches!(*left, Expr::Literal(Literal::Integer(2, _), _)));
             match *right {
                 Expr::Binary { op, .. } => assert_eq!(op, BinaryOp::Multiply),
                 _ => panic!("Expected multiplication on right side"),
@@ -352,7 +352,7 @@ fn test_operator_precedence_div_over_sub() {
             op, left, right, ..
         } => {
             assert_eq!(op, BinaryOp::Subtract);
-            assert!(matches!(*left, Expr::Literal(Literal::Integer(10), _)));
+            assert!(matches!(*left, Expr::Literal(Literal::Integer(10, _), _)));
             match *right {
                 Expr::Binary { op, .. } => assert_eq!(op, BinaryOp::Divide),
                 _ => panic!("Expected division on right side"),
@@ -390,7 +390,7 @@ fn test_operator_associativity_left() {
         } => {
             assert_eq!(op, BinaryOp::Add);
             assert!(matches!(*left, Expr::Binary { .. }));
-            assert!(matches!(*right, Expr::Literal(Literal::Integer(3), _)));
+            assert!(matches!(*right, Expr::Literal(Literal::Integer(3, _), _)));
         }
         _ => panic!("Expected binary expression, got {:?}", expr),
     }
