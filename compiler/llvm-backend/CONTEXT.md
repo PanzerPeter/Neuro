@@ -1,7 +1,7 @@
 # llvm-backend
 
 ## Purpose
-Emit native object code from a type-checked NEURO AST via LLVM IR generation.
+Emit native object code from a type-checked Neuro AST via LLVM IR generation.
 
 ## Entry Point
 - Type: Library function
@@ -20,7 +20,7 @@ Emit native object code from a type-checked NEURO AST via LLVM IR generation.
 - diagnostics — error type infrastructure
 
 ## Notes
-inkwell 0.8.0 with feature `llvm20-1` (LLVM 20 bindings) is a third-party crate, not NEURO-owned Shared Kernel.
+inkwell 0.8.0 with feature `llvm20-1` (LLVM 20 bindings) is a third-party crate, not Neuro-owned Shared Kernel.
 Requires LLVM 20 installed with MLIR enabled; set `LLVM_SYS_201_PREFIX` to the LLVM 20
 prefix (e.g. `/usr/lib/llvm20`) before building.
 `semantic-analysis` has no production dependency here; neurc orchestrates ordering so
@@ -85,7 +85,7 @@ re-querying the AST.
 ## Future: MLIR Integration (Phase 3+)
 When tensor operations are introduced, `melior` (Rust MLIR bindings, targeting the same
 LLVM 20 / MLIR 20 installation) will be added alongside inkwell. The lowering strategy
-will be: AST → NEURO High-Level IR → MLIR dialects (linalg/tensor/func/arith) →
+will be: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arith) →
 Enzyme MLIR AD pass → GPU dialects (nvgpu/rocdl) or `llvm` dialect → inkwell for final
 LLVM IR emission. inkwell remains the terminal code-emission layer in all paths.
 

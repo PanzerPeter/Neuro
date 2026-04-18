@@ -1,6 +1,6 @@
 # Functions
 
-Functions are the primary unit of code organization in NEURO.
+Functions are the primary unit of code organization in Neuro.
 
 ## Function Declaration
 
@@ -229,7 +229,7 @@ func main() -> i32 {
 
 ### Tail Recursion
 
-While NEURO doesn't yet optimize tail calls, you can write tail-recursive functions:
+While Neuro doesn't yet optimize tail calls, you can write tail-recursive functions:
 
 ```neuro
 func factorial_tail(n: i32, acc: i32) -> i32 {
@@ -267,7 +267,7 @@ func is_odd(n: i32) -> bool {
 
 ## The main Function
 
-Every NEURO program requires a `main` function as the entry point:
+Every Neuro program requires a `main` function as the entry point:
 
 ```neuro
 func main() -> i32 {

@@ -85,20 +85,31 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         rust_version: [stable, nightly]
+        # nightly is opt-in for experimental coverage — failures are
+        # informational only and must not block merges
+        include:
+          - rust_version: nightly
+            allow_failure: true
+        exclude: []
+    # Allow nightly legs to fail without failing the whole workflow
+    continue-on-error: ${{ matrix.rust_version == 'nightly' }}
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust (${{ matrix.rust_version }})
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust_version }}
-          
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
-        
+        with:
+          # Separate cache keys per OS + toolchain to avoid poisoning
+          key: ${{ matrix.os }}-${{ matrix.rust_version }}
+
       - name: Setup LLVM 20
         uses: ./.github/actions/setup-llvm
-        
+
       - name: Run Tests
         run: cargo test --workspace --all-targets --verbose
 
@@ -141,6 +152,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}-stable
       - name: Setup LLVM 20
         uses: ./.github/actions/setup-llvm
       - name: Setup Python
@@ -169,19 +182,21 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}-stable
       - name: Setup LLVM 20
         uses: ./.github/actions/setup-llvm
-        
+
       - name: Build Compiler Binary
         run: cargo build -p neurc --release
-        
+
       - name: Upload Compiler Artifact (Unix)
         if: runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: neurc-${{ runner.os }}
           path: target/release/neurc
-          
+
       - name: Upload Compiler Artifact (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4

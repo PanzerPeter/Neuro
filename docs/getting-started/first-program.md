@@ -1,16 +1,16 @@
-# Your First NEURO Program
+# Your First Neuro Program
 
-This tutorial walks you through writing, compiling, and running your first NEURO program.
+This tutorial walks you through writing, compiling, and running your first Neuro program.
 
 ## Prerequisites
 
-- NEURO compiler installed ([Installation Guide](installation.md))
+- Neuro compiler installed ([Installation Guide](installation.md))
 - Text editor or IDE
 - Basic programming knowledge
 
 ## Step 1: Create a Project Directory
 
-Create a directory for your NEURO programs:
+Create a directory for your Neuro programs:
 
 ```bash
 mkdir neuro-projects
@@ -27,7 +27,7 @@ func main() -> i32 {
 }
 ```
 
-This is the simplest valid NEURO program:
+This is the simplest valid Neuro program:
 - `func` declares a function
 - `main` is the entry point (required)
 - `-> i32` specifies the return type (32-bit signed integer)
@@ -130,7 +130,7 @@ echo $LASTEXITCODE  # Output: 30
 
 ## Using Mutable Variables
 
-NEURO supports mutable variables with the `mut` keyword:
+Neuro supports mutable variables with the `mut` keyword:
 
 ```neuro
 func main() -> i32 {
@@ -180,7 +180,7 @@ echo $LASTEXITCODE  # Output: 8
 
 ## Expression-Based Returns
 
-NEURO supports implicit returns (Rust-style):
+Neuro supports implicit returns (Rust-style):
 
 ```neuro
 func add(a: i32, b: i32) -> i32 {
@@ -243,7 +243,7 @@ func main() -> i32 {
 
 ### Integers
 
-NEURO supports multiple integer types:
+Neuro supports multiple integer types:
 
 ```neuro
 func main() -> i32 {

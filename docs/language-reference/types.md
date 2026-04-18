@@ -1,6 +1,6 @@
 # Type System
 
-NEURO is a statically typed language with explicit type annotations and planned type inference.
+Neuro is a statically typed language with explicit type annotations and planned type inference.
 
 ## Current Status
 
@@ -20,7 +20,7 @@ NEURO is a statically typed language with explicit type annotations and planned 
 
 ### Integer Types
 
-NEURO supports 8 integer types with different sizes and signedness:
+Neuro supports 8 integer types with different sizes and signedness:
 
 #### Signed Integers
 
@@ -240,7 +240,7 @@ func returns_nothing() {
 
 ### Strict Type System
 
-NEURO uses strict type checking with no implicit conversions in Phase 1:
+Neuro uses strict type checking with no implicit conversions in Phase 1:
 
 ```neuro
 func strict_types() -> i32 {
@@ -290,6 +290,7 @@ func returns_i32() -> i32 {
 - String type with fat pointer ABI (`{ ptr, i64 }`)
 - Explicit type annotations
 - Contextual numeric literal inference with range validation
+- Explicit type conversions via `as` operator
 - Function types
 - Strict type checking
 - Type mismatch error reporting
@@ -301,7 +302,6 @@ func returns_i32() -> i32 {
 - Arrays with fixed size
 - Tuples for grouping values
 - Generic functions with monomorphization
-- Explicit type conversions (`as` operator)
 
 ### Phase 3 (Planned)
 
@@ -318,7 +318,7 @@ func returns_i32() -> i32 {
 
 ## Type Safety Guarantees
 
-NEURO's type system provides:
+Neuro's type system provides:
 
 1. **No undefined behavior from type errors**: All type errors caught at compile time
 2. **No implicit conversions**: Explicit is better than implicit
@@ -430,7 +430,7 @@ val is_valid: i32 = 1  // Less clear
 
 ## Type Conversion
 
-Explicit type conversions are supported via the `as` operator. There are no implicit type conversions in NEURO.
+Explicit type conversions are supported via the `as` operator. There are no implicit type conversions in Neuro.
 
 ```neuro
 func convert_types() -> i64 {

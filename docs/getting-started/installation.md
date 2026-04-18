@@ -1,6 +1,6 @@
 # Installation Guide
 
-This guide covers installation of the NEURO compiler on Linux and macOS.
+This guide covers installation of the Neuro compiler on Linux and macOS.
 
 ## Prerequisites
 
@@ -184,7 +184,7 @@ Check GitHub Issues if an unexpected test fails.
 
 ---
 
-## Updating NEURO
+## Updating Neuro
 
 ```bash
 cd Neuro

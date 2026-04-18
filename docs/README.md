@@ -1,4 +1,4 @@
-# NEURO Documentation
+# Neuro Documentation
 
 **Status**: Phase 1 Complete, Phase 1.5 & Phase 2 in progress — Alpha Development
 
@@ -13,7 +13,7 @@
 
 ### Getting Started
 
-- [Installation Guide](getting-started/installation.md) — Install NEURO on Linux or macOS
+- [Installation Guide](getting-started/installation.md) — Install Neuro on Linux or macOS
 - [Quick Start Guide](getting-started/quick-start.md) — Basic usage and workflow
 - [Your First Program](getting-started/first-program.md) — Step-by-step tutorial
 
@@ -24,7 +24,8 @@
 - [Functions](language-reference/functions.md) — Declarations, parameters, implicit returns
 - [Expressions](language-reference/expressions.md) — Expression syntax and evaluation
 - [Control Flow](language-reference/control-flow.md) — if/else, while, range-for, break/continue
-- [Operators](language-reference/operators.md) — Arithmetic, comparison, logical operators
+- [Operators](language-reference/operators.md) — Arithmetic, comparison, logical, bitwise, cast operators
+- [Structs](language-reference/structs.md) — User-defined types, methods, associated functions
 
 ### User Guides
 
@@ -39,9 +40,9 @@
 - [Semantic Analysis](compiler/components/semantic-analysis.md) — Type checking
 - [LLVM Backend](compiler/components/llvm-backend.md) — Native code generation
 
-## What is NEURO?
+## What is Neuro?
 
-NEURO is a compiled language designed for high-performance AI workloads. It generates native code via an LLVM 20 backend, with a roadmap toward MLIR-based tensor operations, IR-level automatic differentiation (Enzyme), and GPU acceleration via MLIR GPU dialects.
+Neuro is a compiled language designed for high-performance AI workloads. It generates native code via an LLVM 20 backend, with a roadmap toward MLIR-based tensor operations, IR-level automatic differentiation (Enzyme), and GPU acceleration via MLIR GPU dialects.
 
 Key design goals:
 
@@ -93,7 +94,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.8.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 392 tests passing across all components
+- 397 tests passing across all components
 
 ## Compilation Pipeline
 
@@ -109,7 +110,7 @@ Source File (.nr)
 **Planned extension (Phase 3+):**
 ```
 Tensor/AI path:
-  → NEURO High-Level IR
+  → Neuro High-Level IR
   → MLIR (linalg / tensor / func / arith)
   → Enzyme MLIR AD pass (@grad)
   → GPU dialects (nvgpu / rocdl / Triton)  or  llvm dialect
@@ -185,7 +186,7 @@ See [Installation Guide](getting-started/installation.md) for other distribution
 
 ## Architecture
 
-NEURO uses **Vertical Slice Architecture (VSA)** — organized by language capabilities, not technical layers.
+Neuro uses **Vertical Slice Architecture (VSA)** — organized by language capabilities, not technical layers.
 
 Principles:
 1. **Slice Independence** — each feature crate is self-contained
@@ -209,10 +210,10 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 - [README.md](../README.md) — project overview
 - [CHANGELOG.md](../CHANGELOG.md) — version history
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — contribution guidelines and architecture rules
-- [LICENSE](../LICENSE) — GPL v3.0 with NEURO Exceptions
+- [LICENSE](../LICENSE) — GPL v3.0 with Neuro Exceptions
 
 ---
 
-**Last Updated**: 2026-04-10
+**Last Updated**: 2026-04-18
 **Version**: Phase 1 Complete / Phase 1.5 & Phase 2 in progress
 **Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.8.0

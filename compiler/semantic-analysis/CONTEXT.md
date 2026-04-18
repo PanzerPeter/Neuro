@@ -1,7 +1,7 @@
 # semantic-analysis
 
 ## Purpose
-Validate type correctness and scope rules of a parsed NEURO program before code generation is attempted.
+Validate type correctness and scope rules of a parsed Neuro program before code generation is attempted.
 
 ## Entry Point
 - Type: Library function

@@ -9,10 +9,11 @@ Expressions are code constructs that evaluate to a value.
 Values written directly in code:
 
 ```neuro
-42              // Integer literal (i32)
-3.14            // Float literal (f64)
+42              // Integer literal (i32 by default)
+3.14            // Float literal (f64 by default)
 true            // Boolean literal
 false           // Boolean literal
+"hello"         // String literal (type: string)
 ```
 
 ### Identifiers
@@ -40,16 +41,29 @@ flag && ready   // Logical AND
 Single operand with operator:
 
 ```neuro
--x              // Negation
+-x              // Arithmetic negation
 !flag           // Logical NOT
+~mask           // Bitwise NOT (integer types only)
+```
+
+### Cast Expressions
+
+Explicit numeric type conversion:
+
+```neuro
+n as f64        // Integer to float
+pi as i32       // Float to integer (truncates toward zero)
+flag as i32     // Boolean to integer (false → 0, true → 1)
 ```
 
 ### Function Call Expressions
 
 ```neuro
-add(5, 3)                   // Simple call
+add(5, 3)                   // Free function call
 double(square(x))           // Nested calls
 max(min(a, b), c)           // Multiple nesting
+c.add(32)                   // Method call (instance method)
+Point::new(1, 2)            // Associated function call
 ```
 
 ### Struct Literal Expressions
@@ -85,27 +99,34 @@ x / (y + z)     // Force addition before division
 
 ## Operator Precedence
 
-Higher precedence operators evaluate first:
+Higher precedence operators evaluate first. Full table from highest to lowest:
 
-| Precedence | Operators | Associativity | Description |
-|------------|-----------|---------------|-------------|
-| 9 (Highest) | `.` | Left | Field access |
-| 8 | `(…)` | Left | Function call |
-| 7 | `-` (unary), `!` | Right | Unary negation, logical NOT |
-| 6 | `*`, `/`, `%` | Left | Multiplication, division, modulo |
-| 5 | `+`, `-` | Left | Addition, subtraction |
-| 4 | `<`, `>`, `<=`, `>=` | Left | Comparisons |
-| 3 | `==`, `!=` | Left | Equality |
-| 2 | `&&` | Left | Logical AND |
-| 1 (Lowest) | `\|\|` | Left | Logical OR |
+| Level | Operators | Associativity | Description |
+|-------|-----------|---------------|-------------|
+| (highest) | `.` | Left | Field access |
+| | `(…)` | Left | Function call / method call |
+| 2 | `-` (unary), `!`, `~` | Right | Negation, logical NOT, bitwise NOT |
+| 3 | `as` | Left | Type cast |
+| 5 | `*`, `/`, `%` | Left | Multiply, divide, modulo |
+| 6 | `+`, `-` | Left | Addition, subtraction |
+| 7 | `<<` | Left | Left shift |
+| 8 | `&` | Left | Bitwise AND |
+| 9 | `^` | Left | Bitwise XOR |
+| 10 | `\|` | Left | Bitwise OR |
+| 11 | `<`, `>`, `<=`, `>=`, `==`, `!=` | None | Comparison / equality |
+| 12 | `&&` | Left | Logical AND |
+| 13 (lowest) | `\|\|` | Left | Logical OR |
 
 **Examples**:
 
 ```neuro
-a + b * c       // Parsed as: a + (b * c)
-a < b == c < d  // Parsed as: (a < b) == (c < d)
-!a && b         // Parsed as: (!a) && b
-a || b && c     // Parsed as: a || (b && c)
+a + b * c         // Parsed as: a + (b * c)
+a & b + c         // Parsed as: a & (b + c)   — arithmetic before bitwise
+a | b & c         // Parsed as: a | (b & c)   — AND before OR
+a < b == c < d    // Parsed as: (a < b) == (c < d)
+!a && b           // Parsed as: (!a) && b
+a || b && c       // Parsed as: a || (b && c)
+n as f64 + 1.0    // Parsed as: (n as f64) + 1.0
 ```
 
 ## Expression-Based Returns

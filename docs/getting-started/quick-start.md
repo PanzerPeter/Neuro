@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get up and running with NEURO in 5 minutes.
+Get up and running with Neuro in 5 minutes.
 
 ## Prerequisites
 
@@ -22,7 +22,7 @@ neurc --version
 
 ## Checking a Program
 
-NEURO can validate syntax and types without compiling:
+Neuro can validate syntax and types without compiling:
 
 ```bash
 cargo run -p neurc -- check examples/hello.nr
@@ -35,7 +35,7 @@ Type checking passed!
 
 ## Compiling a Program
 
-Compile a NEURO program to a native executable:
+Compile a Neuro program to a native executable:
 
 ```bash
 cargo run -p neurc -- compile examples/hello.nr
@@ -72,7 +72,7 @@ The hello.nr program returns 26.
 
 ### hello.nr
 
-A minimal NEURO program:
+A minimal Neuro program:
 
 ```neuro
 func main() -> i32 {
@@ -162,7 +162,7 @@ neurc compile ../path/to/program.nr
 
 ## Error Messages
 
-NEURO provides detailed error messages with source locations.
+Neuro provides detailed error messages with source locations.
 
 ### Syntax Error Example
 
@@ -199,7 +199,7 @@ Type error: Type mismatch
 
 ## Development Workflow
 
-1. **Write** your NEURO code in a `.nr` file
+1. **Write** your Neuro code in a `.nr` file
 2. **Check** syntax and types: `neurc check program.nr`
 3. **Compile** to executable: `neurc compile program.nr`
 4. **Run** the program: `./program` (Unix) or `.\program.exe` (Windows)
@@ -237,41 +237,52 @@ This shows:
 - LLVM IR generation
 - Linking process
 
-## Phase 1 Feature Summary
+## Current Feature Summary
 
-The current compiler (Phase 1, ~92% complete) supports:
+Phase 1 is complete. Phase 1.5 and Phase 2 are in progress. The current compiler supports:
 
 ### Types
 - Integers: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
 - Floats: `f32`, `f64`
 - Boolean: `bool`
+- Strings: `string` literals with escape sequences (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==`/`!=` for byte-level comparison
+- Structs: user-defined types with nominal typing
 
-### Variables
+### Variables & Constants
 - Immutable variables: `val x: i32 = 10`
 - Mutable variables: `mut counter: i32 = 0`
 - Variable reassignment: `counter = counter + 1`
+- Compile-time constants: `const MAX: i32 = 100` at module and function scope
+- Contextual numeric literal inference (e.g. `val n = 42` infers `i32`)
 
 ### Functions
-- Function definitions with parameters
-- Explicit return statements
-- Expression-based returns (implicit return of last expression)
+- Function definitions with typed parameters
+- Explicit `return` statements
+- Expression-based implicit returns (trailing expression)
+- Recursion and forward references
+- `impl` blocks with `&self` methods and `TypeName::func` associated functions
 
 ### Control Flow
-- If/else statements with conditions
-- Else-if chaining
+- `if` / `else if` / `else` chains
+- `while` loops
+- Range-for loops: `for i in 0..n` (exclusive) and `for i in 0..=n` (inclusive)
+- `break` and `continue`
 
 ### Operators
 - Arithmetic: `+`, `-`, `*`, `/`, `%`
 - Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
 - Logical: `&&`, `||`, `!`
+- Bitwise: `&`, `|`, `^`, `~`, `<<` (integer types only)
+- Compound assignment: `+=`, `-=`, `*=`, `/=`, `%=`
+- Type cast: `as` for numeric conversions and bool-to-int
 
-### Not Yet Implemented (Phase 2+)
-- Loops (`while`, `for`)
-- Structs and custom types
-- Arrays
-- Strings (basic support pending)
-- Module system
-- Type inference for numeric literals
+### Not Yet Implemented (Phase 1.5 / Phase 2)
+- Ownership and borrow checker (Phase 1.5)
+- If/else as assignable expression: `val x = if c { a } else { b }` (Phase 1.5)
+- String interpolation (Phase 1.5)
+- Enums, pattern matching, tuples (Phase 2)
+- Module system and imports (Phase 2)
+- Generic functions and traits (Phase 2)
 
 ## Common Issues
 

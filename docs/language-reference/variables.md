@@ -77,14 +77,14 @@ Use `val` to declare immutable variables:
 
 ```neuro
 val x: i32 = 42
-val name: string = "NEURO"  // String type pending
+val name: string = "Neuro"  // String type pending
 val pi: f64 = 3.14159
 ```
 
 **Key points**:
 - Declared with `val` keyword
 - Cannot be reassigned after initialization
-- Type annotation required (Phase 1)
+- Type annotation optional when type can be inferred from a numeric literal
 - Must be initialized at declaration
 
 ### Mutable Variables
@@ -104,7 +104,7 @@ flag = true
 - Declared with `mut` keyword
 - Can be reassigned after initialization
 - Reassigned value must match original type
-- Type annotation required (Phase 1)
+- Type annotation optional when type can be inferred from a numeric literal
 
 ## Syntax
 
@@ -143,7 +143,7 @@ func variables() -> i32 {
 
 ### Immutable by Default
 
-Variables are immutable by default in NEURO:
+Variables are immutable by default in Neuro:
 
 ```neuro
 val x: i32 = 10
@@ -214,31 +214,19 @@ func counter() -> i32 {
 
 ## Type Annotations
 
-### Required Type Annotations (Phase 1)
-
-Currently, all variable declarations require explicit type annotations:
+Type annotations are optional when the type can be inferred from the initializer. Numeric literal inference is fully implemented:
 
 ```neuro
-val x: i32 = 42           // Required
-val pi: f64 = 3.14159     // Required
-val flag: bool = true     // Required
+val x: i32 = 42           // Explicit annotation
+val pi: f64 = 3.14159     // Explicit annotation
+val flag: bool = true     // Explicit annotation
+
+val n = 100               // Inferred i32 (default for integer literals)
+val ratio = 3.14          // Inferred f64 (default for float literals)
+mut count = 0             // Inferred i32
 ```
 
-### Type Inference (Planned)
-
-In future phases, type annotations will be optional for variables with initializers:
-
-```neuro
-// Phase 1 completion (pending)
-val x = 42          // Will infer i32
-val pi = 3.14       // Will infer f64
-val flag = true     // Will infer bool
-
-// But explicit types still work
-val x: i32 = 42
-val pi: f64 = 3.14
-val flag: bool = true
-```
+Non-numeric types (bool, string, struct) require an explicit annotation or a typed initializer. Function parameters and return types always require explicit annotations.
 
 ## Variable Scope
 
@@ -343,11 +331,9 @@ x = 42      // Initialize before use
 ```neuro
 func sum_to_n(n: i32) -> i32 {
     mut sum: i32 = 0
-    mut i: i32 = 1
-    // Loop when implemented (Phase 2)
-    // for i in 1..=n {
-    //     sum = sum + i
-    // }
+    for i in 1..=n {
+        sum = sum + i
+    }
     return sum
 }
 ```

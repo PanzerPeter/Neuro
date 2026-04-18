@@ -321,12 +321,23 @@ func is_positive_verbose(x: i32) -> bool {
 }
 ```
 
-## Future Features (Phase 2+)
+## Future Features (Phase 1.5 / Phase 2)
 
-### For Loops (Phase 2)
+### If as Assignable Expression (Phase 1.5)
+
+Assigning an if/else result directly to a variable is not yet supported:
 
 ```neuro
-// In Phase 1.5, both 0..10 and 0..=10 are supported
+// Not yet implemented
+val x: i32 = if condition { 1 } else { 0 }
+```
+
+Using if/else as the trailing expression of a function body already works:
+
+```neuro
+func abs(x: i32) -> i32 {
+    if x >= 0 { x } else { -x }  // OK: implicit return from if/else
+}
 ```
 
 ### Pattern Matching (Phase 2)
@@ -338,13 +349,6 @@ match value {
     1 => "one",
     _ => "other",
 }
-```
-
-### If as Expression (Phase 2)
-
-```neuro
-// Not yet implemented
-val x: i32 = if condition { 1 } else { 0 }
 ```
 
 ## References

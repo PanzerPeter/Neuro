@@ -193,7 +193,7 @@ impl Foo {
 
 ## Nominal Typing
 
-NEURO uses nominal typing for structs: two struct types are compatible only if they have the same name, regardless of field layout.
+Neuro uses nominal typing for structs: two struct types are compatible only if they have the same name, regardless of field layout.
 
 ## Error Types
 

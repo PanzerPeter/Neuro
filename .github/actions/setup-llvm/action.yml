@@ -1,41 +1,113 @@
 name: "Setup LLVM 20"
-description: "Installs LLVM 20 for compiling the Neuro compiler and sets LLVM_SYS_201_PREFIX"
+description: "Installs LLVM 20 and sets LLVM_SYS_201_PREFIX for llvm-sys-201.x"
 inputs: {}
+
 runs:
   using: "composite"
   steps:
+
+    # ── Linux ──────────────────────────────────────────────────────────────────
     - name: Install LLVM 20 (Linux)
       if: runner.os == 'Linux'
       shell: bash
       run: |
+        set -euo pipefail
+
         wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
           | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
-        echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" \
-          | sudo tee /etc/apt/sources.list.d/llvm.list
-        sudo apt-get update -q
-        sudo apt-get install -y llvm-20 llvm-20-dev libpolly-20-dev
-        /usr/lib/llvm-20/bin/llvm-config --version
-        echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
-        echo "LLVM_LINK_LLVM_DYLIB=1" >> $GITHUB_ENV
 
+        echo "deb http://apt.llvm.org/$(lsb_release -cs)/ \
+          llvm-toolchain-$(lsb_release -cs)-20 main" \
+          | sudo tee /etc/apt/sources.list.d/llvm.list
+
+        sudo apt-get update -q
+        sudo apt-get install -y \
+          llvm-20 \
+          llvm-20-dev \
+          llvm-20-tools \
+          libpolly-20-dev \
+          libzstd-dev \
+          zlib1g-dev
+
+        # Sanity-check: ensure llvm-config resolves the correct version
+        /usr/lib/llvm-20/bin/llvm-config --version | grep -E "^20\." \
+          || { echo "ERROR: unexpected LLVM version"; exit 1; }
+
+        {
+          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20"
+          echo "LLVM_LINK_LLVM_DYLIB=1"
+          echo "PATH=/usr/lib/llvm-20/bin:$PATH"
+        } >> "$GITHUB_ENV"
+
+    # ── macOS ──────────────────────────────────────────────────────────────────
     - name: Install LLVM 20 (macOS)
       if: runner.os == 'macOS'
       shell: bash
       run: |
-        brew update
-        brew install llvm@20
-        LLVM_PREFIX="$(brew --prefix llvm@20)"
-        "$LLVM_PREFIX/bin/llvm-config" --version
-        echo "LLVM_SYS_201_PREFIX=$LLVM_PREFIX" >> $GITHUB_ENV
+        set -euo pipefail
 
+        # Unlink any existing LLVM to avoid keg-only conflicts
+        brew unlink llvm 2>/dev/null || true
+        brew install llvm@20
+
+        LLVM_PREFIX="$(brew --prefix llvm@20)"
+
+        "$LLVM_PREFIX/bin/llvm-config" --version | grep -E "^20\." \
+          || { echo "ERROR: unexpected LLVM version"; exit 1; }
+
+        {
+          echo "LLVM_SYS_201_PREFIX=$LLVM_PREFIX"
+          echo "PATH=$LLVM_PREFIX/bin:$PATH"
+          # macOS links statically by default — do NOT set LLVM_LINK_LLVM_DYLIB
+        } >> "$GITHUB_ENV"
+
+    # ── Windows ────────────────────────────────────────────────────────────────
+    # KyleMayes/install-llvm-action does not ship static libs required by
+    # llvm-sys in static mode. We use winget/choco + official LLVM release
+    # installer instead, which places a complete installation under
+    # C:\Program Files\LLVM.
     - name: Install LLVM 20 (Windows)
       if: runner.os == 'Windows'
-      uses: KyleMayes/install-llvm-action@v2
-      id: llvm-win
-      with:
-        version: "20"
-        
-    - name: Set LLVM_SYS_201_PREFIX (Windows)
-      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+
+        $version  = "20.1.2"   # pin to a specific patch for reproducibility
+        $installer = "$env:TEMP\llvm-installer.exe"
+        $url = "https://github.com/llvm/llvm-project/releases/download/" +
+               "llvmorg-$version/LLVM-$version-win64.exe"
+
+        Write-Host "Downloading LLVM $version from $url"
+        Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+
+        Write-Host "Running silent install…"
+        Start-Process -FilePath $installer `
+          -ArgumentList '/S', '/D=C:\LLVM' `
+          -Wait -NoNewWindow
+
+        $llvmConfig = 'C:\LLVM\bin\llvm-config.exe'
+        if (-not (Test-Path $llvmConfig)) {
+          Write-Error "llvm-config not found after install"
+          exit 1
+        }
+
+        $detected = & $llvmConfig --version
+        Write-Host "Installed LLVM version: $detected"
+        if ($detected -notmatch '^20\.') {
+          Write-Error "Unexpected LLVM version: $detected"
+          exit 1
+        }
+
+        # Persist env for subsequent steps
+        "LLVM_SYS_201_PREFIX=C:\LLVM"      | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+        "C:\LLVM\bin"                        | Out-File $env:GITHUB_PATH -Append -Encoding utf8
+
+        # llvm-sys on Windows with MSVC links statically — do NOT set LLVM_LINK_LLVM_DYLIB
+
+    - name: Verify LLVM prefix is set
       shell: bash
-      run: echo "LLVM_SYS_201_PREFIX=${{ steps.llvm-win.outputs.llvm-path }}" >> $GITHUB_ENV
+      run: |
+        : "${LLVM_SYS_201_PREFIX:?LLVM_SYS_201_PREFIX is not set — LLVM install failed}"
+        echo "LLVM_SYS_201_PREFIX = $LLVM_SYS_201_PREFIX"
+        # Confirm llvm-config is reachable and reports the correct major version
+        "$LLVM_SYS_201_PREFIX/bin/llvm-config" --version

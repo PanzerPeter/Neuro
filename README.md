@@ -1,11 +1,11 @@
-# NEURO Programming Language
+# Neuro Programming Language
 
 > A modern, compiled language designed for high-performance AI development.
 
-[![License: GPL-3.0 + NEURO Exceptions](https://img.shields.io/badge/License-GPLv3%20%2B%20Exceptions-blue.svg)](LICENSE)
+[![License: GPL-3.0 + Neuro Exceptions](https://img.shields.io/badge/License-GPLv3%20%2B%20Exceptions-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-392%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-397%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP complete · Phase 1.5 & Phase 2 in progress
 
@@ -32,7 +32,7 @@
 
 ## Overview
 
-NEURO is an Ahead-of-Time (AOT) compiled language built from the ground up for AI workloads. Unlike Python — an interpreted glue language — NEURO generates native code through an LLVM 20 backend, with a roadmap toward:
+Neuro is an Ahead-of-Time (AOT) compiled language built from the ground up for AI workloads. Unlike Python — an interpreted glue language — Neuro generates native code through an LLVM 20 backend, with a roadmap toward:
 
 - **MLIR-based tensor operations** for static, shape-verified tensor types
 - **IR-level automatic differentiation** via Enzyme
@@ -59,7 +59,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 is complete and Phase 2 is in progress. The following features are fully implemented and tested (**392 Tests Passing**):
+Phase 1 is complete and Phase 2 is in progress. The following features are fully implemented and tested (**397 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -173,7 +173,7 @@ neurc compile examples/factorial.nr
 ```neuro
 // Immutable by default
 val x: i32 = 42
-val name: string = "NEURO"
+val name: string = "Neuro"
 
 // Mutable with reassignment
 mut counter: i32 = 0
@@ -264,7 +264,7 @@ val weights: Tensor<f32, [784, 128]> = ...
 
 ## Architecture
 
-NEURO follows **Vertical Slice Architecture (VSA)** — organized by language feature, not technical layer.
+Neuro follows **Vertical Slice Architecture (VSA)** — organized by language feature, not technical layer.
 
 ### Workspace Layout
 
@@ -297,7 +297,7 @@ Source (.nr)
 
 **Planned extension (Phase 3+):**
 ```
-Tensor/AI path: AST → NEURO High-Level IR
+Tensor/AI path: AST → Neuro High-Level IR
   → MLIR (linalg/tensor/func/arith, LLVM 20 / MLIR 20)
   → Enzyme MLIR AD pass (@grad)
   → GPU dialects (nvgpu/rocdl/Triton) or llvm dialect
@@ -355,7 +355,7 @@ vsce package
 
 | Extension | Purpose |
 |---|---|
-| `.nr` | NEURO source files |
+| `.nr` | Neuro source files |
 | `.nrl` | Compiled library modules |
 | `.nrm` | Serialized model/matrix data |
 | `.nrp` | Package definitions |
@@ -372,7 +372,7 @@ The project is in early alpha — breaking changes are expected. Contributions s
 
 ## License
 
-Licensed under the [GNU General Public License v3.0 with NEURO Exceptions](LICENSE).
+Licensed under the [GNU General Public License v3.0 with Neuro Exceptions](LICENSE).
 
 This software is an Alpha release. The license includes mandatory redistribution terms to preserve attribution, enforce alpha-status disclosure, and limit liability (e.g., barring use in safety-critical deployments without acknowledgement). See [LICENSE](LICENSE) for the full breakdown and redistribution checklist.
 

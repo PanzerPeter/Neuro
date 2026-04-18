@@ -1,10 +1,10 @@
-# Contributing to NEURO
+# Contributing to Neuro
 
-Thank you for your interest in contributing to the NEURO programming language compiler.
+Thank you for your interest in contributing to the Neuro programming language compiler.
 
 ## Project Status
 
-NEURO is in **Phase 1.5 / Phase 2** — Phase 1 (core MVP) is complete, the LLVM 20 backend and string fat pointers have landed, and Phase 2 is underway (structs ✅, methods ✅). Remaining Phase 2 work covers enums, pattern matching, and the module system. We welcome contributions, but note:
+Neuro is in **Phase 1.5 / Phase 2** — Phase 1 (core MVP) is complete, the LLVM 20 backend and string fat pointers have landed, and Phase 2 is underway (structs ✅, methods ✅). Remaining Phase 2 work covers enums, pattern matching, and the module system. We welcome contributions, but note:
 
 - Architecture and design are still evolving
 - Breaking changes are expected between minor versions
@@ -118,7 +118,7 @@ cargo test --workspace
 
 ## Architecture Guidelines
 
-NEURO uses **Vertical Slice Architecture (VSA)**. Each compiler feature is a self-contained crate.
+Neuro uses **Vertical Slice Architecture (VSA)**. Each compiler feature is a self-contained crate.
 
 ### Project Layout
 
@@ -282,4 +282,4 @@ cargo run -p neurc -- compile examples/hello.nr
 
 ## License
 
-By contributing to NEURO, you agree your contributions will be licensed under the [GNU General Public License v3.0 with NEURO Exceptions](LICENSE), which includes alpha-phase transparency and liability limits.
+By contributing to Neuro, you agree your contributions will be licensed under the [GNU General Public License v3.0 with Neuro Exceptions](LICENSE), which includes alpha-phase transparency and liability limits.
