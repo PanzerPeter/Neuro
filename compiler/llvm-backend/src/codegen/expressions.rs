@@ -397,6 +397,15 @@ impl<'ctx> CodegenContext<'ctx> {
         let lhs = self.codegen_expr(left)?;
         let rhs = self.codegen_expr(right)?;
 
+        // Coerce both operands to the left-operand semantic type.  Literals always
+        // emit at their default width (i32 / f64); when the expression context is
+        // wider (e.g. `i64_var - 3000000000`) both sides must match before any
+        // arithmetic or comparison instruction is emitted.  The coercion is a no-op
+        // when the LLVM types already agree.
+        let target_llvm = self.type_mapper.map_type(left_ty)?;
+        let lhs = self.coerce_if_needed(lhs, target_llvm, left_ty)?;
+        let rhs = self.coerce_if_needed(rhs, target_llvm, left_ty)?;
+
         match op {
             // Arithmetic operators
             BinaryOp::Add => {

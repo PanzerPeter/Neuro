@@ -1,4 +1,5 @@
 // NEURO Compiler - Integration tests for type inference
+mod common;
 // Tests for numeric literal type inference feature (semantic analysis)
 //
 // NOTE: These tests focus on type checking behavior. Full code generation
@@ -115,4 +116,69 @@ fn test_mixed_types_inference() {
     // All literals should infer correctly and pass type checking
     let (success, output) = check_test("mixed_types");
     assert!(success, "Type checking failed: {}", output);
+}
+
+// ── Codegen regression tests ──────────────────────────────────────────────────
+// These tests exercise full compilation + execution to validate that declared
+// type annotations are honoured at the LLVM IR level, not just semantically.
+
+mod codegen_regressions {
+    use super::common::CompileTest;
+
+    #[test]
+    fn regression_i64_annotation_creates_i64_alloca() {
+        // val x: i64 = 255 previously created an i32 alloca.  Values that fit in
+        // i32 silently gave correct results; the bug manifested when operations on
+        // two annotated-i64 variables were passed to an i64-typed function.
+        let test = CompileTest::new();
+        let source = r#"
+func take_i64(n: i64) -> i64 { return n }
+func main() -> i32 {
+    val a: i64 = 200
+    val b: i64 = 55
+    val c: i64 = take_i64(a + b)
+    return c as i32
+}
+"#;
+        let exit_code = test
+            .compile_and_run("i64_alloca_regression.nr", source)
+            .expect("Compilation or execution failed");
+        assert_eq!(exit_code, 255, "Expected 255 (200 + 55)");
+    }
+
+    #[test]
+    fn regression_f32_annotation_truncates_f64_literal() {
+        // Float literals always default to f64; val x: f32 = 3.0 previously stored
+        // an f64 value in an f64 alloca, silently ignoring the f32 annotation.
+        let test = CompileTest::new();
+        let source = r#"
+func main() -> i32 {
+    val x: f32 = 3.0
+    val y: f32 = 2.0
+    return (x + y) as i32
+}
+"#;
+        let exit_code = test
+            .compile_and_run("f32_annotation_regression.nr", source)
+            .expect("Compilation or execution failed");
+        assert_eq!(exit_code, 5, "Expected 5 (3.0 + 2.0 as i32)");
+    }
+
+    #[test]
+    fn regression_i64_literal_in_binary_expression() {
+        // Literals in binary expressions (not VarDecl) also defaulted to i32.
+        // `i64_var - large_literal` caused an LLVM verifier type mismatch.
+        let test = CompileTest::new();
+        let source = r#"
+func main() -> i32 {
+    val a: i64 = 200
+    val result: i64 = a + 55
+    return result as i32
+}
+"#;
+        let exit_code = test
+            .compile_and_run("i64_binary_literal_regression.nr", source)
+            .expect("Compilation or execution failed");
+        assert_eq!(exit_code, 255, "Expected 255 (200 + 55)");
+    }
 }

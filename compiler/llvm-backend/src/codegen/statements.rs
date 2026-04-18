@@ -9,13 +9,17 @@ use crate::types::Type;
 use super::context::CodegenContext;
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// Generate code for a variable declaration statement
+    /// Generate code for a variable declaration statement.
+    ///
+    /// When `declared_ty` is `Some`, the alloca is created at that width and the
+    /// initializer value is widened/truncated to match (e.g. `val x: i64 = 42`
+    /// emits an i64 alloca with the literal sign-extended from i32).
     pub(crate) fn codegen_var_decl(
         &mut self,
         name: &str,
+        declared_ty: Option<&ast_types::Type>,
         init: Option<&Expr>,
     ) -> CodegenResult<()> {
-        // Get the type of the variable (we need to infer from initializer or explicit type)
         let init_val = if let Some(expr) = init {
             Some(self.codegen_expr(expr)?)
         } else {
@@ -23,24 +27,86 @@ impl<'ctx> CodegenContext<'ctx> {
         };
 
         if let Some(val) = init_val {
-            let val_type = val.get_type();
+            let (alloca_ty, final_val) = if let Some(ast_ty) = declared_ty {
+                let target_sem = crate::types::Type::from_ast(ast_ty);
+                let llvm_target = self.type_mapper.map_type(&target_sem)?;
+                let coerced = self.coerce_if_needed(val, llvm_target, &target_sem)?;
+                (llvm_target, coerced)
+            } else {
+                (val.get_type(), val)
+            };
 
-            // Allocate space on the stack
-            let alloca = self.builder.build_alloca(val_type, name).map_err(|e| {
+            let alloca = self.builder.build_alloca(alloca_ty, name).map_err(|e| {
                 CodegenError::LlvmError(format!("failed to allocate variable: {}", e))
             })?;
-
-            // Store the initial value
-            self.builder.build_store(alloca, val).map_err(|e| {
+            self.builder.build_store(alloca, final_val).map_err(|e| {
                 CodegenError::LlvmError(format!("failed to store initial value: {}", e))
             })?;
-
-            // Record the variable and its type
             self.variables.insert(name.to_string(), alloca);
-            self.variable_types.insert(name.to_string(), val_type);
+            self.variable_types.insert(name.to_string(), alloca_ty);
         }
 
         Ok(())
+    }
+
+    /// Widen, truncate, or extend `val` to match `target_llvm` when the LLVM types
+    /// differ (e.g. i32 literal into an i64 alloca).  A no-op when already equal.
+    pub(crate) fn coerce_if_needed(
+        &self,
+        val: inkwell::values::BasicValueEnum<'ctx>,
+        target_llvm: inkwell::types::BasicTypeEnum<'ctx>,
+        target_sem: &crate::types::Type,
+    ) -> CodegenResult<inkwell::values::BasicValueEnum<'ctx>> {
+        use inkwell::types::BasicTypeEnum;
+        use inkwell::values::BasicValueEnum;
+
+        if val.get_type() == target_llvm {
+            return Ok(val);
+        }
+
+        match (val, target_llvm) {
+            (BasicValueEnum::IntValue(iv), BasicTypeEnum::IntType(it)) => {
+                let from_w = iv.get_type().get_bit_width();
+                let to_w = it.get_bit_width();
+                if to_w > from_w {
+                    if TypeMapper::is_unsigned_int(target_sem) {
+                        Ok(self
+                            .builder
+                            .build_int_z_extend(iv, it, "coerce")
+                            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                            .into())
+                    } else {
+                        Ok(self
+                            .builder
+                            .build_int_s_extend(iv, it, "coerce")
+                            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                            .into())
+                    }
+                } else {
+                    Ok(self
+                        .builder
+                        .build_int_truncate(iv, it, "coerce")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            (BasicValueEnum::FloatValue(fv), BasicTypeEnum::FloatType(ft)) => {
+                if matches!(target_sem, crate::types::Type::F64) {
+                    Ok(self
+                        .builder
+                        .build_float_ext(fv, ft, "coerce")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else {
+                    Ok(self
+                        .builder
+                        .build_float_trunc(fv, ft, "coerce")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                }
+            }
+            _ => Ok(val),
+        }
     }
 
     /// Generate code for an assignment statement
@@ -343,7 +409,9 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a statement
     pub(crate) fn codegen_stmt(&mut self, stmt: &Stmt) -> CodegenResult<()> {
         match stmt {
-            Stmt::VarDecl { name, init, .. } => self.codegen_var_decl(&name.name, init.as_ref()),
+            Stmt::VarDecl { name, ty, init, .. } => {
+                self.codegen_var_decl(&name.name, ty.as_ref(), init.as_ref())
+            }
             Stmt::Assignment { target, value, .. } => self.codegen_assignment(&target.name, value),
             Stmt::Return { value, .. } => self.codegen_return(value.as_ref()),
             Stmt::If {

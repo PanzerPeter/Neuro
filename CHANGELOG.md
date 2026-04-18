@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.11.9] - 2026-04-18
+
+### Fixed
+
+- **codegen**: Integer and float variable declarations with explicit type annotations
+  now emit the correct LLVM alloca width and coerce the initialiser to match
+  - Previously `val x: i64 = 255` emitted an `i32` alloca; passing two such
+    variables to an `i64`-typed function caused an LLVM verifier type mismatch
+  - Fix: `codegen_var_decl` uses the declared annotation type for the alloca;
+    `coerce_if_needed` handles `sext`/`zext`/`trunc`/`fpext`/`fptrunc` as needed
+  - Binary expressions (`a + literal`) also coerce the right-hand literal to
+    match the left-hand operand's semantic type, eliminating IR type mismatches
+  - `type_pass.rs` `type_env` now records the declared annotation type (not the
+    literal's default type) so downstream codegen lookups agree
+  - Three regression tests added in `type_inference::codegen_regressions`:
+    `regression_i64_annotation_creates_i64_alloca`,
+    `regression_f32_annotation_truncates_f64_literal`,
+    `regression_i64_literal_in_binary_expression`
+
+---
+
 ## [1.11.8] - 2026-04-18
 
 ### Fixed

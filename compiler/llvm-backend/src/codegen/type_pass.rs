@@ -145,16 +145,26 @@ impl<'ctx> CodegenContext<'ctx> {
         func_types: &HashMap<String, Type>,
     ) -> CodegenResult<()> {
         match stmt {
-            Stmt::VarDecl { name, init, .. } => {
+            Stmt::VarDecl { name, ty, init, .. } => {
                 if let Some(expr) = init {
                     self.visit_expr_for_types(expr, func_types)?;
-                    // Get the type of the initializer and store it for this variable
-                    let var_ty = self.expr_types.get(&expr.span().start).ok_or_else(|| {
-                        CodegenError::InternalError(
-                            "missing type for variable initializer".to_string(),
-                        )
-                    })?;
-                    self.type_env.insert(name.name.clone(), var_ty.clone());
+                    // Prefer the declared type annotation for the variable's type in
+                    // downstream expression inference.  Without this, `val x: i64 = 42`
+                    // would record i32 (from the literal's default) so later uses of `x`
+                    // would load an i32 alloca instead of an i64 one.
+                    let var_ty = if let Some(declared) = ty {
+                        crate::types::Type::from_ast(declared)
+                    } else {
+                        self.expr_types
+                            .get(&expr.span().start)
+                            .cloned()
+                            .ok_or_else(|| {
+                                CodegenError::InternalError(
+                                    "missing type for variable initializer".to_string(),
+                                )
+                            })?
+                    };
+                    self.type_env.insert(name.name.clone(), var_ty);
                 }
             }
             Stmt::Assignment { value, .. } => {
