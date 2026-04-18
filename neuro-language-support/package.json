@@ -4,6 +4,11 @@
   "description": "Syntax highlighting for the NEURO programming language, designed for AI-optimized workloads.",
   "version": "1.0.0",
   "publisher": "NeuroTeam",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PanzerPeter/Neuro"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },

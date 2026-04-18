@@ -29,7 +29,7 @@
     {
       "open": "'",
       "close": "'",
-      "notIn": ["string"]
+      "notIn": ["string", "comment"]
     }
   ],
   "surroundingPairs": [
