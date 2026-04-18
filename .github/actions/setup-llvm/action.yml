@@ -13,7 +13,7 @@ runs:
         echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" \
           | sudo tee /etc/apt/sources.list.d/llvm.list
         sudo apt-get update -q
-        sudo apt-get install -y llvm-20 llvm-20-dev
+        sudo apt-get install -y llvm-20 llvm-20-dev libpolly-20-dev
         /usr/lib/llvm-20/bin/llvm-config --version
         echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
         echo "LLVM_LINK_LLVM_DYLIB=1" >> $GITHUB_ENV

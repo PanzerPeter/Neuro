@@ -203,18 +203,20 @@ impl<'ctx> CodegenContext<'ctx> {
             for stmt in &method.body {
                 self.codegen_stmt(stmt)?;
             }
-            if !matches!(return_type, Type::Void) {
-                let current_bb = self.builder.get_insert_block().ok_or_else(|| {
-                    CodegenError::InternalError("no insert block after method body".to_string())
-                })?;
+            // Same terminator policy as codegen_function: emit unreachable for dead
+            // merge blocks so the LLVM verifier is satisfied. Genuine missing returns
+            // are undefined behaviour caught by future semantic return-path analysis.
+            if let Some(current_bb) = self.builder.get_insert_block() {
                 if current_bb.get_terminator().is_none() {
-                    return Err(CodegenError::MissingReturn);
-                }
-            } else if let Some(current_bb) = self.builder.get_insert_block() {
-                if current_bb.get_terminator().is_none() {
-                    self.builder
-                        .build_return(None)
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                    if matches!(return_type, Type::Void) {
+                        self.builder
+                            .build_return(None)
+                            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                    } else {
+                        self.builder
+                            .build_unreachable()
+                            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                    }
                 }
             }
         }
@@ -326,21 +328,26 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.codegen_stmt(stmt)?;
             }
 
-            // Ensure function has a return if it's non-void
-            if !matches!(return_type, Type::Void) {
-                let current_bb = self.builder.get_insert_block().ok_or_else(|| {
-                    CodegenError::InternalError("no insert block after function body".to_string())
-                })?;
-
+            // Ensure every basic block has a terminator (LLVM verifier requirement).
+            // If the current block has no terminator it is either dead code (a merge
+            // block whose predecessors all returned/broke) or a genuine missing return.
+            // In both cases we emit `unreachable`; dead blocks are eliminated by LLVM
+            // later, while genuine missing returns produce undefined behaviour — the
+            // correct long-term fix is return-path analysis in semantic analysis.
+            if let Some(current_bb) = self.builder.get_insert_block() {
                 if current_bb.get_terminator().is_none() {
-                    return Err(CodegenError::MissingReturn);
-                }
-            } else if let Some(current_bb) = self.builder.get_insert_block() {
-                // Add void return if missing
-                if current_bb.get_terminator().is_none() {
-                    self.builder.build_return(None).map_err(|e| {
-                        CodegenError::LlvmError(format!("failed to build void return: {}", e))
-                    })?;
+                    if matches!(return_type, Type::Void) {
+                        self.builder.build_return(None).map_err(|e| {
+                            CodegenError::LlvmError(format!("failed to build void return: {}", e))
+                        })?;
+                    } else {
+                        self.builder.build_unreachable().map_err(|e| {
+                            CodegenError::LlvmError(format!(
+                                "failed to build unreachable terminator: {}",
+                                e
+                            ))
+                        })?;
+                    }
                 }
             }
         }

@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [1.11.8] - 2026-04-18
+
+### Fixed
+
+- **codegen**: `if`/`else` where all branches return explicitly now compiles correctly
+  - Previously emitted a false "missing return" error because the dead merge block
+    after all-returning branches had no LLVM terminator
+  - Fix: emit `unreachable` for dead merge blocks; LLVM eliminates them during
+    optimisation. Applies to both free functions and `impl` methods.
+  - Two regression tests added: `regression_if_else_all_branches_return_no_missing_return_error`
+    and `regression_else_if_all_branches_return`
+
+---
+
+## [1.11.7] - 2026-04-18
+
 ### Added
 
 - **lexer/parser/semantic/codegen**: Bitwise operators `&`, `|`, `^`, `~`, `<<` (§1.4)

@@ -208,11 +208,6 @@ func main() -> i32 {
     assert_eq!(exit_code, 12, "Expected exit code 12 (0+1+2+4+5)");
 }
 
-// Note: Deeply nested if/else chains may fail control flow analysis in Phase 1
-// The current implementation has limitations with complex control flow patterns
-// Simple if/else works, but deeply nested or complex chains may not be recognized
-// as having complete return coverage. This is a known limitation for Phase 2.
-
 #[test]
 fn test_else_if_bare_identifier_condition() {
     // A bare identifier as an `else if` condition previously caused the parser to
@@ -243,4 +238,54 @@ func main() -> i32 {
         .compile_and_run("else_if_identifier.nr", source)
         .expect("Compilation or execution failed");
     assert_eq!(exit_code, 1, "Expected exit code 1 (is_medium branch)");
+}
+
+#[test]
+fn regression_if_else_all_branches_return_no_missing_return_error() {
+    // An if/else where every branch has an explicit `return` previously triggered
+    // a false "missing return" codegen error because the dead merge block had no
+    // terminator. The fix emits `unreachable` for the dead merge block.
+    let test = CompileTest::new();
+    let source = r#"
+func abs(x: i32) -> i32 {
+    if x >= 0 {
+        return x
+    } else {
+        return -x
+    }
+}
+
+func main() -> i32 {
+    return abs(-5)
+}
+"#;
+    let exit_code = test
+        .compile_and_run("all_branches_return.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 5, "Expected exit code 5 (abs of -5)");
+}
+
+#[test]
+fn regression_else_if_all_branches_return() {
+    // Variant with else-if chain — all arms return explicitly.
+    let test = CompileTest::new();
+    let source = r#"
+func classify(x: i32) -> i32 {
+    if x < 0 {
+        return -1
+    } else if x == 0 {
+        return 0
+    } else {
+        return 1
+    }
+}
+
+func main() -> i32 {
+    return classify(42)
+}
+"#;
+    let exit_code = test
+        .compile_and_run("else_if_all_return.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 1, "Expected exit code 1 (positive)");
 }
