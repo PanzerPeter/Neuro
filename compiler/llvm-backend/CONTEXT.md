@@ -114,3 +114,7 @@ const identifiers inside function bodies.
 - 2026-04-16: Implemented §1.3 const declarations end-to-end: `codegen_global_const`,
   `codegen_const_expr`, `FoldedConst` folder, `const_values`/`global_const_types` maps,
   `Stmt::Const` codegen, and type-pass support.
+- 2026-04-18: Implemented bitwise operator codegen §1.4. `BinaryOp::BitAnd/BitOr/BitXor/Shl` lower
+  to `build_and`/`build_or`/`build_xor`/`build_left_shift`. `UnaryOp::BitNot` lowers to `build_not`.
+  `type_pass.rs` maps bitwise binary ops to the left-operand type (same as arithmetic). `fold_const`
+  handles all four binary bitwise ops on `FoldedConst::Int` and `BitNot` on `FoldedConst::Int`.

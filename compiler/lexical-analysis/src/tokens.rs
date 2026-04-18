@@ -125,18 +125,27 @@ pub enum TokenKind {
     LessEqual,
     #[token(">=")]
     GreaterEqual,
+    // LeftShift must precede Less so logos longest-match picks `<<` over `<`
+    #[token("<<")]
+    LeftShift,
     #[token("<")]
     Less,
     #[token(">")]
     Greater,
 
-    // Logical operators
+    // Logical and bitwise operators
     #[token("&&")]
     AmpAmp,
     #[token("&")]
     Amp,
     #[token("||")]
     PipePipe,
+    #[token("|")]
+    Pipe,
+    #[token("^")]
+    Caret,
+    #[token("~")]
+    Tilde,
     #[token("!")]
     Bang,
 
@@ -251,9 +260,13 @@ impl Token {
             TokenKind::GreaterEqual => ">=",
             TokenKind::Less => "<",
             TokenKind::Greater => ">",
+            TokenKind::LeftShift => "<<",
             TokenKind::AmpAmp => "&&",
             TokenKind::Amp => "&",
             TokenKind::PipePipe => "||",
+            TokenKind::Pipe => "|",
+            TokenKind::Caret => "^",
+            TokenKind::Tilde => "~",
             TokenKind::Bang => "!",
             TokenKind::Equal => "=",
             TokenKind::At => "@",

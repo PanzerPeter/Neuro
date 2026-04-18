@@ -161,6 +161,30 @@ impl TypeChecker {
                         Some(Type::Bool)
                     }
 
+                    // Bitwise operators: require integer types, return same type
+                    BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl => {
+                        if !left_ty.is_integer() {
+                            self.record_error(TypeError::InvalidBinaryOperator {
+                                op: op.to_string(),
+                                left: left_ty.clone(),
+                                right: right_ty.clone(),
+                                span: *span,
+                            });
+                            return Some(Type::Unknown);
+                        }
+
+                        if !left_ty.is_compatible_with(&right_ty) {
+                            self.record_error(TypeError::Mismatch {
+                                expected: left_ty.clone(),
+                                found: right_ty,
+                                span: *span,
+                            });
+                            return Some(Type::Unknown);
+                        }
+
+                        Some(left_ty)
+                    }
+
                     // Logical operators: require bool types, return bool
                     BinaryOp::And | BinaryOp::Or => {
                         let mut has_error = false;
@@ -198,7 +222,8 @@ impl TypeChecker {
                 // For unary operations, propagate expected type to operand if appropriate
                 let expected_operand = match op {
                     UnaryOp::Negate => expected.filter(|t| t.is_numeric()),
-                    UnaryOp::Not => None, // Not requires bool, no flexibility
+                    UnaryOp::Not => None,
+                    UnaryOp::BitNot => expected.filter(|t| t.is_integer()),
                 };
 
                 let operand_ty = self
@@ -231,6 +256,17 @@ impl TypeChecker {
                             return Some(Type::Unknown);
                         }
                         Some(Type::Bool)
+                    }
+                    UnaryOp::BitNot => {
+                        if !operand_ty.is_integer() {
+                            self.record_error(TypeError::InvalidOperator {
+                                op: op.to_string(),
+                                ty: operand_ty,
+                                span: *span,
+                            });
+                            return Some(Type::Unknown);
+                        }
+                        Some(operand_ty)
                     }
                 }
             }

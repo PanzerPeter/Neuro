@@ -307,6 +307,9 @@ impl<'ctx> CodegenContext<'ctx> {
                     | BinaryOp::GreaterEqual
                     | BinaryOp::And
                     | BinaryOp::Or => Type::Bool,
+                    BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl => {
+                        left_ty.clone()
+                    }
                 };
 
                 self.expr_types.insert(span.start, result_ty);

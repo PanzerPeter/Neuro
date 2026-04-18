@@ -5,7 +5,7 @@
 [![License: GPL-3.0 + NEURO Exceptions](https://img.shields.io/badge/License-GPLv3%20%2B%20Exceptions-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-382%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-392%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP complete · Phase 1.5 & Phase 2 in progress
 
@@ -59,7 +59,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 is complete and Phase 2 is in progress. The following features are fully implemented and tested (**382 Tests Passing**):
+Phase 1 is complete and Phase 2 is in progress. The following features are fully implemented and tested (**392 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -68,6 +68,7 @@ Phase 1 is complete and Phase 2 is in progress. The following features are fully
 | **Control Flow** | if/else/elif, while loops, range-for (`for i in 0..n` and `0..=n`), break, continue |
 | **Mutable Variables** | `val` (immutable) and `mut` (mutable) with type-safe reassignment |
 | **Constants** | `const NAME: Type = expr` at module and function scope; constant-expression validation; forward references; emitted as LLVM globals |
+| **Bitwise Operators** | `&`, `\|`, `^`, `~`, `<<` on integer types; correct precedence per Appendix B (Shl > BitAnd > BitXor > BitOr); floats and bools rejected |
 | **String Type** | Literals with full escape sequence support (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==` and `!=` for byte-level comparison |
 | **Structs** | Definition, instantiation (`Name { field: value }`), field read (`obj.field`), field mutation on `mut` bindings; nominal typing; definition-order independent |
 | **Methods** | `impl` blocks with `&self` instance methods; associated functions called via `TypeName::func(args)`; `&mut self` / consuming `self` rejected until ownership lands |

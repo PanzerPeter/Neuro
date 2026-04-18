@@ -188,6 +188,12 @@ impl<'ctx> CodegenContext<'ctx> {
                         FoldedConst::Bool(b) => Ok(FoldedConst::Bool(!b)),
                         _ => Err(CodegenError::InternalError("not on non-bool const".into())),
                     },
+                    ast_types::UnaryOp::BitNot => match v {
+                        FoldedConst::Int(i) => Ok(FoldedConst::Int(!i)),
+                        _ => Err(CodegenError::InternalError(
+                            "bitnot on non-integer const".into(),
+                        )),
+                    },
                 }
             }
             ast_types::Expr::Binary {
@@ -225,6 +231,10 @@ impl<'ctx> CodegenContext<'ctx> {
                         BinaryOp::GreaterEqual => Ok(FoldedConst::Bool(a >= b)),
                         BinaryOp::And => Ok(FoldedConst::Bool(a != 0 && b != 0)),
                         BinaryOp::Or => Ok(FoldedConst::Bool(a != 0 || b != 0)),
+                        BinaryOp::BitAnd => Ok(FoldedConst::Int(a & b)),
+                        BinaryOp::BitOr => Ok(FoldedConst::Int(a | b)),
+                        BinaryOp::BitXor => Ok(FoldedConst::Int(a ^ b)),
+                        BinaryOp::Shl => Ok(FoldedConst::Int(a.wrapping_shl(b as u32))),
                     },
                     (FoldedConst::Float(a), FoldedConst::Float(b)) => match op {
                         BinaryOp::Add => Ok(FoldedConst::Float(a + b)),
@@ -713,6 +723,28 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_or(lhs.into_int_value(), rhs.into_int_value(), "ortmp")
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                 .into()),
+
+            // Bitwise operators
+            BinaryOp::BitAnd => Ok(self
+                .builder
+                .build_and(lhs.into_int_value(), rhs.into_int_value(), "bandtmp")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .into()),
+            BinaryOp::BitOr => Ok(self
+                .builder
+                .build_or(lhs.into_int_value(), rhs.into_int_value(), "bortmp")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .into()),
+            BinaryOp::BitXor => Ok(self
+                .builder
+                .build_xor(lhs.into_int_value(), rhs.into_int_value(), "xortmp")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .into()),
+            BinaryOp::Shl => Ok(self
+                .builder
+                .build_left_shift(lhs.into_int_value(), rhs.into_int_value(), "shltmp")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .into()),
         }
     }
 
@@ -744,6 +776,11 @@ impl<'ctx> CodegenContext<'ctx> {
             UnaryOp::Not => Ok(self
                 .builder
                 .build_not(val.into_int_value(), "nottmp")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .into()),
+            UnaryOp::BitNot => Ok(self
+                .builder
+                .build_not(val.into_int_value(), "bnottmp")
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                 .into()),
         }

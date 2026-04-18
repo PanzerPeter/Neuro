@@ -63,3 +63,7 @@ so const names are usable in any expression context.
 - 2026-04-16: Implemented §1.3 const declarations: four-pass `check_program`, `constants` map,
   `register_const_item`, `check_const_item`, `is_const_expr`, `Stmt::Const` arm, identifier
   fallback to const map. New error variants: `ConstAlreadyDefined`, `InvalidConstExpr`.
+- 2026-04-18: Implemented bitwise operator type checking §1.4. `BinaryOp::BitAnd/BitOr/BitXor/Shl`
+  require both operands to be integer types (`is_integer()` — not float, not bool) and return the
+  operand type. `UnaryOp::BitNot` requires an integer operand and returns the same type. Floats and
+  bools produce `InvalidBinaryOperator` / `InvalidOperator` errors respectively.

@@ -160,6 +160,60 @@ val not_flag: bool = !flag
 **Types**: Works with boolean type only
 **Returns**: boolean
 
+## Bitwise Operators
+
+Work with integer values only (`i8`–`i64`, `u8`–`u64`). Cannot be used with floats or bools.
+
+### Bitwise AND (`&`)
+
+```neuro
+val a: i32 = 0b1100   // 12
+val b: i32 = 0b1010   // 10
+val r: i32 = a & b    // 0b1000 = 8
+```
+
+**Returns**: same type as operands
+
+### Bitwise OR (`|`)
+
+```neuro
+val a: i32 = 0b1100   // 12
+val b: i32 = 0b1010   // 10
+val r: i32 = a | b    // 0b1110 = 14
+```
+
+**Returns**: same type as operands
+
+### Bitwise XOR (`^`)
+
+```neuro
+val a: i32 = 0b1100   // 12
+val b: i32 = 0b1010   // 10
+val r: i32 = a ^ b    // 0b0110 = 6
+```
+
+**Returns**: same type as operands
+
+### Left Shift (`<<`)
+
+```neuro
+val a: i32 = 1
+val r: i32 = a << 4   // 1 * 2^4 = 16
+```
+
+**Returns**: same type as operands
+**Note**: Right shift is exposed as the `.shr(n)` method (Phase 2+), not an operator.
+
+### Bitwise NOT (`~`)
+
+```neuro
+val a: i32 = 0
+val r: i32 = ~a       // -1 (all bits set, two's complement)
+```
+
+**Unary**: takes a single integer operand
+**Returns**: same type as operand
+
 ## Type Casting Operator (`as`)
 
 Performs an explicit numeric or boolean type conversion.
@@ -240,17 +294,21 @@ while i <= 10 {
 
 ## Operator Precedence
 
-From highest to lowest:
+From highest to lowest (Appendix B):
 
-| Precedence | Operators | Example |
-|------------|-----------|---------|
-| 7 | `-` (unary), `!` | `-x`, `!flag` |
-| 6 | `*`, `/`, `%` | `a * b`, `x / y`, `n % 2` |
-| 5 | `+`, `-` | `a + b`, `x - y` |
-| 4 | `<`, `>`, `<=`, `>=` | `x < y`, `a >= b` |
-| 3 | `==`, `!=` | `x == y`, `a != b` |
-| 2 | `&&` | `a && b` |
-| 1 | `\|\|` | `a \|\| b` |
+| Level | Operators | Associativity | Example |
+|-------|-----------|---------------|---------|
+| 2 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
+| 3 | `as` | L-to-R | `n as f64` |
+| 5 | `*`, `/`, `%` | L-to-R | `a * b`, `n % 2` |
+| 6 | `+`, `-` | L-to-R | `a + b`, `x - y` |
+| 7 | `<<` | L-to-R | `a << 4` |
+| 8 | `&` | L-to-R | `a & mask` |
+| 9 | `^` | L-to-R | `a ^ b` |
+| 10 | `\|` | L-to-R | `a \| b` |
+| 11 | `<`, `>`, `<=`, `>=`, `==`, `!=` | none | `x < y` |
+| 12 | `&&` | L-to-R | `a && b` |
+| 13 | `\|\|` | L-to-R | `a \|\| b` |
 
 ### Precedence Examples
 
@@ -283,7 +341,7 @@ Both operands must be the same type.
 
 ### Integer-Only Operators
 
-`%` works only with integer types:
+`%`, `&`, `|`, `^`, `~`, `<<` work only with integer types:
 - `i8`, `i16`, `i32`, `i64`
 - `u8`, `u16`, `u32`, `u64`
 

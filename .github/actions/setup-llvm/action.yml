@@ -16,6 +16,7 @@ runs:
         sudo apt-get install -y llvm-20 llvm-20-dev
         /usr/lib/llvm-20/bin/llvm-config --version
         echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
+        echo "LLVM_LINK_LLVM_DYLIB=1" >> $GITHUB_ENV
 
     - name: Install LLVM 20 (macOS)
       if: runner.os == 'macOS'

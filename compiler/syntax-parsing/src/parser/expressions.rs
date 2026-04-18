@@ -122,6 +122,15 @@ impl Parser {
                     span,
                 })
             }
+            TokenKind::Tilde => {
+                let operand = self.parse_expr(Precedence::Unary)?;
+                let span = token.span.merge(operand.span());
+                Ok(Expr::Unary {
+                    op: UnaryOp::BitNot,
+                    operand: Box::new(operand),
+                    span,
+                })
+            }
 
             TokenKind::LeftParen => {
                 let expr = self.parse_expr(Precedence::Lowest)?;
@@ -253,6 +262,10 @@ impl Parser {
                 | TokenKind::GreaterEqual
                 | TokenKind::AmpAmp
                 | TokenKind::PipePipe
+                | TokenKind::Amp
+                | TokenKind::Pipe
+                | TokenKind::Caret
+                | TokenKind::LeftShift
         )
     }
 
@@ -272,6 +285,10 @@ impl Parser {
             TokenKind::GreaterEqual => Ok(BinaryOp::GreaterEqual),
             TokenKind::AmpAmp => Ok(BinaryOp::And),
             TokenKind::PipePipe => Ok(BinaryOp::Or),
+            TokenKind::Amp => Ok(BinaryOp::BitAnd),
+            TokenKind::Pipe => Ok(BinaryOp::BitOr),
+            TokenKind::Caret => Ok(BinaryOp::BitXor),
+            TokenKind::LeftShift => Ok(BinaryOp::Shl),
             _ => Err(ParseError::UnexpectedToken {
                 found: token.kind.clone(),
                 expected: "binary operator".to_string(),
@@ -285,11 +302,15 @@ impl Parser {
         match kind {
             TokenKind::PipePipe => Precedence::LogicalOr,
             TokenKind::AmpAmp => Precedence::LogicalAnd,
+            TokenKind::Pipe => Precedence::BitwiseOr,
+            TokenKind::Caret => Precedence::BitwiseXor,
+            TokenKind::Amp => Precedence::BitwiseAnd,
             TokenKind::EqualEqual | TokenKind::NotEqual => Precedence::Equality,
             TokenKind::Less
             | TokenKind::Greater
             | TokenKind::LessEqual
             | TokenKind::GreaterEqual => Precedence::Comparison,
+            TokenKind::LeftShift => Precedence::Shift,
             TokenKind::Plus | TokenKind::Minus => Precedence::Sum,
             TokenKind::Star | TokenKind::Slash | TokenKind::Percent => Precedence::Product,
             TokenKind::As => Precedence::Cast,

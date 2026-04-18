@@ -156,17 +156,28 @@ cargo run -p neurc -- compile examples/constants.nr
 # Exit code: 51
 ```
 
-## Phase 1 Limitations
+### [bitwise_ops.nr](bitwise_ops.nr)
+Bitwise flag manipulation using `&`, `|`, `^`, `~`, and `<<`.
 
-While Phase 1 is feature-complete for its scope, there are known limitations:
+**Features:**
+- Left shift (`<<`) to define bit-flag constants
+- Bitwise OR (`|`) to set flags
+- Bitwise AND (`&`) to test flags
+- Bitwise XOR (`^`) to toggle flags
+- Integer-type requirement (floats/bools rejected)
 
-1. **Float comparisons in if conditions:** The LLVM backend currently only handles integer comparisons in conditional expressions. Float arithmetic works, but using float values as boolean conditions will fail.
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/bitwise_ops.nr
+./examples/bitwise_ops
+# Exit code: 1  (READ flag set; WRITE toggled off; EXECUTE never set)
+```
 
-2. **Complex control flow:** Deeply nested if/else chains may not be recognized as having complete return coverage. Simple if/else patterns work reliably.
+## Known Limitations
 
-3. **No strings yet:** String type is defined but not fully functional.
-
-4. **No arrays or structs:** These are Phase 2 features.
+- No arrays yet (Phase 2+)
+- Ownership/borrow checker not yet implemented (Phase 1.5)
+- Right shift is `.shr(n)` method, not `>>` operator (Phase 2+)
 
 ## Compiling Examples
 

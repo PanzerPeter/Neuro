@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **lexer/parser/semantic/codegen**: Bitwise operators `&`, `|`, `^`, `~`, `<<` (§1.4)
+  - New tokens: `Pipe` (`|`), `Caret` (`^`), `Tilde` (`~`), `LeftShift` (`<<`); `Amp` wired as binary op
+  - New AST variants: `BinaryOp::{BitAnd, BitOr, BitXor, Shl}`, `UnaryOp::BitNot`
+  - New precedence levels (Appendix B): `Shift` (7), `BitwiseAnd` (8), `BitwiseXor` (9), `BitwiseOr` (10)
+  - Type checker enforces integer-only operands; floats and bools are rejected
+  - LLVM codegen: `build_and`/`build_or`/`build_xor`/`build_left_shift`/`build_not`; const folding included
+  - 10 integration tests covering all operators, precedence, i64, and type-error rejection
+
 - **lexer/parser/semantic/codegen**: `const` declarations (§1.3)
   - `const NAME: Type = expr` at module scope and inside function bodies
   - Module-level consts emitted as `@NAME = internal constant` LLVM globals; visible

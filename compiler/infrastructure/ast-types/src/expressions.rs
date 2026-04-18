@@ -96,6 +96,10 @@ pub enum BinaryOp {
     GreaterEqual,
     And,
     Or,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
 }
 
 /// Unary operators
@@ -103,6 +107,7 @@ pub enum BinaryOp {
 pub enum UnaryOp {
     Negate,
     Not,
+    BitNot,
 }
 
 impl fmt::Display for BinaryOp {
@@ -121,6 +126,10 @@ impl fmt::Display for BinaryOp {
             BinaryOp::GreaterEqual => write!(f, ">="),
             BinaryOp::And => write!(f, "&&"),
             BinaryOp::Or => write!(f, "||"),
+            BinaryOp::BitAnd => write!(f, "&"),
+            BinaryOp::BitOr => write!(f, "|"),
+            BinaryOp::BitXor => write!(f, "^"),
+            BinaryOp::Shl => write!(f, "<<"),
         }
     }
 }
@@ -130,6 +139,7 @@ impl fmt::Display for UnaryOp {
         match self {
             UnaryOp::Negate => write!(f, "-"),
             UnaryOp::Not => write!(f, "!"),
+            UnaryOp::BitNot => write!(f, "~"),
         }
     }
 }

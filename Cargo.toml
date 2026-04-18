@@ -19,7 +19,7 @@ members = [
     # Compiler Driver
     "compiler/neurc",
 
-    # Phase 2+: Feature Slices (Added incrementally)
+    # Phase 2+: Feature Slices
     # "compiler/tensor-operations",
     # "compiler/automatic-differentiation",
     # "compiler/gpu-compilation",

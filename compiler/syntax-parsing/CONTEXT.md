@@ -55,3 +55,7 @@ time. No new AST nodes; semantic analysis and codegen are unaffected.
 - 2026-04-16: Added `parse_const_def()` (module-level `const NAME: Type = expr`) and
   `parse_const_stmt()` (function-body const). `parse_program` dispatches on `TokenKind::Const`
   → `parse_const_def`; `parse_stmt` dispatches similarly for body consts.
+- 2026-04-18: Implemented bitwise operators §1.4. New `Precedence` variants `Shift`, `BitwiseAnd`,
+  `BitwiseXor`, `BitwiseOr` inserted between `LogicalAnd` and `Equality` (for bitwise OR/XOR/AND)
+  and between `Comparison` and `Sum` (for `<<`), matching Appendix B precedence table levels 7–10.
+  `Amp` wired as `BinaryOp::BitAnd`. `Tilde` parses as unary `UnaryOp::BitNot` at `Precedence::Unary`.

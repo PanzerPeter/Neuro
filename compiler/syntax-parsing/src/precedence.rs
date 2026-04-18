@@ -7,12 +7,16 @@ pub(crate) enum Precedence {
     Lowest,
     LogicalOr,   // ||
     LogicalAnd,  // &&
+    BitwiseOr,   // |
+    BitwiseXor,  // ^
+    BitwiseAnd,  // &
     Equality,    // == !=
     Comparison,  // < > <= >=
+    Shift,       // <<
     Sum,         // + -
     Product,     // * / %
     Cast,        // as
-    Unary,       // - !
+    Unary,       // - ! ~
     Call,        // function calls
     FieldAccess, // . (member access, binds tighter than call)
 }
