@@ -1,7 +1,7 @@
-# NEURO Project — AI Agent Guide
+# Neuro Project — AI Agent Guide
 
-This file defines the AI agent personas for working with the NEURO compiler codebase.
-NEURO uses **Vertical Slice Architecture (VSA)** — each compiler feature is an isolated crate.
+This file defines the AI agent personas for working with the Neuro compiler codebase.
+Neuro uses **Vertical Slice Architecture (VSA)** — each compiler feature is an isolated crate.
 All agents must understand and respect these boundaries.
 
 For full architecture rules, coding standards, and contribution workflow see [CONTRIBUTING.md](CONTRIBUTING.md).

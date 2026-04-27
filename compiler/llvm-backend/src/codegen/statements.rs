@@ -483,8 +483,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 ..
             } => self.codegen_field_assignment(&object.name, &field.name, value),
 
-            Stmt::Const { name, value, .. } => {
-                let val = self.codegen_const_expr(value)?;
+            Stmt::Const { name, ty, value, .. } => {
+                let declared_sem = crate::types::Type::from_ast(ty);
+                let val = self.codegen_const_expr_typed(value, &declared_sem)?;
                 self.const_values.insert(name.name.clone(), val);
                 Ok(())
             }
@@ -498,9 +499,9 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Emit a module-level constant as an LLVM global constant and cache its value.
     pub(crate) fn codegen_global_const(&mut self, def: &ast_types::ConstDef) -> CodegenResult<()> {
-        let val = self.codegen_const_expr(&def.value)?;
+        let declared_sem = crate::types::Type::from_ast(&def.ty);
+        let val = self.codegen_const_expr_typed(&def.value, &declared_sem)?;
         let llvm_ty = val.get_type();
-
         let global = self.module.add_global(llvm_ty, None, &def.name.name);
         global.set_initializer(&val);
         global.set_constant(true);

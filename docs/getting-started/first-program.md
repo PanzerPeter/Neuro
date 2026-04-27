@@ -268,12 +268,13 @@ func main() -> i32 {
     val pi: f32 = 3.14159     // 32-bit float
     val e: f64 = 2.71828      // 64-bit float (default)
 
-    val result: f64 = pi * 2.0
+    val result: f32 = pi * 2.0   // 2.0 infers as f32 from context
+    val wide: f64 = pi as f64 * 2.0  // explicit cast to mix widths
     return 0
 }
 ```
 
-Note: Currently, integer literals default to i32 and float literals default to f64. Type inference for numeric literals is pending.
+Note: Float literals default to f64. When an annotated type is in context (e.g. `val x: f32 = 2.0`), the literal infers as f32.
 
 ### Booleans
 

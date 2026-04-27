@@ -425,7 +425,7 @@ fn test_operator_precedence() {
 ### Public Functions
 
 ```rust
-/// Parse NEURO source code into an AST
+/// Parse Neuro source code into an AST
 pub fn parse(source: &str) -> Result<Vec<Item>, ParseError>
 ```
 
@@ -589,7 +589,7 @@ Binary(Subtract)
 **Problem**: Parser expected different token
 
 **Solution**:
-- Check syntax matches NEURO grammar
+- Check syntax matches Neuro grammar
 - Ensure all delimiters are balanced (`{`, `}`, `(`, `)`)
 - Verify operator precedence expectations
 

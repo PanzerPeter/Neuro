@@ -160,16 +160,15 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(format!("failed to load variable: {}", e)))
     }
 
-    /// Evaluate a constant expression to a compile-time LLVM value.
-    ///
-    /// Only valid for expressions that passed `is_const_expr` in semantic analysis.
-    /// Folds the expression in Rust first, then creates an LLVM constant value.
-    pub(crate) fn codegen_const_expr(
+    /// Like `codegen_const_expr` but emits the LLVM constant at the width/type
+    /// specified by `declared_ty`, avoiding silent i32 truncation for i64/u8/etc.
+    pub(crate) fn codegen_const_expr_typed(
         &self,
         expr: &ast_types::Expr,
+        declared_ty: &crate::types::Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let folded = Self::fold_const(expr, &self.const_values)?;
-        Ok(self.const_folded_to_llvm(&folded))
+        Ok(self.const_folded_to_llvm_typed(&folded, declared_ty))
     }
 
     /// Rust-level constant folder. Returns a `FoldedConst` scalar.
@@ -283,6 +282,24 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => Err(CodegenError::InternalError(
                 "non-constant expression in const context".into(),
             )),
+        }
+    }
+
+    fn const_folded_to_llvm_typed(
+        &self,
+        v: &FoldedConst,
+        ty: &crate::types::Type,
+    ) -> BasicValueEnum<'ctx> {
+        match v {
+            FoldedConst::Int(i) => {
+                let llvm_int = self.type_mapper.map_int_type(ty);
+                llvm_int.const_int(*i as u64, !ty.is_unsigned_int()).into()
+            }
+            FoldedConst::Float(f) => match ty {
+                crate::types::Type::F32 => self.context.f32_type().const_float(*f).into(),
+                _ => self.context.f64_type().const_float(*f).into(),
+            },
+            _ => self.const_folded_to_llvm(v),
         }
     }
 

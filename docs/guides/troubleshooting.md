@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-Common problems and solutions when working with NEURO.
+Common problems and solutions when working with Neuro.
 
 ## Installation Issues
 
@@ -319,7 +319,7 @@ func good() -> i32 {
 - Install and restart
 
 **Check antivirus**:
-- Add exception for NEURO executables
+- Add exception for Neuro executables
 - Temporarily disable to test
 
 ### Permission Denied (Unix)
@@ -423,7 +423,7 @@ Executable is larger than expected.
 
 **Solution**:
 
-Install NEURO VSCode extension:
+Install Neuro VSCode extension:
 ```bash
 cd neuro-language-support
 npm install -g @vscode/vsce
@@ -501,7 +501,7 @@ neurc compile program.nr
 ### Reporting Issues
 
 Include in bug reports:
-- NEURO compiler version
+- Neuro compiler version
 - Operating system and version
 - LLVM version
 - Rust version
@@ -513,7 +513,7 @@ Include in bug reports:
 ```markdown
 ## Environment
 - OS: Windows 11 / Ubuntu 22.04 / macOS 13
-- NEURO: Phase 1 (commit hash)
+- Neuro: Phase 1 (commit hash)
 - LLVM: 18.1.8
 - Rust: 1.70+
 
@@ -588,7 +588,7 @@ Check that `main` returns the expected exit code and performs desired operations
 
 ### Why can't I mix i32 and i64?
 
-NEURO uses strict typing with no implicit conversions. Explicit conversion operators coming in Phase 2.
+Neuro uses strict typing with no implicit conversions. Explicit conversion operators coming in Phase 2.
 
 ### Why is compilation slow?
 
@@ -598,7 +598,7 @@ Use `-O0` for fastest compile/debug loops and `-O2`/`-O3` for faster runtime bin
 
 Use `neurc check` for rapid feedback without code generation.
 
-### Can I use NEURO for production?
+### Can I use Neuro for production?
 
 Not yet - Phase 1 is alpha stage. Wait for Phase 2+ for production readiness.
 

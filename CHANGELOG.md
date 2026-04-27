@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.12.3] - 2026-04-27
+
+### Fixed
+- **Codegen bug:** `const` declarations with non-i32 types (e.g. `i64`, `u8`) were
+  silently emitted as i32 LLVM constants, truncating values > 2 147 483 647.
+  Both module-level (`const X: i64 = …`) and function-body (`const X: i64 = …`)
+  constants are now emitted at the correct declared bit-width.
+
+### Tests
+- Added `compiler/neurc/tests/examples.rs` — 22 integration tests that compile and
+  execute every `.nr` file in `examples/` and assert the expected exit code.
+  Total test count raised from 406 to 428.
+
+### Documentation
+- `docs/getting-started/first-program.md`: fixed f32/f64 code sample (`pi: f32 * 2.0`
+  was a type error); updated stale note about float literal inference.
+- `docs/language-reference/operators.md`: marked clamping / sign / abs examples that
+  use `if`-as-expression as not yet implemented (Phase 1.5); added working workarounds.
+
+---
+
 ## [1.12.2] - 2026-04-18
 
 ### Documentation

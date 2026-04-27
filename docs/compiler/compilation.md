@@ -8,7 +8,7 @@
 
 ## Overview
 
-The neurc compiler driver provides end-to-end compilation from NEURO source files (.nr) to native executables. This feature completes Phase 1 of the NEURO compiler roadmap.
+The neurc compiler driver provides end-to-end compilation from Neuro source files (.nr) to native executables. This feature completes Phase 1 of the Neuro compiler roadmap.
 
 ## Architecture
 
@@ -110,7 +110,7 @@ neurc compile <INPUT> [OPTIONS]
 ```
 
 **Arguments**:
-- `<INPUT>` - Path to NEURO source file (.nr)
+- `<INPUT>` - Path to Neuro source file (.nr)
 
 **Options**:
 - `-o, --output <FILE>` - Output executable path

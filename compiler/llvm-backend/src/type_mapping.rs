@@ -62,6 +62,18 @@ impl<'ctx> TypeMapper<'ctx> {
         }
     }
 
+    /// Return the LLVM integer type for a Neuro integer type (signed or unsigned).
+    /// Panics if called on a non-integer type.
+    pub(crate) fn map_int_type(&self, ty: &Type) -> inkwell::types::IntType<'ctx> {
+        match ty {
+            Type::I8 | Type::U8 => self.context.i8_type(),
+            Type::I16 | Type::U16 => self.context.i16_type(),
+            Type::I32 | Type::U32 => self.context.i32_type(),
+            Type::I64 | Type::U64 => self.context.i64_type(),
+            _ => panic!("map_int_type called on non-integer type {:?}", ty),
+        }
+    }
+
     /// Check if a type is a floating-point type
     pub(crate) fn is_float_type(ty: &Type) -> bool {
         ty.is_float()

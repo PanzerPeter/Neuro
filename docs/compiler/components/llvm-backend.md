@@ -25,7 +25,7 @@ pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> Codege
 
 ### Types
 
-| NEURO | LLVM |
+| Neuro | LLVM |
 |---|---|
 | `i8` | `i8` |
 | `i16` | `i16` |
@@ -89,7 +89,7 @@ Integer instructions are selected based on signedness:
 
 ## Opaque Pointers (LLVM 15+)
 
-LLVM 15 removed typed pointers. All pointers are now opaque (`ptr`). The backend tracks the NEURO type alongside every pointer in `variable_types: HashMap<String, BasicTypeEnum>` and supplies the type explicitly to every `build_load()` call.
+LLVM 15 removed typed pointers. All pointers are now opaque (`ptr`). The backend tracks the Neuro type alongside every pointer in `variable_types: HashMap<String, BasicTypeEnum>` and supplies the type explicitly to every `build_load()` call.
 
 ## String ABI
 
@@ -143,7 +143,7 @@ std::fs::write("output.o", &object_code)?;
 
 ## LLVM IR Example
 
-**NEURO source:**
+**Neuro source:**
 ```neuro
 func add(a: i32, b: i32) -> i32 {
     return a + b
@@ -207,7 +207,7 @@ When tensor types are introduced, `melior` (Rust MLIR bindings for LLVM/MLIR 20)
 The planned lowering strategy:
 
 ```
-AST → NEURO High-Level IR
+AST → Neuro High-Level IR
   → MLIR dialects (linalg / tensor / func / arith)
   → Enzyme MLIR AD pass (@grad)
   → GPU dialects (nvgpu / rocdl / Triton)  or  llvm dialect

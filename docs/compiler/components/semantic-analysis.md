@@ -391,7 +391,7 @@ fn check_expr(&mut self, expr: &Expr) -> Result<Type, ()> {
 ### Public Functions
 
 ```rust
-/// Type check a NEURO program
+/// Type check a Neuro program
 pub fn type_check(items: &[Item]) -> Result<(), Vec<TypeError>>
 ```
 

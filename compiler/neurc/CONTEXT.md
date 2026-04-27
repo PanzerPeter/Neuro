@@ -1,7 +1,7 @@
 # neurc
 
 ## Purpose
-Orchestrate the full NEURO compiler pipeline and expose it as a CLI tool.
+Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 
 ## Entry Point
 - Type: CLI

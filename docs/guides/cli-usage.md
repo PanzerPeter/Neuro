@@ -44,7 +44,7 @@ RUST_LOG=debug neurc check examples/milestone.nr
 
 ### compile
 
-Compile NEURO source to native executable.
+Compile Neuro source to native executable.
 
 **Syntax**:
 ```bash
@@ -325,7 +325,7 @@ Integrate into build scripts:
 #!/bin/bash
 set -e
 
-echo "Checking NEURO programs..."
+echo "Checking Neuro programs..."
 neurc check src/main.nr
 neurc check src/utils.nr
 
@@ -345,7 +345,7 @@ echo "Build complete!"
     chmod +x llvm.sh
     sudo ./llvm.sh 18
 
-- name: Build NEURO compiler
+- name: Build Neuro compiler
   run: cargo build --release -p neurc
 
 - name: Compile program

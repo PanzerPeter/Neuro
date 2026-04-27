@@ -6,7 +6,7 @@
 
 ## Overview
 
-The lexical analysis feature slice is responsible for converting raw NEURO source code into a stream of tokens. It implements a complete lexer with Unicode support, multiple number bases, string literals with escape sequences, and comprehensive error reporting.
+The lexical analysis feature slice is responsible for converting raw Neuro source code into a stream of tokens. It implements a complete lexer with Unicode support, multiple number bases, string literals with escape sequences, and comprehensive error reporting.
 
 ## Architecture
 
@@ -206,7 +206,7 @@ fn tokenize_string_with_escapes() {
 
 ### Unicode Support
 
-NEURO embraces Unicode for identifiers to support international developers:
+Neuro embraces Unicode for identifiers to support international developers:
 - Follows UAX#31 (Unicode Identifier Syntax)
 - XID_Start for first character
 - XID_Continue for subsequent characters
@@ -225,7 +225,7 @@ Supports common escape sequences for developer convenience:
 ### Public Functions
 
 ```rust
-/// Tokenize a NEURO source file into a token stream
+/// Tokenize a Neuro source file into a token stream
 pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError>
 ```
 
@@ -299,7 +299,7 @@ pub enum TokenKind {
 **Solution**:
 - Check for invisible Unicode characters
 - Ensure file encoding is UTF-8
-- Verify character is valid in NEURO syntax
+- Verify character is valid in Neuro syntax
 
 ### "Invalid escape sequence" in strings
 
