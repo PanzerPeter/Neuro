@@ -2,8 +2,7 @@
 
 > A modern, compiled language designed for high-performance AI development.
 
-[![License: GPL-3.0 + Neuro Exceptions](https://img.shields.io/badge/License-GPLv3%20%2B%20Exceptions-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
+[![License: Neuro Source-Available License](https://img.shields.io/badge/License-NEURO%20Source--Available-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
 [![Tests](https://img.shields.io/badge/tests-436%20passing-success.svg)](#)
 
@@ -502,7 +501,7 @@ The project is in early alpha — breaking changes are expected. Contributions s
 
 ## License
 
-Licensed under the [GNU General Public License v3.0 with Neuro Exceptions](LICENSE).
+Licensed under the [Neuro Source-Available License](LICENSE).
 
 This software is an Alpha release. The license includes mandatory redistribution terms to preserve attribution, enforce alpha-status disclosure, and limit liability (e.g., barring use in safety-critical deployments without acknowledgement). See [LICENSE](LICENSE) for the full breakdown and redistribution checklist.
 
