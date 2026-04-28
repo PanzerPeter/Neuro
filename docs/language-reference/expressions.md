@@ -88,6 +88,31 @@ val total = c.value + c.step
 
 Field access binds tighter than function calls in the precedence table.
 
+### If Expressions
+
+`if`/`else` chains are expressions when every arm has an `else` branch:
+
+```neuro
+val abs_n: i32 = if n >= 0 { n } else { 0 - n }
+val sign: i32  = if n < 0 { -1 } else if n == 0 { 0 } else { 1 }
+```
+
+All arms must produce the same type. An `if` without `else` has type `Void` and cannot be used as a value.
+
+### Block Expressions
+
+A `{ … }` block is an expression whose value is its final (trailing) expression:
+
+```neuro
+val area: i32 = {
+    val w: i32 = 6
+    val h: i32 = 7
+    w * h           // trailing expression — this is the block's value
+}
+```
+
+Locals declared inside a block are scoped to that block.
+
 ### Parenthesized Expressions
 
 Control evaluation order:

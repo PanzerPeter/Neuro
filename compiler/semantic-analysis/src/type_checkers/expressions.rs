@@ -591,6 +591,89 @@ impl TypeChecker {
                     Some(Type::Unknown)
                 }
             }
+
+            Expr::If {
+                condition,
+                then_block,
+                else_if_blocks,
+                else_block,
+                span,
+            } => {
+                let cond_ty = self
+                    .check_expr(condition, Some(&Type::Bool))
+                    .unwrap_or(Type::Unknown);
+                if !matches!(cond_ty, Type::Unknown) && !cond_ty.is_bool() {
+                    self.record_error(TypeError::Mismatch {
+                        expected: Type::Bool,
+                        found: cond_ty,
+                        span: condition.span(),
+                    });
+                }
+
+                // Collect arm types: then + each else-if + optional else
+                let then_ty = self.check_block_expr_type(then_block);
+
+                let mut arm_types: Vec<Type> = vec![then_ty.clone()];
+
+                for (elif_cond, elif_block) in else_if_blocks {
+                    let elif_cond_ty = self
+                        .check_expr(elif_cond, Some(&Type::Bool))
+                        .unwrap_or(Type::Unknown);
+                    if !matches!(elif_cond_ty, Type::Unknown) && !elif_cond_ty.is_bool() {
+                        self.record_error(TypeError::Mismatch {
+                            expected: Type::Bool,
+                            found: elif_cond_ty,
+                            span: elif_cond.span(),
+                        });
+                    }
+                    arm_types.push(self.check_block_expr_type(elif_block));
+                }
+
+                if let Some(else_stmts) = else_block {
+                    arm_types.push(self.check_block_expr_type(else_stmts));
+                } else {
+                    return Some(Type::Void);
+                }
+
+                // All arms must agree on type
+                let result_ty = arm_types[0].clone();
+                for arm_ty in &arm_types[1..] {
+                    if !arm_ty.is_compatible_with(&result_ty) {
+                        self.record_error(TypeError::Mismatch {
+                            expected: result_ty.clone(),
+                            found: arm_ty.clone(),
+                            span: *span,
+                        });
+                        return Some(Type::Unknown);
+                    }
+                }
+                Some(result_ty)
+            }
+
+            Expr::Block { stmts, .. } => {
+                self.symbols.push_scope();
+                let ty = self.check_block_expr_type(stmts);
+                self.symbols.pop_scope();
+                Some(ty)
+            }
         }
+    }
+
+    /// Check all stmts in a block and return the type of the trailing expression, or Void.
+    fn check_block_expr_type(&mut self, stmts: &[ast_types::Stmt]) -> Type {
+        self.symbols.push_scope();
+        let mut result = Type::Void;
+        for (i, stmt) in stmts.iter().enumerate() {
+            if i == stmts.len() - 1 {
+                if let ast_types::Stmt::Expr(expr) = stmt {
+                    result = self.check_expr(expr, None).unwrap_or(Type::Unknown);
+                    self.symbols.pop_scope();
+                    return result;
+                }
+            }
+            let _ = self.check_stmt(stmt);
+        }
+        self.symbols.pop_scope();
+        result
     }
 }

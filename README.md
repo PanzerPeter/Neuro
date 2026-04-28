@@ -5,7 +5,7 @@
 [![License: GPL-3.0 + Neuro Exceptions](https://img.shields.io/badge/License-GPLv3%20%2B%20Exceptions-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-428%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-436%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP complete · Phase 1.5 & Phase 2 in progress
 
@@ -59,7 +59,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 is complete and Phase 2 is in progress. The following features are fully implemented and tested (**428 Tests Passing**):
+Phase 1 is complete and Phase 2 is in progress. The following features are fully implemented and tested (**435 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -72,6 +72,7 @@ Phase 1 is complete and Phase 2 is in progress. The following features are fully
 | **String Type** | Literals with full escape sequence support (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==` and `!=` for byte-level comparison |
 | **Structs** | Definition, instantiation (`Name { field: value }`), field read (`obj.field`), field mutation on `mut` bindings; nominal typing; definition-order independent |
 | **Methods** | `impl` blocks with `&self` instance methods; associated functions called via `TypeName::func(args)`; `&mut self` / consuming `self` rejected until ownership lands |
+| **If/Block Expressions** | `val x = if cond { a } else { b }`; `val y = { stmts; expr }`; all arms type-checked; alloca-based lowering |
 | **LLVM Backend** | Native executable generation via inkwell 0.8.0 (LLVM 20) |
 | **CLI** | `neurc check` (type-check only) and `neurc compile` (produces native binary) |
 

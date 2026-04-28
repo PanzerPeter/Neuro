@@ -574,7 +574,7 @@ impl Parser {
 }
 
 /// Extract the span from a statement — shared by span-calculation in block-ending logic.
-pub(super) fn stmt_span(stmt: &Stmt) -> shared_types::Span {
+pub(crate) fn stmt_span(stmt: &Stmt) -> shared_types::Span {
     match stmt {
         Stmt::VarDecl { span, .. } => *span,
         Stmt::Const { span, .. } => *span,

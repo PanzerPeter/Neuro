@@ -189,6 +189,22 @@ cargo run -p neurc -- compile examples/integer_suffixes.nr
 # Exit code: 0
 ```
 
+### [if_block_expressions.nr](if_block_expressions.nr)
+`if`/`else` chains and bare block expressions used as first-class values.
+
+**Features:**
+- `if`/`else` as a value: `val abs = if n >= 0 { n } else { 0 - n }`
+- Chained `else if` as a value: `val clamped = if n < lo { lo } else if n > hi { hi } else { n }`
+- Bare block expression as a value: `val area = { val w: i32 = 6; val h: i32 = 7; w * h }`
+- All arms type-checked to produce the same type
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/if_block_expressions.nr
+./examples/if_block_expressions
+# Exit code: 149  (abs(−7)=7 + area=42 + clamp(150,0,100)=100)
+```
+
 ## Known Limitations
 
 - No arrays yet (Phase 2+)

@@ -31,7 +31,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Build a struct aggregate value from a struct literal expression.
     pub(crate) fn codegen_struct_literal(
-        &self,
+        &mut self,
         name: &str,
         fields: &[FieldInit],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
@@ -39,7 +39,8 @@ impl<'ctx> CodegenContext<'ctx> {
         let def = self
             .struct_defs
             .get(name)
-            .ok_or_else(|| CodegenError::UnsupportedType(format!("unknown struct '{}'", name)))?;
+            .ok_or_else(|| CodegenError::UnsupportedType(format!("unknown struct '{}'", name)))?
+            .clone();
 
         let mut agg = llvm_ty.get_undef();
         for field_init in fields {
@@ -103,7 +104,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Store a value into a field of a named struct variable.
     pub(crate) fn codegen_field_assignment(
-        &self,
+        &mut self,
         object_name: &str,
         field_name: &str,
         value: &Expr,

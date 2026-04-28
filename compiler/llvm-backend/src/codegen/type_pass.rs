@@ -494,6 +494,58 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 self.expr_types.insert(span.start, field_ty);
             }
+
+            Expr::If {
+                condition,
+                then_block,
+                else_if_blocks,
+                else_block,
+                span,
+            } => {
+                self.visit_expr_for_types(condition, func_types)?;
+                for stmt in then_block {
+                    self.visit_stmt_for_types(stmt, func_types)?;
+                }
+                for (cond, stmts) in else_if_blocks {
+                    self.visit_expr_for_types(cond, func_types)?;
+                    for stmt in stmts {
+                        self.visit_stmt_for_types(stmt, func_types)?;
+                    }
+                }
+                if let Some(stmts) = else_block {
+                    for stmt in stmts {
+                        self.visit_stmt_for_types(stmt, func_types)?;
+                    }
+                }
+                let result_ty = if else_block.is_none() {
+                    Type::Void
+                } else {
+                    match then_block.last() {
+                        Some(Stmt::Expr(e)) => self
+                            .expr_types
+                            .get(&e.span().start)
+                            .cloned()
+                            .unwrap_or(Type::Void),
+                        _ => Type::Void,
+                    }
+                };
+                self.expr_types.insert(span.start, result_ty);
+            }
+
+            Expr::Block { stmts, span } => {
+                for stmt in stmts {
+                    self.visit_stmt_for_types(stmt, func_types)?;
+                }
+                let result_ty = match stmts.last() {
+                    Some(Stmt::Expr(e)) => self
+                        .expr_types
+                        .get(&e.span().start)
+                        .cloned()
+                        .unwrap_or(Type::Void),
+                    _ => Type::Void,
+                };
+                self.expr_types.insert(span.start, result_ty);
+            }
         }
         Ok(())
     }

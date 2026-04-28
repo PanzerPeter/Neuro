@@ -5,6 +5,8 @@ use std::fmt;
 
 use shared_types::{Identifier, Literal, Span};
 
+use super::statements::Stmt;
+
 /// A single field initializer in a struct literal: `field_name: expr`
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldInit {
@@ -60,6 +62,19 @@ pub enum Expr {
         target_type: crate::Type,
         span: Span,
     },
+    /// if-expression producing a value: `if cond { expr } else { expr }`
+    If {
+        condition: Box<Expr>,
+        then_block: Vec<Stmt>,
+        else_if_blocks: Vec<(Expr, Vec<Stmt>)>,
+        else_block: Option<Vec<Stmt>>,
+        span: Span,
+    },
+    /// Bare block expression: `{ stmts; trailing_expr }`
+    Block {
+        stmts: Vec<Stmt>,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -76,6 +91,8 @@ impl Expr {
             Expr::FieldAccess { span, .. } => *span,
             Expr::Path { span, .. } => *span,
             Expr::Cast { span, .. } => *span,
+            Expr::If { span, .. } => *span,
+            Expr::Block { span, .. } => *span,
         }
     }
 }

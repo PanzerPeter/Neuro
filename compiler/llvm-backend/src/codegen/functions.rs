@@ -11,11 +11,11 @@ use super::context::CodegenContext;
 impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a function call
     pub(crate) fn codegen_call(
-        &self,
+        &mut self,
         func_name: &str,
         args: &[Expr],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let function = self
+        let function = *self
             .functions
             .get(func_name)
             .ok_or_else(|| CodegenError::UndefinedFunction(func_name.to_string()))?;
@@ -28,7 +28,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let call_result = self
             .builder
-            .build_call(*function, &arg_values, "calltmp")
+            .build_call(function, &arg_values, "calltmp")
             .map_err(|e| CodegenError::LlvmError(format!("failed to build call: {}", e)))?;
 
         call_result.try_as_basic_value().basic().ok_or_else(|| {
@@ -44,12 +44,12 @@ impl<'ctx> CodegenContext<'ctx> {
     /// `&self` methods are read-only; mutations inside the method body do not
     /// propagate back to the caller (ownership semantics are pending).
     pub(crate) fn codegen_method_call(
-        &self,
+        &mut self,
         mangled_name: &str,
         receiver: &Expr,
         args: &[Expr],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let function = self
+        let function = *self
             .functions
             .get(mangled_name)
             .ok_or_else(|| CodegenError::UndefinedFunction(mangled_name.to_string()))?;
@@ -66,7 +66,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let call_result = self
             .builder
-            .build_call(*function, &arg_values, "calltmp")
+            .build_call(function, &arg_values, "calltmp")
             .map_err(|e| CodegenError::LlvmError(format!("failed to build method call: {}", e)))?;
 
         call_result.try_as_basic_value().basic().ok_or_else(|| {

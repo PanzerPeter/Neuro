@@ -11,6 +11,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.13.0] - 2026-04-28
+
+### Added
+- **If-expressions and block expressions as values** (Phase 1.5 §1.8)
+  - `if`/`else` chains now produce values when used in expression position:
+    `val abs = if x >= 0 { x } else { 0 - x }`
+  - `else if` chains work in expression position:
+    `val s = if n < 0 { -1 } else if n == 0 { 0 } else { 1 }`
+  - Bare block expressions produce the value of their trailing expression:
+    `val r = { val a = 3; val b = 4; a + b }`
+  - Both forms are fully type-checked: all arms must produce the same type;
+    if-without-else has type `Void` and cannot be used as a value.
+  - All four compiler stages updated: AST (`Expr::If`, `Expr::Block`),
+    parser, type checker, LLVM backend (alloca-based lowering; mem2reg promotes
+    to SSA registers in optimised builds).
+
+### Internal
+- `codegen_expr` and all callee helpers upgraded from `&self` to `&mut self`
+  (required because `Expr::If` codegen appends basic blocks and calls
+  `codegen_stmt`).
+
+### Tests
+- Added `compiler/neurc/tests/if_block_expressions.rs` — 7 integration tests.
+- Added `examples/if_block_expressions.nr` example; wired into `examples.rs` test suite.
+  Total test count raised from 428 to 436.
+
+---
+
 ## [1.12.3] - 2026-04-27
 
 ### Fixed

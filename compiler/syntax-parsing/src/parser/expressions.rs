@@ -1,10 +1,11 @@
 use lexical_analysis::{Token, TokenKind};
-use shared_types::{Identifier, Literal};
+use shared_types::{Identifier, Literal, Span};
 
-use crate::ast::{BinaryOp, Expr, UnaryOp};
+use crate::ast::{BinaryOp, Expr, Stmt, UnaryOp};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 
+use super::statements::stmt_span;
 use super::Parser;
 
 /// Maximum expression nesting depth to prevent stack overflow
@@ -143,12 +144,82 @@ impl Parser {
                 Ok(Expr::Paren(Box::new(expr), span))
             }
 
+            TokenKind::If => self.parse_if_expr(token.span),
+
+            TokenKind::LeftBrace => self.parse_block_expr(token.span),
+
             _ => Err(ParseError::UnexpectedToken {
                 found: token.kind,
                 expected: "expression".to_string(),
                 span: token.span,
             }),
         }
+    }
+
+    /// Parse an if-expression. The `if` token has already been consumed; `start_span` is its span.
+    fn parse_if_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
+        self.skip_newlines();
+        self.no_struct_lit = true;
+        let condition = self.parse_expr(Precedence::Lowest)?;
+        self.no_struct_lit = false;
+        self.skip_newlines();
+
+        let then_block = self.parse_block()?;
+        self.skip_newlines();
+
+        let mut else_if_blocks: Vec<(Expr, Vec<Stmt>)> = Vec::new();
+        let mut else_block: Option<Vec<Stmt>> = None;
+
+        while self.check(&TokenKind::Else) {
+            self.advance(); // consume 'else'
+            self.skip_newlines();
+
+            if self.check(&TokenKind::If) {
+                self.advance(); // consume 'if'
+                self.skip_newlines();
+                self.no_struct_lit = true;
+                let elif_cond = self.parse_expr(Precedence::Lowest)?;
+                self.no_struct_lit = false;
+                self.skip_newlines();
+                let elif_block = self.parse_block()?;
+                else_if_blocks.push((elif_cond, elif_block));
+                self.skip_newlines();
+            } else {
+                else_block = Some(self.parse_block()?);
+                break;
+            }
+        }
+
+        let end_span = else_block
+            .as_ref()
+            .and_then(|s| s.last())
+            .or_else(|| else_if_blocks.last().and_then(|(_, s)| s.last()))
+            .or_else(|| then_block.last())
+            .map(stmt_span)
+            .unwrap_or(start_span);
+
+        Ok(Expr::If {
+            condition: Box::new(condition),
+            then_block,
+            else_if_blocks,
+            else_block,
+            span: start_span.merge(end_span),
+        })
+    }
+
+    /// Parse a block expression. The `{` has already been consumed; `start_span` is its span.
+    fn parse_block_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
+        self.skip_newlines();
+        let mut stmts = Vec::new();
+
+        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            stmts.push(self.parse_stmt()?);
+            self.skip_newlines();
+        }
+
+        let close = self.consume(TokenKind::RightBrace, "'}'")?;
+        let span = start_span.merge(close.span);
+        Ok(Expr::Block { stmts, span })
     }
 
     /// Parse an infix expression (binary operators, function calls, field access, casts)

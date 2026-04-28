@@ -110,7 +110,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Generate code for an assignment statement
-    pub(crate) fn codegen_assignment(&self, name: &str, value: &Expr) -> CodegenResult<()> {
+    pub(crate) fn codegen_assignment(&mut self, name: &str, value: &Expr) -> CodegenResult<()> {
         // Generate code for the value expression
         let val = self.codegen_expr(value)?;
 
@@ -129,7 +129,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Generate code for a return statement
-    pub(crate) fn codegen_return(&self, value: Option<&Expr>) -> CodegenResult<()> {
+    pub(crate) fn codegen_return(&mut self, value: Option<&Expr>) -> CodegenResult<()> {
         if let Some(expr) = value {
             let ret_val = self.codegen_expr(expr)?;
             self.builder
@@ -483,7 +483,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 ..
             } => self.codegen_field_assignment(&object.name, &field.name, value),
 
-            Stmt::Const { name, ty, value, .. } => {
+            Stmt::Const {
+                name, ty, value, ..
+            } => {
                 let declared_sem = crate::types::Type::from_ast(ty);
                 let val = self.codegen_const_expr_typed(value, &declared_sem)?;
                 self.const_values.insert(name.name.clone(), val);
