@@ -79,20 +79,22 @@ cargo run -p neurc -- compile examples/division.nr
 ```
 
 ### [float_ops.nr](float_ops.nr)
-Floating-point arithmetic operations.
+Floating-point arithmetic operations and comparisons.
 
 **Features:**
 - f64 floating-point type
 - Float arithmetic (+, -, *, /)
 - Function parameters with float types
-
-**Note:** Float comparisons in if conditions are not yet supported in Phase 1.
+- IEEE-754 ordered float comparisons (`<, >, <=, >=`)
+- NaN handling semantics returning false on inequalities
 
 **Compile and run:**
 ```bash
 cargo run -p neurc -- compile examples/float_ops.nr
 .\examples\float_ops.exe
 ```
+
+**Expected Exit Code:** `42`
 
 ### [control_flow.nr](control_flow.nr)
 Control flow patterns with if/else statements.

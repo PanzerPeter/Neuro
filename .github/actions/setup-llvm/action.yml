@@ -77,43 +77,16 @@ runs:
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'
+        $version = "20.1.4"
 
-        $version   = "20.1.4"   # pin to a specific patch for reproducibility
-        $installer = "$env:TEMP\llvm-installer.exe"
-        $url       = "https://github.com/llvm/llvm-project/releases/download/" +
-                     "llvmorg-$version/LLVM-$version-win64.exe"
-        $targetDir = 'C:\LLVM'
+        Write-Host "Installing LLVM $version via Chocolatey..."
+        choco install llvm --version=$version -y
+        
+        $targetDir = 'C:\Program Files\LLVM'
+        $llvmConfig = "$targetDir\bin\llvm-config.exe"
 
-        Write-Host "Downloading LLVM $version from $url"
-        # curl.exe is more reliable than Invoke-WebRequest for large files
-        curl.exe -fsSL -o $installer $url
-        if ($LASTEXITCODE -ne 0) { throw "curl download failed (exit $LASTEXITCODE)" }
-
-        Write-Host "Running silent NSIS install to $targetDir ..."
-        # Single-string ArgumentList: NSIS parses its own raw command line via
-        # GetCommandLine(), so /D= must be last and must not be quoted.
-        $proc = Start-Process -FilePath $installer `
-                  -ArgumentList "/S /D=$targetDir" `
-                  -Wait -PassThru
-        Write-Host "Installer exit code: $($proc.ExitCode)"
-
-        # Locate llvm-config — fall back to the default NSIS path if /D= was
-        # ignored (older NSIS builds sometimes do this).
-        $candidates = @("$targetDir\bin\llvm-config.exe",
-                        'C:\Program Files\LLVM\bin\llvm-config.exe')
-        $llvmConfig = $null
-        foreach ($c in $candidates) {
-          if (Test-Path $c) { $llvmConfig = $c; $targetDir = Split-Path (Split-Path $c); break }
-        }
-        if (-not $llvmConfig) {
-          # Last resort: check PATH (e.g. if a system-wide LLVM is already present)
-          $inPath = Get-Command llvm-config.exe -ErrorAction SilentlyContinue
-          if ($inPath) {
-            $llvmConfig = $inPath.Path
-            $targetDir  = Split-Path (Split-Path $llvmConfig)
-          } else {
-            throw "llvm-config.exe not found after install (exit code $($proc.ExitCode)). Searched: $($candidates -join ', ')"
-          }
+        if (-not (Test-Path $llvmConfig)) {
+          throw "llvm-config.exe not found at $llvmConfig"
         }
 
         $detected = & $llvmConfig --version

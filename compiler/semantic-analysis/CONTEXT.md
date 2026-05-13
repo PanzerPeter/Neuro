@@ -69,3 +69,4 @@ so const names are usable in any expression context.
   require both operands to be integer types (`is_integer()` — not float, not bool) and return the
   operand type. `UnaryOp::BitNot` requires an integer operand and returns the same type. Floats and
   bools produce `InvalidBinaryOperator` / `InvalidOperator` errors respectively.
+- 2026-05-13: Implemented IEEE-754 native float comparison §1.2, §3.10 and strict inequality type bounds. Inequality operators (`<, >, <=, >=`) are restricted to `is_numeric()` types (ints and floats), correctly rejecting struct, string, and bool types that lack natural ordering, preventing codegen panics. IEEE-754 NaN handling works natively via LLVM `fcmp` generation.

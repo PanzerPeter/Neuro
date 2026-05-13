@@ -146,9 +146,20 @@ impl TypeChecker {
                     }
 
                     // Comparison operators: require compatible types, return bool
-                    BinaryOp::Equal
-                    | BinaryOp::NotEqual
-                    | BinaryOp::Less
+                    BinaryOp::Equal | BinaryOp::NotEqual => {
+                        if !left_ty.is_compatible_with(&right_ty) {
+                            self.record_error(TypeError::Mismatch {
+                                expected: left_ty,
+                                found: right_ty,
+                                span: *span,
+                            });
+                            return Some(Type::Unknown);
+                        }
+                        Some(Type::Bool)
+                    }
+
+                    // Inequality operators: require numeric types (int/float), return bool
+                    BinaryOp::Less
                     | BinaryOp::Greater
                     | BinaryOp::LessEqual
                     | BinaryOp::GreaterEqual => {
@@ -160,6 +171,17 @@ impl TypeChecker {
                             });
                             return Some(Type::Unknown);
                         }
+
+                        if !left_ty.is_numeric() {
+                            self.record_error(TypeError::InvalidBinaryOperator {
+                                op: op.to_string(),
+                                left: left_ty.clone(),
+                                right: right_ty.clone(),
+                                span: *span,
+                            });
+                            return Some(Type::Unknown);
+                        }
+
                         Some(Type::Bool)
                     }
 

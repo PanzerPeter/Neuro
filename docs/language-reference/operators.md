@@ -349,6 +349,7 @@ Both operands must be the same type.
 
 `==`, `!=`, `<`, `>`, `<=`, `>=` work with:
 - All numeric types (same type required)
+  - *Note:* Float comparison (`f32`, `f64`) utilizes native IEEE-754 ordered predicates. Comparisons involving `NaN` will naturally return `false`.
 - `bool` (only `==` and `!=`)
 - `string` (only `==` and `!=`) — byte-level equality via length check + `memcmp`
 
