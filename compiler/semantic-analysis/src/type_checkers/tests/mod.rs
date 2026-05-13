@@ -293,9 +293,9 @@ fn test_literal_inference_in_binary_operation() {
 }
 
 #[test]
-fn test_large_literal_auto_promotes_to_i64() {
+fn test_large_literal_fails_to_promote_to_i64() {
     // val x = 5000000000  (too large for i32)
-    // Should automatically use i64
+    // Should NOT automatically use i64
     let mut checker = TypeChecker::new();
 
     let stmt = Stmt::VarDecl {
@@ -310,11 +310,17 @@ fn test_large_literal_auto_promotes_to_i64() {
     };
 
     checker.check_stmt(&stmt);
-    assert!(!checker.has_errors());
+    assert!(checker.has_errors());
 
-    // Verify variable has i64 type
-    let symbol_info = checker.symbols.lookup("x").unwrap();
-    assert_eq!(symbol_info.ty, Type::I64);
+    let errors = checker.into_errors();
+    assert_eq!(errors.len(), 1);
+    match &errors[0] {
+        TypeError::IntegerLiteralOutOfRange { value, ty, .. } => {
+            assert_eq!(*value, 5000000000);
+            assert_eq!(*ty, Type::I32);
+        }
+        _ => panic!("Expected IntegerLiteralOutOfRange error"),
+    }
 }
 
 #[test]

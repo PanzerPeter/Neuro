@@ -59,7 +59,7 @@ that refer to other known consts). Function-body `Stmt::Const` nodes are validat
 so const names are usable in any expression context.
 
 ## Recent Updates
-- 2026-04-18: Integer literal type suffixes §1.4. `Literal::Integer(value, Some(suffix))` short-circuits `infer_integer_type`; `infer_suffixed_integer_type` maps the suffix to a `Type` via `suffix_to_type` and range-checks the value (reusing `check_integer_range` + `IntegerLiteralOutOfRange`). Unsuffixed literals are unchanged.
+- 2026-04-18: Integer literal type suffixes §1.4. `Literal::Integer(value, Some(suffix))` short-circuits `infer_integer_type`; `infer_suffixed_integer_type` maps the suffix to a `Type` via `suffix_to_type` and range-checks the value (reusing `check_integer_range` + `IntegerLiteralOutOfRange`). Unsuffixed literals that exceed the i32 range now emit an `IntegerLiteralOutOfRange` rather than silently promoting to `i64`.
 
 - 2026-04-04: Updated `type_checker` to correctly destructure the new `inclusive` flag on `Stmt::ForRange`. No integer validation rules changed as bounds checking works the same for inclusive and exclusive endpoints.
 - 2026-04-16: Implemented §1.3 const declarations: four-pass `check_program`, `constants` map,

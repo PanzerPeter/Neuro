@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.14.0] - 2026-05-13
+
+### Changed
+- `semantic`: unannotated integer literals out of i32 range yield error rather than promote to i64 (Phase 1.5)
+- VSA_4_3.xml changed to VSA.md, saving around 2500 tokens in size
+
+---
+
 ## [1.13.0] - 2026-04-28
 
 ### Added

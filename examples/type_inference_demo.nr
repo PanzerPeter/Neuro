@@ -26,7 +26,7 @@ func demonstrate_float_inference() -> i32 {
 func demonstrate_defaults() -> i32 {
     val default_int = 42       // Defaults to i32
     val default_float = 2.5    // Defaults to f64
-    val large_int = 5000000000 // Auto-promotes to i64 (too large for i32)
+    val large_int = 5000000000i64 // Explicit suffix required (too large for i32)
 
     return 0
 }

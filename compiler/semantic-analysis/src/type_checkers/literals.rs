@@ -49,8 +49,13 @@ impl TypeChecker {
         if self.check_integer_range(value, &Type::I32) {
             Type::I32
         } else {
-            // Value doesn't fit in default i32, use i64
-            Type::I64
+            // Value doesn't fit in default i32, report an error
+            self.record_error(TypeError::IntegerLiteralOutOfRange {
+                value,
+                ty: Type::I32,
+                span,
+            });
+            Type::Unknown
         }
     }
 
