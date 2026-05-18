@@ -5,18 +5,19 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Precedence {
     Lowest,
-    LogicalOr,   // ||
-    LogicalAnd,  // &&
-    BitwiseOr,   // |
-    BitwiseXor,  // ^
-    BitwiseAnd,  // &
-    Equality,    // == !=
-    Comparison,  // < > <= >=
-    Shift,       // <<
-    Sum,         // + -
-    Product,     // * / %
-    Cast,        // as
-    Unary,       // - ! ~
-    Call,        // function calls
-    FieldAccess, // . (member access, binds tighter than call)
+    NullCoalesce, // ?? (Appendix B row 14: looser than ||, tighter than range)
+    LogicalOr,    // ||
+    LogicalAnd,   // &&
+    BitwiseOr,    // |
+    BitwiseXor,   // ^
+    BitwiseAnd,   // &
+    Equality,     // == !=
+    Comparison,   // < > <= >=
+    Shift,        // <<
+    Sum,          // + -
+    Product,      // * / %
+    Cast,         // as
+    Unary,        // - ! ~
+    Call,         // function calls
+    FieldAccess,  // . (member access, binds tighter than call)
 }

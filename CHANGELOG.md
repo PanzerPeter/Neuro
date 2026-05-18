@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.16.0] - 2026-05-18
+
+### Added
+- `lexer`: `??` token (`TokenKind::QuestionQuestion`) for null/error coalescing
+- `parser`: `BinaryOp::NullCoalesce` with R-to-L associativity per Appendix B row 14 (Phase 1.5 §3.11)
+- `tests`: parser tests pinning `a ?? b ?? c` to `a ?? (b ?? c)` and `a ?? b || c` to `a ?? (b || c)`
+
+### Changed
+- `semantic`: `??` rejected via new `OperatorNotYetSupported` diagnostic until Option/Result land in Phase 2
+
+---
+
 ## [1.15.0] - 2026-05-13
 
 ### Changed

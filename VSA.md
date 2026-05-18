@@ -1,8 +1,8 @@
-# Vertical Slice Architecture — Solo-Agent AI Base Guidelines v4.3
+# Vertical Slice Architecture — Solo-Agent AI Base Guidelines v4.4
 
 > **Priority: Highest.** Every rule is a compiler error. Blocker-severity violations MUST be refused — state the rule ID and propose a compliant alternative.
 > **Context:** 1 human + 1 AI agent | 20–50K LOC | No backward compatibility.
-> Supersedes: v4.2 | Created: 2026-03-17
+> Supersedes: v4.3 | Created: 2026-05-16
 
 ---
 
@@ -17,6 +17,7 @@
 | **Public Read Model** | Read-only DTO a Slice exposes explicitly for cross-slice synchronous reads. A contract, not a model leak. |
 | **Domain Utility** | Pure function or value type with zero side effects. Shared Kernel eligible only when it contains no slice-specific rules. |
 | **CONTEXT.md** | Machine-readable contract file at each Slice root. The AI's cross-session memory for that Slice. Not documentation. |
+| **Hard Gate** | A point in autonomous execution where the AI MUST pause for explicit written confirmation regardless of `CTX-002`. |
 
 ---
 
@@ -25,16 +26,18 @@
 **`CTX-001` [BLOCKER]** No migration paths, compatibility shims, versioned endpoints, deprecated code paths, or adapter layers. If a better design exists, refactor completely.
 
 **`CTX-002` [ULTRA] — Continuous Execution Protocol**
-To minimize token overhead and latency, refactoring tasks MUST be executed as a continuous, autonomous stream. The AI is authorized to complete the entire scope without pausing for developer confirmation unless a terminal error occurs.
+To minimize token overhead and latency, refactoring tasks MUST be executed as a continuous, autonomous stream. The AI is authorized to complete the entire scope without pausing for developer confirmation unless a Hard Gate or terminal error is encountered.
 
-1.  **Initial Assessment (The Single Gate):** Output a high-level execution plan and a list of files to be modified. Immediately follow this with: *"Starting continuous execution. I will pause only for errors or if $N$ files are modified without success."*
-2.  **Autonomous Chaining:** Execute all changes sequentially across multiple responses. Each response must start with a progress indicator (e.g., `[Step 3/8]`) and end with an internal logic check before proceeding immediately to the next file in the next response.
-3.  **Exception Handling:** The AI MUST only pause if:
-    *   A technical blocker is encountered (e.g., missing dependency, circular logic).
-    *   The proposed change contradicts a previously established pattern in the codebase.
-4.  **Final Reconciliation:** Upon completion, provide a concise summary of all changes made and a verification command (e.g., a test suite execution or a `git diff` summary).
+1. **Initial Assessment (The Single Gate):** Output a high-level execution plan and a list of files to be modified. Immediately follow this with: *"Starting continuous execution. I will pause only at Hard Gates, terminal errors, or if $N$ files are modified without success."*
+2. **Autonomous Chaining:** Execute all changes sequentially. Each response starts with a progress indicator (e.g., `[Step 3/8]`) and ends with an internal logic check before proceeding to the next file.
+3. **Hard Gates — mandatory pause regardless of `CTX-002`:**
+   - A new or modified **persistence schema** is required. Output the proposed schema and wait for explicit written confirmation. Silence, absence of objection, or topic continuation is NOT approval.
+   - A **`RT-001` trigger** fires (Handler exceeds 300 lines or 5 injected dependencies). Halt, present the split plan, wait for confirmation.
+   - The proposed change **contradicts an established pattern** already present in the codebase.
+   - A **missing dependency** or **circular logic** is encountered.
+4. **Final Reconciliation:** Upon completion, provide a concise summary of all changes and a verification command (e.g., a test suite run or `git diff` summary).
 
-Leaving old and new patterns coexisting after any single step is **FORBIDDEN**. Silence or non-response is NOT confirmation.
+Leaving old and new patterns coexisting after any single step is **FORBIDDEN**.
 
 **`CTX-003` [HIGH]** No team-onboarding docs, contribution guides, or changelogs unless explicitly requested.
 
@@ -65,9 +68,6 @@ Leaving old and new patterns coexisting after any single step is **FORBIDDEN**. 
 | `AC-012` | Apply guard clauses and early returns at the top of every function. Nested conditional depth beyond 2 MUST be refactored before delivery. → CQ-001 |
 | `AC-013` | Use named constants for every magic number, magic string, and configuration value. → CM-004 |
 
-### Schema Confirmation
-Before generating any persistence schema, output the proposed schema as part of the Boundary Proposal. Do not proceed to implementation until the developer explicitly confirms in writing. **Silence, absence of objection, or topic continuation is NOT approval.**
-
 ---
 
 ## 4. AI Interaction Protocol
@@ -80,7 +80,7 @@ Before writing implementation code, output:
 - (a) Slice name and its single business responsibility.
 - (b) Full file/folder tree.
 - (c) Input DTO, Output DTO, and Handler signature.
-- (d) Persistence schema if applicable (triggers schema confirmation).
+- (d) Persistence schema if applicable — triggers a **Hard Gate** (→ CTX-002.3).
 
 Infer from context first. Ask ONE clarifying question only if a boundary is genuinely ambiguous after inference.
 
@@ -103,6 +103,9 @@ Do not silently leave inconsistencies.
 Always duplicate business logic across Slices. Do NOT create a shared module based on predicted future divergence — LLMs cannot reliably predict domain evolution. Business logic moves to the Shared Kernel as a Domain Utility ONLY on explicit developer command: `/abstract [LogicName]`. Without that command, **duplication is the default and correct action.**
 
 **`PURE-FN-EXCEPTION`:** Pure functions with zero side effects representing a universal domain concept (e.g., Money arithmetic, VAT calculation, slug generation) are Shared Kernel eligible from initial creation WITHOUT requiring `/abstract`, provided: (a) zero side effects, (b) no branch logic tied to any specific Slice's business rules, (c) genuinely universal across any Slice.
+
+### Abstract Command Integrity
+If the AI detects identical business logic duplicated across three or more Slices and no `/abstract` command has been issued, it MUST proactively flag `RT-005` and surface the duplication — it MUST NOT silently proceed or self-promote the logic to the Shared Kernel. The `/abstract` command is the only valid promotion gate.
 
 ### Slice Independence
 Deleting a Slice folder plus its DI registration and event subscriptions must leave the project in a compilable, fully functional state. If deletion requires modifying code inside another Slice, the boundaries are wrong.
@@ -215,11 +218,24 @@ Examples: `Money.ValueObject.ts` | `Logger.Adapter.ts` | `DatabaseConnection.Con
 
 ---
 
-## 11. Refactoring Triggers
+## 11. Observability
 
-When any trigger fires: **HALT**, report the trigger ID, propose a concrete fix, wait for explicit confirmation before continuing.
+Observability infrastructure lives exclusively in the Shared Kernel as zero-business-logic adapters. Slices consume these adapters via dependency injection and MUST NOT implement logging, tracing, or error formatting inline.
 
-**`RT-001` [BLOCKER]**
+| ID | Severity | Rule |
+|----|----------|------|
+| `OB-001` | HIGH | All Slices MUST emit structured log entries at Handler entry and exit. Minimum fields: `slice`, `operation`, `duration_ms`, `result` (`ok` or `error`). |
+| `OB-002` | HIGH | All error responses MUST conform to a single project-wide error envelope defined in the Shared Kernel. Slices MUST NOT define their own error shapes. |
+| `OB-003` | MEDIUM | Correlation/trace IDs MUST be propagated from the Entry Point through the Handler to any Integration Event emitted. The propagation mechanism is defined once in the Shared Kernel. |
+| `OB-004` | LOW | Infrastructure exceptions (DB, network, external service) MUST be caught at the adapter boundary, logged with full context, and re-surfaced as a typed infrastructure error — never as a raw exception at the Slice boundary. |
+
+---
+
+## 12. Refactoring Triggers
+
+When any trigger fires during **autonomous execution**: report the trigger ID, propose a concrete fix. If the trigger is marked **Hard Gate**, pause and wait for explicit written confirmation before continuing.
+
+**`RT-001` [BLOCKER] [Hard Gate]**
 Condition: Handler/UseCase exceeds 300 lines OR has more than 5 injected dependencies.
 Action: Halt. Identify sub-operations. Propose a split into separate named Commands. Present the plan before writing code.
 
@@ -236,12 +252,12 @@ Condition: A Slice imports more than one other Slice's Public Read Model OR subs
 Action: Flag boundary misalignment. Propose Read Model replication or a boundary redraw.
 
 **`RT-005` [MEDIUM]**
-Condition: Identical validation logic duplicated across three or more Slices.
+Condition: Identical validation logic duplicated across three or more Slices AND no `/abstract` command has been issued.
 Action: Flag the duplication. Propose moving it to a Shared Kernel Domain Utility with a WHY comment. Do NOT proceed with abstraction until the developer explicitly issues `/abstract [ValidatorName]`. Confirmation alone is insufficient.
 
 ---
 
-## 12. Living Context Documentation (CONTEXT.md)
+## 13. Living Context Documentation (CONTEXT.md)
 
 Every Slice MUST have a CONTEXT.md. It is a mandatory Slice component.
 
@@ -275,7 +291,9 @@ Update CONTEXT.md in the **SAME response** as any change to: Input/Output DTO | 
 
 ---
 
-## 13. Context Scaling
+## 14. Context Scaling
+
+Slices within the same project may mature at different rates. Apply the scale tier to **each Slice individually** based on its own complexity, not the total project Slice count alone. When the project crosses a tier boundary, existing Slices are upgraded incrementally — not all at once — and the AI flags which Slices are below the new tier's requirements during the next Consistency Scan (→ Step 4).
 
 ### Small (1–14 Slices)
 - DB entities may be used directly in Handlers. No Repository required.
@@ -289,6 +307,7 @@ Update CONTEXT.md in the **SAME response** as any change to: Input/Output DTO | 
 - Strict DTO separation: Input Model, Output Model, and DB Entity are distinct types.
 - Repository or Query Object required for all non-trivial persistence.
 - Slice-specific DbContext or namespace-isolated collection.
+- Persistent event bus required (in-process with durability guarantees or external broker).
 - Full CONTEXT.md template required.
 
 ### Large (41+ Slices)
@@ -300,7 +319,7 @@ All Medium requirements, plus:
 
 ---
 
-## 14. Conflict Resolution
+## 15. Conflict Resolution
 
 **Shared Business Logic**
 Condition: Business logic used in two or more Slices.
@@ -323,7 +342,7 @@ Action: Identify which existing Slice's single responsibility would change. That
 
 ---
 
-## 15. Testing
+## 16. Testing
 
 | ID | Severity | Rule |
 |----|----------|------|
@@ -333,7 +352,7 @@ Action: Identify which existing Slice's single responsibility would change. That
 
 ---
 
-## 16. Extension Points
+## 17. Extension Points
 
 Child configs MUST inherit this file and implement all mandatory points. Child configs MUST NOT contradict any rule above.
 
@@ -348,6 +367,7 @@ Child configs MUST inherit this file and implement all mandatory points. Child c
 | `EP-PERSISTENCE` | ✅ | Persistence pattern per scale: Small (inline) / Medium (Repository) / Large (Slice DbContext). Table naming convention implementation. |
 | `EP-DI-REGISTRATION` | ✅ | Slice self-registration supporting delete-folder → remove-registration compile test. |
 | `EP-TESTING` | ✅ | Integration test setup (real/in-memory DB). Confirm test file co-location in Feature Folder. |
-| `EP-EVENT-BUS` | ❌ | Event bus per scale: Small (in-memory) / Medium (in-process persistent) / Large (Outbox + external broker). |
-| `EP-ARCH-TESTS` | ❌ | Automated no-cross-slice-reference enforcement. Mandatory at Large scale (41+ Slices). |
+| `EP-OBSERVABILITY` | ✅ | Shared Kernel adapters for structured logging and error envelope. Correlation ID propagation strategy. |
+| `EP-EVENT-BUS` | ✅ at Medium+, ❌ at Small | Event bus per scale: Small (in-memory) / Medium (in-process persistent) / Large (Outbox + external broker). |
+| `EP-ARCH-TESTS` | ✅ at Large, ❌ below | Automated no-cross-slice-reference enforcement. Mandatory at Large scale (41+ Slices). |
 | `EP-CONTEXT-TEMPLATE` | ❌ | Language-specific CONTEXT.md additions (e.g., migration file names, package references). Must not contradict base template. |

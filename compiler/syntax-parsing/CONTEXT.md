@@ -51,6 +51,7 @@ compound-assignment tokens via a one-token lookahead and calls
 time. No new AST nodes; semantic analysis and codegen are unaffected.
 
 ## Recent Updates
+- 2026-05-18: Added `??` (null/error coalescing) at parser level. New `Precedence::NullCoalesce` between `Lowest` and `LogicalOr` per Appendix B row 14; wired in `is_binary_op`, `token_to_binary_op`, `get_precedence`. R-to-L associativity is enforced by recursing on the right operand with `Precedence::Lowest`, so `a ?? b ?? c` parses as `a ?? (b ?? c)`. AST shape locked in by `test_null_coalesce_is_right_associative`. Semantic and codegen do not yet support the operator — see `semantic-analysis` and `llvm-backend` notes.
 - 2026-04-18: Integer literal type suffixes §1.4. `parse_prefix` handles `TokenKind::IntegerSuffix(tok)` → `Literal::Integer(tok.value, Some(tok.suffix))`; plain `TokenKind::Integer(n)` now produces `Literal::Integer(n, None)`.
 
 - 2026-04-04: Enabled parsing of `..=` for inclusive `for` ranges.

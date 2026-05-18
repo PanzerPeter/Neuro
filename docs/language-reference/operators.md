@@ -292,6 +292,25 @@ while i <= 10 {
 **Type checking**: Same rules as the underlying binary operator apply
 **Note**: Compound assignment on struct fields (`point.x += 1.0`) is not yet supported
 
+## Null/Error Coalescing Operator (`??`)
+
+`??` is the read-site equivalent of `unwrap_or(default)` — it returns the unwrapped value of an `Option<T>` or `Result<T, E>` when present, and falls back to the right-hand expression when absent (`None`) or failed (`Err`).
+
+```neuro
+val name   = user.display_name ?? "anonymous"
+val config = load_config()     ?? Config::default()
+```
+
+**Associativity**: right-to-left. `a ?? b ?? c` parses as `a ?? (b ?? c)`, so each fallback is evaluated only when every left-hand side up to it has produced the absent / error variant. Left-to-right would force the middle fallback even when the chain succeeds early — defeating the short-circuit contract.
+
+**Precedence**: level 14 — looser than `||` (so `a ?? b || c` means `a ?? (b || c)`), tighter than range operators.
+
+**Phase 1.5 status**: the operator is tokenized and parsed today so the precedence and associativity are locked in. Type checking and codegen are deferred to Phase 2, where `Option<T>` and `Result<T, E>` land — until then, using `??` produces:
+
+```
+error: operator '??' is not yet supported … requires Option<T> / Result<T, E> — available in Phase 2
+```
+
 ## Operator Precedence
 
 From highest to lowest (Appendix B):
@@ -309,6 +328,7 @@ From highest to lowest (Appendix B):
 | 11 | `<`, `>`, `<=`, `>=`, `==`, `!=` | none | `x < y` |
 | 12 | `&&` | L-to-R | `a && b` |
 | 13 | `\|\|` | L-to-R | `a \|\| b` |
+| 14 | `??` | R-to-L | `a ?? b ?? c` parses as `a ?? (b ?? c)` |
 
 ### Precedence Examples
 

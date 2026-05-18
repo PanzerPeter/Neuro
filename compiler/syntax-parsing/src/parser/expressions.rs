@@ -301,7 +301,14 @@ impl Parser {
                 })?;
                 let op = self.token_to_binary_op(&op_token)?;
                 let precedence = self.get_precedence(&op_token.kind);
-                let right = self.parse_expr(precedence)?;
+                // R-to-L coalescing (`??`): recurse at one-step-lower precedence so the
+                // outer loop re-enters on the next `??` instead of stopping. Appendix B row 14.
+                let right_prec = if matches!(op_token.kind, TokenKind::QuestionQuestion) {
+                    Precedence::Lowest
+                } else {
+                    precedence
+                };
+                let right = self.parse_expr(right_prec)?;
                 let span = left.span().merge(right.span());
 
                 Ok(Expr::Binary {
@@ -341,6 +348,7 @@ impl Parser {
                 | TokenKind::Pipe
                 | TokenKind::Caret
                 | TokenKind::LeftShift
+                | TokenKind::QuestionQuestion
         )
     }
 
@@ -364,6 +372,7 @@ impl Parser {
             TokenKind::Pipe => Ok(BinaryOp::BitOr),
             TokenKind::Caret => Ok(BinaryOp::BitXor),
             TokenKind::LeftShift => Ok(BinaryOp::Shl),
+            TokenKind::QuestionQuestion => Ok(BinaryOp::NullCoalesce),
             _ => Err(ParseError::UnexpectedToken {
                 found: token.kind.clone(),
                 expected: "binary operator".to_string(),
@@ -386,6 +395,7 @@ impl Parser {
             | TokenKind::LessEqual
             | TokenKind::GreaterEqual => Precedence::Comparison,
             TokenKind::LeftShift => Precedence::Shift,
+            TokenKind::QuestionQuestion => Precedence::NullCoalesce,
             TokenKind::Plus | TokenKind::Minus => Precedence::Sum,
             TokenKind::Star | TokenKind::Slash | TokenKind::Percent => Precedence::Product,
             TokenKind::As => Precedence::Cast,

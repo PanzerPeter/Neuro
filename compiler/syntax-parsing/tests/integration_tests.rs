@@ -328,3 +328,57 @@ fn test_complete_program_with_continue_statement() {
     let result = parse(source);
     assert!(result.is_ok(), "Parse error: {:?}", result.err());
 }
+
+// `??` (null/error coalescing) — parser-level R-to-L associativity per Appendix B row 14.
+// Full semantics (Option/Result unwrap) land in Phase 2; this test pins down the AST shape.
+#[test]
+fn test_null_coalesce_is_right_associative() {
+    use syntax_parsing::{parse_expr, BinaryOp, Expr};
+
+    let expr = parse_expr("a ?? b ?? c").expect("parse should succeed");
+
+    // Expect: BinaryOp(a, NullCoalesce, BinaryOp(b, NullCoalesce, c))
+    let Expr::Binary {
+        left, op, right, ..
+    } = expr
+    else {
+        panic!("expected top-level binary expression, got {:?}", expr);
+    };
+    assert_eq!(op, BinaryOp::NullCoalesce);
+    assert!(matches!(*left, Expr::Identifier(ref id) if id.name == "a"));
+
+    let Expr::Binary {
+        left: il,
+        op: iop,
+        right: ir,
+        ..
+    } = *right
+    else {
+        panic!("right operand must itself be a `??` binary expression");
+    };
+    assert_eq!(iop, BinaryOp::NullCoalesce);
+    assert!(matches!(*il, Expr::Identifier(ref id) if id.name == "b"));
+    assert!(matches!(*ir, Expr::Identifier(ref id) if id.name == "c"));
+}
+
+#[test]
+fn test_null_coalesce_binds_looser_than_logical_or() {
+    use syntax_parsing::{parse_expr, BinaryOp, Expr};
+
+    // `a ?? b || c` must parse as `a ?? (b || c)` — `||` (row 13) binds tighter than `??` (row 14).
+    let expr = parse_expr("a ?? b || c").expect("parse should succeed");
+
+    let Expr::Binary {
+        left, op, right, ..
+    } = expr
+    else {
+        panic!("expected top-level binary expression");
+    };
+    assert_eq!(op, BinaryOp::NullCoalesce);
+    assert!(matches!(*left, Expr::Identifier(ref id) if id.name == "a"));
+
+    let Expr::Binary { op: iop, .. } = *right else {
+        panic!("right operand must be the `||` sub-expression");
+    };
+    assert_eq!(iop, BinaryOp::Or);
+}

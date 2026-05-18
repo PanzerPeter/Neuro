@@ -242,6 +242,9 @@ impl<'ctx> CodegenContext<'ctx> {
                         BinaryOp::BitOr => Ok(FoldedConst::Int(a | b)),
                         BinaryOp::BitXor => Ok(FoldedConst::Int(a ^ b)),
                         BinaryOp::Shl => Ok(FoldedConst::Int(a.wrapping_shl(b as u32))),
+                        BinaryOp::NullCoalesce => Err(CodegenError::InternalError(
+                            "operator '??' is not valid in const expressions (Phase 2)".into(),
+                        )),
                     },
                     (FoldedConst::Float(a), FoldedConst::Float(b)) => match op {
                         BinaryOp::Add => Ok(FoldedConst::Float(a + b)),
@@ -779,6 +782,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_left_shift(lhs.into_int_value(), rhs.into_int_value(), "shltmp")
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                 .into()),
+            // Gated upstream by the type checker (OperatorNotYetSupported); reaching codegen
+            // means semantic analysis was skipped — surface that as an ICE rather than panic.
+            BinaryOp::NullCoalesce => Err(CodegenError::InternalError(
+                "operator '??' reached codegen; semantic analysis must reject it (Phase 2 feature)"
+                    .into(),
+            )),
         }
     }
 

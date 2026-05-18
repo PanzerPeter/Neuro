@@ -328,6 +328,12 @@ impl<'ctx> CodegenContext<'ctx> {
                     BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl => {
                         left_ty.clone()
                     }
+                    BinaryOp::NullCoalesce => {
+                        return Err(CodegenError::InternalError(
+                            "operator '??' reached the codegen type pass; semantic analysis must reject it (Phase 2 feature)"
+                                .into(),
+                        ));
+                    }
                 };
 
                 self.expr_types.insert(span.start, result_ty);

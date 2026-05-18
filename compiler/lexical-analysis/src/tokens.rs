@@ -198,6 +198,10 @@ pub enum TokenKind {
     DotDot,
     #[token(".")]
     Dot,
+    // Null/error coalescing. Full semantics arrive in Phase 2 with Option/Result;
+    // tokenized + parsed now so the R-to-L precedence (Appendix B row 14) is locked in.
+    #[token("??")]
+    QuestionQuestion,
 
     // Delimiters
     #[token("(")]
@@ -308,6 +312,7 @@ impl Token {
             TokenKind::Dot => ".",
             TokenKind::DotDot => "..",
             TokenKind::DotDotEqual => "..=",
+            TokenKind::QuestionQuestion => "??",
             TokenKind::LeftParen => "(",
             TokenKind::RightParen => ")",
             TokenKind::LeftBrace => "{",

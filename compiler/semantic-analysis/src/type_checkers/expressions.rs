@@ -209,6 +209,18 @@ impl TypeChecker {
                         Some(left_ty)
                     }
 
+                    // `??` is parsed (R-to-L per Appendix B) but unwrapping Option/Result
+                    // arrives in Phase 2; reject here so codegen never sees it.
+                    BinaryOp::NullCoalesce => {
+                        self.record_error(TypeError::OperatorNotYetSupported {
+                            op: op.to_string(),
+                            hint: "requires Option<T> / Result<T, E> — available in Phase 2"
+                                .to_string(),
+                            span: *span,
+                        });
+                        Some(Type::Unknown)
+                    }
+
                     // Logical operators: require bool types, return bool
                     BinaryOp::And | BinaryOp::Or => {
                         let mut has_error = false;

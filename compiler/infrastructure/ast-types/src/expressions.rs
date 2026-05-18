@@ -117,6 +117,7 @@ pub enum BinaryOp {
     BitOr,
     BitXor,
     Shl,
+    NullCoalesce,
 }
 
 /// Unary operators
@@ -147,6 +148,7 @@ impl fmt::Display for BinaryOp {
             BinaryOp::BitOr => write!(f, "|"),
             BinaryOp::BitXor => write!(f, "^"),
             BinaryOp::Shl => write!(f, "<<"),
+            BinaryOp::NullCoalesce => write!(f, "??"),
         }
     }
 }

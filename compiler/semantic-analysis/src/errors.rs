@@ -150,4 +150,11 @@ pub enum TypeError {
         referenced: String,
         span: Span,
     },
+
+    #[error("operator '{op}' is not yet supported at {span:?}: {hint}")]
+    OperatorNotYetSupported {
+        op: String,
+        hint: String,
+        span: Span,
+    },
 }
