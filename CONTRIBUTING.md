@@ -60,9 +60,10 @@ cargo fmt --all -- --check
 Before contributing, read:
 
 1. [README.md](README.md) — project overview and installation
-2. [docs/README.md](docs/README.md) — technical documentation index
-3. [CHANGELOG.md](CHANGELOG.md) — recent changes
-4. Each slice's `CONTEXT.md` — purpose, entry point, and dependency contract
+2. [DESIGN.md](DESIGN.md) — language design principles and non-goals
+3. [docs/README.md](docs/README.md) — technical documentation index
+4. [CHANGELOG.md](CHANGELOG.md) — recent changes
+5. Each slice's `CONTEXT.md` — purpose, entry point, and dependency contract
 
 ## Development Workflow
 
@@ -282,4 +283,4 @@ cargo run -p neurc -- compile examples/hello.nr
 
 ## License
 
-By contributing to Neuro, you agree your contributions will be licensed under the [GNU General Public License v3.0 with Neuro Exceptions](LICENSE), which includes alpha-phase transparency and liability limits.
+By contributing to Neuro, you agree your contributions will be licensed under the [Neuro Source-Available License](LICENSE), which includes alpha-phase transparency and liability limits.

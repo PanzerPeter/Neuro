@@ -26,6 +26,9 @@
 - [Contributing](#contributing)
 - [License](#license)
 - [Acknowledgments](#acknowledgments)
+- [Security](SECURITY.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Design Rationale](DESIGN.md)
 
 ---
 
@@ -199,14 +202,15 @@ Download the official Windows installer from the LLVM GitHub releases page:
 
 ```powershell
 # PowerShell — download and run the installer silently
-$version = "20.1.4"
+$version = "20.1.8"
 $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/LLVM-$version-win64.exe"
-Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\llvm-installer.exe" -UseBasicParsing
-Start-Process "$env:TEMP\llvm-installer.exe" -ArgumentList "/S /D=C:\LLVM" -Wait
+curl.exe -fsSL -o "$env:TEMP\llvm-installer.exe" $url
+Start-Process "$env:TEMP\llvm-installer.exe" -ArgumentList "/S /D=C:\LLVM" -Wait -PassThru | Out-Null
 ```
 
-Or download and run the installer manually — install to `C:\LLVM` (or any path
-without spaces).
+Or download and run the installer manually from the
+[LLVM GitHub releases page](https://github.com/llvm/llvm-project/releases) — install to `C:\LLVM`
+(the path must not contain spaces; the NSIS installer enforces this).
 
 **Step 4 — Set the LLVM environment variable**
 

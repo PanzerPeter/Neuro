@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.17.2] - 2026-05-20
+
+### Fixed
+- `ci`: Windows LLVM setup — detect existing LLVM 20.x dev install before attempting installation; fall back to official NSIS installer (20.1.8) instead of Chocolatey, which fails when a newer runtime-only version is already present on the runner
+- `docs`: updated Windows installation guide to LLVM 20.1.8 and clarified install path constraint
+
+---
+
+## [1.17.1] - 2026-05-20
+
+### Added
+- `docs`: `SECURITY.md` — vulnerability reporting via GitHub private advisory, response timeline, security surface definition
+- `docs`: `CODE_OF_CONDUCT.md` — Contributor Covenant v2.1
+- `docs`: `DESIGN.md` — language design principles, non-goals, and AI-first rationale
+- `docs`: `DESIGN.md` linked from `README.md` ToC and `CONTRIBUTING.md` codebase reading list
+
+### Fixed
+- `docs`: license name in `CONTRIBUTING.md` corrected from "GNU GPL v3.0 with Neuro Exceptions" to "Neuro Source-Available License"
+
+---
+
 ## [1.17.0] - 2026-05-20
 
 ### Added
