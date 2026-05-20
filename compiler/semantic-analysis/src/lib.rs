@@ -11,10 +11,12 @@ mod errors;
 mod symbol_table;
 pub(crate) mod type_checkers;
 mod types;
+mod warnings;
 
 // Public exports
 pub use errors::TypeError;
 pub use types::Type;
+pub use warnings::{Warning, WarningCode};
 
 use ast_types::Item;
 use type_checkers::TypeChecker;
@@ -48,7 +50,7 @@ use type_checkers::TypeChecker;
 ///
 /// # Returns
 ///
-/// * `Ok(())` - Program is type-correct
+/// * `Ok(Vec<Warning>)` - Program is type-correct; vector may be empty or contain non-fatal lints
 /// * `Err(Vec<TypeError>)` - One or more type errors were found
 ///
 /// # Examples
@@ -66,7 +68,11 @@ use type_checkers::TypeChecker;
 ///
 ///     let ast = parse(source).unwrap();
 ///     match type_check(&ast) {
-///         Ok(()) => println!("Program is type-correct"),
+///         Ok(warnings) => {
+///             for warning in warnings {
+///                 eprintln!("Warning: {}", warning);
+///             }
+///         }
 ///         Err(errors) => {
 ///             for error in errors {
 ///                 eprintln!("Type error: {}", error);
@@ -81,11 +87,12 @@ use type_checkers::TypeChecker;
 /// This function collects multiple errors in a single pass (fail-slow approach)
 /// to provide comprehensive feedback to the user. All errors include source
 /// location information (spans) for precise error reporting.
-pub fn type_check(items: &[Item]) -> Result<(), Vec<TypeError>> {
+pub fn type_check(items: &[Item]) -> Result<Vec<Warning>, Vec<TypeError>> {
     let mut checker = TypeChecker::new();
-    if checker.check_program(items).is_err() {
+    let outcome = checker.check_program(items);
+    if outcome.is_err() {
         Err(checker.into_errors())
     } else {
-        Ok(())
+        Ok(checker.into_warnings())
     }
 }

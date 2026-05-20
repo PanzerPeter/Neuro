@@ -6,7 +6,7 @@ Provide the canonical Abstract Syntax Tree (AST) node definitions shared by all 
 ## Entry Point
 - Type: Library (no entry function — pure data)
 - Public types: `Item`, `Expr`, `Stmt`, `BinaryOp`, `UnaryOp`, `TypeAnnotation`, `FunctionParam`,
-  `ImplDef`, `MethodDef`, `SelfParam`
+  `ImplDef`, `MethodDef`, `SelfParam`, `Attribute`
 
 ## Data Ownership
 - Tables: none
@@ -29,6 +29,7 @@ Extracted from `syntax-parsing` to eliminate the cross-slice dependency that `se
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-05-20: Added `Attribute { name, args, span }` struct. `FunctionDef` and `MethodDef` now carry `attributes: Vec<Attribute>`. Semantics are interpreted by later passes (e.g. `@allow(prefer_loop_over_while_true)`); unknown attribute names are accepted so the surface stays forward-compatible with future `@grad`, `@gpu`, `@no_prelude`.
 - 2026-04-04: Added `inclusive: bool` to `Stmt::ForRange` to support `..=` inclusive range iteration.
 - 2026-04-16: Added `ConstDef` struct and `Item::Const(ConstDef)` for module-level constants (§1.3).
   Added `Stmt::Const { name, ty, value, span }` for function-body constants.

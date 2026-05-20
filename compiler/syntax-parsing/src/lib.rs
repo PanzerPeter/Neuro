@@ -14,8 +14,8 @@ mod precedence;
 
 // Public exports
 pub use ast::{
-    BinaryOp, Expr, FieldDef, FieldInit, FunctionDef, ImplDef, Item, MethodDef, Parameter,
-    SelfParam, Stmt, StructDef, Type, UnaryOp,
+    Attribute, BinaryOp, Expr, FieldDef, FieldInit, FunctionDef, ImplDef, Item, MethodDef,
+    Parameter, SelfParam, Stmt, StructDef, Type, UnaryOp,
 };
 pub use errors::{ParseError, ParseResult};
 

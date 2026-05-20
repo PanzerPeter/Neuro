@@ -244,3 +244,107 @@ fn test_parse_function_long_name() {
     let result = parse(source);
     assert!(result.is_ok(), "Parse error: {:?}", result.err());
 }
+
+#[test]
+fn test_parse_function_with_allow_attribute() {
+    use syntax_parsing::Item;
+
+    let source = r#"
+        @allow(prefer_loop_over_while_true)
+        func main() -> i32 {
+            0
+        }
+    "#;
+    let items = parse(source).expect("parse should succeed");
+    assert_eq!(items.len(), 1);
+    let func = match &items[0] {
+        Item::Function(f) => f,
+        _ => panic!("expected function"),
+    };
+    assert_eq!(func.attributes.len(), 1);
+    assert_eq!(func.attributes[0].name.name, "allow");
+    assert_eq!(func.attributes[0].args.len(), 1);
+    assert_eq!(
+        func.attributes[0].args[0].name,
+        "prefer_loop_over_while_true"
+    );
+}
+
+#[test]
+fn test_parse_function_with_bare_attribute() {
+    use syntax_parsing::Item;
+
+    let source = r#"
+        @inline
+        func small() -> i32 { 1 }
+    "#;
+    let items = parse(source).expect("parse should succeed");
+    let func = match &items[0] {
+        Item::Function(f) => f,
+        _ => panic!("expected function"),
+    };
+    assert_eq!(func.attributes.len(), 1);
+    assert_eq!(func.attributes[0].name.name, "inline");
+    assert!(func.attributes[0].args.is_empty());
+}
+
+#[test]
+fn test_parse_function_with_multi_arg_attribute() {
+    use syntax_parsing::Item;
+
+    let source = r#"
+        @grad(a, b, c)
+        func forward() -> i32 { 0 }
+    "#;
+    let items = parse(source).expect("parse should succeed");
+    let func = match &items[0] {
+        Item::Function(f) => f,
+        _ => panic!("expected function"),
+    };
+    let args: Vec<_> = func.attributes[0]
+        .args
+        .iter()
+        .map(|a| a.name.as_str())
+        .collect();
+    assert_eq!(args, vec!["a", "b", "c"]);
+}
+
+#[test]
+fn test_parse_method_with_allow_attribute() {
+    use syntax_parsing::Item;
+
+    let source = r#"
+        struct Counter { value: i32 }
+
+        impl Counter {
+            @allow(prefer_loop_over_while_true)
+            func tick(&self) -> i32 { 0 }
+        }
+    "#;
+    let items = parse(source).expect("parse should succeed");
+    let impl_def = items
+        .iter()
+        .find_map(|item| {
+            if let Item::Impl(i) = item {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .expect("expected impl block");
+    assert_eq!(impl_def.methods.len(), 1);
+    assert_eq!(impl_def.methods[0].attributes.len(), 1);
+    assert_eq!(impl_def.methods[0].attributes[0].name.name, "allow");
+}
+
+#[test]
+fn test_attribute_before_struct_is_rejected() {
+    let source = r#"
+        @derive(Debug)
+        struct Point { x: i32, y: i32 }
+    "#;
+    assert!(
+        parse(source).is_err(),
+        "attributes on structs should be a parse error until that surface is implemented"
+    );
+}

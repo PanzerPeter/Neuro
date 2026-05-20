@@ -5,6 +5,6 @@
 // so that semantic-analysis and llvm-backend can consume them without
 // creating a cross-slice dependency on syntax-parsing.
 pub use ast_types::{
-    BinaryOp, ConstDef, Expr, FieldDef, FieldInit, FunctionDef, ImplDef, Item, MethodDef,
-    Parameter, SelfParam, Stmt, StructDef, Type, UnaryOp,
+    Attribute, BinaryOp, ConstDef, Expr, FieldDef, FieldInit, FunctionDef, ImplDef, Item,
+    MethodDef, Parameter, SelfParam, Stmt, StructDef, Type, UnaryOp,
 };

@@ -6,7 +6,7 @@ Validate type correctness and scope rules of a parsed Neuro program before code 
 ## Entry Point
 - Type: Library function
 - Input: `items: &[Item]`
-- Output: `Result<(), Vec<TypeError>>`
+- Output: `Result<Vec<Warning>, Vec<TypeError>>` — `Ok` carries non-fatal lint warnings; `Err` carries fatal type errors. Warnings are dropped when errors are present.
 
 ## Data Ownership
 - Tables: none
@@ -24,7 +24,7 @@ Fail-slow strategy: all type errors are collected in a single pass so the develo
 sees the complete error set in one compilation. `syntax-parsing` appears only in
 `[dev-dependencies]` (integration tests); it is not a production dependency.
 
-Four-pass strategy within `check_program`:
+Five-pass strategy within `check_program`:
 1. Pre-register all `Item::Struct` definitions into `struct_defs`.
 2. Pre-register all `Item::Impl` method signatures into `functions` (mangled as
    `StructName__methodName`) and into `impl_methods` (struct → method → mangled key).
@@ -32,6 +32,12 @@ Four-pass strategy within `check_program`:
    references and cross-function visibility without ordering constraints).
 4. Full-check pass: `check_function` for each `Item::Function`, `check_impl` for each
    `Item::Impl`, `check_const_item` for each `Item::Const`.
+5. Lint pass: walk function and method bodies via `run_lints` collecting non-fatal
+   `Warning`s. Currently implements `prefer-loop-over-while-true` (§3.7); silenced by
+   `@allow(prefer_loop_over_while_true)` on the enclosing function/method. Lints run
+   independently of type errors so style guidance reaches the developer even when the
+   program also has type errors (warnings are dropped from the final `Err` return
+   value, but they are still collected for tests that inspect the checker directly).
 
 Struct types use nominal typing — two `Type::Struct` values are compatible iff their
 names are equal.
@@ -59,6 +65,7 @@ that refer to other known consts). Function-body `Stmt::Const` nodes are validat
 so const names are usable in any expression context.
 
 ## Recent Updates
+- 2026-05-20: Added lint infrastructure (§3.7). New `Warning` / `WarningCode` types in `warnings.rs`; `TypeChecker` accumulates a `warnings: Vec<Warning>` collected by `run_lints` in a final pre-return pass. First implemented lint: `prefer-loop-over-while-true` — fires on any `Stmt::While { condition: Expr::Literal(Boolean(true), _), .. }`, suppressed by `@allow(prefer_loop_over_while_true)` on the enclosing `FunctionDef` / `MethodDef`. Parenthesised `while (true)` is deliberately not matched (acts as an explicit escape hatch). `type_check`'s public signature is now `Result<Vec<Warning>, Vec<TypeError>>`.
 - 2026-05-18: Added `BinaryOp::NullCoalesce` rejection arm. Emits new `TypeError::OperatorNotYetSupported { op, hint, span }` with the hint "requires Option<T> / Result<T, E> — available in Phase 2", returns `Type::Unknown` so error recovery continues. Codegen never sees `??` while semantic-analysis is in the pipeline; the variant is parsed solely to lock in the R-to-L associativity from Appendix B row 14 ahead of the Phase 2 implementation.
 - 2026-04-18: Integer literal type suffixes §1.4. `Literal::Integer(value, Some(suffix))` short-circuits `infer_integer_type`; `infer_suffixed_integer_type` maps the suffix to a `Type` via `suffix_to_type` and range-checks the value (reusing `check_integer_range` + `IntegerLiteralOutOfRange`). Unsuffixed literals that exceed the i32 range now emit an `IntegerLiteralOutOfRange` rather than silently promoting to `i64`.
 

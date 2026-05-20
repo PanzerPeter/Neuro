@@ -114,7 +114,8 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
 
     // Type check the program
     match semantic_analysis::type_check(&ast) {
-        Ok(()) => {
+        Ok(warnings) => {
+            print_warnings(&warnings);
             println!("Type checking passed for {:?}", path);
             Ok(())
         }
@@ -125,6 +126,14 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
             }
             Err(anyhow::anyhow!("{} type error(s) found", errors.len()))
         }
+    }
+}
+
+/// Render lint warnings to stderr. Warnings never block compilation; they are
+/// informational guidance for the author.
+fn print_warnings(warnings: &[semantic_analysis::Warning]) {
+    for warning in warnings {
+        eprintln!("{}", warning);
     }
 }
 
@@ -173,7 +182,7 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
 
     // Type check the program
     log::debug!("Type checking...");
-    semantic_analysis::type_check(&ast)
+    let warnings = semantic_analysis::type_check(&ast)
         .map_err(|errors| {
             eprintln!("Type errors found:");
             for (i, error) in errors.iter().enumerate() {
@@ -182,6 +191,7 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
             anyhow::anyhow!("{} type error(s) found", errors.len())
         })
         .context("Type checking failed")?;
+    print_warnings(&warnings);
 
     // Generate LLVM object code
     log::debug!("Generating LLVM IR and object code...");

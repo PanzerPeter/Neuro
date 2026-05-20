@@ -13,6 +13,20 @@ pub struct FunctionDef {
     pub params: Vec<Parameter>,
     pub return_type: Option<Type>,
     pub body: Vec<Stmt>,
+    pub attributes: Vec<Attribute>,
+    pub span: Span,
+}
+
+/// A single `@name(arg1, arg2)` attribute attached to a function or method.
+///
+/// The semantics of an attribute are interpreted by later passes (e.g. the
+/// `@allow(prefer_loop_over_while_true)` lint suppression in semantic analysis).
+/// Unknown attributes are accepted by the parser to keep the surface forward
+/// compatible with future passes such as `@grad`, `@gpu`, and `@no_prelude`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Attribute {
+    pub name: Identifier,
+    pub args: Vec<Identifier>,
     pub span: Span,
 }
 
@@ -67,6 +81,7 @@ pub struct MethodDef {
     pub params: Vec<Parameter>,
     pub return_type: Option<Type>,
     pub body: Vec<Stmt>,
+    pub attributes: Vec<Attribute>,
     pub span: Span,
 }
 

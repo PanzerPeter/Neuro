@@ -6,7 +6,7 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 ## Entry Point
 - Type: CLI
 - Input: `neurc check <file.nr>` | `neurc compile <file.nr> [-O<0-3>] [-o <output>]`
-- Output: Executable binary on success; diagnostic messages to stderr on failure
+- Output: Executable binary on success; diagnostic errors and non-fatal lint warnings to stderr
 
 ## Data Ownership
 - Tables: none
@@ -25,3 +25,8 @@ business logic of its own; every decision is delegated to the owning slice.
 The two-step linker strategy (clang on Unix; lld-link / cl.exe on Windows) is
 required because LLVM object files need a platform linker driver to attach the C
 runtime startup code — neurc cannot ship its own linker.
+
+Lint warnings emitted by `semantic_analysis::type_check` are forwarded to stderr by
+`print_warnings` in both `check_file` and `compile_file`. Warnings never cause a
+non-zero exit; they are informational guidance and may be silenced with `@allow(...)`
+on the enclosing function.

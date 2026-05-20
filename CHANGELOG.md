@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.17.0] - 2026-05-20
+
+### Added
+- `infra`: `Attribute { name, args, span }` AST node; `FunctionDef` and `MethodDef` now carry `attributes: Vec<Attribute>` (Phase 1.5)
+- `parser`: `parse_attributes` consumes `@name` / `@name(arg, ...)` prefixes before any `func` definition, including methods in `impl` blocks
+- `semantic`: lint infrastructure — `Warning` / `WarningCode` public types; `type_check` now returns `Result<Vec<Warning>, Vec<TypeError>>`
+- `semantic`: `prefer-loop-over-while-true` lint §3.7 — fires on bare `while true { ... }`; suppressed by `@allow(prefer_loop_over_while_true)` on the enclosing function/method
+- `codegen`: lint warnings forwarded to stderr by `neurc check` and `neurc compile`; never block compilation
+- `tests`: attribute parsing coverage (free functions, methods, multi-arg, bare, struct-rejection) and lint emission/suppression coverage in semantic-analysis and neurc integration tests
+- `docs`: §3.7 lint section in `docs/language-reference/control-flow.md`; `examples/while_true_lint.nr` runnable demo
+
+---
+
 ## [1.16.0] - 2026-05-18
 
 ### Added

@@ -34,6 +34,7 @@ fn make_function(
             .collect(),
         return_type: return_type.map(|rt| make_type(&rt)),
         body,
+        attributes: Vec::new(),
         span: Span::new(0, 0),
     }
 }

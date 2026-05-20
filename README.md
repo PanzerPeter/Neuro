@@ -4,7 +4,7 @@
 
 [![License: Neuro Source-Available License](https://img.shields.io/badge/License-NEURO%20Source--Available-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-438%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-452%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP complete · Phase 1.5 & Phase 2 in progress
 
@@ -58,7 +58,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 is complete and Phase 2 is in progress. The following features are fully implemented and tested (**438 Tests Passing**):
+Phase 1 is complete and Phase 2 is in progress. The following features are fully implemented and tested (**452 Tests Passing**):
 
 | Feature | Details |
 |---|---|

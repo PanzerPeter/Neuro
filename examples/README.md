@@ -207,6 +207,25 @@ cargo run -p neurc -- compile examples/if_block_expressions.nr
 # Exit code: 149  (abs(−7)=7 + area=42 + clamp(150,0,100)=100)
 ```
 
+### [while_true_lint.nr](while_true_lint.nr)
+Demonstrates the `prefer-loop-over-while-true` lint (§3.7) and the
+`@allow(prefer_loop_over_while_true)` attribute that silences it.
+
+**Features:**
+- Function-level attribute `@allow(prefer_loop_over_while_true)`
+- `while true { ... }` infinite-loop pattern with `break`
+- Compiles cleanly (no warning) because the attribute suppresses the lint
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/while_true_lint.nr
+./examples/while_true_lint
+# Exit code: 7  (loop counts 0 → 7 then breaks)
+```
+
+Removing the `@allow(...)` line produces the same exit code but prints a
+`warning[prefer-loop-over-while-true]` line to stderr.
+
 ## Known Limitations
 
 - No arrays yet (Phase 2+)

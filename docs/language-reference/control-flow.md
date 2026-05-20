@@ -155,6 +155,37 @@ while i < 10 {
 // while 42 { }  // Error: expected bool condition
 ```
 
+### `prefer-loop-over-while-true` lint
+
+`while true { ... }` compiles and runs, but the compiler emits a warning:
+
+```text
+warning[prefer-loop-over-while-true] at 23..27: `while true { ... }` should
+be written as `loop { ... }`; silence with `@allow(prefer_loop_over_while_true)`
+on the enclosing function
+```
+
+The motivation is style, not safety — both forms produce identical machine
+code. To silence the warning on a function (typically when transcribing code
+from C, Python, or JavaScript), attach the `@allow` attribute:
+
+```neuro
+@allow(prefer_loop_over_while_true)
+func main() -> i32 {
+    mut i: i32 = 0
+    while true {
+        if i == 7 { break }
+        i = i + 1
+    }
+    return i
+}
+```
+
+The lint only triggers on the bare literal `true`. Parenthesised
+`while (true) { ... }` is treated as an explicit escape hatch and is not
+flagged. The `loop { ... }` construct itself is reserved for a future
+release; until then the `@allow` attribute is the canonical opt-out.
+
 ## For Loops
 
 Use `for` to iterate over an integer range. Ranges can be exclusive (`..`) or inclusive (`..=`):

@@ -27,7 +27,8 @@ pub mod types;
 
 pub use expressions::{BinaryOp, Expr, FieldInit, UnaryOp};
 pub use items::{
-    ConstDef, FieldDef, FunctionDef, ImplDef, Item, MethodDef, Parameter, SelfParam, StructDef,
+    Attribute, ConstDef, FieldDef, FunctionDef, ImplDef, Item, MethodDef, Parameter, SelfParam,
+    StructDef,
 };
 pub use statements::Stmt;
 pub use types::Type;

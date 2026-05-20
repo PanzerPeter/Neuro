@@ -2,8 +2,8 @@ use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
 use crate::ast::{
-    ConstDef, Expr, FieldDef, FieldInit, FunctionDef, ImplDef, Item, MethodDef, Parameter,
-    SelfParam, StructDef, Type,
+    Attribute, ConstDef, Expr, FieldDef, FieldInit, FunctionDef, ImplDef, Item, MethodDef,
+    Parameter, SelfParam, StructDef, Type,
 };
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
@@ -18,9 +18,23 @@ impl Parser {
 
         self.skip_newlines();
         while !self.is_at_end() {
+            let attributes = self.parse_attributes()?;
+            self.skip_newlines();
+
             if self.check(&TokenKind::Func) {
-                let func = self.parse_function()?;
+                let func = self.parse_function(attributes)?;
                 items.push(Item::Function(func));
+            } else if !attributes.is_empty() {
+                // Attributes only attach to function-like items today; rejecting here
+                // gives an actionable diagnostic instead of silently dropping them.
+                let token = self.peek().ok_or(ParseError::UnexpectedEof {
+                    expected: "function definition after attribute".to_string(),
+                })?;
+                return Err(ParseError::UnexpectedToken {
+                    found: token.kind.clone(),
+                    expected: "function definition after attribute".to_string(),
+                    span: token.span,
+                });
             } else if self.check(&TokenKind::Struct) {
                 let s = self.parse_struct_def()?;
                 items.push(Item::Struct(s));
@@ -44,6 +58,83 @@ impl Parser {
         }
 
         Ok(items)
+    }
+
+    /// Parse zero or more `@name` / `@name(arg, ...)` attributes attached to the
+    /// following item. Stops at the first token that is not `@`.
+    pub(crate) fn parse_attributes(&mut self) -> ParseResult<Vec<Attribute>> {
+        let mut attributes = Vec::new();
+        loop {
+            self.skip_newlines();
+            if !self.check(&TokenKind::At) {
+                break;
+            }
+            attributes.push(self.parse_attribute()?);
+        }
+        Ok(attributes)
+    }
+
+    /// Parse a single `@name` or `@name(arg, ...)` attribute. Assumes the
+    /// current token is `@`.
+    fn parse_attribute(&mut self) -> ParseResult<Attribute> {
+        let at = self.consume(TokenKind::At, "'@'")?;
+
+        let name_token = self.consume(TokenKind::Identifier(String::new()), "attribute name")?;
+        let name = if let TokenKind::Identifier(n) = name_token.kind {
+            Identifier {
+                name: n,
+                span: name_token.span,
+            }
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                found: name_token.kind,
+                expected: "attribute name".to_string(),
+                span: name_token.span,
+            });
+        };
+
+        let mut args: Vec<Identifier> = Vec::new();
+        let mut end_span = name.span;
+
+        if self.check(&TokenKind::LeftParen) {
+            self.advance(); // consume '('
+            self.skip_newlines();
+
+            if !self.check(&TokenKind::RightParen) {
+                loop {
+                    let arg_token =
+                        self.consume(TokenKind::Identifier(String::new()), "attribute argument")?;
+                    let arg = if let TokenKind::Identifier(n) = arg_token.kind {
+                        Identifier {
+                            name: n,
+                            span: arg_token.span,
+                        }
+                    } else {
+                        return Err(ParseError::UnexpectedToken {
+                            found: arg_token.kind,
+                            expected: "attribute argument".to_string(),
+                            span: arg_token.span,
+                        });
+                    };
+                    args.push(arg);
+                    self.skip_newlines();
+                    if !self.check(&TokenKind::Comma) {
+                        break;
+                    }
+                    self.advance(); // consume ','
+                    self.skip_newlines();
+                }
+            }
+
+            let close = self.consume(TokenKind::RightParen, "')'")?;
+            end_span = close.span;
+        }
+
+        Ok(Attribute {
+            name,
+            args,
+            span: at.span.merge(end_span),
+        })
     }
 
     /// Parse a module-level constant: `const NAME: Type = expr`
@@ -87,7 +178,10 @@ impl Parser {
     }
 
     /// Parse a function definition
-    pub(crate) fn parse_function(&mut self) -> ParseResult<FunctionDef> {
+    pub(crate) fn parse_function(
+        &mut self,
+        attributes: Vec<Attribute>,
+    ) -> ParseResult<FunctionDef> {
         let start = self.consume(TokenKind::Func, "'func'")?;
         self.skip_newlines();
 
@@ -189,6 +283,7 @@ impl Parser {
             params,
             return_type,
             body,
+            attributes,
             span: start.span.merge(end_span),
         })
     }
@@ -344,7 +439,9 @@ impl Parser {
 
         let mut methods = Vec::new();
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
-            methods.push(self.parse_method_def()?);
+            let attributes = self.parse_attributes()?;
+            self.skip_newlines();
+            methods.push(self.parse_method_def(attributes)?);
             self.skip_newlines();
         }
 
@@ -366,7 +463,10 @@ impl Parser {
     ///
     /// Associated functions have no self parameter and use the same syntax as
     /// free functions. The distinction is detected by checking the first parameter.
-    pub(crate) fn parse_method_def(&mut self) -> ParseResult<MethodDef> {
+    pub(crate) fn parse_method_def(
+        &mut self,
+        attributes: Vec<Attribute>,
+    ) -> ParseResult<MethodDef> {
         let start = self.consume(TokenKind::Func, "'func'")?;
         self.skip_newlines();
 
@@ -470,6 +570,7 @@ impl Parser {
             params,
             return_type,
             body,
+            attributes,
             span: start.span.merge(end_span),
         })
     }

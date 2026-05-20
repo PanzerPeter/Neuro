@@ -89,3 +89,4 @@ example_test!(example_string_test, "string_test.nr", 0);
 example_test!(example_structs, "structs.nr", 50);
 example_test!(example_type_inference_demo, "type_inference_demo.nr", 42);
 example_test!(example_if_block_expressions, "if_block_expressions.nr", 149);
+example_test!(example_while_true_lint, "while_true_lint.nr", 7);

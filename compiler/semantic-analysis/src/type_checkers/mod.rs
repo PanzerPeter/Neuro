@@ -3,11 +3,12 @@
 
 use std::collections::HashMap;
 
-use ast_types::Item;
+use ast_types::{Attribute, Item, MethodDef, Stmt};
 
 use crate::errors::TypeError;
 use crate::symbol_table::SymbolTable;
 use crate::types::Type;
+use crate::warnings::{Warning, WarningCode};
 
 /// Type checker state
 pub(crate) struct TypeChecker {
@@ -25,6 +26,8 @@ pub(crate) struct TypeChecker {
     pub(crate) constants: HashMap<String, Type>,
     /// Collected type errors
     errors: Vec<TypeError>,
+    /// Collected non-fatal lint warnings
+    warnings: Vec<Warning>,
     /// Current function's return type (for validating return statements)
     current_function_return_type: Option<Type>,
     /// Nesting depth of active loop statements.
@@ -49,6 +52,7 @@ impl TypeChecker {
             impl_methods: HashMap::new(),
             constants: HashMap::new(),
             errors: Vec::new(),
+            warnings: Vec::new(),
             current_function_return_type: None,
             loop_depth: 0,
         }
@@ -62,6 +66,11 @@ impl TypeChecker {
     /// Get all collected errors
     pub(crate) fn into_errors(self) -> Vec<TypeError> {
         self.errors
+    }
+
+    /// Get all collected lint warnings.
+    pub(crate) fn into_warnings(self) -> Vec<Warning> {
+        self.warnings
     }
 
     /// Check if there are any errors
@@ -107,10 +116,108 @@ impl TypeChecker {
             }
         }
 
+        // Pass 5: lint passes — independent of type errors so the developer
+        // always sees style guidance alongside other diagnostics.
+        self.run_lints(items);
+
         if self.has_errors() {
             Err(())
         } else {
             Ok(())
         }
     }
+
+    /// Walk every function and method body emitting lint warnings.
+    ///
+    /// Currently implements `prefer-loop-over-while-true` (§3.7): a
+    /// `while true { ... }` statement is replaced by `loop { ... }` for
+    /// stylistic reasons; the warning is suppressed when the enclosing
+    /// function carries `@allow(prefer_loop_over_while_true)`.
+    fn run_lints(&mut self, items: &[Item]) {
+        for item in items {
+            match item {
+                Item::Function(func) => {
+                    let suppress_while_true =
+                        attr_allows(&func.attributes, WarningCode::PreferLoopOverWhileTrue);
+                    self.lint_block(&func.body, suppress_while_true);
+                }
+                Item::Impl(def) => {
+                    for method in &def.methods {
+                        let suppress_while_true =
+                            attr_allows(&method.attributes, WarningCode::PreferLoopOverWhileTrue);
+                        self.lint_method(method, suppress_while_true);
+                    }
+                }
+                Item::Struct(_) | Item::Const(_) => {}
+            }
+        }
+    }
+
+    fn lint_method(&mut self, method: &MethodDef, suppress_while_true: bool) {
+        self.lint_block(&method.body, suppress_while_true);
+    }
+
+    fn lint_block(&mut self, body: &[Stmt], suppress_while_true: bool) {
+        for stmt in body {
+            self.lint_stmt(stmt, suppress_while_true);
+        }
+    }
+
+    fn lint_stmt(&mut self, stmt: &Stmt, suppress_while_true: bool) {
+        match stmt {
+            Stmt::While {
+                condition, body, ..
+            } => {
+                if !suppress_while_true && is_literal_true(condition) {
+                    self.warnings.push(Warning {
+                        code: WarningCode::PreferLoopOverWhileTrue,
+                        message: "`while true { ... }` should be written as `loop { ... }`; \
+                             silence with `@allow(prefer_loop_over_while_true)` on the \
+                             enclosing function"
+                            .to_string(),
+                        span: condition.span(),
+                    });
+                }
+                self.lint_block(body, suppress_while_true);
+            }
+            Stmt::If {
+                then_block,
+                else_if_blocks,
+                else_block,
+                ..
+            } => {
+                self.lint_block(then_block, suppress_while_true);
+                for (_, block) in else_if_blocks {
+                    self.lint_block(block, suppress_while_true);
+                }
+                if let Some(block) = else_block {
+                    self.lint_block(block, suppress_while_true);
+                }
+            }
+            Stmt::ForRange { body, .. } => {
+                self.lint_block(body, suppress_while_true);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// True when `expr` is the bare boolean literal `true`. Parenthesised
+/// `(true)` is intentionally not matched so that authors who want to keep
+/// `while true` style can do so via the explicit escape hatch.
+fn is_literal_true(expr: &ast_types::Expr) -> bool {
+    matches!(
+        expr,
+        ast_types::Expr::Literal(shared_types::Literal::Boolean(true), _)
+    )
+}
+
+/// True when the attribute list contains `@allow(<warning>)` for the given
+/// warning code.
+fn attr_allows(attributes: &[Attribute], code: WarningCode) -> bool {
+    let allow_id = code.allow_identifier();
+    attributes
+        .iter()
+        .filter(|attr| attr.name.name == "allow")
+        .any(|attr| attr.args.iter().any(|arg| arg.name == allow_id))
 }
