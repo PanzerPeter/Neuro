@@ -6,7 +6,7 @@
   <img src="assets/demo.gif" alt="Compile and run a Neuro program in under a second" width="820">
 </p>
 
-[![License: Neuro Shared Source License](https://img.shields.io/badge/License-Neuro%20Shared%20Source-blue.svg)](LICENSE)
+[![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
 [![Tests](https://img.shields.io/badge/tests-452%20passing-success.svg)](#)
 
@@ -96,8 +96,10 @@ Phase 1 is complete and Phase 2 is in progress. The following features are fully
 | **Functions** | Parameters, explicit and expression-based implicit returns, recursion, forward references |
 | **Control Flow** | if/else/elif, while loops, range-for (`for i in 0..n` and `0..=n`), break, continue |
 | **Mutable Variables** | `val` (immutable) and `mut` (mutable) with type-safe reassignment |
+| **Compound Assignment** | `+=`, `-=`, `*=`, `/=`, `%=` desugared at parse time to `target = target OP expr` |
 | **Constants** | `const NAME: Type = expr` at module and function scope; constant-expression validation; forward references; emitted as LLVM globals |
 | **Bitwise Operators** | `&`, `\|`, `^`, `~`, `<<` on integer types; correct precedence per Appendix B (Shl > BitAnd > BitXor > BitOr); floats and bools rejected |
+| **Attributes & Lints** | `@name(args)` attributes on functions/methods; `while true` lint with `@allow(prefer_loop_over_while_true)` suppression |
 | **String Type** | Literals with full escape sequence support (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==` and `!=` for byte-level comparison |
 | **Structs** | Definition, instantiation (`Name { field: value }`), field read (`obj.field`), field mutation on `mut` bindings; nominal typing; definition-order independent |
 | **Methods** | `impl` blocks with `&self` instance methods; associated functions called via `TypeName::func(args)`; `&mut self` / consuming `self` rejected until ownership lands |
@@ -107,15 +109,17 @@ Phase 1 is complete and Phase 2 is in progress. The following features are fully
 
 ### Current Memory Model
 
-> **⚠️ Alpha Memory Warning — read before writing string-heavy programs**
+> **⚠️ Alpha Memory Warning — no ownership system yet**
 >
-> Stack-allocated values (integers, booleans, structs with primitive fields) are reclaimed automatically on function return via LLVM `alloca`. Heap-allocated data — the **backing buffer of every `string` value** — is currently **leaked**. There is no destructor or drop system yet.
+> Stack-allocated values (integers, booleans, structs with primitive fields) are reclaimed automatically on function return via LLVM `alloca`. String literals are emitted into read-only program memory (`.rodata`) and consume no heap, so a program that only reads literal strings does not leak today.
 >
-> This is an intentional, known limitation of the alpha. Building the ownership tracker and borrow checker is the primary goal of **Phase 1.5**. Do not use this compiler for workloads that allocate unbounded strings in loops.
+> However, **no destructor, drop, or ownership system exists yet**. As soon as runtime string operations (concatenation, formatting, dynamic builders) land, every heap buffer they allocate will leak until the borrow checker and drop semantics are in place. The same applies to any future heap-allocated value (boxed types, dynamic arrays, owning collections).
+>
+> Building the ownership tracker, borrow checker, and deterministic destruction is the primary goal of **Phase 1.7**. Do not assume memory safety semantics until those land.
 >
 > If memory safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
 
-No ownership or destructor system exists yet. The Phase 1.5 work will introduce string fat pointers, an ownership tracker, and the foundations of a borrow checker.
+String fat pointers have already landed; the remaining work — ownership semantics, move-by-default, borrow checker, and drop — is tracked under Phase 1.7 in the roadmap.
 
 ---
 
@@ -460,17 +464,23 @@ Tensor/AI path: AST → Neuro High-Level IR
 
 ---
 
-## Roadmap
+## Quick Roadmap
 
 | Phase | Goal | Status |
 |:---:|---|:---:|
-| **1** | Core MVP — types, functions, control flow, LLVM backend | ✅ Complete |
-| **1.5** | key updates, string fat pointers, ownership semantics | 🔄 In progress |
-| **2** | Structs, enums, pattern matching, module system, error handling | 🔄 In progress (structs ✅, methods ✅) |
-| **3** | Tensor types, MLIR lowering, DLPack, pool allocator | 📋 Planned |
-| **4** | Automatic differentiation via Enzyme MLIR | 📋 Planned |
-| **5** | GPU acceleration via MLIR GPU dialects (nvgpu/rocdl/Triton) | 📋 Planned |
-| **6** | Neural network standard library, Python FFI via DLPack | 📋 Planned |
+| **1**   | Core MVP — types, functions, control flow, LLVM backend | ✅ Complete |
+| **1.5** | Syntax & semantics stabilization — parser fixes, `const`, `as` casts, compound assignment, bitwise ops, integer suffixes, if/block expressions, `while true` lint, IEEE-754 float comparisons, string fat pointers | 🔄 In progress |
+| **1.7** | Ownership & borrow checker — move semantics, `Copy` trait, `&`/`&mut`, lifetimes, drop / deterministic destruction, remove implicit copies | 📋 Planned |
+| **1.8** | Backend plumbing — `neuro-hir` typed IR crate, `melior` integration, HIR lowering pipeline shared by LLVM + future MLIR backends | 📋 Planned |
+| **2**   | Core language — arrays, tuples, structs ✅, methods ✅, enums, pattern matching, generics, traits, closures, type aliases, newtypes, `Option`/`Result`, `??`, `?`, modules, prelude, string interpolation | 🔄 In progress |
+| **3**   | Tensors & MLIR — `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | 📋 Planned |
+| **4**   | Automatic differentiation — Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | 📋 Planned |
+| **5**   | GPU acceleration — MLIR GPU dialects (nvgpu / rocdl / Triton), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | 📋 Planned |
+| **6**   | Neural network standard library — `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | 📋 Planned |
+| **7**   | Async runtime — `async func`, `Future<T>`, `spawn`, `JoinHandle`, `join` / `race`, executor for data-loader / I/O overlap | 📋 Planned |
+| **8**   | Interop & advanced features — Python FFI via DLPack, spread operator, advanced pattern matching, custom attributes, `defer` | 📋 Planned |
+| **9**   | Developer experience — Language Server Protocol, diagnostics polish, formatter | 📋 Planned |
+| **10**  | Package manager & optimization passes — `neurpm`, loop unrolling, AD-aware inlining heuristics | 📋 Planned |
 
 ---
 
@@ -551,7 +561,7 @@ Neuro is built to unify this stack:
 
 ## License
 
-Licensed under the [Neuro Shared Source License v2.0](LICENSE).
+Licensed under the [Neuro Shared Source License v2.1](LICENSE).
 
 **Why not MIT/Apache 2.0 right now?** Neuro is in a critical pre-stabilization phase. The license protects against three specific risks: commercial re-packaging of the compiler before the language spec is stable, AI-assisted reproduction of the compiler for a competing product, and misleading forks that fragment the early ecosystem. None of these restrictions affect normal use.
 
