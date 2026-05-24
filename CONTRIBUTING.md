@@ -88,6 +88,8 @@ scope: short summary (50 chars or less)
 
 Optional longer description. Explain what and why, not how.
 Reference issues with #issue-number.
+
+Signed-off-by: Your Name <your.email@example.com>
 ```
 
 **Scopes**: `lexer`, `parser`, `semantic`, `codegen`, `infra`, `tests`, `docs`, `build`, `ci`
@@ -96,6 +98,10 @@ Reference issues with #issue-number.
 - `parser: add struct definition parsing`
 - `codegen: fix while-loop break target for nested loops`
 - `infra: add Span display impl for error formatting`
+
+Every commit **must** carry a `Signed-off-by:` trailer. See
+[Developer Certificate of Origin (DCO)](#developer-certificate-of-origin-dco)
+below for the legal effect and the `git commit -s` workflow.
 
 ## Coding Standards
 
@@ -208,6 +214,7 @@ cargo test -- --nocapture
 - [ ] `CHANGELOG.md` updated for user-facing changes
 - [ ] `CONTEXT.md` updated if entry points or dependencies changed
 - [ ] Commit messages follow the format above
+- [ ] Every commit carries a `Signed-off-by:` trailer (DCO, see below)
 - [ ] Branch is up to date with `main`
 
 ### Pull Request Guidelines
@@ -281,6 +288,37 @@ cargo run -p neurc -- compile examples/hello.nr
 - Bug reports with minimal reproducible examples
 - Language design feedback on GitHub Discussions
 
+## Developer Certificate of Origin (DCO)
+
+Neuro uses the **Developer Certificate of Origin** ([developercertificate.org](https://developercertificate.org/)) — the same lightweight, no-paperwork mechanism used by the Linux kernel, Git, Docker, and many other open projects — instead of a separate CLA.
+
+By signing off on a commit, you certify that:
+
+> 1. The contribution was created in whole or in part by you and you have the right to submit it under the open source license indicated in the file; or
+> 2. The contribution is based upon previous work that, to the best of your knowledge, is covered under an appropriate open source license and you have the right under that license to submit that work with modifications; or
+> 3. The contribution was provided directly to you by some other person who certified (1), (2), or (3) and you have not modified it.
+> 4. You understand and agree that this project and the contribution are public and that a record of the contribution (including all personal information you submit with it, including the sign-off) is maintained indefinitely and may be redistributed consistent with this project and the open source license(s) involved.
+
+In addition, by signing off you **explicitly accept the relicensing terms of § 12.3 of the [LICENSE](LICENSE)**: your contribution may be redistributed under (a) a future version of the Neuro Shared Source License, (b) the Apache License 2.0, or (c) a license mutually agreed upon in writing between the Neuro Project and you. Relicensing under any other license — including strong-copyleft licenses such as the GPL — requires your individual written consent.
+
+### How to sign off
+
+Use `git commit -s` (or `--signoff`); Git will append a trailer using your configured `user.name` and `user.email`:
+
+```bash
+git commit -s -m "parser: add struct definition parsing"
+```
+
+Resulting trailer:
+
+```
+Signed-off-by: Your Name <your.email@example.com>
+```
+
+If you forgot to sign off, amend with `git commit --amend --signoff`. For a series of commits, use `git rebase --signoff <base>`.
+
+**Pull requests with unsigned commits will not be merged.** The DCO check is enforced in CI.
+
 ## License
 
-By contributing to Neuro, you agree your contributions will be licensed under the [Neuro Source-Available License](LICENSE), which includes alpha-phase transparency and liability limits.
+By submitting a DCO-signed contribution to Neuro, you agree your contribution is licensed under the [Neuro Shared Source License v2.1](LICENSE) and accept the future-relicensing terms enumerated in § 12.3. The contributor patent grant of § 12.5 applies to all accepted contributions.

@@ -2,7 +2,7 @@
 
 > A modern, compiled language designed for high-performance AI development.
 
-[![License: Neuro Source-Available License](https://img.shields.io/badge/License-NEURO%20Source--Available-blue.svg)](LICENSE)
+[![License: Neuro Shared Source License](https://img.shields.io/badge/License-Neuro%20Shared%20Source-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
 [![Tests](https://img.shields.io/badge/tests-452%20passing-success.svg)](#)
 
@@ -44,16 +44,39 @@ Neuro is an Ahead-of-Time (AOT) compiled language built from the ground up for A
 
 ## Quick Example
 
+A single perceptron with ReLU activation; uses structs, `impl` blocks, associated functions, instance methods, if-expressions, and implicit returns. [This file compiles and runs today.](examples/neuron.nr)
+
 ```neuro
-func factorial(n: i32) -> i32 {
-    if n <= 1 {
-        return 1
+struct Neuron {
+    weight: f64,
+    bias: f64
+}
+
+impl Neuron {
+    func new(weight: f64, bias: f64) -> Neuron {
+        Neuron { weight: weight, bias: bias }
     }
-    return n * factorial(n - 1)
+
+    // ReLU: pass-through if active, clamp to zero if not
+    func activate(&self, input: f64) -> f64 {
+        val z = (input * self.weight) + self.bias
+        if z > 0.0 { z } else { 0.0 }
+    }
+
+    func is_active(&self, input: f64) -> bool {
+        val z = (input * self.weight) + self.bias
+        z > 0.0
+    }
 }
 
 func main() -> i32 {
-    factorial(10)
+    val neuron = Neuron::new(0.5, -0.1)
+
+    val dead   = neuron.activate(0.0)   // 0.0 * 0.5 − 0.1 = −0.1 → clamped to 0.0
+    val active = neuron.activate(1.0)   // 1.0 * 0.5 − 0.1 =  0.4 → passes through
+    val fired  = neuron.is_active(1.0)  // true
+
+    return 0
 }
 ```
 
@@ -80,7 +103,15 @@ Phase 1 is complete and Phase 2 is in progress. The following features are fully
 
 ### Current Memory Model
 
-No ownership or destructor system exists yet. Stack-allocated values (integers, booleans, structs with no heap fields) are reclaimed automatically on function return via LLVM's `alloca`. Heap-allocated data — the backing buffer of every `string` value — is currently **leaked**. This is a known limitation of the alpha and is the primary motivation for Phase 1.5's ownership and borrow checker work. Do not use the current compiler for production workloads that allocate unbounded strings.
+> **⚠️ Alpha Memory Warning — read before writing string-heavy programs**
+>
+> Stack-allocated values (integers, booleans, structs with primitive fields) are reclaimed automatically on function return via LLVM `alloca`. Heap-allocated data — the **backing buffer of every `string` value** — is currently **leaked**. There is no destructor or drop system yet.
+>
+> This is an intentional, known limitation of the alpha. Building the ownership tracker and borrow checker is the primary goal of **Phase 1.5**. Do not use this compiler for workloads that allocate unbounded strings in loops.
+>
+> If memory safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
+
+No ownership or destructor system exists yet. The Phase 1.5 work will introduce string fat pointers, an ownership tracker, and the foundations of a borrow checker.
 
 ---
 
@@ -516,9 +547,20 @@ Neuro is built to unify this stack:
 
 ## License
 
-Licensed under the [Neuro Source-Available License](LICENSE).
+Licensed under the [Neuro Shared Source License v2.0](LICENSE).
 
-This software is an Alpha release. The license includes mandatory redistribution terms to preserve attribution, enforce alpha-status disclosure, and limit liability (e.g., barring use in safety-critical deployments without acknowledgement). See [LICENSE](LICENSE) for the full breakdown and redistribution checklist.
+**Why not MIT/Apache 2.0 right now?** Neuro is in a critical pre-stabilization phase. The license protects against three specific risks: commercial re-packaging of the compiler before the language spec is stable, AI-assisted reproduction of the compiler for a competing product, and misleading forks that fragment the early ecosystem. None of these restrictions affect normal use.
+
+**What you can do freely:**
+- Use, study, and modify the compiler for any personal or internal purpose
+- Write Neuro programs and distribute or sell the compiled output under **any** terms you choose. programs you compile are wholly exempt from this license
+- Build tools, plugins, and editor integrations that call into the compiler
+- Contribute code back to the project
+
+**What requires a commercial license:**
+- Redistributing the Neuro compiler itself (or a fork of it) as part of a commercial product
+
+See [LICENSE](LICENSE) for full terms.
 
 ## Acknowledgments
 
