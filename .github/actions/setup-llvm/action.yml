@@ -62,86 +62,75 @@ runs:
         } >> "$GITHUB_ENV"
 
     # ── Windows ────────────────────────────────────────────────────────────────
-    # KyleMayes/install-llvm-action ships prebuilt shared libs only; llvm-sys
-    # on MSVC requires static libs, so we use the official NSIS installer from
-    # the LLVM GitHub releases page instead.
+    # The official LLVM Windows NSIS installer ships only Clang + LLVM-C.dll —
+    # it does NOT include llvm-config.exe, headers, or static .lib files, so
+    # llvm-sys (used by inkwell) cannot build against it. KyleMayes/install-
+    # llvm-action repackages the same NSIS installer for Windows and has the
+    # same limitation.
     #
-    # Strategy:
-    #   1. Check if a usable LLVM 20.x dev install already exists (PATH or
-    #      known locations).  The windows-latest runner pre-installs LLVM but
-    #      only the runtime — llvm-config.exe may be absent.
-    #   2. If not found, download and silently run the official NSIS installer.
+    # We use vovkos/llvm-package-windows, which provides full LLVM dev builds
+    # for Windows with MSVC toolchain in both /MD (msvcrt) and /MT (libcmt)
+    # CRT variants. Rust's stable-x86_64-pc-windows-msvc target uses /MD by
+    # default, so we pick the `msvcrt` variant.
     #
-    # NSIS silent-install notes:
-    #   - /S enables headless mode
-    #   - /D= sets the install dir and MUST be the last argument passed as a
-    #     single string so PowerShell doesn't add extra quoting
-    #   - curl.exe (inbox on Windows Server 2022) is more reliable than
-    #     Invoke-WebRequest for large binary downloads
-    #   - Install path must be free of spaces (NSIS restriction)
+    # Notes:
+    #   - 7z.exe is preinstalled on windows-latest runners.
+    #   - Archive top-level dir matches the asset basename; we move/rename it
+    #     to C:\LLVM for a stable, space-free prefix path.
+    #   - curl.exe is more reliable than Invoke-WebRequest for large binaries.
     - name: Install LLVM 20 (Windows)
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'
 
-        # 1. Look for an existing LLVM 20.x dev install ─────────────────────
-        $llvmConfig = $null
+        $version = "20.1.8"
+        $asset   = "llvm-$version-windows-amd64-msvc17-msvcrt"
+        $url     = "https://github.com/vovkos/llvm-package-windows/releases/download/llvm-$version/$asset.7z"
+        $archive = "$env:TEMP\$asset.7z"
+        $extract = "$env:TEMP\llvm-extract"
+        $prefix  = "C:\LLVM"
 
-        # Check PATH first
-        $cmd = Get-Command llvm-config.exe -ErrorAction SilentlyContinue
-        if ($cmd) { $llvmConfig = $cmd.Source; Write-Host "Found in PATH: $llvmConfig" }
-
-        # Check known install locations (no-spaces path first to prefer it)
-        if (-not $llvmConfig) {
-          foreach ($candidate in @('C:\LLVM\bin\llvm-config.exe', 'C:\Program Files\LLVM\bin\llvm-config.exe')) {
-            if (Test-Path $candidate) {
-              $llvmConfig = $candidate
-              Write-Host "Found at: $candidate"
-              break
-            }
+        # If a prior step already installed it, skip
+        if ((Test-Path "$prefix\bin\llvm-config.exe")) {
+          $existing = & "$prefix\bin\llvm-config.exe" --version
+          if ($existing -match '^20\.') {
+            Write-Host "Reusing existing LLVM $existing at $prefix"
+          } else {
+            Write-Host "Found stale LLVM $existing at $prefix — reinstalling"
+            Remove-Item -Recurse -Force $prefix
           }
         }
 
-        # Validate version if found
-        $needsInstall = $true
-        if ($llvmConfig) {
-          try {
-            $v = & $llvmConfig --version
-            if ($v -match '^20\.') {
-              Write-Host "Reusing existing LLVM $v"
-              $needsInstall = $false
-            } else {
-              Write-Host "Found LLVM $v but need 20.x — will install"
-              $llvmConfig = $null
-            }
-          } catch {
-            Write-Host "llvm-config found but failed to run — will install"
-            $llvmConfig = $null
-          }
-        }
-
-        # 2. Install via official NSIS installer if needed ───────────────────
-        if ($needsInstall) {
-          $version  = "20.1.8"
-          $installer = "$env:TEMP\LLVM-$version-win64.exe"
-          $url       = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/LLVM-$version-win64.exe"
-
-          Write-Host "Downloading LLVM $version installer..."
-          curl.exe -fsSL -o $installer $url
+        if (-not (Test-Path "$prefix\bin\llvm-config.exe")) {
+          Write-Host "Downloading LLVM dev build from vovkos/llvm-package-windows..."
+          # Retry curl to absorb transient GitHub release CDN errors.
+          curl.exe -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o $archive $url
           if ($LASTEXITCODE -ne 0) { throw "curl failed (exit $LASTEXITCODE)" }
 
-          Write-Host "Running LLVM installer silently to C:\LLVM..."
-          $p = Start-Process $installer -ArgumentList "/S /D=C:\LLVM" -Wait -PassThru -NoNewWindow
-          Remove-Item $installer -ErrorAction SilentlyContinue
-          if ($p.ExitCode -ne 0) { throw "LLVM installer exited with code $($p.ExitCode)" }
+          Write-Host "Extracting $archive ..."
+          if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          & 7z.exe x $archive "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7z extract failed (exit $LASTEXITCODE)" }
 
-          $llvmConfig = 'C:\LLVM\bin\llvm-config.exe'
+          $inner = Join-Path $extract $asset
+          if (-not (Test-Path $inner)) {
+            # Some archives flatten differently; fall back to first subdir.
+            $inner = (Get-ChildItem -Directory $extract | Select-Object -First 1).FullName
+          }
+          if (-not (Test-Path $inner)) { throw "Could not locate extracted LLVM root in $extract" }
+
+          if (Test-Path $prefix) { Remove-Item -Recurse -Force $prefix }
+          Move-Item -Path $inner -Destination $prefix
+
+          Remove-Item $archive -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force $extract -ErrorAction SilentlyContinue
         }
 
-        # 3. Final validation ────────────────────────────────────────────────
+        $llvmConfig = "$prefix\bin\llvm-config.exe"
         if (-not (Test-Path $llvmConfig)) {
-          throw "llvm-config.exe not found at $llvmConfig"
+          throw "llvm-config.exe not found at $llvmConfig after install"
         }
 
         $detected = & $llvmConfig --version
@@ -149,16 +138,14 @@ runs:
         if ($detected -notmatch '^20\.') {
           throw "Unexpected LLVM version '$detected' — expected 20.x"
         }
-
-        $binDir   = Split-Path $llvmConfig -Parent
-        $prefix   = Split-Path $binDir -Parent
         Write-Host "LLVM prefix: $prefix"
 
-        # Persist env for subsequent steps
+        # Persist env for subsequent steps.
+        # llvm-sys on Windows/MSVC links statically — do NOT set
+        # LLVM_LINK_LLVM_DYLIB. Default CRT linkage (/MD) matches the
+        # `msvcrt` variant we downloaded.
         "LLVM_SYS_201_PREFIX=$prefix" | Out-File $env:GITHUB_ENV  -Append -Encoding utf8
-        $binDir                        | Out-File $env:GITHUB_PATH -Append -Encoding utf8
-
-        # llvm-sys on Windows/MSVC links statically — do NOT set LLVM_LINK_LLVM_DYLIB
+        "$prefix\bin"                  | Out-File $env:GITHUB_PATH -Append -Encoding utf8
 
     - name: Verify LLVM prefix is set
       shell: bash

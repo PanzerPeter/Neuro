@@ -503,6 +503,17 @@ The project is in early alpha — breaking changes are expected. Contributions s
 
 ---
 
+## Why Neuro?
+
+AI development is stuck in a fragmented paradigm: developers iterate in an interpreted glue language (Python), while underlying libraries are written in unmanaged, safety-critical systems languages (C++/CUDA). 
+
+Neuro is built to unify this stack:
+1. **True Native Performance:** Compiled AOT via LLVM 20—no heavy runtime interpreter, no global interpreter lock (GIL).
+2. **AI-First Type System:** Native compile-time shape verification for tensors using MLIR (Phase 3), preventing runtime dimension mismatches before a single line of training executes.
+3. **Immutability by Default:** A modern `val`/`mut` paradigm to ensure highly parallelized tensor computations are thread-safe by design.
+
+---
+
 ## License
 
 Licensed under the [Neuro Source-Available License](LICENSE).
