@@ -2,6 +2,10 @@
 
 > A modern, compiled language designed for high-performance AI development.
 
+<p align="center">
+  <img src="assets/demo.gif" alt="Compile and run a Neuro program in under a second" width="820">
+</p>
+
 [![License: Neuro Shared Source License](https://img.shields.io/badge/License-Neuro%20Shared%20Source-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
 [![Tests](https://img.shields.io/badge/tests-452%20passing-success.svg)](#)

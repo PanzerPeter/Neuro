@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.17.6] - 2026-05-24
+
+### Added
+- Demo GIF (`assets/demo.gif`) showing `neurc compile examples/neuron.nr` and instant execution of the resulting native binary, embedded near the top of `README.md`
+
+---
+
 ## [1.17.5] - 2026-05-24
 
 ### Changed (License v2.0 → v2.1)
