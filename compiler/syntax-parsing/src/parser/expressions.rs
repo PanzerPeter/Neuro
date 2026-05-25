@@ -61,7 +61,11 @@ impl Parser {
                 Literal::Integer(tok.value, Some(tok.suffix)),
                 token.span,
             )),
-            TokenKind::Float(f) => Ok(Expr::Literal(Literal::Float(f), token.span)),
+            TokenKind::Float(f) => Ok(Expr::Literal(Literal::Float(f, None), token.span)),
+            TokenKind::FloatSuffix(tok) => Ok(Expr::Literal(
+                Literal::Float(tok.value, Some(tok.suffix)),
+                token.span,
+            )),
             TokenKind::String(s) => Ok(Expr::Literal(Literal::String(s), token.span)),
             TokenKind::True => Ok(Expr::Literal(Literal::Boolean(true), token.span)),
             TokenKind::False => Ok(Expr::Literal(Literal::Boolean(false), token.span)),

@@ -73,9 +73,12 @@ impl TypeChecker {
                         Some(self.infer_integer_type(*value, expected, *span))
                     }
                 }
-                Literal::Float(_) => {
-                    // Use contextual type inference for float literals
-                    Some(self.infer_float_type(expected))
+                Literal::Float(_, suffix_opt) => {
+                    if let Some(suffix) = suffix_opt {
+                        Some(self.infer_suffixed_float_type(suffix))
+                    } else {
+                        Some(self.infer_float_type(expected))
+                    }
                 }
                 Literal::Boolean(_) => Some(Type::Bool),
                 Literal::String(_) => Some(Type::String), // String literals have string type

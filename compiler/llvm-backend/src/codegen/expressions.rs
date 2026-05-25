@@ -27,7 +27,7 @@ impl FoldedConst {
     fn from_literal(lit: &shared_types::Literal) -> Self {
         match lit {
             shared_types::Literal::Integer(v, _) => FoldedConst::Int(*v),
-            shared_types::Literal::Float(v) => FoldedConst::Float(*v),
+            shared_types::Literal::Float(v, _) => FoldedConst::Float(*v),
             shared_types::Literal::Boolean(v) => FoldedConst::Bool(*v),
             shared_types::Literal::String(s) => FoldedConst::Str(s.clone()),
         }
@@ -86,9 +86,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 };
                 Ok(llvm_ty.const_int(*val as u64, true).into())
             }
-            shared_types::Literal::Float(val) => {
-                // Default to f64 for float literals
-                Ok(self.context.f64_type().const_float(*val).into())
+            shared_types::Literal::Float(val, suffix_opt) => {
+                use shared_types::FloatSuffix;
+                let llvm_ty = match suffix_opt {
+                    Some(FloatSuffix::F32) => self.context.f32_type(),
+                    None | Some(FloatSuffix::F64) => self.context.f64_type(),
+                };
+                Ok(llvm_ty.const_float(*val).into())
             }
             shared_types::Literal::Boolean(val) => Ok(self
                 .context

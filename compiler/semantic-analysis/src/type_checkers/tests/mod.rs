@@ -153,7 +153,7 @@ fn test_float_literal_infers_f32() {
     let stmt = Stmt::VarDecl {
         name: make_ident("x"),
         ty: Some(make_type("f32")),
-        init: Some(Expr::Literal(Literal::Float(2.5), Span::new(0, 3))),
+        init: Some(Expr::Literal(Literal::Float(2.5, None), Span::new(0, 3))),
         mutable: false,
         span: Span::new(0, 10),
     };
@@ -245,7 +245,7 @@ fn test_literal_defaults_to_f64_without_context() {
     let stmt = Stmt::VarDecl {
         name: make_ident("x"),
         ty: None,
-        init: Some(Expr::Literal(Literal::Float(2.5), Span::new(0, 3))),
+        init: Some(Expr::Literal(Literal::Float(2.5, None), Span::new(0, 3))),
         mutable: false,
         span: Span::new(0, 10),
     };

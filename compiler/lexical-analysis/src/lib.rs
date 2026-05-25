@@ -12,7 +12,7 @@ mod tokens;
 
 // Public exports
 pub use errors::{LexError, LexResult};
-pub use tokens::{IntegerSuffixToken, Token, TokenKind};
+pub use tokens::{FloatSuffixToken, IntegerSuffixToken, Token, TokenKind};
 
 use logos::Logos;
 use shared_types::Span;
@@ -135,7 +135,7 @@ pub fn tokenize(source: &str) -> LexResult<Vec<Token>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shared_types::IntSuffix;
+    use shared_types::{FloatSuffix, IntSuffix};
 
     #[test]
     fn tokenize_empty_source() {
@@ -311,6 +311,49 @@ mod tests {
             TokenKind::Float(f) => assert!((f - 1.5e-5).abs() < 1e-10),
             _ => panic!("Expected float"),
         }
+    }
+
+    #[test]
+    fn tokenize_float_suffixes() {
+        let result = tokenize("1.5f32 2.0f64 1e10f32 1.5e-5f64").unwrap();
+        assert_eq!(result.len(), 5); // 4 suffixed floats + EOF
+        match &result[0].kind {
+            TokenKind::FloatSuffix(tok) => {
+                assert!((tok.value - 1.5).abs() < 1e-10);
+                assert_eq!(tok.suffix, FloatSuffix::F32);
+            }
+            _ => panic!("expected FloatSuffix"),
+        }
+        match &result[1].kind {
+            TokenKind::FloatSuffix(tok) => {
+                assert!((tok.value - 2.0).abs() < 1e-10);
+                assert_eq!(tok.suffix, FloatSuffix::F64);
+            }
+            _ => panic!("expected FloatSuffix"),
+        }
+        match &result[2].kind {
+            TokenKind::FloatSuffix(tok) => {
+                assert!((tok.value - 1e10).abs() < 1.0);
+                assert_eq!(tok.suffix, FloatSuffix::F32);
+            }
+            _ => panic!("expected FloatSuffix"),
+        }
+        match &result[3].kind {
+            TokenKind::FloatSuffix(tok) => {
+                assert!((tok.value - 1.5e-5).abs() < 1e-10);
+                assert_eq!(tok.suffix, FloatSuffix::F64);
+            }
+            _ => panic!("expected FloatSuffix"),
+        }
+    }
+
+    #[test]
+    fn unsuffixed_floats_unchanged() {
+        // Ensure plain floats still produce Float tokens, not FloatSuffix.
+        let result = tokenize("3.15 0.5 1e10").unwrap();
+        assert!(matches!(result[0].kind, TokenKind::Float(_)));
+        assert!(matches!(result[1].kind, TokenKind::Float(_)));
+        assert!(matches!(result[2].kind, TokenKind::Float(_)));
     }
 
     #[test]

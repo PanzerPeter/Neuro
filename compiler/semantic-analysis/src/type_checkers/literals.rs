@@ -1,7 +1,7 @@
 use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::Type;
-use shared_types::{IntSuffix, Span};
+use shared_types::{FloatSuffix, IntSuffix, Span};
 
 impl TypeChecker {
     /// Check if an integer literal fits within the range of a target type
@@ -91,6 +91,20 @@ impl TypeChecker {
 
         // Default to f64
         Type::F64
+    }
+
+    /// Resolve the type for a suffix-annotated float literal. The suffix
+    /// overrides contextual inference; mismatches with an explicit annotation
+    /// surface through the normal assignment type-check path.
+    pub(crate) fn infer_suffixed_float_type(&self, suffix: &FloatSuffix) -> Type {
+        float_suffix_to_type(suffix)
+    }
+}
+
+pub(crate) fn float_suffix_to_type(suffix: &FloatSuffix) -> Type {
+    match suffix {
+        FloatSuffix::F32 => Type::F32,
+        FloatSuffix::F64 => Type::F64,
     }
 }
 

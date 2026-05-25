@@ -119,3 +119,4 @@ const identifiers inside function bodies.
   to `build_and`/`build_or`/`build_xor`/`build_left_shift`. `UnaryOp::BitNot` lowers to `build_not`.
   `type_pass.rs` maps bitwise binary ops to the left-operand type (same as arithmetic). `fold_const`
   handles all four binary bitwise ops on `FoldedConst::Int` and `BitNot` on `FoldedConst::Int`.
+- 2026-05-25: Float literal type suffixes §1.2/§1.4. `codegen_literal` dispatches `Literal::Float(val, Some(F32))` → `f32_type().const_float(val)` and `None | Some(F64)` → `f64_type().const_float(val)`. `type_pass.rs` records the matching `Type::F32` / `Type::F64` for downstream type lookups. `FoldedConst::from_literal` discards the suffix because folded float arithmetic carries the type via the consuming `Type` context.

@@ -191,6 +191,22 @@ cargo run -p neurc -- compile examples/integer_suffixes.nr
 # Exit code: 0
 ```
 
+### [float_suffixes.nr](float_suffixes.nr)
+Float literal type suffixes (`1.5f32`, `2.0f64`, `1e10f32`, `1.5e-5f64`).
+
+**Features:**
+- Both float suffix variants: `f32`, `f64`
+- Suffix pins the type without an explicit annotation (`val x = 1.5f32` infers `f32`)
+- Works with both fractional (`1.5f32`) and exponent (`1e10f32`) literal forms
+- Unsuffixed floats still default to `f64` under contextual inference
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/float_suffixes.nr
+./examples/float_suffixes
+# Exit code: 0
+```
+
 ### [if_block_expressions.nr](if_block_expressions.nr)
 `if`/`else` chains and bare block expressions used as first-class values.
 
@@ -256,6 +272,7 @@ For example:
 - fibonacci.nr returns 55 (fibonacci(10))
 - milestone.nr returns 8 (5 + 3)
 - integer_suffixes.nr returns 0 (sum_bytes(10u8, 20u8) - 30)
+- float_suffixes.nr returns 0
 
 ## Testing
 

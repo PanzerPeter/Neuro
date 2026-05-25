@@ -2,7 +2,7 @@
 // Token type definitions
 
 use logos::Logos;
-use shared_types::{IntSuffix, Span};
+use shared_types::{FloatSuffix, IntSuffix, Span};
 
 use crate::errors::LexError;
 
@@ -12,6 +12,14 @@ use crate::errors::LexError;
 pub struct IntegerSuffixToken {
     pub value: i64,
     pub suffix: IntSuffix,
+}
+
+/// Carries both the numeric value and the explicit type suffix of a suffixed
+/// float literal (e.g. `1.5f32`, `2.0f64`, `1e10f32`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FloatSuffixToken {
+    pub value: f64,
+    pub suffix: FloatSuffix,
 }
 
 /// Token types in the NEURO language
@@ -83,6 +91,22 @@ pub enum TokenKind {
     #[regex(r"[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?", parse_float)]
     #[regex(r"[0-9][0-9_]*[eE][+-]?[0-9][0-9_]*", parse_float)]
     Float(f64),
+
+    // Suffixed float literals. Priority above the bare-Float patterns so logos
+    // longest-match picks `1.5f32` as a single FloatSuffix token rather than
+    // Float(1.5) + Identifier("f32"). Two patterns mirror the fractional and
+    // exponent-only forms of the Float regex.
+    #[regex(
+        r"[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?(f32|f64)",
+        parse_fractional_float_suffix,
+        priority = 3
+    )]
+    #[regex(
+        r"[0-9][0-9_]*[eE][+-]?[0-9][0-9_]*(f32|f64)",
+        parse_fractional_float_suffix,
+        priority = 3
+    )]
+    FloatSuffix(FloatSuffixToken),
 
     // Suffixed integer literals (higher priority than plain; logos maximal munch picks the longer
     // match for `42i64` → IntegerSuffix rather than Integer(42) + Identifier("i64")).
@@ -280,6 +304,7 @@ impl Token {
             TokenKind::Integer(_) => "<integer>",
             TokenKind::IntegerSuffix(_) => "<integer>",
             TokenKind::Float(_) => "<float>",
+            TokenKind::FloatSuffix(_) => "<float>",
             TokenKind::String(_) => "<string>",
             TokenKind::Plus => "+",
             TokenKind::Minus => "-",
@@ -533,6 +558,39 @@ fn parse_octal_suffix(lex: &mut logos::Lexer<TokenKind>) -> Result<IntegerSuffix
     Ok(IntegerSuffixToken {
         value,
         suffix: parse_int_suffix(&raw[suffix_start..]),
+    })
+}
+
+// ── Suffixed float helpers ────────────────────────────────────────────────────
+
+/// Maps `"f32"`/`"f64"` to `FloatSuffix`. The regex guarantees the suffix is
+/// one of these two strings.
+fn parse_float_suffix_str(suffix: &str) -> FloatSuffix {
+    match suffix {
+        "f32" => FloatSuffix::F32,
+        "f64" => FloatSuffix::F64,
+        // Safety: the regex only admits "f32" or "f64".
+        _ => unreachable!("unexpected float suffix '{}'", suffix),
+    }
+}
+
+/// Parses a float-suffix literal in either fractional (`1.5f32`) or
+/// exponent-only (`1e10f32`) form. The suffix is always the trailing
+/// `f32`/`f64`; everything before it is parsed by Rust's `f64` parser after
+/// stripping underscore separators.
+fn parse_fractional_float_suffix(
+    lex: &mut logos::Lexer<TokenKind>,
+) -> Result<FloatSuffixToken, LexError> {
+    let raw = lex.slice();
+    let suffix_start = raw.len() - 3;
+    let digits = raw[..suffix_start].replace('_', "");
+    let value = digits.parse::<f64>().map_err(|_| LexError::InvalidNumber {
+        text: raw.to_string(),
+        span: Span::new(lex.span().start, lex.span().end),
+    })?;
+    Ok(FloatSuffixToken {
+        value,
+        suffix: parse_float_suffix_str(&raw[suffix_start..]),
     })
 }
 

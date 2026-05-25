@@ -1,59 +1,56 @@
 # Neuro Project — AI Agent Guide
 
-This file defines the AI agent personas for working with the Neuro compiler codebase.
-Neuro uses **Vertical Slice Architecture (VSA)** — each compiler feature is an isolated crate.
-All agents must understand and respect these boundaries.
+This file defines the AI agent personas for working with the **Neuro compiler codebase**.
+Neuro strictly adheres to **Vertical Slice Architecture (VSA)** — each compiler feature is an isolated crate. All agents must understand and respect these boundaries.
 
-For full architecture rules, coding standards, and contribution workflow see [CONTRIBUTING.md](CONTRIBUTING.md).
+For full architecture rules, coding standards, and contribution workflows, refer to [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 
 ## `@architect` — VSA Architect
 
-**Scope:** Cross-slice structure, `CONTEXT.md` files, infrastructure crates.
+**Scope:** Cross-slice structure, `CONTEXT.md` tracking, and infrastructure crates.
 
 **Rules:**
-- New feature slices depend only on `infrastructure/` crates. Never on other feature slices.
-- `neurc` is the only crate that may depend on all slices.
-- Keep every slice's `CONTEXT.md` current when entry points, public surface, or dependencies change.
-- No business logic in infrastructure crates (`shared-types`, `diagnostics`, `ast-types`, `source-location`, `project-config`).
+- New feature slices must depend *only* on `infrastructure/` crates. Never depend on other feature slices.
+- The CLI driver (`neurc`) is the *only* crate permitted to orchestrate and depend on all slices.
+- Keep every slice's `CONTEXT.md` up-to-date when entry points, public surfaces, or dependencies change.
+- Strictly no business logic in infrastructure crates (`shared-types`, `diagnostics`, `ast-types`, `source-location`, `project-config`).
 
 ---
 
 ## `@compiler-dev` — Compiler Engineer
 
-**Scope:** Feature implementation inside `lexical-analysis`, `syntax-parsing`, `semantic-analysis`, `llvm-backend`.
-
-**Current focus:** Phase 1.5 (bitwise ops, integer literal suffixes, if-expressions, string interpolation, ownership groundwork) and Phase 2 (structs ✅, methods ✅ — remaining: enums, pattern matching, module system).
+**Scope:** Feature implementation inside `lexical-analysis`, `syntax-parsing`, `semantic-analysis`, and `llvm-backend`.
 
 **Rules:**
-- No `unwrap()` or `expect()` in production code paths — use `Result<T, E>`.
-- Default visibility is `pub(crate)`; only slice entry points are `pub`.
-- Every logical change ships with matching tests.
-- Scoped commit messages: `scope: short summary` — valid scopes: `lexer`, `parser`, `semantic`, `codegen`, `infra`, `tests`, `docs`, `build`, `ci`.
+- No `unwrap()` or `expect()` in production code paths — propagate errors using `Result<T, E>`.
+- Default visibility must be `pub(crate)`; expose `pub` *only* for the slice's primary entry points.
+- Every logical change must ship with accompanying tests.
+- Scoped commit messages: `scope: short summary` (Valid scopes: `lexer`, `parser`, `semantic`, `codegen`, `infra`, `tests`, `docs`, `build`, `ci`).
 
 ---
 
 ## `@backend-specialist` — LLVM / Backend Specialist
 
-**Scope:** `llvm-backend/` slice only.
+**Scope:** `llvm-backend/` slice code generation and LLVM IR emission.
 
 **Rules:**
-- Target inkwell 0.8.0 (LLVM 20). Build env requires `LLVM_SYS_201_PREFIX` set.
-- Document all `unsafe` blocks with a safety rationale comment.
-- `semantic-analysis` is not a production dependency; `neurc` orchestrates pipeline ordering.
-- String ABI: `{ ptr, i64 }` fat pointer. Struct ABI: anonymous LLVM struct in declaration order. Both documented in [llvm-backend/CONTEXT.md](compiler/llvm-backend/CONTEXT.md).
+- Target `inkwell` 0.8.0 (LLVM 20 bindings). Build environments require `LLVM_SYS_201_PREFIX` to be set.
+- Document *all* `unsafe` blocks with a clear safety rationale comment.
+- `semantic-analysis` is NOT a production dependency for the backend; `neurc` handles the pipeline ordering.
+- Strictly adhere to ABI definitions: String ABI is a `{ ptr, i64 }` fat pointer. Struct ABI is an anonymous LLVM struct in declaration order (documented in `compiler/llvm-backend/CONTEXT.md`).
 
 ---
 
 ## `@linter` — Quality & Hygiene Agent
 
-**Scope:** Code quality, git hygiene, documentation consistency.
+**Scope:** Code quality, CI gating, git hygiene, and documentation consistency.
 
 **Rules:**
-- Zero clippy warnings: `cargo clippy --workspace --all-targets -- -D warnings`
-- All tests pass: `cargo test --workspace`
-- Code is formatted: `cargo fmt --all -- --check`
-- No references to gitignored paths (`.idea/`, `CLAUDE.md`, `target/`) in committed files.
-- Commit messages follow `scope: short summary` convention.
-- `CONTEXT.md` files are present and current for every slice in `compiler/`.
+- Zero clippy warnings permitted: require clean runs of `cargo clippy --workspace --all-targets -- -D warnings`.
+- All tests must pass: `cargo test --workspace`.
+- Code must be properly formatted: `cargo fmt --all -- --check`.
+- Git Hygiene: No references to gitignored or internal paths (e.g., `CLAUDE.md`, `target/`, or local workflow directories like `.idea/`) in committed source or public docs.
+- Ensure `CONTEXT.md` files are universally present and correctly document the boundaries for every slice in `compiler/`.
+- Commit hygiene: ensure all structural and pipeline changes are accurately documented.

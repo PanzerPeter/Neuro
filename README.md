@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-452%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-463%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP complete · Phase 1.5 & Phase 2 in progress
 
@@ -88,11 +88,11 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 is complete and Phase 2 is in progress. The following features are fully implemented and tested (**452 Tests Passing**):
+Phase 1 is complete, Phase 1.5 and 2 is in progress. The following features are fully implemented and tested (**463 Tests Passing**):
 
 | Feature | Details |
 |---|---|
-| **Static Typing + Inference** | All integer types (i8–u64), f32/f64, bool, string; explicit `as` casting; contextual numeric literal inference; integer literal type suffixes (`42i64`, `255u8`) |
+| **Static Typing + Inference** | All integer types (i8–u64), f32/f64, bool, string; explicit `as` casting; contextual numeric literal inference; integer literal type suffixes (`42i64`, `255u8`); float literal type suffixes (`1.5f32`, `2.0f64`) |
 | **Functions** | Parameters, explicit and expression-based implicit returns, recursion, forward references |
 | **Control Flow** | if/else/elif, while loops, range-for (`for i in 0..n` and `0..=n`), break, continue |
 | **Mutable Variables** | `val` (immutable) and `mut` (mutable) with type-safe reassignment |

@@ -287,7 +287,13 @@ impl<'ctx> CodegenContext<'ctx> {
                             Some(IntSuffix::I64) | Some(IntSuffix::U64) => Type::I64,
                         }
                     }
-                    shared_types::Literal::Float(_) => Type::F64,
+                    shared_types::Literal::Float(_, suffix_opt) => {
+                        use shared_types::FloatSuffix;
+                        match suffix_opt {
+                            Some(FloatSuffix::F32) => Type::F32,
+                            None | Some(FloatSuffix::F64) => Type::F64,
+                        }
+                    }
                     shared_types::Literal::Boolean(_) => Type::Bool,
                     shared_types::Literal::String(_) => Type::String,
                 };

@@ -92,6 +92,17 @@ func demo_floats() -> f64 {
 
 **Default Type**: Float literals default to `f64`. Contextual inference from declaration, parameter, and return context is implemented.
 
+**Type Suffixes**: A suffix appended directly to a float literal overrides contextual inference and pins the type:
+
+```neuro
+val a = 1.5f32        // f32, no annotation needed
+val b = 2.0f64        // f64
+val c = 1e10f32       // exponent form with suffix
+val d = 1.5e-5f64     // fractional + exponent with suffix
+```
+
+Valid suffixes: `f32`, `f64`. The suffix attaches directly to the literal — no whitespace is permitted between the digits and the suffix. The exponent form (`1e10f32`) and the fractional form (`1.5f32`) both accept a suffix.
+
 ### Boolean Type
 
 The `bool` type represents truth values:

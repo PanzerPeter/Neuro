@@ -113,6 +113,13 @@ pub enum IntSuffix {
     U64,
 }
 
+/// Type suffix on a float literal (e.g., the `f32` in `1.5f32`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatSuffix {
+    F32,
+    F64,
+}
+
 /// Literal value types supported in the language.
 ///
 /// These represent constant values that appear directly in the source code.
@@ -123,8 +130,9 @@ pub enum Literal {
     /// Integer literal, optionally suffixed (e.g., `42`, `42i64`, `255u8`).
     /// When the suffix is present it overrides contextual type inference.
     Integer(i64, Option<IntSuffix>),
-    /// Floating-point literal (e.g., `3.14`, `-0.5`)
-    Float(f64),
+    /// Floating-point literal, optionally suffixed (e.g., `3.14`, `1.5f32`, `2.0f64`).
+    /// When the suffix is present it overrides contextual type inference.
+    Float(f64, Option<FloatSuffix>),
     /// String literal (e.g., `"hello"`)
     String(String),
     /// Boolean literal (`true` or `false`)
@@ -193,8 +201,16 @@ mod tests {
 
     #[test]
     fn literal_float() {
-        let lit = Literal::Float(2.5);
-        assert_eq!(lit, Literal::Float(2.5));
+        let lit = Literal::Float(2.5, None);
+        assert_eq!(lit, Literal::Float(2.5, None));
+    }
+
+    #[test]
+    fn literal_float_suffixed() {
+        let lit = Literal::Float(1.5, Some(FloatSuffix::F32));
+        assert_eq!(lit, Literal::Float(1.5, Some(FloatSuffix::F32)));
+        assert_ne!(lit, Literal::Float(1.5, Some(FloatSuffix::F64)));
+        assert_ne!(lit, Literal::Float(1.5, None));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 // NEURO Programming Language - Syntax Parsing Tests
 // Expression parsing tests
 
-use shared_types::Literal;
+use shared_types::{FloatSuffix, Literal};
 use syntax_parsing::{parse_expr, BinaryOp, Expr, UnaryOp};
 
 #[test]
@@ -21,8 +21,39 @@ fn test_parse_float_literal() {
     assert!(result.is_ok());
     let expr = result.unwrap();
     match expr {
-        Expr::Literal(Literal::Float(f), _) => assert!((f - 2.5).abs() < 0.0001),
+        Expr::Literal(Literal::Float(f, suffix), _) => {
+            assert!((f - 2.5).abs() < 0.0001);
+            assert_eq!(suffix, None);
+        }
         _ => panic!("Expected float literal, got {:?}", expr),
+    }
+}
+
+#[test]
+fn test_parse_float_literal_f32_suffix() {
+    let result = parse_expr("1.5f32");
+    assert!(result.is_ok());
+    let expr = result.unwrap();
+    match expr {
+        Expr::Literal(Literal::Float(f, suffix), _) => {
+            assert!((f - 1.5).abs() < 0.0001);
+            assert_eq!(suffix, Some(FloatSuffix::F32));
+        }
+        _ => panic!("Expected suffixed float literal, got {:?}", expr),
+    }
+}
+
+#[test]
+fn test_parse_float_literal_f64_suffix() {
+    let result = parse_expr("2.0f64");
+    assert!(result.is_ok());
+    let expr = result.unwrap();
+    match expr {
+        Expr::Literal(Literal::Float(f, suffix), _) => {
+            assert!((f - 2.0).abs() < 0.0001);
+            assert_eq!(suffix, Some(FloatSuffix::F64));
+        }
+        _ => panic!("Expected suffixed float literal, got {:?}", expr),
     }
 }
 
