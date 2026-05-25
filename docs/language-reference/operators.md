@@ -388,51 +388,20 @@ val out_of_range: bool = x < min || x > max
 
 ### Clamping
 
-> **Note:** `if`-as-expression (assigning the result of an `if` block to a variable) is planned for Phase 1.5 and not yet implemented. Use a `mut` variable and separate assignments for now.
-
 ```neuro
-// Phase 1.5+ syntax (not yet available):
-// val clamped: i32 = if x < min { min } else if x > max { max } else { x }
-
-// Current workaround:
-mut clamped: i32 = x
-if x < min {
-    clamped = min
-} else if x > max {
-    clamped = max
-}
+val clamped: i32 = if x < min { min } else if x > max { max } else { x }
 ```
 
 ### Sign Determination
 
-> **Note:** `if`-as-expression is not yet implemented. See note above.
-
 ```neuro
-// Phase 1.5+ syntax (not yet available):
-// val sign: i32 = if x > 0 { 1 } else if x < 0 { -1 } else { 0 }
-
-// Current workaround:
-mut sign: i32 = 0
-if x > 0 {
-    sign = 1
-} else if x < 0 {
-    sign = -1
-}
+val sign: i32 = if x > 0 { 1 } else if x < 0 { -1 } else { 0 }
 ```
 
 ### Absolute Value
 
-> **Note:** `if`-as-expression is not yet implemented. See note above.
-
 ```neuro
-// Phase 1.5+ syntax (not yet available):
-// val abs: i32 = if x >= 0 { x } else { -x }
-
-// Current workaround:
-mut abs: i32 = x
-if x < 0 {
-    abs = -x
-}
+val abs: i32 = if x >= 0 { x } else { -x }
 ```
 
 ## Operator Overloading

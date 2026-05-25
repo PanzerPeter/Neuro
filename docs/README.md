@@ -52,42 +52,55 @@ Key design goals:
 - **GPU acceleration** via MLIR `nvgpu`/`rocdl`/Triton dialects (Phase 5+)
 - **Zero-copy Python interop** via DLPack (Phase 6+)
 
-## Current Features (Phase 1 Complete)
+## Current Features
 
 ### Types
 
-- Primitive integers: i8, i16, i32, i64, u8, u16, u32, u64
-- Floating point: f32, f64
-- Boolean: bool
-- String: string literals with escape sequences (\n, \t, \", \\, \xNN, \u{NNNN})
+- Primitive integers: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
+- Floating point: `f32`, `f64`
+- Boolean: `bool`
+- String: fat-pointer ABI (`{ ptr, i64 }`), literals with escape sequences (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`)
+- Integer and float literal type suffixes: `42i64`, `255u8`, `1.5f32`, `2.0f64`
 - Contextual numeric literal inference with range validation
+- Struct types: definition, instantiation, field access, field mutation
 
 ### Variables
 
-- Immutable variables (`val`)
-- Mutable variables (`mut`) with type-safe reassignment
+- Immutable (`val`) and mutable (`mut`) bindings with type-safe reassignment
+- Compile-time constants: `const NAME: Type = expr` at module and function scope
 - Lexical scoping
 
 ### Functions
 
-- Declarations with typed parameters and return types
-- Explicit `return` statements
-- Expression-based implicit returns (trailing expression)
+- Typed parameters and return types
+- Explicit `return` and implicit trailing-expression returns
 - Recursion and forward references
 
 ### Control Flow
 
-- `if` / `else` / `elif`
+- `if` / `else if` / `else` as statements and as **expressions** (value-producing)
+- Bare block expressions as values: `val r = { val a = 3; val b = 4; a + b }`
 - `while` loops
-- Range-for loops (`for i in start..end`)
+- Range-for loops: exclusive (`for i in 0..n`) and inclusive (`for i in 0..=n`)
 - `break` and `continue`
+- Attribute system: `@allow(prefer_loop_over_while_true)` suppresses the `while true` lint
 
 ### Operators
 
 - Arithmetic: `+`, `-`, `*`, `/`, `%`
-- Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
+- Compound assignment: `+=`, `-=`, `*=`, `/=`, `%=`
+- Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=` (IEEE-754 ordered for floats)
 - Logical: `&&`, `||`, `!`
-- Unary: `-`, `!`
+- Bitwise: `&`, `|`, `^`, `~`, `<<` (integer types only)
+- Type cast: `n as f64`, `pi as i32`
+- Null-coalescing `??`: tokenized and parsed (R-to-L associativity); codegen deferred to Phase 2
+- String equality: `==` and `!=` via length-check + `memcmp`
+
+### Structs and Methods (Phase 2)
+
+- `struct` definitions with any primitive or struct field types
+- `impl` blocks: instance methods (`&self`) and associated functions (`TypeName::func`)
+- Nominal typing; forward-reference support (definition order independent)
 
 ### Compilation
 
@@ -127,7 +140,7 @@ func main() -> i32 {
 }
 ```
 
-### Factorial
+### Factorial (recursive, implicit return)
 
 ```neuro
 func factorial(n: i32) -> i32 {
@@ -149,9 +162,35 @@ func main() -> i32 {
 func sum_to(n: i32) -> i32 {
     mut total: i32 = 0
     for i in 0..n {
-        total = total + i
+        total += i
     }
     total
+}
+```
+
+### Neuron (structs + methods + if-expression)
+
+```neuro
+struct Neuron {
+    weight: f64,
+    bias:   f64
+}
+
+impl Neuron {
+    func new(weight: f64, bias: f64) -> Neuron {
+        Neuron { weight: weight, bias: bias }
+    }
+
+    func activate(&self, input: f64) -> f64 {
+        val z = (input * self.weight) + self.bias
+        if z > 0.0 { z } else { 0.0 }  // ReLU
+    }
+}
+
+func main() -> i32 {
+    val n = Neuron::new(0.5, -0.1)
+    val out = n.activate(1.0)   // 0.4
+    return 0
 }
 ```
 
@@ -174,15 +213,7 @@ See [Installation Guide](getting-started/installation.md) for other distribution
 
 ## Roadmap
 
-| Phase | Goal | Status |
-|---|---|---|
-| 1 | Core MVP | **Complete** |
-| 1.5 | LLVM 20 upgrade, string fat pointers, ownership groundwork | In progress |
-| 2 | Structs, enums, pattern matching, module system | In progress (structs, methods) |
-| 3 | Tensor types, MLIR (linalg/tensor), DLPack, pool allocator | Planned |
-| 4 | Automatic differentiation via Enzyme MLIR | Planned |
-| 5 | GPU acceleration via MLIR GPU dialects | Planned |
-| 6 | Neural network library, Python FFI | Planned |
+See the [Quick Roadmap in the project README](../README.md#quick-roadmap) for the phase-by-phase status, and [CONTRIBUTING.md](../CONTRIBUTING.md#current-contribution-priorities) for the detailed Phase 1.5 / Phase 2 checklists.
 
 ## Architecture
 
@@ -214,6 +245,6 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 
 ---
 
-**Last Updated**: 2026-04-18
-**Version**: Phase 1 Complete / Phase 1.5 & Phase 2 in progress
+**Last Updated**: 2026-05-25
+**Version**: Phase 1.5 & Phase 2 in progress (v1.18.1)
 **Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.8.0

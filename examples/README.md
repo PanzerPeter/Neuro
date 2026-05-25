@@ -16,7 +16,23 @@ Basic hello world program demonstrating function definitions, variables, and ret
 **Compile and run:**
 ```bash
 cargo run -p neurc -- compile examples/hello.nr
-.\examples\hello.exe
+./examples/hello
+```
+
+### [neuron.nr](neuron.nr)
+A single perceptron (neuron) model — the project's flagship example.
+
+**Features:**
+- Struct definition and instantiation
+- `impl` block with instance methods (`&self`) and associated function (`new`)
+- `if`/`else` as a value (ReLU activation)
+- Implicit returns
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/neuron.nr
+./examples/neuron
+# Exit code: 0
 ```
 
 ### [milestone.nr](milestone.nr)
@@ -30,7 +46,7 @@ Phase 1 milestone program showing core functionality.
 **Compile and run:**
 ```bash
 cargo run -p neurc -- compile examples/milestone.nr
-.\examples\milestone.exe
+./examples/milestone
 ```
 
 ### [factorial.nr](factorial.nr)
@@ -44,7 +60,7 @@ Recursive factorial calculation (5! = 120).
 **Compile and run:**
 ```bash
 cargo run -p neurc -- compile examples/factorial.nr
-.\examples\factorial.exe
+./examples/factorial
 # Exit code: 120
 ```
 
@@ -59,7 +75,7 @@ Recursive Fibonacci sequence calculation (fibonacci(10) = 55).
 **Compile and run:**
 ```bash
 cargo run -p neurc -- compile examples/fibonacci.nr
-.\examples\fibonacci.exe
+./examples/fibonacci
 # Exit code: 55
 ```
 
@@ -75,7 +91,7 @@ Division and modulo operations.
 **Compile and run:**
 ```bash
 cargo run -p neurc -- compile examples/division.nr
-.\examples\division.exe
+./examples/division
 ```
 
 ### [float_ops.nr](float_ops.nr)
@@ -91,7 +107,7 @@ Floating-point arithmetic operations and comparisons.
 **Compile and run:**
 ```bash
 cargo run -p neurc -- compile examples/float_ops.nr
-.\examples\float_ops.exe
+./examples/float_ops
 ```
 
 **Expected Exit Code:** `42`
@@ -109,7 +125,7 @@ Control flow patterns with if/else statements.
 **Compile and run:**
 ```bash
 cargo run -p neurc -- compile examples/control_flow.nr
-.\examples\control_flow.exe
+./examples/control_flow
 ```
 
 ### [for_range.nr](for_range.nr)
@@ -242,11 +258,58 @@ cargo run -p neurc -- compile examples/while_true_lint.nr
 Removing the `@allow(...)` line produces the same exit code but prints a
 `warning[prefer-loop-over-while-true]` line to stderr.
 
+### [structs.nr](structs.nr)
+Struct definition, instantiation, field access, and mutable field assignment.
+
+**Features:**
+- `struct` definition with primitive fields
+- Struct literal instantiation
+- Field read via dot notation
+- Mutable field assignment on `mut` bindings
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/structs.nr
+./examples/structs
+# Exit code: 50  (rect.width * rect.height = 10 * 5)
+```
+
+### [methods.nr](methods.nr)
+`impl` blocks with instance methods and associated functions.
+
+**Features:**
+- Associated functions called via `TypeName::func(args)`
+- Instance methods called via `instance.method(args)` (`&self` receiver)
+- Multiple `impl` blocks on different types
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/methods.nr
+./examples/methods
+# Exit code: 42  (Counter::new(10).plus(32))
+```
+
+### [compound_assignment.nr](compound_assignment.nr)
+Compound assignment operators (`+=`, `-=`, `*=`, `/=`, `%=`).
+
+**Features:**
+- All five compound assignment operators on a `mut` variable
+- Loop accumulator pattern with `+=` and `i += 1`
+- Each operator desugars to a plain assignment at parse time
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/compound_assignment.nr
+./examples/compound_assignment
+# Exit code: 21  (score=11 + sum=10)
+```
+
 ## Known Limitations
 
 - No arrays yet (Phase 2+)
-- Ownership/borrow checker not yet implemented (Phase 1.5)
+- Ownership/borrow checker not yet implemented (Phase 1.7)
 - Right shift is `.shr(n)` method, not `>>` operator (Phase 2+)
+- `&mut self` and consuming `self` on methods not yet supported (Phase 1.7)
 
 ## Compiling Examples
 
@@ -271,8 +334,14 @@ For example:
 - factorial.nr returns 120 (5!)
 - fibonacci.nr returns 55 (fibonacci(10))
 - milestone.nr returns 8 (5 + 3)
+- structs.nr returns 50 (10 * 5)
+- methods.nr returns 42 (Counter::new(10).plus(32))
+- compound_assignment.nr returns 21 (score=11 + sum=10)
+- neuron.nr returns 0
 - integer_suffixes.nr returns 0 (sum_bytes(10u8, 20u8) - 30)
 - float_suffixes.nr returns 0
+- if_block_expressions.nr returns 149 (abs(−7)=7 + area=42 + clamp(150,0,100)=100)
+- while_true_lint.nr returns 7 (loop counts 0 → 7 then breaks)
 
 ## Testing
 
