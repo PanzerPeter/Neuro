@@ -73,13 +73,28 @@ runs:
     # CRT variants. Rust's stable-x86_64-pc-windows-msvc target uses /MD by
     # default, so we pick the `msvcrt` variant.
     #
+    # IMPORTANT: vovkos builds with LLVM_TARGETS_TO_BUILD=X86;NVPTX;AMDGPU.
+    # Non-X86 backends (ARM, AArch64, RISCV, Mips, etc.) are NOT included.
+    # inkwell must therefore use `target-x86` only — not `target-all`.
+    #
     # Notes:
     #   - 7z.exe is preinstalled on windows-latest runners.
     #   - Archive top-level dir matches the asset basename; we move/rename it
     #     to C:\LLVM for a stable, space-free prefix path.
     #   - curl.exe is more reliable than Invoke-WebRequest for large binaries.
-    - name: Install LLVM 20 (Windows)
+    #   - The extracted LLVM tree (~1 GB) is cached between runs using
+    #     actions/cache keyed on the pinned version string.
+
+    - name: Cache LLVM 20 (Windows)
       if: runner.os == 'Windows'
+      uses: actions/cache@v4
+      id: llvm-cache
+      with:
+        path: C:\LLVM
+        key: llvm-20.1.8-windows-amd64-msvc17-msvcrt
+
+    - name: Install LLVM 20 (Windows)
+      if: runner.os == 'Windows' && steps.llvm-cache.outputs.cache-hit != 'true'
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'
@@ -91,46 +106,40 @@ runs:
         $extract = "$env:TEMP\llvm-extract"
         $prefix  = "C:\LLVM"
 
-        # If a prior step already installed it, skip
-        if ((Test-Path "$prefix\bin\llvm-config.exe")) {
-          $existing = & "$prefix\bin\llvm-config.exe" --version
-          if ($existing -match '^20\.') {
-            Write-Host "Reusing existing LLVM $existing at $prefix"
-          } else {
-            Write-Host "Found stale LLVM $existing at $prefix — reinstalling"
-            Remove-Item -Recurse -Force $prefix
-          }
+        Write-Host "Downloading LLVM dev build from vovkos/llvm-package-windows..."
+        # Retry curl to absorb transient GitHub release CDN errors.
+        curl.exe -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o $archive $url
+        if ($LASTEXITCODE -ne 0) { throw "curl failed (exit $LASTEXITCODE)" }
+
+        Write-Host "Extracting $archive ..."
+        if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
+        New-Item -ItemType Directory -Force -Path $extract | Out-Null
+        & 7z.exe x $archive "-o$extract" -y | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "7z extract failed (exit $LASTEXITCODE)" }
+
+        $inner = Join-Path $extract $asset
+        if (-not (Test-Path $inner)) {
+          # Some archives flatten differently; fall back to first subdir.
+          $inner = (Get-ChildItem -Directory $extract | Select-Object -First 1).FullName
         }
+        if (-not (Test-Path $inner)) { throw "Could not locate extracted LLVM root in $extract" }
 
-        if (-not (Test-Path "$prefix\bin\llvm-config.exe")) {
-          Write-Host "Downloading LLVM dev build from vovkos/llvm-package-windows..."
-          # Retry curl to absorb transient GitHub release CDN errors.
-          curl.exe -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o $archive $url
-          if ($LASTEXITCODE -ne 0) { throw "curl failed (exit $LASTEXITCODE)" }
+        if (Test-Path $prefix) { Remove-Item -Recurse -Force $prefix }
+        Move-Item -Path $inner -Destination $prefix
 
-          Write-Host "Extracting $archive ..."
-          if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
-          New-Item -ItemType Directory -Force -Path $extract | Out-Null
-          & 7z.exe x $archive "-o$extract" -y | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "7z extract failed (exit $LASTEXITCODE)" }
+        Remove-Item $archive -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $extract -ErrorAction SilentlyContinue
 
-          $inner = Join-Path $extract $asset
-          if (-not (Test-Path $inner)) {
-            # Some archives flatten differently; fall back to first subdir.
-            $inner = (Get-ChildItem -Directory $extract | Select-Object -First 1).FullName
-          }
-          if (-not (Test-Path $inner)) { throw "Could not locate extracted LLVM root in $extract" }
-
-          if (Test-Path $prefix) { Remove-Item -Recurse -Force $prefix }
-          Move-Item -Path $inner -Destination $prefix
-
-          Remove-Item $archive -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force $extract -ErrorAction SilentlyContinue
-        }
+    - name: Configure LLVM env (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $prefix = "C:\LLVM"
 
         $llvmConfig = "$prefix\bin\llvm-config.exe"
         if (-not (Test-Path $llvmConfig)) {
-          throw "llvm-config.exe not found at $llvmConfig after install"
+          throw "llvm-config.exe not found at $llvmConfig"
         }
 
         $detected = & $llvmConfig --version

@@ -105,6 +105,15 @@ impl TypeChecker {
                 right,
                 span,
             } => {
+                if op.is_comparison() {
+                    if let Expr::Binary { op: inner_op, .. } = left.as_ref() {
+                        if inner_op.is_comparison() {
+                            self.record_error(TypeError::ComparisonChain { span: *span });
+                            return Some(Type::Unknown);
+                        }
+                    }
+                }
+
                 // Check both operands even if one fails, for better error reporting
                 // For binary operations, operands must match each other
                 // First check left without expected type to get its natural type

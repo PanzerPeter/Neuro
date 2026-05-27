@@ -103,6 +103,7 @@ val at_least: bool = x >= min
 
 **Types**: Work with numeric types, booleans, and strings (`==`/`!=` only)
 **Requirement**: Both operands must be the same type
+**Chaining**: Comparison operators cannot be chained. `a < b < c` is a compile error — write `a < b && b < c` instead.
 
 ## Logical Operators
 

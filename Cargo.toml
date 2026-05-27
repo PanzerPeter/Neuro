@@ -47,7 +47,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.18.2"
+version = "1.19.1"
 edition = "2021"
 rust-version = "1.85"
 authors = ["NEURO Contributors"]
@@ -79,7 +79,7 @@ chumsky = "0.9"
 # LLVM_SYS_201_PREFIX must point to the LLVM 20 installation (e.g. /usr/lib/llvm20).
 # Feature flag is llvm20-1 (inkwell 0.8.0 uses the minor-version suffix scheme).
 # inkwell 0.8.0 requires Rust 1.85+.
-inkwell = { version = "0.8.0", features = ["llvm20-1", "target-all"] }
+inkwell = { version = "0.8.0", features = ["llvm20-1", "target-x86"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

@@ -128,6 +128,20 @@ pub enum UnaryOp {
     BitNot,
 }
 
+impl BinaryOp {
+    pub fn is_comparison(&self) -> bool {
+        matches!(
+            self,
+            BinaryOp::Less
+                | BinaryOp::Greater
+                | BinaryOp::LessEqual
+                | BinaryOp::GreaterEqual
+                | BinaryOp::Equal
+                | BinaryOp::NotEqual
+        )
+    }
+}
+
 impl fmt::Display for BinaryOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

@@ -284,7 +284,7 @@ The borrow checker and HIR/MLIR plumbing live in Phase 1.7 and 1.8.
 - [x] **Integer literal type suffixes**: `42i64`, `255u8` (§1.4).
 - [x] **`if` and block expressions as values** (§1.8).
 - [x] **Float literal suffixes**: `1.5f32`, `2.0f64` (§1.4). Mirrors integer-suffix lexer/parser/type-inference plumbing for floats.
-- [ ] **Comparison chain rejection** (§1.4). `a < b < c` must be a compile error with a `use a < b && b < c` suggestion. Currently parses silently; the semantic analysis pass must detect a `<` or `>` (or `<=`/`>=`) expression whose LHS is itself a comparison expression and emit a dedicated error code with the suggestion. Touch `semantic-analysis/` only — no parser change needed.
+- [x] **Comparison chain rejection** (§1.4). `a < b < c` is a compile error with a "use `&&` to combine separate comparisons" suggestion. Detected in semantic analysis when a comparison operator's LHS is itself a comparison expression.
 - [ ] **Underscore digit separators in numeric literals** (§1.2). `1_000_000`, `0xFF_FF`, `0b1010_0011`. Update the lexer's `logos`-based regex patterns for integer and float tokens to allow `_` between digit groups; strip underscores before passing the raw string to Rust's `parse::<T>()`. No AST or codegen changes required.
 
 #### 2. Language Semantics

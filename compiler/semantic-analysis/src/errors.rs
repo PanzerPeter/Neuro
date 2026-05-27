@@ -157,4 +157,7 @@ pub enum TypeError {
         hint: String,
         span: Span,
     },
+
+    #[error("comparison operators cannot be chained at {span:?}: use `&&` to combine separate comparisons")]
+    ComparisonChain { span: Span },
 }
