@@ -4,11 +4,10 @@ Thank you for your interest in contributing to the Neuro programming language co
 
 ## Project Status
 
-Neuro is in **Phase 1.5 / Phase 2** — Phase 1 (core MVP) is complete, the LLVM 20 backend and string fat pointers have landed, and Phase 2 is underway (structs ✅, methods ✅). Remaining Phase 2 work covers enums, pattern matching, and the module system. We welcome contributions, but note:
+Neuro is in **Phase 1.5 — Syntax & Semantics Stabilization** (the active phase). Phase 1 (core MVP) is complete; the LLVM 20 backend, string fat pointers, structs, and methods have all landed. Phase 1.7 (ownership & borrow checker) and Phase 1.8 (HIR / MLIR plumbing) follow before the bulk of Phase 2. We welcome contributions, but note:
 
 - Architecture and design are still evolving
 - Breaking changes are expected between minor versions
-- Current focus is Phase 1.5 stabilization and Phase 2 language features
 
 ## Table of Contents
 
@@ -272,108 +271,46 @@ Everything in this phase is a frontend / type-checker / scalar-codegen change.
 The borrow checker and HIR/MLIR plumbing live in Phase 1.7 and 1.8.
 
 `[x]` = landed · `[ ]` = open / good first-issue candidate.
+Open items are ordered by dependency — earlier ones unblock later ones.
 
-#### 1. Parser & Syntax Fixes
+#### 1. Parser & Syntax Fixes — complete
 
-- [x] **Fix `else if` condition — `no_struct_lit` guard missing.** Bare identifier used as `else if` condition consumed the block `{` as a struct literal opener, corrupting the parse tree. (`parser.rs:544`)
-- [x] **`const` declarations** (syntax.md §1.3). Compile-time constants at module and function scope.
+- [x] **Fix `else if` condition — `no_struct_lit` guard missing.** Bare identifier used as `else if` condition consumed the block `{` as a struct literal opener, corrupting the parse tree.
+- [x] **`const` declarations** (§1.3). Compile-time constants at module and function scope.
 - [x] **Compound assignment operators**: `+=`, `-=`, `*=`, `/=`, `%=` (§1.4). Desugar to `target = target OP expr` at parse time.
-- [x] **`as` type cast** (§1.4). Explicit numeric type conversion: `val x: f64 = n as f64`. LLVM `sext` / `zext` / `trunc` / `fpext` / `fptrunc` / `fptosi` / `sitofp` emission.
-- [x] **Inclusive range `..=` in `for` loops** (§1.6). `for i in 0..=10` was explicitly rejected at parse time.
-- [x] **Bitwise operators**: `&`, `|`, `^`, `~`, `<<` (§1.4). Right shift is exposed as `.shr(n)` method per spec, not an operator. Precedence levels `Shl > BitAnd > BitXor > BitOr` land between `Comparison` and `Sum`.
+- [x] **`as` type cast** (§1.4). Explicit numeric conversion with LLVM `sext` / `zext` / `trunc` / `fpext` / `fptrunc` / `fptosi` / `sitofp` emission.
+- [x] **Inclusive range `..=` in `for` loops** (§1.6).
+- [x] **Bitwise operators**: `&`, `|`, `^`, `~`, `<<` (§1.4). Precedence `Shl > BitAnd > BitXor > BitOr`. (Right shift is the `.shr(n)` method, not an operator — it is *not* yet implemented; tracked under §2 once builtin-method dispatch exists.)
 - [x] **Integer literal type suffixes**: `42i64`, `255u8` (§1.4).
 - [x] **`if` and block expressions as values** (§1.8).
-- [x] **Float literal suffixes**: `1.5f32`, `2.0f64` (§1.4). Mirrors integer-suffix lexer/parser/type-inference plumbing for floats.
-- [x] **Comparison chain rejection** (§1.4). `a < b < c` is a compile error with a "use `&&` to combine separate comparisons" suggestion. Detected in semantic analysis when a comparison operator's LHS is itself a comparison expression.
-- [ ] **Underscore digit separators in numeric literals** (§1.2). `1_000_000`, `0xFF_FF`, `0b1010_0011`. Update the lexer's `logos`-based regex patterns for integer and float tokens to allow `_` between digit groups; strip underscores before passing the raw string to Rust's `parse::<T>()`. No AST or codegen changes required.
+- [x] **Float literal suffixes**: `1.5f32`, `2.0f64` (§1.4).
+- [x] **Comparison chain rejection** (§1.4). `a < b < c` is a compile error suggesting `&&`.
+- [x] **Underscore digit separators** (§1.2). `1_000_000`, `0xFF_FF`, `0b1010_0011`.
 
 #### 2. Language Semantics
 
-- [x] **IEEE-754 native float comparison** (§1.2, §3.10). `<`, `>`, `<=`, `>=` wired directly to LLVM `fcmp olt/ogt/ole/oge`. Does not dispatch through the `Comparable` trait.
-- [x] **Integer literal magnitude rule** (§1.3). Remove silent `i32 → i64` promotion for out-of-range literals.
-- [x] **`while true` lint** (§3.7). Emits `warning[prefer-loop-over-while-true]`; suppressed with `@allow(prefer_loop_over_while_true)`. The general attribute system landed as a side-effect.
-- [x] **`??` operator — R-to-L associativity confirmed + parser test** (§3.11). Lexer/AST/parser only. Semantic rejects with `OperatorNotYetSupported`; full unwrap semantics deferred to Phase 2 with `Option`/`Result`.
-- [ ] **`*Assign` traits — scalar path** (§3.10). Declare `AddAssign`, `SubAssign`, `MulAssign`, `DivAssign`, `RemAssign` traits in the stdlib with `&mut self` receivers. Wire compound-assignment lowering in `semantic-analysis/` and `llvm-backend/`: (1) if the LHS type implements the matching `*Assign` trait, emit a direct `lhs.op_assign(rhs)` call; (2) otherwise fall back to `lhs = lhs OP rhs`. Primitive scalars (`Copy`) always take path #2 — no behavioral change for existing code. The tensor in-place path (path #1 via DLPack) is deferred to Phase 3.
-- [ ] **Integer overflow semantics** (§1.2). Debug builds: integer arithmetic must panic on overflow (use LLVM's `llvm.sadd.with.overflow` / `llvm.uadd.with.overflow` intrinsics and emit a conditional `abort`). Release builds: wrap silently (default two's complement, no intrinsic change). Also add `wrapping_add`, `wrapping_sub`, `wrapping_mul`, `saturating_add`, `saturating_sub`, `checked_add`, `checked_sub`, `checked_mul` methods on every integer primitive; these lower to the matching LLVM intrinsics. Touch `llvm-backend/` for codegen, `semantic-analysis/` for method resolution, and the stdlib crate for trait declarations.
+- [x] **IEEE-754 native float comparison** (§1.2, §3.10). `<`, `>`, `<=`, `>=` wired directly to LLVM `fcmp`; no `Comparable` dispatch.
+- [x] **Integer literal magnitude rule** (§1.3). No silent `i32 → i64` promotion for out-of-range literals.
+- [x] **`while true` lint** (§3.7). `warning[prefer-loop-over-while-true]`, suppressed with `@allow(prefer_loop_over_while_true)`. Brought in the general attribute system.
+- [x] **`??` operator — parsed, R-to-L associativity + parser test** (§3.11). Semantic rejects with `OperatorNotYetSupported`; full unwrap lands in Phase 2C with `Option`/`Result`.
+- [ ] **Builtin method dispatch on primitive & string types.** Methods today resolve only on structs (via `impl` blocks). Teach `semantic-analysis/` + `llvm-backend/` to dispatch a fixed, compiler-known set of intrinsic methods on builtin types. **Prerequisite** for the integer methods and `.shr(n)` below (and later for string `.len()` / `.slice()`).
+- [ ] **Integer overflow semantics** (§1.2). Debug builds panic on overflow (LLVM `*.with.overflow` intrinsics + conditional `abort`); release builds wrap (two's complement). Codegen-only — no method-dispatch prerequisite.
+- [ ] **Integer primitive methods — `wrapping_*` / `saturating_*` + `.shr(n)`** (§1.2, §1.4). `wrapping_add/sub/mul`, `saturating_add/sub/mul`, and the spec's right-shift `.shr(n)`. Depends on builtin method dispatch. `checked_*` returns `Option<T>` → deferred to Phase 2C.
+
+> **Moved out of Phase 1.5 (forward dependency):** the `*Assign` traits
+> (`AddAssign`/`SubAssign`/…) need the trait system and now live in Phase 2B.
+> For `Copy` scalars, compound assignment already desugars to `x = x OP rhs`,
+> so nothing regresses in the meantime.
 
 #### 3. String Memory Model (groundwork only — full ownership is Phase 1.7)
 
 - [x] **Refactor string type — fat pointers** (`ptr`, `len`).
 - [x] **String equality operators** (`==` and `!=`).
-- [ ] **String literal vs runtime string distinction** (§2.7). Literals are stored in `.rodata` and are never heap-allocated. Add a note in the `llvm-backend/` codegen that the fat-ptr `len` field counts UTF-8 bytes and excludes any null terminator; add a compile-time assertion that downstream consumers must not rely on null termination. No ABI change — documentation and an assertion comment in the relevant codegen path.
-- [ ] **`&string` slice type** (§2.7). Teach the type checker in `semantic-analysis/` to accept `&string` as a distinct type from `string`: a borrowed, non-owning fat-pointer view `(ptr, len)` into UTF-8 data. Codegen is a no-op (the ABI is already a fat pointer). This is the prerequisite for `.slice(range)` and `.char_slice(range)` in later phases.
+- [ ] **String literal vs runtime string distinction** (§2.7). Literals live in `.rodata` and are never heap-allocated. Formalize, document, and test that the fat-ptr `len` counts UTF-8 bytes and excludes the null terminator. Codegen already computes `len` this way — no ABI change.
 
----
-
-### Phase 1.7 — Ownership & Borrow Checker (next up)
-
-**Goal:** Deterministic, zero-overhead memory management. No GC, no ARC.
-Touches `semantic-analysis/` heavily; `llvm-backend/` gains a `Drop` lowering pass.
-
-- [ ] **Move semantics by default.** Assignment and function-call argument passing move ownership for non-`Copy` types. The source binding becomes invalid after the move. Add move-tracking to the type checker; emit "use of moved value" errors.
-- [ ] **`Copy` trait + `@derive(Copy, Clone)`.** Built-in for all primitive scalars. Structs may derive `Copy` only when all fields are `Copy`. Validation in `semantic-analysis/`.
-- [ ] **`.clone()` method.** Explicit deep copy for non-`Copy` owned types; removes any implicit deep copies elsewhere in the compiler.
-- [ ] **Immutable borrows `&T`.** Any number may coexist. Borrow checker rejects mutable borrows during an active immutable borrow. Implement the borrow checker as a new pass in `semantic-analysis/`.
-- [ ] **Mutable borrows `&mut T`.** At most one `&mut T` at a time; excludes immutable borrows. Dereference through `*` for read/write.
-- [ ] **Lifetime inference + explicit annotations.** Elision rules: single input lifetime → all outputs; `&self` lifetime → method outputs. Explicit `<'a>` for advanced patterns.
-- [ ] **`Drop` trait + deterministic destruction.** Destructor runs when owner goes out of scope. `llvm-backend/` must emit Drop calls at scope-exit basic blocks.
-- [ ] **Remove ARC plumbing.** Strip any reference-counting code introduced during the alpha; replace entirely with owned-or-borrowed semantics.
-- [ ] **Runtime string ops behind the borrow checker.** `String::new`, `string + &string` concat, `.push_str`, `.clear`. First features to exercise heap + Drop.
-- [ ] **`unsafe { }` block infrastructure.** Parse `unsafe` as a reserved keyword, add an `UnsafeBlock` AST node. Outside `@kernel` bodies the block is inert (no general unsafe semantics yet). Needed as groundwork for Phase 5 GPU kernels.
-
----
-
-### Phase 1.8 — HIR & MLIR Backend Plumbing (upcoming)
-
-**Goal:** Build the typed High-Level IR and `melior` infrastructure that every backend from Phase 3 onward depends on. Split from Phase 2 because stabilizing the HIR contract before adding tensor types prevents costly rewrites later.
-
-- [ ] **Integrate `melior`** (Rust MLIR bindings) alongside `inkwell`. Build against LLVM/MLIR 20; verify both bindings share the same dylib.
-- [ ] **`neuro-hir` infrastructure crate.** New crate at `compiler/infrastructure/neuro-hir/`. Defines a typed HIR — the stable contract between the frontend (parser + type checker) and all backends. Both `llvm-backend` and the future `mlir-backend` lower from HIR, not from the AST directly.
-- [ ] **HIR lowering strategy.** Implement the lowering pipeline: `AST → neuro-hir → llvm-backend (inkwell → native)`. The `mlir-backend` slot is scaffolded but empty until Phase 3.
-- [ ] **Migrate `llvm-backend` off AST onto HIR.** Acceptance criterion: full test suite passes with HIR-routed codegen before any tensor code is added.
-- [ ] **`mlir-backend` slice scaffold.** Empty slice that consumes HIR and produces a trivial MLIR module. Wires the `melior` dependency, the lowering entry point, and a CI smoke test.
-
----
-
-### Phase 2 — Core Language (after Phase 1.7 & 1.8)
-
-**Goal:** Complete the general-purpose surface language with safe memory semantics.
-
-#### 2A. Type System Expansion
-
-- [ ] **Arrays `[T; N]`** (§3.1). Fixed-size arrays: indexing, `.len()`, iteration via `for x in arr` and `for (i, x) in arr.enumerate()`. Bounds check: debug panic, release wrap; investigate compile-time elision.
-- [ ] **Tuples and destructuring** (§3.2). `(T1, T2, ...)`, `.0`/`.1` field access, `val (a, b) = pair`, struct and array destructuring, `_` wildcard, nested patterns.
-- [ ] **Enums with associated data** (§3.5). Tagged-union codegen. `enum Foo { Bar, Baz(i32), Qux { x: f64 } }`.
-- [ ] **Pattern matching** (§3.6). `match` expression with exhaustiveness checking; guard clauses. Required prerequisite for `Option`/`Result` ergonomics.
-- [ ] **Type aliases** (§3.14). `type Vec3 = Tensor<f32, [3]>` — transparent, non-distinct alias.
-- [ ] **Newtype declarations** (§3.15). `newtype Meters(f64)` — distinct nominal type, zero overhead. Forwards `Copy`/`Clone` from inner type; all other traits implemented explicitly.
-- [ ] **Struct shorthand + update syntax** (§3.3). `Point { x, y }` shorthand; `Point { x: 1.0, ..p }` spread from existing value.
-
-#### 2B. Generics, Traits, and Abstractions
-
-- [ ] **Generics** (§3.8). `func max<T: Ord>(a: T, b: T) -> T`. Monomorphization-based — no runtime dispatch. Add generic parameters to functions, structs, and `impl` blocks; implement type unification in `semantic-analysis/`.
-- [ ] **Trait declarations** (§3.9). `trait Drawable { fn draw(&self); }`. Trait bounds, default methods, associated types.
-- [ ] **Operator traits — scalar path** (§3.10). `Add`, `Sub`, `Mul`, `Div`, `Rem`, `Neg`, `Not`, `BitAnd`, `BitOr`, `BitXor`, `Shl`, `Shr`, `Eq`, `Ord`. Includes `*Assign` traits from Phase 1.5.
-- [ ] **Closures and lambdas** (§3.12). `|x| x + 1`, `|x: i32| -> i32 { x + 1 }`. Three capture modes (`Fn` / `FnMut` / `FnOnce`) determined by usage. Borrow-checker integration required.
-
-#### 2C. Error Handling, Modules, and Prelude
-
-- [ ] **`Option<T>` and `Result<T, E>` in stdlib** (§3.11). Add as built-in generic enums; wire into the type checker.
-- [ ] **`??` operator — full implementation** (§3.11). Accepts `Option<T>` or `Result<T, E>` on the LHS; `Result` Err payload is discarded. Single `Coalesce<T>` trait. Fallback expression is lazy. R-to-L associativity already pinned by Phase 1.5 parser test.
-- [ ] **`val-else else |binding|` type-directed binding** (§8.2). `Result<T, E>` → `|name|` binds `E`. `Option<T>` → `|_|` only.
-- [ ] **Error propagation operator `?`**. Sugar over `match … { Ok(v) => v, Err(e) => return Err(e.into()) }`.
-- [ ] **Multi-file compilation** (§3.16). Each `.nr` file = one module. Directories with `mod.nr` form hierarchies. Implement in `neurc/` driver and `semantic-analysis/`.
-- [ ] **`import` statements and visibility** (§3.16). `import math`, `import math::{sqrt, sin}`, `import math::matrix as mat`, relative paths, variant imports (`import Option::{Some, None}`).
-- [ ] **`export` keyword** (§3.3, §3.16). Items and struct fields private by default; `export` opts into module-public visibility.
-- [ ] **Inline `module { }` blocks + `export import` re-export** (§3.16).
-- [ ] **Implicit prelude** (§3.16). Auto-import `std::prelude::{Option, Some, None, Result, Ok, Err, println, print}`. `@no_prelude` opts out.
-
-#### 2D. Language Cleanup
-
-- [ ] **String interpolation `"Hello, {name}!"`** (§1.7). Stateful lexer rewrite. Format mini-language: `{x:.2}`, `{n:08d}`, `{s:^10}`, etc. Escape `\{` for a literal brace.
-- [ ] **Triple-quoted strings with dedent** (§1.7). `"""..."""` block; closing delimiter column determines dedent amount. Content lines with less indentation than the closing delimiter are a compile error.
-- [ ] **Nested block comments** (§1.1). `/* outer /* inner */ still outer */`. Requires a hand-written comment scanner — `logos` longest-match cannot handle nesting.
-- [ ] **Named arguments** (§3.13). `external internal: T` parameter form; callers may pass positionally or by name. Lowers to identical IR — no runtime cost.
+> **Moved out of Phase 1.5 (forward dependency):** the `&string` slice type is a
+> borrowed `(ptr, len)` view and depends on the reference type `&T`, which lands
+> in Phase 1.7 — it is now tracked there.
 
 ### Non-Code Contributions
 
