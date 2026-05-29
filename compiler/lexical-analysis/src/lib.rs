@@ -357,6 +357,72 @@ mod tests {
     }
 
     #[test]
+    fn underscore_separators_decimal() {
+        let result = tokenize("1_000_000 1_2_3").unwrap();
+        assert!(matches!(result[0].kind, TokenKind::Integer(1_000_000)));
+        assert!(matches!(result[1].kind, TokenKind::Integer(123)));
+    }
+
+    #[test]
+    fn underscore_separators_hex_binary_octal() {
+        let result = tokenize("0xFF_FF 0b1010_0011 0o7_5_5").unwrap();
+        assert!(matches!(result[0].kind, TokenKind::Integer(0xFFFF)));
+        assert!(matches!(result[1].kind, TokenKind::Integer(0b1010_0011)));
+        assert!(matches!(result[2].kind, TokenKind::Integer(0o755)));
+    }
+
+    #[test]
+    fn underscore_separators_float() {
+        let result = tokenize("1_000.000_5 1_0e1_0").unwrap();
+        match result[0].kind {
+            TokenKind::Float(f) => assert!((f - 1000.0005).abs() < 1e-9),
+            _ => panic!("expected float"),
+        }
+        match result[1].kind {
+            // 10e10 == 1.0e11
+            TokenKind::Float(f) => assert!((f - 1.0e11).abs() < 1.0),
+            _ => panic!("expected float"),
+        }
+    }
+
+    #[test]
+    fn underscore_separators_suffixed() {
+        let result = tokenize("1_000i64 0xFF_FFu32 2_000.5f32").unwrap();
+        match &result[0].kind {
+            TokenKind::IntegerSuffix(tok) => {
+                assert_eq!(tok.value, 1000);
+                assert_eq!(tok.suffix, IntSuffix::I64);
+            }
+            _ => panic!("expected IntegerSuffix"),
+        }
+        match &result[1].kind {
+            TokenKind::IntegerSuffix(tok) => {
+                assert_eq!(tok.value, 0xFFFF);
+                assert_eq!(tok.suffix, IntSuffix::U32);
+            }
+            _ => panic!("expected IntegerSuffix"),
+        }
+        match &result[2].kind {
+            TokenKind::FloatSuffix(tok) => {
+                assert!((tok.value - 2000.5).abs() < 1e-9);
+                assert_eq!(tok.suffix, FloatSuffix::F32);
+            }
+            _ => panic!("expected FloatSuffix"),
+        }
+    }
+
+    #[test]
+    fn leading_underscore_is_identifier_not_number() {
+        // A leading underscore must bind as an identifier, never a numeric literal —
+        // the digit-separator rule applies only between digits.
+        let result = tokenize("_1000").unwrap();
+        match &result[0].kind {
+            TokenKind::Identifier(s) => assert_eq!(s, "_1000"),
+            _ => panic!("expected identifier"),
+        }
+    }
+
+    #[test]
     fn tokenize_strings() {
         let result = tokenize(r#""hello" "world" "with spaces""#).unwrap();
         assert_eq!(result.len(), 4); // 3 strings + EOF

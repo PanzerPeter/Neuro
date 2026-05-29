@@ -223,6 +223,22 @@ cargo run -p neurc -- compile examples/float_suffixes.nr
 # Exit code: 0
 ```
 
+### [underscore_separators.nr](underscore_separators.nr)
+Underscore digit separators in numeric literals (`1_000_000`, `0xFF_FF`, `0b1010_0011`).
+
+**Features:**
+- Separators in every base: decimal, hex, binary, octal
+- Separators in floats (`1_000.000_5`) and exponents (`1_0e1_0`)
+- Separators alongside type suffixes (`1_000_000i64`)
+- Underscores are readability-only — stripped before parsing, no runtime cost
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/underscore_separators.nr
+./examples/underscore_separators
+# Exit code: 0
+```
+
 ### [if_block_expressions.nr](if_block_expressions.nr)
 `if`/`else` chains and bare block expressions used as first-class values.
 
@@ -340,6 +356,7 @@ For example:
 - neuron.nr returns 0
 - integer_suffixes.nr returns 0 (sum_bytes(10u8, 20u8) - 30)
 - float_suffixes.nr returns 0
+- underscore_separators.nr returns 0
 - if_block_expressions.nr returns 149 (abs(−7)=7 + area=42 + clamp(150,0,100)=100)
 - while_true_lint.nr returns 7 (loop counts 0 → 7 then breaks)
 

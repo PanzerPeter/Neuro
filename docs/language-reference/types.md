@@ -103,6 +103,22 @@ val d = 1.5e-5f64     // fractional + exponent with suffix
 
 Valid suffixes: `f32`, `f64`. The suffix attaches directly to the literal — no whitespace is permitted between the digits and the suffix. The exponent form (`1e10f32`) and the fractional form (`1.5f32`) both accept a suffix.
 
+### Digit Separators
+
+Underscores may be placed between digits of any numeric literal to improve readability. They carry no value — the compiler strips them before parsing — and work in every base, in floats, in exponents, and alongside type suffixes.
+
+```neuro
+val million = 1_000_000      // decimal grouping
+val mask    = 0xFF_FF        // hex
+val flags   = 0b1010_0011    // binary
+val perms   = 0o7_5_5        // octal
+val ratio   = 1_000.000_5    // float
+val scaled  = 1_0e1_0        // exponent
+val wide    = 1_000_000i64   // with a type suffix
+```
+
+A separator is only recognized between digits: a leading underscore (`_1000`) is an identifier, not a number.
+
 ### Boolean Type
 
 The `bool` type represents truth values:

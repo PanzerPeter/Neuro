@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.19.2] - 2026-05-29
+
+### Added
+- `tests`: dedicated coverage for underscore digit separators in numeric literals (§1.2) — 5 lexer unit tests (decimal, hex/binary/octal, float fractional + exponent, suffixed int/float, leading-underscore boundary) and 4 end-to-end compile-and-run integration tests.
+- `docs`: `examples/underscore_separators.nr` plus a "Digit Separators" note in the type-system reference.
+
+### Notes
+- Lexer support for `_` separators already shipped incidentally with the literal-suffix regexes (every numeric pattern carries `_` in its character class and each parser strips it). This release formally validates, documents, and closes out the Phase 1.5 §1 roadmap item — no production code changed.
+
+---
+
 ## [1.19.1] - 2026-05-27
 
 ### Fixed
