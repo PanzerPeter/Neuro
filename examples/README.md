@@ -191,6 +191,22 @@ cargo run -p neurc -- compile examples/bitwise_ops.nr
 # Exit code: 1  (READ flag set; WRITE toggled off; EXECUTE never set)
 ```
 
+### [integer_overflow.nr](integer_overflow.nr)
+Integer overflow semantics (§1.2): debug builds trap, release builds wrap.
+
+**Features:**
+- Debug builds (`-O0`) abort at runtime when `+`, `-`, or `*` overflows an integer type
+- Release builds (`-O1..-O3`) wrap using two's complement with zero overhead
+- In-range arithmetic produces identical results in both modes
+- Accumulator loop summing `1..=10`
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/integer_overflow.nr
+./examples/integer_overflow
+# Exit code: 55  (1+2+...+10, never overflows)
+```
+
 ### [integer_suffixes.nr](integer_suffixes.nr)
 Integer literal type suffixes (`42i64`, `255u8`, `0xFFu8`, `0b1010i32`).
 
@@ -354,6 +370,7 @@ For example:
 - methods.nr returns 42 (Counter::new(10).plus(32))
 - compound_assignment.nr returns 21 (score=11 + sum=10)
 - neuron.nr returns 0
+- integer_overflow.nr returns 55 (1+2+...+10, no overflow)
 - integer_suffixes.nr returns 0 (sum_bytes(10u8, 20u8) - 30)
 - float_suffixes.nr returns 0
 - underscore_separators.nr returns 0

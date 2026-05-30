@@ -47,7 +47,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.19.3"
+version = "1.20.0"
 edition = "2021"
 rust-version = "1.85"
 authors = ["NEURO Contributors"]
@@ -79,7 +79,11 @@ chumsky = "0.9"
 # LLVM_SYS_201_PREFIX must point to the LLVM 20 installation (e.g. /usr/lib/llvm20).
 # Feature flag is llvm20-1 (inkwell 0.8.0 uses the minor-version suffix scheme).
 # inkwell 0.8.0 requires Rust 1.85+.
-inkwell = { version = "0.8.0", features = ["llvm20-1", "target-x86"] }
+# default-features = false disables inkwell's `target-all` default, which would
+# otherwise compile in initializers for every LLVM target (ARM, BPF, Mips, ...).
+# That fails to link on Windows CI, whose prebuilt LLVM only ships the x86 target
+# libs. We only ever initialize the native (x86) target, so target-x86 suffices.
+inkwell = { version = "0.8.0", default-features = false, features = ["llvm20-1", "target-x86"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

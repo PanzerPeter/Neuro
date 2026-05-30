@@ -68,6 +68,11 @@ pub(crate) struct CodegenContext<'ctx> {
     /// Types of module-level constants, pre-populated so `visit_function_for_types`
     /// can seed `type_env` after each clear.
     pub(crate) global_const_types: HashMap<String, Type>,
+
+    /// When true (debug builds, `-O0`), integer `+`/`-`/`*` are emitted with
+    /// overflow detection that traps at runtime. When false (release builds),
+    /// the plain wrapping instruction is emitted. See §1.2.
+    pub(crate) overflow_checks: bool,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -92,7 +97,14 @@ impl<'ctx> CodegenContext<'ctx> {
             fa_struct_names: HashMap::new(),
             const_values: HashMap::new(),
             global_const_types: HashMap::new(),
+            overflow_checks: false,
         }
+    }
+
+    /// Enable or disable debug-build integer overflow trapping.
+    /// Enabled for `-O0` (debug), disabled for `-O1..-O3` (release).
+    pub(crate) fn set_overflow_checks(&mut self, enabled: bool) {
+        self.overflow_checks = enabled;
     }
 
     /// Get the external `memcmp` declaration, inserting it on first use.

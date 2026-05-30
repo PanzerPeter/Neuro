@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-479%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-486%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP complete · Phase 1.5 & Phase 2 in progress
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 is complete, Phase 1.5 and 2 is in progress. The following features are fully implemented and tested (**479 Tests Passing**):
+Phase 1 is complete, Phase 1.5 and 2 is in progress. The following features are fully implemented and tested (**486 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -98,6 +98,7 @@ Phase 1 is complete, Phase 1.5 and 2 is in progress. The following features are 
 | **Mutable Variables** | `val` (immutable) and `mut` (mutable) with type-safe reassignment |
 | **Compound Assignment** | `+=`, `-=`, `*=`, `/=`, `%=` desugared at parse time to `target = target OP expr` |
 | **Constants** | `const NAME: Type = expr` at module and function scope; constant-expression validation; forward references; emitted as LLVM globals |
+| **Integer Overflow** | `+`/`-`/`*` trap at runtime on overflow in debug builds (`-O0`); wrap (two's complement) in release builds (`-O1..-O3`); division/modulo/bitwise/float unaffected |
 | **Bitwise Operators** | `&`, `\|`, `^`, `~`, `<<` on integer types; correct precedence per Appendix B (Shl > BitAnd > BitXor > BitOr); floats and bools rejected |
 | **Attributes & Lints** | `@name(args)` attributes on functions/methods; `while true` lint with `@allow(prefer_loop_over_while_true)` suppression |
 | **String Type** | Literals with full escape sequence support (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==` and `!=` for byte-level comparison |

@@ -1,5 +1,6 @@
 use ast_types::*;
 use inkwell::basic_block::BasicBlock;
+use inkwell::intrinsics::Intrinsic;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::*;
 use inkwell::{FloatPredicate, IntPredicate};
@@ -418,6 +419,123 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))
     }
 
+    /// Emit integer `+`, `-`, or `*`.
+    ///
+    /// In debug builds (`-O0`, `overflow_checks` enabled) the operation uses the
+    /// LLVM `{s,u}{add,sub,mul}.with.overflow` intrinsic and aborts via `llvm.trap`
+    /// when the result overflows, matching the §1.2 rule that debug arithmetic
+    /// panics on overflow. In release builds the plain wrapping instruction is
+    /// emitted, giving two's-complement wraparound.
+    fn codegen_int_arith(
+        &mut self,
+        op: BinaryOp,
+        lhs: IntValue<'ctx>,
+        rhs: IntValue<'ctx>,
+        unsigned: bool,
+        name: &str,
+    ) -> CodegenResult<IntValue<'ctx>> {
+        if !self.overflow_checks {
+            return self.emit_wrapping_int_arith(op, lhs, rhs, name);
+        }
+
+        let intrinsic_name = match (op, unsigned) {
+            (BinaryOp::Add, false) => "llvm.sadd.with.overflow",
+            (BinaryOp::Add, true) => "llvm.uadd.with.overflow",
+            (BinaryOp::Subtract, false) => "llvm.ssub.with.overflow",
+            (BinaryOp::Subtract, true) => "llvm.usub.with.overflow",
+            (BinaryOp::Multiply, false) => "llvm.smul.with.overflow",
+            (BinaryOp::Multiply, true) => "llvm.umul.with.overflow",
+            _ => return self.emit_wrapping_int_arith(op, lhs, rhs, name),
+        };
+
+        let int_ty = lhs.get_type();
+        let intrinsic = Intrinsic::find(intrinsic_name).ok_or_else(|| {
+            CodegenError::InternalError(format!("missing LLVM intrinsic {intrinsic_name}"))
+        })?;
+        let decl = intrinsic
+            .get_declaration(&self.module, &[int_ty.into()])
+            .ok_or_else(|| {
+                CodegenError::InternalError(format!(
+                    "could not declare LLVM intrinsic {intrinsic_name}"
+                ))
+            })?;
+
+        let agg = self
+            .builder
+            .build_call(decl, &[lhs.into(), rhs.into()], name)
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .try_as_basic_value()
+            .basic()
+            .ok_or_else(|| {
+                CodegenError::InternalError("overflow intrinsic returned void".to_string())
+            })?
+            .into_struct_value();
+
+        let result = self
+            .builder
+            .build_extract_value(agg, 0, "arith.res")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_int_value();
+        let overflowed = self
+            .builder
+            .build_extract_value(agg, 1, "arith.ovf")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_int_value();
+
+        let func = self
+            .current_function
+            .ok_or_else(|| CodegenError::InternalError("arithmetic outside a function".into()))?;
+        let trap_bb = self.context.append_basic_block(func, "arith.overflow");
+        let cont_bb = self.context.append_basic_block(func, "arith.cont");
+
+        self.builder
+            .build_conditional_branch(overflowed, trap_bb, cont_bb)
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+        self.builder.position_at_end(trap_bb);
+        self.emit_trap()?;
+        self.builder
+            .build_unreachable()
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+        self.builder.position_at_end(cont_bb);
+        Ok(result)
+    }
+
+    /// Emit the plain wrapping integer instruction (release-build path).
+    fn emit_wrapping_int_arith(
+        &self,
+        op: BinaryOp,
+        lhs: IntValue<'ctx>,
+        rhs: IntValue<'ctx>,
+        name: &str,
+    ) -> CodegenResult<IntValue<'ctx>> {
+        let value = match op {
+            BinaryOp::Add => self.builder.build_int_add(lhs, rhs, name),
+            BinaryOp::Subtract => self.builder.build_int_sub(lhs, rhs, name),
+            BinaryOp::Multiply => self.builder.build_int_mul(lhs, rhs, name),
+            _ => {
+                return Err(CodegenError::InternalError(
+                    "emit_wrapping_int_arith called with a non-arithmetic operator".to_string(),
+                ))
+            }
+        };
+        value.map_err(|e| CodegenError::LlvmError(e.to_string()))
+    }
+
+    /// Emit a call to `llvm.trap`, which terminates the process on execution.
+    fn emit_trap(&self) -> CodegenResult<()> {
+        let trap = Intrinsic::find("llvm.trap")
+            .ok_or_else(|| CodegenError::InternalError("missing llvm.trap intrinsic".into()))?;
+        let decl = trap
+            .get_declaration(&self.module, &[])
+            .ok_or_else(|| CodegenError::InternalError("could not declare llvm.trap".into()))?;
+        self.builder
+            .build_call(decl, &[], "")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        Ok(())
+    }
+
     /// Generate code for a binary expression
     pub(crate) fn codegen_binary(
         &mut self,
@@ -448,10 +566,15 @@ impl<'ctx> CodegenContext<'ctx> {
                         .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                         .into())
                 } else {
+                    let unsigned = TypeMapper::is_unsigned_int(left_ty);
                     Ok(self
-                        .builder
-                        .build_int_add(lhs.into_int_value(), rhs.into_int_value(), "addtmp")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .codegen_int_arith(
+                            BinaryOp::Add,
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            unsigned,
+                            "addtmp",
+                        )?
                         .into())
                 }
             }
@@ -463,10 +586,15 @@ impl<'ctx> CodegenContext<'ctx> {
                         .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                         .into())
                 } else {
+                    let unsigned = TypeMapper::is_unsigned_int(left_ty);
                     Ok(self
-                        .builder
-                        .build_int_sub(lhs.into_int_value(), rhs.into_int_value(), "subtmp")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .codegen_int_arith(
+                            BinaryOp::Subtract,
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            unsigned,
+                            "subtmp",
+                        )?
                         .into())
                 }
             }
@@ -478,10 +606,15 @@ impl<'ctx> CodegenContext<'ctx> {
                         .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                         .into())
                 } else {
+                    let unsigned = TypeMapper::is_unsigned_int(left_ty);
                     Ok(self
-                        .builder
-                        .build_int_mul(lhs.into_int_value(), rhs.into_int_value(), "multmp")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .codegen_int_arith(
+                            BinaryOp::Multiply,
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
+                            unsigned,
+                            "multmp",
+                        )?
                         .into())
                 }
             }

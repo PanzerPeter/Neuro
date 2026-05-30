@@ -82,6 +82,21 @@ re-querying the AST.
   subsequent arms; the final `else` body is only reachable when all preceding
   conditions are false.
 
+## Integer Overflow ABI
+Integer `+`, `-`, and `*` honor the §1.2 overflow rule, keyed off the
+`OptimizationLevelSetting` passed to `compile`:
+- `-O0` (debug) → `CodegenContext.overflow_checks = true`. `codegen_int_arith`
+  emits the matching `llvm.{s,u}{add,sub,mul}.with.overflow` intrinsic, extracts
+  the `{result, overflow_bit}` aggregate, and conditionally branches to a per-op
+  `arith.overflow` block that calls `llvm.trap` + `unreachable`. Execution
+  continues in the `arith.cont` block carrying the result.
+- `-O1..-O3` (release) → `overflow_checks = false`. `emit_wrapping_int_arith`
+  emits the plain `build_int_add/sub/mul` (two's-complement wrap).
+
+Signedness selects the `s`/`u` intrinsic variant via `TypeMapper::is_unsigned_int`.
+Division, modulo, bitwise ops, and floats are unaffected. The `FoldedConst`
+compile-time path is independent and always wraps.
+
 ## Future: MLIR Integration (Phase 3+)
 When tensor operations are introduced, `melior` (Rust MLIR bindings, targeting the same
 LLVM 20 / MLIR 20 installation) will be added alongside inkwell. The lowering strategy
@@ -110,6 +125,7 @@ types and is re-seeded into `type_env` after each `type_env.clear()` in
 const identifiers inside function bodies.
 
 ## Recent Updates
+- 2026-05-30: Implemented integer overflow semantics §1.2. `CodegenContext.overflow_checks` (set from `-O0`) gates `codegen_int_arith`, which emits `llvm.{s,u}{add,sub,mul}.with.overflow` + `llvm.trap` for debug builds and plain wrapping arithmetic for release. Routed the `Add`/`Subtract`/`Multiply` integer arms of `codegen_binary` through it. See "Integer Overflow ABI".
 - 2026-05-18: Added exhaustive `BinaryOp::NullCoalesce` arms in `codegen_binary` and `fold_const` (Int path); both return `CodegenError::InternalError`. Semantic-analysis gates this operator (Phase 2 feature), so reaching codegen indicates a pipeline bug — surfaced as an ICE rather than a panic so the float-fallthrough arm stays well-behaved.
 - 2026-04-04: Updated `codegen_for_range` to accept `inclusive: bool` from `Stmt::ForRange` and generate `<=` (`ULE`/`SLE`) instead of `<` (`ULT`/`SLT`) comparison instructions when true.
 - 2026-04-16: Implemented §1.3 const declarations end-to-end: `codegen_global_const`,

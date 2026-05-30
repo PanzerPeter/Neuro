@@ -186,6 +186,9 @@ pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> Codege
     let mut codegen_ctx = CodegenContext::new(&context, "neuro_module");
     codegen_ctx.set_struct_defs(struct_defs);
 
+    // Debug builds (-O0) trap on integer overflow; release builds wrap (§1.2).
+    codegen_ctx.set_overflow_checks(optimization == OptimizationLevelSetting::O0);
+
     // Store type information for expressions (including const types for identifier resolution)
     codegen_ctx.store_expr_types(items, &func_types)?;
 
@@ -345,6 +348,51 @@ mod tests {
         assert!(result.is_ok(), "compilation failed: {:?}", result.err());
         let object_code = result.unwrap();
         assert!(!object_code.is_empty(), "object code should not be empty");
+    }
+
+    #[test]
+    fn test_overflow_checks_emit_valid_ir_at_o0() {
+        // -O0 routes integer +/-/* through the with-overflow intrinsics and a
+        // trap block; module verification must accept the resulting IR.
+        let source = r#"
+            func main() -> i32 {
+                mut x: i32 = 2147483647
+                val y: i32 = 1
+                val z: i32 = x + y
+                return z
+            }
+        "#;
+
+        let items = syntax_parsing::parse(source).expect("parsing failed");
+        let result = compile(&items, OptimizationLevelSetting::O0);
+
+        assert!(result.is_ok(), "compilation failed: {:?}", result.err());
+        assert!(
+            !result.unwrap().is_empty(),
+            "object code should not be empty"
+        );
+    }
+
+    #[test]
+    fn test_overflow_wraps_emit_valid_ir_at_o2() {
+        // -O2 emits plain wrapping arithmetic (no intrinsic, no trap block).
+        let source = r#"
+            func main() -> i32 {
+                mut x: u8 = 200u8
+                val y: u8 = 100u8
+                val z: u8 = x + y
+                return z as i32
+            }
+        "#;
+
+        let items = syntax_parsing::parse(source).expect("parsing failed");
+        let result = compile(&items, OptimizationLevelSetting::O2);
+
+        assert!(result.is_ok(), "compilation failed: {:?}", result.err());
+        assert!(
+            !result.unwrap().is_empty(),
+            "object code should not be empty"
+        );
     }
 
     #[test]

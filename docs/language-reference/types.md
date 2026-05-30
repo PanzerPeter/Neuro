@@ -71,6 +71,28 @@ val d = 0b1010i32  // binary literal with suffix
 
 Valid suffixes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`. The value is range-checked against the suffix type at compile time — `300u8` is a compile error.
 
+#### Integer Overflow
+
+When a runtime `+`, `-`, or `*` produces a result outside the range of its integer type, the behavior depends on the optimization level the program was compiled with:
+
+| Build | Flag | Overflow behavior |
+|-------|------|-------------------|
+| Debug | `-O0` (default) | The program **aborts** at runtime (traps). |
+| Release | `-O1`, `-O2`, `-O3` | The result **wraps** using two's complement. |
+
+```neuro
+func main() -> i32 {
+    mut x: u8 = 200u8
+    val y: u8 = 100u8
+    val z: u8 = x + y   // 300 > u8::MAX
+    // Debug (-O0):   aborts here
+    // Release (-O2): wraps to 44
+    return z as i32
+}
+```
+
+The debug-build trap turns a silent miscalculation into an immediate failure during development, while release builds match the zero-overhead wrapping behavior of the underlying hardware. The check is applied to `+`, `-`, and `*` only; division and modulo are unaffected. Compile-time constant folding always uses wrapping arithmetic regardless of optimization level.
+
 ### Floating-Point Types
 
 | Type | Size | Precision | Range (approx) |
