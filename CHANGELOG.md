@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.22.1] - 2026-05-31
+
+### Changed
+- `build`/`tests`: refactored the three largest source files into focused modules with no behaviour change (504 tests still pass). `llvm-backend/src/codegen/expressions.rs` (1609 lines) split into an `expressions/` submodule — `mod.rs` (dispatch + shared helpers), `literals.rs`, `binary.rs`, `unary.rs`, `methods.rs`, `control_flow.rs` — each adding to the same `impl CodegenContext` block. `semantic-analysis/tests/integration_tests.rs` (980 lines) split into seven feature suites (`semantics_{functions,control_flow,integers,errors,expression_returns,strings,lints}.rs`). The lexer's `lib.rs` test module (≈540 lines) moved to `lexical-analysis/src/tests.rs`, leaving the slice entry point at 137 lines.
+
+---
+
 ## [1.22.0] - 2026-05-31
 
 ### Added
