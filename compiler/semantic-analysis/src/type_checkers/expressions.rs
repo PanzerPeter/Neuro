@@ -31,7 +31,41 @@ impl TypeChecker {
                 }
                 Some(Type::U64)
             }
+            // §1.2, §1.4 — wrapping/saturating arithmetic and the right-shift method.
+            // Each takes one same-typed argument and returns the receiver's integer type.
+            (
+                t,
+                "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "saturating_add"
+                | "saturating_sub" | "saturating_mul" | "shr",
+            ) if t.is_integer() => {
+                self.check_unary_int_intrinsic_arg(recv, args, call_span);
+                Some(recv.clone())
+            }
             _ => None,
+        }
+    }
+
+    /// Validate the single argument of an integer intrinsic (`wrapping_*`, `saturating_*`,
+    /// `.shr`): exactly one argument whose type matches the receiver's integer type. Records
+    /// an arity or mismatch diagnostic on violation; the call's result type is unaffected.
+    fn check_unary_int_intrinsic_arg(&mut self, recv: &Type, args: &[Expr], call_span: Span) {
+        if args.len() != 1 {
+            self.record_error(TypeError::ArgumentCountMismatch {
+                expected: 1,
+                found: args.len(),
+                span: call_span,
+            });
+            return;
+        }
+
+        if let Some(arg_ty) = self.check_expr(&args[0], Some(recv)) {
+            if !arg_ty.is_compatible_with(recv) {
+                self.record_error(TypeError::Mismatch {
+                    expected: recv.clone(),
+                    found: arg_ty,
+                    span: args[0].span(),
+                });
+            }
         }
     }
 

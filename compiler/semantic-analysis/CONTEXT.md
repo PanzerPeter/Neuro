@@ -57,8 +57,10 @@ as `TypeName__funcName` and looked up directly in `functions`.
 Builtin method dispatch: when a method-call receiver is a non-struct (primitive or
 string) type, `resolve_builtin_method` checks it against a fixed, compiler-known set of
 intrinsics before falling through to `MethodNotFound`. It returns the method's result
-type and records an arity diagnostic when the argument count is wrong. The first
-intrinsic is `string.len() -> u64` (§2.7).
+type and records an arity diagnostic when the argument count is wrong. Intrinsics:
+`string.len() -> u64` (§2.7); and on any integer receiver `wrapping_{add,sub,mul}`,
+`saturating_{add,sub,mul}`, and `.shr(n)` (§1.2, §1.4) — each takes one same-typed
+argument (validated by `check_unary_int_intrinsic_arg`) and returns the receiver type.
 
 `&mut self` and consuming `self` methods are rejected at registration time with
 `UnsupportedSelfParam` until ownership semantics land (Phase 1.5).
@@ -71,12 +73,15 @@ that refer to other known consts). Function-body `Stmt::Const` nodes are validat
 so const names are usable in any expression context.
 
 ## Recent Updates
+- 2026-05-31: Integer primitive methods §1.2, §1.4. `resolve_builtin_method` now resolves
+  `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and `.shr(n)` on integer receivers,
+  returning the receiver type. New `check_unary_int_intrinsic_arg` enforces arity 1 and an
+  argument type compatible with the receiver (`ArgumentCountMismatch` / `Mismatch`).
 - 2026-05-31: Builtin method dispatch on primitive & string types §2. New private
   `resolve_builtin_method(recv, method, args, span)` in `type_checkers/expressions.rs`;
   the `Call`→`FieldAccess` arm consults it for non-struct receivers before emitting
   `MethodNotFound`. First intrinsic: `string.len() -> u64`. Wrong arity yields
-  `ArgumentCountMismatch`. Integer `wrapping_*`/`saturating_*`/`.shr(n)` remain unblocked
-  follow-ups.
+  `ArgumentCountMismatch`.
 - 2026-05-20: Added lint infrastructure (§3.7). New `Warning` / `WarningCode` types in `warnings.rs`; `TypeChecker` accumulates a `warnings: Vec<Warning>` collected by `run_lints` in a final pre-return pass. First implemented lint: `prefer-loop-over-while-true` — fires on any `Stmt::While { condition: Expr::Literal(Boolean(true), _), .. }`, suppressed by `@allow(prefer_loop_over_while_true)` on the enclosing `FunctionDef` / `MethodDef`. Parenthesised `while (true)` is deliberately not matched (acts as an explicit escape hatch). `type_check`'s public signature is now `Result<Vec<Warning>, Vec<TypeError>>`.
 - 2026-05-18: Added `BinaryOp::NullCoalesce` rejection arm. Emits new `TypeError::OperatorNotYetSupported { op, hint, span }` with the hint "requires Option<T> / Result<T, E> — available in Phase 2", returns `Type::Unknown` so error recovery continues. Codegen never sees `??` while semantic-analysis is in the pipeline; the variant is parsed solely to lock in the R-to-L associativity from Appendix B row 14 ahead of the Phase 2 implementation.
 - 2026-04-18: Integer literal type suffixes §1.4. `Literal::Integer(value, Some(suffix))` short-circuits `infer_integer_type`; `infer_suffixed_integer_type` maps the suffix to a `Type` via `suffix_to_type` and range-checks the value (reusing `check_integer_range` + `IntegerLiteralOutOfRange`). Unsuffixed literals that exceed the i32 range now emit an `IntegerLiteralOutOfRange` rather than silently promoting to `i64`.

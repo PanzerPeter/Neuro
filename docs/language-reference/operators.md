@@ -203,7 +203,7 @@ val r: i32 = a << 4   // 1 * 2^4 = 16
 ```
 
 **Returns**: same type as operands
-**Note**: Right shift is exposed as the `.shr(n)` method (Phase 2+), not an operator.
+**Note**: Right shift is exposed as the `.shr(n)` method, not an operator (`ashr` for signed receivers, `lshr` for unsigned). See [types.md](types.md#integer-methods).
 
 ### Bitwise NOT (`~`)
 

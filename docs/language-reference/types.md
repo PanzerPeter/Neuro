@@ -93,6 +93,27 @@ func main() -> i32 {
 
 The debug-build trap turns a silent miscalculation into an immediate failure during development, while release builds match the zero-overhead wrapping behavior of the underlying hardware. The check is applied to `+`, `-`, and `*` only; division and modulo are unaffected. Compile-time constant folding always uses wrapping arithmetic regardless of optimization level.
 
+#### Integer Methods
+
+When the overflow behavior matters, request it explicitly with a builtin intrinsic method. These dispatch on any integer receiver, take one same-typed argument, and return the receiver's type. They are compiler-known intrinsics, not user-defined `impl` methods.
+
+| Method | Behavior |
+|--------|----------|
+| `.wrapping_add(rhs)` / `.wrapping_sub(rhs)` / `.wrapping_mul(rhs)` | Two's-complement wrap on overflow. Never traps, regardless of build profile. |
+| `.saturating_add(rhs)` / `.saturating_sub(rhs)` / `.saturating_mul(rhs)` | Clamp to the type's `MIN` / `MAX` instead of overflowing. |
+| `.shr(n)` | Right shift by `n`. Arithmetic (sign-preserving) for signed types, logical for unsigned. Right shift is a method rather than an operator — see [operators.md](operators.md). |
+
+```neuro
+val a: u8 = 200
+val b: u8 = 100
+val wrapped: u8   = a.wrapping_add(b)     // 44   (200 + 100 = 300, wraps mod 256)
+val saturated: u8 = a.saturating_add(b)   // 255  (clamps to u8::MAX)
+val floored: u8   = b.saturating_sub(a)   // 0    (unsigned underflow clamps to 0)
+val shifted: u8   = a.shr(2)              // 50   (200 >> 2, logical)
+```
+
+`checked_*` (which returns `Option<T>` on overflow) is deferred until `Option` lands in Phase 2C.
+
 ### Floating-Point Types
 
 | Type | Size | Precision | Range (approx) |

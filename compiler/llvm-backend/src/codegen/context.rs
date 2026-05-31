@@ -19,6 +19,20 @@ use crate::types::Type;
 pub(crate) enum BuiltinMethod {
     /// `string.len()` → field-1 byte length of the string fat pointer (§2.7).
     StringLen,
+    /// `int.wrapping_add(rhs)` → two's-complement wrapping add (§1.2).
+    WrappingAdd,
+    /// `int.wrapping_sub(rhs)` → two's-complement wrapping subtract (§1.2).
+    WrappingSub,
+    /// `int.wrapping_mul(rhs)` → two's-complement wrapping multiply (§1.2).
+    WrappingMul,
+    /// `int.saturating_add(rhs)` → clamp to type MIN/MAX on overflow (§1.2).
+    SaturatingAdd,
+    /// `int.saturating_sub(rhs)` → clamp to type MIN/MAX on overflow (§1.2).
+    SaturatingSub,
+    /// `int.saturating_mul(rhs)` → clamp to type MIN/MAX on overflow (§1.2).
+    SaturatingMul,
+    /// `int.shr(n)` → right shift: arithmetic for signed, logical for unsigned (§1.4).
+    Shr,
 }
 
 /// Resolve a compiler-known intrinsic on a builtin receiver, returning the method
@@ -27,6 +41,20 @@ pub(crate) enum BuiltinMethod {
 pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<(BuiltinMethod, Type)> {
     match (recv, method) {
         (Type::String, "len") => Some((BuiltinMethod::StringLen, Type::U64)),
+        // Integer intrinsics return the receiver's own integer type (§1.2, §1.4).
+        (t, m) if t.is_integer() => {
+            let kind = match m {
+                "wrapping_add" => BuiltinMethod::WrappingAdd,
+                "wrapping_sub" => BuiltinMethod::WrappingSub,
+                "wrapping_mul" => BuiltinMethod::WrappingMul,
+                "saturating_add" => BuiltinMethod::SaturatingAdd,
+                "saturating_sub" => BuiltinMethod::SaturatingSub,
+                "saturating_mul" => BuiltinMethod::SaturatingMul,
+                "shr" => BuiltinMethod::Shr,
+                _ => return None,
+            };
+            Some((kind, recv.clone()))
+        }
         _ => None,
     }
 }
@@ -80,9 +108,12 @@ pub(crate) struct CodegenContext<'ctx> {
     /// share the same span.start, causing expr_types collisions.
     pub(crate) fa_struct_names: HashMap<usize, String>,
 
-    /// Maps a builtin method-call's `Call` span.start → the resolved intrinsic, so
-    /// `codegen_expr` lowers it directly instead of looking up a struct method.
-    pub(crate) builtin_methods: HashMap<usize, BuiltinMethod>,
+    /// Maps a builtin method-call's `Call` span.start → the resolved intrinsic plus the
+    /// receiver's type, so `codegen_expr` lowers it directly instead of looking up a struct
+    /// method. The receiver type is stored here rather than read back from `expr_types`
+    /// because an enclosing cast (`x.shr(n) as T`) shares the receiver's `span.start` and
+    /// would overwrite that entry, losing the receiver's signedness.
+    pub(crate) builtin_methods: HashMap<usize, (BuiltinMethod, Type)>,
 
     /// Evaluated constant values (both module-level and function-level).
     /// `codegen_identifier` checks this before `variables` to allow locals to shadow consts.
@@ -169,5 +200,28 @@ mod tests {
     fn unknown_builtin_method_is_unresolved() {
         assert!(resolve_builtin_method(&Type::String, "capacity").is_none());
         assert!(resolve_builtin_method(&Type::I32, "len").is_none());
+    }
+
+    #[test]
+    fn integer_intrinsics_resolve_to_receiver_type() {
+        assert!(matches!(
+            resolve_builtin_method(&Type::U8, "wrapping_add"),
+            Some((BuiltinMethod::WrappingAdd, Type::U8))
+        ));
+        assert!(matches!(
+            resolve_builtin_method(&Type::I64, "saturating_mul"),
+            Some((BuiltinMethod::SaturatingMul, Type::I64))
+        ));
+        assert!(matches!(
+            resolve_builtin_method(&Type::I32, "shr"),
+            Some((BuiltinMethod::Shr, Type::I32))
+        ));
+    }
+
+    #[test]
+    fn integer_intrinsics_reject_non_integer_receiver() {
+        assert!(resolve_builtin_method(&Type::String, "wrapping_add").is_none());
+        assert!(resolve_builtin_method(&Type::F64, "saturating_sub").is_none());
+        assert!(resolve_builtin_method(&Type::I32, "wrapping_div").is_none());
     }
 }

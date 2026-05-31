@@ -81,6 +81,7 @@ example_test!(example_float_ops, "float_ops.nr", 42);
 example_test!(example_for_range_inclusive, "for_range_inclusive.nr", 15);
 example_test!(example_for_range, "for_range.nr", 10);
 example_test!(example_hello, "hello.nr", 26);
+example_test!(example_integer_methods, "integer_methods.nr", 0);
 example_test!(example_integer_overflow, "integer_overflow.nr", 55);
 example_test!(example_integer_suffixes, "integer_suffixes.nr", 0);
 example_test!(example_methods, "methods.nr", 42);

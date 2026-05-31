@@ -207,6 +207,22 @@ cargo run -p neurc -- compile examples/integer_overflow.nr
 # Exit code: 55  (1+2+...+10, never overflows)
 ```
 
+### [integer_methods.nr](integer_methods.nr)
+Integer primitive methods (§1.2, §1.4): explicit overflow control and right shift.
+
+**Features:**
+- `wrapping_{add,sub,mul}` — two's-complement wrap that never traps, even in debug builds
+- `saturating_{add,sub,mul}` — clamp to the type's `MIN` / `MAX` on overflow
+- `.shr(n)` — right shift: arithmetic (sign-preserving) for signed, logical for unsigned
+- All dispatch through the builtin-method intrinsic path
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/integer_methods.nr
+./examples/integer_methods
+# Exit code: 0  (all assertions hold)
+```
+
 ### [integer_suffixes.nr](integer_suffixes.nr)
 Integer literal type suffixes (`42i64`, `255u8`, `0xFFu8`, `0b1010i32`).
 
@@ -386,6 +402,7 @@ For example:
 - compound_assignment.nr returns 21 (score=11 + sum=10)
 - neuron.nr returns 0
 - integer_overflow.nr returns 55 (1+2+...+10, no overflow)
+- integer_methods.nr returns 0 (wrapping / saturating / shr assertions hold)
 - integer_suffixes.nr returns 0 (sum_bytes(10u8, 20u8) - 30)
 - float_suffixes.nr returns 0
 - underscore_separators.nr returns 0

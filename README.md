@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-493%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-504%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP complete · Phase 1.5 & Phase 2 in progress
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 is complete, Phase 1.5 and 2 is in progress. The following features are fully implemented and tested (**493 Tests Passing**):
+Phase 1 is complete, Phase 1.5 and 2 is in progress. The following features are fully implemented and tested (**504 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -102,7 +102,7 @@ Phase 1 is complete, Phase 1.5 and 2 is in progress. The following features are 
 | **Bitwise Operators** | `&`, `\|`, `^`, `~`, `<<` on integer types; correct precedence per Appendix B (Shl > BitAnd > BitXor > BitOr); floats and bools rejected |
 | **Attributes & Lints** | `@name(args)` attributes on functions/methods; `while true` lint with `@allow(prefer_loop_over_while_true)` suppression |
 | **String Type** | Literals with full escape sequence support (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==` and `!=` for byte-level comparison; `.len()` builtin method returning the `u64` byte length (O(1), excludes null terminator) |
-| **Builtin Methods** | Compiler-known intrinsic method dispatch on primitive & string receivers (`receiver.method()`), alongside user-defined `impl` methods; first intrinsic `string.len()` |
+| **Builtin Methods** | Compiler-known intrinsic method dispatch on primitive & string receivers (`receiver.method()`), alongside user-defined `impl` methods; `string.len()`; integer `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and right-shift `.shr(n)` (`ashr`/`lshr` by signedness) |
 | **Structs** | Definition, instantiation (`Name { field: value }`), field read (`obj.field`), field mutation on `mut` bindings; nominal typing; definition-order independent |
 | **Methods** | `impl` blocks with `&self` instance methods; associated functions called via `TypeName::func(args)`; `&mut self` / consuming `self` rejected until ownership lands |
 | **If/Block Expressions** | `val x = if cond { a } else { b }`; `val y = { stmts; expr }`; all arms type-checked; alloca-based lowering |

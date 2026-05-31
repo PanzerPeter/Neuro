@@ -295,7 +295,7 @@ Open items are ordered by dependency — earlier ones unblock later ones.
 - [x] **`??` operator — parsed, R-to-L associativity + parser test** (§3.11). Semantic rejects with `OperatorNotYetSupported`; full unwrap lands in Phase 2C with `Option`/`Result`.
 - [x] **Builtin method dispatch on primitive & string types.** Methods today resolve only on structs (via `impl` blocks). `semantic-analysis/` + `llvm-backend/` now dispatch a fixed, compiler-known set of intrinsic methods on builtin types. Landed with the first intrinsic, `string.len() -> u64` (§2.7); the integer methods and `.shr(n)` below are now unblocked.
 - [x] **Integer overflow semantics** (§1.2). Debug builds panic on overflow (LLVM `*.with.overflow` intrinsics + conditional `abort`); release builds wrap (two's complement). Codegen-only — no method-dispatch prerequisite.
-- [ ] **Integer primitive methods — `wrapping_*` / `saturating_*` + `.shr(n)`** (§1.2, §1.4). `wrapping_add/sub/mul`, `saturating_add/sub/mul`, and the spec's right-shift `.shr(n)`. Depends on builtin method dispatch. `checked_*` returns `Option<T>` → deferred to Phase 2C.
+- [x] **Integer primitive methods — `wrapping_*` / `saturating_*` + `.shr(n)`** (§1.2, §1.4). `wrapping_add/sub/mul`, `saturating_add/sub/mul`, and the spec's right-shift `.shr(n)`. Each resolves on any integer receiver, takes one same-typed argument, and returns the receiver's type. `checked_*` returns `Option<T>` → deferred to Phase 2C.
 
 > **Moved out of Phase 1.5 (forward dependency):** the `*Assign` traits
 > (`AddAssign`/`SubAssign`/…) need the trait system and now live in Phase 2B.

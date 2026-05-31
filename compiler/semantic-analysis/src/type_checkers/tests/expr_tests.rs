@@ -250,3 +250,134 @@ fn unknown_builtin_method_reports_method_not_found() {
         errors
     );
 }
+
+// Build `<recv>.<method>(<arg>)` where recv and arg are u8-suffixed literals.
+fn int_intrinsic_call(method: &str, recv: i64, arg: i64) -> Expr {
+    Expr::Call {
+        func: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Literal(
+                Literal::Integer(recv, Some(shared_types::IntSuffix::U8)),
+                Span::new(0, 5),
+            )),
+            field: make_ident(method),
+            span: Span::new(0, 20),
+        }),
+        args: vec![Expr::Literal(
+            Literal::Integer(arg, Some(shared_types::IntSuffix::U8)),
+            Span::new(21, 26),
+        )],
+        span: Span::new(0, 27),
+    }
+}
+
+#[test]
+fn integer_intrinsics_resolve_to_receiver_type() {
+    for method in [
+        "wrapping_add",
+        "wrapping_sub",
+        "wrapping_mul",
+        "saturating_add",
+        "saturating_sub",
+        "saturating_mul",
+        "shr",
+    ] {
+        let mut checker = TypeChecker::new();
+        let ty = checker.check_expr(&int_intrinsic_call(method, 200, 100), None);
+        assert_eq!(ty, Some(Type::U8), "method {method} should return U8");
+        assert!(
+            !checker.has_errors(),
+            "{method} should type-check cleanly, got: {:?}",
+            checker.into_errors()
+        );
+    }
+}
+
+#[test]
+fn integer_intrinsic_wrong_arity_rejected() {
+    let mut checker = TypeChecker::new();
+
+    // 200u8.wrapping_add() — missing the rhs argument.
+    let expr = Expr::Call {
+        func: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Literal(
+                Literal::Integer(200, Some(shared_types::IntSuffix::U8)),
+                Span::new(0, 5),
+            )),
+            field: make_ident("wrapping_add"),
+            span: Span::new(0, 20),
+        }),
+        args: vec![],
+        span: Span::new(0, 22),
+    };
+
+    checker.check_expr(&expr, None);
+    assert!(checker.has_errors());
+    let errors = checker.into_errors();
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ArgumentCountMismatch { .. })),
+        "Expected ArgumentCountMismatch, got: {:?}",
+        errors
+    );
+}
+
+#[test]
+fn integer_intrinsic_mismatched_arg_type_rejected() {
+    let mut checker = TypeChecker::new();
+
+    // 200u8.wrapping_add(5i64) — argument type differs from the receiver's.
+    let expr = Expr::Call {
+        func: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Literal(
+                Literal::Integer(200, Some(shared_types::IntSuffix::U8)),
+                Span::new(0, 5),
+            )),
+            field: make_ident("wrapping_add"),
+            span: Span::new(0, 20),
+        }),
+        args: vec![Expr::Literal(
+            Literal::Integer(5, Some(shared_types::IntSuffix::I64)),
+            Span::new(21, 25),
+        )],
+        span: Span::new(0, 27),
+    };
+
+    checker.check_expr(&expr, None);
+    assert!(checker.has_errors());
+    let errors = checker.into_errors();
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })),
+        "Expected Mismatch, got: {:?}",
+        errors
+    );
+}
+
+#[test]
+fn integer_intrinsic_on_float_reports_method_not_found() {
+    let mut checker = TypeChecker::new();
+
+    // (1.5f64).wrapping_add(2.0) — no integer intrinsics on floats.
+    let expr = Expr::Call {
+        func: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Literal(Literal::Float(1.5, None), Span::new(0, 5))),
+            field: make_ident("wrapping_add"),
+            span: Span::new(0, 20),
+        }),
+        args: vec![Expr::Literal(Literal::Float(2.0, None), Span::new(21, 24))],
+        span: Span::new(0, 26),
+    };
+
+    checker.check_expr(&expr, None);
+    assert!(checker.has_errors());
+    let errors = checker.into_errors();
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::MethodNotFound { .. })),
+        "Expected MethodNotFound, got: {:?}",
+        errors
+    );
+}

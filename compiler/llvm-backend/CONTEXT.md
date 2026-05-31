@@ -81,6 +81,17 @@ pointer `{ ptr, i64 }` — the stored byte length (O(1), no scan); the i64 value
 length with no conversion. `resolve_builtin_method` is duplicated from the `semantic-analysis`
 resolver so the backend stays independent of the type-checker slice.
 
+Integer intrinsics — `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and `.shr(n)` —
+resolve on any integer receiver to the receiver's own type and lower in `codegen_int_intrinsic`
+(`expressions.rs`). Both operands are coerced to the receiver's int type via `coerce_if_needed`
+(the arg literal can arrive widened to i32). Wrapping ops emit plain `add`/`sub`/`mul` (no
+`nsw`/`nuw`, so they wrap and never trap regardless of the build's overflow-check flag). `.shr`
+emits `ashr` for signed and `lshr` for unsigned, selected from the receiver's signedness.
+`saturating_add`/`saturating_sub` use the overloaded `llvm.{s,u}{add,sub}.sat` intrinsics, which
+return the clamped result directly. `saturating_mul` has no direct intrinsic: it uses
+`{s,u}mul.with.overflow` and `select`s the bound on overflow — unsigned → MAX; signed → MIN when
+the operand signs differ (product negative), MAX otherwise.
+
 ## if / else-if / else Lowering
 
 `codegen_if` lowers an `if/else if+/else?` chain by treating it as a binary tree:
@@ -135,6 +146,12 @@ types and is re-seeded into `type_env` after each `type_env.clear()` in
 const identifiers inside function bodies.
 
 ## Recent Updates
+- 2026-05-31: Integer primitive methods §1.2, §1.4. Extended `BuiltinMethod` +
+  `resolve_builtin_method` (`context.rs`) with `Wrapping{Add,Sub,Mul}`, `Saturating{Add,Sub,Mul}`,
+  `Shr` resolving on any integer receiver to its own type. `codegen_int_intrinsic`
+  (`expressions.rs`) lowers them; wrapping = plain non-trapping arithmetic, `.shr` = `ashr`/`lshr`
+  by signedness, saturating add/sub = `llvm.{s,u}{add,sub}.sat`, saturating mul =
+  `{s,u}mul.with.overflow` + `select`. See "Builtin Method ABI".
 - 2026-05-31: Builtin method dispatch on primitive & string types §2. New `BuiltinMethod`
   enum + `resolve_builtin_method` + `builtin_methods` map in `context.rs`; the `type_pass`
   method-call arm tags non-struct receivers, and `codegen_builtin_method` in `expressions.rs`
