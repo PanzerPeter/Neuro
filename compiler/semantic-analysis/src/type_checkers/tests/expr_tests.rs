@@ -163,3 +163,90 @@ fn comparison_with_logical_and_accepted() {
         checker.into_errors()
     );
 }
+
+#[test]
+fn string_len_resolves_to_u64() {
+    let mut checker = TypeChecker::new();
+
+    // "hello".len()
+    let expr = Expr::Call {
+        func: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Literal(
+                Literal::String("hello".to_string()),
+                Span::new(0, 7),
+            )),
+            field: make_ident("len"),
+            span: Span::new(0, 11),
+        }),
+        args: vec![],
+        span: Span::new(0, 13),
+    };
+
+    let ty = checker.check_expr(&expr, None);
+    assert_eq!(ty, Some(Type::U64));
+    assert!(
+        !checker.has_errors(),
+        "string.len() should type-check cleanly, got: {:?}",
+        checker.into_errors()
+    );
+}
+
+#[test]
+fn string_len_with_argument_rejected() {
+    let mut checker = TypeChecker::new();
+
+    // "hello".len(1) — len takes no arguments
+    let expr = Expr::Call {
+        func: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Literal(
+                Literal::String("hello".to_string()),
+                Span::new(0, 7),
+            )),
+            field: make_ident("len"),
+            span: Span::new(0, 11),
+        }),
+        args: vec![Expr::Literal(Literal::Integer(1, None), Span::new(12, 13))],
+        span: Span::new(0, 14),
+    };
+
+    checker.check_expr(&expr, None);
+    assert!(checker.has_errors());
+    let errors = checker.into_errors();
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ArgumentCountMismatch { .. })),
+        "Expected ArgumentCountMismatch, got: {:?}",
+        errors
+    );
+}
+
+#[test]
+fn unknown_builtin_method_reports_method_not_found() {
+    let mut checker = TypeChecker::new();
+
+    // "hello".foo() — no such intrinsic on string
+    let expr = Expr::Call {
+        func: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Literal(
+                Literal::String("hello".to_string()),
+                Span::new(0, 7),
+            )),
+            field: make_ident("foo"),
+            span: Span::new(0, 11),
+        }),
+        args: vec![],
+        span: Span::new(0, 13),
+    };
+
+    checker.check_expr(&expr, None);
+    assert!(checker.has_errors());
+    let errors = checker.into_errors();
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::MethodNotFound { .. })),
+        "Expected MethodNotFound, got: {:?}",
+        errors
+    );
+}

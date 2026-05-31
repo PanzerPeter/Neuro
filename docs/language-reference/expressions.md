@@ -64,7 +64,13 @@ double(square(x))           // Nested calls
 max(min(a, b), c)           // Multiple nesting
 c.add(32)                   // Method call (instance method)
 Point::new(1, 2)            // Associated function call
+"hello".len()               // Builtin method on a string receiver
 ```
+
+Method-call syntax `receiver.method(args)` resolves against user-defined `impl` methods
+when the receiver is a struct, and against a fixed, compiler-known set of intrinsic methods
+when the receiver is a builtin (primitive or string) type. The first builtin intrinsic is
+`string.len()` — see [types.md](types.md#string-methods).
 
 ### Struct Literal Expressions
 

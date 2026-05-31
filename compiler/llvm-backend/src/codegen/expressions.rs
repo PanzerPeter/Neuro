@@ -9,7 +9,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::type_mapping::TypeMapper;
 use crate::types::Type;
 
-use super::context::CodegenContext;
+use super::context::{BuiltinMethod, CodegenContext};
 
 /// Rust-level representation of a folded constant value.
 ///
@@ -1013,6 +1013,17 @@ impl<'ctx> CodegenContext<'ctx> {
 
                     // Method call: `instance.method(args)` — pass self as first arg
                     Expr::FieldAccess { field, .. } => {
+                        // `object` is the FieldAccess's own object sub-expression.
+                        let object = if let Expr::FieldAccess { object, .. } = &**func {
+                            object
+                        } else {
+                            unreachable!()
+                        };
+                        // Builtin intrinsics on primitive/string receivers are tagged by
+                        // the type pass and lowered directly, bypassing struct mangling.
+                        if let Some(kind) = self.builtin_methods.get(&span.start).copied() {
+                            return self.codegen_builtin_method(kind, object);
+                        }
                         let struct_name = self
                             .fa_struct_names
                             .get(&span.start)
@@ -1023,13 +1034,6 @@ impl<'ctx> CodegenContext<'ctx> {
                             })?
                             .clone();
                         let mangled = format!("{}__{}", struct_name, field.name);
-                        // `object` is the FieldAccess's own object sub-expression.
-                        // Extract it from the func expression.
-                        let object = if let Expr::FieldAccess { object, .. } = &**func {
-                            object
-                        } else {
-                            unreachable!()
-                        };
                         self.codegen_method_call(&mangled, object, args)
                     }
 
@@ -1091,6 +1095,35 @@ impl<'ctx> CodegenContext<'ctx> {
             } => self.codegen_if_expr(condition, then_block, else_if_blocks, else_block, span),
 
             Expr::Block { stmts, .. } => self.codegen_block_expr(stmts),
+        }
+    }
+
+    /// Lower a compiler-known intrinsic method call on a builtin receiver.
+    fn codegen_builtin_method(
+        &mut self,
+        kind: BuiltinMethod,
+        receiver: &Expr,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        match kind {
+            // `string.len()` reads field 1 of the fat pointer `{ ptr, i64 }` — the
+            // stored byte length. O(1), no scan; the value is already the u64 length.
+            BuiltinMethod::StringLen => {
+                let recv_val = self.codegen_expr(receiver)?;
+                let struct_val = match recv_val {
+                    BasicValueEnum::StructValue(sv) => sv,
+                    other => {
+                        return Err(CodegenError::InternalError(format!(
+                            "string receiver did not lower to a fat pointer: {:?}",
+                            other
+                        )))
+                    }
+                };
+                self.builder
+                    .build_extract_value(struct_val, 1, "str.len")
+                    .map_err(|e| {
+                        CodegenError::LlvmError(format!("failed to extract string length: {}", e))
+                    })
+            }
         }
     }
 

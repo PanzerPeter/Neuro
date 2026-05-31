@@ -87,6 +87,7 @@ example_test!(example_methods, "methods.nr", 42);
 example_test!(example_milestone, "milestone.nr", 8);
 example_test!(example_phase1_complete, "phase1_complete_test.nr", 0);
 example_test!(example_string_test, "string_test.nr", 0);
+example_test!(example_string_len, "string_len.nr", 0);
 example_test!(example_structs, "structs.nr", 50);
 example_test!(example_type_inference_demo, "type_inference_demo.nr", 42);
 example_test!(example_underscore_separators, "underscore_separators.nr", 0);

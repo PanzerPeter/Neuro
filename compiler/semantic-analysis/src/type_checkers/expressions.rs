@@ -7,6 +7,34 @@ use shared_types::{Literal, Span};
 use std::collections::HashMap;
 
 impl TypeChecker {
+    /// Resolve a compiler-known intrinsic method on a builtin (non-struct) receiver.
+    ///
+    /// Returns `Some(return_type)` when `method` names an intrinsic for `recv` — recording
+    /// an arity diagnostic when the argument count is wrong — and `None` when no such
+    /// intrinsic exists, so the caller falls through to the standard `MethodNotFound` error.
+    fn resolve_builtin_method(
+        &mut self,
+        recv: &Type,
+        method: &str,
+        args: &[Expr],
+        call_span: Span,
+    ) -> Option<Type> {
+        match (recv, method) {
+            // §2.7 — O(1) byte length read from the string fat pointer's stored `len`.
+            (Type::String, "len") => {
+                if !args.is_empty() {
+                    self.record_error(TypeError::ArgumentCountMismatch {
+                        expected: 0,
+                        found: args.len(),
+                        span: call_span,
+                    });
+                }
+                Some(Type::U64)
+            }
+            _ => None,
+        }
+    }
+
     /// Type-check a plain identifier call (free function or previously registered
     /// method with a mangled name). Extracted so the `Call` arm can delegate here.
     pub(crate) fn check_plain_call(
@@ -364,6 +392,13 @@ impl TypeChecker {
                         let struct_name = match &obj_ty {
                             Type::Struct(n) => n.clone(),
                             other => {
+                                // Builtin (non-struct) receivers dispatch a fixed,
+                                // compiler-known set of intrinsic methods (§2.7).
+                                if let Some(ret) =
+                                    self.resolve_builtin_method(other, &field.name, args, *span)
+                                {
+                                    return Some(ret);
+                                }
                                 self.record_error(TypeError::MethodNotFound {
                                     struct_name: other.to_string(),
                                     method_name: field.name.clone(),

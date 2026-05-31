@@ -161,6 +161,25 @@ func demo_booleans() -> i32 {
 **Values**: `true` or `false`
 **Operations**: Logical operators (`&&`, `||`, `!`), comparison results
 
+## String Type
+
+The `string` type is an immutable, UTF-8 encoded fat pointer `{ ptr, i64 }` — a pointer to
+the bytes plus a stored byte length. Equality (`==`, `!=`) compares byte content.
+
+### String Methods
+
+Builtin intrinsic methods dispatch on a `string` receiver via the usual `receiver.method()`
+syntax:
+
+```neuro
+val s: string = "hello, world"
+val n: u64 = s.len()    // 12 — O(1) read of the stored byte length
+```
+
+**`.len() -> u64`** — returns the number of UTF-8 bytes, read directly from the fat pointer
+in O(1) with no scan. The length **excludes** the null terminator. Because the index is a
+byte count, a multi-byte code point contributes more than one to the length.
+
 ## Struct Types
 
 Structs are user-defined types that group named fields. They use nominal typing — two structs with identical fields are distinct types.

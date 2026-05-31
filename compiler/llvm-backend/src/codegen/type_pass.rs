@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
-use super::context::CodegenContext;
+use super::context::{resolve_builtin_method, CodegenContext};
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Store type information for expressions (needed for codegen)
@@ -382,30 +382,44 @@ impl<'ctx> CodegenContext<'ctx> {
                     // Method call: `instance.method(args)`
                     Expr::FieldAccess { object, field, .. } => {
                         self.visit_expr_for_types(object, func_types)?;
-                        let struct_name = match self.expr_types.get(&object.span().start).cloned() {
-                            Some(Type::Struct(n)) => n,
-                            _ => {
+                        let recv_ty = self.expr_types.get(&object.span().start).cloned();
+                        match recv_ty {
+                            Some(Type::Struct(struct_name)) => {
+                                let mangled = format!("{}__{}", struct_name, field.name);
+                                let func_type = func_types.get(&mangled).ok_or_else(|| {
+                                    CodegenError::UndefinedFunction(mangled.clone())
+                                })?;
+                                let ret_ty = match func_type {
+                                    Type::Function { ret, .. } => (**ret).clone(),
+                                    _ => {
+                                        return Err(CodegenError::InternalError(
+                                            "method type is not a function".to_string(),
+                                        ))
+                                    }
+                                };
+                                self.expr_types.insert(span.start, ret_ty);
+                                // Store struct name so codegen_expr can reconstruct the mangled name.
+                                self.fa_struct_names.insert(span.start, struct_name);
+                            }
+                            Some(recv) => match resolve_builtin_method(&recv, &field.name) {
+                                Some((kind, ret_ty)) => {
+                                    self.expr_types.insert(span.start, ret_ty);
+                                    self.builtin_methods.insert(span.start, kind);
+                                }
+                                None => {
+                                    return Err(CodegenError::InternalError(
+                                        "unrecognised builtin method during type collection"
+                                            .to_string(),
+                                    ))
+                                }
+                            },
+                            None => {
                                 return Err(CodegenError::InternalError(
-                                    "method call on non-struct type during type collection"
+                                    "missing receiver type for method call during type collection"
                                         .to_string(),
                                 ))
                             }
-                        };
-                        let mangled = format!("{}__{}", struct_name, field.name);
-                        let func_type = func_types
-                            .get(&mangled)
-                            .ok_or_else(|| CodegenError::UndefinedFunction(mangled.clone()))?;
-                        let ret_ty = match func_type {
-                            Type::Function { ret, .. } => (**ret).clone(),
-                            _ => {
-                                return Err(CodegenError::InternalError(
-                                    "method type is not a function".to_string(),
-                                ))
-                            }
-                        };
-                        self.expr_types.insert(span.start, ret_ty);
-                        // Store struct name so codegen_expr can reconstruct the mangled name.
-                        self.fa_struct_names.insert(span.start, struct_name);
+                        }
                     }
 
                     // Associated function call: `TypeName::func(args)`

@@ -71,6 +71,16 @@ node's `func` is a `FieldAccess`. `fa_struct_names` (keyed by the `Call` span st
 carries the struct name so `codegen_method_call` can reconstruct the mangled name without
 re-querying the AST.
 
+## Builtin Method ABI
+Intrinsic methods on non-struct (primitive / string) receivers are resolved by
+`resolve_builtin_method` (in `context.rs`) during the type-collection pass, which tags the
+`Call` span in `builtin_methods` and records the result type. `codegen_expr` checks
+`builtin_methods` before the struct path and lowers via `codegen_builtin_method`. The first
+intrinsic, `string.len()`, lowers to a single `extractvalue` of field 1 from the string fat
+pointer `{ ptr, i64 }` — the stored byte length (O(1), no scan); the i64 value is the `u64`
+length with no conversion. `resolve_builtin_method` is duplicated from the `semantic-analysis`
+resolver so the backend stays independent of the type-checker slice.
+
 ## if / else-if / else Lowering
 
 `codegen_if` lowers an `if/else if+/else?` chain by treating it as a binary tree:
@@ -125,6 +135,10 @@ types and is re-seeded into `type_env` after each `type_env.clear()` in
 const identifiers inside function bodies.
 
 ## Recent Updates
+- 2026-05-31: Builtin method dispatch on primitive & string types §2. New `BuiltinMethod`
+  enum + `resolve_builtin_method` + `builtin_methods` map in `context.rs`; the `type_pass`
+  method-call arm tags non-struct receivers, and `codegen_builtin_method` in `expressions.rs`
+  lowers them. First intrinsic `string.len()` emits `extractvalue ..., 1`. See "Builtin Method ABI".
 - 2026-05-30: Implemented integer overflow semantics §1.2. `CodegenContext.overflow_checks` (set from `-O0`) gates `codegen_int_arith`, which emits `llvm.{s,u}{add,sub,mul}.with.overflow` + `llvm.trap` for debug builds and plain wrapping arithmetic for release. Routed the `Add`/`Subtract`/`Multiply` integer arms of `codegen_binary` through it. See "Integer Overflow ABI".
 - 2026-05-18: Added exhaustive `BinaryOp::NullCoalesce` arms in `codegen_binary` and `fold_const` (Int path); both return `CodegenError::InternalError`. Semantic-analysis gates this operator (Phase 2 feature), so reaching codegen indicates a pipeline bug — surfaced as an ICE rather than a panic so the float-fallthrough arm stays well-behaved.
 - 2026-04-04: Updated `codegen_for_range` to accept `inclusive: bool` from `Stmt::ForRange` and generate `<=` (`ULE`/`SLE`) instead of `<` (`ULT`/`SLT`) comparison instructions when true.

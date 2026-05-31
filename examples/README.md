@@ -321,6 +321,21 @@ cargo run -p neurc -- compile examples/methods.nr
 # Exit code: 42  (Counter::new(10).plus(32))
 ```
 
+### [string_len.nr](string_len.nr)
+Builtin method dispatch on a string receiver: `string.len()` (§2.7).
+
+**Features:**
+- The first intrinsic method on a builtin type — `s.len()` returns a `u64`
+- O(1) length read from the string fat pointer (no scan); excludes the null terminator
+- `u64` literal suffixes (`12u64`, `0u64`) in comparisons
+
+**Compile and run:**
+```bash
+cargo run -p neurc -- compile examples/string_len.nr
+./examples/string_len
+# Exit code: 0  ("hello, world".len() == 12 and "".len() == 0)
+```
+
 ### [compound_assignment.nr](compound_assignment.nr)
 Compound assignment operators (`+=`, `-=`, `*=`, `/=`, `%=`).
 

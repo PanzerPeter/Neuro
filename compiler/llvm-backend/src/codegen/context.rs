@@ -12,6 +12,25 @@ use std::collections::HashMap;
 use crate::type_mapping::TypeMapper;
 use crate::types::Type;
 
+/// A compiler-known intrinsic method on a builtin (non-struct) receiver type.
+/// Recorded by the type-collection pass so `codegen_expr` can lower the call
+/// without a struct mangled-name lookup.
+#[derive(Clone, Copy)]
+pub(crate) enum BuiltinMethod {
+    /// `string.len()` → field-1 byte length of the string fat pointer (§2.7).
+    StringLen,
+}
+
+/// Resolve a compiler-known intrinsic on a builtin receiver, returning the method
+/// tag and its result type. Mirrors the resolver in `semantic-analysis`; the duplication
+/// keeps the backend independent of the type-checker slice.
+pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<(BuiltinMethod, Type)> {
+    match (recv, method) {
+        (Type::String, "len") => Some((BuiltinMethod::StringLen, Type::U64)),
+        _ => None,
+    }
+}
+
 /// Tracks basic blocks for loop control flow (`continue` and `break`).
 pub(crate) struct LoopTargets<'ctx> {
     /// The basic block where a `continue` statement should jump.
@@ -61,6 +80,10 @@ pub(crate) struct CodegenContext<'ctx> {
     /// share the same span.start, causing expr_types collisions.
     pub(crate) fa_struct_names: HashMap<usize, String>,
 
+    /// Maps a builtin method-call's `Call` span.start → the resolved intrinsic, so
+    /// `codegen_expr` lowers it directly instead of looking up a struct method.
+    pub(crate) builtin_methods: HashMap<usize, BuiltinMethod>,
+
     /// Evaluated constant values (both module-level and function-level).
     /// `codegen_identifier` checks this before `variables` to allow locals to shadow consts.
     pub(crate) const_values: HashMap<String, BasicValueEnum<'ctx>>,
@@ -95,6 +118,7 @@ impl<'ctx> CodegenContext<'ctx> {
             loop_targets: Vec::new(),
             struct_defs: HashMap::new(),
             fa_struct_names: HashMap::new(),
+            builtin_methods: HashMap::new(),
             const_values: HashMap::new(),
             global_const_types: HashMap::new(),
             overflow_checks: false,
@@ -124,5 +148,26 @@ impl<'ctx> CodegenContext<'ctx> {
         );
         self.module
             .add_function("memcmp", fn_type, Some(inkwell::module::Linkage::External))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_builtin_method, BuiltinMethod};
+    use crate::types::Type;
+
+    #[test]
+    fn string_len_resolves_to_u64() {
+        let resolved = resolve_builtin_method(&Type::String, "len");
+        assert!(matches!(
+            resolved,
+            Some((BuiltinMethod::StringLen, Type::U64))
+        ));
+    }
+
+    #[test]
+    fn unknown_builtin_method_is_unresolved() {
+        assert!(resolve_builtin_method(&Type::String, "capacity").is_none());
+        assert!(resolve_builtin_method(&Type::I32, "len").is_none());
     }
 }

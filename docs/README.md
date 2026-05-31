@@ -95,6 +95,7 @@ Key design goals:
 - Type cast: `n as f64`, `pi as i32`
 - Null-coalescing `??`: tokenized and parsed (R-to-L associativity); codegen deferred to Phase 2
 - String equality: `==` and `!=` via length-check + `memcmp`
+- Builtin method dispatch on primitive & string receivers; first intrinsic `string.len() -> u64` (O(1) fat-pointer read)
 
 ### Structs and Methods (Phase 2)
 
@@ -107,7 +108,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.8.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 486 tests passing across all components
+- 493 tests passing across all components
 
 ## Compilation Pipeline
 
