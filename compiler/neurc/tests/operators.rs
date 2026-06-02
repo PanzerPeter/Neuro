@@ -130,3 +130,109 @@ func main() -> i32 {
     // 3 + (-10) + 1 = -6, returns 250 as i32 is returned as exit code
     assert_eq!(exit_code as i8, -6, "Expected exit code -6");
 }
+
+// Logical short-circuit (§1.4): the RHS of `&&`/`||` must not be evaluated when
+// the LHS already decides the result. `boom()` divides by zero, so if it runs the
+// process is killed by SIGFPE and no clean exit code is produced.
+
+#[test]
+fn and_short_circuits_rhs_not_evaluated() {
+    let test = CompileTest::new();
+    let source = r#"
+func boom() -> bool {
+    val a: i32 = 1
+    val z: i32 = 0
+    return (a / z) == 0
+}
+func main() -> i32 {
+    if false && boom() { return 2 }
+    return 0
+}
+"#;
+    let exit_code = test
+        .compile_and_run("and_short_circuit.nr", source)
+        .expect("Compilation or execution failed");
+    // false && boom() => boom() never runs => no SIGFPE => clean exit 0.
+    assert_eq!(exit_code, 0, "&& should short-circuit and not run boom()");
+}
+
+#[test]
+fn or_short_circuits_rhs_not_evaluated() {
+    let test = CompileTest::new();
+    let source = r#"
+func boom() -> bool {
+    val a: i32 = 1
+    val z: i32 = 0
+    return (a / z) == 0
+}
+func main() -> i32 {
+    if true || boom() { return 0 }
+    return 2
+}
+"#;
+    let exit_code = test
+        .compile_and_run("or_short_circuit.nr", source)
+        .expect("Compilation or execution failed");
+    // true || boom() => boom() never runs => no SIGFPE => clean exit 0.
+    assert_eq!(exit_code, 0, "|| should short-circuit and not run boom()");
+}
+
+#[test]
+fn logical_and_truth_table() {
+    let test = CompileTest::new();
+    // true && true => take branch (1); true && false => skip (0).
+    let true_true = r#"
+func main() -> i32 {
+    if true && true { return 1 }
+    return 0
+}
+"#;
+    let true_false = r#"
+func main() -> i32 {
+    if true && false { return 1 }
+    return 0
+}
+"#;
+    assert_eq!(
+        test.compile_and_run("and_tt.nr", true_true)
+            .expect("compile/run failed"),
+        1,
+        "true && true should be true"
+    );
+    assert_eq!(
+        test.compile_and_run("and_tf.nr", true_false)
+            .expect("compile/run failed"),
+        0,
+        "true && false should be false"
+    );
+}
+
+#[test]
+fn logical_or_truth_table() {
+    let test = CompileTest::new();
+    // false || true => take branch (1); false || false => skip (0).
+    let false_true = r#"
+func main() -> i32 {
+    if false || true { return 1 }
+    return 0
+}
+"#;
+    let false_false = r#"
+func main() -> i32 {
+    if false || false { return 1 }
+    return 0
+}
+"#;
+    assert_eq!(
+        test.compile_and_run("or_ft.nr", false_true)
+            .expect("compile/run failed"),
+        1,
+        "false || true should be true"
+    );
+    assert_eq!(
+        test.compile_and_run("or_ff.nr", false_false)
+            .expect("compile/run failed"),
+        0,
+        "false || false should be false"
+    );
+}

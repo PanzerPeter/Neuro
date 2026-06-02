@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.23.3] - 2026-06-02
+
+### Fixed
+- `codegen`: logical `&&` and `||` now short-circuit (§1.4), as the language spec and `docs/language-reference/operators.md` have always promised. The backend previously evaluated **both** operands eagerly and combined them with a plain `and`/`or` on the two `i1` values, so the right-hand side always ran — meaning a guard like `if x != 0 && 10 / x > 0` still executed the division when `x == 0` (SIGFPE), and any RHS side effect fired unconditionally. `codegen_binary` now intercepts `&&`/`||` before operand evaluation and lowers them through `codegen_short_circuit`, which branches on the LHS and only evaluates the RHS on the deciding edge, merging the two results with a phi node (`&&` → `if lhs { rhs } else { false }`, `||` → `if lhs { true } else { rhs }`). The phi captures the true predecessor blocks after each side is emitted, so a RHS that itself appends blocks (e.g. a nested `if`-expression) is handled correctly.
+- `codegen`: a `bool`-typed constant whose initializer is a binary expression — `const FLAG: bool = true && false`, `const OK: bool = (1 < 2) && (3 < 4)`, `const E: bool = true == true`, including function-scope `const` — no longer aborts compilation with an `internal compiler error: type mismatch in const binary expression`. The const folder (`fold_const`) only had arms for two-integer and two-float operands; bool operands fell through to the catch-all error even though semantic analysis accepted the program. Added a `(Bool, Bool)` arm handling `&&`, `||`, `==`, and `!=`.
+
+---
+
 ## [1.23.2] - 2026-06-02
 
 ### Fixed

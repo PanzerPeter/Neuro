@@ -154,6 +154,73 @@ func main() -> i32 {
     assert!(result.is_err(), "duplicate module const should be rejected");
 }
 
+// ── Bool-typed const folding (§1.3 / §1.4) ──────────────────────────────────
+// The const folder must handle binary expressions whose operands fold to bools.
+
+#[test]
+fn module_const_bool_and() {
+    let test = CompileTest::new();
+    let source = r#"
+const FLAG: bool = true && false
+func main() -> i32 {
+    if FLAG { return 1 }
+    return 0
+}
+"#;
+    let exit_code = test
+        .compile_and_run("module_const_bool_and.nr", source)
+        .expect("bool const folding should compile and run");
+    assert_eq!(exit_code, 0, "true && false should fold to false");
+}
+
+#[test]
+fn module_const_bool_from_comparisons() {
+    let test = CompileTest::new();
+    let source = r#"
+const OK: bool = (1 < 2) && (3 < 4)
+func main() -> i32 {
+    if OK { return 1 }
+    return 0
+}
+"#;
+    let exit_code = test
+        .compile_and_run("module_const_bool_cmp.nr", source)
+        .expect("bool const folding over comparisons should compile and run");
+    assert_eq!(exit_code, 1, "(1 < 2) && (3 < 4) should fold to true");
+}
+
+#[test]
+fn module_const_bool_equality() {
+    let test = CompileTest::new();
+    let source = r#"
+const E: bool = true == true
+func main() -> i32 {
+    if E { return 1 }
+    return 0
+}
+"#;
+    let exit_code = test
+        .compile_and_run("module_const_bool_eq.nr", source)
+        .expect("bool == const folding should compile and run");
+    assert_eq!(exit_code, 1, "true == true should fold to true");
+}
+
+#[test]
+fn function_const_bool_and() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    const G: bool = true && true
+    if G { return 1 }
+    return 0
+}
+"#;
+    let exit_code = test
+        .compile_and_run("function_const_bool_and.nr", source)
+        .expect("function-body bool const folding should compile and run");
+    assert_eq!(exit_code, 1, "true && true should fold to true");
+}
+
 // ── AC5: Duplicate function-body const is rejected ────────────────────────────
 
 #[test]

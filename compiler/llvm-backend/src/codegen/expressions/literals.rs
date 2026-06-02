@@ -251,6 +251,16 @@ impl<'ctx> CodegenContext<'ctx> {
                             "operator '??' is not valid in const expressions (Phase 2)".into(),
                         )),
                     },
+                    (FoldedConst::Bool(a), FoldedConst::Bool(b)) => match op {
+                        BinaryOp::And => Ok(FoldedConst::Bool(a && b)),
+                        BinaryOp::Or => Ok(FoldedConst::Bool(a || b)),
+                        BinaryOp::Equal => Ok(FoldedConst::Bool(a == b)),
+                        BinaryOp::NotEqual => Ok(FoldedConst::Bool(a != b)),
+                        // Defensive: semantic analysis already rejects e.g. `bool < bool`.
+                        _ => Err(CodegenError::InternalError(
+                            "unsupported binary op on bool const".into(),
+                        )),
+                    },
                     (FoldedConst::Float(a), FoldedConst::Float(b)) => match op {
                         BinaryOp::Add => Ok(FoldedConst::Float(a + b)),
                         BinaryOp::Subtract => Ok(FoldedConst::Float(a - b)),
