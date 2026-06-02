@@ -56,6 +56,44 @@ func main() -> i32 {
 }
 
 #[test]
+fn string_len_counts_utf8_bytes_not_codepoints() {
+    let test = CompileTest::new();
+    // "héllo": h(1) é(2, U+00E9) l(1) l(1) o(1) = 6 UTF-8 bytes, 5 codepoints.
+    // `.len()` is a byte count (§2.7), so it must report 6, not 5.
+    let source = r#"
+func main() -> i32 {
+    val n: u64 = "héllo".len()
+    return n as i32
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("string_len_utf8.nr", source)
+        .expect("multibyte string.len() compilation or execution failed");
+    assert_eq!(exit_code, 6);
+}
+
+#[test]
+fn string_len_includes_interior_nul_byte() {
+    let test = CompileTest::new();
+    // "a\0b" has three content bytes; a consumer that stopped at the NUL terminator
+    // would see length 1. `.len()` is authoritative and must report 3, proving that
+    // string consumers must not rely on null termination (§2.7 literal/runtime guarantee).
+    let source = r#"
+func main() -> i32 {
+    val s: string = "a\0b"
+    val n: u64 = s.len()
+    return n as i32
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("string_len_interior_nul.nr", source)
+        .expect("interior-NUL string.len() compilation or execution failed");
+    assert_eq!(exit_code, 3);
+}
+
+#[test]
 fn unknown_builtin_method_is_rejected() {
     let test = CompileTest::new();
     let source = r#"

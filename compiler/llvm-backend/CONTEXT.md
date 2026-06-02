@@ -32,6 +32,12 @@ that type checking always precedes code generation. `syntax-parsing` appears onl
 - field 0 (`ptr`): pointer to null-terminated UTF-8 bytes in read-only memory (`.rodata`)
 - field 1 (`i64`): byte count of the string **excluding** the null terminator
 
+String **literals** are emitted to `.rodata` and are never heap-allocated; the appended NUL
+(`STRING_NULL_TERMINATOR` in `literals.rs`) exists only so the pointer is a valid C string for
+FFI. The `len` field is authoritative — interior NUL bytes are legal content and are counted,
+so consumers must not treat the data as NUL-terminated. Runtime (heap) strings will land in
+Phase 1.7 and share this exact ABI, so the two are indistinguishable to a consumer.
+
 The struct is passed and returned by value. On x86-64 SysV this fits in two registers
 (rax/rdx or equivalent), so no sret indirection is needed for typical string functions.
 The semantic type `Type::String` in `semantic-analysis` is unchanged; the fat pointer
@@ -146,6 +152,10 @@ types and is re-seeded into `type_env` after each `type_env.clear()` in
 const identifiers inside function bodies.
 
 ## Recent Updates
+- 2026-06-02: Formalized the string literal/runtime distinction §2.7. Named the literal
+  terminator byte `STRING_NULL_TERMINATOR` (`literals.rs`) with a WHY comment; both literal
+  lowering paths now state that `len` excludes it and is authoritative (interior NULs counted).
+  Behaviour unchanged — codegen already computed `len` this way. See "String ABI".
 - 2026-05-31: Integer primitive methods §1.2, §1.4. Extended `BuiltinMethod` +
   `resolve_builtin_method` (`context.rs`) with `Wrapping{Add,Sub,Mul}`, `Saturating{Add,Sub,Mul}`,
   `Shr` resolving on any integer receiver to its own type. `codegen_int_intrinsic`

@@ -8,6 +8,13 @@ use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
+/// Trailing byte appended to a string literal's `.rodata` storage so the pointer
+/// doubles as a valid C string for FFI. It is deliberately **excluded** from the
+/// fat pointer's `len` field: `len` is the UTF-8 byte count of the literal's
+/// content, and consumers must treat `len` as authoritative rather than scanning
+/// for this terminator — interior NUL bytes (`"a\0b"`) are legal content.
+const STRING_NULL_TERMINATOR: u8 = 0;
+
 enum FoldedConst {
     Int(i64),
     Float(f64),
@@ -92,7 +99,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 .const_int(*val as u64, false)
                 .into()),
             shared_types::Literal::String(s) => {
-                // Place the UTF-8 bytes in read-only memory; LLVM appends the null terminator.
+                // Literals are not heap-allocated: the UTF-8 bytes live in `.rodata` for the
+                // program's lifetime. LLVM appends the `STRING_NULL_TERMINATOR` automatically.
                 let global_string =
                     self.builder
                         .build_global_string_ptr(s, "str")
@@ -103,7 +111,8 @@ impl<'ctx> CodegenContext<'ctx> {
                             ))
                         })?;
 
-                // byte count excludes the null terminator — callers should not rely on it
+                // `len` is the content's UTF-8 byte count and excludes the appended terminator;
+                // it is the authoritative length (interior NULs included). See STRING_NULL_TERMINATOR.
                 let byte_len = self.context.i64_type().const_int(s.len() as u64, false);
 
                 // Build { ptr, i64 } via insertvalue instructions rather than a constant
@@ -312,7 +321,7 @@ impl<'ctx> CodegenContext<'ctx> {
             FoldedConst::Str(s) => {
                 let bytes: Vec<_> = s
                     .bytes()
-                    .chain(std::iter::once(0u8))
+                    .chain(std::iter::once(STRING_NULL_TERMINATOR))
                     .map(|b| self.context.i8_type().const_int(b as u64, false))
                     .collect();
                 let arr = self.context.i8_type().const_array(&bytes);
@@ -321,6 +330,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 global.set_constant(true);
                 global.set_linkage(inkwell::module::Linkage::Private);
                 let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+                // Length excludes the appended terminator — identical contract to the
+                // runtime-literal path above.
                 let len = self.context.i64_type().const_int(s.len() as u64, false);
                 let fat_type = self
                     .context

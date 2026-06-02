@@ -187,6 +187,19 @@ func demo_booleans() -> i32 {
 The `string` type is an immutable, UTF-8 encoded fat pointer `{ ptr, i64 }` — a pointer to
 the bytes plus a stored byte length. Equality (`==`, `!=`) compares byte content.
 
+### Storage and the `len` Guarantee
+
+String **literals** live in read-only program memory (`.rodata`) for the lifetime of the
+program; they are **not** heap-allocated, so a program that only reads literals never leaks.
+(Runtime, heap-backed strings — concatenation, builders — arrive with the ownership system in
+Phase 1.7. Both forms share the same `{ ptr, i64 }` ABI, so consumers cannot tell them apart.)
+
+The pointer addresses a NUL-terminated byte sequence so it doubles as a valid C string for
+future FFI, but the stored `len` field **excludes** that trailing NUL. `len` is the
+**authoritative** length: it is the exact UTF-8 byte count of the content. Consumers must use
+`len` and **must not** scan for a NUL terminator, because interior NUL bytes are legal content —
+`"a\0b".len()` is `3`, not `1`.
+
 ### String Methods
 
 Builtin intrinsic methods dispatch on a `string` receiver via the usual `receiver.method()`

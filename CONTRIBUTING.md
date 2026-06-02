@@ -306,7 +306,7 @@ Open items are ordered by dependency — earlier ones unblock later ones.
 
 - [x] **Refactor string type — fat pointers** (`ptr`, `len`).
 - [x] **String equality operators** (`==` and `!=`).
-- [ ] **String literal vs runtime string distinction** (§2.7). Literals live in `.rodata` and are never heap-allocated. Formalize, document, and test that the fat-ptr `len` counts UTF-8 bytes and excludes the null terminator. Codegen already computes `len` this way — no ABI change.
+- [x] **String literal vs runtime string distinction** (§2.7). Literals live in `.rodata` and are never heap-allocated. The fat-ptr `len` counts UTF-8 bytes and excludes the null terminator — now formalized via the named `STRING_NULL_TERMINATOR` constant, documented in `types.md`, and tested end-to-end (multibyte UTF-8 + interior NUL). No ABI change.
 
 > **Moved out of Phase 1.5 (forward dependency):** the `&string` slice type is a
 > borrowed `(ptr, len)` view and depends on the reference type `&T`, which lands

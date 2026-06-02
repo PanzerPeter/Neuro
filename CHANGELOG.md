@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.23.0] - 2026-06-02
+
+### Changed
+- `codegen`/`docs`: formalized the string literal vs runtime string distinction (Phase 1.5 §2.7). String literals are emitted to `.rodata` (never heap-allocated); the trailing NUL is now the named `STRING_NULL_TERMINATOR` constant in `literals.rs`, documented as a C-string/FFI convenience that the fat-pointer `len` deliberately excludes. `len` is the authoritative UTF-8 byte count — interior NUL bytes are legal content and are counted, so consumers must not treat string data as NUL-terminated. Behaviour is unchanged (codegen already computed `len` this way); this item formalizes, documents, and tests the guarantee. New end-to-end tests cover multibyte UTF-8 (`"héllo".len() == 6`) and an interior NUL (`"a\0b".len() == 3`). 506 tests passing.
+
+---
+
 ## [1.22.1] - 2026-05-31
 
 ### Changed
