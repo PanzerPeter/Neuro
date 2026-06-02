@@ -90,6 +90,86 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))
     }
 
+    /// Emit a short-circuiting logical `&&` or `||` (§1.4).
+    ///
+    /// Operands are guaranteed `bool` (i1) by semantic analysis. The LHS is
+    /// evaluated first; the RHS is only evaluated on the branch where the result
+    /// is not yet decided:
+    ///   - `&&`: `if lhs { rhs } else { false }`
+    ///   - `||`: `if lhs { true } else { rhs }`
+    ///
+    /// The two incoming values are merged with a phi node in the merge block.
+    fn codegen_short_circuit(
+        &mut self,
+        left: &Expr,
+        op: BinaryOp,
+        right: &Expr,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let parent_fn = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("logical operator outside a function".into())
+        })?;
+
+        let bool_ty = self.context.bool_type();
+
+        // Evaluate the LHS in the current block.
+        let lhs = self.codegen_expr(left)?.into_int_value();
+        // The phi's predecessor for the short-circuit edge is the block we end up
+        // in after evaluating the LHS (it may itself have appended blocks).
+        let entry_bb = self.builder.get_insert_block().ok_or_else(|| {
+            CodegenError::InternalError("no insertion block for logical operator".into())
+        })?;
+
+        let rhs_bb = self.context.append_basic_block(parent_fn, "logic.rhs");
+        let merge_bb = self.context.append_basic_block(parent_fn, "logic.merge");
+
+        // `&&` evaluates the RHS when the LHS is true; `||` when it is false.
+        match op {
+            BinaryOp::And => self
+                .builder
+                .build_conditional_branch(lhs, rhs_bb, merge_bb)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?,
+            _ => self
+                .builder
+                .build_conditional_branch(lhs, merge_bb, rhs_bb)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?,
+        };
+
+        // RHS block: evaluate the RHS, then branch to merge. Capture the block we
+        // actually end up in — RHS codegen may append further blocks (e.g. a nested
+        // if-expression) — so the phi uses the current block, not `rhs_bb`.
+        self.builder.position_at_end(rhs_bb);
+        let rhs = self.codegen_expr(right)?.into_int_value();
+        let rhs_end_bb = self.builder.get_insert_block().ok_or_else(|| {
+            CodegenError::InternalError("no insertion block after logical RHS".into())
+        })?;
+        let rhs_terminated = self.current_block_terminated();
+        if !rhs_terminated {
+            self.builder
+                .build_unconditional_branch(merge_bb)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        }
+
+        // The short-circuit constant: `&&` yields false, `||` yields true.
+        let short_circuit_val = match op {
+            BinaryOp::And => bool_ty.const_int(0, false),
+            _ => bool_ty.const_int(1, false),
+        };
+
+        self.builder.position_at_end(merge_bb);
+        let phi = self
+            .builder
+            .build_phi(bool_ty, "logic.result")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        // Skip the RHS incoming edge if that block terminated (e.g. RHS diverged).
+        if rhs_terminated {
+            phi.add_incoming(&[(&short_circuit_val, entry_bb)]);
+        } else {
+            phi.add_incoming(&[(&short_circuit_val, entry_bb), (&rhs, rhs_end_bb)]);
+        }
+
+        Ok(phi.as_basic_value())
+    }
+
     /// Emit integer `+`, `-`, or `*`.
     ///
     /// In debug builds (`-O0`, `overflow_checks` enabled) the operation uses the
@@ -215,6 +295,13 @@ impl<'ctx> CodegenContext<'ctx> {
         right: &Expr,
         left_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        // `&&` and `||` short-circuit (§1.4): the RHS must only be evaluated when
+        // the LHS does not already decide the result. This requires branching, so
+        // it is handled before the eager operand evaluation below.
+        if matches!(op, BinaryOp::And | BinaryOp::Or) {
+            return self.codegen_short_circuit(left, op, right);
+        }
+
         let lhs = self.codegen_expr(left)?;
         let rhs = self.codegen_expr(right)?;
 
@@ -557,17 +644,11 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
 
-            // Logical operators (short-circuit evaluation would require basic blocks, using simple AND/OR for Phase 1)
-            BinaryOp::And => Ok(self
-                .builder
-                .build_and(lhs.into_int_value(), rhs.into_int_value(), "andtmp")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                .into()),
-            BinaryOp::Or => Ok(self
-                .builder
-                .build_or(lhs.into_int_value(), rhs.into_int_value(), "ortmp")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                .into()),
+            // Logical `&&`/`||` short-circuit and are handled at the top of this
+            // function before operands are evaluated; they never reach this match.
+            BinaryOp::And | BinaryOp::Or => Err(CodegenError::InternalError(
+                "logical operator reached eager binary match; should short-circuit".into(),
+            )),
 
             // Bitwise operators
             BinaryOp::BitAnd => Ok(self

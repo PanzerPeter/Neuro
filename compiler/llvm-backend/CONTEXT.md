@@ -118,6 +118,18 @@ the merge block (no instruction at `-O0`) and run off its own end. The type pass
 the tail `if`'s result type at its span (`record_tail_if_type`) so the result slot can be
 allocated, mirroring the `Expr::If` arm.
 
+## Logical Operator Lowering
+`&&` and `||` short-circuit (§1.4). `codegen_binary` intercepts them before its eager
+operand evaluation and delegates to `codegen_short_circuit`, which evaluates the LHS in
+the current block, conditionally branches to a `logic.rhs` block (taken only on the
+deciding edge — true for `&&`, false for `||`), and merges the RHS value with the
+short-circuit constant (`false` for `&&`, `true` for `||`) via a phi in `logic.merge`.
+Both phi predecessors are captured *after* their side is emitted (`get_insert_block`),
+so a RHS that appends its own blocks (nested `if`-expression) is handled; a RHS that
+terminates its block is dropped from the phi. Operands are guaranteed `i1` by semantic
+analysis, so no coercion is performed. The `BinaryOp::And | BinaryOp::Or` arm of the
+eager match is now an unreachable ICE guard.
+
 ## Integer Overflow ABI
 Integer `+`, `-`, and `*` honor the §1.2 overflow rule, keyed off the
 `OptimizationLevelSetting` passed to `compile`:
@@ -161,6 +173,14 @@ types and is re-seeded into `type_env` after each `type_env.clear()` in
 const identifiers inside function bodies.
 
 ## Recent Updates
+- 2026-06-02: Logical `&&`/`||` now short-circuit (§1.4). `codegen_binary` intercepts them
+  before eager operand evaluation and routes through the new `codegen_short_circuit`
+  (phi-merge over a `logic.rhs`/`logic.merge` block pair). Previously both operands were
+  evaluated and combined with `build_and`/`build_or`, so the RHS always ran. See
+  "Logical Operator Lowering".
+- 2026-06-02: `fold_const` (`literals.rs`) gained a `(Bool, Bool)` binary arm (`&&`, `||`,
+  `==`, `!=`). A `bool`-typed const with a binary initializer (`const FLAG: bool = true && false`)
+  previously hit the catch-all `_` arm and aborted with an ICE despite passing semantic analysis.
 - 2026-06-02: Fixed miscompilation of a tail-position `if`/`else` used as an implicit
   return. Unified `codegen_function`/`codegen_method` body lowering into `codegen_body`,
   which now treats a trailing `Stmt::If { else_block: Some(..), .. }` as a value-producing
