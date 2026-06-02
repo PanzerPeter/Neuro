@@ -109,6 +109,15 @@ the operand signs differ (product negative), MAX otherwise.
   subsequent arms; the final `else` body is only reachable when all preceding
   conditions are false.
 
+A value-producing `if`/`else` in expression position is lowered by `codegen_if_expr`
+into a result `alloca` written by each arm and loaded at the merge block. A statement
+-position `if` parses to `Stmt::If`, so when such an `if` (with an `else`) is the *tail*
+of a function or method body, `codegen_body` routes it through `codegen_if_expr` and
+returns the loaded value — otherwise the non-void function would emit `unreachable` at
+the merge block (no instruction at `-O0`) and run off its own end. The type pass records
+the tail `if`'s result type at its span (`record_tail_if_type`) so the result slot can be
+allocated, mirroring the `Expr::If` arm.
+
 ## Integer Overflow ABI
 Integer `+`, `-`, and `*` honor the §1.2 overflow rule, keyed off the
 `OptimizationLevelSetting` passed to `compile`:
@@ -152,6 +161,12 @@ types and is re-seeded into `type_env` after each `type_env.clear()` in
 const identifiers inside function bodies.
 
 ## Recent Updates
+- 2026-06-02: Fixed miscompilation of a tail-position `if`/`else` used as an implicit
+  return. Unified `codegen_function`/`codegen_method` body lowering into `codegen_body`,
+  which now treats a trailing `Stmt::If { else_block: Some(..), .. }` as a value-producing
+  if-expression; `record_tail_if_type` (type pass) records its result type at the `if` span.
+  Previously the statement path emitted `unreachable` for the non-void return → fall-through
+  segfault. See "if / else-if / else Lowering".
 - 2026-06-02: Formalized the string literal/runtime distinction §2.7. Named the literal
   terminator byte `STRING_NULL_TERMINATOR` (`literals.rs`) with a WHY comment; both literal
   lowering paths now state that `len` excludes it and is authoritative (interior NULs counted).

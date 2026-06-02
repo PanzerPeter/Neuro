@@ -97,6 +97,7 @@ impl<'ctx> CodegenContext<'ctx> {
         for stmt in &method.body {
             self.visit_stmt_for_types(stmt, func_types)?;
         }
+        self.record_tail_if_type(&method.body);
         Ok(())
     }
 
@@ -136,7 +137,34 @@ impl<'ctx> CodegenContext<'ctx> {
         for stmt in &func_def.body {
             self.visit_stmt_for_types(stmt, func_types)?;
         }
+        self.record_tail_if_type(&func_def.body);
         Ok(())
+    }
+
+    /// A statement-position `if` parses to `Stmt::If`, so the type pass never records
+    /// a result type at its span the way it does for an `Expr::If`. When such an `if`
+    /// is the body's tail (the implicit return), `codegen_if_expr` needs that type to
+    /// allocate the result slot — record it here, mirroring the `Expr::If` arm.
+    fn record_tail_if_type(&mut self, body: &[Stmt]) {
+        if let Some(Stmt::If {
+            then_block,
+            else_block,
+            span,
+            ..
+        }) = body.last()
+        {
+            if else_block.is_some() {
+                let result_ty = match then_block.last() {
+                    Some(Stmt::Expr(e)) => self
+                        .expr_types
+                        .get(&e.span().start)
+                        .cloned()
+                        .unwrap_or(Type::Void),
+                    _ => Type::Void,
+                };
+                self.expr_types.insert(span.start, result_ty);
+            }
+        }
     }
 
     pub(crate) fn visit_stmt_for_types(

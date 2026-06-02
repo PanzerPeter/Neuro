@@ -420,9 +420,10 @@ nul
 # ---------------------------
 # NEURO Examples
 # ---------------------------
-# Ignore compiled executables in the examples directory
-# Everything without an extension in examples/ is considered an executable
-examples/*
-!examples/*.nr
-!examples/*.md
-!examples/*/
+# Ignore everything under examples/ (compiled executables land here when
+# building in place) except source, docs, the manifest, and subdirectories.
+examples/**
+!examples/**/
+!examples/**/*.nr
+!examples/**/*.md
+!examples/**/*.txt

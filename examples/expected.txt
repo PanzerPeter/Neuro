@@ -1,0 +1,56 @@
+# Expected exit codes for every example program.
+#
+# Format:  <path-relative-to-examples/>   <expected-exit-code>
+# Blank lines and lines beginning with '#' are ignored.
+#
+# This file is the single source of truth for the example test harness
+# (compiler/neurc/tests/examples.rs). The harness walks examples/ recursively,
+# compiles and runs every *.nr file, and asserts its exit code matches the
+# value here. A *.nr file with no entry below — or an entry with no file —
+# fails the test, so adding an example is one new line here and nothing else.
+
+# --- basics ---------------------------------------------------------------
+basics/assignment.nr            15
+basics/division.nr              16
+basics/expression_returns.nr    37
+basics/factorial.nr             120
+basics/fibonacci.nr             55
+basics/hello.nr                 26
+basics/milestone.nr             8
+basics/phase1_complete.nr       0
+basics/type_inference.nr        42
+
+# --- types ----------------------------------------------------------------
+types/constants.nr                  51
+types/extended_types.nr             0
+types/extended_types_arithmetic.nr  0
+types/float_ops.nr                  42
+types/float_suffixes.nr             0
+types/integer_overflow.nr           55
+types/integer_suffixes.nr           0
+types/string_len.nr                 0
+types/strings.nr                    0
+types/underscore_separators.nr      0
+
+# --- operators ------------------------------------------------------------
+operators/bitwise_ops.nr          1
+operators/compound_assignment.nr  21
+operators/integer_methods.nr      0
+
+# --- control flow ---------------------------------------------------------
+control_flow/control_flow.nr          31
+control_flow/for_range.nr             10
+control_flow/for_range_inclusive.nr   15
+control_flow/if_block_expressions.nr  149
+control_flow/while_true_lint.nr       7
+
+# --- structs & methods ----------------------------------------------------
+structs/methods.nr  42
+structs/neuron.nr   4
+structs/structs.nr  50
+
+# --- showcase (multiple features working together) ------------------------
+showcase/num_algorithms.nr  32
+showcase/perceptron.nr      8
+showcase/running_stats.nr   5
+showcase/simulation.nr      2

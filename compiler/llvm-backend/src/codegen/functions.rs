@@ -185,43 +185,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .insert(param.name.name.clone(), param_type);
         }
 
-        let has_implicit_return = !matches!(return_type, Type::Void)
-            && !method.body.is_empty()
-            && matches!(method.body.last(), Some(Stmt::Expr(_)));
-
-        if has_implicit_return {
-            for stmt in &method.body[..method.body.len() - 1] {
-                self.codegen_stmt(stmt)?;
-            }
-            if let Some(Stmt::Expr(expr)) = method.body.last() {
-                let ret_val = self.codegen_expr(expr)?;
-                self.builder
-                    .build_return(Some(&ret_val))
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            }
-        } else {
-            for stmt in &method.body {
-                self.codegen_stmt(stmt)?;
-            }
-            // Same terminator policy as codegen_function: emit unreachable for dead
-            // merge blocks so the LLVM verifier is satisfied. Genuine missing returns
-            // are undefined behaviour caught by future semantic return-path analysis.
-            if let Some(current_bb) = self.builder.get_insert_block() {
-                if current_bb.get_terminator().is_none() {
-                    if matches!(return_type, Type::Void) {
-                        self.builder
-                            .build_return(None)
-                            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-                    } else {
-                        self.builder
-                            .build_unreachable()
-                            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-                    }
-                }
-            }
-        }
-
-        Ok(())
+        self.codegen_body(&method.body, return_type)
     }
 
     /// Generate code for a function definition
@@ -302,29 +266,54 @@ impl<'ctx> CodegenContext<'ctx> {
                 .insert(param.name.name.clone(), param_type);
         }
 
-        // Generate function body
-        // Handle expression-based returns: if the last statement is an expression
-        // and the function has a non-void return type, treat it as an implicit return
-        let has_implicit_return = !matches!(return_type, Type::Void)
-            && !func_def.body.is_empty()
-            && matches!(func_def.body.last(), Some(Stmt::Expr(_)));
+        self.codegen_body(&func_def.body, return_type)
+    }
 
-        if has_implicit_return {
-            // Generate all statements except the last one
-            for stmt in &func_def.body[..func_def.body.len() - 1] {
+    /// Lower a function or method body, treating a value-producing tail statement
+    /// as the implicit return value.
+    ///
+    /// A statement-position `if` parses to `Stmt::If`, so a trailing `if/else` used
+    /// as the implicit return is not a `Stmt::Expr`; it must still yield the
+    /// if-expression's value rather than falling through with `unreachable`, which
+    /// produces no instruction at `-O0` and lets execution run off the end of the
+    /// function.
+    fn codegen_body(&mut self, body: &[Stmt], return_type: &Type) -> CodegenResult<()> {
+        let tail_is_value = !matches!(return_type, Type::Void)
+            && matches!(
+                body.last(),
+                Some(Stmt::Expr(_))
+                    | Some(Stmt::If {
+                        else_block: Some(_),
+                        ..
+                    })
+            );
+
+        if tail_is_value {
+            for stmt in &body[..body.len() - 1] {
                 self.codegen_stmt(stmt)?;
             }
-
-            // Generate implicit return from the last expression
-            if let Some(Stmt::Expr(expr)) = func_def.body.last() {
-                let ret_val = self.codegen_expr(expr)?;
-                self.builder.build_return(Some(&ret_val)).map_err(|e| {
-                    CodegenError::LlvmError(format!("failed to build implicit return: {}", e))
-                })?;
-            }
+            let ret_val = match body.last() {
+                Some(Stmt::Expr(expr)) => self.codegen_expr(expr)?,
+                Some(Stmt::If {
+                    condition,
+                    then_block,
+                    else_if_blocks,
+                    else_block,
+                    span,
+                }) => {
+                    self.codegen_if_expr(condition, then_block, else_if_blocks, else_block, span)?
+                }
+                _ => {
+                    return Err(CodegenError::InternalError(
+                        "tail statement is not value-producing".to_string(),
+                    ))
+                }
+            };
+            self.builder
+                .build_return(Some(&ret_val))
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         } else {
-            // Generate all statements normally
-            for stmt in &func_def.body {
+            for stmt in body {
                 self.codegen_stmt(stmt)?;
             }
 

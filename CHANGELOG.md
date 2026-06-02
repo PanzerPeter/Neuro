@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.23.2] - 2026-06-02
+
+### Fixed
+- `codegen`: a tail-position `if`/`else` used as a function's or method's implicit return value is now lowered correctly. A statement-position `if` parses to `Stmt::If`, so the backend's implicit-return detection — which only recognised `Stmt::Expr` — fell through to a void `if` statement and emitted `unreachable` for the non-void return, producing no instruction at `-O0` and letting execution run off the end of the function (segfault or garbage). `codegen_body` now treats a trailing `Stmt::If { else_block: Some(..), .. }` as a value-producing if-expression, and the type pass records its result type at the `if` span so the result slot is allocated. Restores the idiomatic `func f() -> T { if c { a } else { b } }` form, including recursion (`gcd`) and `&self` methods. `examples/structs/neuron.nr` reverts to the idiomatic tail if-expr.
+
+---
+
+## [1.23.1] - 2026-06-02
+
+### Changed
+- `tests`/`docs`: reorganized the `examples/` directory into topic subdirectories (`basics/`, `types/`, `operators/`, `control_flow/`, `structs/`, `showcase/`) and made the example test harness self-expanding. `compiler/neurc/tests/examples.rs` now discovers every `.nr` file recursively and checks its exit code against a single manifest, `examples/expected.txt`; adding an example is one new file plus one manifest line, with no Rust edits. The harness fails loudly on an unregistered file, a stale manifest entry, or any exit-code mismatch, so `cargo test --workspace` exercises all examples automatically.
+
+### Added
+- `tests`: four "showcase" examples that exercise multiple features together — `showcase/perceptron.nr` (structs + methods + `f64` + branches + loop), `showcase/num_algorithms.nr` (recursion + loops + modulo + saturating arithmetic), `showcase/running_stats.nr` (struct state + field mutation + `&self` method + `f64` division), and `showcase/simulation.nr` (bitwise flags + struct state + `.shr` + `break`).
+
+### Fixed
+- `examples`: rewrote example functions that relied on a tail-position `if`/`else` *expression* as the implicit return value to use explicit `return` instead, since that codegen path is currently miscompiled (segfault / wrong value when the result is consumed). `structs/neuron.nr` previously masked the issue by discarding the result; it now observes its activation in the exit code. Removed stray compiled binaries from `examples/` (including a tracked one) and tightened the `.gitignore` rules to cover the new subdirectories.
+
+---
+
 ## [1.23.0] - 2026-06-02
 
 ### Changed

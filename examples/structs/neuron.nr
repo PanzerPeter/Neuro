@@ -35,8 +35,9 @@ func main() -> i32 {
     // Active region: strong enough input fires the neuron
     val active = neuron.activate(1.0)  // 1.0 * 0.5 + (−0.1) =  0.4
 
-    // Predicate method using block-expression implicit return
-    val fired = neuron.is_active(1.0)
+    // The dead region clamps to exactly zero.
+    if dead > 0.0 { return 1 }
 
-    return 0
+    // Scale the active output into the exit code so the result is observed.
+    return (active * 10.0) as i32      // 0.4 * 10 = 4
 }

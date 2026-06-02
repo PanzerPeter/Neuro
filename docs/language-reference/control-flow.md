@@ -84,6 +84,10 @@ func sign(x: i32) -> i32 {
 
 ### Expression-Based Return
 
+An `if`/`else` is an expression: its value is the trailing expression of the taken
+branch. It can be a function's implicit return value or be bound to a variable. Both
+branches must yield the same type, so an `else` is required when the value is used.
+
 ```neuro
 func abs(x: i32) -> i32 {
     if x >= 0 {
@@ -91,6 +95,11 @@ func abs(x: i32) -> i32 {
     } else {
         -x  // Implicit return
     }
+}
+
+func clamp_low(x: i32) -> i32 {
+    val y = if x < 0 { 0 } else { x }  // bound to a variable
+    y
 }
 ```
 
@@ -353,23 +362,6 @@ func is_positive_verbose(x: i32) -> bool {
 ```
 
 ## Future Features (Phase 1.5 / Phase 2)
-
-### If as Assignable Expression (Phase 1.5)
-
-Assigning an if/else result directly to a variable is not yet supported:
-
-```neuro
-// Not yet implemented
-val x: i32 = if condition { 1 } else { 0 }
-```
-
-Using if/else as the trailing expression of a function body already works:
-
-```neuro
-func abs(x: i32) -> i32 {
-    if x >= 0 { x } else { -x }  // OK: implicit return from if/else
-}
-```
 
 ### Pattern Matching (Phase 2)
 
