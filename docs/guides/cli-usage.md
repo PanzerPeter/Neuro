@@ -31,7 +31,7 @@ neurc check <file.nr>
 neurc check examples/hello.nr
 
 # With debug logging
-RUST_LOG=debug neurc check examples/milestone.nr
+RUST_LOG=debug neurc check examples/basics/milestone.nr
 ```
 
 **Output**:

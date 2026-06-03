@@ -119,13 +119,13 @@ neurc compile <INPUT> [OPTIONS]
 **Examples**:
 ```bash
 # Compile to default output (milestone.exe on Windows)
-neurc compile examples/milestone.nr
+neurc compile examples/basics/milestone.nr
 
 # Compile with custom output path
 neurc compile examples/hello.nr -o bin/hello.exe
 
 # With debug logging
-RUST_LOG=debug neurc compile examples/milestone.nr
+RUST_LOG=debug neurc compile examples/basics/milestone.nr
 ```
 
 ### Exit Codes
@@ -212,7 +212,7 @@ parse(&source)
 ```rust
 #[test]
 fn test_compile_file_with_valid_program() {
-    // Compile examples/milestone.nr
+    // Compile examples/basics/milestone.nr
     // Verify executable created
 }
 
@@ -235,7 +235,7 @@ fn test_link_object_to_executable() {
 ```rust
 #[test]
 fn test_end_to_end_milestone() {
-    // Compile examples/milestone.nr
+    // Compile examples/basics/milestone.nr
     // Execute the binary
     // Assert exit code == 8
 }
