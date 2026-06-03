@@ -11,11 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.24.1] - 2026-06-03
+
+### Changed
+- `docs`: synced phase status across all Markdown docs to reflect Phase 1.5 (syntax & semantics stabilization) as complete and Phase 1.7 (ownership & borrow checker) as the active phase. Removed the now-complete Phase 1.5 checklist from `CONTRIBUTING.md`; updated status/roadmap lines in `README.md`, `docs/README.md`, `docs/getting-started/quick-start.md`; corrected "not yet implemented" lists (if/block expressions are implemented; ownership → 1.7, string interpolation → Phase 2); retargeted stale `Phase 1.5` references in `docs/language-reference/{operators,control-flow}.md` and `compiler/semantic-analysis/CONTEXT.md`.
+
+---
+
+## [1.24.0] - 2026-06-03
+
+### Added
+- `parser`: type aliases (§3.14). `type Name = TargetType` introduces a transparent alias — the alias and its target are interchangeable and no new nominal type is created. Aliases resolve in every type-annotation position (variable/const annotations, function parameters and return types, struct fields, and `as` cast targets) and collapse through chains (`type A = B; type B = i32`). Resolution happens entirely at parse time by substituting each aliased annotation with its target type (the same desugaring strategy used for compound assignment), so semantic analysis and codegen are unchanged and never observe an alias. New `TokenKind::Type` keyword and `ParseError::{DuplicateTypeAlias, TypeAliasShadowsBuiltin, CyclicTypeAlias}` diagnostics reject duplicate aliases, aliases that shadow a built-in type, and cyclic alias chains; an unknown target type is still reported by the existing semantic `UnknownTypeName` check against the resolved type, with the span anchored at the alias use site. Scope note: alias substitution applies to type positions only — using an alias as a value-position constructor or path name is not part of this feature.
+
+---
+
 ## [1.23.4] - 2026-06-03
 
 ### Fixed
 - `build`: release smoke-test harness (`tools/run_release_smoke_tests.py`) referenced `examples/milestone.nr` and `examples/factorial.nr`, which moved to `examples/basics/` when the examples were reorganized. The hard-coded list now points at `basics/milestone.nr` and `basics/factorial.nr`, so the Windows/Linux/macOS release CI jobs find and compile them again (exit codes 8 and 120 unchanged).
 - `docs`: updated stale `examples/milestone.nr` / `examples/factorial.nr` paths across `README.md` and `docs/` to the current `examples/basics/` locations.
+- `ci`: the Test Suite matrix installed Rust via `dtolnay/rust-toolchain@stable` while overriding `toolchain: ${{ matrix.rust_version }}`. The `@stable` tag hardcodes the channel in the action ref (input `toolchain` is `required: false, default: stable`), so the dynamic override is unsupported and the `nightly` leg bailed out in the action's parse step with `'toolchain' is a required input`. The matrix step now uses `@master` (where `toolchain` is `required: true`), the documented pattern for channels that vary by matrix value. The six fixed-stable `@stable` uses elsewhere are unchanged.
 
 ---
 

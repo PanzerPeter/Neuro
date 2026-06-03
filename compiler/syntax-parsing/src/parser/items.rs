@@ -9,12 +9,19 @@ use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 
 use super::statements::stmt_span;
+use super::type_aliases::{expand_type_aliases, TypeAliasDecl};
 use super::Parser;
 
 impl Parser {
-    /// Parse top-level items: function, struct, impl, or const definitions
+    /// Parse top-level items: function, struct, impl, const, or type-alias definitions.
+    ///
+    /// Type aliases (§3.14) are transparent and are resolved here: each declaration
+    /// is collected, then every aliased type annotation in the remaining items is
+    /// rewritten to its target type before the program is returned. No alias item
+    /// reaches semantic analysis or codegen.
     pub(crate) fn parse_program(&mut self) -> ParseResult<Vec<Item>> {
         let mut items = Vec::new();
+        let mut alias_decls: Vec<TypeAliasDecl> = Vec::new();
 
         self.skip_newlines();
         while !self.is_at_end() {
@@ -44,19 +51,22 @@ impl Parser {
             } else if self.check(&TokenKind::Const) {
                 let c = self.parse_const_def()?;
                 items.push(Item::Const(c));
+            } else if self.check(&TokenKind::Type) {
+                alias_decls.push(self.parse_type_alias()?);
             } else {
                 let token = self.peek().ok_or(ParseError::UnexpectedEof {
-                    expected: "function, struct, impl, or const definition".to_string(),
+                    expected: "function, struct, impl, const, or type definition".to_string(),
                 })?;
                 return Err(ParseError::UnexpectedToken {
                     found: token.kind.clone(),
-                    expected: "function, struct, impl, or const definition".to_string(),
+                    expected: "function, struct, impl, const, or type definition".to_string(),
                     span: token.span,
                 });
             }
             self.skip_newlines();
         }
 
+        expand_type_aliases(&mut items, alias_decls)?;
         Ok(items)
     }
 

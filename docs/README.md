@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Phase 1 Complete, Phase 1.5 & Phase 2 in progress — Alpha Development
+**Status**: Phase 1 & Phase 1.5 Complete, Phase 1.7 (ownership) active · Phase 2 overlapping — Alpha Development
 
 ## Quick Links
 
@@ -108,7 +108,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.8.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 486 tests passing across all components
+- 492 tests passing across all components
 
 ## Compilation Pipeline
 
@@ -214,7 +214,7 @@ See [Installation Guide](getting-started/installation.md) for other distribution
 
 ## Roadmap
 
-See the [Quick Roadmap in the project README](../README.md#quick-roadmap) for the phase-by-phase status, and [CONTRIBUTING.md](../CONTRIBUTING.md#current-contribution-priorities) for the detailed Phase 1.5 / Phase 2 checklists.
+See the [Quick Roadmap in the project README](../README.md#quick-roadmap) for the phase-by-phase status, and [CONTRIBUTING.md](../CONTRIBUTING.md#current-contribution-priorities) for the active Phase 1.7 checklist.
 
 ## Architecture
 
@@ -246,6 +246,6 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 
 ---
 
-**Last Updated**: 2026-05-25
-**Version**: Phase 1.5 & Phase 2 in progress (v1.18.1)
+**Last Updated**: 2026-06-03
+**Version**: Phase 1.7 (ownership) active · Phase 2 overlapping (v1.24.1)
 **Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.8.0

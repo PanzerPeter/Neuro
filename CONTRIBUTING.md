@@ -4,7 +4,7 @@ Thank you for your interest in contributing to the Neuro programming language co
 
 ## Project Status
 
-Neuro is in **Phase 1.5 — Syntax & Semantics Stabilization** (the active phase). Phase 1 (core MVP) is complete; the LLVM 20 backend, string fat pointers, structs, and methods have all landed. Phase 1.7 (ownership & borrow checker) and Phase 1.8 (HIR / MLIR plumbing) follow before the bulk of Phase 2. We welcome contributions, but note:
+Neuro is in **Phase 1.7 — Ownership & Borrow Checker** (the active phase). Earlier phases (core MVP, syntax & semantics stabilization) are complete; the LLVM 20 backend, string fat pointers, structs, methods, casts, bitwise ops, literal suffixes, if/block expressions, builtin-method dispatch, integer overflow semantics, and type aliases have all landed. Phase 1.8 (HIR / MLIR plumbing) follows, with Phase 2 overlapping. We welcome contributions, but note:
 
 - Architecture and design are still evolving
 - Breaking changes are expected between minor versions
@@ -264,53 +264,29 @@ cargo run -p neurc -- compile examples/hello.nr
 
 ## Current Contribution Priorities
 
-### Phase 1.5 — Syntax & Semantics Stabilization (active)
+### Phase 1.7 — Ownership & Borrow Checker (active)
 
-**Goal:** Stabilize syntax, ABI, and semantic rules before adding ownership.
-Everything in this phase is a frontend / type-checker / scalar-codegen change.
-The borrow checker and HIR/MLIR plumbing live in Phase 1.7 and 1.8.
+**Goal:** Deterministic, zero-overhead memory management — move-by-default,
+borrowing, lifetimes, and deterministic `Drop`. No GC, no reference counting.
+This is multi-month work that does not block surface-syntax features; items are
+ordered by dependency, earlier ones unblock later ones.
 
-`[x]` = landed · `[ ]` = open / good first-issue candidate.
-Open items are ordered by dependency — earlier ones unblock later ones.
+`[x]` = landed · `[ ]` = open. The borrow checker is large — coordinate on an
+issue before starting one of the bigger items.
 
-#### 1. Parser & Syntax Fixes — complete
-
-- [x] **Fix `else if` condition — `no_struct_lit` guard missing.** Bare identifier used as `else if` condition consumed the block `{` as a struct literal opener, corrupting the parse tree.
-- [x] **`const` declarations** (§1.3). Compile-time constants at module and function scope.
-- [x] **Compound assignment operators**: `+=`, `-=`, `*=`, `/=`, `%=` (§1.4). Desugar to `target = target OP expr` at parse time.
-- [x] **`as` type cast** (§1.4). Explicit numeric conversion with LLVM `sext` / `zext` / `trunc` / `fpext` / `fptrunc` / `fptosi` / `sitofp` emission.
-- [x] **Inclusive range `..=` in `for` loops** (§1.6).
-- [x] **Bitwise operators**: `&`, `|`, `^`, `~`, `<<` (§1.4). Precedence `Shl > BitAnd > BitXor > BitOr`. (Right shift is the `.shr(n)` method, not an operator — it is *not* yet implemented; tracked under §2 once builtin-method dispatch exists.)
-- [x] **Integer literal type suffixes**: `42i64`, `255u8` (§1.4).
-- [x] **`if` and block expressions as values** (§1.8).
-- [x] **Float literal suffixes**: `1.5f32`, `2.0f64` (§1.4).
-- [x] **Comparison chain rejection** (§1.4). `a < b < c` is a compile error suggesting `&&`.
-- [x] **Underscore digit separators** (§1.2). `1_000_000`, `0xFF_FF`, `0b1010_0011`.
-
-#### 2. Language Semantics
-
-- [x] **IEEE-754 native float comparison** (§1.2, §3.10). `<`, `>`, `<=`, `>=` wired directly to LLVM `fcmp`; no `Comparable` dispatch.
-- [x] **Integer literal magnitude rule** (§1.3). No silent `i32 → i64` promotion for out-of-range literals.
-- [x] **`while true` lint** (§3.7). `warning[prefer-loop-over-while-true]`, suppressed with `@allow(prefer_loop_over_while_true)`. Brought in the general attribute system.
-- [x] **`??` operator — parsed, R-to-L associativity + parser test** (§3.11). Semantic rejects with `OperatorNotYetSupported`; full unwrap lands in Phase 2C with `Option`/`Result`.
-- [x] **Builtin method dispatch on primitive & string types.** Methods today resolve only on structs (via `impl` blocks). `semantic-analysis/` + `llvm-backend/` now dispatch a fixed, compiler-known set of intrinsic methods on builtin types. Landed with the first intrinsic, `string.len() -> u64` (§2.7); the integer methods and `.shr(n)` below are now unblocked.
-- [x] **Integer overflow semantics** (§1.2). Debug builds panic on overflow (LLVM `*.with.overflow` intrinsics + conditional `abort`); release builds wrap (two's complement). Codegen-only — no method-dispatch prerequisite.
-- [x] **Integer primitive methods — `wrapping_*` / `saturating_*` + `.shr(n)`** (§1.2, §1.4). `wrapping_add/sub/mul`, `saturating_add/sub/mul`, and the spec's right-shift `.shr(n)`. Each resolves on any integer receiver, takes one same-typed argument, and returns the receiver's type. `checked_*` returns `Option<T>` → deferred to Phase 2C.
-
-> **Moved out of Phase 1.5 (forward dependency):** the `*Assign` traits
-> (`AddAssign`/`SubAssign`/…) need the trait system and now live in Phase 2B.
-> For `Copy` scalars, compound assignment already desugars to `x = x OP rhs`,
-> so nothing regresses in the meantime.
-
-#### 3. String Memory Model (groundwork only — full ownership is Phase 1.7)
-
-- [x] **Refactor string type — fat pointers** (`ptr`, `len`).
-- [x] **String equality operators** (`==` and `!=`).
-- [x] **String literal vs runtime string distinction** (§2.7). Literals live in `.rodata` and are never heap-allocated. The fat-ptr `len` counts UTF-8 bytes and excludes the null terminator — now formalized via the named `STRING_NULL_TERMINATOR` constant, documented in `types.md`, and tested end-to-end (multibyte UTF-8 + interior NUL). No ABI change.
-
-> **Moved out of Phase 1.5 (forward dependency):** the `&string` slice type is a
-> borrowed `(ptr, len)` view and depends on the reference type `&T`, which lands
-> in Phase 1.7 — it is now tracked there.
+- [x] **BUG (codegen): tail-position `if`/`else` implicit return miscompiled** (§1.8). Fixed in v1.23.2. A statement-position tail `if` was lowered as a void statement, so a non-void return emitted `unreachable` → fall-through segfault at `-O0`. `codegen_body` now treats a trailing `Stmt::If { else_block: Some(..), .. }` as a value-producing if-expression.
+- [ ] **Move semantics by default** (§2.2). Assignment and function calls move ownership for non-`Copy` types; the source binding becomes invalid after the move.
+- [ ] **`Copy` trait + `@derive(Copy, Clone)`** (§2.3). Built-in for primitive scalars; a struct may derive `Copy` only when all fields are `Copy`.
+- [ ] **`.clone()` method** (§2.7). Explicit deep copy for non-`Copy` owned types; removes implicit deep copies elsewhere.
+- [ ] **Immutable borrows `&T`** (§2.4). Any number of immutable borrows may coexist; the checker rejects mutable borrows during their lifetime.
+- [ ] **`&string` slice type** (§2.7). A borrowed, non-owning `(ptr, len)` view into UTF-8 data; codegen is a no-op (the ABI already matches). Lands with `&T`. Prerequisite for `.slice(range)`.
+- [ ] **Mutable borrows `&mut T`** (§2.5). At most one `&mut T` at a time; excludes immutable borrows. Dereference via `*`.
+- [ ] **Lifetime inference + explicit annotations** (§2.6). Rust-style elision; explicit `<'a>` available for advanced patterns.
+- [ ] **`Drop` trait + deterministic destruction.** Destructor runs at scope exit. No GC, no ARC. First heap consumer is the string concat / format machinery.
+- [ ] **Panic runtime — abort, no unwinding** (§1.2). `panic` / `assert` / `unreachable` print a diagnostic with source location and abort; the stack is not unwound. `Drop` / `defer` run only on normal scope exit. Integer-overflow, array-bounds, and string-slice checks route here.
+- [ ] **Remove ARC.** Strip any reference-counting plumbing introduced during the alpha — everything is owned-or-borrowed from here on.
+- [ ] **Runtime string ops behind the borrow checker.** `String::new`, `string + &string` concat, `.push_str`, `.clear` — the first features that exercise heap + `Drop`.
+- [ ] **`unsafe { }` block infrastructure** (§3, prep for Phase 5 `@kernel`). Reserved keyword + block parsing + AST node. Outside `@kernel` bodies, `unsafe` is inert.
 
 ### Non-Code Contributions
 
