@@ -315,13 +315,13 @@ cargo install --path compiler/neurc
 cargo run -p neurc -- check examples/hello.nr
 
 # Compile to a native executable
-cargo run -p neurc -- compile examples/factorial.nr
+cargo run -p neurc -- compile examples/basics/factorial.nr
 
 # Run the compiled binary
 ./examples/factorial
 
 # After cargo install --path compiler/neurc:
-neurc compile examples/factorial.nr
+neurc compile examples/basics/factorial.nr
 ```
 
 ---

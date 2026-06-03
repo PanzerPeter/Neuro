@@ -372,7 +372,7 @@ func main() -> i32 {
 Compile and run:
 
 ```bash
-cargo run -p neurc -- compile factorial.nr
+cargo run -p neurc -- compile examples/basics/factorial.nr
 .\factorial.exe
 echo $LASTEXITCODE  # Output: 120
 ```

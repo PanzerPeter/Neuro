@@ -40,8 +40,8 @@ def main() -> int:
         return 1
 
     examples = [
-        ("milestone.nr", 8),
-        ("factorial.nr", 120),
+        ("basics/milestone.nr", 8),
+        ("basics/factorial.nr", 120),
     ]
 
     is_windows = platform.system().lower().startswith("win")

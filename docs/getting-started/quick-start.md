@@ -117,7 +117,7 @@ func main() -> i32 {
 Compile and run:
 
 ```bash
-cargo run -p neurc -- compile examples/milestone.nr
+cargo run -p neurc -- compile examples/basics/milestone.nr
 
 # Windows
 .\examples\milestone.exe
