@@ -78,6 +78,8 @@ pub enum TokenKind {
     Match,
     #[token("where")]
     Where,
+    #[token("type")]
+    Type,
     #[token("self")]
     SelfLower,
     #[token("Self")]
@@ -298,6 +300,7 @@ impl Token {
             TokenKind::Module => "module",
             TokenKind::Match => "match",
             TokenKind::Where => "where",
+            TokenKind::Type => "type",
             TokenKind::SelfLower => "self",
             TokenKind::SelfUpper => "Self",
             TokenKind::Identifier(s) => s,

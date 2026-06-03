@@ -8,6 +8,7 @@ use crate::errors::{ParseError, ParseResult};
 mod expressions;
 mod items;
 mod statements;
+mod type_aliases;
 mod types;
 
 /// Parser for NEURO source code

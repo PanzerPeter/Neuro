@@ -24,6 +24,15 @@ pub enum ParseError {
     #[error("duplicate parameter name '{name}' in function definition")]
     DuplicateParameter { name: String, span: Span },
 
+    #[error("duplicate type alias '{name}'")]
+    DuplicateTypeAlias { name: String, span: Span },
+
+    #[error("type alias '{name}' shadows a built-in type; choose a different name")]
+    TypeAliasShadowsBuiltin { name: String, span: Span },
+
+    #[error("type alias '{name}' is defined in terms of itself (cyclic alias)")]
+    CyclicTypeAlias { name: String, span: Span },
+
     #[error("lexical error: {0}")]
     LexError(#[from] LexError),
 }

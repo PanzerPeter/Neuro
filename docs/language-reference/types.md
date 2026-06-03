@@ -598,6 +598,55 @@ func compose() -> i32 {
 }
 ```
 
+## Type Aliases
+
+A `type` declaration introduces a **transparent** alias for an existing type. The
+alias and its target are fully interchangeable — no new nominal type is created,
+so a value of the alias type and a value of the target type are the same type to
+the compiler (contrast with `newtype`, §3.15, which is a distinct type).
+
+```neuro
+type Meters = f64
+type Id = i64
+
+struct Sensor {
+    location: Meters        // same as `location: f64`
+}
+
+func to_id(raw: i32) -> Id {
+    raw as Id               // same as `raw as i64`
+}
+
+func main() -> i32 {
+    val s = Sensor { location: 10.0 }
+    val tag: Id = to_id(7)
+    return tag as i32       // 7
+}
+```
+
+Aliases resolve in every type-annotation position: variable and `const`
+annotations, function parameters and return types, struct fields, and `as` cast
+targets. Alias chains collapse to their ultimate target:
+
+```neuro
+type A = B
+type B = i32
+val x: A = 1                // x : i32
+```
+
+**Rules and diagnostics:**
+
+- A duplicate alias name is a compile error.
+- An alias may not shadow a built-in type name (`i32`, `f64`, `string`, …).
+- A cyclic alias chain (`type A = B`; `type B = A`) is a compile error.
+- An unknown target type is reported where the alias is *used*, against the
+  resolved name.
+
+Aliases are resolved at parse time, so they carry zero runtime cost and produce
+exactly the same code as writing the target type directly. Using an alias as a
+value-position constructor or path name (e.g. `MyAlias { ... }`) is not part of
+this feature.
+
 ## References
 
 - [Variables](variables.md) - Variable declaration and usage

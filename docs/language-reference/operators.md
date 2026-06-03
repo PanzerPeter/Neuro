@@ -306,7 +306,7 @@ val config = load_config()     ?? Config::default()
 
 **Precedence**: level 14 — looser than `||` (so `a ?? b || c` means `a ?? (b || c)`), tighter than range operators.
 
-**Phase 1.5 status**: the operator is tokenized and parsed today so the precedence and associativity are locked in. Type checking and codegen are deferred to Phase 2, where `Option<T>` and `Result<T, E>` land — until then, using `??` produces:
+**Status**: the operator is tokenized and parsed today so the precedence and associativity are locked in. Type checking and codegen are deferred to Phase 2, where `Option<T>` and `Result<T, E>` land — until then, using `??` produces:
 
 ```
 error: operator '??' is not yet supported … requires Option<T> / Result<T, E> — available in Phase 2

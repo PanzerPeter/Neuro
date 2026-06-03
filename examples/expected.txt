@@ -30,6 +30,7 @@ types/integer_overflow.nr           55
 types/integer_suffixes.nr           0
 types/string_len.nr                 0
 types/strings.nr                    0
+types/type_aliases.nr               17
 types/underscore_separators.nr      0
 
 # --- operators ------------------------------------------------------------

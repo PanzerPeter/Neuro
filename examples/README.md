@@ -11,7 +11,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | Directory        | What it covers                                                         |
 | ---------------- | ---------------------------------------------------------------------- |
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference |
-| `types/`         | Primitive types, literal suffixes, separators, casts, overflow, strings |
+| `types/`         | Primitive types, literal suffixes, separators, casts, overflow, strings, type aliases |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods            |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `while`, block expressions, lints           |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods               |

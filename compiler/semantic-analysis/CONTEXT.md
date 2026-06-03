@@ -63,7 +63,7 @@ type and records an arity diagnostic when the argument count is wrong. Intrinsic
 argument (validated by `check_unary_int_intrinsic_arg`) and returns the receiver type.
 
 `&mut self` and consuming `self` methods are rejected at registration time with
-`UnsupportedSelfParam` until ownership semantics land (Phase 1.5).
+`UnsupportedSelfParam` until ownership semantics land (Phase 1.7).
 
 Constant declarations (`const NAME: Type = expr`): the `constants: HashMap<String, Type>` field
 in `TypeChecker` holds both module-level and function-body consts. `is_const_expr` validates

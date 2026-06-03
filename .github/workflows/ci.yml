@@ -92,7 +92,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust (${{ matrix.rust_version }})
-        uses: dtolnay/rust-toolchain@stable
+        # Use @master (toolchain is a required input) when the channel varies by
+        # matrix value. Pinning to @stable hardcodes the channel in the action
+        # ref, so overriding it via `toolchain:` is unsupported and the nightly
+        # leg bails out in the action's parse step.
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust_version }}
 
