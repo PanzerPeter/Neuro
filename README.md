@@ -109,7 +109,7 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 | **If/Block Expressions** | `val x = if cond { a } else { b }`; `val y = { stmts; expr }`; all arms type-checked; alloca-based lowering |
 | **Unsafe Blocks** | `unsafe { … }` reserved keyword + block expression (Phase 1.7 groundwork); inert — lowers identically to a bare block, evaluates to its trailing expression |
 | **Panic Runtime** | `panic(msg)`, `assert(cond)`, `unreachable()` builtins (§1.2): print a diagnostic (`message at file:line:col`) to stderr and abort via `abort()` — no stack unwinding. `assert` aborts only on a false condition. Divergent, so usable in tail-return position; a same-named user function shadows the builtin |
-| **LLVM Backend** | Native executable generation via inkwell 0.8.0 (LLVM 20) |
+| **LLVM Backend** | Native executable generation via inkwell 0.9.0 (LLVM 20) |
 | **CLI** | `neurc check` (type-check only) and `neurc compile` (produces native binary) |
 
 ### Current Memory Model
@@ -442,7 +442,7 @@ compiler/
 ├── syntax-parsing/          # Pratt + statement parser → AST
 ├── semantic-analysis/       # Type checker, scope analysis
 ├── control-flow/            # CFG builder (Phase 2+)
-├── llvm-backend/            # inkwell 0.8 / LLVM 20 codegen
+├── llvm-backend/            # inkwell 0.9 / LLVM 20 codegen
 └── neurc/                   # CLI compiler driver
 ```
 

@@ -141,7 +141,7 @@ compiler/
 ├── syntax-parsing/          # Parser slice (depends on lexical-analysis by design)
 ├── semantic-analysis/       # Type checker slice
 ├── control-flow/            # CFG analysis slice (Phase 2+)
-├── llvm-backend/            # LLVM 20 / inkwell 0.8 codegen slice
+├── llvm-backend/            # LLVM 20 / inkwell 0.9 codegen slice
 │
 └── neurc/                   # Compiler driver — the only crate that depends on all slices
 ```

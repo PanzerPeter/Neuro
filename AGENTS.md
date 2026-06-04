@@ -36,7 +36,7 @@ For full architecture rules, coding standards, and contribution workflows, refer
 **Scope:** `llvm-backend/` slice code generation and LLVM IR emission.
 
 **Rules:**
-- Target `inkwell` 0.8.0 (LLVM 20 bindings). Build environments require `LLVM_SYS_201_PREFIX` to be set.
+- Target `inkwell` 0.9.0 (LLVM 20 bindings). Build environments require `LLVM_SYS_201_PREFIX` to be set.
 - Document *all* `unsafe` blocks with a clear safety rationale comment.
 - `semantic-analysis` is NOT a production dependency for the backend; `neurc` handles the pipeline ordering.
 - Strictly adhere to ABI definitions: String ABI is a `{ ptr, i64 }` fat pointer. Struct ABI is an anonymous LLVM struct in declaration order (documented in `compiler/llvm-backend/CONTEXT.md`).

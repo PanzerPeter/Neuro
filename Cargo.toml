@@ -47,7 +47,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.26.1"
+version = "1.26.2"
 edition = "2021"
 rust-version = "1.85"
 authors = ["NEURO Contributors"]
@@ -59,7 +59,7 @@ categories = ["development-tools", "science"]
 
 [workspace.dependencies]
 # Core dependencies used across multiple crates
-thiserror = "1.0"
+thiserror = "2.0"
 anyhow = "1.0"
 miette = { version = "7.0", features = ["fancy"] }
 
@@ -68,27 +68,23 @@ logos = "0.14"
 unicode-segmentation = "1.11"
 unicode-ident = "1.0"
 
-# Parsing
-lalrpop = "0.20"
-lalrpop-util = "0.20"
-chumsky = "0.9"
-
 # LLVM Backend
 # Requires LLVM 20 installed system-wide with MLIR enabled.
 # On CachyOS/Arch: sudo pacman -S llvm20
 # LLVM_SYS_201_PREFIX must point to the LLVM 20 installation (e.g. /usr/lib/llvm20).
-# Feature flag is llvm20-1 (inkwell 0.8.0 uses the minor-version suffix scheme).
-# inkwell 0.8.0 requires Rust 1.85+.
+# Feature flag is llvm20-1 (inkwell uses the minor-version suffix scheme).
+# inkwell 0.9.0 is ported to Rust edition 2024 (Rust 1.85+) and adds LLVM 21/22
+# support while retaining LLVM 20 via the llvm20-1 feature.
 # default-features = false disables inkwell's `target-all` default, which would
 # otherwise compile in initializers for every LLVM target (ARM, BPF, Mips, ...).
 # That fails to link on Windows CI, whose prebuilt LLVM only ships the x86 target
 # libs. We only ever initialize the native (x86) target, so target-x86 suffices.
-inkwell = { version = "0.8.0", default-features = false, features = ["llvm20-1", "target-x86"] }
+inkwell = { version = "0.9.0", default-features = false, features = ["llvm20-1", "target-x86"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
+toml = "1.0"
 
 # CLI
 clap = { version = "4.5", features = ["derive", "color", "suggestions"] }
@@ -110,7 +106,7 @@ tower-lsp = "0.20"
 lsp-types = "0.95"
 
 # Testing
-criterion = "0.5"
+criterion = "0.8"
 proptest = "1.4"
 
 [profile.dev]
