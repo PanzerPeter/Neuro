@@ -73,6 +73,9 @@ that refer to other known consts). Function-body `Stmt::Const` nodes are validat
 so const names are usable in any expression context.
 
 ## Recent Updates
+- 2026-06-04: Added `Expr::Unsafe` type-checking (Phase 1.7 groundwork). Treated identically to
+  `Expr::Block`: pushes a scope and yields the trailing expression's type. `unsafe` is inert —
+  no special semantics, no new diagnostics.
 - 2026-05-31: Integer primitive methods §1.2, §1.4. `resolve_builtin_method` now resolves
   `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and `.shr(n)` on integer receivers,
   returning the receiver type. New `check_unary_int_intrinsic_arg` enforces arity 1 and an

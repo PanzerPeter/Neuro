@@ -149,6 +149,9 @@ impl<'ctx> CodegenContext<'ctx> {
             } => self.codegen_if_expr(condition, then_block, else_if_blocks, else_block, span),
 
             Expr::Block { stmts, .. } => self.codegen_block_expr(stmts),
+
+            // `unsafe` is inert: lower its body identically to a bare block.
+            Expr::Unsafe { stmts, .. } => self.codegen_block_expr(stmts),
         }
     }
 

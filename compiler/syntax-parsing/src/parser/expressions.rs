@@ -152,6 +152,8 @@ impl Parser {
 
             TokenKind::LeftBrace => self.parse_block_expr(token.span),
 
+            TokenKind::Unsafe => self.parse_unsafe_expr(token.span),
+
             _ => Err(ParseError::UnexpectedToken {
                 found: token.kind,
                 expected: "expression".to_string(),
@@ -224,6 +226,25 @@ impl Parser {
         let close = self.consume(TokenKind::RightBrace, "'}'")?;
         let span = start_span.merge(close.span);
         Ok(Expr::Block { stmts, span })
+    }
+
+    /// Parse an unsafe block expression. The `unsafe` keyword has already been
+    /// consumed; `start_span` is its span. The body is an ordinary statement
+    /// block — `unsafe` is inert in Phase 1.7, so this only records the node.
+    fn parse_unsafe_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
+        self.skip_newlines();
+        self.consume(TokenKind::LeftBrace, "'{' after 'unsafe'")?;
+        self.skip_newlines();
+
+        let mut stmts = Vec::new();
+        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            stmts.push(self.parse_stmt()?);
+            self.skip_newlines();
+        }
+
+        let close = self.consume(TokenKind::RightBrace, "'}'")?;
+        let span = start_span.merge(close.span);
+        Ok(Expr::Unsafe { stmts, span })
     }
 
     /// Parse an infix expression (binary operators, function calls, field access, casts)

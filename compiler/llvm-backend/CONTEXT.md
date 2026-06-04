@@ -173,6 +173,9 @@ types and is re-seeded into `type_env` after each `type_env.clear()` in
 const identifiers inside function bodies.
 
 ## Recent Updates
+- 2026-06-04: Added `Expr::Unsafe` lowering (Phase 1.7 groundwork). Lowered via `codegen_block_expr`
+  exactly like `Expr::Block`; the type pass collects its result type through the shared
+  `Expr::Block | Expr::Unsafe` arm. `unsafe` is inert — identical IR to a bare block.
 - 2026-06-02: Logical `&&`/`||` now short-circuit (§1.4). `codegen_binary` intercepts them
   before eager operand evaluation and routes through the new `codegen_short_circuit`
   (phi-merge over a `logic.rhs`/`logic.merge` block pair). Previously both operands were

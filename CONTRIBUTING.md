@@ -286,7 +286,7 @@ issue before starting one of the bigger items.
 - [ ] **Panic runtime — abort, no unwinding** (§1.2). `panic` / `assert` / `unreachable` print a diagnostic with source location and abort; the stack is not unwound. `Drop` / `defer` run only on normal scope exit. Integer-overflow, array-bounds, and string-slice checks route here.
 - [ ] **Remove ARC.** Strip any reference-counting plumbing introduced during the alpha — everything is owned-or-borrowed from here on.
 - [ ] **Runtime string ops behind the borrow checker.** `String::new`, `string + &string` concat, `.push_str`, `.clear` — the first features that exercise heap + `Drop`.
-- [ ] **`unsafe { }` block infrastructure** (§3, prep for Phase 5 `@kernel`). Reserved keyword + block parsing + AST node. Outside `@kernel` bodies, `unsafe` is inert.
+- [x] **`unsafe { }` block infrastructure** (§3, prep for Phase 5 `@kernel`). Reserved keyword + block parsing + AST node. Outside `@kernel` bodies, `unsafe` is inert.
 
 ### Non-Code Contributions
 

@@ -25,6 +25,13 @@ fn tokenize_keywords() {
 }
 
 #[test]
+fn tokenize_unsafe_keyword() {
+    let result = tokenize("unsafe").unwrap();
+    assert_eq!(result.len(), 2); // keyword + EOF
+    assert!(matches!(result[0].kind, TokenKind::Unsafe));
+}
+
+#[test]
 fn tokenize_identifiers() {
     let result = tokenize("foo bar_baz _underscore").unwrap();
     assert_eq!(result.len(), 4); // 3 identifiers + EOF

@@ -771,6 +771,15 @@ impl TypeChecker {
                 self.symbols.pop_scope();
                 Some(ty)
             }
+
+            // `unsafe` is inert in Phase 1.7: it introduces a scope and yields
+            // its trailing expression's type, exactly like a bare block.
+            Expr::Unsafe { stmts, .. } => {
+                self.symbols.push_scope();
+                let ty = self.check_block_expr_type(stmts);
+                self.symbols.pop_scope();
+                Some(ty)
+            }
         }
     }
 

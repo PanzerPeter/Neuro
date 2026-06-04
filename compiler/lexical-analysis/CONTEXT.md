@@ -33,6 +33,7 @@ so `+=` is always consumed as a single token rather than `+` then `=`.
 (`const NAME: Type = expr`). It sits between `Mut` and `As` in declaration order.
 
 ## Recent Updates
+- 2026-06-04: Added `TokenKind::Unsafe` keyword token for `unsafe { }` blocks (Phase 1.7 groundwork). Reserves the word so it cannot be an identifier. Sits after `Type` in declaration order.
 - 2026-06-03: Added `TokenKind::Type` keyword token for §3.14 type-alias declarations (`type Name = TargetType`). Sits after `Where` in declaration order.
 - 2026-04-16: Added `TokenKind::Const` keyword token for §1.3 const declarations.
 - 2026-04-18: Added bitwise operator tokens for §1.4: `Pipe` (`|`), `Caret` (`^`), `Tilde` (`~`), `LeftShift` (`<<`). `Amp` (`&`) was already present. `LeftShift` is declared before `Less` so logos longest-match always picks `<<` over `<`.
