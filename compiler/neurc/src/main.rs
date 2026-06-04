@@ -198,9 +198,10 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
     let optimization =
         OptimizationLevelSetting::from_u8(optimization).context("Invalid optimization level")?;
 
-    let object_code = llvm_backend::compile(&ast, optimization)
-        .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
-        .context("Failed to generate object code")?;
+    let object_code =
+        llvm_backend::compile(&ast, optimization, &source, &input.display().to_string())
+            .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
+            .context("Failed to generate object code")?;
 
     // Write object code to temporary file
     // On Windows, MSVC expects .obj extension; on Unix, .o is conventional

@@ -10,6 +10,7 @@ license.workspace = true
 shared-types = { path = "../infrastructure/shared-types" }
 ast-types = { path = "../infrastructure/ast-types" }
 diagnostics = { path = "../infrastructure/diagnostics" }
+source-location = { path = "../infrastructure/source-location" }
 inkwell = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

@@ -69,6 +69,55 @@ impl TypeChecker {
         }
     }
 
+    /// Type-check a call to a compiler-known panic-family builtin (§1.2):
+    /// `panic(msg: string)`, `assert(cond: bool)`, or `unreachable()`.
+    ///
+    /// Returns `Some(ty)` when `func_name` names a builtin — recording an arity or
+    /// argument-type diagnostic on violation — and `None` otherwise, so the caller falls
+    /// through to ordinary function resolution. The result type is `Type::Unknown`: these
+    /// builtins **diverge** (they abort and never return), so the call must satisfy any
+    /// context — a unit statement, a non-`void` tail return (`func f() -> i32 { panic(..) }`),
+    /// or a value binding. `Type::Unknown` is the type system's "compatible with everything"
+    /// type, which is exactly the divergent (`never`) contract until a dedicated `!` type lands.
+    fn resolve_panic_builtin(
+        &mut self,
+        func_name: &str,
+        args: &[Expr],
+        span: Span,
+    ) -> Option<Type> {
+        // Each builtin's single fixed parameter type, or `None` for the nullary `unreachable`.
+        let expected_param = match func_name {
+            "panic" => Some(Type::String),
+            "assert" => Some(Type::Bool),
+            "unreachable" => None,
+            _ => return None,
+        };
+
+        let expected_arity = if expected_param.is_some() { 1 } else { 0 };
+        if args.len() != expected_arity {
+            self.record_error(TypeError::ArgumentCountMismatch {
+                expected: expected_arity,
+                found: args.len(),
+                span,
+            });
+            return Some(Type::Unknown);
+        }
+
+        if let (Some(expected), Some(arg)) = (expected_param, args.first()) {
+            if let Some(arg_ty) = self.check_expr(arg, Some(&expected)) {
+                if !arg_ty.is_compatible_with(&expected) {
+                    self.record_error(TypeError::Mismatch {
+                        expected,
+                        found: arg_ty,
+                        span: arg.span(),
+                    });
+                }
+            }
+        }
+
+        Some(Type::Unknown)
+    }
+
     /// Type-check a plain identifier call (free function or previously registered
     /// method with a mangled name). Extracted so the `Call` arm can delegate here.
     pub(crate) fn check_plain_call(
@@ -77,6 +126,14 @@ impl TypeChecker {
         args: &[ast_types::Expr],
         span: shared_types::Span,
     ) -> Option<Type> {
+        // A user-defined function of the same name shadows the builtin: only consult the
+        // panic-family resolver when no such function is registered.
+        if !self.functions.contains_key(func_name) {
+            if let Some(ret) = self.resolve_panic_builtin(func_name, args, span) {
+                return Some(ret);
+            }
+        }
+
         let func_ty = if let Some(ty) = self.functions.get(func_name) {
             ty.clone()
         } else {

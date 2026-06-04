@@ -93,11 +93,17 @@ impl OptimizationLevelSetting {
 ///     "#;
 ///
 ///     let ast = parse(source).unwrap();
-///     let object_code = compile(&ast, OptimizationLevelSetting::O2).unwrap();
+///     let object_code =
+///         compile(&ast, OptimizationLevelSetting::O2, source, "example.nr").unwrap();
 ///     // Write object_code to file or link to executable
 /// }
 /// ```
-pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> CodegenResult<Vec<u8>> {
+pub fn compile(
+    items: &[Item],
+    optimization: OptimizationLevelSetting,
+    source: &str,
+    source_path: &str,
+) -> CodegenResult<Vec<u8>> {
     // Collect struct definitions first so resolve_syntax_type can recognise struct names
     // when processing function parameter and return types below.
     let mut struct_defs: HashMap<String, Vec<(String, Type)>> = HashMap::new();
@@ -185,6 +191,13 @@ pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> Codege
     let context = LLVMContext::create();
     let mut codegen_ctx = CodegenContext::new(&context, "neuro_module");
     codegen_ctx.set_struct_defs(struct_defs);
+
+    // Supply source so panic-family builtins can render `file:line:col` in their
+    // runtime diagnostics (§1.2).
+    codegen_ctx.set_source(source_location::SourceFile::new(
+        source_path.to_string(),
+        source.to_string(),
+    ));
 
     // Debug builds (-O0) trap on integer overflow; release builds wrap (§1.2).
     codegen_ctx.set_overflow_checks(optimization == OptimizationLevelSetting::O0);
@@ -322,7 +335,7 @@ mod tests {
         "#;
 
         let items = syntax_parsing::parse(source).expect("parsing failed");
-        let result = compile(&items, OptimizationLevelSetting::O0);
+        let result = compile(&items, OptimizationLevelSetting::O0, source, "test.nr");
 
         assert!(result.is_ok(), "compilation failed: {:?}", result.err());
         let object_code = result.unwrap();
@@ -343,7 +356,7 @@ mod tests {
         "#;
 
         let items = syntax_parsing::parse(source).expect("parsing failed");
-        let result = compile(&items, OptimizationLevelSetting::O2);
+        let result = compile(&items, OptimizationLevelSetting::O2, source, "test.nr");
 
         assert!(result.is_ok(), "compilation failed: {:?}", result.err());
         let object_code = result.unwrap();
@@ -364,7 +377,7 @@ mod tests {
         "#;
 
         let items = syntax_parsing::parse(source).expect("parsing failed");
-        let result = compile(&items, OptimizationLevelSetting::O0);
+        let result = compile(&items, OptimizationLevelSetting::O0, source, "test.nr");
 
         assert!(result.is_ok(), "compilation failed: {:?}", result.err());
         assert!(
@@ -386,7 +399,7 @@ mod tests {
         "#;
 
         let items = syntax_parsing::parse(source).expect("parsing failed");
-        let result = compile(&items, OptimizationLevelSetting::O2);
+        let result = compile(&items, OptimizationLevelSetting::O2, source, "test.nr");
 
         assert!(result.is_ok(), "compilation failed: {:?}", result.err());
         assert!(

@@ -5,8 +5,12 @@ Emit native object code from a type-checked Neuro AST via LLVM IR generation.
 
 ## Entry Point
 - Type: Library function
-- Input: `items: &[Item], optimization: OptimizationLevelSetting`
+- Input: `items: &[Item], optimization: OptimizationLevelSetting, source: &str, source_path: &str`
 - Output: `Result<Vec<u8>, CodegenError>`
+
+`source` / `source_path` are the original module text and its path; they are wrapped in a
+`source_location::SourceFile` and used solely to render `file:line:col` in panic-family
+runtime diagnostics (§1.2). They do not affect type-checking or codegen of any other construct.
 
 ## Data Ownership
 - Tables: none
@@ -18,6 +22,7 @@ Emit native object code from a type-checked Neuro AST via LLVM IR generation.
 - ast-types — read-only traversal of the type-checked AST
 - shared-types — type system primitives
 - diagnostics — error type infrastructure
+- source-location — `SourceFile` byte-offset → line/column mapping for panic diagnostics (§1.2)
 
 ## Notes
 inkwell 0.8.0 with feature `llvm20-1` (LLVM 20 bindings) is a third-party crate, not Neuro-owned Shared Kernel.
@@ -145,6 +150,36 @@ Signedness selects the `s`/`u` intrinsic variant via `TypeMapper::is_unsigned_in
 Division, modulo, bitwise ops, and floats are unaffected. The `FoldedConst`
 compile-time path is independent and always wraps.
 
+## Panic Runtime ABI
+The panic-family builtins `panic(msg: string)`, `assert(cond: bool)`, and `unreachable()`
+(§1.2) lower in `panic.rs`. The contract is **abort, no unwinding**: no landing pads are
+emitted, so the happy path is zero-cost and `Drop`/`defer` (future) fire only on normal
+scope exit. The `Call`→`Identifier` arm in `expressions.rs` intercepts these names via
+`CodegenContext::is_panic_builtin` *before* `codegen_call`, but only when no user function of
+the same name is registered (user functions shadow the builtin, matching the semantic
+resolver). `is_panic_builtin` is duplicated from `semantic-analysis` to keep the backend
+independent of the type-checker slice.
+
+Each builtin writes its diagnostic to stderr (fd 2) with the external POSIX `write` call
+(`get_or_declare_write`), then calls libc `abort` (`get_or_declare_abort`, marked `noreturn`)
+followed by an `unreachable` terminator:
+- `panic` → `write "panic: "`, `write <msg fat-ptr>`, `write " at file:line:col\n"`, abort.
+- `unreachable` → `write "internal error: entered unreachable code at file:line:col\n"`, abort.
+- `assert` → conditional branch: a true condition falls through to `assert.cont`; a false one
+  enters `assert.fail`, which writes `"assertion failed at file:line:col\n"` and aborts.
+
+The dynamic `panic` message is a runtime `string` fat pointer `{ ptr, i64 }`; its fields are
+read with `extractvalue` and passed straight to `write`. The `file:line:col` suffix is derived
+from the `Call` span start via the `SourceFile` supplied to `compile`; it is empty when no
+source was provided. `write`+`abort` are POSIX/libc symbols available on Linux and macOS, and
+via the MSVC CRT compatibility layer on Windows.
+
+Because `panic`/`unreachable` terminate the block with `unreachable`, statements that follow a
+divergent call are dead code. `codegen_stmt` early-returns when the current block is already
+terminated, and `codegen_return` / `codegen_body`'s tail path skip the `ret` when evaluating
+the returned expression terminated the block (`func f() -> i32 { panic("x") }`). This keeps
+LLVM from seeing instructions after a terminator.
+
 ## Future: MLIR Integration (Phase 3+)
 When tensor operations are introduced, `melior` (Rust MLIR bindings, targeting the same
 LLVM 20 / MLIR 20 installation) will be added alongside inkwell. The lowering strategy
@@ -173,6 +208,14 @@ types and is re-seeded into `type_env` after each `type_env.clear()` in
 const identifiers inside function bodies.
 
 ## Recent Updates
+- 2026-06-04: Panic runtime §1.2 (Phase 1.7). New `panic.rs` lowers `panic`/`assert`/`unreachable`
+  to a stderr diagnostic (`write` to fd 2) + libc `abort` + `unreachable` — abort, no unwinding.
+  `compile` gained `source`/`source_path` params (wrapped in `SourceFile`) so diagnostics carry
+  `file:line:col`. `get_or_declare_write`/`get_or_declare_abort` added (`context.rs`); the
+  `Call`→`Identifier` arm intercepts the builtins via `is_panic_builtin` before `codegen_call`
+  (user functions shadow). Added terminated-block guards in `codegen_stmt`, `codegen_return`, and
+  `codegen_body`'s tail path so dead code after a divergent call does not break verification.
+  See "Panic Runtime ABI".
 - 2026-06-04: Added `Expr::Unsafe` lowering (Phase 1.7 groundwork). Lowered via `codegen_block_expr`
   exactly like `Expr::Block`; the type pass collects its result type through the shared
   `Expr::Block | Expr::Unsafe` arm. `unsafe` is inert — identical IR to a bare block.

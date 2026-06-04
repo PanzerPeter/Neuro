@@ -627,6 +627,47 @@ func identity<T>(x: T) -> T {
 }
 ```
 
+## Panic Builtins (§1.2)
+
+Three compiler-known builtins terminate the program when an unrecoverable condition is
+reached. They follow the **abort, no unwinding** model: each prints a diagnostic
+(`message at file:line:col`) to standard error and calls `abort()`. The stack is *not*
+unwound, so future `Drop` / `defer` cleanup runs only on normal scope exit, never during a
+panic.
+
+```neuro
+func divide(a: i32, b: i32) -> i32 {
+    if b == 0 {
+        panic("division by zero")
+    }
+    a / b
+}
+
+func main() -> i32 {
+    assert(divide(10, 2) == 5)   // passes silently
+    val x = divide(1, 0)         // prints "panic: division by zero at main.nr:3:9" and aborts
+    return 0
+}
+```
+
+| Builtin | Signature | Behaviour |
+|---|---|---|
+| `panic` | `panic(msg: string)` | Print `panic: <msg> at <loc>` and abort. |
+| `assert` | `assert(cond: bool)` | Abort with `assertion failed at <loc>` only when `cond` is false; otherwise continue. |
+| `unreachable` | `unreachable()` | Print `internal error: entered unreachable code at <loc>` and abort. |
+
+Because these builtins **diverge** (they never return), a call may appear anywhere a value is
+expected — including the implicit-return (tail) position of a non-`void` function:
+
+```neuro
+func parse_digit(c: i32) -> i32 {
+    if c >= 48 && c <= 57 { c - 48 } else { panic("not a digit") }
+}
+```
+
+A user-defined function whose name is `panic`, `assert`, or `unreachable` shadows the builtin
+within the program.
+
 ## References
 
 - [Types](types.md) - Function types and type checking

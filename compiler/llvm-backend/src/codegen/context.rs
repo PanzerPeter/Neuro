@@ -1,12 +1,14 @@
 // NEURO Programming Language - LLVM Backend
 // Code generation context and LLVM IR generation
 
+use inkwell::attributes::Attribute;
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context as LLVMContext;
 use inkwell::module::Module;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
+use source_location::SourceFile;
 use std::collections::HashMap;
 
 use crate::type_mapping::TypeMapper;
@@ -127,6 +129,11 @@ pub(crate) struct CodegenContext<'ctx> {
     /// overflow detection that traps at runtime. When false (release builds),
     /// the plain wrapping instruction is emitted. See §1.2.
     pub(crate) overflow_checks: bool,
+
+    /// Source text wrapper for the module being compiled, used to render `file:line:col`
+    /// in panic-family diagnostics (§1.2). `None` when the caller did not supply source
+    /// (e.g. the library doctest); panic diagnostics then omit the location suffix.
+    pub(crate) source: Option<SourceFile>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -153,6 +160,7 @@ impl<'ctx> CodegenContext<'ctx> {
             const_values: HashMap::new(),
             global_const_types: HashMap::new(),
             overflow_checks: false,
+            source: None,
         }
     }
 
@@ -160,6 +168,11 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Enabled for `-O0` (debug), disabled for `-O1..-O3` (release).
     pub(crate) fn set_overflow_checks(&mut self, enabled: bool) {
         self.overflow_checks = enabled;
+    }
+
+    /// Provide the module source so panic-family diagnostics can render `file:line:col`.
+    pub(crate) fn set_source(&mut self, source: SourceFile) {
+        self.source = Some(source);
     }
 
     /// Get the external `memcmp` declaration, inserting it on first use.
@@ -179,6 +192,46 @@ impl<'ctx> CodegenContext<'ctx> {
         );
         self.module
             .add_function("memcmp", fn_type, Some(inkwell::module::Linkage::External))
+    }
+
+    /// Get the external POSIX `write` declaration, inserting it on first use.
+    /// `write(fd: i32, buf: ptr, count: i64) -> i64`. Used by the panic runtime to emit
+    /// the diagnostic to stderr (fd 2); the return value is discarded. POSIX-standard on
+    /// Linux/macOS and exposed by the MSVC CRT compatibility layer on Windows.
+    pub(crate) fn get_or_declare_write(&self) -> FunctionValue<'ctx> {
+        if let Some(f) = self.module.get_function("write") {
+            return f;
+        }
+        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let fn_type = self.context.i64_type().fn_type(
+            &[
+                self.context.i32_type().into(),
+                ptr_type.into(),
+                self.context.i64_type().into(),
+            ],
+            false,
+        );
+        self.module
+            .add_function("write", fn_type, Some(inkwell::module::Linkage::External))
+    }
+
+    /// Get the external libc `abort` declaration, inserting it on first use.
+    /// `abort() -> void`. Terminates the process via SIGABRT without unwinding the stack,
+    /// which is exactly the §1.2 panic contract (no landing pads, `Drop`/`defer` skipped).
+    pub(crate) fn get_or_declare_abort(&self) -> FunctionValue<'ctx> {
+        if let Some(f) = self.module.get_function("abort") {
+            return f;
+        }
+        let fn_type = self.context.void_type().fn_type(&[], false);
+        let func =
+            self.module
+                .add_function("abort", fn_type, Some(inkwell::module::Linkage::External));
+        func.add_attribute(
+            inkwell::attributes::AttributeLoc::Function,
+            self.context
+                .create_enum_attribute(Attribute::get_named_enum_kind_id("noreturn"), 0),
+        );
+        func
     }
 }
 

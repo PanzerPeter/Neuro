@@ -292,26 +292,40 @@ impl<'ctx> CodegenContext<'ctx> {
             for stmt in &body[..body.len() - 1] {
                 self.codegen_stmt(stmt)?;
             }
-            let ret_val = match body.last() {
-                Some(Stmt::Expr(expr)) => self.codegen_expr(expr)?,
-                Some(Stmt::If {
-                    condition,
-                    then_block,
-                    else_if_blocks,
-                    else_block,
-                    span,
-                }) => {
-                    self.codegen_if_expr(condition, then_block, else_if_blocks, else_block, span)?
+            // A preceding statement may have diverged (e.g. an unconditional `panic`),
+            // terminating the block before the tail expression. Skip the tail and the
+            // return in that case — there is no live block to emit into.
+            if !self.current_block_terminated() {
+                let ret_val = match body.last() {
+                    Some(Stmt::Expr(expr)) => self.codegen_expr(expr)?,
+                    Some(Stmt::If {
+                        condition,
+                        then_block,
+                        else_if_blocks,
+                        else_block,
+                        span,
+                    }) => self.codegen_if_expr(
+                        condition,
+                        then_block,
+                        else_if_blocks,
+                        else_block,
+                        span,
+                    )?,
+                    _ => {
+                        return Err(CodegenError::InternalError(
+                            "tail statement is not value-producing".to_string(),
+                        ))
+                    }
+                };
+                // The tail expression itself may diverge (`func f() -> i32 { panic("x") }`),
+                // in which case the block is already terminated and `ret_val` is a discarded
+                // placeholder — do not append a `ret` after the `unreachable`.
+                if !self.current_block_terminated() {
+                    self.builder
+                        .build_return(Some(&ret_val))
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
                 }
-                _ => {
-                    return Err(CodegenError::InternalError(
-                        "tail statement is not value-producing".to_string(),
-                    ))
-                }
-            };
-            self.builder
-                .build_return(Some(&ret_val))
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            }
         } else {
             for stmt in body {
                 self.codegen_stmt(stmt)?;
