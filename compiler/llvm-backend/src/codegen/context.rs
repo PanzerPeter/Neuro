@@ -110,6 +110,13 @@ pub(crate) struct CodegenContext<'ctx> {
     /// share the same span.start, causing expr_types collisions.
     pub(crate) fa_struct_names: HashMap<usize, String>,
 
+    /// Maps a binary expression's full span `(start, end)` → its left-operand type, used by
+    /// `codegen_binary` to pick the comparison/arithmetic instruction width and signedness.
+    /// Keyed by the full span rather than `span.start + 1`: a binary node and its leftmost
+    /// descendant share the same `span.start`, so the parent's left-type slot would clobber
+    /// the child's. `(start, end)` is unique per node (the child's `end` is always smaller).
+    pub(crate) binary_left_types: HashMap<(usize, usize), Type>,
+
     /// Maps a builtin method-call's `Call` span.start → the resolved intrinsic plus the
     /// receiver's type, so `codegen_expr` lowers it directly instead of looking up a struct
     /// method. The receiver type is stored here rather than read back from `expr_types`
@@ -156,6 +163,7 @@ impl<'ctx> CodegenContext<'ctx> {
             loop_targets: Vec::new(),
             struct_defs: HashMap::new(),
             fa_struct_names: HashMap::new(),
+            binary_left_types: HashMap::new(),
             builtin_methods: HashMap::new(),
             const_values: HashMap::new(),
             global_const_types: HashMap::new(),

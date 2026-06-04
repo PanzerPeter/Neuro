@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.26.1] - 2026-06-04
+
+### Fixed
+- `codegen`: short-circuit `&&` / `||` with a comparison as the **left** operand miscompiled (§1.4). The type pass stored each binary node's left-operand type at `expr_types[span.start + 1]`, but a binary node and its leftmost descendant share the same `span.start`; the parent's write (e.g. `&&`, left type `Bool`) clobbered the left child comparison's entry (e.g. `i32`). The leftmost comparison was then generated with `left_ty = Bool`, truncating its i32 operands to i1 — so `c >= 48 && c <= 57` with `c = 51` wrongly evaluated to `false` (the i1 `-1 >= 0` is false), while `c == 51 && …` and parenthesized `(c >= 48) && …` happened to work. Left-operand types now live in a dedicated `binary_left_types` map keyed by the full span `(start, end)`, which is unique per node and immune to the `span.start` collision. Regression test: `compiler/neurc/tests/short_circuit_runtime.rs`.
+
+---
+
 ## [1.26.0] - 2026-06-04
 
 ### Added

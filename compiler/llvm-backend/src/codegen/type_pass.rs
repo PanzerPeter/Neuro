@@ -371,8 +371,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 };
 
                 self.expr_types.insert(span.start, result_ty);
-                // Store left type for binary codegen
-                self.expr_types.insert(span.start + 1, left_ty);
+                // Store the left-operand type for binary codegen in a dedicated, full-span-keyed
+                // map. A `span.start + 1` slot in `expr_types` would collide: this node and its
+                // leftmost descendant share `span.start`, so the parent (e.g. `&&`, left type
+                // Bool) would clobber the child comparison's left type (e.g. i32).
+                self.binary_left_types
+                    .insert((span.start, span.end), left_ty);
             }
             Expr::Unary { operand, span, .. } => {
                 self.visit_expr_for_types(operand, func_types)?;
