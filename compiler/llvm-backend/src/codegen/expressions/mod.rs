@@ -37,12 +37,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 right,
                 span,
             } => {
-                // The left-operand type is stored at span.start + 1 by visit_expr_for_types.
-                // span.start holds the result type (e.g. Bool for comparisons), which is not
-                // what codegen_binary needs when dispatching on the operand kind.
+                // The left-operand type is stored in `binary_left_types`, keyed by this node's
+                // full span, by visit_expr_for_types. `expr_types[span.start]` holds the result
+                // type (e.g. Bool for comparisons), which is not what codegen_binary needs when
+                // dispatching on the operand kind.
                 let left_ty = self
-                    .expr_types
-                    .get(&(span.start + 1))
+                    .binary_left_types
+                    .get(&(span.start, span.end))
                     .cloned()
                     .ok_or_else(|| {
                         CodegenError::InternalError(
