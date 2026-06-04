@@ -393,18 +393,27 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 match &**func {
                     Expr::Identifier(ident) => {
-                        let func_type = func_types
-                            .get(&ident.name)
-                            .ok_or_else(|| CodegenError::UndefinedFunction(ident.name.clone()))?;
-                        let ret_ty = match func_type {
-                            Type::Function { ret, .. } => &**ret,
-                            _ => {
-                                return Err(CodegenError::InternalError(
-                                    "called object is not a function".to_string(),
-                                ))
-                            }
-                        };
-                        self.expr_types.insert(span.start, ret_ty.clone());
+                        // Panic-family builtins (§1.2) are not in `func_types`; they yield unit
+                        // and are lowered specially. A user function of the same name shadows
+                        // the builtin, matching `codegen_expr` and the semantic resolver.
+                        if Self::is_panic_builtin(&ident.name)
+                            && !func_types.contains_key(&ident.name)
+                        {
+                            self.expr_types.insert(span.start, Type::Void);
+                        } else {
+                            let func_type = func_types.get(&ident.name).ok_or_else(|| {
+                                CodegenError::UndefinedFunction(ident.name.clone())
+                            })?;
+                            let ret_ty = match func_type {
+                                Type::Function { ret, .. } => &**ret,
+                                _ => {
+                                    return Err(CodegenError::InternalError(
+                                        "called object is not a function".to_string(),
+                                    ))
+                                }
+                            };
+                            self.expr_types.insert(span.start, ret_ty.clone());
+                        }
                     }
 
                     // Method call: `instance.method(args)`

@@ -58,7 +58,12 @@ fn bench_codegen(c: &mut Criterion) {
             &items,
             |b, parsed_items| {
                 b.iter(|| {
-                    let result = compile(parsed_items, OptimizationLevelSetting::O2);
+                    let result = compile(
+                        parsed_items,
+                        OptimizationLevelSetting::O2,
+                        source,
+                        "bench.nr",
+                    );
                     assert!(
                         result.is_ok(),
                         "benchmark compilation failed: {:?}",

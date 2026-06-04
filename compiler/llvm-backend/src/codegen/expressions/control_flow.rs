@@ -129,9 +129,13 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         if let Stmt::Expr(expr) = last {
             let val = self.codegen_expr(expr)?;
-            self.builder
-                .build_store(alloca, val)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            // A diverging arm value (e.g. `else { panic("x") }`) terminates the block with
+            // `unreachable`; there is no result to store and the caller skips the merge branch.
+            if !self.current_block_terminated() {
+                self.builder
+                    .build_store(alloca, val)
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            }
         } else {
             self.codegen_stmt(last)?;
         }

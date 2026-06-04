@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.26.0] - 2026-06-04
+
+### Added
+- `codegen`: panic runtime — `panic` / `assert` / `unreachable` (Phase 1.7, syntax §1.2). The three panic-family builtins now lower end-to-end with the **abort, no unwinding** contract: `panic(msg: string)` and `unreachable()` print a diagnostic to stderr and terminate via libc `abort()` (SIGABRT); `assert(cond: bool)` branches and aborts only when the condition is false. Diagnostics carry the source location (`message at file:line:col`), threaded into `llvm_backend::compile` via two new `source` / `source_path` parameters and rendered through `source_location::SourceFile`. The diagnostic is written with the POSIX `write` syscall to stderr (fd 2) so it reaches the terminal before the process dies; no unwinding landing pads are emitted, so `Drop`/`defer` (future) will fire only on normal scope exit. The builtins are recognized in both `semantic-analysis` (`resolve_panic_builtin`, returning the divergent `Unknown` type so a panic satisfies any return/binding context, e.g. `func f() -> i32 { panic("x") }`) and `llvm-backend` (`is_panic_builtin` + `panic.rs`); a user function of the same name shadows the builtin. Statements after a divergent call are dropped via new terminated-block guards in `codegen_stmt`/`codegen_return`/`codegen_body`. `checked_*`-style value-position panics and rerouting integer-overflow/bounds checks through this runtime remain follow-ups.
+
+---
+
 ## [1.25.0] - 2026-06-04
 
 ### Added

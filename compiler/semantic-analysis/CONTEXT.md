@@ -62,6 +62,16 @@ type and records an arity diagnostic when the argument count is wrong. Intrinsic
 `saturating_{add,sub,mul}`, and `.shr(n)` (§1.2, §1.4) — each takes one same-typed
 argument (validated by `check_unary_int_intrinsic_arg`) and returns the receiver type.
 
+Panic-family builtins (§1.2): `check_plain_call` consults `resolve_panic_builtin` before
+ordinary function resolution, but only when no user function of the same name is registered
+(a user `func panic(...)` shadows the builtin). The builtins are `panic(msg: string)`,
+`assert(cond: bool)`, and `unreachable()`; each validates arity and argument type
+(`ArgumentCountMismatch` / `Mismatch`) and returns `Type::Unknown`. The result is `Unknown`
+(the "compatible with everything" type) rather than `Void` because the call **diverges**
+(aborts), so it must satisfy any context — a unit statement, a non-`void` tail return
+(`func f() -> i32 { panic(..) }`), or a value binding — until a dedicated `!`/never type lands.
+Lowering lives entirely in `llvm-backend`.
+
 `&mut self` and consuming `self` methods are rejected at registration time with
 `UnsupportedSelfParam` until ownership semantics land (Phase 1.7).
 
@@ -73,6 +83,12 @@ that refer to other known consts). Function-body `Stmt::Const` nodes are validat
 so const names are usable in any expression context.
 
 ## Recent Updates
+- 2026-06-04: Panic runtime §1.2 (Phase 1.7). New `resolve_panic_builtin` in
+  `type_checkers/expressions.rs` recognizes `panic(string)`, `assert(bool)`, `unreachable()`
+  before ordinary resolution in `check_plain_call`; consulted only when no user function of the
+  same name exists (user functions shadow). Each returns `Type::Unknown` (divergent — satisfies
+  any return/binding context); wrong arity/type reuse `ArgumentCountMismatch` / `Mismatch`. No
+  new error variants.
 - 2026-06-04: Added `Expr::Unsafe` type-checking (Phase 1.7 groundwork). Treated identically to
   `Expr::Block`: pushes a scope and yields the trailing expression's type. `unsafe` is inert —
   no special semantics, no new diagnostics.

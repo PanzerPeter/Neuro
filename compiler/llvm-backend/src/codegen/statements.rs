@@ -132,6 +132,11 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn codegen_return(&mut self, value: Option<&Expr>) -> CodegenResult<()> {
         if let Some(expr) = value {
             let ret_val = self.codegen_expr(expr)?;
+            // `return panic("x")`: evaluating the operand already terminated the block with
+            // `unreachable`, so there is no value to return and no terminator slot left.
+            if self.current_block_terminated() {
+                return Ok(());
+            }
             self.builder
                 .build_return(Some(&ret_val))
                 .map_err(|e| CodegenError::LlvmError(format!("failed to build return: {}", e)))?;
@@ -408,6 +413,14 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Generate code for a statement
     pub(crate) fn codegen_stmt(&mut self, stmt: &Stmt) -> CodegenResult<()> {
+        // Statements following a divergent statement (a `panic`/`unreachable` builtin, or
+        // a `return`/`break`/`continue`) are dead code: the current block already has a
+        // terminator. Emitting into it would append instructions after a terminator and
+        // fail LLVM verification, so skip them. LLVM drops the now-unreferenced code.
+        if self.current_block_terminated() {
+            return Ok(());
+        }
+
         match stmt {
             Stmt::VarDecl { name, ty, init, .. } => {
                 self.codegen_var_decl(&name.name, ty.as_ref(), init.as_ref())

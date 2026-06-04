@@ -61,7 +61,17 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             Expr::Call { func, args, span } => {
                 match &**func {
-                    Expr::Identifier(ident) => self.codegen_call(&ident.name, args),
+                    Expr::Identifier(ident) => {
+                        // Panic-family builtins (§1.2) lower to a diagnostic + `abort`.
+                        // A user function of the same name shadows the builtin, matching
+                        // the semantic resolver, so only intercept when none is registered.
+                        if CodegenContext::is_panic_builtin(&ident.name)
+                            && !self.functions.contains_key(&ident.name)
+                        {
+                            return self.codegen_panic_builtin(&ident.name, args, *span);
+                        }
+                        self.codegen_call(&ident.name, args)
+                    }
 
                     // Method call: `instance.method(args)` — pass self as first arg
                     Expr::FieldAccess { field, .. } => {

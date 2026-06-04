@@ -283,7 +283,7 @@ issue before starting one of the bigger items.
 - [ ] **Mutable borrows `&mut T`** (§2.5). At most one `&mut T` at a time; excludes immutable borrows. Dereference via `*`.
 - [ ] **Lifetime inference + explicit annotations** (§2.6). Rust-style elision; explicit `<'a>` available for advanced patterns.
 - [ ] **`Drop` trait + deterministic destruction.** Destructor runs at scope exit. No GC, no ARC. First heap consumer is the string concat / format machinery.
-- [ ] **Panic runtime — abort, no unwinding** (§1.2). `panic` / `assert` / `unreachable` print a diagnostic with source location and abort; the stack is not unwound. `Drop` / `defer` run only on normal scope exit. Integer-overflow, array-bounds, and string-slice checks route here.
+- [x] **Panic runtime — abort, no unwinding** (§1.2). `panic` / `assert` / `unreachable` print a diagnostic with source location and abort; the stack is not unwound. `Drop` / `defer` run only on normal scope exit. (Rerouting integer-overflow, array-bounds, and string-slice checks through this runtime remains a follow-up.)
 - [ ] **Remove ARC.** Strip any reference-counting plumbing introduced during the alpha — everything is owned-or-borrowed from here on.
 - [ ] **Runtime string ops behind the borrow checker.** `String::new`, `string + &string` concat, `.push_str`, `.clear` — the first features that exercise heap + `Drop`.
 - [x] **`unsafe { }` block infrastructure** (§3, prep for Phase 5 `@kernel`). Reserved keyword + block parsing + AST node. Outside `@kernel` bodies, `unsafe` is inert.
