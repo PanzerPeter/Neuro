@@ -75,6 +75,17 @@ pub enum Expr {
         stmts: Vec<Stmt>,
         span: Span,
     },
+    /// Unsafe block expression: `unsafe { stmts; trailing_expr }`.
+    ///
+    /// Phase 1.7 groundwork: the keyword is reserved and the block parses, but
+    /// `unsafe` carries no special semantics yet — it is inert outside `@kernel`
+    /// bodies (which do not exist until Phase 5). It type-checks and lowers
+    /// exactly like a bare [`Expr::Block`]; the distinct node lets later phases
+    /// attach the kernel-aliasing relaxation without reparsing.
+    Unsafe {
+        stmts: Vec<Stmt>,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -93,6 +104,7 @@ impl Expr {
             Expr::Cast { span, .. } => *span,
             Expr::If { span, .. } => *span,
             Expr::Block { span, .. } => *span,
+            Expr::Unsafe { span, .. } => *span,
         }
     }
 }

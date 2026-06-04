@@ -300,6 +300,7 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
             }
         }
         Expr::Block { stmts, .. } => rewrite_block(stmts, resolved),
+        Expr::Unsafe { stmts, .. } => rewrite_block(stmts, resolved),
         Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } => {}
     }
 }

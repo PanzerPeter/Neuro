@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.25.0] - 2026-06-04
+
+### Added
+- `parser`: `unsafe { }` block infrastructure (Phase 1.7 groundwork, syntax §3 / §6.3). `unsafe` is now a reserved keyword (`TokenKind::Unsafe`) and `unsafe { … }` parses to a dedicated `Expr::Unsafe { stmts, span }` AST node. The block is an ordinary statement block: it introduces a scope and evaluates to its trailing expression, so it works as an implicit return, a `val` initializer, or a void statement. `unsafe` is deliberately **inert** — it carries no special semantics yet and lowers to identical IR as a bare block (`codegen_block_expr`). The distinct node exists so the Phase 5 GPU-kernel aliasing model can later gate raw `KernelOut` index writes behind `unsafe { }` without re-shaping the grammar. Reserving the keyword means it can no longer be used as an identifier.
+
+---
+
 ## [1.24.1] - 2026-06-03
 
 ### Changed

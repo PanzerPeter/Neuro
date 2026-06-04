@@ -43,6 +43,7 @@ control_flow/control_flow.nr          31
 control_flow/for_range.nr             10
 control_flow/for_range_inclusive.nr   15
 control_flow/if_block_expressions.nr  149
+control_flow/unsafe_block.nr          24
 control_flow/while_true_lint.nr       7
 
 # --- structs & methods ----------------------------------------------------

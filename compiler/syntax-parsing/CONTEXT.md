@@ -64,6 +64,11 @@ field/cast); using an alias as a value-position constructor or path name is not
 part of this feature.
 
 ## Recent Updates
+- 2026-06-04: Added `unsafe { }` block expressions (Phase 1.7 groundwork). New `parse_unsafe_expr`
+  prefix handler in `parser/expressions.rs` (dispatched on `TokenKind::Unsafe`), producing
+  `Expr::Unsafe { stmts, span }`. Body parses as an ordinary statement block; `unsafe` is inert.
+  `rewrite_expr` (type-alias pass) recurses into the block. No statement-parser change — an
+  `unsafe` block reaches the prefix parser via the expression-statement fallthrough.
 - 2026-06-03: Added type-alias declarations §3.14. New `TokenKind::Type` dispatch in
   `parse_program`; `parse_type_alias` + `expand_type_aliases` in `parser/type_aliases.rs`.
   New `ParseError::{DuplicateTypeAlias, TypeAliasShadowsBuiltin, CyclicTypeAlias}`.

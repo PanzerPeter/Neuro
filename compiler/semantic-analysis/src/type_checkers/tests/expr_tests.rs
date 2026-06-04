@@ -381,3 +381,29 @@ fn integer_intrinsic_on_float_reports_method_not_found() {
         errors
     );
 }
+
+#[test]
+fn unsafe_block_yields_trailing_expr_type_without_errors() {
+    // func main() -> i32 { unsafe { 7 } }
+    let mut checker = TypeChecker::new();
+
+    let func = make_function(
+        "main",
+        vec![],
+        Some("i32".to_string()),
+        vec![Stmt::Expr(Expr::Unsafe {
+            stmts: vec![Stmt::Expr(Expr::Literal(
+                Literal::Integer(7, None),
+                Span::new(9, 10),
+            ))],
+            span: Span::new(0, 12),
+        })],
+    );
+
+    checker.check_function(&func);
+    assert!(
+        !checker.has_errors(),
+        "unsafe block should type-check cleanly, got: {:?}",
+        checker.into_errors()
+    );
+}

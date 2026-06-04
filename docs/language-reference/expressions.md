@@ -119,6 +119,24 @@ val area: i32 = {
 
 Locals declared inside a block are scoped to that block.
 
+### Unsafe Block Expressions
+
+An `unsafe { … }` block is a block expression prefixed with the reserved
+`unsafe` keyword. It evaluates exactly like a bare block — its value is the
+trailing expression, and its locals are block-scoped:
+
+```neuro
+val x: i32 = unsafe {
+    val a: i32 = 20
+    a + 22          // trailing expression — this is the block's value
+}
+```
+
+`unsafe` is currently **inert**: it is a reserved keyword and produces a
+distinct AST node, but carries no special semantics yet. It exists as Phase 1.7
+groundwork for the GPU-kernel aliasing model (Phase 5), where `unsafe { }` will
+gate raw `KernelOut` index writes. Until then it behaves identically to `{ }`.
+
 ### Parenthesized Expressions
 
 Control evaluation order:

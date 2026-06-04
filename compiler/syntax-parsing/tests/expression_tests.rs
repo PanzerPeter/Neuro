@@ -449,3 +449,40 @@ fn test_function_call_with_complex_args() {
         _ => panic!("Expected function call"),
     }
 }
+
+#[test]
+fn test_parse_unsafe_block_with_value() {
+    let result = parse_expr("unsafe { 42 }");
+    assert!(result.is_ok());
+    match result.unwrap() {
+        Expr::Unsafe { stmts, .. } => assert_eq!(stmts.len(), 1),
+        other => panic!("Expected unsafe block, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_unsafe_block_empty() {
+    let result = parse_expr("unsafe { }");
+    assert!(result.is_ok());
+    match result.unwrap() {
+        Expr::Unsafe { stmts, .. } => assert_eq!(stmts.len(), 0),
+        other => panic!("Expected empty unsafe block, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_unsafe_block_multiple_stmts() {
+    let result = parse_expr("unsafe {\n    val x = 1\n    x + 2\n}");
+    assert!(result.is_ok());
+    match result.unwrap() {
+        Expr::Unsafe { stmts, .. } => assert_eq!(stmts.len(), 2),
+        other => panic!("Expected unsafe block, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_unsafe_is_reserved_keyword() {
+    // `unsafe` must not be usable as an identifier.
+    let result = parse_expr("unsafe + 1");
+    assert!(result.is_err());
+}

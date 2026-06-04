@@ -586,7 +586,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.expr_types.insert(span.start, result_ty);
             }
 
-            Expr::Block { stmts, span } => {
+            Expr::Block { stmts, span } | Expr::Unsafe { stmts, span } => {
                 for stmt in stmts {
                     self.visit_stmt_for_types(stmt, func_types)?;
                 }
