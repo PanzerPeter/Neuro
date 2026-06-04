@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.26.2] - 2026-06-04
+
+### Changed
+- `build`: dependency maintenance pass. Removed three dead dependencies from `syntax-parsing` — `lalrpop`, `lalrpop-util`, and `chumsky` — which were declared but never imported (the parser is hand-written Pratt; there was no `.lalrpop` grammar or `build.rs`). This drops their transitive build-time tree (`petgraph`, `regex`, `string_cache`, `bit-set`, `term`, …), trimming the dependency surface and build time. Upgraded `inkwell` 0.8.0 → 0.9.0 (still LLVM 20 via `llvm20-1`; 0.9 adds LLVM 21/22 support and ports to Rust edition 2024 — no backend code changes required), `thiserror` 1 → 2, `toml` 0.8 → 1.1, and `criterion` 0.5 → 0.8 (dev/bench only). `cargo update` swept caret-range drift (unicode-segmentation 1.13, unicode-ident 1.0.24, tempfile 3.27, etc.). `logos` deliberately held at 0.14 — the 0.16 engine rewrite trades a slight lexer perf regression for regex correctness we do not currently need. All 526 tests pass; clippy clean.
+
+---
+
 ## [1.26.1] - 2026-06-04
 
 ### Fixed
