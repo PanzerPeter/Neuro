@@ -31,6 +31,18 @@ impl TypeChecker {
                 }
                 Some(Type::U64)
             }
+            // §2.7 — explicit deep copy of an owned string. Takes no arguments and yields a
+            // fresh `string`. The canonical opt-out of move-by-default for non-`Copy` types.
+            (Type::String, "clone") => {
+                if !args.is_empty() {
+                    self.record_error(TypeError::ArgumentCountMismatch {
+                        expected: 0,
+                        found: args.len(),
+                        span: call_span,
+                    });
+                }
+                Some(Type::String)
+            }
             // §1.2, §1.4 — wrapping/saturating arithmetic and the right-shift method.
             // Each takes one same-typed argument and returns the receiver's integer type.
             (

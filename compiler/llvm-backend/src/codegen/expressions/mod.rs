@@ -85,7 +85,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         // Builtin intrinsics on primitive/string receivers are tagged by
                         // the type pass and lowered directly, bypassing struct mangling.
                         if let Some((kind, recv_ty)) =
-                            self.builtin_methods.get(&span.start).cloned()
+                            self.builtin_methods.get(&(span.start, span.end)).cloned()
                         {
                             return self.codegen_builtin_method(kind, &recv_ty, object, args);
                         }

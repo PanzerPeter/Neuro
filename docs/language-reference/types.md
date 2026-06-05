@@ -208,11 +208,22 @@ syntax:
 ```neuro
 val s: string = "hello, world"
 val n: u64 = s.len()    // 12 — O(1) read of the stored byte length
+val copy: string = s.clone()   // a fresh string equal to s
 ```
 
 **`.len() -> u64`** — returns the number of UTF-8 bytes, read directly from the fat pointer
 in O(1) with no scan. The length **excludes** the null terminator. Because the index is a
 byte count, a multi-byte code point contributes more than one to the length.
+
+**`.clone() -> string`** — returns a fresh `string` equal to its receiver. It is the
+canonical explicit deep copy for non-`Copy` owned types and, once move-by-default lands
+(Phase 1.7), the way to keep using a value after it would otherwise be moved. Today strings
+are immutable and `.rodata`-backed (no heap string type exists yet), so the clone copies the
+`(ptr, len)` fat pointer — observationally a deep copy because the pointee bytes are
+immutable and shared safely. `.clone()` takes no arguments and returns a `string`, so it
+chains with other builtin methods (`"hi".clone().len()`). `Copy` scalar types
+(`i8`..`u64`, `f32`/`f64`, `bool`) do not provide `.clone()`: assignment already duplicates
+them.
 
 ## Struct Types
 

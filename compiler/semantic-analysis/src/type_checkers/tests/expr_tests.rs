@@ -222,6 +222,63 @@ fn string_len_with_argument_rejected() {
 }
 
 #[test]
+fn string_clone_resolves_to_string() {
+    let mut checker = TypeChecker::new();
+
+    // "hello".clone()
+    let expr = Expr::Call {
+        func: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Literal(
+                Literal::String("hello".to_string()),
+                Span::new(0, 7),
+            )),
+            field: make_ident("clone"),
+            span: Span::new(0, 13),
+        }),
+        args: vec![],
+        span: Span::new(0, 15),
+    };
+
+    let ty = checker.check_expr(&expr, None);
+    assert_eq!(ty, Some(Type::String));
+    assert!(
+        !checker.has_errors(),
+        "string.clone() should type-check cleanly, got: {:?}",
+        checker.into_errors()
+    );
+}
+
+#[test]
+fn string_clone_with_argument_rejected() {
+    let mut checker = TypeChecker::new();
+
+    // "hello".clone(1) — clone takes no arguments
+    let expr = Expr::Call {
+        func: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Literal(
+                Literal::String("hello".to_string()),
+                Span::new(0, 7),
+            )),
+            field: make_ident("clone"),
+            span: Span::new(0, 13),
+        }),
+        args: vec![Expr::Literal(Literal::Integer(1, None), Span::new(14, 15))],
+        span: Span::new(0, 16),
+    };
+
+    checker.check_expr(&expr, None);
+    assert!(checker.has_errors());
+    let errors = checker.into_errors();
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ArgumentCountMismatch { .. })),
+        "Expected ArgumentCountMismatch, got: {:?}",
+        errors
+    );
+}
+
+#[test]
 fn unknown_builtin_method_reports_method_not_found() {
     let mut checker = TypeChecker::new();
 

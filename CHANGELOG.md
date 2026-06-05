@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.27.0] - 2026-06-05
+
+### Added
+- `codegen`: `string.clone()` builtin method (§2.7, Phase 1.7). Returns a fresh `string` equal to its receiver — the canonical opt-out of move-by-default for non-`Copy` types. Resolved on a `string` receiver in both `semantic-analysis` (`resolve_builtin_method` → `Type::String`) and `llvm-backend` (`BuiltinMethod::StringClone`), duplicated per VSA so neither slice depends on the other. Lowering copies the `{ ptr, len }` fat-pointer value: today strings are immutable and `.rodata`-backed (no heap string type yet), so a value copy is observationally a deep copy; when runtime heap strings land this must duplicate the underlying buffer. Takes no arguments (`ArgumentCountMismatch` otherwise); `.clone()` on a non-`string` receiver remains `MethodNotFound` (`Copy` scalars take the assignment path). Also fixed a latent `span.start` collision: chaining two builtin calls (`s.clone().len()`) nests two `Call` nodes sharing `span.start`, so the `builtin_methods` dispatch map is now keyed by the full span `(start, end)` — unique per node — matching the existing `binary_left_types` workaround. Tests: 2 semantic unit, 1 backend unit, 3 integration (`neurc/tests/builtin_methods.rs`), example `types/string_clone.nr` (exit 5). 530 tests pass.
+
+---
+
 ## [1.26.2] - 2026-06-04
 
 ### Changed

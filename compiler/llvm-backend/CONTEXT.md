@@ -85,12 +85,18 @@ re-querying the AST.
 ## Builtin Method ABI
 Intrinsic methods on non-struct (primitive / string) receivers are resolved by
 `resolve_builtin_method` (in `context.rs`) during the type-collection pass, which tags the
-`Call` span in `builtin_methods` and records the result type. `codegen_expr` checks
-`builtin_methods` before the struct path and lowers via `codegen_builtin_method`. The first
-intrinsic, `string.len()`, lowers to a single `extractvalue` of field 1 from the string fat
-pointer `{ ptr, i64 }` — the stored byte length (O(1), no scan); the i64 value is the `u64`
-length with no conversion. `resolve_builtin_method` is duplicated from the `semantic-analysis`
-resolver so the backend stays independent of the type-checker slice.
+`Call`'s full span `(start, end)` in `builtin_methods` and records the result type.
+`codegen_expr` checks `builtin_methods` before the struct path and lowers via
+`codegen_builtin_method`. The map is keyed by the full span rather than `span.start` because a
+chained builtin call (`s.clone().len()`) nests two `Call` nodes that share the same
+`span.start`; `(start, end)` is unique per node (same workaround as `binary_left_types`).
+`string.len()` lowers to a single `extractvalue` of field 1 from the string fat pointer
+`{ ptr, i64 }` — the stored byte length (O(1), no scan); the i64 value is the `u64` length with
+no conversion. `string.clone()` (§2.7) lowers to the receiver's own fat-pointer value: strings
+are immutable and `.rodata`-backed (no heap string type yet), so a `{ ptr, len }` value copy is
+observationally a deep copy — this must duplicate the underlying buffer once runtime heap
+strings land. `resolve_builtin_method` is duplicated from the `semantic-analysis` resolver so
+the backend stays independent of the type-checker slice.
 
 Integer intrinsics — `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and `.shr(n)` —
 resolve on any integer receiver to the receiver's own type and lower in `codegen_int_intrinsic`
@@ -208,6 +214,13 @@ types and is re-seeded into `type_env` after each `type_env.clear()` in
 const identifiers inside function bodies.
 
 ## Recent Updates
+- 2026-06-05: `string.clone() -> string` builtin §2.7 (Phase 1.7). New `BuiltinMethod::StringClone`
+  + `(Type::String, "clone")` arm in `resolve_builtin_method` (`context.rs`); `codegen_builtin_method`
+  (`expressions/methods.rs`) lowers it to the receiver's fat-pointer value (a value copy — a deep copy
+  while strings are immutable / `.rodata`-backed; must duplicate the heap buffer once heap strings land).
+  Re-keyed `builtin_methods` from `span.start` to the full span `(start, end)` so chained builtin
+  calls (`s.clone().len()`, two `Call` nodes sharing `span.start`) dispatch correctly — same class of
+  `span.start` collision the `binary_left_types` map already works around.
 - 2026-06-04: Panic runtime §1.2 (Phase 1.7). New `panic.rs` lowers `panic`/`assert`/`unreachable`
   to a stderr diagnostic (`write` to fd 2) + libc `abort` + `unreachable` — abort, no unwinding.
   `compile` gained `source`/`source_path` params (wrapped in `SourceFile`) so diagnostics carry

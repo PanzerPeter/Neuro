@@ -47,7 +47,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.26.2"
+version = "1.27.0"
 edition = "2021"
 rust-version = "1.85"
 authors = ["NEURO Contributors"]
