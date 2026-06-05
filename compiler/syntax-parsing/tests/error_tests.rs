@@ -256,3 +256,41 @@ fn test_error_duplicate_parameter_names() {
         assert!(e.to_string().contains("duplicate parameter"));
     }
 }
+
+// Neuro statements are newline-terminated; the language has NO semicolons.
+// A trailing `;` is an unexpected token, not a no-op. These tests lock in
+// that decision so it stays consistent with the docs (which tell users not
+// to write semicolons).
+#[test]
+fn test_error_semicolon_after_binding() {
+    let source = r#"
+        func test() {
+            val x: i32 = 10;
+        }
+    "#;
+    let result = parse(source);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_error_semicolon_after_expression() {
+    let source = r#"
+        func test() -> i32 {
+            val x: i32 = 10
+            x;
+        }
+    "#;
+    let result = parse(source);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_error_semicolon_after_return() {
+    let source = r#"
+        func test() -> i32 {
+            return 1;
+        }
+    "#;
+    let result = parse(source);
+    assert!(result.is_err());
+}

@@ -184,7 +184,7 @@ Neuro supports implicit returns (Rust-style):
 
 ```neuro
 func add(a: i32, b: i32) -> i32 {
-    a + b  // Implicit return (no semicolon, no 'return' keyword)
+    a + b  // Implicit return (no 'return' keyword)
 }
 
 func main() -> i32 {
@@ -193,7 +193,7 @@ func main() -> i32 {
 ```
 
 **Key points**:
-- Last expression without semicolon becomes the return value
+- The last expression in the body becomes the return value (no `return`, no `;`)
 - Must match function return type
 - Can mix explicit `return` and implicit returns
 
@@ -487,18 +487,22 @@ func good() -> i32 {
 }
 ```
 
-### 4. Missing Semicolon vs Implicit Return
+### 4. Statements vs Implicit Return
+
+Neuro has **no semicolons** — statements are terminated by a newline. A trailing
+`;` is a parse error. The final expression in a function body (no `return`
+keyword) becomes its return value:
 
 ```neuro
 func example() -> i32 {
-    val x: i32 = 10  // Semicolon required for statements
-    x  // No semicolon for implicit return
+    val x: i32 = 10  // Statement (newline-terminated, no `;`)
+    x                // Last expression is the implicit return value
 }
 
-// Common mistake: semicolon on last expression
+// Common mistake: a stray semicolon
 func wrong() -> i32 {
     val x: i32 = 10
-    x;  // Error: returns void, not i32
+    x;  // Error: `;` is not a valid token here
 }
 ```
 

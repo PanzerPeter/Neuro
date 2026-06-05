@@ -119,11 +119,11 @@ func conditional_return(x: i32) -> i32 {
 
 ### Expression-Based Returns (Implicit Return)
 
-The last expression in a function body (without semicolon) automatically becomes the return value:
+The last expression in a function body automatically becomes the return value (Neuro has no semicolons; statements are newline-terminated):
 
 ```neuro
 func implicit_return() -> i32 {
-    42  // No semicolon, no 'return' keyword
+    42  // No 'return' keyword needed
 }
 
 func add(a: i32, b: i32) -> i32 {
@@ -143,10 +143,10 @@ func mixed(x: i32) -> i32 {
 ```
 
 **Key points**:
-- Last expression without semicolon is the return value
+- The last expression in the body is the return value
 - Must match function return type
 - Can mix with explicit `return` statements
-- Semicolon makes it a statement (not a return)
+- There are no semicolons; a stray `;` is a parse error
 
 ### Void Return
 
@@ -567,15 +567,15 @@ func unreachable() -> i32 {
 }
 ```
 
-### Semicolon on Implicit Return
+### Stray Semicolon
 
 ```neuro
 func wrong() -> i32 {
     val x: i32 = 42
-    x;  // Error: semicolon makes this a statement, returns void
+    x;  // Error: `;` is not a valid token (Neuro has no semicolons)
 }
 
-// Fix: remove semicolon
+// Fix: remove the semicolon
 func right() -> i32 {
     val x: i32 = 42
     x  // Implicit return

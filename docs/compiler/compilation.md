@@ -122,7 +122,7 @@ neurc compile <INPUT> [OPTIONS]
 neurc compile examples/basics/milestone.nr
 
 # Compile with custom output path
-neurc compile examples/hello.nr -o bin/hello.exe
+neurc compile examples/basics/hello.nr -o bin/hello.exe
 
 # With debug logging
 RUST_LOG=debug neurc compile examples/basics/milestone.nr
@@ -242,7 +242,7 @@ fn test_end_to_end_milestone() {
 
 #[test]
 fn test_end_to_end_hello() {
-    // Compile examples/hello.nr
+    // Compile examples/basics/hello.nr
     // Execute the binary
     // Assert exit code == 26
 }

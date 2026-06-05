@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.28.1] - 2026-06-05
+
+### Fixed
+- `docs`: corrected a pervasive, user-facing error — the getting-started tutorial, troubleshooting guide, and language reference all claimed semicolons were *required* to terminate statements (`val x: i32 = 10  // Semicolon required`). Neuro has **no semicolons**: statements are newline-terminated and a trailing `;` is an `unexpected token Semicolon` parse error. A beginner following `first-program.md` verbatim would hit an immediate parse failure. Rewrote the statement/implicit-return explanation in `docs/getting-started/first-program.md`, `docs/guides/troubleshooting.md`, `docs/language-reference/expressions.md`, and `docs/language-reference/functions.md` to describe newline termination and positional implicit return.
+- `docs`: fixed stale example paths left over from the v1.23.1 `examples/` reorg into topic subdirectories. README, CONTRIBUTING, and the getting-started/CLI/compilation guides told users to run `cargo run -p neurc -- compile examples/hello.nr`, which no longer exists (now `examples/basics/hello.nr`); the README "compiles and runs today" link pointed at `examples/neuron.nr` instead of `examples/structs/neuron.nr`. Historical CHANGELOG entries and illustrative `bad.nr`/`mismatch.nr` error-output paths left untouched.
+- `docs`: refreshed `docs/README.md` version/footer metadata — version 1.27.0 → 1.28.0, last-updated date, and inkwell 0.8.0 → 0.9.0 (two spots) to match the v1.26.2 bump.
+
+### Added
+- `tests`: 3 parser regression tests (`syntax-parsing/tests/error_tests.rs`) asserting that a trailing semicolon after a binding, an expression, or a `return` is a parse error — locking in the no-semicolon language decision so it cannot silently drift from the docs. 546 tests pass.
+
+---
+
 ## [1.28.0] - 2026-06-05
 
 ### Added

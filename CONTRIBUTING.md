@@ -253,13 +253,13 @@ cargo audit
 
 ```bash
 # Verbose logging
-RUST_LOG=debug cargo run -p neurc -- check examples/hello.nr
+RUST_LOG=debug cargo run -p neurc -- check examples/basics/hello.nr
 
 # Check types without codegen
-cargo run -p neurc -- check examples/hello.nr
+cargo run -p neurc -- check examples/basics/hello.nr
 
 # Compile to native binary
-cargo run -p neurc -- compile examples/hello.nr
+cargo run -p neurc -- compile examples/basics/hello.nr
 ```
 
 ## Current Contribution Priorities

@@ -79,7 +79,14 @@ Key design goals:
 ### Control Flow
 
 - `if` / `else if` / `else` as statements and as **expressions** (value-producing)
-- Bare block expressions as values: `val r = { val a = 3; val b = 4; a + b }`
+- Bare block expressions as values — statements newline-separated, the final expression is the block's value:
+  ```neuro
+  val r = {
+      val a = 3
+      val b = 4
+      a + b
+  }
+  ```
 - `while` loops
 - Range-for loops: exclusive (`for i in 0..n`) and inclusive (`for i in 0..=n`)
 - `break` and `continue`
@@ -108,7 +115,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 543 tests passing across all components
+- 546 tests passing across all components
 
 ## Compilation Pipeline
 
@@ -232,7 +239,7 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 
 | Component | Library | Version |
 |---|---|---|
-| CPU codegen | inkwell | 0.8.0 (LLVM 20) |
+| CPU codegen | inkwell | 0.9.0 (LLVM 20) |
 | MLIR construction (Phase 3+) | melior | LLVM/MLIR 20 |
 | Autodiff (Phase 4+) | Enzyme (MLIR dialect) | built against LLVM 20 |
 | GPU (Phase 5+) | MLIR nvgpu/rocdl/Triton | LLVM 20 backends |
@@ -246,6 +253,6 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 
 ---
 
-**Last Updated**: 2026-06-03
-**Version**: Phase 1.7 (ownership) active · Phase 2 overlapping (v1.27.0)
-**Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.8.0
+**Last Updated**: 2026-06-05
+**Version**: Phase 1.7 (ownership) active · Phase 2 overlapping (v1.28.1)
+**Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.9.0

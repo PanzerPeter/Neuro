@@ -266,21 +266,22 @@ Parse error: unexpected token `}`, expected expression
 ```
 
 **Common causes**:
-1. Missing semicolons on statements
+1. A stray semicolon (Neuro has none — see below)
 2. Unbalanced brackets/braces
 3. Syntax errors
 
 **Solutions**:
 
-**Check semicolons**:
+**Remove semicolons** — Neuro statements are terminated by a newline, not `;`.
+A trailing semicolon is an `unexpected token Semicolon` parse error:
 ```neuro
-// Error: missing semicolon
+// Error: semicolons are not valid tokens
+val x: i32 = 10;
+val y: i32 = 20;
+
+// Fix: one statement per line, no `;`
 val x: i32 = 10
 val y: i32 = 20
-
-// Fix: add semicolons for statements
-val x: i32 = 10  // Semicolon required
-val y: i32 = 20  // Semicolon required
 ```
 
 **Check brackets**:
