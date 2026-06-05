@@ -214,6 +214,12 @@ types and is re-seeded into `type_env` after each `type_env.clear()` in
 const identifiers inside function bodies.
 
 ## Recent Updates
+- 2026-06-05: Struct functional-update lowering (§3.3). `codegen_struct_literal` (`codegen/structs.rs`)
+  takes `base: Option<&Expr>`: with a base it seeds the aggregate from the base struct value
+  (`codegen_expr(base).into_struct_value()`) instead of `get_undef()`, then each explicit field
+  `insert_value` overwrites its slot — so unlisted fields keep the base's values. `type_pass.rs`
+  visits `base` for type collection. Field-init shorthand needs no codegen change (it is an
+  ordinary `Expr::Identifier` by the time codegen runs).
 - 2026-06-05: `string.clone() -> string` builtin §2.7 (Phase 1.7). New `BuiltinMethod::StringClone`
   + `(Type::String, "clone")` arm in `resolve_builtin_method` (`context.rs`); `codegen_builtin_method`
   (`expressions/methods.rs`) lowers it to the receiver's fat-pointer value (a value copy — a deep copy

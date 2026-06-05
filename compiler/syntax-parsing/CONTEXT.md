@@ -64,6 +64,12 @@ field/cast); using an alias as a value-position constructor or path name is not
 part of this feature.
 
 ## Recent Updates
+- 2026-06-05: Struct shorthand + functional-update syntax (§3.3) in `parse_struct_literal`
+  (`parser/items.rs`). A field with no `: value` desugars to `field: field` by emitting
+  `FieldInit { value: Expr::Identifier(field_name) }` — no new AST node. A trailing `..expr`
+  entry sets `Expr::StructLiteral.base`; it terminates the field list (the `..` only appears
+  last). `rewrite_expr` (type-alias pass) now recurses into `base`. Parse-time desugaring for
+  shorthand; semantic/codegen observe only the `base` field.
 - 2026-06-04: Added `unsafe { }` block expressions (Phase 1.7 groundwork). New `parse_unsafe_expr`
   prefix handler in `parser/expressions.rs` (dispatched on `TokenKind::Unsafe`), producing
   `Expr::Unsafe { stmts, span }`. Body parses as an ordinary statement block; `unsafe` is inert.

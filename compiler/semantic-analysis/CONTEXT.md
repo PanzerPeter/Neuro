@@ -84,6 +84,13 @@ that refer to other known consts). Function-body `Stmt::Const` nodes are validat
 so const names are usable in any expression context.
 
 ## Recent Updates
+- 2026-06-05: Struct functional-update type-checking (§3.3) in `Expr::StructLiteral`
+  (`type_checkers/expressions.rs`). When `base` is present, the base expression is checked
+  against `Type::Struct(name)` (mismatch → `TypeError::Mismatch`) and the missing-field scan is
+  skipped — `..base` supplies every unlisted field. Without a base the existing
+  `MissingStructField` check is unchanged. Field-init shorthand needs no semantic change: the
+  parser already lowered it to an `Expr::Identifier`, so an undefined name surfaces as the
+  ordinary undefined-variable error.
 - 2026-06-05: `string.clone() -> string` builtin §2.7 (Phase 1.7). New `(Type::String, "clone")`
   arm in `resolve_builtin_method` (`type_checkers/expressions.rs`): nullary, returns `Type::String`,
   records `ArgumentCountMismatch` when given arguments. Non-`string` receivers still fall through to

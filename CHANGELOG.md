@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.28.0] - 2026-06-05
+
+### Added
+- `parser`: struct field-init shorthand and functional-update syntax (§3.3, Phase 2A). `Point { x, y }` desugars each bare field to `x: x` at parse time (a `FieldInit` whose value is `Expr::Identifier(field_name)` — no AST node, so semantic analysis and codegen are unchanged for shorthand; an undefined name surfaces as the ordinary undefined-variable error). `Point { x: 1.0, ..p }` adds a functional-update base: `Expr::StructLiteral` gained `base: Option<Box<Expr>>`, and the parser stops the field scan at a trailing `..expr`. Semantic analysis checks the base against `Type::Struct(name)` (wrong struct → `Mismatch`) and, when a base is present, skips the missing-field scan since `..base` supplies every unlisted field; a base-less literal still requires all fields (`MissingStructField`). Codegen seeds the LLVM aggregate from the base struct value instead of `undef`, then `insert_value` overwrites each explicit field, so unlisted fields keep the base's values with no reallocation. The type-alias rewrite pass recurses into `base`. Tests: 5 parser unit (`syntax-parsing/tests/expression_tests.rs`), 8 integration (`neurc/tests/struct_shorthand_update.rs`), example `structs/struct_update.nr`. 543 tests pass.
+
+---
+
 ## [1.27.0] - 2026-06-05
 
 ### Added

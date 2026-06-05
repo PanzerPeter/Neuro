@@ -380,7 +380,19 @@ impl Parser {
         self.skip_newlines();
 
         let mut fields: Vec<FieldInit> = Vec::new();
+        let mut base: Option<Box<Expr>> = None;
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            // Functional-update base `..expr` terminates the field list: every
+            // field not named above is sourced from it. `..` only appears as the
+            // final entry, so we stop scanning fields once we see it.
+            if self.check(&TokenKind::DotDot) {
+                self.advance(); // consume '..'
+                self.skip_newlines();
+                base = Some(Box::new(self.parse_expr(Precedence::Lowest)?));
+                self.skip_newlines();
+                break;
+            }
+
             let field_name_token =
                 self.consume(TokenKind::Identifier(String::new()), "field name")?;
             let field_name = if let TokenKind::Identifier(n) = field_name_token.kind {
@@ -397,10 +409,15 @@ impl Parser {
             };
 
             self.skip_newlines();
-            self.consume(TokenKind::Colon, "':'")?;
-            self.skip_newlines();
-
-            let value = self.parse_expr(Precedence::Lowest)?;
+            // Shorthand: `Point { x }` desugars to `Point { x: x }`. A field with
+            // no `: value` binds the same-named identifier in scope.
+            let value = if self.check(&TokenKind::Colon) {
+                self.advance(); // consume ':'
+                self.skip_newlines();
+                self.parse_expr(Precedence::Lowest)?
+            } else {
+                Expr::Identifier(field_name.clone())
+            };
             let field_span = field_name.span.merge(value.span());
 
             fields.push(FieldInit {
@@ -421,7 +438,12 @@ impl Parser {
         let close = self.consume(TokenKind::RightBrace, "'}'")?;
         let span = name.span.merge(close.span);
 
-        Ok(Expr::StructLiteral { name, fields, span })
+        Ok(Expr::StructLiteral {
+            name,
+            fields,
+            base,
+            span,
+        })
     }
 
     /// Parse an `impl TypeName { … }` block

@@ -30,10 +30,15 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Build a struct aggregate value from a struct literal expression.
+    ///
+    /// `base` is the optional functional-update source (`Point { x, ..p }`): the
+    /// aggregate is seeded from its value so that fields absent from `fields`
+    /// retain the base's values, then each explicit field overwrites its slot.
     pub(crate) fn codegen_struct_literal(
         &mut self,
         name: &str,
         fields: &[FieldInit],
+        base: Option<&Expr>,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let llvm_ty = self.get_struct_llvm_type(name)?;
         let def = self
@@ -42,7 +47,10 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or_else(|| CodegenError::UnsupportedType(format!("unknown struct '{}'", name)))?
             .clone();
 
-        let mut agg = llvm_ty.get_undef();
+        let mut agg = match base {
+            Some(base_expr) => self.codegen_expr(base_expr)?.into_struct_value(),
+            None => llvm_ty.get_undef(),
+        };
         for field_init in fields {
             let idx = def
                 .iter()
