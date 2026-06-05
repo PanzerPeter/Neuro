@@ -1,4 +1,4 @@
-// NEURO Programming Language - LLVM Backend
+// Neuro Programming Language - LLVM Backend
 // Codegen for expressions: Builtin method calls and integer intrinsics.
 
 use ast_types::*;

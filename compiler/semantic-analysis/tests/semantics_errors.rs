@@ -1,4 +1,4 @@
-// NEURO Programming Language - Semantic Analysis
+// Neuro Programming Language - Semantic Analysis
 // Integration tests: General type-checking error cases
 
 use semantic_analysis::{type_check, TypeError};

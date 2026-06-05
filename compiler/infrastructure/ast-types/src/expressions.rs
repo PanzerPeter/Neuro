@@ -1,4 +1,4 @@
-// NEURO Programming Language - AST Types
+// Neuro Programming Language - AST Types
 // Expression AST nodes
 
 use std::fmt;

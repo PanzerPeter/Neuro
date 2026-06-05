@@ -1,4 +1,4 @@
-//! NEURO Programming Language - Shared Types
+//! Neuro Programming Language - Shared Types
 //!
 //! Infrastructure component providing common type definitions used across
 //! compiler slices. This crate contains lightweight data structures for

@@ -1,7 +1,7 @@
 # lexical-analysis
 
 ## Purpose
-Transform raw NEURO source text into a validated token stream as the first stage of the compiler pipeline.
+Transform raw Neuro source text into a validated token stream as the first stage of the compiler pipeline.
 
 ## Entry Point
 - Type: Library function

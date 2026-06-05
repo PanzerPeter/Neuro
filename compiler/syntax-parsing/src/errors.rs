@@ -1,4 +1,4 @@
-// NEURO Programming Language - Syntax Parsing
+// Neuro Programming Language - Syntax Parsing
 // Parse error definitions
 
 use lexical_analysis::{LexError, TokenKind};

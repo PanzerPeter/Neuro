@@ -1,4 +1,4 @@
-// NEURO Example: Fibonacci sequence calculation
+// Neuro Example: Fibonacci sequence calculation
 // Demonstrates: recursive function calls, multiple recursion branches
 //
 // This program calculates fibonacci(10) = 55

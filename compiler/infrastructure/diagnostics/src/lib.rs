@@ -1,4 +1,4 @@
-//! NEURO Programming Language - Diagnostics
+//! Neuro Programming Language - Diagnostics
 //!
 //! Infrastructure component for collecting and formatting compiler diagnostic messages
 //! (errors, warnings, hints, and informational messages).

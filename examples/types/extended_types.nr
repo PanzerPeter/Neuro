@@ -1,4 +1,4 @@
-// NEURO Extended Primitive Types Example
+// Neuro Extended Primitive Types Example
 // Demonstrates i8, i16, u8, u16, u32, u64 types
 
 func test_i8_arithmetic(a: i8, b: i8) -> i8 {

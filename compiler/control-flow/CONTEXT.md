@@ -1,7 +1,7 @@
 # control-flow
 
 ## Purpose
-Build a Control Flow Graph from a validated NEURO program to enable unreachable-code detection and return-path analysis.
+Build a Control Flow Graph from a validated Neuro program to enable unreachable-code detection and return-path analysis.
 
 ## Entry Point
 - Type: Library function (Phase 2+; stub only in Phase 1)

@@ -1,4 +1,4 @@
-// NEURO Compiler - Integration tests for type inference
+// Neuro Compiler - Integration tests for type inference
 mod common;
 // Tests for numeric literal type inference feature (semantic analysis)
 //

@@ -1,4 +1,4 @@
-// NEURO Programming Language - Semantic Analysis
+// Neuro Programming Language - Semantic Analysis
 // Integration tests: Expression-based (implicit) returns
 
 use semantic_analysis::{type_check, TypeError};

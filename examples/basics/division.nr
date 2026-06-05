@@ -1,4 +1,4 @@
-// NEURO Example: Division and modulo operations
+// Neuro Example: Division and modulo operations
 // Demonstrates: division (/), modulo (%), arithmetic combinations
 
 func divide(a: i32, b: i32) -> i32 {

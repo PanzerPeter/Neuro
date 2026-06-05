@@ -1,4 +1,4 @@
-// NEURO Programming Language - LLVM Backend
+// Neuro Programming Language - LLVM Backend
 // Feature slice for LLVM IR generation and optimization
 //
 // This slice follows Vertical Slice Architecture (VSA) principles:
@@ -52,7 +52,7 @@ impl OptimizationLevelSetting {
     }
 }
 
-/// Compile NEURO AST to LLVM object code.
+/// Compile Neuro AST to LLVM object code.
 ///
 /// This is the main entry point for the LLVM backend. It takes a type-checked
 /// AST and generates LLVM IR, then compiles it to object code.

@@ -1,4 +1,4 @@
-// NEURO Programming Language - Syntax Parsing
+// Neuro Programming Language - Syntax Parsing
 // AST module
 //
 // NOTE (VSA baseline): AST types live in infrastructure/ast-types

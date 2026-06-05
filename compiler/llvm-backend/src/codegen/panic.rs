@@ -1,4 +1,4 @@
-// NEURO Programming Language - LLVM Backend
+// Neuro Programming Language - LLVM Backend
 // Codegen for the panic-family builtins: `panic`, `assert`, `unreachable` (§1.2).
 //
 // The §1.2 panic contract is *abort, no unwinding*: a panic prints a diagnostic

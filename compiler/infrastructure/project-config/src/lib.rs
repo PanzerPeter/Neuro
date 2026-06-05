@@ -1,4 +1,4 @@
-//! NEURO Programming Language - Project Configuration
+//! Neuro Programming Language - Project Configuration
 //!
 //! Infrastructure component for parsing and managing project configuration from `neuro.toml` files.
 //!
@@ -38,7 +38,7 @@ use thiserror::Error;
 
 /// Project configuration from neuro.toml
 ///
-/// This represents the complete configuration for a NEURO project.
+/// This represents the complete configuration for a Neuro project.
 /// In Phase 1, only package metadata and basic build settings are used.
 /// Dependencies will be fully utilized in Phase 2 when the module system is implemented.
 #[derive(Debug, Clone, Serialize, Deserialize)]

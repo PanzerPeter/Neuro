@@ -1,4 +1,4 @@
-// NEURO Programming Language - Semantic Analysis
+// Neuro Programming Language - Semantic Analysis
 // Feature slice for type checking and semantic validation
 //
 // This slice follows Vertical Slice Architecture (VSA) principles:
@@ -21,9 +21,9 @@ pub use warnings::{Warning, WarningCode};
 use ast_types::Item;
 use type_checkers::TypeChecker;
 
-/// Type check a NEURO program.
+/// Type check a Neuro program.
 ///
-/// This function performs semantic analysis on a parsed NEURO program, validating:
+/// This function performs semantic analysis on a parsed Neuro program, validating:
 /// - Type correctness of expressions and statements
 /// - Variable and function declarations
 /// - Function signatures and call sites

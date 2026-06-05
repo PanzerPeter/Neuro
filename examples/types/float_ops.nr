@@ -1,4 +1,4 @@
-// NEURO Example: Floating-point operations
+// Neuro Example: Floating-point operations
 // Demonstrates: f64 type, float arithmetic, and Phase 1.5 compliant IEEE-754 tracking
 
 func calculate_f64(x: f64, y: f64) -> f64 {

@@ -1,4 +1,4 @@
-// NEURO Programming Language - Lexical Analysis
+// Neuro Programming Language - Lexical Analysis
 // Feature slice for tokenization and lexical processing
 //
 // This slice follows Vertical Slice Architecture (VSA) principles:
@@ -17,7 +17,7 @@ pub use tokens::{FloatSuffixToken, IntegerSuffixToken, Token, TokenKind};
 use logos::Logos;
 use shared_types::Span;
 
-/// Lexer for the NEURO language
+/// Lexer for the Neuro language
 pub struct Lexer<'source> {
     source: &'source str,
     inner: logos::Lexer<'source, TokenKind>,
@@ -93,14 +93,14 @@ impl<'source> Iterator for Lexer<'source> {
     }
 }
 
-/// Convenience function to tokenize NEURO source code
+/// Convenience function to tokenize Neuro source code
 ///
-/// This is the main entry point for lexical analysis. It takes NEURO source code
+/// This is the main entry point for lexical analysis. It takes Neuro source code
 /// and produces a stream of tokens. Returns early on the first lexical error.
 ///
 /// # Arguments
 ///
-/// * `source` - The NEURO source code as a string
+/// * `source` - The Neuro source code as a string
 ///
 /// # Returns
 ///

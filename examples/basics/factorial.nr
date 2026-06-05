@@ -1,4 +1,4 @@
-// NEURO Example: Factorial calculation using recursion
+// Neuro Example: Factorial calculation using recursion
 // Demonstrates: recursive function calls, if/else, arithmetic operations
 //
 // This program calculates factorial(5) = 120

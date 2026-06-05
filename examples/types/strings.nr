@@ -1,9 +1,9 @@
-// NEURO Programming Language - String Type Test
+// Neuro Programming Language - String Type Test
 // Phase 1: Basic string implementation
 
 // Simple string return
 func get_greeting() -> string {
-    return "Hello, NEURO!"
+    return "Hello, Neuro!"
 }
 
 // String parameter and return

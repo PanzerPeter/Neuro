@@ -1,4 +1,4 @@
-// NEURO Programming Language - Syntax Parsing
+// Neuro Programming Language - Syntax Parsing
 // Feature slice for AST generation and syntax analysis
 //
 // This slice follows Vertical Slice Architecture (VSA) principles:
@@ -23,9 +23,9 @@ use lexical_analysis::tokenize;
 use parser::Parser;
 use precedence::Precedence;
 
-/// Parse NEURO source code into AST
+/// Parse Neuro source code into AST
 ///
-/// This function takes NEURO source code and produces an Abstract Syntax Tree (AST)
+/// This function takes Neuro source code and produces an Abstract Syntax Tree (AST)
 /// representing the program structure. It performs lexical analysis (tokenization)
 /// followed by syntax analysis (parsing).
 ///
@@ -40,7 +40,7 @@ use precedence::Precedence;
 ///
 /// # Arguments
 ///
-/// * `source` - The NEURO source code as a string
+/// * `source` - The Neuro source code as a string
 ///
 /// # Returns
 ///
@@ -79,14 +79,14 @@ pub fn parse(source: &str) -> ParseResult<Vec<Item>> {
     parser.parse_program()
 }
 
-/// Parse a NEURO expression from source code
+/// Parse a Neuro expression from source code
 ///
 /// This is a convenience function for parsing standalone expressions,
 /// useful for testing and REPL environments.
 ///
 /// # Arguments
 ///
-/// * `source` - The NEURO expression source code as a string
+/// * `source` - The Neuro expression source code as a string
 ///
 /// # Returns
 ///

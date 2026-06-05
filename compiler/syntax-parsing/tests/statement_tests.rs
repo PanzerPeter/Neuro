@@ -1,4 +1,4 @@
-// NEURO Programming Language - Syntax Parsing Tests
+// Neuro Programming Language - Syntax Parsing Tests
 // Statement parsing tests
 
 use syntax_parsing::parse;

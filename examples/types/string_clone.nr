@@ -1,4 +1,4 @@
-// NEURO Programming Language - String .clone() (Phase 1.7 §2.7)
+// Neuro Programming Language - String .clone() (Phase 1.7 §2.7)
 // Demonstrates the explicit deep-copy method on a non-Copy owned string.
 //
 // `.clone()` returns a fresh `string` equal to its receiver. It is the canonical

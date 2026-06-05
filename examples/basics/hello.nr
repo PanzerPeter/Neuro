@@ -1,4 +1,4 @@
-// NEURO Example: Simple arithmetic function
+// Neuro Example: Simple arithmetic function
 // Demonstrates Phase 1 syntax: functions, variables, and return statements
 
 func add(a: i32, b: i32) -> i32 {

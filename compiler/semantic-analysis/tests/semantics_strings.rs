@@ -1,4 +1,4 @@
-// NEURO Programming Language - Semantic Analysis
+// Neuro Programming Language - Semantic Analysis
 // Integration tests: String type
 
 use semantic_analysis::{type_check, TypeError};
@@ -6,7 +6,7 @@ use semantic_analysis::{type_check, TypeError};
 #[test]
 fn type_check_string_literal() {
     let source = r#"func get_message() -> string {
-        return "Hello, NEURO!"
+        return "Hello, Neuro!"
     }"#;
     let items = syntax_parsing::parse(source).unwrap();
     let result = type_check(&items);
@@ -125,7 +125,7 @@ fn type_check_multiple_string_functions() {
         }
 
         func get_name() -> string {
-            return "NEURO"
+            return "Neuro"
         }
 
         func use_strings() -> string {

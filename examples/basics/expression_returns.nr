@@ -1,4 +1,4 @@
-// Example: Expression-Based Returns in NEURO
+// Example: Expression-Based Returns in Neuro
 // Demonstrates the new Phase 1 feature: implicit returns
 
 // Simple expression-based return
