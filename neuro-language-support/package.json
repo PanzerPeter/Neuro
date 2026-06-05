@@ -1,7 +1,7 @@
 {
   "name": "neuro-language-support",
-  "displayName": "NEURO Language Support",
-  "description": "Syntax highlighting for the NEURO programming language, designed for AI-optimized workloads.",
+  "displayName": "Neuro Language Support",
+  "description": "Syntax highlighting for the Neuro programming language, designed for AI-optimized workloads.",
   "version": "1.0.0",
   "publisher": "NeuroTeam",
   "license": "SEE LICENSE IN LICENSE",
@@ -20,7 +20,7 @@
       {
         "id": "neuro",
         "aliases": [
-          "NEURO",
+          "Neuro",
           "neuro"
         ],
         "extensions": [

@@ -8,7 +8,7 @@ fn test_string_literal_return() {
     let test = CompileTest::new();
     let source = r#"
 func get_message() -> string {
-    return "Hello, NEURO!"
+    return "Hello, Neuro!"
 }
 
 func main() -> i32 {

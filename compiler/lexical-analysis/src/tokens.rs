@@ -1,4 +1,4 @@
-// NEURO Programming Language - Lexical Analysis
+// Neuro Programming Language - Lexical Analysis
 // Token type definitions
 
 use logos::Logos;
@@ -22,7 +22,7 @@ pub struct FloatSuffixToken {
     pub suffix: FloatSuffix,
 }
 
-/// Token types in the NEURO language
+/// Token types in the Neuro language
 #[derive(Debug, Clone, PartialEq, Logos)]
 #[logos(skip r"[ \t\r]+")]
 #[logos(error = LexError)]

@@ -14,7 +14,7 @@ Provide lightweight, zero-business-logic data structures used universally across
 - Public Read Model: none
 
 ## Shared Kernel
-No upstream dependencies within the NEURO workspace. This is the lowest-level infrastructure crate.
+No upstream dependencies within the Neuro workspace. This is the lowest-level infrastructure crate.
 
 ## Notes
 `Span` is a half-open byte-offset range `[start, end)` used by every AST node and token for accurate error reporting. `Identifier` wraps a `String` name with a `Span`. `Literal` enumerates all compile-time constant value kinds (integer, float, string, bool).

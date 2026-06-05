@@ -1,4 +1,4 @@
-// NEURO Programming Language - Syntax Parsing Tests
+// Neuro Programming Language - Syntax Parsing Tests
 // Function parsing tests
 
 use syntax_parsing::{parse, Item};

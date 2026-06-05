@@ -1,4 +1,4 @@
-// NEURO Programming Language - Control Flow
+// Neuro Programming Language - Control Flow
 // Feature slice for control flow analysis and compilation
 
 use thiserror::Error;

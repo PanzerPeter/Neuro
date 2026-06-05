@@ -1,5 +1,5 @@
-// NEURO Programming Language - LLVM Backend
-// NEURO semantic type to LLVM type mapping
+// Neuro Programming Language - LLVM Backend
+// Neuro semantic type to LLVM type mapping
 
 use inkwell::context::Context as LLVMContext;
 use inkwell::types::BasicTypeEnum;
@@ -7,7 +7,7 @@ use inkwell::types::BasicTypeEnum;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
-/// Maps NEURO semantic types to LLVM types
+/// Maps Neuro semantic types to LLVM types
 pub(crate) struct TypeMapper<'ctx> {
     context: &'ctx LLVMContext,
 }
@@ -17,7 +17,7 @@ impl<'ctx> TypeMapper<'ctx> {
         Self { context }
     }
 
-    /// Convert a NEURO semantic type to an LLVM type
+    /// Convert a Neuro semantic type to an LLVM type
     pub(crate) fn map_type(&self, ty: &Type) -> CodegenResult<BasicTypeEnum<'ctx>> {
         match ty {
             // Signed integers

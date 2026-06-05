@@ -1,4 +1,4 @@
-// NEURO Programming Language - Compiler Driver
+// Neuro Programming Language - Compiler Driver
 // Main entry point for the neurc compiler
 
 use anyhow::{Context, Result};
@@ -11,7 +11,7 @@ use std::process::{self, Command};
 
 #[derive(Parser)]
 #[command(name = "neurc")]
-#[command(about = "NEURO Programming Language Compiler", long_about = None)]
+#[command(about = "Neuro Programming Language Compiler", long_about = None)]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
@@ -20,7 +20,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Compile NEURO source files
+    /// Compile Neuro source files
     Compile {
         /// Input source file
         #[arg(value_name = "FILE")]
@@ -80,7 +80,7 @@ fn main() {
 
         Commands::Version => {
             println!("neurc {}", env!("CARGO_PKG_VERSION"));
-            println!("NEURO Programming Language Compiler");
+            println!("Neuro Programming Language Compiler");
             println!("Phase 1 - Alpha Development");
         }
     }
@@ -91,16 +91,16 @@ fn validate_source_file(path: &Path) -> Result<()> {
     match path.extension().and_then(|ext| ext.to_str()) {
         Some("nr") => Ok(()),
         Some(other) => Err(anyhow::anyhow!(
-            "Invalid file extension '.{}'. NEURO source files must have .nr extension",
+            "Invalid file extension '.{}'. Neuro source files must have .nr extension",
             other
         )),
         None => Err(anyhow::anyhow!(
-            "File has no extension. NEURO source files must have .nr extension"
+            "File has no extension. Neuro source files must have .nr extension"
         )),
     }
 }
 
-/// Check a NEURO source file for syntax and type errors
+/// Check a Neuro source file for syntax and type errors
 fn check_file(path: &PathBuf) -> anyhow::Result<()> {
     // Validate file extension
     validate_source_file(path)?;
@@ -137,7 +137,7 @@ fn print_warnings(warnings: &[semantic_analysis::Warning]) {
     }
 }
 
-/// Compile a NEURO source file to a native executable.
+/// Compile a Neuro source file to a native executable.
 ///
 /// This function orchestrates the complete compilation pipeline:
 /// 1. Read source file

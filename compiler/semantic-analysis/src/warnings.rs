@@ -1,4 +1,4 @@
-// NEURO Programming Language - Semantic Analysis
+// Neuro Programming Language - Semantic Analysis
 // Lint warnings emitted alongside successful type checking.
 
 use shared_types::Span;

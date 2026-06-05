@@ -1,4 +1,4 @@
-// NEURO Example: unsafe blocks (Phase 1.7 groundwork)
+// Neuro Example: unsafe blocks (Phase 1.7 groundwork)
 // Demonstrates: `unsafe { }` as an expression that evaluates to its trailing
 // value, used both bound to a `val` and as the function's implicit return.
 //

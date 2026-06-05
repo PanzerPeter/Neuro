@@ -1,4 +1,4 @@
-// NEURO Type Inference Demo
+// Neuro Type Inference Demo
 // Demonstrates contextual type inference for numeric literals
 
 // Integer type inference from variable declarations

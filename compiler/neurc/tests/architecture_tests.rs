@@ -1,6 +1,6 @@
 //! Architecture Tests for VSA Baseline Compliance
 //!
-//! These tests verify that the NEURO compiler maintains Vertical Slice Architecture
+//! These tests verify that the Neuro compiler maintains Vertical Slice Architecture
 //! boundaries. They ensure that:
 //! - Feature slices only depend on infrastructure crates
 //! - Infrastructure crates don't depend on feature slices

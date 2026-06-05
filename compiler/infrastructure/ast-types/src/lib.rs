@@ -1,4 +1,4 @@
-//! NEURO Programming Language - AST Types
+//! Neuro Programming Language - AST Types
 //!
 //! Infrastructure component providing Abstract Syntax Tree (AST) type definitions
 //! used across compiler slices. This crate contains pure data structures with no

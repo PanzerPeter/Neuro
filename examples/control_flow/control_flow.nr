@@ -1,4 +1,4 @@
-// NEURO Example: Control flow
+// Neuro Example: Control flow
 // Demonstrates: if/else, while loops, break/continue, boolean logic, comparisons
 //
 // Note: Phase 1 has limitations with deeply nested control flow

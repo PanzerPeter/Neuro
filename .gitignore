@@ -418,7 +418,7 @@ crash.log
 nul
 
 # ---------------------------
-# NEURO Examples
+# Neuro Examples
 # ---------------------------
 # Ignore everything under examples/ (compiled executables land here when
 # building in place) except source, docs, the manifest, and subdirectories.

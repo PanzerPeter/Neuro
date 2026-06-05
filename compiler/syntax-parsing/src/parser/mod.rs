@@ -1,4 +1,4 @@
-// NEURO Programming Language - Syntax Parsing
+// Neuro Programming Language - Syntax Parsing
 // Parser implementation using Pratt parsing for expressions
 
 use lexical_analysis::{Token, TokenKind};
@@ -11,7 +11,7 @@ mod statements;
 mod type_aliases;
 mod types;
 
-/// Parser for NEURO source code
+/// Parser for Neuro source code
 pub(crate) struct Parser {
     pub(super) tokens: Vec<Token>,
     pub(super) current: usize,

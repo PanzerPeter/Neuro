@@ -1,9 +1,9 @@
 ===============================================================================
-                          NEURO PROJECT LICENSE
+                          Neuro PROJECT LICENSE
                           Version 1.1, April 2025
 ===============================================================================
 
-Copyright (C) 2024–2025 NEURO Project Contributors
+Copyright (C) 2024–2025 Neuro Project Contributors
 Project Repository: https://github.com/PanzerPeter/Neuro
 
 All rights reserved except as explicitly granted herein.
@@ -13,11 +13,11 @@ All rights reserved except as explicitly granted herein.
 ===============================================================================
 
 This License governs the use, reproduction, modification, and distribution of
-the NEURO software project ("the Software"), including all associated source
+the Neuro software project ("the Software"), including all associated source
 code, object code, documentation, assets, algorithms, data structures, design
 patterns, architectural decisions, and any derivative works thereof.
 
-The NEURO Project is committed to open-source principles as defined by the
+The Neuro Project is committed to open-source principles as defined by the
 GNU General Public License v3.0, while simultaneously protecting the project's
 intellectual integrity against unauthorized reproduction — including reproduction
 facilitated by automated, AI-assisted, or agent-based means. This License
@@ -91,13 +91,13 @@ Recipients who access, use, modify, or distribute the Software.
 
 For the purposes of this License, the following definitions apply:
 
-  1.1  "Software" means the NEURO project source code, binaries, assets,
+  1.1  "Software" means the Neuro project source code, binaries, assets,
        documentation, algorithms, data structures, system architecture, design
        patterns, and all associated materials published at the official project
-       repository or distributed by the NEURO Project Contributors.
+       repository or distributed by the Neuro Project Contributors.
 
   1.2  "Contributor" means any individual or legal entity that has submitted
-       code, documentation, or other materials to the NEURO project repository
+       code, documentation, or other materials to the Neuro project repository
        and whose contributions have been accepted.
 
   1.3  "Derivative Work" means any work, whether in source or object form,
@@ -142,8 +142,8 @@ For the purposes of this License, the following definitions apply:
        location (such as a README, About page, application splash screen,
        or license documentation):
 
-         Based on NEURO (https://github.com/PanzerPeter/Neuro)
-         Copyright (C) 2024–2025 NEURO Project Contributors
+         Based on Neuro (https://github.com/PanzerPeter/Neuro)
+         Copyright (C) 2024–2025 Neuro Project Contributors
 
   2.2  The following elements must be preserved verbatim and in their entirety
        in all copies, distributions, and Derivative Works:
@@ -191,7 +191,7 @@ For the purposes of this License, the following definitions apply:
              responsible, and the date(s) of modification;
 
          (c) Not represent or imply that a modified version is the original,
-             unmodified NEURO project.
+             unmodified Neuro project.
 
   4.2  The CHANGES file must be updated with each new release or distribution
        of a modified version. Cumulative changelogs that omit intermediate
@@ -202,20 +202,20 @@ For the purposes of this License, the following definitions apply:
 ───────────────────────────────────────────────────────────────────────────────
 
   5.1  Derivative Works must be distributed under a name that is clearly and
-       meaningfully distinct from "NEURO" so as not to create confusion
+       meaningfully distinct from "Neuro" so as not to create confusion
        regarding the origin or official status of the project.
 
   5.2  You may not use any of the following, or names confusingly similar
-       thereto, without explicit prior written consent from the NEURO Project:
+       thereto, without explicit prior written consent from the Neuro Project:
 
-         — "NEURO" as a standalone product or project name
+         — "Neuro" as a standalone product or project name
          — "Neuro Engine", "NeuroAI", "NeuroPlatform", or any compound
-           name where "NEURO" is the dominant identifying element
-         — The official NEURO project logotype, icon set, or visual identity
+           name where "Neuro" is the dominant identifying element
+         — The official Neuro project logotype, icon set, or visual identity
 
   5.3  You must explicitly state in user-visible documentation that your
        Derivative Work is not affiliated with, endorsed by, or an official
-       release of the NEURO Project.
+       release of the Neuro Project.
 
 ───────────────────────────────────────────────────────────────────────────────
 § 6. SOURCE AVAILABILITY FOR BINARY DISTRIBUTIONS
@@ -335,17 +335,17 @@ produce functional replicas or near-equivalent systems without authorization.
 § 8. TRADEMARK AND ENDORSEMENT RESTRICTIONS
 ───────────────────────────────────────────────────────────────────────────────
 
-  8.1  This License does not grant any right to use the NEURO project name,
+  8.1  This License does not grant any right to use the Neuro project name,
        trademarks, service marks, project logos, or the names of any
        Contributors for the purpose of endorsing, promoting, or advertising
        any product, service, or Derivative Work without explicit prior written
-       permission from the NEURO Project.
+       permission from the Neuro Project.
 
-  8.2  You may truthfully state that your Derivative Work is "based on NEURO"
-       or "derived from the NEURO project", provided such a statement is
+  8.2  You may truthfully state that your Derivative Work is "based on Neuro"
+       or "derived from the Neuro project", provided such a statement is
        accompanied by the mandatory attribution required by § 2.
 
-  8.3  You may not use any NEURO Project visual identity elements (logos,
+  8.3  You may not use any Neuro Project visual identity elements (logos,
        color schemes, iconography) in any external publication, product,
        or promotional material without written authorization.
 
@@ -369,7 +369,7 @@ produce functional replicas or near-equivalent systems without authorization.
 
   9.2  If you choose to deploy the Software in any of the above contexts
        in contravention of this advisory, you do so entirely at your own
-       risk and liability. The NEURO Project Contributors expressly disclaim
+       risk and liability. The Neuro Project Contributors expressly disclaim
        all liability for such deployments to the maximum extent permitted
        by applicable law.
 
@@ -390,7 +390,7 @@ produce functional replicas or near-equivalent systems without authorization.
          (h) Any breach of the base GPL v3.0 terms.
 
   10.2 Rights terminated under this section may only be reinstated by explicit
-       written consent of the NEURO Project maintainers, or as provided by
+       written consent of the Neuro Project maintainers, or as provided by
        the cure provisions of GPL v3.0 § 8 for GPL-only violations.
 
   10.3 Termination of your rights does not affect the rights of parties who
@@ -402,18 +402,18 @@ produce functional replicas or near-equivalent systems without authorization.
 ───────────────────────────────────────────────────────────────────────────────
 
   11.1 By submitting a contribution (code, documentation, design assets, or
-       any other material) to the NEURO project repository, you:
+       any other material) to the Neuro project repository, you:
 
          (a) Represent that you have the legal right to grant the rights
              described herein and that the contribution does not infringe
              any third-party intellectual property rights;
 
-         (b) Grant to the NEURO Project and its recipients a perpetual,
+         (b) Grant to the Neuro Project and its recipients a perpetual,
              irrevocable, royalty-free license to use, reproduce, modify,
              and distribute your contribution under the terms of this License;
 
          (c) Agree that your contribution may be relicensed under future
-             versions of this License as published by the NEURO Project,
+             versions of this License as published by the Neuro Project,
              provided such future versions remain substantially compatible
              with GPL v3.0.
 
@@ -451,7 +451,7 @@ produce functional replicas or near-equivalent systems without authorization.
 § 13. NO WAIVER
 ───────────────────────────────────────────────────────────────────────────────
 
-  13.1 Failure by the NEURO Project or any Contributor to enforce any provision
+  13.1 Failure by the Neuro Project or any Contributor to enforce any provision
        of this License shall not constitute a waiver of that provision or of
        any other provision, nor shall it constitute a waiver of the right to
        enforce that provision in the future.
@@ -461,11 +461,11 @@ produce functional replicas or near-equivalent systems without authorization.
 ───────────────────────────────────────────────────────────────────────────────
 
   14.1 This License, together with the incorporated GPL v3.0, constitutes the
-       entire agreement between the NEURO Project and the Recipient with respect
+       entire agreement between the Neuro Project and the Recipient with respect
        to the Software and supersedes all prior agreements, representations,
        and understandings, whether oral or written, relating to the same.
 
-  14.2 This License may be updated by the NEURO Project at any time. The
+  14.2 This License may be updated by the Neuro Project at any time. The
        version of the License applicable to any given copy of the Software
        is the version that accompanied that copy at the time of distribution.
 
@@ -474,7 +474,7 @@ produce functional replicas or near-equivalent systems without authorization.
 ===============================================================================
 
 In addition to the rights granted by GPL v3.0 and subject to the obligations
-set forth in Part III, the NEURO Project Contributors expressly grant the
+set forth in Part III, the Neuro Project Contributors expressly grant the
 following additional permissions:
 
   (a) USE FOR ANY PURPOSE: You may use, study, and modify the Software for any
@@ -505,7 +505,7 @@ Before distributing this Software or any Derivative Work, verify that you have:
   [ ] Used a clearly distinct name for any Derivative Work (§ 5)
   [ ] Confirmed that no AI-Assisted Reproduction or Structural Cloning occurred (§ 7)
   [ ] Confirmed the Software was not used as AI training data in violation of § 7.5
-  [ ] Not implied NEURO Project endorsement of your distribution (§ 8)
+  [ ] Not implied Neuro Project endorsement of your distribution (§ 8)
   [ ] Included a user-facing notice that the software is alpha-stage (§ 3)
 
 ===============================================================================

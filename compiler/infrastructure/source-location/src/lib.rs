@@ -1,4 +1,4 @@
-//! NEURO Programming Language - Source Location
+//! Neuro Programming Language - Source Location
 //!
 //! Infrastructure component for mapping byte offsets to human-readable line/column positions
 //! and extracting source code snippets for error reporting.

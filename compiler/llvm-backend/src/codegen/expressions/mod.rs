@@ -1,4 +1,4 @@
-// NEURO Programming Language - LLVM Backend
+// Neuro Programming Language - LLVM Backend
 // Codegen for expressions: top-level dispatch and shared helpers.
 // Category implementations live in the sibling submodules below; each adds
 // methods to the same `impl CodegenContext` block (Rust allows split impls).

@@ -1,4 +1,4 @@
-# NEURO Example Programs
+# Neuro Example Programs
 
 Runnable `.nr` programs demonstrating the language. Each program returns an
 `i32` from `main`, which becomes the process **exit code** — that is how every

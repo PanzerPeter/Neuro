@@ -1,4 +1,4 @@
-// NEURO Programming Language - LLVM Backend
+// Neuro Programming Language - LLVM Backend
 // Codegen for expressions: Unary operators.
 
 use ast_types::*;

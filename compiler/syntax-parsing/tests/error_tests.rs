@@ -1,4 +1,4 @@
-// NEURO Programming Language - Syntax Parsing Tests
+// Neuro Programming Language - Syntax Parsing Tests
 // Error case tests
 
 use syntax_parsing::{parse, parse_expr};

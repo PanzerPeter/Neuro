@@ -1,4 +1,4 @@
-// NEURO Programming Language - Lexical Analysis tests
+// Neuro Programming Language - Lexical Analysis tests
 // Unit tests for the tokenizer (moved out of lib.rs to keep the slice entry point lean).
 
 use super::*;

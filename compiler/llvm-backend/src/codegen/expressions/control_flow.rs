@@ -1,4 +1,4 @@
-// NEURO Programming Language - LLVM Backend
+// Neuro Programming Language - LLVM Backend
 // Codegen for expressions: Expression-position control flow (if-expressions, block expressions).
 
 use ast_types::*;
