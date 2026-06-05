@@ -48,7 +48,7 @@ Neuro is an Ahead-of-Time (AOT) compiled language built from the ground up for A
 
 ## Quick Example
 
-A single perceptron with ReLU activation; uses structs, `impl` blocks, associated functions, instance methods, if-expressions, and implicit returns. [This file compiles and runs today.](examples/neuron.nr)
+A single perceptron with ReLU activation; uses structs, `impl` blocks, associated functions, instance methods, if-expressions, and implicit returns. [This file compiles and runs today.](examples/structs/neuron.nr)
 
 ```neuro
 struct Neuron {
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**543 Tests Passing**):
+Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**546 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -106,7 +106,7 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 | **Structs** | Definition, instantiation (`Name { field: value }`), field-init shorthand (`Point { x, y }`), functional update (`Point { x: 1.0, ..base }`), field read (`obj.field`), field mutation on `mut` bindings; nominal typing; definition-order independent |
 | **Methods** | `impl` blocks with `&self` instance methods; associated functions called via `TypeName::func(args)`; `&mut self` / consuming `self` rejected until ownership lands |
 | **Type Aliases** | `type Name = Target` transparent aliases (§3.14) resolved at parse time across var/const/param/return/field/cast positions; chain resolution; duplicate, builtin-shadow, and cyclic-alias diagnostics |
-| **If/Block Expressions** | `val x = if cond { a } else { b }`; `val y = { stmts; expr }`; all arms type-checked; alloca-based lowering |
+| **If/Block Expressions** | `val x = if cond { a } else { b }`; bare block-as-value with newline-separated statements and a final trailing expression; all arms type-checked; alloca-based lowering |
 | **Unsafe Blocks** | `unsafe { … }` reserved keyword + block expression (Phase 1.7 groundwork); inert — lowers identically to a bare block, evaluates to its trailing expression |
 | **Panic Runtime** | `panic(msg)`, `assert(cond)`, `unreachable()` builtins (§1.2): print a diagnostic (`message at file:line:col`) to stderr and abort via `abort()` — no stack unwinding. `assert` aborts only on a false condition. Divergent, so usable in tail-return position; a same-named user function shadows the builtin |
 | **LLVM Backend** | Native executable generation via inkwell 0.9.0 (LLVM 20) |
@@ -315,7 +315,7 @@ cargo install --path compiler/neurc
 
 ```bash
 # Type-check a source file (no binary produced)
-cargo run -p neurc -- check examples/hello.nr
+cargo run -p neurc -- check examples/basics/hello.nr
 
 # Compile to a native executable
 cargo run -p neurc -- compile examples/basics/factorial.nr

@@ -180,7 +180,7 @@ n as f64 + 1.0    // Parsed as: (n as f64) + 1.0
 
 ## Expression-Based Returns
 
-Last expression in a function (without semicolon) is the return value:
+The last expression in a function body is the return value (Neuro has no semicolons; statements are newline-terminated):
 
 ```neuro
 func add(a: i32, b: i32) -> i32 {
@@ -196,14 +196,14 @@ func max(a: i32, b: i32) -> i32 {
 }
 ```
 
-**Key distinction**:
-- Expression (no semicolon): Returns value
-- Statement (with semicolon): Evaluates but doesn't return
+**Key distinction** — it is positional, not punctuation-based:
+- A bare expression in the **last** position of a block is its return value
+- Any earlier line (a `val`/`mut` binding, assignment, or non-final expression) is a statement evaluated for its effect
 
 ```neuro
 func example() -> i32 {
-    val x: i32 = 42  // Statement (semicolon required)
-    x  // Expression (no semicolon, implicit return)
+    val x: i32 = 42  // Statement (binding)
+    x  // Last expression — implicit return
 }
 ```
 

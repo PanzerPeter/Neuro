@@ -28,7 +28,7 @@ neurc check <file.nr>
 **Examples**:
 ```bash
 # Check a single file
-neurc check examples/hello.nr
+neurc check examples/basics/hello.nr
 
 # With debug logging
 RUST_LOG=debug neurc check examples/basics/milestone.nr
@@ -57,19 +57,19 @@ neurc compile <file.nr> [options]
 **Examples**:
 ```bash
 # Default output (hello.exe on Windows)
-neurc compile examples/hello.nr
+neurc compile examples/basics/hello.nr
 
 # Custom output path
-neurc compile examples/hello.nr -o bin/my_program
+neurc compile examples/basics/hello.nr -o bin/my_program
 
 # Custom output with .exe extension
-neurc compile examples/hello.nr -o bin/my_program.exe
+neurc compile examples/basics/hello.nr -o bin/my_program.exe
 
 # Compile from different directory
 neurc compile ../path/to/program.nr
 
 # With debug logging
-RUST_LOG=debug neurc compile examples/hello.nr
+RUST_LOG=debug neurc compile examples/basics/hello.nr
 ```
 
 **Output**:
@@ -274,7 +274,7 @@ Typical compilation times (Phase 1):
 ```powershell
 # Both work
 neurc compile examples\hello.nr
-neurc compile examples/hello.nr
+neurc compile examples/basics/hello.nr
 ```
 
 ### Linux

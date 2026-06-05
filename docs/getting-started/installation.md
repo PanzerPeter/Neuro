@@ -109,7 +109,7 @@ cargo test --workspace
 
 ```bash
 # Check syntax and types without producing a binary
-cargo run -p neurc -- check examples/hello.nr
+cargo run -p neurc -- check examples/basics/hello.nr
 
 # Compile to a native executable
 cargo run -p neurc -- compile examples/basics/factorial.nr
@@ -119,7 +119,7 @@ cargo run -p neurc -- compile examples/basics/factorial.nr
 
 # After cargo install --path compiler/neurc:
 neurc --version
-neurc check examples/hello.nr
+neurc check examples/basics/hello.nr
 ```
 
 All tests should pass:

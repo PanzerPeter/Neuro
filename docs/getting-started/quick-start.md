@@ -25,7 +25,7 @@ neurc --version
 Neuro can validate syntax and types without compiling:
 
 ```bash
-cargo run -p neurc -- check examples/hello.nr
+cargo run -p neurc -- check examples/basics/hello.nr
 ```
 
 Expected output:
@@ -38,7 +38,7 @@ Type checking passed!
 Compile a Neuro program to a native executable:
 
 ```bash
-cargo run -p neurc -- compile examples/hello.nr
+cargo run -p neurc -- compile examples/basics/hello.nr
 ```
 
 On Windows, this creates `examples\hello.exe`.
@@ -151,10 +151,10 @@ neurc compile <file.nr> [options]
 
 ```bash
 # Default output (same name as source)
-neurc compile examples/hello.nr
+neurc compile examples/basics/hello.nr
 
 # Custom output path
-neurc compile examples/hello.nr -o bin/my_program
+neurc compile examples/basics/hello.nr -o bin/my_program
 
 # Compile from different directory
 neurc compile ../path/to/program.nr
@@ -224,10 +224,10 @@ Enable debug output to see compilation stages:
 ```bash
 # Windows (PowerShell)
 $env:RUST_LOG="debug"
-neurc compile examples/hello.nr
+neurc compile examples/basics/hello.nr
 
 # Unix
-RUST_LOG=debug neurc compile examples/hello.nr
+RUST_LOG=debug neurc compile examples/basics/hello.nr
 ```
 
 This shows:
