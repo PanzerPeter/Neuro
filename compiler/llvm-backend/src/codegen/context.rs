@@ -21,6 +21,8 @@ use crate::types::Type;
 pub(crate) enum BuiltinMethod {
     /// `string.len()` → field-1 byte length of the string fat pointer (§2.7).
     StringLen,
+    /// `string.clone()` → a copy of the string fat pointer value (§2.7).
+    StringClone,
     /// `int.wrapping_add(rhs)` → two's-complement wrapping add (§1.2).
     WrappingAdd,
     /// `int.wrapping_sub(rhs)` → two's-complement wrapping subtract (§1.2).
@@ -43,6 +45,7 @@ pub(crate) enum BuiltinMethod {
 pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<(BuiltinMethod, Type)> {
     match (recv, method) {
         (Type::String, "len") => Some((BuiltinMethod::StringLen, Type::U64)),
+        (Type::String, "clone") => Some((BuiltinMethod::StringClone, Type::String)),
         // Integer intrinsics return the receiver's own integer type (§1.2, §1.4).
         (t, m) if t.is_integer() => {
             let kind = match m {
@@ -117,12 +120,14 @@ pub(crate) struct CodegenContext<'ctx> {
     /// the child's. `(start, end)` is unique per node (the child's `end` is always smaller).
     pub(crate) binary_left_types: HashMap<(usize, usize), Type>,
 
-    /// Maps a builtin method-call's `Call` span.start → the resolved intrinsic plus the
-    /// receiver's type, so `codegen_expr` lowers it directly instead of looking up a struct
-    /// method. The receiver type is stored here rather than read back from `expr_types`
+    /// Maps a builtin method-call's `Call` full span `(start, end)` → the resolved intrinsic
+    /// plus the receiver's type, so `codegen_expr` lowers it directly instead of looking up a
+    /// struct method. The receiver type is stored here rather than read back from `expr_types`
     /// because an enclosing cast (`x.shr(n) as T`) shares the receiver's `span.start` and
-    /// would overwrite that entry, losing the receiver's signedness.
-    pub(crate) builtin_methods: HashMap<usize, (BuiltinMethod, Type)>,
+    /// would overwrite that entry, losing the receiver's signedness. Keyed by the full span
+    /// rather than `span.start` because a chained builtin call (`s.clone().len()`) nests two
+    /// `Call` nodes that share the same `span.start`; the full `(start, end)` is unique per node.
+    pub(crate) builtin_methods: HashMap<(usize, usize), (BuiltinMethod, Type)>,
 
     /// Evaluated constant values (both module-level and function-level).
     /// `codegen_identifier` checks this before `variables` to allow locals to shadow consts.
@@ -258,9 +263,20 @@ mod tests {
     }
 
     #[test]
+    fn string_clone_resolves_to_string() {
+        let resolved = resolve_builtin_method(&Type::String, "clone");
+        assert!(matches!(
+            resolved,
+            Some((BuiltinMethod::StringClone, Type::String))
+        ));
+    }
+
+    #[test]
     fn unknown_builtin_method_is_unresolved() {
         assert!(resolve_builtin_method(&Type::String, "capacity").is_none());
         assert!(resolve_builtin_method(&Type::I32, "len").is_none());
+        // `.clone()` is a string-only builtin; integers take the assignment (Copy) path.
+        assert!(resolve_builtin_method(&Type::I32, "clone").is_none());
     }
 
     #[test]

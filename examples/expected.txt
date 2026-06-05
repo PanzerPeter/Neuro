@@ -28,6 +28,7 @@ types/float_ops.nr                  42
 types/float_suffixes.nr             0
 types/integer_overflow.nr           55
 types/integer_suffixes.nr           0
+types/string_clone.nr               5
 types/string_len.nr                 0
 types/strings.nr                    0
 types/type_aliases.nr               17

@@ -445,7 +445,8 @@ impl<'ctx> CodegenContext<'ctx> {
                             Some(recv) => match resolve_builtin_method(&recv, &field.name) {
                                 Some((kind, ret_ty)) => {
                                     self.expr_types.insert(span.start, ret_ty);
-                                    self.builtin_methods.insert(span.start, (kind, recv));
+                                    self.builtin_methods
+                                        .insert((span.start, span.end), (kind, recv));
                                 }
                                 None => {
                                     return Err(CodegenError::InternalError(

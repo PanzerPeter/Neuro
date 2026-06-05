@@ -94,6 +94,63 @@ func main() -> i32 {
 }
 
 #[test]
+fn string_clone_preserves_length() {
+    let test = CompileTest::new();
+    // A clone is byte-for-byte identical, so its length matches the source's.
+    let source = r#"
+func main() -> i32 {
+    val a: string = "hello"
+    val b: string = a.clone()
+    val n: u64 = b.len()
+    return n as i32
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("string_clone_len.nr", source)
+        .expect("string.clone().len() compilation or execution failed");
+    assert_eq!(exit_code, 5);
+}
+
+#[test]
+fn string_clone_is_equal_to_source() {
+    let test = CompileTest::new();
+    // The clone compares byte-equal to the original.
+    let source = r#"
+func main() -> i32 {
+    val a: string = "neuro"
+    val b: string = a.clone()
+    if a == b {
+        return 7
+    }
+    return 0
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("string_clone_eq.nr", source)
+        .expect("string.clone() equality compilation or execution failed");
+    assert_eq!(exit_code, 7);
+}
+
+#[test]
+fn string_clone_chained_with_len() {
+    let test = CompileTest::new();
+    // `.clone()` returns a `string`, so further builtin methods chain off it.
+    let source = r#"
+func main() -> i32 {
+    val n: u64 = "hi, neuro".clone().len()
+    return n as i32
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("string_clone_chain.nr", source)
+        .expect("chained string.clone().len() compilation or execution failed");
+    assert_eq!(exit_code, 9);
+}
+
+#[test]
 fn unknown_builtin_method_is_rejected() {
     let test = CompileTest::new();
     let source = r#"

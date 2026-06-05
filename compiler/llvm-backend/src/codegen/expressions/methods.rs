@@ -41,6 +41,12 @@ impl<'ctx> CodegenContext<'ctx> {
                         CodegenError::LlvmError(format!("failed to extract string length: {}", e))
                     })
             }
+            // `string.clone()` (§2.7) — explicit deep copy of an owned string.
+            // String literals live in immutable `.rodata` and no heap-backed string type
+            // exists yet (Phase 1.7), so duplicating the `{ ptr, len }` fat-pointer value is
+            // observationally a deep copy: the pointee bytes are immutable and shared safely.
+            // When runtime heap strings land this must duplicate the underlying buffer.
+            BuiltinMethod::StringClone => self.codegen_expr(receiver),
             BuiltinMethod::WrappingAdd
             | BuiltinMethod::WrappingSub
             | BuiltinMethod::WrappingMul
@@ -107,8 +113,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.emit_saturating_sat_intrinsic(intrinsic_name, lhs, rhs)?
             }
             BuiltinMethod::SaturatingMul => self.emit_saturating_mul(lhs, rhs, unsigned)?,
-            BuiltinMethod::StringLen => {
-                unreachable!("StringLen is handled by codegen_builtin_method")
+            BuiltinMethod::StringLen | BuiltinMethod::StringClone => {
+                unreachable!("string intrinsics are handled by codegen_builtin_method")
             }
         };
 
