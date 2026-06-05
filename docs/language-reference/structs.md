@@ -29,6 +29,30 @@ val rect = Rectangle { width: 10, height: 5 }
 
 All fields must be provided. Field order in the literal does not need to match the definition order.
 
+### Field-Init Shorthand
+
+When a local variable has the same name as the field it initialises, write the name once:
+
+```neuro
+val x = 1.0
+val y = 2.0
+val p = Point { x, y }   // equivalent to Point { x: x, y: y }
+```
+
+Shorthand and explicit `field: value` entries may be mixed: `Point { x, y: 2.0 }`. A shorthand field references the same-named binding in scope; if no such binding exists, it is an ordinary undefined-name error.
+
+### Functional Update (`..base`)
+
+A trailing `..base` supplies every field not listed explicitly from an existing value of the same struct type. Listed fields override the base:
+
+```neuro
+val p = Point { x: 1.0, y: 2.0 }
+val shifted = Point { x: 10.0, ..p }   // x = 10.0, y inherited from p (2.0)
+val copy = Point { ..p }               // all fields copied from p
+```
+
+The base must be the same struct type as the literal (otherwise a type `Mismatch` error). When a base is present, omitting fields is **not** a `MissingStructField` error — the base fills them in. The base is evaluated and its fields are copied into the new value; no allocation is introduced.
+
 ## Field Access
 
 Use dot notation to read a field:

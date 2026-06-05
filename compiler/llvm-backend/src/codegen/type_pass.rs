@@ -516,9 +516,17 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.expr_types.insert(ident.span.start, ty.clone());
             }
 
-            Expr::StructLiteral { name, fields, span } => {
+            Expr::StructLiteral {
+                name,
+                fields,
+                base,
+                span,
+            } => {
                 for field_init in fields {
                     self.visit_expr_for_types(&field_init.value, func_types)?;
+                }
+                if let Some(base) = base {
+                    self.visit_expr_for_types(base, func_types)?;
                 }
                 self.expr_types
                     .insert(span.start, Type::Struct(name.name.clone()));

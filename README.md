@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-530%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-543%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP & Phase 1.5 stabilization complete · Phase 1.7 (ownership) active · Phase 2 overlapping
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**530 Tests Passing**):
+Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**543 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -103,7 +103,7 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 | **Attributes & Lints** | `@name(args)` attributes on functions/methods; `while true` lint with `@allow(prefer_loop_over_while_true)` suppression |
 | **String Type** | Literals with full escape sequence support (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==` and `!=` for byte-level comparison; `.len()` builtin method returning the `u64` byte length (O(1), excludes null terminator); `.clone()` builtin method returning a fresh `string` (§2.7) |
 | **Builtin Methods** | Compiler-known intrinsic method dispatch on primitive & string receivers (`receiver.method()`), alongside user-defined `impl` methods; `string.len()`, `string.clone()`; integer `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and right-shift `.shr(n)` (`ashr`/`lshr` by signedness) |
-| **Structs** | Definition, instantiation (`Name { field: value }`), field read (`obj.field`), field mutation on `mut` bindings; nominal typing; definition-order independent |
+| **Structs** | Definition, instantiation (`Name { field: value }`), field-init shorthand (`Point { x, y }`), functional update (`Point { x: 1.0, ..base }`), field read (`obj.field`), field mutation on `mut` bindings; nominal typing; definition-order independent |
 | **Methods** | `impl` blocks with `&self` instance methods; associated functions called via `TypeName::func(args)`; `&mut self` / consuming `self` rejected until ownership lands |
 | **Type Aliases** | `type Name = Target` transparent aliases (§3.14) resolved at parse time across var/const/param/return/field/cast positions; chain resolution; duplicate, builtin-shadow, and cyclic-alias diagnostics |
 | **If/Block Expressions** | `val x = if cond { a } else { b }`; `val y = { stmts; expr }`; all arms type-checked; alloca-based lowering |

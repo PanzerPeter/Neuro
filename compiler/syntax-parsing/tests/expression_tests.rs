@@ -486,3 +486,92 @@ fn test_unsafe_is_reserved_keyword() {
     let result = parse_expr("unsafe + 1");
     assert!(result.is_err());
 }
+
+#[test]
+fn test_parse_struct_literal_explicit_fields() {
+    let result = parse_expr("Point { x: 1.0, y: 2.0 }");
+    assert!(result.is_ok());
+    match result.unwrap() {
+        Expr::StructLiteral {
+            name, fields, base, ..
+        } => {
+            assert_eq!(name.name, "Point");
+            assert_eq!(fields.len(), 2);
+            assert!(base.is_none());
+        }
+        other => panic!("Expected struct literal, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_struct_literal_shorthand() {
+    // `Point { x, y }` desugars each bare field to `field: field`.
+    let result = parse_expr("Point { x, y }");
+    assert!(result.is_ok());
+    match result.unwrap() {
+        Expr::StructLiteral { fields, base, .. } => {
+            assert_eq!(fields.len(), 2);
+            assert!(base.is_none());
+            match &*fields[0].value {
+                Expr::Identifier(id) => assert_eq!(id.name, "x"),
+                other => panic!("Expected shorthand identifier value, got {:?}", other),
+            }
+            assert_eq!(fields[0].name.name, "x");
+        }
+        other => panic!("Expected struct literal, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_struct_literal_mixed_shorthand() {
+    let result = parse_expr("Point { x, y: 2.0 }");
+    assert!(result.is_ok());
+    match result.unwrap() {
+        Expr::StructLiteral { fields, .. } => {
+            assert_eq!(fields.len(), 2);
+            match &*fields[0].value {
+                Expr::Identifier(id) => assert_eq!(id.name, "x"),
+                other => panic!("Expected shorthand identifier, got {:?}", other),
+            }
+            match &*fields[1].value {
+                Expr::Literal(_, _) => {}
+                other => panic!("Expected explicit literal value, got {:?}", other),
+            }
+        }
+        other => panic!("Expected struct literal, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_struct_update_syntax() {
+    // `Point { x: 10.0, ..p }` carries the base in `base`.
+    let result = parse_expr("Point { x: 10.0, ..p }");
+    assert!(result.is_ok());
+    match result.unwrap() {
+        Expr::StructLiteral { fields, base, .. } => {
+            assert_eq!(fields.len(), 1);
+            match base {
+                Some(b) => match *b {
+                    Expr::Identifier(id) => assert_eq!(id.name, "p"),
+                    other => panic!("Expected base identifier, got {:?}", other),
+                },
+                None => panic!("Expected functional-update base"),
+            }
+        }
+        other => panic!("Expected struct literal, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_struct_update_only_base() {
+    // A base with no explicit overrides is well-formed: `Point { ..p }`.
+    let result = parse_expr("Point { ..p }");
+    assert!(result.is_ok());
+    match result.unwrap() {
+        Expr::StructLiteral { fields, base, .. } => {
+            assert_eq!(fields.len(), 0);
+            assert!(base.is_some());
+        }
+        other => panic!("Expected struct literal, got {:?}", other),
+    }
+}

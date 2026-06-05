@@ -665,7 +665,12 @@ impl TypeChecker {
                 self.check_expr(inner, expected)
             }
 
-            Expr::StructLiteral { name, fields, span } => {
+            Expr::StructLiteral {
+                name,
+                fields,
+                base,
+                span,
+            } => {
                 let def = if let Some(d) = self.struct_defs.get(&name.name).cloned() {
                     d
                 } else {
@@ -719,14 +724,29 @@ impl TypeChecker {
                     }
                 }
 
-                // Report any fields that are in the definition but missing from the literal
-                for (field_name, _) in &def {
-                    if !seen.contains_key(field_name) {
-                        self.record_error(TypeError::MissingStructField {
-                            struct_name: name.name.clone(),
-                            field_name: field_name.clone(),
-                            span: *span,
-                        });
+                // A `..base` source supplies every unlisted field, so missing
+                // fields are only an error for a plain literal. The base itself
+                // must be the same struct type.
+                if let Some(base_expr) = base {
+                    let expected = Type::Struct(name.name.clone());
+                    if let Some(base_ty) = self.check_expr(base_expr, Some(&expected)) {
+                        if !base_ty.is_compatible_with(&expected) {
+                            self.record_error(TypeError::Mismatch {
+                                expected,
+                                found: base_ty,
+                                span: base_expr.span(),
+                            });
+                        }
+                    }
+                } else {
+                    for (field_name, _) in &def {
+                        if !seen.contains_key(field_name) {
+                            self.record_error(TypeError::MissingStructField {
+                                struct_name: name.name.clone(),
+                                field_name: field_name.clone(),
+                                span: *span,
+                            });
+                        }
                     }
                 }
 

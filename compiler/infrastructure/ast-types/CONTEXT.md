@@ -29,6 +29,10 @@ Extracted from `syntax-parsing` to eliminate the cross-slice dependency that `se
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-06-05: `Expr::StructLiteral` gained `base: Option<Box<Expr>>` for functional-update syntax
+  (`Point { x: 1.0, ..p }`, §3.3). `None` is a plain literal (all fields listed). Field-init
+  shorthand (`Point { x, y }`) needs no AST change — the parser desugars a bare field to
+  `FieldInit { value: Expr::Identifier(field_name) }`.
 - 2026-06-04: Added `Expr::Unsafe { stmts, span }` for `unsafe { }` block expressions (Phase 1.7 groundwork). Structurally identical to `Expr::Block`; the distinct node lets later phases (Phase 5 `@kernel`) attach the kernel-aliasing relaxation. Inert today — no special semantics.
 - 2026-05-20: Added `Attribute { name, args, span }` struct. `FunctionDef` and `MethodDef` now carry `attributes: Vec<Attribute>`. Semantics are interpreted by later passes (e.g. `@allow(prefer_loop_over_while_true)`); unknown attribute names are accepted so the surface stays forward-compatible with future `@grad`, `@gpu`, `@no_prelude`.
 - 2026-04-04: Added `inclusive: bool` to `Stmt::ForRange` to support `..=` inclusive range iteration.

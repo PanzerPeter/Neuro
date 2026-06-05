@@ -270,9 +270,12 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
         }
         Expr::Unary { operand, .. } => rewrite_expr(operand, resolved),
         Expr::Paren(inner, _) => rewrite_expr(inner, resolved),
-        Expr::StructLiteral { fields, .. } => {
+        Expr::StructLiteral { fields, base, .. } => {
             for field in fields.iter_mut() {
                 rewrite_expr(&mut field.value, resolved);
+            }
+            if let Some(base) = base {
+                rewrite_expr(base, resolved);
             }
         }
         Expr::FieldAccess { object, .. } => rewrite_expr(object, resolved),

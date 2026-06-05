@@ -125,9 +125,9 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             Expr::Paren(inner, _) => self.codegen_expr(inner),
 
-            Expr::StructLiteral { name, fields, .. } => {
-                self.codegen_struct_literal(&name.name, fields)
-            }
+            Expr::StructLiteral {
+                name, fields, base, ..
+            } => self.codegen_struct_literal(&name.name, fields, base.as_deref()),
 
             Expr::FieldAccess {
                 object,

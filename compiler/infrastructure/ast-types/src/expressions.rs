@@ -37,10 +37,15 @@ pub enum Expr {
         span: Span,
     },
     Paren(Box<Expr>, Span),
-    /// Struct literal: `Point { x: 1.0, y: 2.0 }`
+    /// Struct literal: `Point { x: 1.0, y: 2.0 }`.
+    ///
+    /// `base` carries the functional-update source: `Point { x: 1.0, ..p }`
+    /// supplies every field not listed in `fields` from `base`. `None` means a
+    /// plain literal where all fields must be listed explicitly.
     StructLiteral {
         name: Identifier,
         fields: Vec<FieldInit>,
+        base: Option<Box<Expr>>,
         span: Span,
     },
     /// Field access: `expr.field_name`
