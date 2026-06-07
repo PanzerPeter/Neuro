@@ -6,6 +6,9 @@ use ast_types::{BinaryOp, Expr, UnaryOp};
 use shared_types::{Literal, Span};
 use std::collections::HashMap;
 
+/// The builtin deep-copy method name shared by `string` and Clone-deriving structs (§2.3, §2.7).
+const CLONE_METHOD: &str = "clone";
+
 impl TypeChecker {
     /// Resolve a compiler-known intrinsic method on a builtin (non-struct) receiver.
     ///
@@ -528,6 +531,21 @@ impl TypeChecker {
                         {
                             Some(k) => k.clone(),
                             None => {
+                                // `.clone()` on a struct that derives `Clone` (or `Copy`) is a
+                                // compiler-known builtin (§2.3) — a deep copy yielding the same
+                                // struct type. A user-defined `clone` method shadows it (handled
+                                // above by the impl_methods lookup).
+                                if field.name == CLONE_METHOD && self.struct_is_clone(&struct_name)
+                                {
+                                    if !args.is_empty() {
+                                        self.record_error(TypeError::ArgumentCountMismatch {
+                                            expected: 0,
+                                            found: args.len(),
+                                            span: *span,
+                                        });
+                                    }
+                                    return Some(Type::Struct(struct_name));
+                                }
                                 self.record_error(TypeError::MethodNotFound {
                                     struct_name,
                                     method_name: field.name.clone(),

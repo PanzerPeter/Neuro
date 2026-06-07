@@ -51,6 +51,9 @@ pub struct FieldDef {
 pub struct StructDef {
     pub name: Identifier,
     pub fields: Vec<FieldDef>,
+    /// `@derive(...)` attributes attached to the struct (e.g. `@derive(Copy, Clone)`).
+    /// Interpreted by semantic analysis to determine Copy/Clone-ness (§2.3).
+    pub attributes: Vec<Attribute>,
     pub span: Span,
 }
 

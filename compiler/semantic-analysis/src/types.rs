@@ -164,16 +164,6 @@ impl Type {
     pub(crate) fn is_string(&self) -> bool {
         matches!(self, Type::String)
     }
-
-    /// Whether values of this type participate in move-by-default ownership (§2.2).
-    ///
-    /// Only `string` is tracked today: it is the sole non-`Copy` owned type the
-    /// language can construct. Structs become move-tracked when the `Copy` trait
-    /// and `@derive(Copy)` land (the next Phase 1.7 item); until then they remain
-    /// freely duplicable to avoid breaking existing struct code.
-    pub(crate) fn is_move_tracked(&self) -> bool {
-        matches!(self, Type::String)
-    }
 }
 
 impl fmt::Display for Type {

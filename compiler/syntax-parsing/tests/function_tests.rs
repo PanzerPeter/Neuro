@@ -338,13 +338,50 @@ fn test_parse_method_with_allow_attribute() {
 }
 
 #[test]
-fn test_attribute_before_struct_is_rejected() {
+fn test_parse_struct_with_derive_attribute() {
+    use syntax_parsing::Item;
+
     let source = r#"
-        @derive(Debug)
+        @derive(Copy, Clone)
         struct Point { x: i32, y: i32 }
+    "#;
+    let items = parse(source).expect("parse should succeed");
+    let struct_def = match &items[0] {
+        Item::Struct(s) => s,
+        _ => panic!("expected struct"),
+    };
+    assert_eq!(struct_def.attributes.len(), 1);
+    assert_eq!(struct_def.attributes[0].name.name, "derive");
+    let args: Vec<_> = struct_def.attributes[0]
+        .args
+        .iter()
+        .map(|a| a.name.as_str())
+        .collect();
+    assert_eq!(args, vec!["Copy", "Clone"]);
+}
+
+#[test]
+fn test_parse_struct_without_attributes_has_empty_list() {
+    use syntax_parsing::Item;
+
+    let source = r#"
+        struct Point { x: i32, y: i32 }
+    "#;
+    let items = parse(source).expect("parse should succeed");
+    let struct_def = match &items[0] {
+        Item::Struct(s) => s,
+        _ => panic!("expected struct"),
+    };
+    assert!(struct_def.attributes.is_empty());
+}
+
+#[test]
+fn test_dangling_attribute_at_eof_is_rejected() {
+    let source = r#"
+        @derive(Copy)
     "#;
     assert!(
         parse(source).is_err(),
-        "attributes on structs should be a parse error until that surface is implemented"
+        "an attribute followed by neither func nor struct should be a parse error"
     );
 }

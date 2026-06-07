@@ -1,7 +1,7 @@
 // Neuro Programming Language - Semantic Analysis
 // Main type checking engine
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ast_types::{Attribute, Item, MethodDef, Stmt};
 
@@ -18,6 +18,12 @@ pub(crate) struct TypeChecker {
     functions: HashMap<String, Type>,
     /// Struct definitions: name → ordered list of (field_name, field_type)
     struct_defs: HashMap<String, Vec<(String, Type)>>,
+    /// Names of structs that derive `Copy` (`@derive(Copy)`). A Copy struct is
+    /// duplicated on assignment instead of moved (§2.3).
+    copy_structs: HashSet<String>,
+    /// Names of structs that derive `Clone` — either explicitly via `@derive(Clone)`
+    /// or implicitly because they derive `Copy`. A Clone struct supports `.clone()`.
+    clone_structs: HashSet<String>,
     /// Methods per struct: struct_name → method_name → mangled function key in `functions`
     ///
     /// The mangled key follows the convention `StructName__methodName`.
@@ -50,6 +56,8 @@ impl TypeChecker {
             symbols: SymbolTable::new(),
             functions: HashMap::new(),
             struct_defs: HashMap::new(),
+            copy_structs: HashSet::new(),
+            clone_structs: HashSet::new(),
             impl_methods: HashMap::new(),
             constants: HashMap::new(),
             errors: Vec::new(),
@@ -79,12 +87,53 @@ impl TypeChecker {
         !self.errors.is_empty()
     }
 
+    /// Whether a value of `ty` is `Copy` — duplicated on assignment rather than moved (§2.3).
+    ///
+    /// Primitive scalars are always Copy; `string` never is; a struct is Copy only when it
+    /// derives `Copy`. Other type forms (functions, void, unknown) are not Copy receivers
+    /// in any move-tracked position, so the distinction is immaterial for them.
+    pub(crate) fn is_type_copy(&self, ty: &Type) -> bool {
+        match ty {
+            Type::String | Type::Void | Type::Function { .. } | Type::Unknown => false,
+            Type::Struct(name) => self.copy_structs.contains(name),
+            _ => true,
+        }
+    }
+
+    /// Whether values of `ty` participate in move-by-default ownership (§2.2).
+    ///
+    /// `string` is always tracked. A struct is tracked unless it derives `Copy`, mirroring
+    /// the spec rule that user types are move-by-default and opt into copying via `@derive`.
+    pub(crate) fn is_type_move_tracked(&self, ty: &Type) -> bool {
+        match ty {
+            Type::String => true,
+            Type::Struct(name) => !self.copy_structs.contains(name),
+            _ => false,
+        }
+    }
+
+    /// Whether a struct named `name` supports `.clone()` — i.e. it derives `Clone` (or `Copy`,
+    /// which implies `Clone`).
+    pub(crate) fn struct_is_clone(&self, name: &str) -> bool {
+        self.clone_structs.contains(name)
+    }
+
     /// Check a complete program
     pub(crate) fn check_program(&mut self, items: &[Item]) -> Result<(), ()> {
         // Pass 1: register struct definitions so type names resolve in method signatures.
+        // This also records each struct's Copy/Clone derivation intent.
         for item in items {
             if let Item::Struct(def) = item {
                 let _ = self.register_struct(def);
+            }
+        }
+
+        // Pass 1b: validate `@derive(Copy)` — every field of a Copy struct must itself
+        // be Copy (§2.3). Runs after all structs are registered so a Copy field that is
+        // another struct resolves regardless of source order.
+        for item in items {
+            if let Item::Struct(def) = item {
+                self.validate_copy_derive(def);
             }
         }
 

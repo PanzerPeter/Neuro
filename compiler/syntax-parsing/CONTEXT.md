@@ -1,7 +1,7 @@
 # syntax-parsing
 
 ## Purpose
-Transform a Neuro token stream into a typed Abstract Syntax Tree that subsequent compiler stages can traverse.
+Transform a Neuro token stream into a typed Abstract Syntax Tree for later compiler stages.
 
 ## Entry Point
 - Type: Library function
@@ -9,86 +9,75 @@ Transform a Neuro token stream into a typed Abstract Syntax Tree that subsequent
 - Output: `Result<Vec<Item>, ParseError>`
 
 ## Data Ownership
-- Tables: none
-- Events Published: none
-- Events Consumed: none
-- Public Read Model: none
+- Tables / Events Published / Events Consumed / Public Read Model: none
 
 ## Shared Kernel
-- ast-types — owns AST node definitions so semantic-analysis and llvm-backend can consume the tree without depending on this slice
-- shared-types — provides `Span`, `Identifier`, and `Literal` used throughout the grammar
-- lexical-analysis — direct consumer relationship; `parse()` calls `tokenize()` internally so callers need only one entry point
+- ast-types — owns AST node definitions so semantic-analysis/llvm-backend consume the tree without
+  depending on this slice
+- shared-types — `Span`, `Identifier`, `Literal` used throughout the grammar
+- lexical-analysis — direct consumer; `parse()` calls `tokenize()` internally (callers need one entry)
 
 ## Notes
-The direct dependency on lexical-analysis is a deliberate intra-pipeline coupling,
-not a VSA cross-slice violation. syntax-parsing is the sole consumer of the token
-stream; externalising tokenisation would create an unnecessary coordination step in
-neurc. The architecture test carries an explicit allowlist entry for this pairing.
+The lexical-analysis dependency is deliberate intra-pipeline coupling, not a VSA violation:
+syntax-parsing is the sole token-stream consumer, and externalising tokenisation would add an
+unnecessary neurc coordination step. The architecture test allowlists this pairing.
 
-Struct literal disambiguation: the `Parser` carries a `no_struct_lit: bool` flag set
-to `true` while parsing if/while/for conditions and `else if` conditions. This prevents
-`Identifier { ... }` from consuming the `{` that opens the body block — the same
-disambiguation strategy used by Rust. All condition sites (primary `if`, every `else if`
-arm, and `while`) must set and clear the flag symmetrically.
+Struct literal disambiguation: `Parser` carries `no_struct_lit: bool`, set `true` while parsing
+if/while/for and `else if` conditions, so `Identifier { ... }` does not consume the `{` opening the
+body block (same strategy as Rust). All condition sites set/clear the flag symmetrically.
 
-`impl` blocks: `parse_program` dispatches on `TokenKind::Impl` → `parse_impl_def`,
-which parses `impl TypeName { method* }`. Each method is parsed by `parse_method_def`,
-which calls `try_parse_self_param` to detect `&self`, `&mut self`, or `self` before
-the regular parameter list.
+`impl` blocks: `parse_program` dispatches `TokenKind::Impl` → `parse_impl_def` (`impl TypeName
+{ method* }`); each method via `parse_method_def`, which calls `try_parse_self_param` to detect
+`&self`/`&mut self`/`self` before the param list.
 
-Path expressions: when `parse_prefix` sees `Identifier` followed by `::`, it
-consumes both tokens and produces `Expr::Path { type_name, member, span }`. This
-node appears as the `func` of an `Expr::Call` for associated function calls like
-`Point::new(x, y)`.
+Path expressions: when `parse_prefix` sees `Identifier` `::`, it produces `Expr::Path { type_name,
+member, span }` — the `func` of an `Expr::Call` for associated calls like `Point::new(x, y)`.
 
-The `Amp` (`&`) token was added to the lexer to support self-parameter parsing.
-logos uses longest-match so `&&` still tokenizes as `AmpAmp`.
+`Amp` (`&`) token added to the lexer for self-param parsing; logos longest-match keeps `&&` as
+`AmpAmp`.
 
-Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`): `parse_statement` detects
-compound-assignment tokens via a one-token lookahead and calls
-`parse_compound_assignment_stmt`, which desugars `target OP= rhs` into
-`Stmt::Assignment { target, value: Expr::Binary { target, OP, rhs } }` at parse
-time. No new AST nodes; semantic analysis and codegen are unaffected.
+Compound assignment (`+=`,`-=`,`*=`,`/=`,`%=`): `parse_statement` detects the tokens via one-token
+lookahead → `parse_compound_assignment_stmt`, desugaring `target OP= rhs` into
+`Stmt::Assignment { target, value: Expr::Binary { target, OP, rhs } }` at parse time. No new AST nodes.
 
-Type aliases (`type Name = Target`, §3.14): `parse_program` dispatches on
-`TokenKind::Type` to `parse_type_alias`, collecting declarations separately from
-`items` rather than emitting an AST node. After all items are parsed,
-`expand_type_aliases` (in `parser/type_aliases.rs`) resolves alias chains (with
-cycle, duplicate, and built-in-shadow rejection) and substitutes every aliased
-type annotation across items/statements/expressions with its target type,
-preserving the use-site span. Aliases are transparent, so — exactly like compound
-assignment — semantic analysis and codegen never observe them; an unknown target
-is reported by the existing semantic `UnknownTypeName` check. Scope: alias
-substitution applies to type-annotation positions only (var/const/param/return/
-field/cast); using an alias as a value-position constructor or path name is not
-part of this feature.
+Type aliases (`type Name = Target`, §3.14): `parse_program` dispatches `TokenKind::Type` →
+`parse_type_alias`, collecting declarations separately from `items`. After parsing,
+`expand_type_aliases` (`parser/type_aliases.rs`) resolves alias chains (rejecting cycles, duplicates,
+built-in shadows) and substitutes every aliased type annotation across items/statements/expressions,
+preserving the use-site span. Transparent — like compound assignment, semantic/codegen never observe
+them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-annotation positions
+only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
-- 2026-06-05: Struct shorthand + functional-update syntax (§3.3) in `parse_struct_literal`
-  (`parser/items.rs`). A field with no `: value` desugars to `field: field` by emitting
-  `FieldInit { value: Expr::Identifier(field_name) }` — no new AST node. A trailing `..expr`
-  entry sets `Expr::StructLiteral.base`; it terminates the field list (the `..` only appears
-  last). `rewrite_expr` (type-alias pass) now recurses into `base`. Parse-time desugaring for
-  shorthand; semantic/codegen observe only the `base` field.
-- 2026-06-04: Added `unsafe { }` block expressions (Phase 1.7 groundwork). New `parse_unsafe_expr`
-  prefix handler in `parser/expressions.rs` (dispatched on `TokenKind::Unsafe`), producing
-  `Expr::Unsafe { stmts, span }`. Body parses as an ordinary statement block; `unsafe` is inert.
-  `rewrite_expr` (type-alias pass) recurses into the block. No statement-parser change — an
-  `unsafe` block reaches the prefix parser via the expression-statement fallthrough.
-- 2026-06-03: Added type-alias declarations §3.14. New `TokenKind::Type` dispatch in
-  `parse_program`; `parse_type_alias` + `expand_type_aliases` in `parser/type_aliases.rs`.
-  New `ParseError::{DuplicateTypeAlias, TypeAliasShadowsBuiltin, CyclicTypeAlias}`.
-  Parse-time desugaring — no AST node, no semantic/codegen change.
-- 2026-05-20: Added attribute parsing. `parse_attributes` collects zero or more `@name` / `@name(arg, ...)` prefixes ahead of every `func` definition (free functions in `parse_program` and `impl`-block methods in `parse_impl_def`); the resulting `Vec<Attribute>` is attached to the produced `FunctionDef` / `MethodDef`. Argument lists are identifiers separated by commas. Attributes preceding non-function items are rejected with an `UnexpectedToken` diagnostic. Attribute *semantics* live in semantic-analysis — the parser deliberately accepts any name so future decorators (e.g. `@grad`, `@gpu`, `@no_prelude`) plug in without grammar churn.
-- 2026-05-18: Added `??` (null/error coalescing) at parser level. New `Precedence::NullCoalesce` between `Lowest` and `LogicalOr` per Appendix B row 14; wired in `is_binary_op`, `token_to_binary_op`, `get_precedence`. R-to-L associativity is enforced by recursing on the right operand with `Precedence::Lowest`, so `a ?? b ?? c` parses as `a ?? (b ?? c)`. AST shape locked in by `test_null_coalesce_is_right_associative`. Semantic and codegen do not yet support the operator — see `semantic-analysis` and `llvm-backend` notes.
-- 2026-04-18: Integer literal type suffixes §1.4. `parse_prefix` handles `TokenKind::IntegerSuffix(tok)` → `Literal::Integer(tok.value, Some(tok.suffix))`; plain `TokenKind::Integer(n)` now produces `Literal::Integer(n, None)`.
-- 2026-05-25: Float literal type suffixes §1.2/§1.4. `parse_prefix` handles `TokenKind::FloatSuffix(tok)` → `Literal::Float(tok.value, Some(tok.suffix))`; plain `TokenKind::Float(f)` now produces `Literal::Float(f, None)`.
-
-- 2026-04-04: Enabled parsing of `..=` for inclusive `for` ranges.
-- 2026-04-16: Added `parse_const_def()` (module-level `const NAME: Type = expr`) and
-  `parse_const_stmt()` (function-body const). `parse_program` dispatches on `TokenKind::Const`
-  → `parse_const_def`; `parse_stmt` dispatches similarly for body consts.
-- 2026-04-18: Implemented bitwise operators §1.4. New `Precedence` variants `Shift`, `BitwiseAnd`,
-  `BitwiseXor`, `BitwiseOr` inserted between `LogicalAnd` and `Equality` (for bitwise OR/XOR/AND)
-  and between `Comparison` and `Sum` (for `<<`), matching Appendix B precedence table levels 7–10.
-  `Amp` wired as `BinaryOp::BitAnd`. `Tilde` parses as unary `UnaryOp::BitNot` at `Precedence::Unary`.
+- 2026-06-07: `@derive(...)` attaches to struct definitions (§2.3). `parse_program` passes the
+  collected `Vec<Attribute>` into `parse_struct_def(attributes)` → `StructDef.attributes`. The
+  "attribute before non-function item" rejection now fires only when an attribute precedes neither
+  `func` nor `struct`. Semantics (Copy/Clone) live in semantic-analysis; parser accepts any name.
+- 2026-06-05: Struct shorthand + functional-update (§3.3) in `parse_struct_literal`. A field with no
+  `: value` desugars to `field: field` (`FieldInit { value: Expr::Identifier(name) }`); a trailing
+  `..expr` sets `StructLiteral.base` and ends the field list. `rewrite_expr` recurses into `base`.
+  Parse-time desugaring; semantic/codegen see only `base`.
+- 2026-06-04: `unsafe { }` block expressions (Phase 1.7). New `parse_unsafe_expr` prefix handler
+  (`TokenKind::Unsafe`) → `Expr::Unsafe { stmts, span }`; body parses as a statement block; inert.
+  `rewrite_expr` recurses into the block. Reaches the prefix parser via expression-statement
+  fallthrough (no statement-parser change).
+- 2026-06-03: Type-alias declarations §3.14 — `TokenKind::Type` dispatch; `parse_type_alias` +
+  `expand_type_aliases` (`parser/type_aliases.rs`). New `ParseError::{DuplicateTypeAlias,
+  TypeAliasShadowsBuiltin, CyclicTypeAlias}`. Parse-time desugaring, no AST node.
+- 2026-05-20: Attribute parsing — `parse_attributes` collects `@name`/`@name(arg,...)` ahead of every
+  `func` (free + impl methods) → `Vec<Attribute>` on `FunctionDef`/`MethodDef`. Attributes before
+  non-function items rejected (`UnexpectedToken`). Semantics live in semantic-analysis; any name
+  accepted so future `@grad`/`@gpu`/`@no_prelude` need no grammar churn.
+- 2026-05-18: `??` (null/error coalescing) — `Precedence::NullCoalesce` between `Lowest` and
+  `LogicalOr` (Appendix B row 14); R-to-L associativity via recursing on the right operand at
+  `Precedence::Lowest`. Semantic/codegen don't yet support it.
+- 2026-05-25: Float literal suffixes §1.2/§1.4 — `parse_prefix` handles `TokenKind::FloatSuffix` →
+  `Literal::Float(val, Some(suffix))`; plain `Float(f)` → `None`.
+- 2026-04-18: Integer literal suffixes §1.4 — `parse_prefix` handles `TokenKind::IntegerSuffix` →
+  `Literal::Integer(val, Some(suffix))`; plain `Integer(n)` → `None`.
+- 2026-04-18: Bitwise operators §1.4 — new `Precedence` variants `Shift`/`BitwiseAnd`/`BitwiseXor`/
+  `BitwiseOr` (Appendix B levels 7–10); `Amp` → `BinaryOp::BitAnd`; `Tilde` → unary `BitNot` at
+  `Precedence::Unary`.
+- 2026-04-16: `parse_const_def` (module-level) + `parse_const_stmt` (body); `parse_program`/`parse_stmt`
+  dispatch on `TokenKind::Const`.
+- 2026-04-04: Parse `..=` for inclusive `for` ranges.

@@ -291,6 +291,40 @@ struct Score {
 }
 ```
 
+### Copy and Clone (`@derive`)
+
+By default a struct is **move-by-default**, just like `string`: binding, assigning,
+returning, or passing it by value moves the source, and reading the source afterward is a
+`use of moved value` error (§2.2). A struct opts out of moving by deriving `Copy`:
+
+```neuro
+@derive(Copy, Clone)
+struct Point { x: i32, y: i32 }
+
+val a = Point { x: 3, y: 4 }
+val b = a          // a is COPIED, not moved
+val s = a.x + b.y  // a is still valid here
+```
+
+Rules (§2.3):
+
+- A struct may derive `Copy` only when **every field is `Copy`**. Primitive scalars
+  (`i8`–`u64`, `f32`, `f64`, `bool`) are `Copy`; `string` is not; a struct field is `Copy`
+  only when its type also derives `Copy`. Violating this is a `CopyDeriveNonCopyField` error.
+- `Copy` implies `Clone`.
+- `@derive(Clone)` (or `Copy`) enables `struct.clone()` — an explicit deep copy that returns a
+  fresh value without moving the receiver. A user-defined `clone` method in an `impl` block
+  shadows the builtin.
+- Unknown derive arguments (e.g. `@derive(Debug)`) are accepted and ignored for now.
+
+```neuro
+@derive(Clone)
+struct Vec2 { x: f64, y: f64 }
+
+val v = Vec2 { x: 1.0, y: 2.0 }
+val w = v.clone()  // independent copy; v stays usable
+```
+
 ### Type Errors
 
 | Error | Cause |
@@ -300,6 +334,7 @@ struct Score {
 | `AssignToImmutableField` | Field assignment on a `val` binding |
 | `StructAlreadyDefined` | Two `struct` declarations share the same name |
 | `UnknownStruct` | Struct literal references an undeclared struct name |
+| `CopyDeriveNonCopyField` | `@derive(Copy)` on a struct with a non-`Copy` field |
 
 ## Void Type
 

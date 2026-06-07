@@ -1,18 +1,16 @@
 # semantic-analysis
 
 ## Purpose
-Validate type correctness and scope rules of a parsed Neuro program before code generation is attempted.
+Validate type correctness and scope rules of a parsed Neuro program before code generation.
 
 ## Entry Point
 - Type: Library function
 - Input: `items: &[Item]`
-- Output: `Result<Vec<Warning>, Vec<TypeError>>` — `Ok` carries non-fatal lint warnings; `Err` carries fatal type errors. Warnings are dropped when errors are present.
+- Output: `Result<Vec<Warning>, Vec<TypeError>>` — `Ok` carries non-fatal lint warnings, `Err`
+  carries fatal type errors. Warnings are dropped when errors are present.
 
 ## Data Ownership
-- Tables: none
-- Events Published: none
-- Events Consumed: none
-- Public Read Model: none
+- Tables / Events Published / Events Consumed / Public Read Model: none
 
 ## Shared Kernel
 - ast-types — read-only traversal of `Item`, `Expr`, `Stmt` nodes
@@ -20,133 +18,118 @@ Validate type correctness and scope rules of a parsed Neuro program before code 
 - diagnostics — error type infrastructure
 
 ## Notes
-Fail-slow strategy: all type errors are collected in a single pass so the developer
-sees the complete error set in one compilation. `syntax-parsing` appears only in
-`[dev-dependencies]` (integration tests); it is not a production dependency.
+Fail-slow: all type errors collected in one pass so the developer sees the complete set per
+compilation. `syntax-parsing` is `[dev-dependencies]` only (integration tests), not production.
 
-Five-pass strategy within `check_program`:
-1. Pre-register all `Item::Struct` definitions into `struct_defs`.
-2. Pre-register all `Item::Impl` method signatures into `functions` (mangled as
-   `StructName__methodName`) and into `impl_methods` (struct → method → mangled key).
-3. Pre-register all `Item::Const` names and types into `constants` (enables forward
-   references and cross-function visibility without ordering constraints).
-4. Full-check pass: `check_function` for each `Item::Function`, `check_impl` for each
-   `Item::Impl`, `check_const_item` for each `Item::Const`.
-5. Lint pass: walk function and method bodies via `run_lints` collecting non-fatal
-   `Warning`s. Currently implements `prefer-loop-over-while-true` (§3.7); silenced by
-   `@allow(prefer_loop_over_while_true)` on the enclosing function/method. Lints run
-   independently of type errors so style guidance reaches the developer even when the
-   program also has type errors (warnings are dropped from the final `Err` return
-   value, but they are still collected for tests that inspect the checker directly).
+Five-pass `check_program`:
+1. Pre-register all `Item::Struct` into `struct_defs` (and `@derive` Copy/Clone intent into
+   `copy_structs`/`clone_structs`). Pass 1b runs `validate_copy_derive` per struct once all are
+   registered (so a Copy field that is another struct resolves regardless of order).
+2. Pre-register all `Item::Impl` method signatures into `functions` (mangled `StructName__methodName`)
+   and `impl_methods` (struct → method → mangled key).
+3. Pre-register all `Item::Const` names/types into `constants` (forward refs + cross-function
+   visibility, no ordering constraint).
+4. Full-check: `check_function` / `check_impl` / `check_const_item`.
+5. Lint pass: `run_lints` walks bodies collecting non-fatal `Warning`s. Currently
+   `prefer-loop-over-while-true` (§3.7), silenced by `@allow(prefer_loop_over_while_true)`. Lints run
+   independently of type errors (warnings still collected for tests inspecting the checker, but
+   dropped from the final `Err`).
 
-Struct types use nominal typing — two `Type::Struct` values are compatible iff their
-names are equal.
+Struct types are nominal — two `Type::Struct` are compatible iff names match.
 
-`impl` method scoping: `check_impl` binds `self` as an immutable variable of the
-struct type, then binds the remaining parameters, before checking the method body.
+`check_impl` binds `self` as an immutable var of the struct type, then the remaining params, before
+checking the body.
 
-Method calls (`instance.method(args)`) are recognised in `check_expr` when the `Call`
-node's `func` is a `FieldAccess`. The object's struct type drives a lookup into
-`impl_methods` to find the mangled function name, then arity and argument types are
-validated against the registered signature (skipping param[0] which is `self`).
+Method calls (`instance.method(args)`) — recognised in `check_expr` when the `Call`'s `func` is a
+`FieldAccess`; the object's struct type drives an `impl_methods` lookup for the mangled name, then
+arity/arg types are validated (skipping param[0] = `self`).
 
-Associated function calls (`TypeName::func(args)`) are recognised in `check_expr`
-when the `Call` node's `func` is an `Expr::Path`. The mangled name is reconstructed
-as `TypeName__funcName` and looked up directly in `functions`.
+Associated calls (`TypeName::func(args)`) — recognised when `func` is an `Expr::Path`; mangled name
+`TypeName__funcName` looked up directly in `functions`.
 
-Builtin method dispatch: when a method-call receiver is a non-struct (primitive or
-string) type, `resolve_builtin_method` checks it against a fixed, compiler-known set of
-intrinsics before falling through to `MethodNotFound`. It returns the method's result
-type and records an arity diagnostic when the argument count is wrong. Intrinsics:
-`string.len() -> u64` and `string.clone() -> string` (§2.7, both nullary); and on any
-integer receiver `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and `.shr(n)`
-(§1.2, §1.4) — each takes one same-typed argument (validated by
-`check_unary_int_intrinsic_arg`) and returns the receiver type.
+Builtin method dispatch: for a non-struct (primitive/string) receiver, `resolve_builtin_method`
+checks a fixed compiler-known set before `MethodNotFound`, returning the result type (and an arity
+diagnostic on wrong count). Intrinsics: `string.len() -> u64`, `string.clone() -> string` (§2.7,
+nullary); and on any integer receiver `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, `.shr(n)`
+(§1.2/§1.4) — each one same-typed arg (`check_unary_int_intrinsic_arg`), returns the receiver type.
+A struct receiver's `.clone()` (§2.3) is a nullary builtin when the struct derives `Clone`/`Copy` and
+no user `clone` method exists (user method shadows); returns the struct type.
 
-Panic-family builtins (§1.2): `check_plain_call` consults `resolve_panic_builtin` before
-ordinary function resolution, but only when no user function of the same name is registered
-(a user `func panic(...)` shadows the builtin). The builtins are `panic(msg: string)`,
-`assert(cond: bool)`, and `unreachable()`; each validates arity and argument type
-(`ArgumentCountMismatch` / `Mismatch`) and returns `Type::Unknown`. The result is `Unknown`
-(the "compatible with everything" type) rather than `Void` because the call **diverges**
-(aborts), so it must satisfy any context — a unit statement, a non-`void` tail return
-(`func f() -> i32 { panic(..) }`), or a value binding — until a dedicated `!`/never type lands.
-Lowering lives entirely in `llvm-backend`.
+Panic-family builtins (§1.2): `check_plain_call` consults `resolve_panic_builtin` before ordinary
+resolution, only when no user function of the same name is registered (user `func panic(...)`
+shadows). Builtins: `panic(msg: string)`, `assert(cond: bool)`, `unreachable()`; each validates
+arity/type (`ArgumentCountMismatch`/`Mismatch`) and returns `Type::Unknown` — not `Void`, because the
+call **diverges** (aborts) and must satisfy any context (unit stmt, non-`void` tail return, value
+binding) until a dedicated `!`/never type lands. Lowering lives in `llvm-backend`.
 
-`&mut self` and consuming `self` methods are rejected at registration time with
-`UnsupportedSelfParam` until ownership semantics land (Phase 1.7).
+`&mut self` / consuming `self` methods are rejected at registration with `UnsupportedSelfParam` until
+ownership lands (Phase 1.7).
 
-Move-by-default ownership (§2.2, `type_checkers/moves.rs`): a non-`Copy` value is
-*moved* out of its source binding when placed into a new owner — a `val`/`mut`
-initializer, an assignment RHS, a `return` value, a struct-field assignment value,
-or a by-value call argument. `record_move` marks the source binding moved (only when
-the consumed expression is a bare place identifier of a move-tracked type;
-`Type::is_move_tracked()` returns `true` for `Type::String` only — structs become
-tracked when `Copy`/`@derive(Copy)` lands). Reading a moved binding emits
-`UseOfMovedValue` (carrying the original move span) from the `Expr::Identifier` arm.
-`SymbolInfo.moved_at: Option<Span>` holds the per-binding state; reassigning a `mut`
-clears it. `.clone()` borrows its receiver, so it does not move — the canonical
-opt-out. The analysis is conservative: `if`/`while`/`for` bodies and `if`-expression
-arms snapshot/restore move state (`SymbolTable::snapshot_moves` / `restore_moves`) so
-a conditional move never leaks onto a path that did not execute it. It may miss some
-moves (e.g. second-iteration loop moves) but never rejects a valid program.
+Move-by-default ownership (§2.2, `type_checkers/moves.rs`): a non-`Copy` value is *moved* out of its
+source binding when placed into a new owner — `val`/`mut` initializer, assignment RHS, `return`,
+struct-field assignment value, or by-value call argument. `record_move` marks the source moved (only
+when the consumed expr is a bare place identifier of a move-tracked type;
+`TypeChecker::is_type_move_tracked` returns true for `Type::String` and any `Type::Struct` not
+deriving `Copy`, via `copy_structs`). Reading a moved binding emits `UseOfMovedValue` (with the
+original move span) from the `Expr::Identifier` arm. `SymbolInfo.moved_at: Option<Span>` holds
+per-binding state; reassigning a `mut` clears it. `.clone()` borrows (no move) — the canonical
+opt-out. Conservative: `if`/`while`/`for` bodies and if-expr arms snapshot/restore move state
+(`snapshot_moves`/`restore_moves`) so a conditional move never leaks onto a non-executing path. May
+miss some moves (e.g. second-iteration loop moves) but never rejects a valid program.
 
-Constant declarations (`const NAME: Type = expr`): the `constants: HashMap<String, Type>` field
-in `TypeChecker` holds both module-level and function-body consts. `is_const_expr` validates
-that a RHS is a constant expression (literals, arithmetic on literals, casts, and identifiers
-that refer to other known consts). Function-body `Stmt::Const` nodes are validated in
-`check_stmt`. `Expr::Identifier` resolution falls back to `constants` after the symbol table,
-so const names are usable in any expression context.
+Const declarations (`const NAME: Type = expr`): `constants: HashMap<String, Type>` holds both
+module-level and body consts. `is_const_expr` validates the RHS (literals, arithmetic on literals,
+casts, identifiers referring to other known consts). Body `Stmt::Const` validated in `check_stmt`.
+`Expr::Identifier` falls back to `constants` after the symbol table, so const names work in any
+expression context.
 
 ## Recent Updates
-- 2026-06-07: Move semantics by default §2.2 (Phase 1.7). New `type_checkers/moves.rs`
-  with `record_move`; `SymbolInfo.moved_at` + `mark_moved`/`clear_moved`/`snapshot_moves`/
-  `restore_moves` on `SymbolTable`; `Type::is_move_tracked()`; new `TypeError::UseOfMovedValue`.
-  Consuming positions in `statements.rs` (VarDecl/Assignment/Return/FieldAssignment) and
-  `expressions.rs` (all three call-argument loops) record moves; the `Expr::Identifier` read
-  arm reports use-after-move. Conditional regions snapshot/restore so moves do not leak across
-  branches. Tracked types limited to `string` (only non-`Copy` type today).
-- 2026-06-05: Struct functional-update type-checking (§3.3) in `Expr::StructLiteral`
-  (`type_checkers/expressions.rs`). When `base` is present, the base expression is checked
-  against `Type::Struct(name)` (mismatch → `TypeError::Mismatch`) and the missing-field scan is
-  skipped — `..base` supplies every unlisted field. Without a base the existing
-  `MissingStructField` check is unchanged. Field-init shorthand needs no semantic change: the
-  parser already lowered it to an `Expr::Identifier`, so an undefined name surfaces as the
-  ordinary undefined-variable error.
-- 2026-06-05: `string.clone() -> string` builtin §2.7 (Phase 1.7). New `(Type::String, "clone")`
-  arm in `resolve_builtin_method` (`type_checkers/expressions.rs`): nullary, returns `Type::String`,
-  records `ArgumentCountMismatch` when given arguments. Non-`string` receivers still fall through to
-  `MethodNotFound`. Mirrored independently in `llvm-backend` (`BuiltinMethod::StringClone`).
-- 2026-06-04: Panic runtime §1.2 (Phase 1.7). New `resolve_panic_builtin` in
-  `type_checkers/expressions.rs` recognizes `panic(string)`, `assert(bool)`, `unreachable()`
-  before ordinary resolution in `check_plain_call`; consulted only when no user function of the
-  same name exists (user functions shadow). Each returns `Type::Unknown` (divergent — satisfies
-  any return/binding context); wrong arity/type reuse `ArgumentCountMismatch` / `Mismatch`. No
-  new error variants.
-- 2026-06-04: Added `Expr::Unsafe` type-checking (Phase 1.7 groundwork). Treated identically to
-  `Expr::Block`: pushes a scope and yields the trailing expression's type. `unsafe` is inert —
-  no special semantics, no new diagnostics.
-- 2026-05-31: Integer primitive methods §1.2, §1.4. `resolve_builtin_method` now resolves
-  `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and `.shr(n)` on integer receivers,
-  returning the receiver type. New `check_unary_int_intrinsic_arg` enforces arity 1 and an
-  argument type compatible with the receiver (`ArgumentCountMismatch` / `Mismatch`).
-- 2026-05-31: Builtin method dispatch on primitive & string types §2. New private
-  `resolve_builtin_method(recv, method, args, span)` in `type_checkers/expressions.rs`;
-  the `Call`→`FieldAccess` arm consults it for non-struct receivers before emitting
-  `MethodNotFound`. First intrinsic: `string.len() -> u64`. Wrong arity yields
-  `ArgumentCountMismatch`.
-- 2026-05-20: Added lint infrastructure (§3.7). New `Warning` / `WarningCode` types in `warnings.rs`; `TypeChecker` accumulates a `warnings: Vec<Warning>` collected by `run_lints` in a final pre-return pass. First implemented lint: `prefer-loop-over-while-true` — fires on any `Stmt::While { condition: Expr::Literal(Boolean(true), _), .. }`, suppressed by `@allow(prefer_loop_over_while_true)` on the enclosing `FunctionDef` / `MethodDef`. Parenthesised `while (true)` is deliberately not matched (acts as an explicit escape hatch). `type_check`'s public signature is now `Result<Vec<Warning>, Vec<TypeError>>`.
-- 2026-05-18: Added `BinaryOp::NullCoalesce` rejection arm. Emits new `TypeError::OperatorNotYetSupported { op, hint, span }` with the hint "requires Option<T> / Result<T, E> — available in Phase 2", returns `Type::Unknown` so error recovery continues. Codegen never sees `??` while semantic-analysis is in the pipeline; the variant is parsed solely to lock in the R-to-L associativity from Appendix B row 14 ahead of the Phase 2 implementation.
-- 2026-04-18: Integer literal type suffixes §1.4. `Literal::Integer(value, Some(suffix))` short-circuits `infer_integer_type`; `infer_suffixed_integer_type` maps the suffix to a `Type` via `suffix_to_type` and range-checks the value (reusing `check_integer_range` + `IntegerLiteralOutOfRange`). Unsuffixed literals that exceed the i32 range now emit an `IntegerLiteralOutOfRange` rather than silently promoting to `i64`.
-- 2026-05-25: Float literal type suffixes §1.2/§1.4. `Literal::Float(value, Some(suffix))` short-circuits `infer_float_type`; `infer_suffixed_float_type` maps the `FloatSuffix` to `Type::F32` / `Type::F64` via `float_suffix_to_type`. Mismatched annotations (e.g., `val x: f32 = 1.5f64`) surface through the existing assignment type-check path.
-
-- 2026-04-04: Updated `type_checker` to correctly destructure the new `inclusive` flag on `Stmt::ForRange`. No integer validation rules changed as bounds checking works the same for inclusive and exclusive endpoints.
-- 2026-04-16: Implemented §1.3 const declarations: four-pass `check_program`, `constants` map,
-  `register_const_item`, `check_const_item`, `is_const_expr`, `Stmt::Const` arm, identifier
-  fallback to const map. New error variants: `ConstAlreadyDefined`, `InvalidConstExpr`.
-- 2026-04-18: Implemented bitwise operator type checking §1.4. `BinaryOp::BitAnd/BitOr/BitXor/Shl`
-  require both operands to be integer types (`is_integer()` — not float, not bool) and return the
-  operand type. `UnaryOp::BitNot` requires an integer operand and returns the same type. Floats and
-  bools produce `InvalidBinaryOperator` / `InvalidOperator` errors respectively.
-- 2026-05-13: Implemented IEEE-754 native float comparison §1.2, §3.10 and strict inequality type bounds. Inequality operators (`<, >, <=, >=`) are restricted to `is_numeric()` types (ints and floats), correctly rejecting struct, string, and bool types that lack natural ordering, preventing codegen panics. IEEE-754 NaN handling works natively via LLVM `fcmp` generation.
-- 2026-05-27: Comparison chain rejection §1.4. In `check_expr`, before type-checking comparison operands, the checker inspects whether the LHS of a comparison `Binary` node is itself a comparison `Binary`. If so, emits `TypeError::ComparisonChain { span }` and returns `Type::Unknown`. Covers all six comparison operators. Uses `BinaryOp::is_comparison()` helper added to `ast-types`.
+- 2026-06-07: `Copy` trait + `@derive(Copy, Clone)` §2.3. `copy_structs`/`clone_structs`
+  (`HashSet<String>`) populated from `StructDef.attributes` in `register_struct`
+  (`record_derive_intent`); pass 1b `validate_copy_derive` checks every field of a Copy struct is Copy
+  (`CopyDeriveNonCopyField`). `Type::is_move_tracked` replaced by context-aware
+  `is_type_move_tracked`/`is_type_copy` (a struct is move-tracked unless it derives Copy). Struct
+  `.clone()` resolves in the method-call arm when Clone/Copy-derived and no user `clone` exists. Copy
+  implies Clone; unknown derive args ignored.
+- 2026-06-07: Move semantics by default §2.2. New `moves.rs` (`record_move`); `SymbolInfo.moved_at` +
+  `mark_moved`/`clear_moved`/`snapshot_moves`/`restore_moves`; `UseOfMovedValue`. Consuming positions
+  in `statements.rs` (VarDecl/Assignment/Return/FieldAssignment) and `expressions.rs` (call-arg loops)
+  record moves; the `Expr::Identifier` read arm reports use-after-move; conditional regions
+  snapshot/restore. Tracked types limited to `string` initially.
+- 2026-06-05: Struct functional-update §3.3 in `Expr::StructLiteral`. With `base` present, the base is
+  checked against `Type::Struct(name)` (mismatch → `Mismatch`) and the missing-field scan skipped.
+  Shorthand needs no change (parser lowered it to `Expr::Identifier`).
+- 2026-06-05: `string.clone() -> string` §2.7 — `(Type::String,"clone")` arm in
+  `resolve_builtin_method` (nullary; args → `ArgumentCountMismatch`). Mirrored in `llvm-backend`.
+- 2026-06-04: Panic runtime §1.2 — `resolve_panic_builtin` recognizes `panic`/`assert`/`unreachable`
+  in `check_plain_call` before ordinary resolution (user funcs shadow); each returns `Type::Unknown`;
+  wrong arity/type reuse `ArgumentCountMismatch`/`Mismatch`. No new variants.
+- 2026-06-04: `Expr::Unsafe` type-checking (Phase 1.7) — identical to `Expr::Block` (pushes a scope,
+  yields the trailing expr's type). Inert.
+- 2026-05-31: Integer primitive methods §1.2/§1.4 — `resolve_builtin_method` resolves
+  `wrapping`/`saturating`/`.shr(n)` on integer receivers; `check_unary_int_intrinsic_arg` enforces
+  arity 1 + compatible arg type.
+- 2026-05-31: Builtin method dispatch on primitive/string §2 — `resolve_builtin_method` in
+  `expressions.rs`; the `Call`→`FieldAccess` arm consults it before `MethodNotFound`. First:
+  `string.len() -> u64`.
+- 2026-05-27: Comparison chain rejection §1.4 — `check_expr` emits `ComparisonChain` when a
+  comparison's LHS is itself a comparison (all six ops). Uses `BinaryOp::is_comparison()` (ast-types).
+- 2026-05-25: Float literal suffixes §1.2/§1.4 — `infer_suffixed_float_type` maps `FloatSuffix` →
+  `F32`/`F64`; mismatched annotations surface via the assignment type-check path.
+- 2026-05-20: Lint infra §3.7 — `Warning`/`WarningCode` (`warnings.rs`); `run_lints` final pass; first
+  lint `prefer-loop-over-while-true` (`while true`, suppressed by `@allow(...)`; parenthesised
+  `while (true)` deliberately not matched). Public signature now `Result<Vec<Warning>, Vec<TypeError>>`.
+- 2026-05-18: `BinaryOp::NullCoalesce` rejection — `OperatorNotYetSupported { op, hint, span }`
+  (hint: "requires Option<T>/Result<T,E> — Phase 2"), returns `Unknown` for recovery. `??` is parsed
+  only to lock in R-to-L associativity ahead of Phase 2.
+- 2026-05-13: IEEE-754 native float comparison §1.2/§3.10 — inequalities (`<`,`>`,`<=`,`>=`)
+  restricted to `is_numeric()`, rejecting struct/string/bool (prevents codegen panics). NaN handled
+  natively via LLVM `fcmp`.
+- 2026-04-18: Integer literal suffixes §1.4 — `infer_suffixed_integer_type` via `suffix_to_type` +
+  range check (`IntegerLiteralOutOfRange`). Unsuffixed literals over i32 range now error rather than
+  silently promoting to i64.
+- 2026-04-18: Bitwise type checking §1.4 — `BitAnd/BitOr/BitXor/Shl` require integer operands, return
+  the operand type; `BitNot` requires integer. Floats/bools → `InvalidBinaryOperator`/`InvalidOperator`.
+- 2026-04-16: Const declarations §1.3 — `constants` map, `register_const_item`, `check_const_item`,
+  `is_const_expr`, `Stmt::Const` arm, identifier fallback. New: `ConstAlreadyDefined`, `InvalidConstExpr`.
+- 2026-04-04: `Stmt::ForRange` `inclusive` flag destructured; no integer validation change.

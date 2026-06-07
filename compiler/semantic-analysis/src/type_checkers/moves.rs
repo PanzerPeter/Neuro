@@ -34,12 +34,9 @@ impl TypeChecker {
         };
 
         // A constant is a value, not an owner, so it cannot be moved from.
-        let is_tracked_binding = self
-            .symbols
-            .lookup(&ident.name)
-            .is_some_and(|info| info.ty.is_move_tracked());
+        let binding_ty = self.symbols.lookup(&ident.name).map(|info| info.ty.clone());
 
-        if is_tracked_binding {
+        if binding_ty.is_some_and(|ty| self.is_type_move_tracked(&ty)) {
             self.symbols.mark_moved(&ident.name, ident.span);
         }
     }
@@ -148,6 +145,96 @@ mod tests {
         assert!(
             errs.is_empty(),
             "conditional move must not leak past the branch; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn non_copy_struct_move_then_use_is_rejected() {
+        let errs = errors(
+            r#"
+            struct Point { x: i32, y: i32 }
+            func main() -> i32 {
+                val a = Point { x: 1, y: 2 }
+                val b = a
+                val r = a.x
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("use of moved value 'a'")),
+            "a non-Copy struct must move; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn copy_struct_does_not_move() {
+        let errs = errors(
+            r#"
+            @derive(Copy, Clone)
+            struct Point { x: i32, y: i32 }
+            func main() -> i32 {
+                val a = Point { x: 1, y: 2 }
+                val b = a
+                val r = a.x
+                return 0
+            }
+            "#,
+        );
+        assert!(errs.is_empty(), "a Copy struct must not move; got {errs:?}");
+    }
+
+    #[test]
+    fn derive_copy_with_non_copy_field_is_rejected() {
+        let errs = errors(
+            r#"
+            @derive(Copy)
+            struct Holder { name: string }
+            func main() -> i32 { 0 }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("cannot derive Copy")),
+            "Copy with a string field must be rejected; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn struct_clone_does_not_move_receiver() {
+        let errs = errors(
+            r#"
+            @derive(Clone)
+            struct Point { x: i32, y: i32 }
+            func main() -> i32 {
+                val a = Point { x: 1, y: 2 }
+                val b = a.clone()
+                val r = a.x
+                return r
+            }
+            "#,
+        );
+        assert!(
+            errs.is_empty(),
+            "clone must not move the receiver; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn clone_on_non_clone_struct_is_rejected() {
+        let errs = errors(
+            r#"
+            struct Point { x: i32, y: i32 }
+            func main() -> i32 {
+                val a = Point { x: 1, y: 2 }
+                val b = a.clone()
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("method") || e.contains("clone")),
+            "clone on a non-Clone struct must be rejected; got {errs:?}"
         );
     }
 

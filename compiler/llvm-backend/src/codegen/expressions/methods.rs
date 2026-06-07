@@ -47,6 +47,10 @@ impl<'ctx> CodegenContext<'ctx> {
             // observationally a deep copy: the pointee bytes are immutable and shared safely.
             // When runtime heap strings land this must duplicate the underlying buffer.
             BuiltinMethod::StringClone => self.codegen_expr(receiver),
+            // `struct.clone()` (§2.3) — structs are stack-allocated aggregates with no heap
+            // backing yet, so loading the receiver's value is a faithful deep copy. When a
+            // struct gains a heap-owning field this must recurse into that field's clone.
+            BuiltinMethod::StructClone => self.codegen_expr(receiver),
             BuiltinMethod::WrappingAdd
             | BuiltinMethod::WrappingSub
             | BuiltinMethod::WrappingMul
@@ -113,8 +117,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.emit_saturating_sat_intrinsic(intrinsic_name, lhs, rhs)?
             }
             BuiltinMethod::SaturatingMul => self.emit_saturating_mul(lhs, rhs, unsigned)?,
-            BuiltinMethod::StringLen | BuiltinMethod::StringClone => {
-                unreachable!("string intrinsics are handled by codegen_builtin_method")
+            BuiltinMethod::StringLen | BuiltinMethod::StringClone | BuiltinMethod::StructClone => {
+                unreachable!("string/struct intrinsics are handled by codegen_builtin_method")
             }
         };
 

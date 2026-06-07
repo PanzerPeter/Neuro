@@ -9,10 +9,7 @@ Provide the canonical Abstract Syntax Tree (AST) node definitions shared by all 
   `ImplDef`, `MethodDef`, `SelfParam`, `Attribute`
 
 ## Data Ownership
-- Tables: none
-- Events Published: none
-- Events Consumed: none
-- Public Read Model: none
+- Tables / Events Published / Events Consumed / Public Read Model: none
 
 ## Shared Kernel
 - shared-types — `Span`, `Identifier`, `Literal` embedded in every AST node
@@ -29,6 +26,9 @@ Extracted from `syntax-parsing` to eliminate the cross-slice dependency that `se
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-06-07: `StructDef` gained `attributes: Vec<Attribute>` so `@derive(Copy, Clone)` (§2.3) can
+  attach to struct definitions. Mirrors the existing `attributes` field on `FunctionDef` /
+  `MethodDef`; interpreted by semantic-analysis. Empty when no attributes are present.
 - 2026-06-05: `Expr::StructLiteral` gained `base: Option<Box<Expr>>` for functional-update syntax
   (`Point { x: 1.0, ..p }`, §3.3). `None` is a plain literal (all fields listed). Field-init
   shorthand (`Point { x, y }`) needs no AST change — the parser desugars a bare field to
