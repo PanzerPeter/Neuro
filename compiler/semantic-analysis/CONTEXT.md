@@ -76,6 +76,21 @@ Lowering lives entirely in `llvm-backend`.
 `&mut self` and consuming `self` methods are rejected at registration time with
 `UnsupportedSelfParam` until ownership semantics land (Phase 1.7).
 
+Move-by-default ownership (§2.2, `type_checkers/moves.rs`): a non-`Copy` value is
+*moved* out of its source binding when placed into a new owner — a `val`/`mut`
+initializer, an assignment RHS, a `return` value, a struct-field assignment value,
+or a by-value call argument. `record_move` marks the source binding moved (only when
+the consumed expression is a bare place identifier of a move-tracked type;
+`Type::is_move_tracked()` returns `true` for `Type::String` only — structs become
+tracked when `Copy`/`@derive(Copy)` lands). Reading a moved binding emits
+`UseOfMovedValue` (carrying the original move span) from the `Expr::Identifier` arm.
+`SymbolInfo.moved_at: Option<Span>` holds the per-binding state; reassigning a `mut`
+clears it. `.clone()` borrows its receiver, so it does not move — the canonical
+opt-out. The analysis is conservative: `if`/`while`/`for` bodies and `if`-expression
+arms snapshot/restore move state (`SymbolTable::snapshot_moves` / `restore_moves`) so
+a conditional move never leaks onto a path that did not execute it. It may miss some
+moves (e.g. second-iteration loop moves) but never rejects a valid program.
+
 Constant declarations (`const NAME: Type = expr`): the `constants: HashMap<String, Type>` field
 in `TypeChecker` holds both module-level and function-body consts. `is_const_expr` validates
 that a RHS is a constant expression (literals, arithmetic on literals, casts, and identifiers
@@ -84,6 +99,13 @@ that refer to other known consts). Function-body `Stmt::Const` nodes are validat
 so const names are usable in any expression context.
 
 ## Recent Updates
+- 2026-06-07: Move semantics by default §2.2 (Phase 1.7). New `type_checkers/moves.rs`
+  with `record_move`; `SymbolInfo.moved_at` + `mark_moved`/`clear_moved`/`snapshot_moves`/
+  `restore_moves` on `SymbolTable`; `Type::is_move_tracked()`; new `TypeError::UseOfMovedValue`.
+  Consuming positions in `statements.rs` (VarDecl/Assignment/Return/FieldAssignment) and
+  `expressions.rs` (all three call-argument loops) record moves; the `Expr::Identifier` read
+  arm reports use-after-move. Conditional regions snapshot/restore so moves do not leak across
+  branches. Tracked types limited to `string` (only non-`Copy` type today).
 - 2026-06-05: Struct functional-update type-checking (§3.3) in `Expr::StructLiteral`
   (`type_checkers/expressions.rs`). When `base` is present, the base expression is checked
   against `Type::Struct(name)` (mismatch → `TypeError::Mismatch`) and the missing-field scan is

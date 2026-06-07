@@ -79,6 +79,11 @@ impl TypeChecker {
                     return None;
                 }
 
+                // Binding the initializer moves it out of its source (§2.2).
+                if let Some(init_expr) = init {
+                    self.record_move(init_expr);
+                }
+
                 Some(())
             }
 
@@ -94,6 +99,11 @@ impl TypeChecker {
                 let value_ty = self
                     .check_expr(value, expected_ty.as_ref())
                     .unwrap_or(Type::Unknown);
+
+                // The RHS is moved into the target, and the target now owns a
+                // fresh value — clearing any prior moved-out state on it (§2.2).
+                self.record_move(value);
+                self.symbols.clear_moved(&target.name);
 
                 // Lookup the target variable again for validation
                 if let Some(symbol_info) = self.symbols.lookup(&target.name) {
@@ -152,6 +162,11 @@ impl TypeChecker {
                     }
                 }
 
+                // Returning a value moves it out of the function (§2.2).
+                if let Some(expr) = value {
+                    self.record_move(expr);
+                }
+
                 Some(())
             }
 
@@ -173,12 +188,18 @@ impl TypeChecker {
                     }
                 }
 
+                // A move inside one arm must not invalidate the binding on paths
+                // that never ran that arm. Restore the move state after each arm
+                // so only unconditional (straight-line) moves persist (§2.2).
+                let move_snapshot = self.symbols.snapshot_moves();
+
                 // Check then block
                 self.symbols.push_scope();
                 for stmt in then_block {
                     let _ = self.check_stmt(stmt);
                 }
                 self.symbols.pop_scope();
+                self.symbols.restore_moves(&move_snapshot);
 
                 // Check else-if blocks
                 for (else_if_cond, else_if_stmts) in else_if_blocks {
@@ -197,6 +218,7 @@ impl TypeChecker {
                         let _ = self.check_stmt(stmt);
                     }
                     self.symbols.pop_scope();
+                    self.symbols.restore_moves(&move_snapshot);
                 }
 
                 // Check else block
@@ -206,6 +228,7 @@ impl TypeChecker {
                         let _ = self.check_stmt(stmt);
                     }
                     self.symbols.pop_scope();
+                    self.symbols.restore_moves(&move_snapshot);
                 }
 
                 Some(())
@@ -226,6 +249,9 @@ impl TypeChecker {
                     }
                 }
 
+                // The body may run zero or many times, so a move inside it is not
+                // a guaranteed straight-line move; restore afterwards (§2.2).
+                let move_snapshot = self.symbols.snapshot_moves();
                 self.loop_depth += 1;
                 self.symbols.push_scope();
                 for stmt in body {
@@ -233,6 +259,7 @@ impl TypeChecker {
                 }
                 self.symbols.pop_scope();
                 self.loop_depth -= 1;
+                self.symbols.restore_moves(&move_snapshot);
 
                 Some(())
             }
@@ -274,6 +301,9 @@ impl TypeChecker {
                     });
                 }
 
+                // As with `while`, body moves are not guaranteed straight-line;
+                // restore the move state after the loop (§2.2).
+                let move_snapshot = self.symbols.snapshot_moves();
                 self.loop_depth += 1;
                 self.symbols.push_scope();
 
@@ -294,6 +324,7 @@ impl TypeChecker {
 
                 self.symbols.pop_scope();
                 self.loop_depth -= 1;
+                self.symbols.restore_moves(&move_snapshot);
 
                 Some(())
             }
@@ -380,6 +411,9 @@ impl TypeChecker {
                     });
                     return None;
                 }
+
+                // Storing the value into a field moves it out of its source (§2.2).
+                self.record_move(value);
 
                 Some(())
             }

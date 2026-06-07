@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-546%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-557%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP & Phase 1.5 stabilization complete · Phase 1.7 (ownership) active · Phase 2 overlapping
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**546 Tests Passing**):
+Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**557 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -107,6 +107,7 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 | **Methods** | `impl` blocks with `&self` instance methods; associated functions called via `TypeName::func(args)`; `&mut self` / consuming `self` rejected until ownership lands |
 | **Type Aliases** | `type Name = Target` transparent aliases (§3.14) resolved at parse time across var/const/param/return/field/cast positions; chain resolution; duplicate, builtin-shadow, and cyclic-alias diagnostics |
 | **If/Block Expressions** | `val x = if cond { a } else { b }`; bare block-as-value with newline-separated statements and a final trailing expression; all arms type-checked; alloca-based lowering |
+| **Move Semantics** | Move-by-default for non-`Copy` values (today: `string`). Binding, assignment, `return`, struct-field store, and by-value call arguments move the source; reading a moved binding is a `use of moved value` error. `.clone()` opts out; `Copy` scalars are duplicated. Conditional (`if`/`while`/`for`) moves don't leak past their branch (§2.2) |
 | **Unsafe Blocks** | `unsafe { … }` reserved keyword + block expression (Phase 1.7 groundwork); inert — lowers identically to a bare block, evaluates to its trailing expression |
 | **Panic Runtime** | `panic(msg)`, `assert(cond)`, `unreachable()` builtins (§1.2): print a diagnostic (`message at file:line:col`) to stderr and abort via `abort()` — no stack unwinding. `assert` aborts only on a false condition. Divergent, so usable in tail-return position; a same-named user function shadows the builtin |
 | **LLVM Backend** | Native executable generation via inkwell 0.9.0 (LLVM 20) |
@@ -124,7 +125,7 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 >
 > If memory safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
 
-String fat pointers have already landed; the remaining work — ownership semantics, move-by-default, borrow checker, and drop — is tracked under Phase 1.7 in the roadmap.
+String fat pointers and move-by-default (use-after-move detection on `string`) have already landed; the remaining work — the `Copy` trait, `&`/`&mut` borrows, lifetimes, and `Drop` / deterministic destruction — is tracked under Phase 1.7 in the roadmap.
 
 ---
 

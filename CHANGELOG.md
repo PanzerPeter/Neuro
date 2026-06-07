@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.29.0] - 2026-06-07
+
+### Added
+- `semantic`: move semantics by default (§2.2, Phase 1.7). Non-`Copy` owned values are *moved* out of their source binding when bound (`val s2 = s1`), assigned, returned, passed by value to a call, or stored into a struct field; reading the source afterward is a new `UseOfMovedValue` error pointing at where the move happened. `.clone()` (already a builtin) borrows its receiver and is the canonical opt-out. Move tracking is limited to `string` — the only non-`Copy` type the language can construct today; structs stay freely duplicable until `Copy`/`@derive(Copy)` lands (the next Phase 1.7 item). The checker is conservative: it flags only direct place expressions in a consuming position, and `if`/`while`/`for` bodies and `if`-expression arms snapshot/restore move state so a conditional move never leaks onto a path that did not execute it (no false positives; may miss e.g. second-iteration loop moves). Implementation: new `type_checkers/moves.rs` (`record_move`), `SymbolInfo.moved_at` plus `mark_moved`/`clear_moved`/`snapshot_moves`/`restore_moves` on `SymbolTable`, `Type::is_move_tracked()`. Tests: 6 unit (`semantic-analysis`), 5 integration (`neurc/tests/move_semantics.rs`), example `types/move_semantics.nr`. 557 tests pass.
+
+---
+
 ## [1.28.1] - 2026-06-05
 
 ### Fixed

@@ -275,7 +275,7 @@ ordered by dependency, earlier ones unblock later ones.
 issue before starting one of the bigger items.
 
 - [x] **BUG (codegen): tail-position `if`/`else` implicit return miscompiled** (§1.8). Fixed in v1.23.2. A statement-position tail `if` was lowered as a void statement, so a non-void return emitted `unreachable` → fall-through segfault at `-O0`. `codegen_body` now treats a trailing `Stmt::If { else_block: Some(..), .. }` as a value-producing if-expression.
-- [ ] **Move semantics by default** (§2.2). Assignment and function calls move ownership for non-`Copy` types; the source binding becomes invalid after the move.
+- [x] **Move semantics by default** (§2.2). Landed in v1.29.0 scoped to `string` (the only non-`Copy` type today): binding, assignment, `return`, struct-field store, and by-value call arguments move the source; reading it afterward is `UseOfMovedValue`. `.clone()` is the opt-out. Conditional regions snapshot/restore move state so a move in one branch never invalidates a path that did not run it. Struct move-tracking arrives with `Copy` / `@derive(Copy)` below.
 - [ ] **`Copy` trait + `@derive(Copy, Clone)`** (§2.3). Built-in for primitive scalars; a struct may derive `Copy` only when all fields are `Copy`.
 - [x] **`.clone()` method** (§2.7). Landed as the `string.clone() -> string` builtin (v1.27.0) — the canonical opt-out of move-by-default for non-`Copy` types. Copies the `(ptr, len)` fat pointer (observationally a deep copy while strings are immutable / `.rodata`-backed). Broader non-`Copy` clone (structs via `@derive(Clone)`) lands with `Copy` / move below.
 - [ ] **Immutable borrows `&T`** (§2.4). Any number of immutable borrows may coexist; the checker rejects mutable borrows during their lifetime.

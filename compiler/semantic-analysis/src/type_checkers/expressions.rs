@@ -182,6 +182,8 @@ impl TypeChecker {
                     });
                 }
             }
+            // By-value argument passing moves a non-Copy binding into the callee.
+            self.record_move(arg);
         }
 
         Some(return_type)
@@ -218,7 +220,15 @@ impl TypeChecker {
             Expr::Identifier(ident) => {
                 // Variables take priority; constants are a fallback so locals can shadow consts.
                 if let Some(symbol_info) = self.symbols.lookup(&ident.name) {
-                    Some(symbol_info.ty.clone())
+                    let ty = symbol_info.ty.clone();
+                    if let Some(moved_at) = symbol_info.moved_at {
+                        self.record_error(TypeError::UseOfMovedValue {
+                            name: ident.name.clone(),
+                            span: ident.span,
+                            moved_at,
+                        });
+                    }
+                    Some(ty)
                 } else if let Some(const_ty) = self.constants.get(&ident.name).cloned() {
                     Some(const_ty)
                 } else {
@@ -561,6 +571,7 @@ impl TypeChecker {
                                     });
                                 }
                             }
+                            self.record_move(arg);
                         }
 
                         Some(return_type)
@@ -616,6 +627,7 @@ impl TypeChecker {
                                     });
                                 }
                             }
+                            self.record_move(arg);
                         }
 
                         Some(return_type)
@@ -814,12 +826,18 @@ impl TypeChecker {
                     });
                 }
 
+                // Each arm runs on its own path, so a move inside one arm must not
+                // leak onto the others or past the `if`. Snapshot the move state
+                // after the (unconditional) condition and restore it between arms.
+                let move_snapshot = self.symbols.snapshot_moves();
+
                 // Collect arm types: then + each else-if + optional else
                 let then_ty = self.check_block_expr_type(then_block);
 
                 let mut arm_types: Vec<Type> = vec![then_ty.clone()];
 
                 for (elif_cond, elif_block) in else_if_blocks {
+                    self.symbols.restore_moves(&move_snapshot);
                     let elif_cond_ty = self
                         .check_expr(elif_cond, Some(&Type::Bool))
                         .unwrap_or(Type::Unknown);
@@ -833,8 +851,10 @@ impl TypeChecker {
                     arm_types.push(self.check_block_expr_type(elif_block));
                 }
 
+                self.symbols.restore_moves(&move_snapshot);
                 if let Some(else_stmts) = else_block {
                     arm_types.push(self.check_block_expr_type(else_stmts));
+                    self.symbols.restore_moves(&move_snapshot);
                 } else {
                     return Some(Type::Void);
                 }
