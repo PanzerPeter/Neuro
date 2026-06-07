@@ -37,6 +37,7 @@ pub(crate) struct TypeChecker {
 mod declarations;
 mod expressions;
 mod literals;
+mod moves;
 mod resolution;
 mod statements;
 

@@ -160,4 +160,11 @@ pub enum TypeError {
 
     #[error("comparison operators cannot be chained at {span:?}: use `&&` to combine separate comparisons")]
     ComparisonChain { span: Span },
+
+    #[error("use of moved value '{name}' at {span:?}: it was moved at {moved_at:?}; bind a `.clone()` if you need an independent copy")]
+    UseOfMovedValue {
+        name: String,
+        span: Span,
+        moved_at: Span,
+    },
 }

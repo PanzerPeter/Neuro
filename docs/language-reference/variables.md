@@ -212,6 +212,66 @@ func counter() -> i32 {
 }
 ```
 
+## Move Semantics (Ownership)
+
+Every binding owns its value. For **non-`Copy`** types — today that is `string` —
+placing the value somewhere new *moves* ownership out of the source binding, and the
+source becomes invalid. Reading a moved binding is a compile error:
+
+```neuro
+val s1: string = "Hello"
+val s2: string = s1        // s1 is MOVED into s2
+// val n: u64 = s1.len()   // ERROR: use of moved value 's1'
+val n: u64 = s2.len()      // OK — s2 owns the value now
+```
+
+A move happens whenever a non-`Copy` value is handed to a new owner: a `val`/`mut`
+initializer, an assignment, a `return`, a struct-field store, or a by-value call
+argument:
+
+```neuro
+func consume(s: string) -> u64 { s.len() }
+
+val greeting: string = "Hi"
+val len: u64 = consume(greeting)   // greeting is moved into consume()
+// val again = greeting.len()      // ERROR: greeting was moved
+```
+
+**`Copy` scalars are never moved.** `i8`..`u64`, `f32`/`f64`, and `bool` are
+duplicated on assignment, so the source stays valid:
+
+```neuro
+val a: i32 = 5
+val b: i32 = a             // a is COPIED
+val c: i32 = a + b         // both a and b still valid
+```
+
+**`.clone()` is the opt-out.** When you need an independent copy of a non-`Copy`
+value, clone it — the receiver is borrowed, not moved:
+
+```neuro
+val a: string = "hello"
+val b: string = a.clone()  // a is NOT moved
+val ok: bool = a == b      // reading a here is fine
+```
+
+**Conditional moves don't leak.** A move that only happens inside one branch of an
+`if`/`while`/`for` does not invalidate the binding on paths that never ran that
+branch:
+
+```neuro
+val msg: string = "hi"
+if ready {
+    val r: u64 = consume(msg)   // moves msg only on this path
+}
+val n: u64 = msg.len()          // OK — the move above was conditional
+```
+
+> Move tracking currently applies only to `string`, the one non-`Copy` type the
+> language can construct. Structs become move-tracked once the `Copy` trait and
+> `@derive(Copy)` land; until then they are freely duplicable. `mut` bindings that
+> were moved can be revived by reassigning them a fresh value.
+
 ## Type Annotations
 
 Type annotations are optional when the type can be inferred from the initializer. Numeric literal inference is fully implemented:

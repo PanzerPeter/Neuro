@@ -216,8 +216,9 @@ in O(1) with no scan. The length **excludes** the null terminator. Because the i
 byte count, a multi-byte code point contributes more than one to the length.
 
 **`.clone() -> string`** — returns a fresh `string` equal to its receiver. It is the
-canonical explicit deep copy for non-`Copy` owned types and, once move-by-default lands
-(Phase 1.7), the way to keep using a value after it would otherwise be moved. Today strings
+canonical explicit deep copy for non-`Copy` owned types and, now that move-by-default has
+landed (Phase 1.7, §2.2 — see [variables](variables.md#move-semantics-ownership)), the way to
+keep using a value after it would otherwise be moved. Today strings
 are immutable and `.rodata`-backed (no heap string type exists yet), so the clone copies the
 `(ptr, len)` fat pointer — observationally a deep copy because the pointee bytes are
 immutable and shared safely. `.clone()` takes no arguments and returns a `string`, so it
