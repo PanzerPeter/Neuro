@@ -38,6 +38,14 @@ pub enum TypeError {
     #[error("cannot apply operator {op} to type {ty} at {span:?}")]
     InvalidOperator { op: String, ty: Type, span: Span },
 
+    #[error("struct '{struct_name}' cannot derive Copy at {span:?}: field '{field_name}' has type {field_type}, which is not Copy")]
+    CopyDeriveNonCopyField {
+        struct_name: String,
+        field_name: String,
+        field_type: Type,
+        span: Span,
+    },
+
     #[error("cannot apply binary operator {op} to types {left} and {right} at {span:?}")]
     InvalidBinaryOperator {
         op: String,

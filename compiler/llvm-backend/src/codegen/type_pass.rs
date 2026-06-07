@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
-use super::context::{resolve_builtin_method, CodegenContext};
+use super::context::{resolve_builtin_method, BuiltinMethod, CodegenContext};
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Store type information for expressions (needed for codegen)
@@ -427,6 +427,19 @@ impl<'ctx> CodegenContext<'ctx> {
                         match recv_ty {
                             Some(Type::Struct(struct_name)) => {
                                 let mangled = format!("{}__{}", struct_name, field.name);
+                                // `struct.clone()` (§2.3) is a builtin deep copy when no user
+                                // method named `clone` exists. Semantic analysis has already
+                                // verified the struct derives Clone, so any clone reaching codegen
+                                // without a user method is the builtin.
+                                if field.name == "clone" && !func_types.contains_key(&mangled) {
+                                    let recv = Type::Struct(struct_name);
+                                    self.expr_types.insert(span.start, recv.clone());
+                                    self.builtin_methods.insert(
+                                        (span.start, span.end),
+                                        (BuiltinMethod::StructClone, recv),
+                                    );
+                                    return Ok(());
+                                }
                                 let func_type = func_types.get(&mangled).ok_or_else(|| {
                                     CodegenError::UndefinedFunction(mangled.clone())
                                 })?;

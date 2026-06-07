@@ -23,6 +23,8 @@ pub(crate) enum BuiltinMethod {
     StringLen,
     /// `string.clone()` → a copy of the string fat pointer value (§2.7).
     StringClone,
+    /// `struct.clone()` → a copy of the struct aggregate value, for `@derive(Clone)` types (§2.3).
+    StructClone,
     /// `int.wrapping_add(rhs)` → two's-complement wrapping add (§1.2).
     WrappingAdd,
     /// `int.wrapping_sub(rhs)` → two's-complement wrapping subtract (§1.2).

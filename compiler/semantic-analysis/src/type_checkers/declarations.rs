@@ -2,6 +2,14 @@ use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::Type;
 use ast_types::{ConstDef, Expr, FunctionDef, ImplDef, SelfParam, Stmt, StructDef};
+use shared_types::Span;
+
+/// The attribute name carrying trait derivations (`@derive(...)`).
+const DERIVE_ATTRIBUTE: &str = "derive";
+/// Derive argument requesting the `Copy` trait.
+const COPY_TRAIT: &str = "Copy";
+/// Derive argument requesting the `Clone` trait.
+const CLONE_TRAIT: &str = "Clone";
 
 impl TypeChecker {
     /// Check a function definition
@@ -126,7 +134,70 @@ impl TypeChecker {
         }
 
         self.struct_defs.insert(def.name.name.clone(), fields);
+        self.record_derive_intent(def);
         Some(())
+    }
+
+    /// Record the `@derive(Copy, Clone)` intent declared on a struct.
+    ///
+    /// Only `Copy` and `Clone` are acted upon; any other derive argument (e.g. `Debug`)
+    /// is accepted and ignored so the surface stays forward compatible. `Copy` implies
+    /// `Clone` (a Copy type is trivially cloneable), matching §2.3 and Rust.
+    fn record_derive_intent(&mut self, def: &StructDef) {
+        let mut derives_copy = false;
+        let mut derives_clone = false;
+        for attr in &def.attributes {
+            if attr.name.name != DERIVE_ATTRIBUTE {
+                continue;
+            }
+            for arg in &attr.args {
+                match arg.name.as_str() {
+                    COPY_TRAIT => derives_copy = true,
+                    CLONE_TRAIT => derives_clone = true,
+                    _ => {}
+                }
+            }
+        }
+        if derives_copy {
+            self.copy_structs.insert(def.name.name.clone());
+        }
+        if derives_copy || derives_clone {
+            self.clone_structs.insert(def.name.name.clone());
+        }
+    }
+
+    /// Validate that a struct deriving `Copy` has only `Copy` fields (§2.3).
+    ///
+    /// Emits a `CopyDeriveNonCopyField` error for each offending field. Run after all
+    /// structs are registered so a field whose type is another struct resolves regardless
+    /// of declaration order.
+    pub(crate) fn validate_copy_derive(&mut self, def: &StructDef) {
+        if !self.copy_structs.contains(&def.name.name) {
+            return;
+        }
+        // Collect offenders first to avoid borrowing `self` mutably while iterating fields.
+        let mut offenders: Vec<(String, Type, Span)> = Vec::new();
+        if let Some(fields) = self.struct_defs.get(&def.name.name) {
+            for (field_name, field_ty) in fields {
+                if !self.is_type_copy(field_ty) {
+                    let span = def
+                        .fields
+                        .iter()
+                        .find(|f| &f.name.name == field_name)
+                        .map(|f| f.span)
+                        .unwrap_or(def.name.span);
+                    offenders.push((field_name.clone(), field_ty.clone(), span));
+                }
+            }
+        }
+        for (field_name, field_type, span) in offenders {
+            self.record_error(TypeError::CopyDeriveNonCopyField {
+                struct_name: def.name.name.clone(),
+                field_name,
+                field_type,
+                span,
+            });
+        }
     }
 
     /// Register all method signatures from an `impl` block into the global

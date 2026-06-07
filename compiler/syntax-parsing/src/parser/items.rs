@@ -31,20 +31,20 @@ impl Parser {
             if self.check(&TokenKind::Func) {
                 let func = self.parse_function(attributes)?;
                 items.push(Item::Function(func));
+            } else if self.check(&TokenKind::Struct) {
+                let s = self.parse_struct_def(attributes)?;
+                items.push(Item::Struct(s));
             } else if !attributes.is_empty() {
-                // Attributes only attach to function-like items today; rejecting here
+                // Attributes attach only to functions and structs today; rejecting here
                 // gives an actionable diagnostic instead of silently dropping them.
                 let token = self.peek().ok_or(ParseError::UnexpectedEof {
-                    expected: "function definition after attribute".to_string(),
+                    expected: "function or struct definition after attribute".to_string(),
                 })?;
                 return Err(ParseError::UnexpectedToken {
                     found: token.kind.clone(),
-                    expected: "function definition after attribute".to_string(),
+                    expected: "function or struct definition after attribute".to_string(),
                     span: token.span,
                 });
-            } else if self.check(&TokenKind::Struct) {
-                let s = self.parse_struct_def()?;
-                items.push(Item::Struct(s));
             } else if self.check(&TokenKind::Impl) {
                 let impl_def = self.parse_impl_def()?;
                 items.push(Item::Impl(impl_def));
@@ -298,8 +298,12 @@ impl Parser {
         })
     }
 
-    /// Parse a struct definition: `struct Name { field: Type, ... }`
-    pub(crate) fn parse_struct_def(&mut self) -> ParseResult<StructDef> {
+    /// Parse a struct definition: `struct Name { field: Type, ... }`,
+    /// optionally preceded by `@derive(...)` attributes (already consumed by the caller).
+    pub(crate) fn parse_struct_def(
+        &mut self,
+        attributes: Vec<Attribute>,
+    ) -> ParseResult<StructDef> {
         let start = self.consume(TokenKind::Struct, "'struct'")?;
         self.skip_newlines();
 
@@ -368,6 +372,7 @@ impl Parser {
         Ok(StructDef {
             name,
             fields,
+            attributes,
             span: start.span.merge(close.span),
         })
     }

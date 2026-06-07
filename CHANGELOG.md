@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.30.0] - 2026-06-07
+
+### Added
+- `semantic`: `Copy` trait + `@derive(Copy, Clone)` for structs (§2.3, Phase 1.7). A struct that derives `Copy` is duplicated on assignment instead of moved, so `val b = a` leaves `a` usable; a struct that does *not* derive `Copy` is now move-tracked like `string` — binding/assigning/returning/passing it by value moves the source, and reading it afterward is a `UseOfMovedValue` error. Deriving `Copy` requires every field to be `Copy` (primitive scalars are `Copy`, `string` is not, a struct field is `Copy` only when it derives `Copy`); a violation is a new `CopyDeriveNonCopyField` error. `Copy` implies `Clone`. `@derive(Clone)` (or `Copy`) enables `struct.clone()` as a compiler-known builtin deep copy; a user-defined `clone` method shadows it. Unknown derive arguments (e.g. `Debug`) are accepted and ignored for forward compatibility. Move-tracking is now context-aware (`TypeChecker::is_type_move_tracked` / `is_type_copy`) rather than a property of the type alone. `@derive(...)` attributes now attach to struct definitions (parser + `StructDef.attributes`). Implementation spans `ast-types` (`StructDef.attributes`), `syntax-parsing` (struct attribute parsing), `semantic-analysis` (`copy_structs`/`clone_structs` registries, Copy-field validation pass, struct `.clone()` resolution), and `llvm-backend` (`BuiltinMethod::StructClone` — loads the aggregate value, a faithful copy while structs are stack-allocated). Tests: 3 parser unit, 5 semantic unit, 5 integration (`neurc/tests/copy_clone.rs`), example `types/copy_clone.nr`. 570 tests pass.
+
+---
+
 ## [1.29.0] - 2026-06-07
 
 ### Added

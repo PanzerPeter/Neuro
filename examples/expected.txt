@@ -22,6 +22,7 @@ basics/type_inference.nr        42
 
 # --- types ----------------------------------------------------------------
 types/constants.nr                  51
+types/copy_clone.nr                 14
 types/extended_types.nr             0
 types/extended_types_arithmetic.nr  0
 types/float_ops.nr                  42
