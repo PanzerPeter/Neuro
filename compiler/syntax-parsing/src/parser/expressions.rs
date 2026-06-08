@@ -141,6 +141,17 @@ impl Parser {
                 })
             }
 
+            // Immutable borrow `&place` (§2.4). In prefix position `&` is a borrow;
+            // as an infix operator it is bitwise-AND, handled in `parse_infix`.
+            TokenKind::Amp => {
+                let operand = self.parse_expr(Precedence::Unary)?;
+                let span = token.span.merge(operand.span());
+                Ok(Expr::Reference {
+                    operand: Box::new(operand),
+                    span,
+                })
+            }
+
             TokenKind::LeftParen => {
                 let expr = self.parse_expr(Precedence::Lowest)?;
                 let close = self.consume(TokenKind::RightParen, "')'")?;

@@ -1,7 +1,7 @@
 use lexical_analysis::TokenKind;
 use shared_types::{Identifier, Span};
 
-use crate::ast::{BinaryOp, Expr, Stmt, Type};
+use crate::ast::{BinaryOp, Expr, Stmt};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 
@@ -85,12 +85,7 @@ impl Parser {
         let span = start_span.merge(
             init.as_ref()
                 .map(|e| e.span())
-                .or_else(|| {
-                    ty.as_ref().map(|t| match t {
-                        Type::Named(ident) => ident.span,
-                        Type::Tensor { span, .. } => *span,
-                    })
-                })
+                .or_else(|| ty.as_ref().map(|t| t.span()))
                 .unwrap_or(name.span),
         );
 

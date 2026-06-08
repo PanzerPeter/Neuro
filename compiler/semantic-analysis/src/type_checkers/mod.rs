@@ -96,6 +96,9 @@ impl TypeChecker {
         match ty {
             Type::String | Type::Void | Type::Function { .. } | Type::Unknown => false,
             Type::Struct(name) => self.copy_structs.contains(name),
+            // An immutable borrow `&T` is always `Copy` — copying the reference is sound
+            // because it grants no mutation and never moves the borrowed value (§2.4).
+            Type::Reference(_) => true,
             _ => true,
         }
     }

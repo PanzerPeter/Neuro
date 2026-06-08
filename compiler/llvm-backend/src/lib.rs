@@ -291,6 +291,10 @@ fn resolve_syntax_type(ty: &ast_types::Type) -> CodegenResult<Type> {
             // resolved later by CodegenContext when it has access to struct_defs.
             name => Ok(Type::Struct(name.to_string())),
         },
+        // Immutable borrow `&T` (§2.4): an opaque pointer to the referent's storage.
+        ast_types::Type::Reference { inner, .. } => {
+            Ok(Type::Reference(Box::new(resolve_syntax_type(inner)?)))
+        }
         ast_types::Type::Tensor { .. } => Err(CodegenError::UnsupportedType(
             "tensor types not supported in Phase 1".to_string(),
         )),

@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-570%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-580%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP & Phase 1.5 stabilization complete · Phase 1.7 (ownership) active · Phase 2 overlapping
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**570 Tests Passing**):
+Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**580 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -109,6 +109,7 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 | **If/Block Expressions** | `val x = if cond { a } else { b }`; bare block-as-value with newline-separated statements and a final trailing expression; all arms type-checked; alloca-based lowering |
 | **Move Semantics** | Move-by-default for non-`Copy` values (`string` and structs without `@derive(Copy)`). Binding, assignment, `return`, struct-field store, and by-value call arguments move the source; reading a moved binding is a `use of moved value` error. `.clone()` opts out; `Copy` scalars are duplicated. Conditional (`if`/`while`/`for`) moves don't leak past their branch (§2.2) |
 | **Copy / Clone** | `@derive(Copy, Clone)` on structs (§2.3). A `Copy` struct is duplicated on assignment instead of moved; deriving `Copy` requires every field to be `Copy` (else a compile error). `Copy` implies `Clone`; `@derive(Clone)` enables `struct.clone()` as a builtin deep copy (a user `clone` method shadows it). Unknown derive args are accepted and ignored |
+| **Immutable Borrows** | `&T` reference type (params/returns/locals) and `&place` borrow expression (§2.4). Borrowing does not move the borrowee, and `&T` is `Copy`. Method/field access auto-derefs through a borrow: `.len()`/`.clone()` on `&string`, field read and `&self` methods on `&Struct`. Borrowing a temporary or `const` is `CannotBorrowValue`. Lowers to an opaque pointer. (The `*` deref operator and lifetime checking land with `&mut T`.) |
 | **Unsafe Blocks** | `unsafe { … }` reserved keyword + block expression (Phase 1.7 groundwork); inert — lowers identically to a bare block, evaluates to its trailing expression |
 | **Panic Runtime** | `panic(msg)`, `assert(cond)`, `unreachable()` builtins (§1.2): print a diagnostic (`message at file:line:col`) to stderr and abort via `abort()` — no stack unwinding. `assert` aborts only on a false condition. Divergent, so usable in tail-return position; a same-named user function shadows the builtin |
 | **LLVM Backend** | Native executable generation via inkwell 0.9.0 (LLVM 20) |
@@ -126,7 +127,7 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 >
 > If memory safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
 
-String fat pointers and move-by-default (use-after-move detection on `string`) have already landed; the remaining work — the `Copy` trait, `&`/`&mut` borrows, lifetimes, and `Drop` / deterministic destruction — is tracked under Phase 1.7 in the roadmap.
+String fat pointers, move-by-default (use-after-move detection), the `Copy` trait, and immutable borrows (`&T`) have already landed; the remaining work — mutable borrows `&mut T` (with the `*` deref operator), lifetimes, and `Drop` / deterministic destruction — is tracked under Phase 1.7 in the roadmap.
 
 ---
 
@@ -477,7 +478,7 @@ Tensor/AI path: AST → Neuro High-Level IR
 |:---:|---|:---:|
 | **1**   | Core MVP — types, functions, control flow, LLVM backend | ✅ Complete |
 | **1.5** | Syntax & semantics stabilization — parser fixes, `const`, `as` casts, compound assignment, bitwise ops, integer suffixes, if/block expressions, `while true` lint, IEEE-754 float comparisons, string fat pointers | ✅ Complete |
-| **1.7** | Ownership & borrow checker — move semantics, `Copy` trait, `&`/`&mut`, lifetimes, drop / deterministic destruction, remove implicit copies | 🔄 In progress |
+| **1.7** | Ownership & borrow checker — move semantics ✅, `Copy` trait ✅, immutable borrows `&T` ✅, `&mut`, lifetimes, drop / deterministic destruction, remove implicit copies | 🔄 In progress |
 | **1.8** | Backend plumbing — `neuro-hir` typed IR crate, `melior` integration, HIR lowering pipeline shared by LLVM + future MLIR backends | 📋 Planned |
 | **2**   | Core language — arrays, tuples, structs ✅, methods ✅, enums, pattern matching, generics, traits, closures, type aliases, newtypes, `Option`/`Result`, `??`, `?`, modules, prelude, string interpolation | 🔄 In progress |
 | **3**   | Tensors & MLIR — `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | 📋 Planned |

@@ -156,6 +156,7 @@ fn rewrite_type(ty: &mut Type, resolved: &HashMap<String, Type>) {
                 }
             }
         }
+        Type::Reference { inner, .. } => rewrite_type(inner, resolved),
         Type::Tensor { element_type, .. } => rewrite_type(element_type, resolved),
     }
 }
@@ -304,6 +305,7 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
         }
         Expr::Block { stmts, .. } => rewrite_block(stmts, resolved),
         Expr::Unsafe { stmts, .. } => rewrite_block(stmts, resolved),
+        Expr::Reference { operand, .. } => rewrite_expr(operand, resolved),
         Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } => {}
     }
 }
@@ -331,6 +333,7 @@ mod tests {
     fn named(ty: &Type) -> &str {
         match ty {
             Type::Named(ident) => ident.name.as_str(),
+            Type::Reference { .. } => "<reference>",
             Type::Tensor { .. } => "<tensor>",
         }
     }

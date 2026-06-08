@@ -239,6 +239,59 @@ mod tests {
     }
 
     #[test]
+    fn borrowing_a_string_does_not_move_it() {
+        // §2.4: passing `&s` borrows rather than moves, so `s` stays usable afterward.
+        let errs = errors(
+            r#"
+            func describe(s: &string) -> u64 { s.len() }
+            func main() -> i32 {
+                val s: string = "hello"
+                val n: u64 = describe(&s)
+                val m: u64 = describe(&s)
+                return 0
+            }
+            "#,
+        );
+        assert!(errs.is_empty(), "borrowing must not move; got {errs:?}");
+    }
+
+    #[test]
+    fn borrowing_a_struct_does_not_move_it() {
+        let errs = errors(
+            r#"
+            struct Point { x: i32, y: i32 }
+            func read(p: &Point) -> i32 { p.x }
+            func main() -> i32 {
+                val pt = Point { x: 1, y: 2 }
+                val a: i32 = read(&pt)
+                val b: i32 = read(&pt)
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.is_empty(),
+            "borrowing a struct must not move it; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn borrowing_a_temporary_is_rejected() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                val r = &5
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("cannot borrow")),
+            "borrowing a literal must be rejected; got {errs:?}"
+        );
+    }
+
+    #[test]
     fn reassigning_a_mut_revives_the_binding() {
         let errs = errors(
             r#"

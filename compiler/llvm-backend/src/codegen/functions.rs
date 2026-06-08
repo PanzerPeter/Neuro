@@ -54,8 +54,19 @@ impl<'ctx> CodegenContext<'ctx> {
             .get(mangled_name)
             .ok_or_else(|| CodegenError::UndefinedFunction(mangled_name.to_string()))?;
 
-        // Load the receiver struct value.
-        let self_val = self.codegen_expr(receiver)?;
+        // Load the receiver struct value. A `&Struct` receiver (§2.4) lowers to a pointer to
+        // the struct; the `&self` method takes the struct by value, so dereference the borrow.
+        let raw_self = self.codegen_expr(receiver)?;
+        let self_val = match raw_self {
+            BasicValueEnum::PointerValue(ptr) => {
+                let struct_name = mangled_name.split("__").next().unwrap_or(mangled_name);
+                let struct_ty = self.get_struct_llvm_type(struct_name)?;
+                self.builder
+                    .build_load(struct_ty, ptr, "deref.self")
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            }
+            other => other,
+        };
         let mut arg_values: Vec<BasicMetadataValueEnum> =
             vec![BasicMetadataValueEnum::from(self_val)];
 

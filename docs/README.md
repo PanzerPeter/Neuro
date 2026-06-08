@@ -115,7 +115,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 570 tests passing across all components
+- 580 tests passing across all components
 
 ## Compilation Pipeline
 
@@ -253,6 +253,6 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 
 ---
 
-**Last Updated**: 2026-06-07
-**Version**: Phase 1.7 (ownership) active · Phase 2 overlapping (v1.29.0)
+**Last Updated**: 2026-06-08
+**Version**: Phase 1.7 (ownership) active · Phase 2 overlapping (v1.31.0)
 **Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.9.0

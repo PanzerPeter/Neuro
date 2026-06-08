@@ -46,6 +46,12 @@ impl<'ctx> TypeMapper<'ctx> {
                     .struct_type(&[ptr_type.into(), len_type.into()], false)
                     .into())
             }
+            // An immutable borrow `&T` is an opaque pointer to the referent's storage (§2.4).
+            // LLVM 20 pointers are untyped, so every reference maps to the same `ptr`.
+            Type::Reference(_) => Ok(self
+                .context
+                .ptr_type(inkwell::AddressSpace::default())
+                .into()),
             Type::Void => Err(CodegenError::UnsupportedType(
                 "void type cannot be used as a value".to_string(),
             )),

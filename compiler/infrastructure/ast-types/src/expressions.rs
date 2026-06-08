@@ -91,6 +91,13 @@ pub enum Expr {
         stmts: Vec<Stmt>,
         span: Span,
     },
+    /// Immutable borrow expression `&place` (§2.4): takes a non-owning reference
+    /// to `operand` without moving it. The operand is a place expression (an
+    /// identifier); the result has type `&T`.
+    Reference {
+        operand: Box<Expr>,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -110,6 +117,7 @@ impl Expr {
             Expr::If { span, .. } => *span,
             Expr::Block { span, .. } => *span,
             Expr::Unsafe { span, .. } => *span,
+            Expr::Reference { span, .. } => *span,
         }
     }
 }

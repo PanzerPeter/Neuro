@@ -26,6 +26,10 @@ Extracted from `syntax-parsing` to eliminate the cross-slice dependency that `se
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-06-08: Added `Type::Reference { inner, span }` (`&T`) and `Expr::Reference { operand, span }`
+  (`&place`) for immutable borrows (§2.4). The reference type appears in any type-annotation
+  position; the borrow expression is a prefix `&` on a place expression. Interpreted by
+  semantic-analysis (no move, `Copy`, auto-deref) and llvm-backend (lowered to an opaque pointer).
 - 2026-06-07: `StructDef` gained `attributes: Vec<Attribute>` so `@derive(Copy, Clone)` (§2.3) can
   attach to struct definitions. Mirrors the existing `attributes` field on `FunctionDef` /
   `MethodDef`; interpreted by semantic-analysis. Empty when no attributes are present.

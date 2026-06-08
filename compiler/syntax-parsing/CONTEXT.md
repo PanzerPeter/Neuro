@@ -49,6 +49,11 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-06-08: Immutable borrows §2.4 — `parse_type` parses a leading `&` recursively into
+  `Type::Reference { inner, span }`; `parse_prefix` handles `TokenKind::Amp` in prefix position as a
+  borrow `Expr::Reference { operand, span }` (operand at `Precedence::Unary`). Infix `&` is still
+  `BinaryOp::BitAnd`, so prefix vs. infix `&` are disambiguated purely by parser position. Param /
+  field span computation switched to `Type::span()` to cover the new variant.
 - 2026-06-07: `@derive(...)` attaches to struct definitions (§2.3). `parse_program` passes the
   collected `Vec<Attribute>` into `parse_struct_def(attributes)` → `StructDef.attributes`. The
   "attribute before non-function item" rejection now fires only when an attribute precedes neither
