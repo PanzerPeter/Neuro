@@ -49,8 +49,11 @@ impl Type {
             ast_types::Type::Reference { inner, .. } => {
                 Type::Reference(Box::new(Type::from_ast(inner)))
             }
+            // Tensor types (Phase 3) never reach the backend: semantic analysis rejects
+            // every `Tensor<...>` annotation as an unknown type before codegen runs, so
+            // this arm is an invariant assertion rather than a missing-feature stub.
             ast_types::Type::Tensor { .. } => {
-                unimplemented!("Tensors not implemented in scalar backend")
+                unreachable!("tensor types are rejected by semantic analysis before codegen")
             }
         }
     }

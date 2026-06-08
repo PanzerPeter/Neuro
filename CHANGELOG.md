@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.31.1] - 2026-06-08
+
+### Changed
+- `codegen`: audit cleanup — replace the banned `unimplemented!()` stub on the tensor arm of `Type::from_ast` (`llvm-backend`) with a documented `unreachable!()` invariant. Tensor annotations are rejected by semantic analysis before codegen, so the arm asserts an invariant rather than stubbing a missing feature (AC-004 compliance). No behavioral change; 580 tests pass.
+
+---
+
 ## [1.31.0] - 2026-06-08
 
 ### Added
