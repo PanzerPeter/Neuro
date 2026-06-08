@@ -22,7 +22,9 @@ impl TypeChecker {
         args: &[Expr],
         call_span: Span,
     ) -> Option<Type> {
-        match (recv, method) {
+        // String methods auto-deref through an immutable borrow `&string` (§2.4), so the
+        // referent drives the string match below.
+        match (recv.referent(), method) {
             // §2.7 — O(1) byte length read from the string fat pointer's stored `len`.
             (Type::String, "len") => {
                 if !args.is_empty() {
@@ -48,11 +50,13 @@ impl TypeChecker {
             }
             // §1.2, §1.4 — wrapping/saturating arithmetic and the right-shift method.
             // Each takes one same-typed argument and returns the receiver's integer type.
+            // Matched on `recv` (not the referent): integer intrinsics require a value
+            // receiver, since reading a scalar through `&T` needs the deref operator.
             (
-                t,
+                _,
                 "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "saturating_add"
                 | "saturating_sub" | "saturating_mul" | "shr",
-            ) if t.is_integer() => {
+            ) if recv.is_integer() => {
                 self.check_unary_int_intrinsic_arg(recv, args, call_span);
                 Some(recv.clone())
             }
@@ -505,18 +509,23 @@ impl TypeChecker {
                         if matches!(obj_ty, Type::Unknown) {
                             return Some(Type::Unknown);
                         }
-                        let struct_name = match &obj_ty {
+                        // Auto-deref through an immutable borrow: `r.method()` where
+                        // `r: &Struct` dispatches on `Struct` (§2.4). The borrow is never moved.
+                        let struct_name = match obj_ty.referent() {
                             Type::Struct(n) => n.clone(),
-                            other => {
+                            _ => {
                                 // Builtin (non-struct) receivers dispatch a fixed,
-                                // compiler-known set of intrinsic methods (§2.7).
+                                // compiler-known set of intrinsic methods (§2.7). The original
+                                // (possibly `&T`) type is passed so `resolve_builtin_method`
+                                // can auto-deref `&string` but keep integer intrinsics
+                                // value-only.
                                 if let Some(ret) =
-                                    self.resolve_builtin_method(other, &field.name, args, *span)
+                                    self.resolve_builtin_method(&obj_ty, &field.name, args, *span)
                                 {
                                     return Some(ret);
                                 }
                                 self.record_error(TypeError::MethodNotFound {
-                                    struct_name: other.to_string(),
+                                    struct_name: obj_ty.to_string(),
                                     method_name: field.name.clone(),
                                     span: *fa_span,
                                 });
@@ -793,7 +802,9 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
 
-                let struct_name = match &obj_ty {
+                // Auto-deref through an immutable borrow: `r.field` reads a field of the
+                // referent when `r: &Struct` (§2.4).
+                let struct_name = match obj_ty.referent() {
                     Type::Struct(n) => n.clone(),
                     other => {
                         self.record_error(TypeError::UnknownField {
@@ -906,6 +917,31 @@ impl TypeChecker {
                 let ty = self.check_block_expr_type(stmts);
                 self.symbols.pop_scope();
                 Some(ty)
+            }
+
+            // Immutable borrow `&place` (§2.4). The result type is `&T`. Checking the
+            // operand reads its type without consuming it: a borrow never moves the
+            // borrowed value, which is the whole point of a reference.
+            Expr::Reference { operand, span } => {
+                // Only a live binding (`val`/`mut`/parameter) is a borrowable place. A
+                // `const` is an inlined value with no address (§1.3), and temporaries
+                // (literals, calls, operator results) are not places.
+                let mut place = operand.as_ref();
+                while let Expr::Paren(inner, _) = place {
+                    place = inner;
+                }
+                let borrowable = matches!(place, Expr::Identifier(ident)
+                    if self.symbols.lookup(&ident.name).is_some());
+                if !borrowable {
+                    self.record_error(TypeError::CannotBorrowValue { span: *span });
+                    let _ = self.check_expr(operand, None);
+                    return Some(Type::Unknown);
+                }
+                let inner = self.check_expr(operand, None)?;
+                if matches!(inner, Type::Unknown) {
+                    return Some(Type::Unknown);
+                }
+                Some(Type::Reference(Box::new(inner)))
             }
         }
     }

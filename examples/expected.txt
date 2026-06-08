@@ -28,6 +28,7 @@ types/extended_types_arithmetic.nr  0
 types/float_ops.nr                  42
 types/float_suffixes.nr             0
 types/integer_overflow.nr           55
+types/immutable_borrows.nr          0
 types/integer_suffixes.nr           0
 types/move_semantics.nr             0
 types/string_clone.nr               5

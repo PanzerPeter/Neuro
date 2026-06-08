@@ -84,6 +84,13 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-06-08: Immutable borrows `&T` §2.4. New `Type::Reference(Box<Type>)` (Display `&T`; compatible
+  iff referents are; `referent()` peels one layer). `resolve_type` maps `ast::Type::Reference`.
+  `Expr::Reference` arm in `check_expr` requires a place (`is_place_expr`: identifier or
+  parenthesised identifier; else `CannotBorrowValue`) and yields `&T` **without** moving the operand —
+  borrowing never consumes. References are always `Copy` and never move-tracked (`is_type_copy` true,
+  `is_type_move_tracked` false via its `_` arm). Method-call and field-access resolution auto-deref via
+  `obj_ty.referent()`, so `r.len()` / `r.field` / `r.method()` work for `r: &string` / `r: &Struct`.
 - 2026-06-07: `Copy` trait + `@derive(Copy, Clone)` §2.3. `copy_structs`/`clone_structs`
   (`HashSet<String>`) populated from `StructDef.attributes` in `register_struct`
   (`record_derive_intent`); pass 1b `validate_copy_derive` checks every field of a Copy struct is Copy

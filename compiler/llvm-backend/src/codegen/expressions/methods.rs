@@ -24,17 +24,9 @@ impl<'ctx> CodegenContext<'ctx> {
         match kind {
             // `string.len()` reads field 1 of the fat pointer `{ ptr, i64 }` — the
             // stored byte length. O(1), no scan; the value is already the u64 length.
+            // A `&string` receiver is auto-dereferenced first (§2.4).
             BuiltinMethod::StringLen => {
-                let recv_val = self.codegen_expr(receiver)?;
-                let struct_val = match recv_val {
-                    BasicValueEnum::StructValue(sv) => sv,
-                    other => {
-                        return Err(CodegenError::InternalError(format!(
-                            "string receiver did not lower to a fat pointer: {:?}",
-                            other
-                        )))
-                    }
-                };
+                let struct_val = self.string_receiver_struct(receiver)?;
                 self.builder
                     .build_extract_value(struct_val, 1, "str.len")
                     .map_err(|e| {
@@ -46,11 +38,33 @@ impl<'ctx> CodegenContext<'ctx> {
             // exists yet (Phase 1.7), so duplicating the `{ ptr, len }` fat-pointer value is
             // observationally a deep copy: the pointee bytes are immutable and shared safely.
             // When runtime heap strings land this must duplicate the underlying buffer.
-            BuiltinMethod::StringClone => self.codegen_expr(receiver),
+            // A `&string` receiver is auto-dereferenced first (§2.4).
+            BuiltinMethod::StringClone => Ok(self.string_receiver_struct(receiver)?.into()),
             // `struct.clone()` (§2.3) — structs are stack-allocated aggregates with no heap
             // backing yet, so loading the receiver's value is a faithful deep copy. When a
             // struct gains a heap-owning field this must recurse into that field's clone.
-            BuiltinMethod::StructClone => self.codegen_expr(receiver),
+            // A `&Struct` receiver is auto-dereferenced first (§2.4).
+            BuiltinMethod::StructClone => {
+                let recv_val = self.codegen_expr(receiver)?;
+                match recv_val {
+                    BasicValueEnum::PointerValue(ptr) => {
+                        let name = match recv_ty.referent() {
+                            Type::Struct(n) => n,
+                            other => {
+                                return Err(CodegenError::InternalError(format!(
+                                    "struct clone receiver is not a struct: {:?}",
+                                    other
+                                )))
+                            }
+                        };
+                        let struct_ty = self.get_struct_llvm_type(name)?;
+                        self.builder
+                            .build_load(struct_ty, ptr, "deref.struct")
+                            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                    }
+                    other => Ok(other),
+                }
+            }
             BuiltinMethod::WrappingAdd
             | BuiltinMethod::WrappingSub
             | BuiltinMethod::WrappingMul
@@ -58,6 +72,28 @@ impl<'ctx> CodegenContext<'ctx> {
             | BuiltinMethod::SaturatingSub
             | BuiltinMethod::SaturatingMul
             | BuiltinMethod::Shr => self.codegen_int_intrinsic(kind, recv_ty, receiver, args),
+        }
+    }
+
+    /// Lower a string receiver to its `{ ptr, len }` fat-pointer value, auto-dereferencing
+    /// an immutable borrow `&string` (§2.4): a borrowed receiver lowers to a pointer to the
+    /// fat pointer, so the struct is loaded; an owned receiver is already the struct value.
+    fn string_receiver_struct(&mut self, receiver: &Expr) -> CodegenResult<StructValue<'ctx>> {
+        let recv_val = self.codegen_expr(receiver)?;
+        match recv_val {
+            BasicValueEnum::StructValue(sv) => Ok(sv),
+            BasicValueEnum::PointerValue(ptr) => {
+                let string_ty = self.type_mapper.map_type(&Type::String)?;
+                Ok(self
+                    .builder
+                    .build_load(string_ty, ptr, "deref.str")
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                    .into_struct_value())
+            }
+            other => Err(CodegenError::InternalError(format!(
+                "string receiver did not lower to a fat pointer or borrow: {:?}",
+                other
+            ))),
         }
     }
 

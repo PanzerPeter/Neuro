@@ -3,7 +3,7 @@ use shared_types::Identifier;
 
 use crate::ast::{
     Attribute, ConstDef, Expr, FieldDef, FieldInit, FunctionDef, ImplDef, Item, MethodDef,
-    Parameter, SelfParam, StructDef, Type,
+    Parameter, SelfParam, StructDef,
 };
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
@@ -242,10 +242,7 @@ impl Parser {
                 self.skip_newlines();
 
                 let param_ty = self.parse_type()?;
-                let param_span = param_start.merge(match &param_ty {
-                    Type::Named(ident) => ident.span,
-                    Type::Tensor { span, .. } => *span,
-                });
+                let param_span = param_start.merge(param_ty.span());
 
                 for existing_param in &params {
                     if existing_param.name.name == param_name.name {
@@ -347,10 +344,7 @@ impl Parser {
             self.skip_newlines();
 
             let field_ty = self.parse_type()?;
-            let field_span = field_name.span.merge(match &field_ty {
-                Type::Named(ident) => ident.span,
-                Type::Tensor { span, .. } => *span,
-            });
+            let field_span = field_name.span.merge(field_ty.span());
 
             fields.push(FieldDef {
                 name: field_name,
@@ -565,10 +559,7 @@ impl Parser {
                 self.skip_newlines();
 
                 let param_ty = self.parse_type()?;
-                let param_span = param_start.merge(match &param_ty {
-                    Type::Named(ident) => ident.span,
-                    Type::Tensor { span, .. } => *span,
-                });
+                let param_span = param_start.merge(param_ty.span());
 
                 params.push(Parameter {
                     name: param_name,

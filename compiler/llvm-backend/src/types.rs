@@ -23,6 +23,9 @@ pub(crate) enum Type {
     /// User-defined struct, identified by name. Field layout is resolved via the
     /// CodegenContext struct_defs table rather than embedding it in the type.
     Struct(std::string::String),
+    /// Immutable borrow `&T` (§2.4). Lowered to an opaque LLVM pointer; the
+    /// referent type drives auto-deref of method/field receivers.
+    Reference(Box<Type>),
 }
 
 impl Type {
@@ -43,9 +46,21 @@ impl Type {
                 "string" => Type::String,
                 name => Type::Struct(name.to_string()),
             },
+            ast_types::Type::Reference { inner, .. } => {
+                Type::Reference(Box::new(Type::from_ast(inner)))
+            }
             ast_types::Type::Tensor { .. } => {
                 unimplemented!("Tensors not implemented in scalar backend")
             }
+        }
+    }
+
+    /// The referent of a reference type, or the type itself otherwise. Used to
+    /// auto-deref `&T` receivers when resolving builtin methods (§2.4).
+    pub(crate) fn referent(&self) -> &Type {
+        match self {
+            Type::Reference(inner) => inner,
+            other => other,
         }
     }
 

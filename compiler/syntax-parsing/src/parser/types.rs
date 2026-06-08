@@ -9,6 +9,20 @@ use super::Parser;
 impl Parser {
     /// Parse a type annotation
     pub(crate) fn parse_type(&mut self) -> ParseResult<Type> {
+        // Immutable borrow type `&T` (§2.4). The referent is parsed recursively, so
+        // the `&` distributes over whatever type follows.
+        if self.check(&TokenKind::Amp) {
+            let amp = self.advance().ok_or(ParseError::UnexpectedEof {
+                expected: "'&'".to_string(),
+            })?;
+            let inner = self.parse_type()?;
+            let span = amp.span.merge(inner.span());
+            return Ok(Type::Reference {
+                inner: Box::new(inner),
+                span,
+            });
+        }
+
         let token = self.advance().ok_or(ParseError::UnexpectedEof {
             expected: "type".to_string(),
         })?;

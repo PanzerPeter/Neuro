@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.31.0] - 2026-06-08
+
+### Added
+- `semantic`/`codegen`: immutable borrows `&T` (§2.4, Phase 1.7). A new reference type `&T` is accepted in any type-annotation position (parameters, returns, locals), and a prefix `&place` borrow expression takes a non-owning reference to a variable. Borrowing **does not move** the borrowed value — `length(&msg); msg.len()` compiles — and `&T` is itself `Copy`, so a reference can be passed and re-borrowed freely. Method and field access auto-deref through a borrow: `s.len()` / `s.clone()` work on `&string`, and `r.field` / `r.method()` work on `&Struct`. Borrowing a temporary (a literal, a call result) or a `const` (an inlined value, not a place) is a new `CannotBorrowValue` error. References lower to opaque LLVM 20 pointers; a borrow of a place is its alloca pointer, and consuming sites load through the pointer when the receiver is a borrow (value-driven, so owned and borrowed receivers share one path). Integer intrinsics (`wrapping_*`, `.shr`) intentionally still require a value receiver — reading a scalar through `&T` needs the deref operator, which lands with `&mut T`. Implementation spans `ast-types` (`Type::Reference`, `Expr::Reference`), `syntax-parsing` (`&T` type + prefix `&` borrow), `semantic-analysis` (`Type::Reference`, no-move/Copy rules, auto-deref, `CannotBorrowValue`), and `llvm-backend` (`Type::Reference` → `ptr`, borrow + auto-deref codegen). Tests: 1 semantic-type unit, 3 move-checker unit, 6 integration (`neurc/tests/immutable_borrows.rs`), example `types/immutable_borrows.nr`. 580 tests pass.
+
+---
+
 ## [1.30.0] - 2026-06-07
 
 ### Added

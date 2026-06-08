@@ -175,4 +175,7 @@ pub enum TypeError {
         span: Span,
         moved_at: Span,
     },
+
+    #[error("cannot borrow this expression at {span:?}: `&` requires a place (a variable); bind it to a `val` first")]
+    CannotBorrowValue { span: Span },
 }

@@ -170,6 +170,16 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-06-08: Immutable borrows `&T` §2.4. New backend `Type::Reference(Box<Type>)` (+ `from_ast`,
+  `referent()`); `map_type` lowers any reference to an opaque `ptr`. `Expr::Reference` lowers to the
+  storage pointer of the borrowed place (`codegen_reference` returns the alloca pointer — no load).
+  Auto-deref is value-driven: a borrowed receiver lowers to a `PointerValue`, so `string_receiver_struct`
+  (string `len`/`clone`), `StructClone`, `codegen_method_call` (self), and `get_struct_ptr_and_type`
+  (field access) load through the pointer when they see one; an owned receiver is already a value.
+  `resolve_builtin_method` auto-derefs `&string` for string methods but keeps integer intrinsics
+  value-only. `type_pass` records `Reference(inner)` for borrows and peels `referent()` when computing
+  struct names/mangling. No new context state — ref-ness is read from `variable_types` (a `&Struct`
+  alloca holds a `ptr`) and from the lowered value kind.
 - 2026-06-07: `struct.clone()` §2.3 — `BuiltinMethod::StructClone` (`context.rs`); type-pass struct
   method-call arm tags it when no `StructName__clone` exists; lowers to the receiver's aggregate value.
   Move/Copy is semantic-only — no other codegen change. See "Builtin Method ABI".

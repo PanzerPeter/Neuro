@@ -9,6 +9,10 @@ pub enum Type {
     /// Named type (e.g., i32, f64, String, bool)
     Named(Identifier),
 
+    /// Immutable borrow type `&T` (§2.4): a non-owning reference to a value of
+    /// type `inner`. `span` covers the leading `&` through the referent type.
+    Reference { inner: Box<Type>, span: Span },
+
     /// Tensor type for multi-dimensional arrays.
     ///
     /// This variant is reserved for future language support and is not yet
@@ -26,6 +30,7 @@ impl Type {
     pub fn span(&self) -> Span {
         match self {
             Type::Named(ident) => ident.span,
+            Type::Reference { span, .. } => *span,
             Type::Tensor { span, .. } => *span,
         }
     }

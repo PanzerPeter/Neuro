@@ -336,6 +336,52 @@ val w = v.clone()  // independent copy; v stays usable
 | `UnknownStruct` | Struct literal references an undeclared struct name |
 | `CopyDeriveNonCopyField` | `@derive(Copy)` on a struct with a non-`Copy` field |
 
+## References — Immutable Borrows (`&T`)
+
+An **immutable borrow** `&T` is a non-owning reference to a value (§2.4). It lets a
+function read a value without taking ownership, so the caller keeps using its binding
+afterward. The borrow expression `&x` takes a reference to the place `x`.
+
+```neuro
+func describe(s: &string) -> u64 {
+    s.len()                 // method call auto-derefs through the borrow
+}
+
+func main() -> i32 {
+    val msg: string = "Neuro"
+    val n: u64 = describe(&msg)   // borrow — msg is NOT moved
+    val again: u64 = msg.len()    // still valid: borrowing never consumes
+    return 0
+}
+```
+
+**Rules:**
+
+- A reference type `&T` may appear on parameters, return types, and local bindings.
+- Borrowing **does not move** the borrowed value — that is the whole point of a reference.
+  A non-`Copy` value such as `string` stays usable after being borrowed.
+- `&T` is itself `Copy`: passing or re-borrowing a reference duplicates the pointer.
+- Method and field access **auto-deref** through a borrow: `r.len()` / `r.clone()` on a
+  `&string`, and `r.field` / `r.method()` on a `&Struct`, behave as if applied to the
+  referent.
+- Only a **place** (a `val`/`mut`/parameter binding) can be borrowed. Borrowing a
+  temporary (a literal or a call result) or a `const` (an inlined value, not a memory
+  location — §1.3) is a `CannotBorrowValue` error.
+
+```neuro
+struct Point { x: i64, y: i64 }
+impl Point {
+    func sum(&self) -> i64 { self.x + self.y }
+}
+
+func read_sum(p: &Point) -> i64 { p.sum() }   // borrow a struct, call through it
+```
+
+> **Not yet available:** the explicit dereference operator `*r` (for reading a borrowed
+> scalar) and lifetime checking land together with mutable borrows `&mut T` in a later
+> Phase 1.7 step. Until then, integer intrinsics (`r.wrapping_add(..)`) still require a
+> value receiver, and a returned `&T` is not yet lifetime-verified.
+
 ## Void Type
 
 Functions that don't return a value have implicit `void` return type:

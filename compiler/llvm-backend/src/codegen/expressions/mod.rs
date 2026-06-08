@@ -163,6 +163,30 @@ impl<'ctx> CodegenContext<'ctx> {
 
             // `unsafe` is inert: lower its body identically to a bare block.
             Expr::Unsafe { stmts, .. } => self.codegen_block_expr(stmts),
+
+            // Immutable borrow `&place` (§2.4): the value of the borrow is the storage
+            // pointer of the place. Every local/parameter is an alloca, so its address is
+            // exactly the pointer already held in `variables`.
+            Expr::Reference { operand, .. } => self.codegen_reference(operand),
+        }
+    }
+
+    /// Lower an immutable borrow `&place` to the storage pointer of the place (§2.4).
+    /// Semantic analysis guarantees the operand is a live binding (identifier).
+    fn codegen_reference(&self, operand: &Expr) -> CodegenResult<BasicValueEnum<'ctx>> {
+        match operand {
+            Expr::Identifier(ident) => {
+                let ptr = self
+                    .variables
+                    .get(&ident.name)
+                    .ok_or_else(|| CodegenError::UndefinedVariable(ident.name.clone()))?;
+                Ok((*ptr).into())
+            }
+            Expr::Paren(inner, _) => self.codegen_reference(inner),
+            other => Err(CodegenError::InternalError(format!(
+                "borrow of a non-place expression reached codegen: {:?}",
+                other
+            ))),
         }
     }
 

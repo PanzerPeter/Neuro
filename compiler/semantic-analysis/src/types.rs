@@ -29,6 +29,9 @@ pub enum Type {
     },
     /// User-defined struct type, identified by name (nominal typing).
     Struct(std::string::String),
+    /// Immutable borrow `&T` (§2.4): a non-owning reference to `inner`. References
+    /// are `Copy` and never move the borrowed value.
+    Reference(Box<Type>),
     Unknown,
 }
 
@@ -78,10 +81,22 @@ impl Type {
             // Struct types match by name (nominal typing)
             (Type::Struct(a), Type::Struct(b)) => a == b,
 
+            // References match when their referents match (§2.4).
+            (Type::Reference(a), Type::Reference(b)) => a.is_compatible_with(b),
+
             // Unknown type for error recovery
             (Type::Unknown, _) | (_, Type::Unknown) => true,
 
             _ => false,
+        }
+    }
+
+    /// The referent of a reference type, or the type itself when it is not a reference.
+    /// Used to auto-deref `&T` receivers in method/field resolution (§2.4).
+    pub(crate) fn referent(&self) -> &Type {
+        match self {
+            Type::Reference(inner) => inner,
+            other => other,
         }
     }
 
@@ -184,6 +199,7 @@ impl fmt::Display for Type {
             Type::Void => write!(f, "void"),
             Type::Unknown => write!(f, "<error>"),
             Type::Struct(name) => write!(f, "{}", name),
+            Type::Reference(inner) => write!(f, "&{}", inner),
             Type::Function { params, ret } => {
                 write!(f, "fn(")?;
                 for (i, param) in params.iter().enumerate() {
@@ -352,6 +368,26 @@ mod tests {
         // Other types should NOT be compatible with String
         assert!(!Type::I32.is_compatible_with(&Type::String));
         assert!(!Type::Bool.is_compatible_with(&Type::String));
+    }
+
+    #[test]
+    fn reference_type_compatibility_and_display() {
+        let ref_str = Type::Reference(Box::new(Type::String));
+        let ref_str2 = Type::Reference(Box::new(Type::String));
+        let ref_i32 = Type::Reference(Box::new(Type::I32));
+
+        // References match iff their referents match (§2.4).
+        assert!(ref_str.is_compatible_with(&ref_str2));
+        assert!(!ref_str.is_compatible_with(&ref_i32));
+        // A reference is not compatible with the bare referent type.
+        assert!(!ref_str.is_compatible_with(&Type::String));
+
+        assert_eq!(ref_str.to_string(), "&string");
+        assert_eq!(ref_i32.to_string(), "&i32");
+
+        // `referent` peels exactly one layer; a non-reference is returned unchanged.
+        assert_eq!(ref_str.referent(), &Type::String);
+        assert_eq!(Type::I32.referent(), &Type::I32);
     }
 
     #[test]

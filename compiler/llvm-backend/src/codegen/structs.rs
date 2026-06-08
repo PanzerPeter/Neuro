@@ -182,13 +182,28 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<(PointerValue<'ctx>, StructType<'ctx>)> {
         match object {
             Expr::Identifier(ident) => {
-                let ptr = self
+                let alloca = self
                     .variables
                     .get(&ident.name)
                     .copied()
                     .ok_or_else(|| CodegenError::UndefinedVariable(ident.name.clone()))?;
                 let llvm_ty = self.get_struct_llvm_type(struct_name)?;
-                Ok((ptr, llvm_ty))
+                // A `&Struct` binding stores a pointer to the struct in its alloca (the
+                // mapped LLVM type is `ptr`, not the aggregate). Load that pointer to reach
+                // the borrowed struct; an owned struct binding's alloca is the struct itself.
+                let var_ty = self.variable_types.get(&ident.name).ok_or_else(|| {
+                    CodegenError::InternalError(format!("missing type for variable {}", ident.name))
+                })?;
+                if var_ty.is_pointer_type() {
+                    let struct_ptr = self
+                        .builder
+                        .build_load(*var_ty, alloca, "deref.struct.ptr")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into_pointer_value();
+                    Ok((struct_ptr, llvm_ty))
+                } else {
+                    Ok((alloca, llvm_ty))
+                }
             }
             _ => Err(CodegenError::UnsupportedType(
                 "chained field access is not yet supported".to_string(),

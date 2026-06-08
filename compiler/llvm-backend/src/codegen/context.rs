@@ -45,11 +45,19 @@ pub(crate) enum BuiltinMethod {
 /// tag and its result type. Mirrors the resolver in `semantic-analysis`; the duplication
 /// keeps the backend independent of the type-checker slice.
 pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<(BuiltinMethod, Type)> {
-    match (recv, method) {
+    // Auto-deref an immutable borrow `&string` so `r.len()` / `r.clone()` resolve through
+    // the reference (§2.4). The integer intrinsics below intentionally require a value
+    // receiver — reading a scalar through a reference needs the deref operator (later phase).
+    // The second element is the call's *result* type. The receiver type (possibly
+    // `&string`) is recorded separately by the type pass, letting codegen decide whether
+    // to load through the reference.
+    match (recv.referent(), method) {
         (Type::String, "len") => Some((BuiltinMethod::StringLen, Type::U64)),
         (Type::String, "clone") => Some((BuiltinMethod::StringClone, Type::String)),
-        // Integer intrinsics return the receiver's own integer type (§1.2, §1.4).
-        (t, m) if t.is_integer() => {
+        // Integer intrinsics require a value receiver (matched on `recv`, not the referent):
+        // reading a scalar through `&T` needs the deref operator. They return the receiver's
+        // own integer type (§1.2, §1.4).
+        (_, m) if recv.is_integer() => {
             let kind = match m {
                 "wrapping_add" => BuiltinMethod::WrappingAdd,
                 "wrapping_sub" => BuiltinMethod::WrappingSub,

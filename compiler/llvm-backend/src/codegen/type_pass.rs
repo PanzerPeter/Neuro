@@ -420,23 +420,32 @@ impl<'ctx> CodegenContext<'ctx> {
                         }
                     }
 
-                    // Method call: `instance.method(args)`
+                    // Method call: `instance.method(args)`. A `&T` receiver auto-derefs to
+                    // dispatch on `T` (§2.4): struct methods load through the borrow, string
+                    // builtins are tagged via the original (`&string`) receiver type.
                     Expr::FieldAccess { object, field, .. } => {
                         self.visit_expr_for_types(object, func_types)?;
                         let recv_ty = self.expr_types.get(&object.span().start).cloned();
-                        match recv_ty {
-                            Some(Type::Struct(struct_name)) => {
+                        let recv = recv_ty.ok_or_else(|| {
+                            CodegenError::InternalError(
+                                "missing receiver type for method call during type collection"
+                                    .to_string(),
+                            )
+                        })?;
+                        match recv.referent() {
+                            Type::Struct(struct_name) => {
+                                let struct_name = struct_name.clone();
                                 let mangled = format!("{}__{}", struct_name, field.name);
                                 // `struct.clone()` (§2.3) is a builtin deep copy when no user
                                 // method named `clone` exists. Semantic analysis has already
                                 // verified the struct derives Clone, so any clone reaching codegen
                                 // without a user method is the builtin.
                                 if field.name == "clone" && !func_types.contains_key(&mangled) {
-                                    let recv = Type::Struct(struct_name);
-                                    self.expr_types.insert(span.start, recv.clone());
+                                    let owned = Type::Struct(struct_name);
+                                    self.expr_types.insert(span.start, owned.clone());
                                     self.builtin_methods.insert(
                                         (span.start, span.end),
-                                        (BuiltinMethod::StructClone, recv),
+                                        (BuiltinMethod::StructClone, owned),
                                     );
                                     return Ok(());
                                 }
@@ -455,7 +464,7 @@ impl<'ctx> CodegenContext<'ctx> {
                                 // Store struct name so codegen_expr can reconstruct the mangled name.
                                 self.fa_struct_names.insert(span.start, struct_name);
                             }
-                            Some(recv) => match resolve_builtin_method(&recv, &field.name) {
+                            _ => match resolve_builtin_method(&recv, &field.name) {
                                 Some((kind, ret_ty)) => {
                                     self.expr_types.insert(span.start, ret_ty);
                                     self.builtin_methods
@@ -468,12 +477,6 @@ impl<'ctx> CodegenContext<'ctx> {
                                     ))
                                 }
                             },
-                            None => {
-                                return Err(CodegenError::InternalError(
-                                    "missing receiver type for method call during type collection"
-                                        .to_string(),
-                                ))
-                            }
                         }
                     }
 
@@ -552,7 +555,12 @@ impl<'ctx> CodegenContext<'ctx> {
             } => {
                 self.visit_expr_for_types(object, func_types)?;
 
-                let struct_name = match self.expr_types.get(&object.span().start).cloned() {
+                // A `&Struct` receiver auto-derefs to read a field of the referent (§2.4).
+                let struct_name = match self
+                    .expr_types
+                    .get(&object.span().start)
+                    .map(|t| t.referent().clone())
+                {
                     Some(Type::Struct(n)) => n,
                     _ => {
                         return Err(CodegenError::InternalError(
@@ -634,6 +642,23 @@ impl<'ctx> CodegenContext<'ctx> {
                     _ => Type::Void,
                 };
                 self.expr_types.insert(span.start, result_ty);
+            }
+
+            // Immutable borrow `&place` (§2.4): the borrow has type `&T` where `T` is the
+            // operand's type. Lowered to the operand's storage pointer.
+            Expr::Reference { operand, span } => {
+                self.visit_expr_for_types(operand, func_types)?;
+                let inner = self
+                    .expr_types
+                    .get(&operand.span().start)
+                    .cloned()
+                    .ok_or_else(|| {
+                        CodegenError::InternalError(
+                            "missing type for borrow operand during type collection".to_string(),
+                        )
+                    })?;
+                self.expr_types
+                    .insert(span.start, Type::Reference(Box::new(inner)));
             }
         }
         Ok(())
