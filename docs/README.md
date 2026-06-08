@@ -254,5 +254,5 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 ---
 
 **Last Updated**: 2026-06-08
-**Version**: Phase 1.7 (ownership) active · Phase 2 overlapping (v1.31.0)
+**Version**: Phase 1.7 (ownership) active · Phase 2 overlapping (v1.31.1)
 **Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.9.0
