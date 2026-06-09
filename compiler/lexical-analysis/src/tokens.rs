@@ -52,6 +52,8 @@ pub enum TokenKind {
     // Phase 2 Keywords (added for completeness)
     #[token("while")]
     While,
+    #[token("loop")]
+    Loop,
     #[token("for")]
     For,
     #[token("in")]
@@ -289,6 +291,7 @@ impl Token {
             TokenKind::True => "true",
             TokenKind::False => "false",
             TokenKind::While => "while",
+            TokenKind::Loop => "loop",
             TokenKind::For => "for",
             TokenKind::In => "in",
             TokenKind::Break => "break",

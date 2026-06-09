@@ -164,6 +164,59 @@ func main() -> i32 {
 }
 
 #[test]
+fn test_loop_with_break() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut i: i32 = 0
+
+    loop {
+        if i == 4 {
+            break
+        }
+        i = i + 1
+    }
+
+    return i
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("loop_break.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 4, "Expected exit code 4");
+}
+
+#[test]
+fn test_loop_with_continue() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut i: i32 = 0
+    mut sum: i32 = 0
+
+    loop {
+        i = i + 1
+        if i == 3 {
+            continue
+        }
+        if i > 5 {
+            break
+        }
+        sum = sum + i
+    }
+
+    return sum
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("loop_continue.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 12, "Expected exit code 12 (1+2+4+5)");
+}
+
+#[test]
 fn test_for_range_loop_accumulation() {
     let test = CompileTest::new();
     let source = r#"

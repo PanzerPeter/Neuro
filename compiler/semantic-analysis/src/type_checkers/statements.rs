@@ -264,6 +264,22 @@ impl TypeChecker {
                 Some(())
             }
 
+            Stmt::Loop { body, span: _ } => {
+                // The body may run any number of times, so a move inside it is not
+                // a guaranteed straight-line move; restore afterwards (§2.2).
+                let move_snapshot = self.symbols.snapshot_moves();
+                self.loop_depth += 1;
+                self.symbols.push_scope();
+                for stmt in body {
+                    let _ = self.check_stmt(stmt);
+                }
+                self.symbols.pop_scope();
+                self.loop_depth -= 1;
+                self.symbols.restore_moves(&move_snapshot);
+
+                Some(())
+            }
+
             Stmt::ForRange {
                 iterator,
                 start,

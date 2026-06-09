@@ -49,6 +49,9 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-06-09: `loop { ... }` infinite-loop statement (§3.7). `parse_stmt` dispatches `TokenKind::Loop`
+  to `parse_loop_stmt`, which parses a block body into `Stmt::Loop { body, span }` (no condition).
+  `stmt_span` and the type-alias `rewrite_stmt` cover the new node.
 - 2026-06-09: Mutable borrows `&mut T` + deref `*` (§2.5). `parse_type` and the prefix-`&` borrow
   accept an optional `mut` after `&`, setting `mutable` on `Type::Reference` / `Expr::Reference`.
   Prefix `TokenKind::Star` now parses a dereference `Expr::Deref { operand, span }` (operand at

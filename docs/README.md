@@ -23,7 +23,7 @@
 - [Variables](language-reference/variables.md) — `val`, `mut`, reassignment, scoping
 - [Functions](language-reference/functions.md) — Declarations, parameters, implicit returns
 - [Expressions](language-reference/expressions.md) — Expression syntax and evaluation
-- [Control Flow](language-reference/control-flow.md) — if/else, while, range-for, break/continue
+- [Control Flow](language-reference/control-flow.md) — if/else, while, loop, range-for, break/continue
 - [Operators](language-reference/operators.md) — Arithmetic, comparison, logical, bitwise, cast operators
 - [Structs](language-reference/structs.md) — User-defined types, methods, associated functions
 
@@ -88,6 +88,7 @@ Key design goals:
   }
   ```
 - `while` loops
+- `loop { }` infinite loops (canonical infinite loop; exit via `break`)
 - Range-for loops: exclusive (`for i in 0..n`) and inclusive (`for i in 0..=n`)
 - `break` and `continue`
 - Attribute system: `@allow(prefer_loop_over_while_true)` suppresses the `while true` lint
@@ -115,7 +116,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 601 tests passing across all components
+- 607 tests passing across all components
 
 ## Compilation Pipeline
 

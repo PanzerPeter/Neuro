@@ -240,6 +240,9 @@ fn rewrite_stmt(stmt: &mut Stmt, resolved: &HashMap<String, Type>) {
             rewrite_expr(condition, resolved);
             rewrite_block(body, resolved);
         }
+        Stmt::Loop { body, .. } => {
+            rewrite_block(body, resolved);
+        }
         Stmt::ForRange {
             start, end, body, ..
         } => {

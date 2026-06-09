@@ -33,6 +33,7 @@ so `+=` is always consumed as a single token rather than `+` then `=`.
 (`const NAME: Type = expr`). It sits between `Mut` and `As` in declaration order.
 
 ## Recent Updates
+- 2026-06-09: Added `TokenKind::Loop` keyword token for the `loop { ... }` infinite-loop statement (§3.7). Reserves the word so it cannot be an identifier. Sits directly after `While` in declaration order.
 - 2026-06-04: Added `TokenKind::Unsafe` keyword token for `unsafe { }` blocks (Phase 1.7 groundwork). Reserves the word so it cannot be an identifier. Sits after `Type` in declaration order.
 - 2026-06-03: Added `TokenKind::Type` keyword token for §3.14 type-alias declarations (`type Name = TargetType`). Sits after `Where` in declaration order.
 - 2026-04-16: Added `TokenKind::Const` keyword token for §1.3 const declarations.

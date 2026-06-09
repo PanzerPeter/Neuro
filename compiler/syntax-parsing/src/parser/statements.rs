@@ -283,6 +283,20 @@ impl Parser {
         })
     }
 
+    /// Parse a loop statement: `loop { ... }` (§3.7).
+    pub(crate) fn parse_loop_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
+        self.skip_newlines();
+
+        let body = self.parse_block()?;
+
+        let end_span = body.last().map(stmt_span).unwrap_or(start_span);
+
+        Ok(Stmt::Loop {
+            body,
+            span: start_span.merge(end_span),
+        })
+    }
+
     /// Parse a for-range statement: `for <ident> in <expr>..<expr> { ... }`
     pub(crate) fn parse_for_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
         self.skip_newlines();
@@ -379,6 +393,11 @@ impl Parser {
                 let start_span = token.span;
                 self.advance(); // consume 'while'
                 self.parse_while_stmt(start_span)
+            }
+            TokenKind::Loop => {
+                let start_span = token.span;
+                self.advance(); // consume 'loop'
+                self.parse_loop_stmt(start_span)
             }
             TokenKind::For => {
                 let start_span = token.span;
@@ -600,6 +619,7 @@ pub(crate) fn stmt_span(stmt: &Stmt) -> shared_types::Span {
         Stmt::Return { span, .. } => *span,
         Stmt::If { span, .. } => *span,
         Stmt::While { span, .. } => *span,
+        Stmt::Loop { span, .. } => *span,
         Stmt::ForRange { span, .. } => *span,
         Stmt::Break { span } => *span,
         Stmt::Continue { span } => *span,

@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.34.0] - 2026-06-09
+
+### Added
+- `lexer`/`parser`/`semantic`/`codegen`: `loop { ... }` infinite-loop statement (§3.7). `loop` is the canonical infinite loop — the form the `prefer-loop-over-while-true` lint already recommended in place of `while true { ... }`, but which previously did not exist, so following the compiler's own advice produced broken code. `loop` has no condition: the only exit is `break`, and `continue` re-enters the body from the top. New surface: the `loop` keyword (`TokenKind::Loop`) and the `Stmt::Loop { body, span }` AST node. Semantic analysis increments `loop_depth` for the body (so `break`/`continue` inside are in-loop) and the lint walker recurses into `loop` bodies; codegen lowers it to an unconditional back-edge (`loop.body` branches to itself), mirroring `while` minus the condition block. A `loop` statement evaluates to unit; the value-producing `break value` form is not yet modelled (tracked on the roadmap). Tests: 1 lexer unit, 1 parser unit, 2 semantic integration, 2 `neurc` integration (`control_flow.rs`), example `control_flow/loop_statement.nr`. 607 tests pass.
+
+---
+
 ## [1.33.0] - 2026-06-09
 
 ### Added
