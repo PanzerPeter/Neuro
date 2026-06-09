@@ -923,10 +923,15 @@ impl TypeChecker {
                 Some(ty)
             }
 
-            // Immutable borrow `&place` (§2.4). The result type is `&T`. Checking the
-            // operand reads its type without consuming it: a borrow never moves the
-            // borrowed value, which is the whole point of a reference.
-            Expr::Reference { operand, span } => {
+            // Borrow `&place` (§2.4) / `&mut place` (§2.5). The result type is `&T`
+            // (or `&mut T`). Checking the operand reads its type without consuming it:
+            // a borrow never moves the borrowed value, which is the whole point of a
+            // reference.
+            Expr::Reference {
+                operand,
+                mutable,
+                span,
+            } => {
                 // Only a live binding (`val`/`mut`/parameter) is a borrowable place. A
                 // `const` is an inlined value with no address (§1.3), and temporaries
                 // (literals, calls, operator results) are not places.
@@ -934,10 +939,22 @@ impl TypeChecker {
                 while let Expr::Paren(inner, _) = place {
                     place = inner;
                 }
-                let borrowable = matches!(place, Expr::Identifier(ident)
-                    if self.symbols.lookup(&ident.name).is_some());
-                if !borrowable {
+                let binding = match place {
+                    Expr::Identifier(ident) => self
+                        .symbols
+                        .lookup(&ident.name)
+                        .map(|info| (ident.name.clone(), info.mutable)),
+                    _ => None,
+                };
+                let Some((name, is_mut_binding)) = binding else {
                     self.record_error(TypeError::CannotBorrowValue { span: *span });
+                    let _ = self.check_expr(operand, None);
+                    return Some(Type::Unknown);
+                };
+                // `&mut` demands a `mut` binding — you cannot acquire write access
+                // through a reference to a value you may not write directly (§2.5).
+                if *mutable && !is_mut_binding {
+                    self.record_error(TypeError::CannotBorrowMutably { name, span: *span });
                     let _ = self.check_expr(operand, None);
                     return Some(Type::Unknown);
                 }
@@ -945,7 +962,30 @@ impl TypeChecker {
                 if matches!(inner, Type::Unknown) {
                     return Some(Type::Unknown);
                 }
-                Some(Type::Reference(Box::new(inner)))
+                Some(Type::Reference {
+                    inner: Box::new(inner),
+                    mutable: *mutable,
+                })
+            }
+
+            // Dereference `*operand` (§2.5): the result is the referent type `T`. The
+            // operand must have a reference type; dereferencing anything else is an
+            // error. Reading through either `&T` or `&mut T` is permitted.
+            Expr::Deref { operand, span } => {
+                let operand_ty = self.check_expr(operand, None)?;
+                if matches!(operand_ty, Type::Unknown) {
+                    return Some(Type::Unknown);
+                }
+                match operand_ty {
+                    Type::Reference { inner, .. } => Some(*inner),
+                    other => {
+                        self.record_error(TypeError::CannotDereference {
+                            found: other,
+                            span: *span,
+                        });
+                        Some(Type::Unknown)
+                    }
+                }
             }
         }
     }

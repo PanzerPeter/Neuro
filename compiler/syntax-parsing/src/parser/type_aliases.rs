@@ -248,6 +248,10 @@ fn rewrite_stmt(stmt: &mut Stmt, resolved: &HashMap<String, Type>) {
             rewrite_block(body, resolved);
         }
         Stmt::FieldAssignment { value, .. } => rewrite_expr(value, resolved),
+        Stmt::DerefAssignment { pointer, value, .. } => {
+            rewrite_expr(pointer, resolved);
+            rewrite_expr(value, resolved);
+        }
         Stmt::Const { ty, value, .. } => {
             rewrite_type(ty, resolved);
             rewrite_expr(value, resolved);
@@ -306,6 +310,7 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
         Expr::Block { stmts, .. } => rewrite_block(stmts, resolved),
         Expr::Unsafe { stmts, .. } => rewrite_block(stmts, resolved),
         Expr::Reference { operand, .. } => rewrite_expr(operand, resolved),
+        Expr::Deref { operand, .. } => rewrite_expr(operand, resolved),
         Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } => {}
     }
 }

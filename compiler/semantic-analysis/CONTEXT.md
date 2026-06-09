@@ -84,6 +84,16 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-06-09: Mutable borrows `&mut T` + deref `*` (§2.5). `Type::Reference` is now
+  `{ inner, mutable }` (Display `&mut T`; compatible only when mutability **and** referents
+  match — no `&mut T`→`&T` coercion). `resolve_type` carries `mutable` through. The
+  `Expr::Reference` arm rejects `&mut` of a non-`mut` binding (`CannotBorrowMutably`). New
+  `Expr::Deref` arm: types `*r` to the referent, else `CannotDereference`. New
+  `Stmt::DerefAssignment` checker: requires `pointer: &mut T`, else `CannotAssignThroughRef`
+  (immutable ref) / `CannotDereference` (non-ref); the stored value is checked against the
+  referent and move-recorded. New errors `CannotBorrowMutably` / `CannotDereference` /
+  `CannotAssignThroughRef`. Unit tests in `types.rs` and `moves.rs`. Flow-sensitive aliasing
+  exclusivity is deferred to lifetime inference.
 - 2026-06-09: `&string` slice equality §2.7. `&string` is a borrowed string slice; the
   `Equal`/`NotEqual` arm of `check_expr` now compares operands through `Type::peel_string_ref`,
   which normalizes `&string` → `string` (one layer, string only) so an owned `string` and a

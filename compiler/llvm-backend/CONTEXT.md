@@ -174,6 +174,15 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-06-09: Mutable borrows `&mut T` + deref `*` (§2.5). `&mut place` lowers like `&place` —
+  `codegen_reference` returns the place's storage pointer (mutability is compile-time only; the
+  backend `Type::Reference` is unchanged). New `Expr::Deref` (`codegen_deref`): loads the referent
+  through the pointer, typed by the referent recorded in `type_pass`. New `Stmt::DerefAssignment`
+  (`codegen_deref_assignment`): stores the value at the pointer. `type_pass` records the referent
+  for a `Deref` and visits a `DerefAssignment`. Unit-returning calls are now valid in statement
+  position: `codegen_call` / `codegen_method_call` return `Option` (None = void); the shared
+  `codegen_call_dispatch` is wrapped with a void-error in value position and discarded by the
+  `Stmt::Expr` call path.
 - 2026-06-08: Immutable borrows `&T` §2.4. New backend `Type::Reference(Box<Type>)` (+ `from_ast`,
   `referent()`); `map_type` lowers any reference to an opaque `ptr`. `Expr::Reference` lowers to the
   storage pointer of the borrowed place (`codegen_reference` returns the alloca pointer — no load).

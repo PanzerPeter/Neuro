@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.33.0] - 2026-06-09
+
+### Added
+- `parser`/`semantic`/`codegen`: mutable borrows `&mut T` and the dereference operator `*` (§2.5, Phase 1.7). A `&mut T` reference grants write access to a `mut` binding without taking ownership; values are read and written through the new prefix `*` operator. New surface: the `&mut place` borrow expression, the `&mut T` type annotation (params/returns/locals), the `*expr` dereference expression, and the `*place = value` assignment-through-a-reference statement. Borrow rules enforced in semantic analysis: `&mut` requires a `mut` binding (`CannotBorrowMutably`); `*` applies only to a reference (`CannotDereference`); writing through `*` requires a `&mut` (`CannotAssignThroughRef`). `&mut T` and `&T` are distinct types with no implicit coercion (explicit over implicit). Codegen lowers a borrow to the place's storage pointer (mutability is a compile-time-only distinction) and a deref to a load/store through that pointer. Side fix needed by the canonical example: unit-returning function calls in statement position no longer error (`codegen_call`/`codegen_method_call` now return `Option`, discarded in statement position); and a new line beginning with `*` is parsed as a dereference statement rather than glued to the previous expression as a continued multiplication. **Deferred** (mirrors how `&T` shipped without lifetime checking): flow-sensitive aliasing exclusivity — the "at most one `&mut` at a time, no `&` may coexist" rule — lands with lifetime inference, which shares the same borrow-region analysis. Tests: 4 semantic unit, 1 type-system unit, 8 integration (`neurc/tests/mutable_borrows.rs`), example `showcase/mutable_borrows.nr`. 601 tests pass.
+
+---
+
 ## [1.32.0] - 2026-06-09
 
 ### Added

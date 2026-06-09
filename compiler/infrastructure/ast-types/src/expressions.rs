@@ -91,10 +91,18 @@ pub enum Expr {
         stmts: Vec<Stmt>,
         span: Span,
     },
-    /// Immutable borrow expression `&place` (§2.4): takes a non-owning reference
-    /// to `operand` without moving it. The operand is a place expression (an
-    /// identifier); the result has type `&T`.
+    /// Borrow expression `&place` / `&mut place` (§2.4, §2.5): takes a non-owning
+    /// reference to `operand` without moving it. The operand is a place expression
+    /// (an identifier); the result has type `&T` (or `&mut T` when `mutable`).
     Reference {
+        operand: Box<Expr>,
+        mutable: bool,
+        span: Span,
+    },
+    /// Dereference expression `*operand` (§2.5): reads the value the reference
+    /// `operand` points at. The operand must have a reference type `&T`/`&mut T`;
+    /// the result has type `T`.
+    Deref {
         operand: Box<Expr>,
         span: Span,
     },
@@ -118,6 +126,7 @@ impl Expr {
             Expr::Block { span, .. } => *span,
             Expr::Unsafe { span, .. } => *span,
             Expr::Reference { span, .. } => *span,
+            Expr::Deref { span, .. } => *span,
         }
     }
 }

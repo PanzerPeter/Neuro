@@ -10,11 +10,14 @@ use super::context::CodegenContext;
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a function call
+    /// Lower a free/associated function call. Returns `None` when the callee
+    /// returns unit `()` — such a call is valid only in statement position, where
+    /// the result is discarded (see `codegen_call_dispatch`).
     pub(crate) fn codegen_call(
         &mut self,
         func_name: &str,
         args: &[Expr],
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+    ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
         let function = *self
             .functions
             .get(func_name)
@@ -31,11 +34,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_call(function, &arg_values, "calltmp")
             .map_err(|e| CodegenError::LlvmError(format!("failed to build call: {}", e)))?;
 
-        call_result.try_as_basic_value().basic().ok_or_else(|| {
-            CodegenError::InternalError(
-                "function call returned void when value expected".to_string(),
-            )
-        })
+        Ok(call_result.try_as_basic_value().basic())
     }
 
     /// Call a method: load the receiver as a value and prepend it to the argument list.
@@ -43,12 +42,13 @@ impl<'ctx> CodegenContext<'ctx> {
     /// For `&self` methods the struct is passed by value — this is sound because
     /// `&self` methods are read-only; mutations inside the method body do not
     /// propagate back to the caller (ownership semantics are pending).
+    /// Lower a method call. Returns `None` when the method returns unit `()`.
     pub(crate) fn codegen_method_call(
         &mut self,
         mangled_name: &str,
         receiver: &Expr,
         args: &[Expr],
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+    ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
         let function = *self
             .functions
             .get(mangled_name)
@@ -80,9 +80,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_call(function, &arg_values, "calltmp")
             .map_err(|e| CodegenError::LlvmError(format!("failed to build method call: {}", e)))?;
 
-        call_result.try_as_basic_value().basic().ok_or_else(|| {
-            CodegenError::InternalError("method call returned void when value expected".to_string())
-        })
+        Ok(call_result.try_as_basic_value().basic())
     }
 
     /// Generate LLVM functions for all supported methods in an `impl` block.

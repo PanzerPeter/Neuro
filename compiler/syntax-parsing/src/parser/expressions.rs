@@ -32,6 +32,17 @@ impl Parser {
         let mut left = self.parse_prefix()?;
 
         while !self.is_at_end() {
+            // A new line beginning with `*` is a dereference statement (`*r = v` or
+            // `*r`), not a continued multiplication. The no-semicolon rule only
+            // continues an expression across a newline when the *previous* line ends
+            // with an operator (a trailing `*`, handled without skipping here), so a
+            // leading `*` must end the current expression and fall to the statement
+            // parser (§2.5).
+            if matches!(self.peek_kind(), Some(TokenKind::Newline))
+                && matches!(self.peek_next_nonnewline_kind(), Some(TokenKind::Star))
+            {
+                break;
+            }
             self.skip_newlines();
 
             if let Some(token) = self.peek() {
@@ -141,12 +152,30 @@ impl Parser {
                 })
             }
 
-            // Immutable borrow `&place` (§2.4). In prefix position `&` is a borrow;
-            // as an infix operator it is bitwise-AND, handled in `parse_infix`.
+            // Borrow `&place` (§2.4) / `&mut place` (§2.5). In prefix position `&` is
+            // a borrow; as an infix operator it is bitwise-AND, handled in
+            // `parse_infix`. A `mut` keyword after `&` marks a mutable borrow.
             TokenKind::Amp => {
+                let mutable = self.check(&TokenKind::Mut);
+                if mutable {
+                    self.advance(); // consume 'mut'
+                }
                 let operand = self.parse_expr(Precedence::Unary)?;
                 let span = token.span.merge(operand.span());
                 Ok(Expr::Reference {
+                    operand: Box::new(operand),
+                    mutable,
+                    span,
+                })
+            }
+
+            // Dereference `*operand` (§2.5). In prefix position `*` reads through a
+            // reference; as an infix operator it is multiplication, handled in
+            // `parse_infix`.
+            TokenKind::Star => {
+                let operand = self.parse_expr(Precedence::Unary)?;
+                let span = token.span.merge(operand.span());
+                Ok(Expr::Deref {
                     operand: Box::new(operand),
                     span,
                 })

@@ -377,10 +377,54 @@ impl Point {
 func read_sum(p: &Point) -> i64 { p.sum() }   // borrow a struct, call through it
 ```
 
-> **Not yet available:** the explicit dereference operator `*r` (for reading a borrowed
-> scalar) and lifetime checking land together with mutable borrows `&mut T` in a later
-> Phase 1.7 step. Until then, integer intrinsics (`r.wrapping_add(..)`) still require a
-> value receiver, and a returned `&T` is not yet lifetime-verified.
+> **Not yet lifetime-verified:** a returned `&T` is not yet checked against the lifetime of
+> the value it points into; that check lands with lifetime inference. Integer intrinsics
+> (`r.wrapping_add(..)`) still require a value receiver — read through `*r` first.
+
+### References — Mutable Borrows (`&mut T`)
+
+A **mutable borrow** `&mut T` is a non-owning reference that grants **write** access to a
+value (§2.5). The borrow expression `&mut x` requires `x` to be a `mut` binding — you
+cannot acquire write access through a reference to a value you may not write directly.
+
+Values are read and written through the prefix **dereference operator** `*`:
+
+```neuro
+func increment(n: &mut i32) {
+    *n = *n + 1          // read with *n, write with *n = ...
+}
+
+func main() -> i32 {
+    mut counter: i32 = 40
+    increment(&mut counter)       // mutate in place — counter is borrowed, not moved
+    increment(&mut counter)
+    return counter                // 42
+}
+```
+
+**Rules:**
+
+- `&mut x` requires a `mut` binding; mutably borrowing a `val` is a compile error
+  (`cannot mutably borrow`).
+- `*r` reads the referent; dereferencing a non-reference is an error (`cannot dereference`).
+- `*r = value` writes through the reference and requires `r: &mut T`; writing through an
+  immutable `&T` is an error (`cannot assign through an immutable reference`).
+- `&mut T` and `&T` are **distinct types** — there is no implicit `&mut T → &T` coercion
+  (explicit over implicit).
+
+```neuro
+func main() -> i32 {
+    mut x: i32 = 7
+    val r: &mut i32 = &mut x
+    *r = 35
+    return *r                     // 35
+}
+```
+
+> **Deferred:** the flow-sensitive aliasing rule — *at most one `&mut` at a time, and no
+> `&` may coexist with it* — lands with lifetime inference, which shares the same
+> borrow-region analysis. The type system, the `mut`-binding requirement, and `*` read/write
+> are enforced today.
 
 ### String Slices (`&string`)
 
@@ -411,7 +455,7 @@ func main() -> i32 {
 Comparing through borrows never moves: `lang` stays usable after each `&lang`. Reference
 peeling for equality is **string-only**, so comparing a non-string reference to its value
 (`&n == n` on an `i32`) or mixing types (`i32 == &string`) is still a type error — reading
-other `&T` through `==` needs the deref operator that lands with `&mut T`.
+other `&T` through `==` needs the `*` deref operator (§2.5).
 
 > **Not yet available:** the slicing methods `.slice(range)` / `.char_slice(range)` that
 > produce a `&string` view into the interior of a string arrive in a later phase; today a

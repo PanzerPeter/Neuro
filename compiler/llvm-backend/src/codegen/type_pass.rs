@@ -271,6 +271,10 @@ impl<'ctx> CodegenContext<'ctx> {
                     }
                 }
             }
+            Stmt::DerefAssignment { pointer, value, .. } => {
+                self.visit_expr_for_types(pointer, func_types)?;
+                self.visit_expr_for_types(value, func_types)?;
+            }
             Stmt::Expr(expr) => {
                 self.visit_expr_for_types(expr, func_types)?;
             }
@@ -644,9 +648,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.expr_types.insert(span.start, result_ty);
             }
 
-            // Immutable borrow `&place` (§2.4): the borrow has type `&T` where `T` is the
-            // operand's type. Lowered to the operand's storage pointer.
-            Expr::Reference { operand, span } => {
+            // Borrow `&place` (§2.4) / `&mut place` (§2.5): the borrow has type `&T`
+            // (`&mut T`) where `T` is the operand's type. Lowered to the operand's
+            // storage pointer regardless of mutability — both are opaque pointers.
+            Expr::Reference { operand, span, .. } => {
                 self.visit_expr_for_types(operand, func_types)?;
                 let inner = self
                     .expr_types
@@ -659,6 +664,28 @@ impl<'ctx> CodegenContext<'ctx> {
                     })?;
                 self.expr_types
                     .insert(span.start, Type::Reference(Box::new(inner)));
+            }
+
+            // Dereference `*operand` (§2.5): the result type is the referent `T`. Record
+            // it so codegen can pick the correct load type.
+            Expr::Deref { operand, span } => {
+                self.visit_expr_for_types(operand, func_types)?;
+                let operand_ty = self
+                    .expr_types
+                    .get(&operand.span().start)
+                    .cloned()
+                    .ok_or_else(|| {
+                        CodegenError::InternalError(
+                            "missing type for deref operand during type collection".to_string(),
+                        )
+                    })?;
+                let inner = match operand_ty {
+                    Type::Reference(inner) => *inner,
+                    // Semantic analysis rejects deref of a non-reference; reaching here
+                    // with another type would be an internal inconsistency.
+                    other => other,
+                };
+                self.expr_types.insert(span.start, inner);
             }
         }
         Ok(())

@@ -67,6 +67,16 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
+    /// Assignment through a mutable reference: `*pointer = value` (§2.5).
+    ///
+    /// `pointer` is the reference expression being dereferenced (the `r` in
+    /// `*r = value`); the value is stored at the location it points at. Requires
+    /// `pointer` to have a `&mut T` type — enforced in semantic analysis.
+    DerefAssignment {
+        pointer: Expr,
+        value: Expr,
+        span: Span,
+    },
     /// Compile-time constant declaration inside a function body.
     ///
     /// The type annotation is mandatory; the value must be a constant expression.

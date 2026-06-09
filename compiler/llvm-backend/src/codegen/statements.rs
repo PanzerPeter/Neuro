@@ -128,6 +128,22 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// Generate code for `*pointer = value` — a store through a mutable reference (§2.5).
+    /// `pointer` evaluates to the referent's address; the value is stored there.
+    pub(crate) fn codegen_deref_assignment(
+        &mut self,
+        pointer: &Expr,
+        value: &Expr,
+    ) -> CodegenResult<()> {
+        let ptr_val = self.codegen_expr(pointer)?;
+        let ptr = ptr_val.into_pointer_value();
+        let val = self.codegen_expr(value)?;
+        self.builder.build_store(ptr, val).map_err(|e| {
+            CodegenError::LlvmError(format!("failed to store through reference: {}", e))
+        })?;
+        Ok(())
+    }
+
     /// Generate code for a return statement
     pub(crate) fn codegen_return(&mut self, value: Option<&Expr>) -> CodegenResult<()> {
         if let Some(expr) = value {
@@ -496,6 +512,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 ..
             } => self.codegen_field_assignment(&object.name, &field.name, value),
 
+            Stmt::DerefAssignment { pointer, value, .. } => {
+                self.codegen_deref_assignment(pointer, value)
+            }
+
             Stmt::Const {
                 name, ty, value, ..
             } => {
@@ -506,7 +526,13 @@ impl<'ctx> CodegenContext<'ctx> {
             }
 
             Stmt::Expr(expr) => {
-                self.codegen_expr(expr)?;
+                // A call in statement position may return unit `()`; dispatch directly so
+                // a void result is discarded rather than treated as a missing value.
+                if let Expr::Call { func, args, span } = expr {
+                    self.codegen_call_dispatch(func, args, span)?;
+                } else {
+                    self.codegen_expr(expr)?;
+                }
                 Ok(())
             }
         }
