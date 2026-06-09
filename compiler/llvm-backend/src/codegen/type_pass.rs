@@ -235,6 +235,11 @@ impl<'ctx> CodegenContext<'ctx> {
                     self.visit_stmt_for_types(stmt, func_types)?;
                 }
             }
+            Stmt::Loop { body, .. } => {
+                for stmt in body {
+                    self.visit_stmt_for_types(stmt, func_types)?;
+                }
+            }
             Stmt::ForRange {
                 iterator,
                 start,

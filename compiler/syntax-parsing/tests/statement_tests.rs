@@ -225,6 +225,30 @@ fn test_parse_nested_while_in_if() {
 }
 
 #[test]
+fn test_parse_loop_statement() {
+    let source = r#"
+        func test() {
+            mut x: i32 = 0
+            loop {
+                x = x + 1
+                if x > 5 {
+                    break
+                }
+            }
+        }
+    "#;
+    let items = parse(source).expect("loop statement should parse");
+    let ast_types::Item::Function(func) = &items[0] else {
+        panic!("expected a function item");
+    };
+    assert!(
+        matches!(func.body.get(1), Some(ast_types::Stmt::Loop { .. })),
+        "second statement should be a Stmt::Loop, got {:?}",
+        func.body.get(1)
+    );
+}
+
+#[test]
 fn test_parse_for_range_statement() {
     let source = r#"
         func test() {

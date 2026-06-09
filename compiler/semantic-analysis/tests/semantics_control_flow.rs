@@ -47,6 +47,41 @@ fn type_check_while_statement() {
 }
 
 #[test]
+fn type_check_break_inside_loop() {
+    let source = r#"func test() -> i32 {
+        mut i: i32 = 0
+        loop {
+            i = i + 1
+            if i == 3 {
+                break
+            }
+        }
+        return i
+    }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let result = type_check(&items);
+    assert!(result.is_ok(), "Expected break in loop to type check");
+}
+
+#[test]
+fn type_check_continue_inside_loop() {
+    let source = r#"func test() -> i32 {
+        mut i: i32 = 0
+        loop {
+            i = i + 1
+            if i < 3 {
+                continue
+            }
+            break
+        }
+        return i
+    }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let result = type_check(&items);
+    assert!(result.is_ok(), "Expected continue in loop to type check");
+}
+
+#[test]
 fn type_check_break_inside_while_loop() {
     let source = r#"func test() -> i32 {
         mut i: i32 = 0

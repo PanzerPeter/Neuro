@@ -94,7 +94,7 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 |---|---|
 | **Static Typing + Inference** | All integer types (i8–u64), f32/f64, bool, string; explicit `as` casting; contextual numeric literal inference; integer literal type suffixes (`42i64`, `255u8`); float literal type suffixes (`1.5f32`, `2.0f64`); underscore digit separators (`1_000_000`, `0xFF_FF`, `0b1010_0011`) |
 | **Functions** | Parameters, explicit and expression-based implicit returns, recursion, forward references |
-| **Control Flow** | if/else/elif, while loops, range-for (`for i in 0..n` and `0..=n`), break, continue |
+| **Control Flow** | if/else/elif, while loops, `loop { }` infinite loops, range-for (`for i in 0..n` and `0..=n`), break, continue |
 | **Mutable Variables** | `val` (immutable) and `mut` (mutable) with type-safe reassignment |
 | **Compound Assignment** | `+=`, `-=`, `*=`, `/=`, `%=` desugared at parse time to `target = target OP expr` |
 | **Constants** | `const NAME: Type = expr` at module and function scope; constant-expression validation; forward references; emitted as LLVM globals |

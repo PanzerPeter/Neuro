@@ -26,6 +26,11 @@ Extracted from `syntax-parsing` to eliminate the cross-slice dependency that `se
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-06-09: Added `Stmt::Loop { body, span }` for the infinite `loop { ... }` statement (§3.7).
+  Distinct from `While`: no condition, the only exit is `break`, `continue` re-enters from the top.
+  The value-producing `break value` form is not modelled yet — a `loop` statement yields unit.
+  Interpreted by semantic-analysis (`loop_depth` so `break`/`continue` are in-loop) and llvm-backend
+  (unconditional back-edge).
 - 2026-06-09: Mutable borrows `&mut T` (§2.5). `Type::Reference` and `Expr::Reference` gained a
   `mutable: bool` field (`&mut T` / `&mut place`). New `Expr::Deref { operand, span }` (the prefix
   `*` dereference) and `Stmt::DerefAssignment { pointer, value, span }` (`*r = value`). Interpreted

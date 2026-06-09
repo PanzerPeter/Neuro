@@ -192,8 +192,28 @@ func main() -> i32 {
 
 The lint only triggers on the bare literal `true`. Parenthesised
 `while (true) { ... }` is treated as an explicit escape hatch and is not
-flagged. The `loop { ... }` construct itself is reserved for a future
-release; until then the `@allow` attribute is the canonical opt-out.
+flagged. The recommended replacement is the `loop { ... }` statement below.
+
+## Loop (Infinite)
+
+Use `loop` for an infinite loop. Unlike `while`, it has no condition: the only
+way out is a `break`, and `continue` re-enters the body from the top. This is
+the canonical infinite-loop form the `prefer-loop-over-while-true` lint
+suggests.
+
+```neuro
+mut attempts: i32 = 0
+loop {
+    attempts = attempts + 1
+    if attempts > 5 {
+        break
+    }
+}
+```
+
+`break` and `continue` behave exactly as they do in `while` and `for` bodies.
+A `loop` statement evaluates to unit `()`; the value-producing form
+(`break value`) is not yet available.
 
 ## For Loops
 

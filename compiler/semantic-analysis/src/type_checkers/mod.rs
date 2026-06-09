@@ -251,6 +251,9 @@ impl TypeChecker {
             Stmt::ForRange { body, .. } => {
                 self.lint_block(body, suppress_while_true);
             }
+            Stmt::Loop { body, .. } => {
+                self.lint_block(body, suppress_while_true);
+            }
             _ => {}
         }
     }

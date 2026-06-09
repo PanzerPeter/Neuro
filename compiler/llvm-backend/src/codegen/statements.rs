@@ -293,6 +293,58 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// Generate code for an infinite `loop { ... }` statement (§3.7).
+    ///
+    /// Unlike `while`, there is no condition block: control branches
+    /// unconditionally into the body and back to its top, so the only way out
+    /// is a `break`. `continue` re-enters the body from the top.
+    pub(crate) fn codegen_loop(&mut self, body: &[Stmt]) -> CodegenResult<()> {
+        let parent_fn = self
+            .current_function
+            .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
+
+        let body_bb = self.context.append_basic_block(parent_fn, "loop.body");
+        let exit_bb = self.context.append_basic_block(parent_fn, "loop.exit");
+
+        let current_bb = self.builder.get_insert_block().ok_or_else(|| {
+            CodegenError::InternalError("no insert block before loop".to_string())
+        })?;
+
+        if current_bb.get_terminator().is_none() {
+            self.builder
+                .build_unconditional_branch(body_bb)
+                .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
+        }
+
+        self.builder.position_at_end(body_bb);
+        self.loop_targets.push(LoopTargets {
+            continue_bb: body_bb,
+            break_bb: exit_bb,
+        });
+        for stmt in body {
+            if let Some(current_bb) = self.builder.get_insert_block() {
+                if current_bb.get_terminator().is_some() {
+                    break;
+                }
+            }
+            self.codegen_stmt(stmt)?;
+        }
+        let _ = self.loop_targets.pop();
+
+        if let Some(tail_bb) = self.builder.get_insert_block() {
+            if tail_bb.get_terminator().is_none() {
+                self.builder
+                    .build_unconditional_branch(body_bb)
+                    .map_err(|e| {
+                        CodegenError::LlvmError(format!("failed to build branch: {}", e))
+                    })?;
+            }
+        }
+
+        self.builder.position_at_end(exit_bb);
+        Ok(())
+    }
+
     /// Generate code for a for-range statement (`for i in start..end { ... }`).
     pub(crate) fn codegen_for_range(
         &mut self,
@@ -453,6 +505,7 @@ impl<'ctx> CodegenContext<'ctx> {
             Stmt::While {
                 condition, body, ..
             } => self.codegen_while(condition, body),
+            Stmt::Loop { body, .. } => self.codegen_loop(body),
             Stmt::ForRange {
                 iterator,
                 start,

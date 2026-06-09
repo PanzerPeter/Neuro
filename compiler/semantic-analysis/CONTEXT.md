@@ -84,6 +84,10 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-06-09: `loop { ... }` statement (§3.7). `check_stmt` handles `Stmt::Loop` like `while`'s body
+  (increments `loop_depth` so `break`/`continue` inside are in-loop; snapshot/restore moves around
+  the body per §2.2), minus the condition. The `prefer-loop-over-while-true` lint walker recurses
+  into `loop` bodies. No new error code — the construct is unconditionally valid.
 - 2026-06-09: Mutable borrows `&mut T` + deref `*` (§2.5). `Type::Reference` is now
   `{ inner, mutable }` (Display `&mut T`; compatible only when mutability **and** referents
   match — no `&mut T`→`&T` coercion). `resolve_type` carries `mutable` through. The

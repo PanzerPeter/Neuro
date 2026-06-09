@@ -174,6 +174,11 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-06-09: `loop { ... }` statement (§3.7). `codegen_loop` mirrors `codegen_while` without a
+  condition block: it branches unconditionally into `loop.body` and back to its top, so the only
+  exit is a `break` (pushes `LoopTargets { continue_bb: body, break_bb: exit }` — `continue`
+  re-enters the top). `type_pass` visits the body for type recording. A `break`-less `loop` leaves
+  `loop.exit` without predecessors; the function epilogue supplies its terminator.
 - 2026-06-09: Mutable borrows `&mut T` + deref `*` (§2.5). `&mut place` lowers like `&place` —
   `codegen_reference` returns the place's storage pointer (mutability is compile-time only; the
   backend `Type::Reference` is unchanged). New `Expr::Deref` (`codegen_deref`): loads the referent
