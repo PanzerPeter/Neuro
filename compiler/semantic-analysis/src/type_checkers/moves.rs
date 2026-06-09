@@ -292,6 +292,77 @@ mod tests {
     }
 
     #[test]
+    fn mutable_borrow_of_a_mut_binding_is_accepted() {
+        // §2.5: `&mut` of a `mut` binding type-checks, and `*r` reads/writes through it.
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                mut x: i32 = 5
+                val r: &mut i32 = &mut x
+                *r = 9
+                return *r
+            }
+            "#,
+        );
+        assert!(
+            errs.is_empty(),
+            "&mut of a mut binding is valid; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn mutable_borrow_of_a_val_binding_is_rejected() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                val x: i32 = 5
+                val r: &mut i32 = &mut x
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("cannot mutably borrow")),
+            "&mut of a val must be rejected; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn dereferencing_a_non_reference_is_rejected() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                val x: i32 = 5
+                val y: i32 = *x
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("cannot dereference")),
+            "deref of a non-reference must be rejected; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn writing_through_an_immutable_reference_is_rejected() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                mut x: i32 = 5
+                val r: &i32 = &x
+                *r = 9
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("immutable reference")),
+            "writing through &T must be rejected; got {errs:?}"
+        );
+    }
+
+    #[test]
     fn reassigning_a_mut_revives_the_binding() {
         let errs = errors(
             r#"

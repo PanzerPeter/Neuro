@@ -9,16 +9,22 @@ use super::Parser;
 impl Parser {
     /// Parse a type annotation
     pub(crate) fn parse_type(&mut self) -> ParseResult<Type> {
-        // Immutable borrow type `&T` (§2.4). The referent is parsed recursively, so
-        // the `&` distributes over whatever type follows.
+        // Borrow type `&T` (§2.4) / `&mut T` (§2.5). The referent is parsed
+        // recursively, so the `&` distributes over whatever type follows. A `mut`
+        // keyword immediately after `&` marks a mutable borrow.
         if self.check(&TokenKind::Amp) {
             let amp = self.advance().ok_or(ParseError::UnexpectedEof {
                 expected: "'&'".to_string(),
             })?;
+            let mutable = self.check(&TokenKind::Mut);
+            if mutable {
+                self.advance(); // consume 'mut'
+            }
             let inner = self.parse_type()?;
             let span = amp.span.merge(inner.span());
             return Ok(Type::Reference {
                 inner: Box::new(inner),
+                mutable,
                 span,
             });
         }

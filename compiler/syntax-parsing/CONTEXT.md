@@ -49,6 +49,14 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-06-09: Mutable borrows `&mut T` + deref `*` (§2.5). `parse_type` and the prefix-`&` borrow
+  accept an optional `mut` after `&`, setting `mutable` on `Type::Reference` / `Expr::Reference`.
+  Prefix `TokenKind::Star` now parses a dereference `Expr::Deref { operand, span }` (operand at
+  `Precedence::Unary`); infix `*` stays multiply. `parse_stmt` handles a leading `*` as either a
+  deref expression statement or, when followed by `=`, a `Stmt::DerefAssignment { pointer, value }`.
+  Continuation fix: `parse_expr_inner` treats a newline followed by `*` as a statement boundary (via
+  `peek_next_nonnewline_kind`), so `*r = v` after an expression-ending line is not glued as a
+  multiplication. `stmt_span` and the type-alias rewrite cover the new nodes.
 - 2026-06-08: Immutable borrows §2.4 — `parse_type` parses a leading `&` recursively into
   `Type::Reference { inner, span }`; `parse_prefix` handles `TokenKind::Amp` in prefix position as a
   borrow `Expr::Reference { operand, span }` (operand at `Precedence::Unary`). Infix `&` is still

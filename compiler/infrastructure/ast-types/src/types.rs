@@ -9,9 +9,14 @@ pub enum Type {
     /// Named type (e.g., i32, f64, String, bool)
     Named(Identifier),
 
-    /// Immutable borrow type `&T` (§2.4): a non-owning reference to a value of
+    /// Borrow (reference) type (§2.4, §2.5): a non-owning reference to a value of
     /// type `inner`. `span` covers the leading `&` through the referent type.
-    Reference { inner: Box<Type>, span: Span },
+    /// `mutable` distinguishes `&mut T` (write access) from `&T` (read-only).
+    Reference {
+        inner: Box<Type>,
+        mutable: bool,
+        span: Span,
+    },
 
     /// Tensor type for multi-dimensional arrays.
     ///

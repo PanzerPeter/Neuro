@@ -455,6 +455,29 @@ impl Parser {
                 let expr = self.parse_expr(Precedence::Lowest)?;
                 Ok(Stmt::Expr(expr))
             }
+            // A leading `*` is a dereference: either an assignment through a
+            // mutable reference (`*r = value`, §2.5) or a deref expression statement.
+            TokenKind::Star => {
+                let start_span = token.span;
+                let expr = self.parse_expr(Precedence::Lowest)?;
+                if self.check(&TokenKind::Equal) {
+                    self.advance(); // consume '='
+                    let value = self.parse_expr(Precedence::Lowest)?;
+                    let span = start_span.merge(value.span());
+                    let pointer = match expr {
+                        Expr::Deref { operand, .. } => *operand,
+                        // The `*` prefix always parses to a Deref, so this is unreachable
+                        // in practice; fall back to the parsed expression defensively.
+                        other => other,
+                    };
+                    return Ok(Stmt::DerefAssignment {
+                        pointer,
+                        value,
+                        span,
+                    });
+                }
+                Ok(Stmt::Expr(expr))
+            }
             _ => {
                 let expr = self.parse_expr(Precedence::Lowest)?;
                 Ok(Stmt::Expr(expr))
@@ -581,6 +604,7 @@ pub(crate) fn stmt_span(stmt: &Stmt) -> shared_types::Span {
         Stmt::Break { span } => *span,
         Stmt::Continue { span } => *span,
         Stmt::FieldAssignment { span, .. } => *span,
+        Stmt::DerefAssignment { span, .. } => *span,
         Stmt::Expr(e) => e.span(),
     }
 }

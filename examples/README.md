@@ -15,7 +15,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods            |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `while`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable` |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods               |
-| `showcase/`      | **Bigger programs that combine many features at once**                 |
+| `showcase/`      | **Bigger programs that combine many features at once** — incl. mutable borrows `&mut T` + `*` deref (`mutable_borrows.nr`) |
 
 The single source of truth for each program's expected exit code is
 [`expected.txt`](expected.txt).

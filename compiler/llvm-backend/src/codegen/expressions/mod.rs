@@ -61,59 +61,15 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.codegen_unary(*op, operand, &operand_ty)
             }
             Expr::Call { func, args, span } => {
-                match &**func {
-                    Expr::Identifier(ident) => {
-                        // Panic-family builtins (§1.2) lower to a diagnostic + `abort`.
-                        // A user function of the same name shadows the builtin, matching
-                        // the semantic resolver, so only intercept when none is registered.
-                        if CodegenContext::is_panic_builtin(&ident.name)
-                            && !self.functions.contains_key(&ident.name)
-                        {
-                            return self.codegen_panic_builtin(&ident.name, args, *span);
-                        }
-                        self.codegen_call(&ident.name, args)
-                    }
-
-                    // Method call: `instance.method(args)` — pass self as first arg
-                    Expr::FieldAccess { field, .. } => {
-                        // `object` is the FieldAccess's own object sub-expression.
-                        let object = if let Expr::FieldAccess { object, .. } = &**func {
-                            object
-                        } else {
-                            unreachable!()
-                        };
-                        // Builtin intrinsics on primitive/string receivers are tagged by
-                        // the type pass and lowered directly, bypassing struct mangling.
-                        if let Some((kind, recv_ty)) =
-                            self.builtin_methods.get(&(span.start, span.end)).cloned()
-                        {
-                            return self.codegen_builtin_method(kind, &recv_ty, object, args);
-                        }
-                        let struct_name = self
-                            .fa_struct_names
-                            .get(&span.start)
-                            .ok_or_else(|| {
-                                CodegenError::InternalError(
-                                    "missing struct name for method call".to_string(),
-                                )
-                            })?
-                            .clone();
-                        let mangled = format!("{}__{}", struct_name, field.name);
-                        self.codegen_method_call(&mangled, object, args)
-                    }
-
-                    // Associated function call: `TypeName::func(args)`
-                    Expr::Path {
-                        type_name, member, ..
-                    } => {
-                        let mangled = format!("{}__{}", type_name.name, member.name);
-                        self.codegen_call(&mangled, args)
-                    }
-
-                    _ => Err(CodegenError::UnsupportedType(
-                        "unsupported call expression".to_string(),
-                    )),
-                }
+                // In value position a unit-returning call is an error — there is no
+                // value to bind. Statement position discards the result instead
+                // (see `codegen_call_dispatch` callers in `codegen_stmt`).
+                self.codegen_call_dispatch(func, args, span)?
+                    .ok_or_else(|| {
+                        CodegenError::InternalError(
+                            "function call returned void when value expected".to_string(),
+                        )
+                    })
             }
 
             Expr::Path { .. } => {
@@ -164,11 +120,99 @@ impl<'ctx> CodegenContext<'ctx> {
             // `unsafe` is inert: lower its body identically to a bare block.
             Expr::Unsafe { stmts, .. } => self.codegen_block_expr(stmts),
 
-            // Immutable borrow `&place` (§2.4): the value of the borrow is the storage
-            // pointer of the place. Every local/parameter is an alloca, so its address is
-            // exactly the pointer already held in `variables`.
+            // Borrow `&place` (§2.4) / `&mut place` (§2.5): the value of the borrow is
+            // the storage pointer of the place. Every local/parameter is an alloca, so
+            // its address is exactly the pointer already held in `variables`. Mutability
+            // is a compile-time-only distinction — both lower to the same pointer.
             Expr::Reference { operand, .. } => self.codegen_reference(operand),
+
+            // Dereference `*operand` (§2.5): load the referent through the reference.
+            Expr::Deref { operand, span } => self.codegen_deref(operand, span.start),
         }
+    }
+
+    /// Resolve and lower a call expression (free function, method, associated
+    /// function, builtin intrinsic, or panic builtin), returning `None` when the
+    /// callee returns unit `()`. Shared by value position (`codegen_expr`) and
+    /// statement position (`codegen_stmt`), which discards a `None` result.
+    pub(crate) fn codegen_call_dispatch(
+        &mut self,
+        func: &Expr,
+        args: &[Expr],
+        span: &shared_types::Span,
+    ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
+        match func {
+            Expr::Identifier(ident) => {
+                // Panic-family builtins (§1.2) lower to a diagnostic + `abort`. A user
+                // function of the same name shadows the builtin, matching the semantic
+                // resolver, so only intercept when none is registered.
+                if CodegenContext::is_panic_builtin(&ident.name)
+                    && !self.functions.contains_key(&ident.name)
+                {
+                    return Ok(Some(self.codegen_panic_builtin(
+                        &ident.name,
+                        args,
+                        *span,
+                    )?));
+                }
+                self.codegen_call(&ident.name, args)
+            }
+
+            // Method call: `instance.method(args)` — pass self as first arg
+            Expr::FieldAccess { field, object, .. } => {
+                // Builtin intrinsics on primitive/string receivers are tagged by the
+                // type pass and lowered directly, bypassing struct mangling.
+                if let Some((kind, recv_ty)) =
+                    self.builtin_methods.get(&(span.start, span.end)).cloned()
+                {
+                    return Ok(Some(
+                        self.codegen_builtin_method(kind, &recv_ty, object, args)?,
+                    ));
+                }
+                let struct_name = self
+                    .fa_struct_names
+                    .get(&span.start)
+                    .ok_or_else(|| {
+                        CodegenError::InternalError(
+                            "missing struct name for method call".to_string(),
+                        )
+                    })?
+                    .clone();
+                let mangled = format!("{}__{}", struct_name, field.name);
+                self.codegen_method_call(&mangled, object, args)
+            }
+
+            // Associated function call: `TypeName::func(args)`
+            Expr::Path {
+                type_name, member, ..
+            } => {
+                let mangled = format!("{}__{}", type_name.name, member.name);
+                self.codegen_call(&mangled, args)
+            }
+
+            _ => Err(CodegenError::UnsupportedType(
+                "unsupported call expression".to_string(),
+            )),
+        }
+    }
+
+    /// Lower a dereference `*operand` to a load of the referent (§2.5). The operand
+    /// evaluates to a pointer (a reference); the referent type recorded by the type
+    /// pass at `span_start` selects the load type.
+    fn codegen_deref(
+        &mut self,
+        operand: &Expr,
+        span_start: usize,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let ptr_val = self.codegen_expr(operand)?;
+        let ptr = ptr_val.into_pointer_value();
+        let referent_ty = self.expr_types.get(&span_start).cloned().ok_or_else(|| {
+            CodegenError::InternalError("missing referent type for dereference".to_string())
+        })?;
+        let llvm_ty = self.get_any_llvm_type(&referent_ty)?;
+        self.builder.build_load(llvm_ty, ptr, "deref").map_err(|e| {
+            CodegenError::LlvmError(format!("failed to load through reference: {}", e))
+        })
     }
 
     /// Lower an immutable borrow `&place` to the storage pointer of the place (§2.4).

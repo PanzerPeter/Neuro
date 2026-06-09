@@ -37,10 +37,14 @@ impl TypeChecker {
                     }
                 }
             },
-            // Immutable borrow `&T` (§2.4): resolve the referent recursively.
-            ast_types::Type::Reference { inner, .. } => self
-                .resolve_type(inner)
-                .map(|t| Type::Reference(Box::new(t))),
+            // Borrow `&T` (§2.4) / `&mut T` (§2.5): resolve the referent recursively,
+            // preserving mutability.
+            ast_types::Type::Reference { inner, mutable, .. } => {
+                self.resolve_type(inner).map(|t| Type::Reference {
+                    inner: Box::new(t),
+                    mutable: *mutable,
+                })
+            }
             ast_types::Type::Tensor { span, .. } => {
                 // Tensor types are Phase 3, not supported in Phase 1
                 self.record_error(TypeError::UnknownTypeName {

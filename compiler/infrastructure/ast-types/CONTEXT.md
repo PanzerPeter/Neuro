@@ -26,6 +26,11 @@ Extracted from `syntax-parsing` to eliminate the cross-slice dependency that `se
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-06-09: Mutable borrows `&mut T` (§2.5). `Type::Reference` and `Expr::Reference` gained a
+  `mutable: bool` field (`&mut T` / `&mut place`). New `Expr::Deref { operand, span }` (the prefix
+  `*` dereference) and `Stmt::DerefAssignment { pointer, value, span }` (`*r = value`). Interpreted
+  by semantic-analysis (`&mut` needs a `mut` binding; `*` reads/writes; `&mut T` ≠ `&T`) and
+  llvm-backend (borrow → storage pointer; deref → load/store).
 - 2026-06-08: Added `Type::Reference { inner, span }` (`&T`) and `Expr::Reference { operand, span }`
   (`&place`) for immutable borrows (§2.4). The reference type appears in any type-annotation
   position; the borrow expression is a prefix `&` on a place expression. Interpreted by

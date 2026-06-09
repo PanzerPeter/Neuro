@@ -29,9 +29,13 @@ pub enum Type {
     },
     /// User-defined struct type, identified by name (nominal typing).
     Struct(std::string::String),
-    /// Immutable borrow `&T` (§2.4): a non-owning reference to `inner`. References
-    /// are `Copy` and never move the borrowed value.
-    Reference(Box<Type>),
+    /// Borrow `&T` (§2.4) / `&mut T` (§2.5): a non-owning reference to `inner`.
+    /// References are `Copy` and never move the borrowed value. `mutable`
+    /// distinguishes a write-capable `&mut T` from a read-only `&T`.
+    Reference {
+        inner: Box<Type>,
+        mutable: bool,
+    },
     Unknown,
 }
 
@@ -81,8 +85,19 @@ impl Type {
             // Struct types match by name (nominal typing)
             (Type::Struct(a), Type::Struct(b)) => a == b,
 
-            // References match when their referents match (§2.4).
-            (Type::Reference(a), Type::Reference(b)) => a.is_compatible_with(b),
+            // References match when their referents match and their mutability
+            // agrees (§2.4, §2.5). There is no implicit `&mut T` → `&T` coercion —
+            // the language is explicit over implicit (§Design Principles).
+            (
+                Type::Reference {
+                    inner: a,
+                    mutable: am,
+                },
+                Type::Reference {
+                    inner: b,
+                    mutable: bm,
+                },
+            ) => am == bm && a.is_compatible_with(b),
 
             // Unknown type for error recovery
             (Type::Unknown, _) | (_, Type::Unknown) => true,
@@ -95,7 +110,7 @@ impl Type {
     /// Used to auto-deref `&T` receivers in method/field resolution (§2.4).
     pub(crate) fn referent(&self) -> &Type {
         match self {
-            Type::Reference(inner) => inner,
+            Type::Reference { inner, .. } => inner,
             other => other,
         }
     }
@@ -103,10 +118,10 @@ impl Type {
     /// Normalize a string operand for equality: a `&string` slice and an owned
     /// `string` compare the same UTF-8 bytes (§2.7), so a single string reference
     /// is peeled to `string`. Other `&T` are left intact — reading them through
-    /// `==` needs the deref operator, which lands with `&mut T`.
+    /// `==` needs the deref operator (`*`).
     pub(crate) fn peel_string_ref(&self) -> Type {
         match self {
-            Type::Reference(inner) if matches!(**inner, Type::String) => Type::String,
+            Type::Reference { inner, .. } if matches!(**inner, Type::String) => Type::String,
             other => other.clone(),
         }
     }
@@ -210,7 +225,13 @@ impl fmt::Display for Type {
             Type::Void => write!(f, "void"),
             Type::Unknown => write!(f, "<error>"),
             Type::Struct(name) => write!(f, "{}", name),
-            Type::Reference(inner) => write!(f, "&{}", inner),
+            Type::Reference { inner, mutable } => {
+                if *mutable {
+                    write!(f, "&mut {}", inner)
+                } else {
+                    write!(f, "&{}", inner)
+                }
+            }
             Type::Function { params, ret } => {
                 write!(f, "fn(")?;
                 for (i, param) in params.iter().enumerate() {
@@ -381,11 +402,25 @@ mod tests {
         assert!(!Type::Bool.is_compatible_with(&Type::String));
     }
 
+    fn ref_to(inner: Type) -> Type {
+        Type::Reference {
+            inner: Box::new(inner),
+            mutable: false,
+        }
+    }
+
+    fn mut_ref_to(inner: Type) -> Type {
+        Type::Reference {
+            inner: Box::new(inner),
+            mutable: true,
+        }
+    }
+
     #[test]
     fn reference_type_compatibility_and_display() {
-        let ref_str = Type::Reference(Box::new(Type::String));
-        let ref_str2 = Type::Reference(Box::new(Type::String));
-        let ref_i32 = Type::Reference(Box::new(Type::I32));
+        let ref_str = ref_to(Type::String);
+        let ref_str2 = ref_to(Type::String);
+        let ref_i32 = ref_to(Type::I32);
 
         // References match iff their referents match (§2.4).
         assert!(ref_str.is_compatible_with(&ref_str2));
@@ -402,9 +437,20 @@ mod tests {
     }
 
     #[test]
+    fn mutable_and_immutable_references_are_distinct() {
+        // §2.5: `&mut T` and `&T` are distinct types — no implicit coercion.
+        let mut_ref = mut_ref_to(Type::I32);
+        let imm_ref = ref_to(Type::I32);
+        assert!(!mut_ref.is_compatible_with(&imm_ref));
+        assert!(!imm_ref.is_compatible_with(&mut_ref));
+        assert!(mut_ref.is_compatible_with(&mut_ref_to(Type::I32)));
+        assert_eq!(mut_ref.to_string(), "&mut i32");
+    }
+
+    #[test]
     fn peel_string_ref_normalizes_string_slice_only() {
         // §2.7: `&string` (a string slice) and owned `string` are equality-comparable.
-        let ref_str = Type::Reference(Box::new(Type::String));
+        let ref_str = ref_to(Type::String);
         assert_eq!(ref_str.peel_string_ref(), Type::String);
         assert_eq!(Type::String.peel_string_ref(), Type::String);
         // After peeling, a slice and an owned string compare compatible either way.
@@ -413,8 +459,8 @@ mod tests {
             .is_compatible_with(&Type::String.peel_string_ref()));
 
         // Non-string references are left intact — reading them through `==` needs
-        // the deref operator (lands with `&mut T`), so `&i32` stays incompatible.
-        let ref_i32 = Type::Reference(Box::new(Type::I32));
+        // the deref operator (`*`), so `&i32` stays incompatible.
+        let ref_i32 = ref_to(Type::I32);
         assert_eq!(ref_i32.peel_string_ref(), ref_i32);
         assert!(!ref_i32
             .peel_string_ref()

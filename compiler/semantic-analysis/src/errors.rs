@@ -178,4 +178,13 @@ pub enum TypeError {
 
     #[error("cannot borrow this expression at {span:?}: `&` requires a place (a variable); bind it to a `val` first")]
     CannotBorrowValue { span: Span },
+
+    #[error("cannot mutably borrow '{name}' at {span:?}: `&mut` requires a `mut` binding; declare it with `mut`")]
+    CannotBorrowMutably { name: String, span: Span },
+
+    #[error("cannot dereference a non-reference value of type `{found}` at {span:?}: `*` applies only to `&T` / `&mut T`")]
+    CannotDereference { found: Type, span: Span },
+
+    #[error("cannot assign through an immutable reference `&{inner}` at {span:?}: writing through `*` requires a `&mut {inner}`")]
+    CannotAssignThroughRef { inner: Type, span: Span },
 }

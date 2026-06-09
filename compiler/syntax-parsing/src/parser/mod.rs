@@ -92,4 +92,17 @@ impl Parser {
             self.advance();
         }
     }
+
+    /// The kind of the next token that is not a newline, without consuming anything.
+    /// Used to decide whether a newline is a statement boundary or a continuation.
+    pub(super) fn peek_next_nonnewline_kind(&self) -> Option<&TokenKind> {
+        let mut i = self.current;
+        while matches!(
+            self.tokens.get(i).map(|t| &t.kind),
+            Some(TokenKind::Newline)
+        ) {
+            i += 1;
+        }
+        self.tokens.get(i).map(|t| &t.kind)
+    }
 }

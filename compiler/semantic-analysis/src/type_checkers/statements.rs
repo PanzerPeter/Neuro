@@ -418,6 +418,56 @@ impl TypeChecker {
                 Some(())
             }
 
+            // Assignment through a mutable reference `*pointer = value` (§2.5). The
+            // pointer must have a `&mut T` type; the value is checked against `T`.
+            Stmt::DerefAssignment {
+                pointer,
+                value,
+                span,
+            } => {
+                let pointer_ty = self.check_expr(pointer, None).unwrap_or(Type::Unknown);
+                let inner_ty = match &pointer_ty {
+                    Type::Unknown => return Some(()),
+                    Type::Reference {
+                        inner,
+                        mutable: true,
+                    } => (**inner).clone(),
+                    Type::Reference {
+                        inner,
+                        mutable: false,
+                    } => {
+                        self.record_error(TypeError::CannotAssignThroughRef {
+                            inner: (**inner).clone(),
+                            span: *span,
+                        });
+                        return None;
+                    }
+                    other => {
+                        self.record_error(TypeError::CannotDereference {
+                            found: other.clone(),
+                            span: pointer.span(),
+                        });
+                        return None;
+                    }
+                };
+
+                let value_ty = self
+                    .check_expr(value, Some(&inner_ty))
+                    .unwrap_or(Type::Unknown);
+                // The stored value is moved into the location the reference points at (§2.2).
+                self.record_move(value);
+
+                if !matches!(value_ty, Type::Unknown) && !value_ty.is_compatible_with(&inner_ty) {
+                    self.record_error(TypeError::Mismatch {
+                        expected: inner_ty,
+                        found: value_ty,
+                        span: *span,
+                    });
+                }
+
+                Some(())
+            }
+
             Stmt::Const {
                 name,
                 ty,
