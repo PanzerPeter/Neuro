@@ -100,6 +100,17 @@ impl Type {
         }
     }
 
+    /// Normalize a string operand for equality: a `&string` slice and an owned
+    /// `string` compare the same UTF-8 bytes (§2.7), so a single string reference
+    /// is peeled to `string`. Other `&T` are left intact — reading them through
+    /// `==` needs the deref operator, which lands with `&mut T`.
+    pub(crate) fn peel_string_ref(&self) -> Type {
+        match self {
+            Type::Reference(inner) if matches!(**inner, Type::String) => Type::String,
+            other => other.clone(),
+        }
+    }
+
     /// Check if this is a numeric type (any integer or float)
     pub(crate) fn is_numeric(&self) -> bool {
         matches!(
@@ -388,6 +399,26 @@ mod tests {
         // `referent` peels exactly one layer; a non-reference is returned unchanged.
         assert_eq!(ref_str.referent(), &Type::String);
         assert_eq!(Type::I32.referent(), &Type::I32);
+    }
+
+    #[test]
+    fn peel_string_ref_normalizes_string_slice_only() {
+        // §2.7: `&string` (a string slice) and owned `string` are equality-comparable.
+        let ref_str = Type::Reference(Box::new(Type::String));
+        assert_eq!(ref_str.peel_string_ref(), Type::String);
+        assert_eq!(Type::String.peel_string_ref(), Type::String);
+        // After peeling, a slice and an owned string compare compatible either way.
+        assert!(ref_str
+            .peel_string_ref()
+            .is_compatible_with(&Type::String.peel_string_ref()));
+
+        // Non-string references are left intact — reading them through `==` needs
+        // the deref operator (lands with `&mut T`), so `&i32` stays incompatible.
+        let ref_i32 = Type::Reference(Box::new(Type::I32));
+        assert_eq!(ref_i32.peel_string_ref(), ref_i32);
+        assert!(!ref_i32
+            .peel_string_ref()
+            .is_compatible_with(&Type::I32.peel_string_ref()));
     }
 
     #[test]

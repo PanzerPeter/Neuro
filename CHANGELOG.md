@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.32.0] - 2026-06-09
+
+### Added
+- `semantic`/`codegen`: `&string` slice equality (§2.7, Phase 1.7). `&string` is now usable as a borrowed string slice: the equality operators `==` / `!=` compare the underlying UTF-8 bytes for any combination of an owned `string` and a `&string` slice (`&a == &b`, `&a == "lit"`, `"lit" == &a`). Semantic analysis normalizes a single string reference via `Type::peel_string_ref` in the `Equal`/`NotEqual` arm, so a slice and an owned string are equality-compatible; peeling is limited to `string`, so `i32 == &string` and `&i32 == i32` stay type errors (reading other `&T` through `==` needs the deref operator, which lands with `&mut T`). Codegen handles string equality before the numeric coercion: each operand is normalized to its `{ ptr, len }` fat pointer by the new `load_string_fatptr` helper (a borrow is loaded through its pointer; an owned struct value passes through) and compared with the existing `codegen_string_eq` — the ABI is unchanged, only the borrowed operand is auto-dereferenced. Borrowing for a comparison never moves, so both operands stay usable afterward. Tests: 1 semantic-type unit, 7 integration (`neurc/tests/string_slice.rs`), example `types/string_slice.nr`. 588 tests pass.
+
+---
+
 ## [1.31.1] - 2026-06-08
 
 ### Changed

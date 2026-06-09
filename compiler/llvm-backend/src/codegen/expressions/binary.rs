@@ -90,6 +90,24 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))
     }
 
+    /// Normalize a string operand to its `{ ptr, len }` fat-pointer struct value,
+    /// auto-dereferencing a `&string` slice (§2.7) — a borrow lowers to a pointer
+    /// to the fat pointer, so it is loaded; an owned `string` is already the struct.
+    fn load_string_fatptr(
+        &self,
+        value: BasicValueEnum<'ctx>,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        match value {
+            BasicValueEnum::PointerValue(ptr) => {
+                let string_ty = self.type_mapper.map_type(&Type::String)?;
+                self.builder
+                    .build_load(string_ty, ptr, "deref.str")
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            }
+            other => Ok(other),
+        }
+    }
+
     /// Emit a short-circuiting logical `&&` or `||` (§1.4).
     ///
     /// Operands are guaranteed `bool` (i1) by semantic analysis. The LHS is
@@ -305,6 +323,27 @@ impl<'ctx> CodegenContext<'ctx> {
         let lhs = self.codegen_expr(left)?;
         let rhs = self.codegen_expr(right)?;
 
+        // String equality (§2.7) compares UTF-8 bytes. Either operand may be an
+        // owned `string` (a `{ ptr, len }` struct value) or a `&string` slice (a
+        // pointer to one); each is normalized to the fat-pointer struct before the
+        // byte compare. Handled before the numeric coercion below, which assumes a
+        // scalar left type and would mis-coerce a borrowed (pointer) operand.
+        if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
+            && matches!(left_ty.referent(), Type::String)
+        {
+            let lhs_str = self.load_string_fatptr(lhs)?;
+            let rhs_str = self.load_string_fatptr(rhs)?;
+            let eq = self.codegen_string_eq(lhs_str, rhs_str)?;
+            return match op {
+                BinaryOp::Equal => Ok(eq.into()),
+                _ => Ok(self
+                    .builder
+                    .build_not(eq, "str_ne")
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                    .into()),
+            };
+        }
+
         // Coerce both operands to the left-operand semantic type.  Literals always
         // emit at their default width (i32 / f64); when the expression context is
         // wider (e.g. `i64_var - 3000000000`) both sides must match before any
@@ -431,11 +470,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
 
-            // Comparison operators
+            // Comparison operators (string equality handled above the coercion)
             BinaryOp::Equal => {
-                if matches!(left_ty, Type::String) {
-                    Ok(self.codegen_string_eq(lhs, rhs)?.into())
-                } else if TypeMapper::is_float_type(left_ty) {
+                if TypeMapper::is_float_type(left_ty) {
                     Ok(self
                         .builder
                         .build_float_compare(
@@ -460,14 +497,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             BinaryOp::NotEqual => {
-                if matches!(left_ty, Type::String) {
-                    let eq = self.codegen_string_eq(lhs, rhs)?;
-                    Ok(self
-                        .builder
-                        .build_not(eq, "str_ne")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                        .into())
-                } else if TypeMapper::is_float_type(left_ty) {
+                if TypeMapper::is_float_type(left_ty) {
                     Ok(self
                         .builder
                         .build_float_compare(

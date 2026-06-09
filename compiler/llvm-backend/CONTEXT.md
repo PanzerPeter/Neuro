@@ -41,7 +41,11 @@ Passed/returned by value. On x86-64 SysV this fits two registers, so no sret ind
 The semantic `Type::String` is unchanged — the fat-pointer layout is a backend-only detail.
 
 `==`/`!=` on strings lower to a length check + libc `memcmp` (universally available). The length
-check uses `select` to pass `n=0` to `memcmp` when lengths differ (safe, no extra blocks).
+check uses `select` to pass `n=0` to `memcmp` when lengths differ (safe, no extra blocks). A
+`&string` slice (§2.7) is just a pointer to the fat pointer, so `codegen_binary` handles string
+`Equal`/`NotEqual` *before* the numeric coercion: each operand is run through `load_string_fatptr`
+(load through the pointer for a borrow, pass through an owned struct value) and then `codegen_string_eq`.
+Detection keys off `left_ty.referent() == String`, covering owned, borrowed, and mixed operands.
 
 ## Struct ABI
 User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding —
