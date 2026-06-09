@@ -84,6 +84,12 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-06-09: `&string` slice equality §2.7. `&string` is a borrowed string slice; the
+  `Equal`/`NotEqual` arm of `check_expr` now compares operands through `Type::peel_string_ref`,
+  which normalizes `&string` → `string` (one layer, string only) so an owned `string` and a
+  `&string` slice are equality-compatible in any combination. Other `&T` are left intact, so
+  `&i32 == i32` and `i32 == &string` stay type errors. Comparison operands are not consuming
+  positions, so borrowing for `==` never moves. Unit test in `types.rs`.
 - 2026-06-08: Immutable borrows `&T` §2.4. New `Type::Reference(Box<Type>)` (Display `&T`; compatible
   iff referents are; `referent()` peels one layer). `resolve_type` maps `ast::Type::Reference`.
   `Expr::Reference` arm in `check_expr` requires a place (`is_place_expr`: identifier or

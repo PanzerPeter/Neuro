@@ -305,9 +305,13 @@ impl TypeChecker {
                         Some(left_ty)
                     }
 
-                    // Comparison operators: require compatible types, return bool
+                    // Comparison operators: require compatible types, return bool.
+                    // `&string` is a borrowed string slice (§2.7), so an owned `string`
+                    // and a `&string` slice compare equal byte-wise in any combination.
                     BinaryOp::Equal | BinaryOp::NotEqual => {
-                        if !left_ty.is_compatible_with(&right_ty) {
+                        let left_cmp = left_ty.peel_string_ref();
+                        let right_cmp = right_ty.peel_string_ref();
+                        if !left_cmp.is_compatible_with(&right_cmp) {
                             self.record_error(TypeError::Mismatch {
                                 expected: left_ty,
                                 found: right_ty,

@@ -382,6 +382,41 @@ func read_sum(p: &Point) -> i64 { p.sum() }   // borrow a struct, call through i
 > Phase 1.7 step. Until then, integer intrinsics (`r.wrapping_add(..)`) still require a
 > value receiver, and a returned `&T` is not yet lifetime-verified.
 
+### String Slices (`&string`)
+
+`&string` is the **borrowed string slice** (§2.7): a non-owning `(ptr, len)` view into
+UTF-8 data. There is no separate slice type — `&string` is both "a borrow of an owned
+`string`" and "a string slice," the analogue of Rust's `&str`.
+
+A slice is read-only, so its fundamental operation is **equality**. The operators `==`
+and `!=` compare the underlying UTF-8 bytes for any combination of an owned `string` and a
+`&string` slice; a borrowed operand is auto-dereferenced to its fat pointer before the byte
+compare, so it costs no copy.
+
+```neuro
+func slices_equal(a: &string, b: &string) -> bool {
+    a == b                       // two borrowed slices
+}
+
+func main() -> i32 {
+    val lang: string = "Neuro"
+    val same: string = "Neuro"
+    val eq: bool = slices_equal(&lang, &same)   // true
+    val lit: bool = (&lang == "Neuro")          // true — slice vs owned literal
+    if eq && lit { return 0 }
+    return 1
+}
+```
+
+Comparing through borrows never moves: `lang` stays usable after each `&lang`. Reference
+peeling for equality is **string-only**, so comparing a non-string reference to its value
+(`&n == n` on an `i32`) or mixing types (`i32 == &string`) is still a type error — reading
+other `&T` through `==` needs the deref operator that lands with `&mut T`.
+
+> **Not yet available:** the slicing methods `.slice(range)` / `.char_slice(range)` that
+> produce a `&string` view into the interior of a string arrive in a later phase; today a
+> `&string` is obtained only by borrowing an owned `string` with `&`.
+
 ## Void Type
 
 Functions that don't return a value have implicit `void` return type:
