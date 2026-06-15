@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.35.0] - 2026-06-15
+
+### Added
+- `parser`/`semantic`/`codegen`: loop labels with `break label` / `continue label` (§3.7). A `for`, `while`, or `loop` may be prefixed with a label — an identifier followed by a colon (`outer:`) — and a nested `break outer` / `continue outer` then targets the labeled loop rather than the innermost one. This is the construct that lets an inner loop exit or re-enter an enclosing loop directly. New surface: an `Option<Identifier>` `label` field on `Stmt::While` / `ForRange` / `Loop` and on `Stmt::Break` / `Continue` (labels reuse the existing `Identifier` + `Colon` tokens, so the lexer is unchanged). The parser dispatches `ident : <loop-keyword>` to the matching loop parser and reads an optional same-line label after `break` / `continue`. Semantic analysis replaces the `loop_depth` counter with a `loop_labels` stack: an unlabeled `break`/`continue` still requires an enclosing loop, and a labeled one requires a matching active label (else the new `UndefinedLabel` error). Codegen adds a `label` to `LoopTargets` and resolves a labeled jump by scanning the loop-target stack from innermost outward. Tests: 3 parser unit, 3 semantic unit, 4 `neurc` integration (`labeled_breaks.rs`), example `control_flow/labeled_breaks.nr`. 617 tests pass.
+
+---
+
 ## [1.34.0] - 2026-06-09
 
 ### Added

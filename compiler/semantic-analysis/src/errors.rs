@@ -85,6 +85,9 @@ pub enum TypeError {
     #[error("'continue' used outside of a loop at {span:?}")]
     ContinueOutsideLoop { span: Span },
 
+    #[error("use of undefined loop label '{name}' at {span:?}")]
+    UndefinedLabel { name: String, span: Span },
+
     #[error("for-range bound must be an integer type, found {found} at {span:?}")]
     InvalidForRangeType { found: Type, span: Span },
 

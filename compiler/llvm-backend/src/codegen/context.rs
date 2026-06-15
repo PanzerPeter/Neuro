@@ -76,6 +76,9 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<(Built
 
 /// Tracks basic blocks for loop control flow (`continue` and `break`).
 pub(crate) struct LoopTargets<'ctx> {
+    /// Loop label (`outer:`, §3.7) when present, so a labeled `break`/`continue`
+    /// can target this loop rather than the innermost one.
+    pub(crate) label: Option<String>,
     /// The basic block where a `continue` statement should jump.
     pub(crate) continue_bb: BasicBlock<'ctx>,
     /// The basic block where a `break` statement should jump.

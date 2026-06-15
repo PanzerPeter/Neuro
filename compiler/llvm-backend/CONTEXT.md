@@ -174,6 +174,11 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-06-15: Loop labels (§3.7). `LoopTargets` gained `label: Option<String>`; `codegen_while` /
+  `codegen_loop` / `codegen_for_range` take the loop's label and store it. `break`/`continue`
+  resolve via `resolve_loop_target`: a labeled one scans `loop_targets` from innermost out for the
+  matching label, an unlabeled one takes the top. Label validity is guaranteed by semantic analysis,
+  so an unresolved label is an `InternalError`.
 - 2026-06-09: `loop { ... }` statement (§3.7). `codegen_loop` mirrors `codegen_while` without a
   condition block: it branches unconditionally into `loop.body` and back to its top, so the only
   exit is a `break` (pushes `LoopTargets { continue_bb: body, break_bb: exit }` — `continue`

@@ -49,6 +49,12 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-06-15: Loop labels (§3.7). `parse_stmt`'s identifier branch calls `try_parse_labeled_loop`,
+  which dispatches `ident : <for|while|loop>` to the matching loop parser with `Some(label)` (labels
+  reuse the existing `Identifier` + `Colon` tokens — no lexer change). `parse_while_stmt` /
+  `parse_loop_stmt` / `parse_for_stmt` take an `Option<Identifier>` label. `break` / `continue` read
+  an optional trailing same-line label via `parse_optional_loop_label` (no newline skip, so a
+  line-final `break` is never a labeled break).
 - 2026-06-09: `loop { ... }` infinite-loop statement (§3.7). `parse_stmt` dispatches `TokenKind::Loop`
   to `parse_loop_stmt`, which parses a block body into `Stmt::Loop { body, span }` (no condition).
   `stmt_span` and the type-alias `rewrite_stmt` cover the new node.

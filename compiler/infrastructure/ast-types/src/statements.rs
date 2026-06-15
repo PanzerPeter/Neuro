@@ -34,8 +34,11 @@ pub enum Stmt {
     },
     /// While loop statement.
     ///
-    /// Executes `body` repeatedly while `condition` evaluates to `true`.
+    /// Executes `body` repeatedly while `condition` evaluates to `true`. An
+    /// optional `label` (`outer: while ...`, §3.7) names the loop so a nested
+    /// `break label` / `continue label` can target it.
     While {
+        label: Option<Identifier>,
         condition: Expr,
         body: Vec<Stmt>,
         span: Span,
@@ -43,8 +46,10 @@ pub enum Stmt {
     /// For loop over a numeric range.
     ///
     /// Executes `body` for each value of `iterator` from `start` up to
-    /// `end`. Whether `end` is included depends on `inclusive`.
+    /// `end`. Whether `end` is included depends on `inclusive`. An optional
+    /// `label` (§3.7) names the loop for labeled break/continue.
     ForRange {
+        label: Option<Identifier>,
         iterator: Identifier,
         start: Expr,
         end: Expr,
@@ -57,17 +62,23 @@ pub enum Stmt {
     /// Executes `body` repeatedly; the only exit is a `break`. `continue`
     /// re-enters the body from the top. Unlike `while`/`for`, a `loop` has no
     /// fall-through exit. The value-producing form (`break value`) is not yet
-    /// modelled — a `loop` statement always yields unit.
+    /// modelled — a `loop` statement always yields unit. An optional `label`
+    /// (§3.7) names the loop for labeled break/continue.
     Loop {
+        label: Option<Identifier>,
         body: Vec<Stmt>,
         span: Span,
     },
-    /// Break out of the nearest enclosing loop.
+    /// Break out of the nearest enclosing loop, or out of the loop named by
+    /// `label` when present (`break outer`, §3.7).
     Break {
+        label: Option<Identifier>,
         span: Span,
     },
-    /// Continue to the next iteration of the nearest enclosing loop.
+    /// Continue the nearest enclosing loop, or the loop named by `label` when
+    /// present (`continue outer`, §3.7).
     Continue {
+        label: Option<Identifier>,
         span: Span,
     },
     /// Field assignment on a struct binding: `object.field = value`

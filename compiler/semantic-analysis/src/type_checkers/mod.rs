@@ -36,8 +36,10 @@ pub(crate) struct TypeChecker {
     warnings: Vec<Warning>,
     /// Current function's return type (for validating return statements)
     current_function_return_type: Option<Type>,
-    /// Nesting depth of active loop statements.
-    loop_depth: u32,
+    /// Labels of the currently active loops, innermost last. An entry is `None`
+    /// for an unlabeled loop. The stack depth doubles as the loop-nesting count
+    /// used to reject `break` / `continue` outside any loop (§3.7).
+    loop_labels: Vec<Option<String>>,
 }
 
 mod declarations;
@@ -63,7 +65,7 @@ impl TypeChecker {
             errors: Vec::new(),
             warnings: Vec::new(),
             current_function_return_type: None,
-            loop_depth: 0,
+            loop_labels: Vec::new(),
         }
     }
 

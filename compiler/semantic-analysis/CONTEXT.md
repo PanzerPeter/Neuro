@@ -84,6 +84,11 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-06-15: Loop labels (§3.7). The `loop_depth: u32` counter is replaced by `loop_labels:
+  Vec<Option<String>>` (innermost last). Each loop pushes its label (or `None`) for the duration of
+  its body; `check_loop_control_label` validates `break`/`continue`: an unlabeled one needs a
+  non-empty stack (else `BreakOutsideLoop` / `ContinueOutsideLoop`), a labeled one needs a matching
+  active label (else the new `TypeError::UndefinedLabel`).
 - 2026-06-09: `loop { ... }` statement (§3.7). `check_stmt` handles `Stmt::Loop` like `while`'s body
   (increments `loop_depth` so `break`/`continue` inside are in-loop; snapshot/restore moves around
   the body per §2.2), minus the condition. The `prefer-loop-over-while-true` lint walker recurses
