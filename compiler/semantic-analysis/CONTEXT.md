@@ -84,6 +84,12 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-06-15: `loop` as a value expression (§3.7). `loop_labels` became `loop_stack:
+  Vec<LoopContext>` (label + `is_value_loop` + accumulated `break_value_ty`). `check_loop_body`
+  pushes a context for while/loop/for; only `loop` (and `Expr::Loop`) is a value loop. A value
+  `break v` calls `record_break_value`: it rejects a value targeting a `while`/`for`
+  (`TypeError::BreakValueInUnitLoop`), sets the loop's type on first value-break, and reports
+  `Mismatch` on a disagreeing later one. `Expr::Loop` returns the agreed type (or unit).
 - 2026-06-15: Loop labels (§3.7). The `loop_depth: u32` counter is replaced by `loop_labels:
   Vec<Option<String>>` (innermost last). Each loop pushes its label (or `None`) for the duration of
   its body; `check_loop_control_label` validates `break`/`continue`: an unlabeled one needs a

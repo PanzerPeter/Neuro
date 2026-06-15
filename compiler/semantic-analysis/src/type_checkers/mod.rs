@@ -36,10 +36,24 @@ pub(crate) struct TypeChecker {
     warnings: Vec<Warning>,
     /// Current function's return type (for validating return statements)
     current_function_return_type: Option<Type>,
-    /// Labels of the currently active loops, innermost last. An entry is `None`
-    /// for an unlabeled loop. The stack depth doubles as the loop-nesting count
-    /// used to reject `break` / `continue` outside any loop (§3.7).
-    loop_labels: Vec<Option<String>>,
+    /// Currently active loops, innermost last (§3.7). Stack depth doubles as the
+    /// loop-nesting count used to reject `break` / `continue` outside any loop;
+    /// each entry carries its label and value-break typing state.
+    loop_stack: Vec<LoopContext>,
+}
+
+/// Per-active-loop tracking for `break`/`continue` resolution and value-break
+/// typing (§3.7).
+struct LoopContext {
+    /// Loop label (`outer:`), or `None` for an unlabeled loop.
+    label: Option<String>,
+    /// Whether this loop can yield a value via `break v`. Only `loop` can; a
+    /// `while`/`for` always yields unit, so a value-carrying `break` targeting one
+    /// is an error.
+    is_value_loop: bool,
+    /// The agreed type of value-carrying `break`s seen so far, or `None` until the
+    /// first one. All value-breaks targeting the same loop must agree on type.
+    break_value_ty: Option<Type>,
 }
 
 mod declarations;
@@ -65,7 +79,7 @@ impl TypeChecker {
             errors: Vec::new(),
             warnings: Vec::new(),
             current_function_return_type: None,
-            loop_labels: Vec::new(),
+            loop_stack: Vec::new(),
         }
     }
 

@@ -117,6 +117,15 @@ impl<'ctx> CodegenContext<'ctx> {
 
             Expr::Block { stmts, .. } => self.codegen_block_expr(stmts),
 
+            // A `loop` in value position (§3.7) lowers like the statement form, but
+            // its `break v` result is loaded and returned. A unit loop (no value
+            // `break`) yields the placeholder used elsewhere for void positions.
+            Expr::Loop { label, body, span } => {
+                let value =
+                    self.codegen_loop(label.as_ref().map(|l| l.name.as_str()), body, span.start)?;
+                Ok(value.unwrap_or_else(|| self.context.i32_type().const_int(0, false).into()))
+            }
+
             // `unsafe` is inert: lower its body identically to a bare block.
             Expr::Unsafe { stmts, .. } => self.codegen_block_expr(stmts),
 

@@ -276,7 +276,7 @@ impl Parser {
         self.no_struct_lit = false;
         self.skip_newlines();
 
-        let body = self.parse_block()?;
+        let body = self.parse_labeled_block(label.as_ref())?;
 
         let end_span = body.last().map(stmt_span).unwrap_or(condition.span());
 
@@ -296,7 +296,7 @@ impl Parser {
     ) -> ParseResult<Stmt> {
         self.skip_newlines();
 
-        let body = self.parse_block()?;
+        let body = self.parse_labeled_block(label.as_ref())?;
 
         let end_span = body.last().map(stmt_span).unwrap_or(start_span);
 
@@ -305,6 +305,21 @@ impl Parser {
             body,
             span: start_span.merge(end_span),
         })
+    }
+
+    /// Parse a loop body, tracking `label` as in-scope for the duration so a
+    /// `break label` inside is recognised as a labeled break rather than a
+    /// value-carrying `break label` (§3.7). An unlabeled loop parses normally.
+    fn parse_labeled_block(&mut self, label: Option<&Identifier>) -> ParseResult<Vec<Stmt>> {
+        match label {
+            Some(label) => {
+                self.active_labels.push(label.name.clone());
+                let body = self.parse_block();
+                self.active_labels.pop();
+                body
+            }
+            None => self.parse_block(),
+        }
     }
 
     /// Parse a for-range statement: `for <ident> in <expr>..<expr> { ... }`,
@@ -353,7 +368,7 @@ impl Parser {
         self.no_struct_lit = false;
         self.skip_newlines();
 
-        let body = self.parse_block()?;
+        let body = self.parse_labeled_block(label.as_ref())?;
 
         let end_span = body.last().map(stmt_span).unwrap_or(end.span());
 
@@ -365,6 +380,52 @@ impl Parser {
             inclusive,
             body,
             span: start_span.merge(end_span),
+        })
+    }
+
+    /// Parse a `break` statement after its keyword: an optional in-scope loop
+    /// `label`, then an optional value-producing expression `break v` (§3.7).
+    ///
+    /// `break label` and `break value` collide syntactically (both a bare token
+    /// after `break`), so a leading identifier is consumed as a label only when it
+    /// names a loop currently in scope ([`Parser::active_labels`]); otherwise it
+    /// begins the value expression. The value, like the label, must sit on the
+    /// same logical line — a `break` at end of line carries neither.
+    fn parse_break_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
+        let label = match self.peek_kind() {
+            Some(TokenKind::Identifier(name)) if self.active_labels.iter().any(|l| l == name) => {
+                let name = name.clone();
+                let label_span = self.peek().map(|t| t.span).unwrap_or(start_span);
+                self.advance();
+                Some(Identifier {
+                    name,
+                    span: label_span,
+                })
+            }
+            _ => None,
+        };
+
+        let value = if self.is_at_end()
+            || matches!(
+                self.peek_kind(),
+                Some(TokenKind::Newline) | Some(TokenKind::RightBrace)
+            ) {
+            None
+        } else {
+            Some(self.parse_expr(Precedence::Lowest)?)
+        };
+
+        let end_span = value
+            .as_ref()
+            .map(|e| e.span())
+            .or_else(|| label.as_ref().map(|l| l.span))
+            .map(|s| start_span.merge(s))
+            .unwrap_or(start_span);
+
+        Ok(Stmt::Break {
+            label,
+            value,
+            span: end_span,
         })
     }
 
@@ -496,8 +557,7 @@ impl Parser {
             TokenKind::Break => {
                 let span = token.span;
                 self.advance(); // consume 'break'
-                let label = self.parse_optional_loop_label();
-                Ok(Stmt::Break { label, span })
+                self.parse_break_stmt(span)
             }
             TokenKind::Continue => {
                 let span = token.span;

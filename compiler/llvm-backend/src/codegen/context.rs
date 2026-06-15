@@ -83,6 +83,10 @@ pub(crate) struct LoopTargets<'ctx> {
     pub(crate) continue_bb: BasicBlock<'ctx>,
     /// The basic block where a `break` statement should jump.
     pub(crate) break_bb: BasicBlock<'ctx>,
+    /// Result slot for a value-producing `loop` (§3.7). A value-carrying `break v`
+    /// stores `v` here before branching to `break_bb`; the loop expression loads
+    /// it at exit. `None` for `while`/`for` (unit) and unit `loop`s.
+    pub(crate) break_slot: Option<PointerValue<'ctx>>,
 }
 
 /// Central state container for LLVM IR code generation.
@@ -116,6 +120,16 @@ pub(crate) struct CodegenContext<'ctx> {
 
     /// Active loop targets for break/continue statements.
     pub(crate) loop_targets: Vec<LoopTargets<'ctx>>,
+
+    /// Type-collection-pass stack of loops currently being visited, innermost last,
+    /// as `(label, loop span.start)`. Lets a value-carrying `break v` resolve the
+    /// loop it targets (innermost, or by label) so its result type can be recorded.
+    pub(crate) tp_loop_stack: Vec<(Option<String>, usize)>,
+
+    /// Type-collection-pass map: loop `span.start` → the type its value-`break`s
+    /// produce (§3.7). Read back when finishing a `loop` to set its expression type
+    /// and size its result slot during codegen.
+    pub(crate) tp_loop_break_types: HashMap<usize, Type>,
 
     /// Struct field definitions (name → ordered [(field_name, field_type)]).
     /// Populated before code generation begins; used by GEP and insertvalue.
@@ -179,6 +193,8 @@ impl<'ctx> CodegenContext<'ctx> {
             expr_types: HashMap::new(),
             type_env: HashMap::new(),
             loop_targets: Vec::new(),
+            tp_loop_stack: Vec::new(),
+            tp_loop_break_types: HashMap::new(),
             struct_defs: HashMap::new(),
             fa_struct_names: HashMap::new(),
             binary_left_types: HashMap::new(),

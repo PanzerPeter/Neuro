@@ -411,6 +411,78 @@ fn test_unlabeled_break_has_no_label() {
     };
     assert!(matches!(
         body.first(),
-        Some(ast_types::Stmt::Break { label: None, .. })
+        Some(ast_types::Stmt::Break {
+            label: None,
+            value: None,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn test_parse_loop_value_expression() {
+    let source = r#"
+        func test() -> i32 {
+            val x = loop {
+                break 5
+            }
+            return x
+        }
+    "#;
+    let items = parse(source).expect("loop value expression should parse");
+    let ast_types::Item::Function(func) = &items[0] else {
+        panic!("expected a function item");
+    };
+    let Some(ast_types::Stmt::VarDecl {
+        init: Some(init), ..
+    }) = func.body.first()
+    else {
+        panic!("first statement should be a var decl");
+    };
+    let ast_types::Expr::Loop { body, .. } = init else {
+        panic!("initializer should be a loop expression, got {:?}", init);
+    };
+    // The `break 5` carries an integer value rather than being read as a label.
+    assert!(matches!(
+        body.first(),
+        Some(ast_types::Stmt::Break {
+            label: None,
+            value: Some(_),
+            ..
+        })
+    ));
+}
+
+#[test]
+fn test_break_value_is_not_parsed_as_label() {
+    // A bare identifier after `break` that is not an in-scope loop label is the
+    // start of a value expression, not a label.
+    let source = r#"
+        func test() -> i32 {
+            mut n: i32 = 7
+            val x = loop {
+                break n
+            }
+            return x
+        }
+    "#;
+    let items = parse(source).expect("break with a non-label identifier value should parse");
+    let ast_types::Item::Function(func) = &items[0] else {
+        panic!("expected a function item");
+    };
+    let Some(ast_types::Stmt::VarDecl {
+        init: Some(ast_types::Expr::Loop { body, .. }),
+        ..
+    }) = func.body.get(1)
+    else {
+        panic!("second statement should be a loop-value var decl");
+    };
+    assert!(matches!(
+        body.first(),
+        Some(ast_types::Stmt::Break {
+            label: None,
+            value: Some(ast_types::Expr::Identifier(_)),
+            ..
+        })
     ));
 }

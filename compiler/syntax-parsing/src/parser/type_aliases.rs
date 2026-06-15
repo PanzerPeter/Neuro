@@ -260,7 +260,12 @@ fn rewrite_stmt(stmt: &mut Stmt, resolved: &HashMap<String, Type>) {
             rewrite_expr(value, resolved);
         }
         Stmt::Expr(expr) => rewrite_expr(expr, resolved),
-        Stmt::Break { .. } | Stmt::Continue { .. } => {}
+        Stmt::Break { value, .. } => {
+            if let Some(value) = value {
+                rewrite_expr(value, resolved);
+            }
+        }
+        Stmt::Continue { .. } => {}
     }
 }
 
@@ -311,6 +316,7 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
             }
         }
         Expr::Block { stmts, .. } => rewrite_block(stmts, resolved),
+        Expr::Loop { body, .. } => rewrite_block(body, resolved),
         Expr::Unsafe { stmts, .. } => rewrite_block(stmts, resolved),
         Expr::Reference { operand, .. } => rewrite_expr(operand, resolved),
         Expr::Deref { operand, .. } => rewrite_expr(operand, resolved),

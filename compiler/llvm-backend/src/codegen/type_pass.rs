@@ -167,6 +167,58 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
+    /// Visit a loop body during type collection while tracking the loop on
+    /// `tp_loop_stack`, then record the loop's result type at its span. The result
+    /// type is the type produced by its value-carrying `break`s (§3.7), or `Void`
+    /// when none target it — exactly what `codegen` reads to size the result slot.
+    fn visit_loop_body_for_types(
+        &mut self,
+        label: &Option<shared_types::Identifier>,
+        span: shared_types::Span,
+        body: &[Stmt],
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        self.tp_loop_stack
+            .push((label.as_ref().map(|l| l.name.clone()), span.start));
+        for stmt in body {
+            self.visit_stmt_for_types(stmt, func_types)?;
+        }
+        self.tp_loop_stack.pop();
+
+        let result_ty = self
+            .tp_loop_break_types
+            .get(&span.start)
+            .cloned()
+            .unwrap_or(Type::Void);
+        self.expr_types.insert(span.start, result_ty);
+        Ok(())
+    }
+
+    /// Resolve the loop targeted by a value-carrying `break v` (innermost, or by
+    /// `label`) and record `v`'s type against that loop's span. The first value
+    /// seen wins; semantic analysis has already proven all value-breaks for one
+    /// loop agree on type.
+    fn record_break_value_type(&mut self, label: Option<&shared_types::Identifier>, value: &Expr) {
+        let target = match label {
+            Some(label) => self
+                .tp_loop_stack
+                .iter()
+                .rev()
+                .find(|(l, _)| l.as_deref() == Some(label.name.as_str()))
+                .map(|(_, span_start)| *span_start),
+            None => self.tp_loop_stack.last().map(|(_, span_start)| *span_start),
+        };
+        let Some(span_start) = target else {
+            return;
+        };
+        if self.tp_loop_break_types.contains_key(&span_start) {
+            return;
+        }
+        if let Some(value_ty) = self.expr_types.get(&value.span().start).cloned() {
+            self.tp_loop_break_types.insert(span_start, value_ty);
+        }
+    }
+
     pub(crate) fn visit_stmt_for_types(
         &mut self,
         stmt: &Stmt,
@@ -228,25 +280,27 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             Stmt::While {
-                condition, body, ..
+                label,
+                condition,
+                body,
+                span,
             } => {
                 self.visit_expr_for_types(condition, func_types)?;
-                for stmt in body {
-                    self.visit_stmt_for_types(stmt, func_types)?;
-                }
+                self.visit_loop_body_for_types(label, *span, body, func_types)?;
             }
-            Stmt::Loop { body, .. } => {
-                for stmt in body {
-                    self.visit_stmt_for_types(stmt, func_types)?;
-                }
+            Stmt::Loop {
+                label, body, span, ..
+            } => {
+                self.visit_loop_body_for_types(label, *span, body, func_types)?;
             }
             Stmt::ForRange {
+                label,
                 iterator,
                 start,
                 end,
                 inclusive: _,
                 body,
-                ..
+                span,
             } => {
                 self.visit_expr_for_types(start, func_types)?;
                 self.visit_expr_for_types(end, func_types)?;
@@ -255,9 +309,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     self.type_env.insert(iterator.name.clone(), iterator_ty);
                 }
 
-                for stmt in body {
-                    self.visit_stmt_for_types(stmt, func_types)?;
-                }
+                self.visit_loop_body_for_types(label, *span, body, func_types)?;
             }
             Stmt::Const {
                 name, ty, value, ..
@@ -266,7 +318,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 let const_ty = crate::types::Type::from_ast(ty);
                 self.type_env.insert(name.name.clone(), const_ty);
             }
-            Stmt::Break { .. } | Stmt::Continue { .. } => {}
+            Stmt::Break { label, value, .. } => {
+                if let Some(value) = value {
+                    self.visit_expr_for_types(value, func_types)?;
+                    self.record_break_value_type(label.as_ref(), value);
+                }
+            }
+            Stmt::Continue { .. } => {}
             Stmt::FieldAssignment { value, object, .. } => {
                 self.visit_expr_for_types(value, func_types)?;
                 // Ensure the object variable is in type_env so field access codegen can resolve it
@@ -651,6 +709,12 @@ impl<'ctx> CodegenContext<'ctx> {
                     _ => Type::Void,
                 };
                 self.expr_types.insert(span.start, result_ty);
+            }
+
+            // A `loop` expression's result type is the type its value-`break`s
+            // produce (§3.7), recorded by `visit_loop_body_for_types` at this span.
+            Expr::Loop { label, body, span } => {
+                self.visit_loop_body_for_types(label, *span, body, func_types)?;
             }
 
             // Borrow `&place` (§2.4) / `&mut place` (§2.5): the borrow has type `&T`

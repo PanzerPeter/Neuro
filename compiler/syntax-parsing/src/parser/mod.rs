@@ -19,6 +19,11 @@ pub(crate) struct Parser {
     /// When true, an identifier followed by `{` is NOT parsed as a struct literal.
     /// Set to true inside if/while/for conditions to prevent consuming the block's `{`.
     pub(super) no_struct_lit: bool,
+    /// Loop labels in scope at the current parse position, innermost last (§3.7).
+    /// `break`/`continue` labels and value-carrying `break v` share bare-identifier
+    /// syntax, so an identifier after `break` is read as a label only when it names
+    /// an in-scope loop; otherwise it begins the break value expression.
+    pub(super) active_labels: Vec<String>,
 }
 
 impl Parser {
@@ -29,6 +34,7 @@ impl Parser {
             current: 0,
             expr_depth: 0,
             no_struct_lit: false,
+            active_labels: Vec::new(),
         }
     }
 
