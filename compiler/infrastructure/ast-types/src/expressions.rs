@@ -80,6 +80,18 @@ pub enum Expr {
         stmts: Vec<Stmt>,
         span: Span,
     },
+    /// Infinite loop in value position: `loop { ... break v }` (§3.7).
+    ///
+    /// Distinct from [`Stmt::Loop`]: only `loop` can yield a non-unit value
+    /// (it has no fall-through exit, so it leaves solely via `break`). The loop
+    /// evaluates to the value carried by its value-producing `break`s, which must
+    /// all agree on type. `while`/`for` always yield unit and have no expression
+    /// form. The expression form is unlabeled; labels are a statement-loop concern.
+    Loop {
+        label: Option<Identifier>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
     /// Unsafe block expression: `unsafe { stmts; trailing_expr }`.
     ///
     /// Phase 1.7 groundwork: the keyword is reserved and the block parses, but
@@ -124,6 +136,7 @@ impl Expr {
             Expr::Cast { span, .. } => *span,
             Expr::If { span, .. } => *span,
             Expr::Block { span, .. } => *span,
+            Expr::Loop { span, .. } => *span,
             Expr::Unsafe { span, .. } => *span,
             Expr::Reference { span, .. } => *span,
             Expr::Deref { span, .. } => *span,

@@ -1,5 +1,6 @@
 use crate::codegen::context::LoopTargets;
 use ast_types::*;
+use inkwell::values::BasicValueEnum;
 use inkwell::IntPredicate;
 
 use crate::errors::{CodegenError, CodegenResult};
@@ -247,7 +248,22 @@ impl<'ctx> CodegenContext<'ctx> {
         label: Option<&shared_types::Identifier>,
         is_break: bool,
     ) -> CodegenResult<inkwell::basic_block::BasicBlock<'ctx>> {
-        let targets = match label {
+        let targets = self.lookup_loop_target(label)?;
+        Ok(if is_break {
+            targets.break_bb
+        } else {
+            targets.continue_bb
+        })
+    }
+
+    /// Resolve the [`LoopTargets`] a `break`/`continue` refers to: the innermost
+    /// loop, or the nearest enclosing one carrying `label`. Label resolution is
+    /// validated in semantic analysis, so a miss here is an internal error.
+    fn lookup_loop_target(
+        &self,
+        label: Option<&shared_types::Identifier>,
+    ) -> CodegenResult<&LoopTargets<'ctx>> {
+        match label {
             Some(label) => self
                 .loop_targets
                 .iter()
@@ -258,19 +274,13 @@ impl<'ctx> CodegenContext<'ctx> {
                         "undefined loop label '{}' during codegen",
                         label.name
                     ))
-                })?,
+                }),
             None => self.loop_targets.last().ok_or_else(|| {
                 CodegenError::InternalError(
                     "break/continue used outside loop during codegen".to_string(),
                 )
-            })?,
-        };
-
-        Ok(if is_break {
-            targets.break_bb
-        } else {
-            targets.continue_bb
-        })
+            }),
+        }
     }
 
     pub(crate) fn codegen_while(
@@ -310,6 +320,7 @@ impl<'ctx> CodegenContext<'ctx> {
             label: label.map(str::to_string),
             continue_bb: cond_bb,
             break_bb: exit_bb,
+            break_slot: None,
         });
         for stmt in body {
             if let Some(current_bb) = self.builder.get_insert_block() {
@@ -335,15 +346,41 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// Generate code for an infinite `loop { ... }` statement (§3.7).
+    /// Generate code for an infinite `loop { ... }` (§3.7), returning the loop's
+    /// value when it is used as an expression and yields one via `break v`.
     ///
     /// Unlike `while`, there is no condition block: control branches
-    /// unconditionally into the body and back to its top, so the only way out
-    /// is a `break`. `continue` re-enters the body from the top.
-    pub(crate) fn codegen_loop(&mut self, label: Option<&str>, body: &[Stmt]) -> CodegenResult<()> {
+    /// unconditionally into the body and back to its top, so the only way out is a
+    /// `break`. `continue` re-enters the body from the top. `span_start` keys the
+    /// loop's result type (recorded by the type pass): when it is not `Void`, a
+    /// result slot is allocated, value-carrying `break`s store into it, and the
+    /// loaded value is returned. `Stmt::Loop` discards the result; `Expr::Loop`
+    /// binds it.
+    pub(crate) fn codegen_loop(
+        &mut self,
+        label: Option<&str>,
+        body: &[Stmt],
+        span_start: usize,
+    ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
         let parent_fn = self
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
+
+        let result_ty = self
+            .expr_types
+            .get(&span_start)
+            .cloned()
+            .unwrap_or(Type::Void);
+        let result_slot = if matches!(result_ty, Type::Void) {
+            None
+        } else {
+            let llvm_ty = self.get_any_llvm_type(&result_ty)?;
+            Some(
+                self.builder
+                    .build_alloca(llvm_ty, "loopexpr.result")
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?,
+            )
+        };
 
         let body_bb = self.context.append_basic_block(parent_fn, "loop.body");
         let exit_bb = self.context.append_basic_block(parent_fn, "loop.exit");
@@ -363,6 +400,7 @@ impl<'ctx> CodegenContext<'ctx> {
             label: label.map(str::to_string),
             continue_bb: body_bb,
             break_bb: exit_bb,
+            break_slot: result_slot,
         });
         for stmt in body {
             if let Some(current_bb) = self.builder.get_insert_block() {
@@ -385,7 +423,18 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         self.builder.position_at_end(exit_bb);
-        Ok(())
+
+        match result_slot {
+            Some(slot) => {
+                let llvm_ty = self.get_any_llvm_type(&result_ty)?;
+                let val = self
+                    .builder
+                    .build_load(llvm_ty, slot, "loopexpr.val")
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                Ok(Some(val))
+            }
+            None => Ok(None),
+        }
     }
 
     /// Generate code for a for-range statement (`for i in start..end { ... }`).
@@ -470,6 +519,7 @@ impl<'ctx> CodegenContext<'ctx> {
             label: label.map(str::to_string),
             continue_bb: step_bb,
             break_bb: exit_bb,
+            break_slot: None,
         });
         for stmt in body {
             if let Some(current_bb) = self.builder.get_insert_block() {
@@ -553,8 +603,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 body,
                 ..
             } => self.codegen_while(label.as_ref().map(|l| l.name.as_str()), condition, body),
-            Stmt::Loop { label, body, .. } => {
-                self.codegen_loop(label.as_ref().map(|l| l.name.as_str()), body)
+            Stmt::Loop {
+                label, body, span, ..
+            } => {
+                // Statement position: the loop value (if any) is discarded.
+                self.codegen_loop(label.as_ref().map(|l| l.name.as_str()), body, span.start)?;
+                Ok(())
             }
             Stmt::ForRange {
                 label,
@@ -572,8 +626,23 @@ impl<'ctx> CodegenContext<'ctx> {
                 *inclusive,
                 body,
             ),
-            Stmt::Break { label, .. } => {
-                let break_bb = self.resolve_loop_target(label.as_ref(), true)?;
+            Stmt::Break { label, value, .. } => {
+                let target = self.lookup_loop_target(label.as_ref())?;
+                let break_bb = target.break_bb;
+                let break_slot = target.break_slot;
+
+                // A value-carrying `break v` (§3.7) stores `v` into the loop's result
+                // slot before exiting; semantic analysis guarantees the slot exists.
+                if let Some(value_expr) = value {
+                    let val = self.codegen_expr(value_expr)?;
+                    if let Some(slot) = break_slot {
+                        if !self.current_block_terminated() {
+                            self.builder
+                                .build_store(slot, val)
+                                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                        }
+                    }
+                }
 
                 if let Some(current_bb) = self.builder.get_insert_block() {
                     if current_bb.get_terminator().is_none() {

@@ -49,6 +49,12 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-06-15: `loop` as a value expression (§3.7). `parse_prefix` dispatches `TokenKind::Loop` to
+  `parse_loop_expr` (and `label: loop` to `parse_labeled_loop_expr`), producing `Expr::Loop`. `break`
+  parsing moved to `parse_break_stmt`: a trailing identifier is read as a label only when it names an
+  in-scope loop (`Parser::active_labels`, pushed by `parse_labeled_block` / `parse_labeled_loop_expr`),
+  otherwise it begins the value expression; an optional same-line value follows. `continue` keeps the
+  greedy `parse_optional_loop_label`.
 - 2026-06-15: Loop labels (§3.7). `parse_stmt`'s identifier branch calls `try_parse_labeled_loop`,
   which dispatches `ident : <for|while|loop>` to the matching loop parser with `Some(label)` (labels
   reuse the existing `Identifier` + `Colon` tokens — no lexer change). `parse_while_stmt` /

@@ -88,6 +88,9 @@ pub enum TypeError {
     #[error("use of undefined loop label '{name}' at {span:?}")]
     UndefinedLabel { name: String, span: Span },
 
+    #[error("'break' with a value is only allowed in a 'loop'; 'while' and 'for' always yield unit, at {span:?}")]
+    BreakValueInUnitLoop { span: Span },
+
     #[error("for-range bound must be an integer type, found {found} at {span:?}")]
     InvalidForRangeType { found: Type, span: Span },
 

@@ -174,6 +174,12 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-06-15: `loop` as a value expression (§3.7). `LoopTargets` gained `break_slot:
+  Option<PointerValue>`; `codegen_loop` takes the loop's `span_start`, allocates a result slot when
+  the type pass recorded a non-`Void` type there, and returns the loaded value (`Stmt::Loop` discards
+  it, `Expr::Loop` binds it). A value `break v` stores into the resolved loop's slot before branching
+  (`lookup_loop_target`). The type pass tracks loops on `tp_loop_stack` and records each loop's
+  value-`break` type in `tp_loop_break_types`, written back to `expr_types` at the loop span.
 - 2026-06-15: Loop labels (§3.7). `LoopTargets` gained `label: Option<String>`; `codegen_while` /
   `codegen_loop` / `codegen_for_range` take the loop's label and store it. `break`/`continue`
   resolve via `resolve_loop_target`: a labeled one scans `loop_targets` from innermost out for the

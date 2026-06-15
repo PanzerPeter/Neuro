@@ -61,9 +61,9 @@ pub enum Stmt {
     ///
     /// Executes `body` repeatedly; the only exit is a `break`. `continue`
     /// re-enters the body from the top. Unlike `while`/`for`, a `loop` has no
-    /// fall-through exit. The value-producing form (`break value`) is not yet
-    /// modelled — a `loop` statement always yields unit. An optional `label`
-    /// (§3.7) names the loop for labeled break/continue.
+    /// fall-through exit. In statement position the loop's value is discarded;
+    /// the value-producing form lives in [`Expr::Loop`] (`break value`, §3.7).
+    /// An optional `label` (§3.7) names the loop for labeled break/continue.
     Loop {
         label: Option<Identifier>,
         body: Vec<Stmt>,
@@ -71,8 +71,14 @@ pub enum Stmt {
     },
     /// Break out of the nearest enclosing loop, or out of the loop named by
     /// `label` when present (`break outer`, §3.7).
+    ///
+    /// `value` carries the loop-expression result for a value-producing `break v`
+    /// (§3.7): the targeted `loop` evaluates to it. Only `loop` accepts a value;
+    /// `while`/`for` always yield unit, so a value here targeting them is rejected
+    /// in semantic analysis. `None` is a plain `break` / `break label`.
     Break {
         label: Option<Identifier>,
+        value: Option<Expr>,
         span: Span,
     },
     /// Continue the nearest enclosing loop, or the loop named by `label` when

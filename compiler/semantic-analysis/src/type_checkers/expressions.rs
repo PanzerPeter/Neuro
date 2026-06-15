@@ -914,6 +914,14 @@ impl TypeChecker {
                 Some(ty)
             }
 
+            // A `loop` in value position (§3.7) evaluates to the value carried by
+            // its value-producing `break`s (which must all agree on type). With no
+            // value-break it yields unit. `while`/`for` have no expression form.
+            Expr::Loop { label, body, .. } => {
+                let value_ty = self.check_loop_body(label.as_ref(), true, body);
+                Some(value_ty.unwrap_or(Type::Void))
+            }
+
             // `unsafe` is inert in Phase 1.7: it introduces a scope and yields
             // its trailing expression's type, exactly like a bare block.
             Expr::Unsafe { stmts, .. } => {

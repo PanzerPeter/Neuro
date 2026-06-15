@@ -87,6 +87,21 @@ impl Parser {
                     name,
                     span: token.span,
                 };
+                // Labeled loop expression `label: loop { ... }` (§3.7): a single `:`
+                // (not `::`) after an identifier followed by `loop` is the only
+                // expression-position use of a bare colon.
+                if self.check(&TokenKind::Colon) {
+                    let mut idx = self.current + 1;
+                    while matches!(
+                        self.tokens.get(idx).map(|t| &t.kind),
+                        Some(TokenKind::Newline)
+                    ) {
+                        idx += 1;
+                    }
+                    if matches!(self.tokens.get(idx).map(|t| &t.kind), Some(TokenKind::Loop)) {
+                        return self.parse_labeled_loop_expr(ident, token.span);
+                    }
+                }
                 if self.check(&TokenKind::ColonColon) {
                     self.advance(); // consume '::'
                     let member_token = self.consume(
@@ -192,6 +207,8 @@ impl Parser {
 
             TokenKind::LeftBrace => self.parse_block_expr(token.span),
 
+            TokenKind::Loop => self.parse_loop_expr(token.span),
+
             TokenKind::Unsafe => self.parse_unsafe_expr(token.span),
 
             _ => Err(ParseError::UnexpectedToken {
@@ -266,6 +283,48 @@ impl Parser {
         let close = self.consume(TokenKind::RightBrace, "'}'")?;
         let span = start_span.merge(close.span);
         Ok(Expr::Block { stmts, span })
+    }
+
+    /// Parse a loop expression in value position: `loop { ... break v }` (§3.7).
+    /// The `loop` keyword has already been consumed; `start_span` is its span. The
+    /// loop evaluates to its value-carrying `break`s; an unlabeled form is used in
+    /// expression position (labels are a statement-loop concern).
+    fn parse_loop_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
+        self.skip_newlines();
+        let body = self.parse_block()?;
+        let end_span = body.last().map(stmt_span).unwrap_or(start_span);
+        Ok(Expr::Loop {
+            label: None,
+            body,
+            span: start_span.merge(end_span),
+        })
+    }
+
+    /// Parse a labeled loop expression `label: loop { ... }` (§3.7). `label` is the
+    /// already-parsed identifier; the cursor sits on the `:`. The label is tracked
+    /// in scope for the body so a nested `break label v` resolves to it rather than
+    /// being read as a value-carrying `break label`.
+    fn parse_labeled_loop_expr(
+        &mut self,
+        label: Identifier,
+        start_span: Span,
+    ) -> ParseResult<Expr> {
+        self.advance(); // consume ':'
+        self.skip_newlines();
+        self.consume(TokenKind::Loop, "'loop'")?;
+        self.skip_newlines();
+
+        self.active_labels.push(label.name.clone());
+        let body = self.parse_block();
+        self.active_labels.pop();
+        let body = body?;
+
+        let end_span = body.last().map(stmt_span).unwrap_or(start_span);
+        Ok(Expr::Loop {
+            label: Some(label),
+            body,
+            span: start_span.merge(end_span),
+        })
     }
 
     /// Parse an unsafe block expression. The `unsafe` keyword has already been

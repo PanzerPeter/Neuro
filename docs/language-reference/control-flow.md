@@ -212,8 +212,29 @@ loop {
 ```
 
 `break` and `continue` behave exactly as they do in `while` and `for` bodies.
-A `loop` statement evaluates to unit `()`; the value-producing form
-(`break value`) is not yet available.
+
+### Loop as a value expression
+
+Because blocks are expressions, a `loop` can produce a value: `break v` exits
+the loop and makes `v` the value of the whole `loop` expression.
+
+```neuro
+mut i: i32 = 0
+val first_even = loop {
+    i = i + 1
+    if i % 2 == 0 {
+        break i          // the loop expression evaluates to i
+    }
+}
+```
+
+All value-carrying `break`s for one loop must agree on type. With a label,
+`break outer value` carries the value out of an outer loop, and the labeled loop
+may itself be used in value position (`val x = outer: loop { ... }`).
+
+Only `loop` can yield a value — it is the one loop guaranteed (by the absence of
+a fall-through exit) to leave solely via a `break`. `while` and `for` always
+evaluate to unit `()`, so a `break value` targeting one is a compile error.
 
 ## For Loops
 

@@ -26,6 +26,10 @@ Extracted from `syntax-parsing` to eliminate the cross-slice dependency that `se
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-06-15: `loop` as a value expression (§3.7). Added `Expr::Loop { label, body, span }` — the
+  value-producing form, distinct from `Stmt::Loop` (statement form, value discarded). `Stmt::Break`
+  gained `value: Option<Expr>` for `break v`. The targeted `loop` evaluates to its value-`break`s
+  (which must agree on type); `while`/`for` stay unit and have no expression form.
 - 2026-06-15: Loop labels (§3.7). `Stmt::While` / `ForRange` / `Loop` each gained `label:
   Option<Identifier>` (the `outer:` prefix); `Stmt::Break` / `Continue` each gained `label:
   Option<Identifier>` (`break outer`). `None` is the unlabeled form. Resolved by semantic-analysis

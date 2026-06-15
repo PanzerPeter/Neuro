@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.36.0] - 2026-06-15
+
+### Added
+- `parser`/`semantic`/`codegen`: `loop` as a value expression — `break value` (§3.7). A `loop` used in expression position evaluates to the value carried out by its `break`: `val first = loop { ... break v }`. All value-carrying `break`s for one loop must agree on type; `break value` targeting a `while`/`for` is rejected, since those always yield unit (only `loop` is guaranteed to leave solely via a `break`). `break label value` carries a value out of a labeled outer loop, and a labeled loop may itself appear in expression position (`val x = outer: loop { ... }`). New surface: `Expr::Loop { label, body, span }` (distinct from the statement `Stmt::Loop`, whose value is discarded) and a `value: Option<Expr>` field on `Stmt::Break`. The parser disambiguates `break ident` — an identifier is read as a label only when it names an in-scope loop (tracked in a new parser label stack), otherwise it begins the value expression. Semantic analysis replaces the `loop_labels` stack with a `loop_stack` of per-loop contexts that accumulate the agreed value-break type (new `BreakValueInUnitLoop` error; type disagreement reuses `Mismatch`). Codegen allocates a result slot per value loop; a value `break` stores into it before branching and the loop expression loads it at exit. Tests: 2 parser unit, 3 semantic unit, 4 `neurc` integration (`loop_value.rs`), example `control_flow/loop_value.nr`. 626 tests pass.
+
+---
+
 ## [1.35.0] - 2026-06-15
 
 ### Added
