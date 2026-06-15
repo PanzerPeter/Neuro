@@ -329,11 +329,13 @@ fn test_for_range_accepts_integer_bounds() {
     let mut checker = TypeChecker::new();
 
     let stmt = Stmt::ForRange {
+        label: None,
         iterator: make_ident("i"),
         start: Expr::Literal(Literal::Integer(0, None), Span::new(0, 1)),
         end: Expr::Literal(Literal::Integer(5, None), Span::new(4, 5)),
         inclusive: false,
         body: vec![Stmt::Continue {
+            label: None,
             span: Span::new(8, 16),
         }],
         span: Span::new(0, 16),
@@ -348,6 +350,7 @@ fn test_for_range_rejects_non_integer_bound() {
     let mut checker = TypeChecker::new();
 
     let stmt = Stmt::ForRange {
+        label: None,
         iterator: make_ident("i"),
         start: Expr::Literal(Literal::Boolean(true), Span::new(0, 4)),
         end: Expr::Literal(Literal::Integer(5, None), Span::new(7, 8)),
@@ -363,4 +366,62 @@ fn test_for_range_rejects_non_integer_bound() {
     assert!(errors
         .iter()
         .any(|error| matches!(error, TypeError::InvalidForRangeType { .. })));
+}
+
+#[test]
+fn test_labeled_break_resolves_to_enclosing_loop() {
+    let mut checker = TypeChecker::new();
+
+    let stmt = Stmt::Loop {
+        label: Some(make_ident("outer")),
+        body: vec![Stmt::Loop {
+            label: None,
+            body: vec![Stmt::Break {
+                label: Some(make_ident("outer")),
+                span: Span::new(0, 1),
+            }],
+            span: Span::new(0, 1),
+        }],
+        span: Span::new(0, 1),
+    };
+
+    checker.check_stmt(&stmt);
+    assert!(!checker.has_errors());
+}
+
+#[test]
+fn test_undefined_loop_label_is_rejected() {
+    let mut checker = TypeChecker::new();
+
+    let stmt = Stmt::Loop {
+        label: Some(make_ident("outer")),
+        body: vec![Stmt::Break {
+            label: Some(make_ident("missing")),
+            span: Span::new(0, 1),
+        }],
+        span: Span::new(0, 1),
+    };
+
+    checker.check_stmt(&stmt);
+    assert!(checker.has_errors());
+    let errors = checker.into_errors();
+    assert!(errors
+        .iter()
+        .any(|error| matches!(error, TypeError::UndefinedLabel { .. })));
+}
+
+#[test]
+fn test_break_outside_loop_still_rejected() {
+    let mut checker = TypeChecker::new();
+
+    let stmt = Stmt::Break {
+        label: None,
+        span: Span::new(0, 1),
+    };
+
+    checker.check_stmt(&stmt);
+    let errors = checker.into_errors();
+    assert!(errors
+        .iter()
+        .any(|error| matches!(error, TypeError::BreakOutsideLoop { .. })));
 }

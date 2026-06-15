@@ -237,7 +237,48 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Generate code for a while statement
-    pub(crate) fn codegen_while(&mut self, condition: &Expr, body: &[Stmt]) -> CodegenResult<()> {
+    /// Resolve the branch target for a `break`/`continue` (§3.7).
+    ///
+    /// An unlabeled statement targets the innermost loop; a labeled one targets
+    /// the nearest enclosing loop carrying that label. Label resolution is
+    /// validated in semantic analysis, so a miss here is an internal error.
+    fn resolve_loop_target(
+        &self,
+        label: Option<&shared_types::Identifier>,
+        is_break: bool,
+    ) -> CodegenResult<inkwell::basic_block::BasicBlock<'ctx>> {
+        let targets = match label {
+            Some(label) => self
+                .loop_targets
+                .iter()
+                .rev()
+                .find(|t| t.label.as_deref() == Some(label.name.as_str()))
+                .ok_or_else(|| {
+                    CodegenError::InternalError(format!(
+                        "undefined loop label '{}' during codegen",
+                        label.name
+                    ))
+                })?,
+            None => self.loop_targets.last().ok_or_else(|| {
+                CodegenError::InternalError(
+                    "break/continue used outside loop during codegen".to_string(),
+                )
+            })?,
+        };
+
+        Ok(if is_break {
+            targets.break_bb
+        } else {
+            targets.continue_bb
+        })
+    }
+
+    pub(crate) fn codegen_while(
+        &mut self,
+        label: Option<&str>,
+        condition: &Expr,
+        body: &[Stmt],
+    ) -> CodegenResult<()> {
         let parent_fn = self
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
@@ -266,6 +307,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(body_bb);
         self.loop_targets.push(LoopTargets {
+            label: label.map(str::to_string),
             continue_bb: cond_bb,
             break_bb: exit_bb,
         });
@@ -298,7 +340,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Unlike `while`, there is no condition block: control branches
     /// unconditionally into the body and back to its top, so the only way out
     /// is a `break`. `continue` re-enters the body from the top.
-    pub(crate) fn codegen_loop(&mut self, body: &[Stmt]) -> CodegenResult<()> {
+    pub(crate) fn codegen_loop(&mut self, label: Option<&str>, body: &[Stmt]) -> CodegenResult<()> {
         let parent_fn = self
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
@@ -318,6 +360,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(body_bb);
         self.loop_targets.push(LoopTargets {
+            label: label.map(str::to_string),
             continue_bb: body_bb,
             break_bb: exit_bb,
         });
@@ -348,6 +391,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a for-range statement (`for i in start..end { ... }`).
     pub(crate) fn codegen_for_range(
         &mut self,
+        label: Option<&str>,
         iterator: &shared_types::Identifier,
         start: &Expr,
         end: &Expr,
@@ -423,6 +467,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(body_bb);
         self.loop_targets.push(LoopTargets {
+            label: label.map(str::to_string),
             continue_bb: step_bb,
             break_bb: exit_bb,
         });
@@ -503,28 +548,37 @@ impl<'ctx> CodegenContext<'ctx> {
                 ..
             } => self.codegen_if(condition, then_block, else_if_blocks, else_block),
             Stmt::While {
-                condition, body, ..
-            } => self.codegen_while(condition, body),
-            Stmt::Loop { body, .. } => self.codegen_loop(body),
+                label,
+                condition,
+                body,
+                ..
+            } => self.codegen_while(label.as_ref().map(|l| l.name.as_str()), condition, body),
+            Stmt::Loop { label, body, .. } => {
+                self.codegen_loop(label.as_ref().map(|l| l.name.as_str()), body)
+            }
             Stmt::ForRange {
+                label,
                 iterator,
                 start,
                 end,
                 inclusive,
                 body,
                 ..
-            } => self.codegen_for_range(iterator, start, end, *inclusive, body),
-            Stmt::Break { .. } => {
-                let targets = self.loop_targets.last().ok_or_else(|| {
-                    CodegenError::InternalError(
-                        "break used outside loop during codegen".to_string(),
-                    )
-                })?;
+            } => self.codegen_for_range(
+                label.as_ref().map(|l| l.name.as_str()),
+                iterator,
+                start,
+                end,
+                *inclusive,
+                body,
+            ),
+            Stmt::Break { label, .. } => {
+                let break_bb = self.resolve_loop_target(label.as_ref(), true)?;
 
                 if let Some(current_bb) = self.builder.get_insert_block() {
                     if current_bb.get_terminator().is_none() {
                         self.builder
-                            .build_unconditional_branch(targets.break_bb)
+                            .build_unconditional_branch(break_bb)
                             .map_err(|e| {
                                 CodegenError::LlvmError(format!(
                                     "failed to build break branch: {}",
@@ -536,17 +590,13 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 Ok(())
             }
-            Stmt::Continue { .. } => {
-                let targets = self.loop_targets.last().ok_or_else(|| {
-                    CodegenError::InternalError(
-                        "continue used outside loop during codegen".to_string(),
-                    )
-                })?;
+            Stmt::Continue { label, .. } => {
+                let continue_bb = self.resolve_loop_target(label.as_ref(), false)?;
 
                 if let Some(current_bb) = self.builder.get_insert_block() {
                     if current_bb.get_terminator().is_none() {
                         self.builder
-                            .build_unconditional_branch(targets.continue_bb)
+                            .build_unconditional_branch(continue_bb)
                             .map_err(|e| {
                                 CodegenError::LlvmError(format!(
                                     "failed to build continue branch: {}",

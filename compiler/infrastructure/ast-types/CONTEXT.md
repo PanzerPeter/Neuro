@@ -26,6 +26,10 @@ Extracted from `syntax-parsing` to eliminate the cross-slice dependency that `se
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-06-15: Loop labels (§3.7). `Stmt::While` / `ForRange` / `Loop` each gained `label:
+  Option<Identifier>` (the `outer:` prefix); `Stmt::Break` / `Continue` each gained `label:
+  Option<Identifier>` (`break outer`). `None` is the unlabeled form. Resolved by semantic-analysis
+  (a label stack) and llvm-backend (labeled `LoopTargets`).
 - 2026-06-09: Added `Stmt::Loop { body, span }` for the infinite `loop { ... }` statement (§3.7).
   Distinct from `While`: no condition, the only exit is `break`, `continue` re-enters from the top.
   The value-producing `break value` form is not modelled yet — a `loop` statement yields unit.

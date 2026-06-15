@@ -2,8 +2,44 @@ use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::Type;
 use ast_types::Stmt;
+use shared_types::Identifier;
 
 impl TypeChecker {
+    /// Validate a `break` / `continue` against the active loop stack (§3.7).
+    ///
+    /// An unlabeled control statement requires any enclosing loop; a labeled one
+    /// requires an enclosing loop carrying that exact label. `is_break`
+    /// distinguishes the two error codes for an out-of-loop unlabeled statement.
+    fn check_loop_control_label(
+        &mut self,
+        label: Option<&Identifier>,
+        span: shared_types::Span,
+        is_break: bool,
+    ) {
+        match label {
+            Some(label) => {
+                let in_scope = self
+                    .loop_labels
+                    .iter()
+                    .any(|active| active.as_deref() == Some(label.name.as_str()));
+                if !in_scope {
+                    self.record_error(TypeError::UndefinedLabel {
+                        name: label.name.clone(),
+                        span: label.span,
+                    });
+                }
+            }
+            None if self.loop_labels.is_empty() => {
+                if is_break {
+                    self.record_error(TypeError::BreakOutsideLoop { span });
+                } else {
+                    self.record_error(TypeError::ContinueOutsideLoop { span });
+                }
+            }
+            None => {}
+        }
+    }
+
     /// Check a statement.
     /// Returns None if there was a fatal error, Some(()) otherwise.
     /// Non-fatal errors are recorded and checking continues.
@@ -235,6 +271,7 @@ impl TypeChecker {
             }
 
             Stmt::While {
+                label,
                 condition,
                 body,
                 span: _,
@@ -252,35 +289,42 @@ impl TypeChecker {
                 // The body may run zero or many times, so a move inside it is not
                 // a guaranteed straight-line move; restore afterwards (§2.2).
                 let move_snapshot = self.symbols.snapshot_moves();
-                self.loop_depth += 1;
+                self.loop_labels
+                    .push(label.as_ref().map(|l| l.name.clone()));
                 self.symbols.push_scope();
                 for stmt in body {
                     let _ = self.check_stmt(stmt);
                 }
                 self.symbols.pop_scope();
-                self.loop_depth -= 1;
+                self.loop_labels.pop();
                 self.symbols.restore_moves(&move_snapshot);
 
                 Some(())
             }
 
-            Stmt::Loop { body, span: _ } => {
+            Stmt::Loop {
+                label,
+                body,
+                span: _,
+            } => {
                 // The body may run any number of times, so a move inside it is not
                 // a guaranteed straight-line move; restore afterwards (§2.2).
                 let move_snapshot = self.symbols.snapshot_moves();
-                self.loop_depth += 1;
+                self.loop_labels
+                    .push(label.as_ref().map(|l| l.name.clone()));
                 self.symbols.push_scope();
                 for stmt in body {
                     let _ = self.check_stmt(stmt);
                 }
                 self.symbols.pop_scope();
-                self.loop_depth -= 1;
+                self.loop_labels.pop();
                 self.symbols.restore_moves(&move_snapshot);
 
                 Some(())
             }
 
             Stmt::ForRange {
+                label,
                 iterator,
                 start,
                 end,
@@ -320,7 +364,8 @@ impl TypeChecker {
                 // As with `while`, body moves are not guaranteed straight-line;
                 // restore the move state after the loop (§2.2).
                 let move_snapshot = self.symbols.snapshot_moves();
-                self.loop_depth += 1;
+                self.loop_labels
+                    .push(label.as_ref().map(|l| l.name.clone()));
                 self.symbols.push_scope();
 
                 if !matches!(start_ty, Type::Unknown) {
@@ -339,25 +384,19 @@ impl TypeChecker {
                 }
 
                 self.symbols.pop_scope();
-                self.loop_depth -= 1;
+                self.loop_labels.pop();
                 self.symbols.restore_moves(&move_snapshot);
 
                 Some(())
             }
 
-            Stmt::Break { span } => {
-                if self.loop_depth == 0 {
-                    self.record_error(TypeError::BreakOutsideLoop { span: *span });
-                }
-
+            Stmt::Break { label, span } => {
+                self.check_loop_control_label(label.as_ref(), *span, true);
                 Some(())
             }
 
-            Stmt::Continue { span } => {
-                if self.loop_depth == 0 {
-                    self.record_error(TypeError::ContinueOutsideLoop { span: *span });
-                }
-
+            Stmt::Continue { label, span } => {
+                self.check_loop_control_label(label.as_ref(), *span, false);
                 Some(())
             }
 

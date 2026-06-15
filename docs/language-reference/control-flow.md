@@ -287,6 +287,43 @@ func valid() -> i32 {
 // }
 ```
 
+### Loop Labels
+
+A `for`, `while`, or `loop` may be prefixed with a label — an identifier
+followed by a colon (`outer:`). `break label` and `continue label` then target
+the labeled loop rather than the innermost one, so an inner loop can exit or
+re-enter an outer loop directly:
+
+```neuro
+func count() -> i32 {
+    mut total: i32 = 0
+    outer: for i in 0..5 {
+        for j in 0..5 {
+            total = total + 1
+            if i + j >= 3 {
+                break outer       // exits BOTH loops
+            }
+        }
+    }
+    return total
+}
+```
+
+`continue label` re-enters the labeled loop's next iteration:
+
+```neuro
+outer: for i in 0..3 {
+    for j in 0..3 {
+        if j == 1 {
+            continue outer        // skip to the outer loop's next i
+        }
+    }
+}
+```
+
+A label on `break` / `continue` must name an enclosing loop; an unknown label
+is a compile error (`use of undefined loop label`).
+
 ## Examples
 
 ### Range Check

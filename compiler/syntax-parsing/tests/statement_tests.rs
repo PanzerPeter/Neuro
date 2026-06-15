@@ -328,3 +328,89 @@ fn test_parse_statement_with_multiline_expression() {
     let result = parse(source);
     assert!(result.is_ok(), "Parse error: {:?}", result.err());
 }
+
+#[test]
+fn test_parse_labeled_for_with_labeled_break() {
+    let source = r#"
+        func test() {
+            outer: for i in 0..10 {
+                for j in 0..10 {
+                    if i * j > 5 {
+                        break outer
+                    }
+                }
+            }
+        }
+    "#;
+    let items = parse(source).expect("labeled for with labeled break should parse");
+    let ast_types::Item::Function(func) = &items[0] else {
+        panic!("expected a function item");
+    };
+    let Some(ast_types::Stmt::ForRange { label, body, .. }) = func.body.first() else {
+        panic!("first statement should be a labeled for-range");
+    };
+    assert_eq!(label.as_ref().map(|l| l.name.as_str()), Some("outer"));
+
+    let Some(ast_types::Stmt::ForRange { body: inner, .. }) = body.first() else {
+        panic!("inner statement should be a for-range");
+    };
+    let Some(ast_types::Stmt::If { then_block, .. }) = inner.first() else {
+        panic!("inner loop should contain an if");
+    };
+    assert!(
+        matches!(
+            then_block.first(),
+            Some(ast_types::Stmt::Break { label: Some(l), .. }) if l.name == "outer"
+        ),
+        "expected `break outer`, got {:?}",
+        then_block.first()
+    );
+}
+
+#[test]
+fn test_parse_labeled_loop_and_while() {
+    let source = r#"
+        func test() {
+            search: loop {
+                continue search
+            }
+            spin: while true {
+                break spin
+            }
+        }
+    "#;
+    let items = parse(source).expect("labeled loop and while should parse");
+    let ast_types::Item::Function(func) = &items[0] else {
+        panic!("expected a function item");
+    };
+    assert!(matches!(
+        func.body.first(),
+        Some(ast_types::Stmt::Loop { label: Some(l), .. }) if l.name == "search"
+    ));
+    assert!(matches!(
+        func.body.get(1),
+        Some(ast_types::Stmt::While { label: Some(l), .. }) if l.name == "spin"
+    ));
+}
+
+#[test]
+fn test_unlabeled_break_has_no_label() {
+    let source = r#"
+        func test() {
+            loop {
+                break
+            }
+        }
+    "#;
+    let items = parse(source).expect("plain break should still parse");
+    let ast_types::Item::Function(func) = &items[0] else {
+        panic!("expected a function item");
+    };
+    let Some(ast_types::Stmt::Loop { body, .. }) = func.body.first() else {
+        panic!("expected a loop");
+    };
+    assert!(matches!(
+        body.first(),
+        Some(ast_types::Stmt::Break { label: None, .. })
+    ));
+}
