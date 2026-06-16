@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.39.0] - 2026-06-16
+
+### Added
+- `semantic`: flow-sensitive borrow exclusivity (§2.4, §2.5) — the aliasing rule split out of the lifetime-inference roadmap item because it needs only borrow-region tracking, not full lifetime inference. The borrow checker now enforces that **at most one `&mut` borrow** of a place may be live at a time and that **no `&` borrow coexists with a live `&mut`**; any number of shared `&` borrows may coexist. Borrow regions are lexical: a borrow held by a binding (`val r = &x`) lives until that binding leaves scope; a borrow passed to a call, used in a condition, or returned ends with the statement that took it. New surface: per-binding persistent/transient borrow counters and a borrow-provenance field on `SymbolInfo`; `SymbolTable` methods `borrow_counts` / `add_transient_borrow` / `attach_borrow` / `release_borrow_of` / `clear_transient_borrows`, with `pop_scope` now releasing a dying reference binding's borrow. The `Expr::Reference` arm checks coexistence and registers each borrow; `check_stmt` clears transient borrows at statement end; `VarDecl` / `Assignment` promote a direct `&place` initializer to a persistent borrow (reassigning a `mut` reference releases its old borrow first). New diagnostics `CannotMutablyBorrowWhileBorrowed` / `CannotBorrowWhileMutablyBorrowed`. Lexical, not NLL: only direct-borrow initializers create tracked persistent borrows, so the analysis never rejects a valid program; read/move-while-borrowed and returned-reference outlives are deferred to lifetime inference. Tests: 8 semantic unit, 5 `neurc` integration (`borrow_exclusivity.rs`), example `types/borrow_exclusivity.nr`. 657 tests pass.
+
+---
+
 ## [1.38.0] - 2026-06-16
 
 ### Added

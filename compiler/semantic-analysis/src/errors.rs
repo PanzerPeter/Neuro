@@ -196,4 +196,10 @@ pub enum TypeError {
 
     #[error("cannot assign through an immutable reference `&{inner}` at {span:?}: writing through `*` requires a `&mut {inner}`")]
     CannotAssignThroughRef { inner: Type, span: Span },
+
+    #[error("cannot borrow '{name}' as mutable at {span:?}: it is already borrowed; a `&mut` borrow is exclusive — no other borrow of '{name}' may be live at the same time (§2.5)")]
+    CannotMutablyBorrowWhileBorrowed { name: String, span: Span },
+
+    #[error("cannot borrow '{name}' as immutable at {span:?}: it is already mutably borrowed; an active `&mut` borrow excludes all other borrows of '{name}' (§2.4)")]
+    CannotBorrowWhileMutablyBorrowed { name: String, span: Span },
 }
