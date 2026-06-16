@@ -49,6 +49,7 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-06-15: `char` literals (§1.2). `parse_prefix` maps `TokenKind::Char(c)` → `Expr::Literal(Literal::Char(c))`.
 - 2026-06-15: `loop` as a value expression (§3.7). `parse_prefix` dispatches `TokenKind::Loop` to
   `parse_loop_expr` (and `label: loop` to `parse_labeled_loop_expr`), producing `Expr::Loop`. `break`
   parsing moved to `parse_break_stmt`: a trailing identifier is read as a label only when it names an

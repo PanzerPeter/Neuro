@@ -137,6 +137,8 @@ pub enum Literal {
     String(String),
     /// Boolean literal (`true` or `false`)
     Boolean(bool),
+    /// Character literal — a single Unicode scalar value (e.g. `'a'`, `'\n'`) (§1.2)
+    Char(char),
 }
 
 #[cfg(test)]

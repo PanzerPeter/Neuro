@@ -19,6 +19,9 @@ pub enum LexError {
     #[error("invalid escape sequence '{escape}' at position {}", span.start)]
     InvalidEscape { escape: String, span: Span },
 
+    #[error("invalid character literal {literal} at position {}", span.start)]
+    InvalidCharLiteral { literal: String, span: Span },
+
     #[error("unterminated block comment starting at position {}", span.start)]
     UnterminatedBlockComment { span: Span },
 }

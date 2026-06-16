@@ -84,6 +84,10 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-06-15: `char` primitive type (§1.2). New `Type::Char`: `"char"` resolves in `resolve_type`;
+  `Literal::Char` infers to `Type::Char`; `is_valid_cast` permits char↔integer and char→char only
+  (no float/bool); ordering comparisons (`< > <= >=`) accept `char` (built-in total order) alongside
+  numerics; char is Copy (not move-tracked). Equality reuses the existing compatible-type path.
 - 2026-06-15: `loop` as a value expression (§3.7). `loop_labels` became `loop_stack:
   Vec<LoopContext>` (label + `is_value_loop` + accumulated `break_value_ty`). `check_loop_body`
   pushes a context for while/loop/for; only `loop` (and `Expr::Loop`) is a value loop. A value

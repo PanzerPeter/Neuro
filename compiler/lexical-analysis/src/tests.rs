@@ -543,6 +543,24 @@ fn is_valid_identifier_test() {
 }
 
 #[test]
+fn tokenize_char_literals() {
+    let result = tokenize("'a' '\\n' '\\u{1F44D}' '\\''").unwrap();
+    assert!(matches!(result[0].kind, TokenKind::Char('a')));
+    assert!(matches!(result[1].kind, TokenKind::Char('\n')));
+    assert!(matches!(result[2].kind, TokenKind::Char('\u{1F44D}')));
+    assert!(matches!(result[3].kind, TokenKind::Char('\'')));
+}
+
+#[test]
+fn empty_and_multi_char_literals_are_rejected() {
+    // Neither `''` nor `'ab'` matches the single-scalar char-literal regex, so
+    // both surface as lex errors rather than tokenizing.
+    assert!(tokenize("''").is_err());
+    assert!(tokenize("'ab'").is_err());
+    assert!(tokenize("'a").is_err());
+}
+
+#[test]
 fn stress_test_large_input() {
     let mut source = String::new();
     for i in 0..1000 {

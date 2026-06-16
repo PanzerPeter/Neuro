@@ -28,6 +28,9 @@ impl FoldedConst {
             shared_types::Literal::Integer(v, _) => FoldedConst::Int(*v),
             shared_types::Literal::Float(v, _) => FoldedConst::Float(*v),
             shared_types::Literal::Boolean(v) => FoldedConst::Bool(*v),
+            // A `char` const folds as its 32-bit code point; `map_int_type(Char)`
+            // (i32) gives the slot the correct width when emitted.
+            shared_types::Literal::Char(c) => FoldedConst::Int(*c as i64),
             shared_types::Literal::String(s) => FoldedConst::Str(s.clone()),
         }
     }
@@ -98,6 +101,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 .bool_type()
                 .const_int(*val as u64, false)
                 .into()),
+            // §1.2 — a `char` is its 32-bit Unicode scalar value held in an i32.
+            shared_types::Literal::Char(c) => {
+                Ok(self.context.i32_type().const_int(*c as u64, false).into())
+            }
             shared_types::Literal::String(s) => {
                 // Literals are not heap-allocated: the UTF-8 bytes live in `.rodata` for the
                 // program's lifetime. LLVM appends the `STRING_NULL_TERMINATOR` automatically.
@@ -450,14 +457,16 @@ impl<'ctx> CodegenContext<'ctx> {
                         .into())
                 }
             }
-            // Int to Int
-            (t1, t2) if t1.is_integer() && t2.is_integer() => {
+            // Int to Int, including casts to/from `char` (a 32-bit code point) (§1.2).
+            // `is_int_like` covers integers plus `char`; widening uses zero-extension
+            // for unsigned and `char`, sign-extension otherwise.
+            (t1, t2) if t1.is_int_like() && t2.is_int_like() => {
                 let int_value = value.into_int_value();
                 let from_width = int_value.get_type().get_bit_width();
                 let to_width = target_llvm.into_int_type().get_bit_width();
 
                 if to_width > from_width {
-                    if t1.is_unsigned_int() {
+                    if t1.is_unsigned_like() {
                         Ok(self
                             .builder
                             .build_int_z_extend(int_value, target_llvm.into_int_type(), "cast_ext")

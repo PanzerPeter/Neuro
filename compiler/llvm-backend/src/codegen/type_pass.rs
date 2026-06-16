@@ -390,6 +390,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         }
                     }
                     shared_types::Literal::Boolean(_) => Type::Bool,
+                    shared_types::Literal::Char(_) => Type::Char,
                     shared_types::Literal::String(_) => Type::String,
                 };
                 self.expr_types.insert(span.start, ty);

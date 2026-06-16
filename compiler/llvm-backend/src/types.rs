@@ -14,6 +14,8 @@ pub(crate) enum Type {
     F32,
     F64,
     Bool,
+    /// A single Unicode scalar value (§1.2), lowered to a 32-bit integer.
+    Char,
     String,
     Void,
     Function {
@@ -43,6 +45,7 @@ impl Type {
                 "f32" => Type::F32,
                 "f64" => Type::F64,
                 "bool" => Type::Bool,
+                "char" => Type::Char,
                 "string" => Type::String,
                 name => Type::Struct(name.to_string()),
             },
@@ -83,6 +86,19 @@ impl Type {
 
     pub(crate) fn is_unsigned_int(&self) -> bool {
         matches!(self, Type::U8 | Type::U16 | Type::U32 | Type::U64)
+    }
+
+    /// Whether this type lowers to an LLVM integer and so uses the integer cast
+    /// path: any integer plus `char` (a 32-bit code point). Distinct from
+    /// `is_integer`, which excludes `char` for the language-level numeric rules.
+    pub(crate) fn is_int_like(&self) -> bool {
+        self.is_integer() || matches!(self, Type::Char)
+    }
+
+    /// Whether an int-like value zero-extends (vs sign-extends) when widened in a
+    /// cast: unsigned integers and `char` (code points are non-negative).
+    pub(crate) fn is_unsigned_like(&self) -> bool {
+        self.is_unsigned_int() || matches!(self, Type::Char)
     }
 
     pub(crate) fn is_float(&self) -> bool {

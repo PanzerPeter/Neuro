@@ -4,7 +4,7 @@ Neuro is a statically typed language with explicit type annotations and planned 
 
 ## Current Status
 
-- Implemented: primitive types (integers, floats, booleans)
+- Implemented: primitive types (integers, floats, booleans, `char`)
 - Implemented: extended integer types (`i8`-`i64`, `u8`-`u64`)
 - Implemented: function types
 - Implemented: void type
@@ -181,6 +181,40 @@ func demo_booleans() -> i32 {
 
 **Values**: `true` or `false`
 **Operations**: Logical operators (`&&`, `||`, `!`), comparison results
+
+### Character Type
+
+The `char` type is a single **Unicode scalar value** (a 32-bit code point), not a byte.
+Char literals are written with single quotes and support escape sequences:
+
+```neuro
+func demo_chars() -> i32 {
+    val letter: char = 'A'
+    val newline: char = '\n'
+    val emoji: char = '\u{1F44D}'   // thumbs-up, U+1F44D
+
+    // char is Copy, so the source stays valid after a bind.
+    val also = letter
+
+    // Built-in total order: all six comparison operators work directly.
+    if letter < 'Z' && also == letter {
+        return letter as i32        // as-cast char -> integer (65)
+    }
+    return 0
+}
+```
+
+| Property | Behavior |
+|---|---|
+| **Width** | 32-bit Unicode scalar value |
+| **Literals** | `'a'`, `'\n'`, `'\t'`, `'\r'`, `'\\'`, `'\''`, `'\0'`, `'\xNN'`, `'\u{...}'` |
+| **Copy** | Yes — binding a `char` copies it; the source remains valid |
+| **Comparison** | Built-in `==`, `!=`, `<`, `>`, `<=`, `>=` (ordered by code point) |
+| **Casts** | `as` to/from any integer type (`'A' as i32`, `97 as char`); **not** to/from `float`/`bool` |
+| **Arithmetic** | None — `'a' + 1` is a compile error; cast to an integer and compute there |
+
+An empty literal (`''`), a multi-character literal (`'ab'`), and an unterminated literal
+(`'a`) are all lexer errors.
 
 ## String Type
 
