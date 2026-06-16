@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-644%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-657%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP & Phase 1.5 stabilization complete · Phase 1.7 (ownership) active · Phase 2 overlapping
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**644 Tests Passing**):
+Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**657 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -112,7 +112,8 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 | **Move Semantics** | Move-by-default for non-`Copy` values (`string` and structs without `@derive(Copy)`). Binding, assignment, `return`, struct-field store, and by-value call arguments move the source; reading a moved binding is a `use of moved value` error. `.clone()` opts out; `Copy` scalars are duplicated. Conditional (`if`/`while`/`for`) moves don't leak past their branch (§2.2) |
 | **Copy / Clone** | `@derive(Copy, Clone)` on structs (§2.3). A `Copy` struct is duplicated on assignment instead of moved; deriving `Copy` requires every field to be `Copy` (else a compile error). `Copy` implies `Clone`; `@derive(Clone)` enables `struct.clone()` as a builtin deep copy (a user `clone` method shadows it). Unknown derive args are accepted and ignored |
 | **Immutable Borrows** | `&T` reference type (params/returns/locals) and `&place` borrow expression (§2.4). Borrowing does not move the borrowee, and `&T` is `Copy`. Method/field access auto-derefs through a borrow: `.len()`/`.clone()` on `&string`, field read and `&self` methods on `&Struct`. Borrowing a temporary or `const` is `CannotBorrowValue`. Lowers to an opaque pointer. |
-| **Mutable Borrows** | `&mut T` reference type and `&mut place` borrow expression, plus the prefix `*` dereference operator for reading (`*r`) and writing (`*r = v`, `*place = value`) through a reference (§2.5). `&mut` requires a `mut` binding (`CannotBorrowMutably`); `*` applies only to a reference (`CannotDereference`); writing through `*` requires a `&mut` (`CannotAssignThroughRef`). `&mut T` and `&T` are distinct types — no implicit coercion. Borrows lower to the place's storage pointer; a deref is a load/store. (Flow-sensitive aliasing exclusivity lands with lifetime inference.) |
+| **Mutable Borrows** | `&mut T` reference type and `&mut place` borrow expression, plus the prefix `*` dereference operator for reading (`*r`) and writing (`*r = v`, `*place = value`) through a reference (§2.5). `&mut` requires a `mut` binding (`CannotBorrowMutably`); `*` applies only to a reference (`CannotDereference`); writing through `*` requires a `&mut` (`CannotAssignThroughRef`). `&mut T` and `&T` are distinct types — no implicit coercion. Borrows lower to the place's storage pointer; a deref is a load/store. |
+| **Borrow Exclusivity** | Flow-sensitive aliasing rules enforced at compile time (§2.4, §2.5): any number of shared `&T` borrows of a place may coexist, but a `&mut T` borrow is exclusive — while it is live, no other borrow of that place may exist. Lexical borrow regions: a borrow held by a binding lives until the binding leaves scope; a borrow passed to a call ends with the statement. Diagnostics `cannot borrow … as mutable` / `cannot borrow … as immutable`. Read/move-while-borrowed and returned-reference outlives await lifetime inference |
 | **String Slices** | `&string` is the borrowed string slice (§2.7): a non-owning `(ptr, len)` view. Equality `==` / `!=` compares the underlying UTF-8 bytes for any owned/borrowed combination (`&a == &b`, `&a == "lit"`, `"lit" == &a`); a borrowed operand is auto-dereferenced to its fat pointer before the byte compare. Reference-peeling is string-only, so `i32 == &string` stays a type error. Borrowing for a comparison never moves |
 | **Unsafe Blocks** | `unsafe { … }` reserved keyword + block expression (Phase 1.7 groundwork); inert — lowers identically to a bare block, evaluates to its trailing expression |
 | **Panic Runtime** | `panic(msg)`, `assert(cond)`, `unreachable()` builtins (§1.2): print a diagnostic (`message at file:line:col`) to stderr and abort via `abort()` — no stack unwinding. `assert` aborts only on a false condition. Divergent, so usable in tail-return position; a same-named user function shadows the builtin |
@@ -131,7 +132,7 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 >
 > If memory safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
 
-String fat pointers, move-by-default (use-after-move detection), the `Copy` trait, immutable borrows (`&T`), and mutable borrows (`&mut T` with the `*` deref operator) have already landed; the remaining work — flow-sensitive borrow exclusivity, lifetimes, and `Drop` / deterministic destruction — is tracked under Phase 1.7 in the roadmap.
+String fat pointers, move-by-default (use-after-move detection), the `Copy` trait, immutable borrows (`&T`), mutable borrows (`&mut T` with the `*` deref operator), and flow-sensitive borrow exclusivity (the `&`/`&mut` aliasing rules) have already landed; the remaining work — lifetimes and `Drop` / deterministic destruction — is tracked under Phase 1.7 in the roadmap.
 
 ---
 
@@ -482,7 +483,7 @@ Tensor/AI path: AST → Neuro High-Level IR
 |:---:|---|:---:|
 | **1**   | Core MVP — types, functions, control flow, LLVM backend | ✅ Complete |
 | **1.5** | Syntax & semantics stabilization — parser fixes, `const`, `as` casts, compound assignment, bitwise ops, integer suffixes, if/block expressions, `while true` lint, IEEE-754 float comparisons, string fat pointers | ✅ Complete |
-| **1.7** | Ownership & borrow checker — move semantics ✅, `Copy` trait ✅, immutable borrows `&T` ✅, mutable borrows `&mut T` ✅, lifetimes, drop / deterministic destruction, remove implicit copies | 🔄 In progress |
+| **1.7** | Ownership & borrow checker — move semantics ✅, `Copy` trait ✅, immutable borrows `&T` ✅, mutable borrows `&mut T` ✅, borrow exclusivity ✅, lifetimes, drop / deterministic destruction, remove implicit copies | 🔄 In progress |
 | **1.8** | Backend plumbing — `neuro-hir` typed IR crate, `melior` integration, HIR lowering pipeline shared by LLVM + future MLIR backends | 📋 Planned |
 | **2**   | Core language — arrays, tuples, structs ✅, methods ✅, enums, pattern matching, generics, traits, closures, type aliases, newtypes, `Option`/`Result`, `??`, `?`, modules, prelude, string interpolation | 🔄 In progress |
 | **3**   | Tensors & MLIR — `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | 📋 Planned |

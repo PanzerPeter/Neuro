@@ -7,6 +7,15 @@ use shared_types::Span;
 
 use crate::types::Type;
 
+/// A borrow held by a reference binding: the place it points at and whether the
+/// borrow is exclusive (`&mut`). Lets the borrow be released when the holding
+/// binding leaves scope (§2.4, §2.5).
+#[derive(Debug, Clone, PartialEq)]
+struct BorrowProvenance {
+    place: String,
+    exclusive: bool,
+}
+
 /// Information about a symbol (variable)
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SymbolInfo {
@@ -15,6 +24,18 @@ pub(crate) struct SymbolInfo {
     /// The span at which this binding's value was moved out, or `None` while the
     /// binding still owns its value. Drives use-after-move detection (§2.2).
     pub(crate) moved_at: Option<Span>,
+    /// Borrows taken against this binding's place that outlive a single statement —
+    /// each one held by a reference binding (`val r = &x`) until it leaves scope.
+    shared_persistent: u32,
+    exclusive_persistent: u32,
+    /// Borrows against this place that live only for the current statement (call
+    /// arguments, conditions, return values). Cleared at the end of every
+    /// statement so a transient borrow never leaks past the statement taking it.
+    shared_transient: u32,
+    exclusive_transient: u32,
+    /// Set when this binding is itself a reference that borrows another place
+    /// (`val r = &x`); drives release of the borrow when this binding dies.
+    borrows: Option<BorrowProvenance>,
 }
 
 impl SymbolInfo {
@@ -23,6 +44,11 @@ impl SymbolInfo {
             ty,
             mutable,
             moved_at: None,
+            shared_persistent: 0,
+            exclusive_persistent: 0,
+            shared_transient: 0,
+            exclusive_transient: 0,
+            borrows: None,
         }
     }
 }
@@ -46,10 +72,23 @@ impl SymbolTable {
         self.scopes.push(HashMap::new());
     }
 
-    /// Exit the current scope
+    /// Exit the current scope, releasing every borrow held by a binding that
+    /// dies with it. A reference binding (`val r = &x`) holds a borrow against an
+    /// outer place; once `r` is gone the borrow is over, so the outer place's
+    /// persistent borrow count is decremented (§2.4, §2.5). Borrows targeting a
+    /// place that lived in the same dying scope need no release — the place is
+    /// gone too — so a target absent from the surviving scopes is simply skipped.
     pub(crate) fn pop_scope(&mut self) {
-        if self.scopes.len() > 1 {
-            self.scopes.pop();
+        if self.scopes.len() <= 1 {
+            return;
+        }
+        let Some(dying) = self.scopes.pop() else {
+            return;
+        };
+        for info in dying.values() {
+            if let Some(prov) = &info.borrows {
+                self.release_persistent(prov);
+            }
         }
     }
 
@@ -74,6 +113,98 @@ impl SymbolTable {
             }
         }
         None
+    }
+
+    fn lookup_mut(&mut self, name: &str) -> Option<&mut SymbolInfo> {
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(info) = scope.get_mut(name) {
+                return Some(info);
+            }
+        }
+        None
+    }
+
+    /// Total borrows currently active against `place` — persistent plus
+    /// transient — as `(shared, exclusive)`. `None` when the name is not a live
+    /// binding (e.g. a constant or an undefined name). Drives the §2.4/§2.5
+    /// coexistence checks at each borrow site.
+    pub(crate) fn borrow_counts(&self, place: &str) -> Option<(u32, u32)> {
+        let info = self.lookup(place)?;
+        Some((
+            info.shared_persistent + info.shared_transient,
+            info.exclusive_persistent + info.exclusive_transient,
+        ))
+    }
+
+    /// Register a borrow of `place` that lives only for the current statement
+    /// (a call argument, a condition, a returned reference). Cleared by
+    /// [`clear_transient_borrows`]. No-op when `place` is not a live binding.
+    ///
+    /// [`clear_transient_borrows`]: SymbolTable::clear_transient_borrows
+    pub(crate) fn add_transient_borrow(&mut self, place: &str, exclusive: bool) {
+        if let Some(info) = self.lookup_mut(place) {
+            if exclusive {
+                info.exclusive_transient = info.exclusive_transient.saturating_add(1);
+            } else {
+                info.shared_transient = info.shared_transient.saturating_add(1);
+            }
+        }
+    }
+
+    /// Promote the transient borrow of `place` taken while checking an
+    /// initializer into a persistent borrow held by `holder` (`val holder = &place`).
+    /// The borrow is released when `holder` leaves scope (see [`pop_scope`]).
+    ///
+    /// [`pop_scope`]: SymbolTable::pop_scope
+    pub(crate) fn attach_borrow(&mut self, holder: &str, place: &str, exclusive: bool) {
+        if let Some(info) = self.lookup_mut(place) {
+            if exclusive {
+                info.exclusive_transient = info.exclusive_transient.saturating_sub(1);
+                info.exclusive_persistent = info.exclusive_persistent.saturating_add(1);
+            } else {
+                info.shared_transient = info.shared_transient.saturating_sub(1);
+                info.shared_persistent = info.shared_persistent.saturating_add(1);
+            }
+        }
+        if let Some(info) = self.lookup_mut(holder) {
+            info.borrows = Some(BorrowProvenance {
+                place: place.to_string(),
+                exclusive,
+            });
+        }
+    }
+
+    /// Release the persistent borrow held by `holder`, if any — used before a
+    /// `mut` reference binding is reassigned, so its previous borrowee is freed
+    /// before the new borrow is checked. No-op when `holder` holds no borrow.
+    pub(crate) fn release_borrow_of(&mut self, holder: &str) {
+        let prov = self.lookup_mut(holder).and_then(|info| info.borrows.take());
+        if let Some(prov) = prov {
+            self.release_persistent(&prov);
+        }
+    }
+
+    fn release_persistent(&mut self, prov: &BorrowProvenance) {
+        if let Some(info) = self.lookup_mut(&prov.place) {
+            if prov.exclusive {
+                info.exclusive_persistent = info.exclusive_persistent.saturating_sub(1);
+            } else {
+                info.shared_persistent = info.shared_persistent.saturating_sub(1);
+            }
+        }
+    }
+
+    /// Drop every transient borrow. Called at the end of each statement: a borrow
+    /// passed to a call or used in a condition lives only for that statement, so
+    /// it must not block a later borrow of the same place (§2.4, §2.5). Persistent
+    /// borrows (held by live reference bindings) are untouched.
+    pub(crate) fn clear_transient_borrows(&mut self) {
+        for scope in &mut self.scopes {
+            for info in scope.values_mut() {
+                info.shared_transient = 0;
+                info.exclusive_transient = 0;
+            }
+        }
     }
 
     /// Mark the binding named `name` as moved-out at `span` (innermost match).

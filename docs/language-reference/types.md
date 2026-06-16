@@ -493,10 +493,47 @@ func main() -> i32 {
 }
 ```
 
-> **Deferred:** the flow-sensitive aliasing rule — *at most one `&mut` at a time, and no
-> `&` may coexist with it* — lands with lifetime inference, which shares the same
-> borrow-region analysis. The type system, the `mut`-binding requirement, and `*` read/write
-> are enforced today.
+### Borrow Exclusivity (`&` / `&mut` aliasing rules)
+
+The borrow checker enforces two coexistence rules at compile time (§2.4, §2.5):
+
+- **Any number of shared `&T` borrows** of a place may be live at the same time.
+- **A `&mut T` borrow is exclusive**: while it is live, no other borrow of that place —
+  shared or mutable — may exist.
+
+A borrow's region is **lexical**. A borrow held by a binding (`val r = &x`) lives until that
+binding leaves scope; a borrow passed to a function, used in a condition, or returned ends
+with the statement that took it. So sequential borrows in separate statements never conflict,
+and a borrow taken inside a block is released at the block's closing brace.
+
+```neuro
+func main() -> i32 {
+    mut x: i32 = 5
+    val a: &i32 = &x
+    val b: &i32 = &x          // ok — shared borrows coexist
+    val c: &mut i32 = &mut x  // ERROR: cannot borrow 'x' as mutable — it is already borrowed
+    return 0
+}
+```
+
+```neuro
+func inc(n: &mut i32) { *n = *n + 1 }
+
+func main() -> i32 {
+    mut x: i32 = 0
+    inc(&mut x)               // the &mut ends with this call
+    inc(&mut x)               // ok — the previous borrow is no longer live
+    return x                  // 2
+}
+```
+
+The diagnostics are `cannot borrow '<name>' as mutable` (a `&mut` while any borrow is live) and
+`cannot borrow '<name>' as immutable` (a `&` while a `&mut` is live).
+
+> **Deferred:** this is a lexical check, not non-lexical liveness (NLL). Reading or moving a
+> value while it is borrowed, and verifying that a returned reference does not outlive its
+> borrowee, land with **lifetime inference** (§2.6), which extends the same borrow-region
+> analysis.
 
 ### String Slices (`&string`)
 

@@ -77,6 +77,21 @@ opt-out. Conservative: `if`/`while`/`for` bodies and if-expr arms snapshot/resto
 (`snapshot_moves`/`restore_moves`) so a conditional move never leaks onto a non-executing path. May
 miss some moves (e.g. second-iteration loop moves) but never rejects a valid program.
 
+Borrow exclusivity (§2.4, §2.5, `symbol_table.rs` + the `Expr::Reference` arm): each binding tracks
+borrows taken *against its place* — persistent counts (a borrow held by a reference binding via
+`val r = &x`) plus transient counts (a borrow passed to a call, used in a condition, or returned).
+`borrow_counts` sums them; at a `&place` site the `Expr::Reference` arm rejects a `&mut` while any
+borrow is live (`CannotMutablyBorrowWhileBorrowed`) and a `&` while a `&mut` is live
+(`CannotBorrowWhileMutablyBorrowed`); any number of shared borrows may coexist. A direct
+`&place` / `&mut place` initializer is promoted to a persistent borrow held by the new binding
+(`attach_borrow`), released when that binding leaves scope (`pop_scope`); reassigning a `mut`
+reference releases its old borrow first (`release_borrow_of`). Transient borrows are dropped at the
+end of every statement (`clear_transient_borrows`), so a borrow never outlives the statement that
+took it. Lexical, not NLL: only direct-borrow initializers create tracked persistent borrows, so the
+analysis never rejects a valid program — it may miss borrows that escape through compound
+expressions. Read/move-while-borrowed and returned-reference outlives are not yet checked (they await
+lifetime inference).
+
 Const declarations (`const NAME: Type = expr`): `constants: HashMap<String, Type>` holds both
 module-level and body consts. `is_const_expr` validates the RHS (literals, arithmetic on literals,
 casts, identifiers referring to other known consts). Body `Stmt::Const` validated in `check_stmt`.
@@ -84,6 +99,14 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-06-16: Borrow exclusivity §2.4/§2.5. `SymbolInfo` gained persistent/transient borrow counters
+  plus a `borrows` provenance; new `SymbolTable` methods `borrow_counts` / `add_transient_borrow` /
+  `attach_borrow` / `release_borrow_of` / `clear_transient_borrows`, and `pop_scope` now releases a
+  dying reference binding's borrow. The `Expr::Reference` arm checks coexistence and registers the
+  borrow as transient; `check_stmt` wraps `check_stmt_inner` to clear transient borrows at statement
+  end; `VarDecl` / `Assignment` promote a direct `&place` initializer to a persistent borrow. New
+  errors `CannotMutablyBorrowWhileBorrowed` / `CannotBorrowWhileMutablyBorrowed`. Tests in
+  `type_checkers/tests/mod.rs`.
 - 2026-06-16: `f16`/`bf16` half-precision primitives (§1.2). New `Type::F16`/`Type::BF16`: `"f16"`/`"bf16"`
   resolve in `resolve_type`; the `FloatSuffix::F16`/`BF16` literal suffixes infer to them; `is_half_float()`
   added. Narrow contract — Copy (not move-tracked), `==`/`!=` via the compatible-type path, `as`-cast

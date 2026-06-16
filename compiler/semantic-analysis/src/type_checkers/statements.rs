@@ -1,8 +1,35 @@
 use super::{LoopContext, TypeChecker};
 use crate::errors::TypeError;
 use crate::types::Type;
-use ast_types::Stmt;
+use ast_types::{Expr, Stmt};
 use shared_types::Identifier;
+
+/// If `expr` is a direct borrow of a named place (`&x` / `&mut x`, possibly
+/// parenthesised), return that place's name and whether the borrow is exclusive.
+/// A borrow wrapped in any other expression (a block, an `if`, a call result) is
+/// not tracked as persistent — only a direct initializer creates a held borrow,
+/// which keeps the analysis free of false positives at the cost of missing some
+/// borrows that escape through compound expressions.
+fn borrow_target_of(expr: &Expr) -> Option<(String, bool)> {
+    let mut outer = expr;
+    while let Expr::Paren(inner, _) = outer {
+        outer = inner;
+    }
+    let Expr::Reference {
+        operand, mutable, ..
+    } = outer
+    else {
+        return None;
+    };
+    let mut place = operand.as_ref();
+    while let Expr::Paren(inner, _) = place {
+        place = inner;
+    }
+    match place {
+        Expr::Identifier(ident) => Some((ident.name.clone(), *mutable)),
+        _ => None,
+    }
+}
 
 impl TypeChecker {
     /// Validate a `break` / `continue` against the active loop stack (§3.7).
@@ -109,10 +136,24 @@ impl TypeChecker {
         }
     }
 
+    /// Check a statement, then drop any transient borrows it took.
+    ///
+    /// A borrow passed to a call, used in a condition, or returned lives only for
+    /// the statement that created it (§2.4, §2.5). Clearing transient borrows here
+    /// — after the statement and its nested sub-statements are fully checked —
+    /// frees the place for a later borrow without leaking the borrow forward.
+    /// Persistent borrows held by reference bindings are untouched; they are
+    /// released when their binding leaves scope.
+    pub(crate) fn check_stmt(&mut self, stmt: &Stmt) -> Option<()> {
+        let result = self.check_stmt_inner(stmt);
+        self.symbols.clear_transient_borrows();
+        result
+    }
+
     /// Check a statement.
     /// Returns None if there was a fatal error, Some(()) otherwise.
     /// Non-fatal errors are recorded and checking continues.
-    pub(crate) fn check_stmt(&mut self, stmt: &Stmt) -> Option<()> {
+    fn check_stmt_inner(&mut self, stmt: &Stmt) -> Option<()> {
         match stmt {
             Stmt::VarDecl {
                 name,
@@ -187,6 +228,13 @@ impl TypeChecker {
                 // Binding the initializer moves it out of its source (§2.2).
                 if let Some(init_expr) = init {
                     self.record_move(init_expr);
+
+                    // A direct `&place` / `&mut place` initializer makes this
+                    // binding hold a persistent borrow of that place, live until
+                    // the binding leaves scope (§2.4, §2.5).
+                    if let Some((place, exclusive)) = borrow_target_of(init_expr) {
+                        self.symbols.attach_borrow(&name.name, &place, exclusive);
+                    }
                 }
 
                 Some(())
@@ -200,6 +248,12 @@ impl TypeChecker {
                 // Lookup the target variable first to get expected type
                 let expected_ty = self.symbols.lookup(&target.name).map(|s| s.ty.clone());
 
+                // If the target was a reference binding, its previous borrow ends
+                // here — release it before the new value is checked so that
+                // re-borrowing the same place (`r = &mut x`) is not a false
+                // conflict against the borrow being overwritten (§2.4, §2.5).
+                self.symbols.release_borrow_of(&target.name);
+
                 // Check the value expression with expected type hint
                 let value_ty = self
                     .check_expr(value, expected_ty.as_ref())
@@ -209,6 +263,12 @@ impl TypeChecker {
                 // fresh value — clearing any prior moved-out state on it (§2.2).
                 self.record_move(value);
                 self.symbols.clear_moved(&target.name);
+
+                // A direct `&place` / `&mut place` RHS makes the target hold a new
+                // persistent borrow of that place (§2.4, §2.5).
+                if let Some((place, exclusive)) = borrow_target_of(value) {
+                    self.symbols.attach_borrow(&target.name, &place, exclusive);
+                }
 
                 // Lookup the target variable again for validation
                 if let Some(symbol_info) = self.symbols.lookup(&target.name) {

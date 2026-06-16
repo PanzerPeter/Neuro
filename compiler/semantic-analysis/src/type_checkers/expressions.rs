@@ -986,6 +986,32 @@ impl TypeChecker {
                 if matches!(inner, Type::Unknown) {
                     return Some(Type::Unknown);
                 }
+
+                // §2.4 / §2.5 aliasing exclusivity. A `&mut` borrow is exclusive:
+                // no other borrow of the place may be live at the same time. A
+                // shared `&` borrow tolerates other shared borrows but excludes an
+                // active `&mut`. The counts sum persistent borrows (held by live
+                // reference bindings) and transient borrows (taken earlier in this
+                // same statement, e.g. another argument of the same call).
+                if let Some((shared, exclusive)) = self.symbols.borrow_counts(&name) {
+                    if *mutable {
+                        if shared > 0 || exclusive > 0 {
+                            self.record_error(TypeError::CannotMutablyBorrowWhileBorrowed {
+                                name: name.clone(),
+                                span: *span,
+                            });
+                        }
+                    } else if exclusive > 0 {
+                        self.record_error(TypeError::CannotBorrowWhileMutablyBorrowed {
+                            name: name.clone(),
+                            span: *span,
+                        });
+                    }
+                }
+                // Every fresh borrow starts transient; a `val r = &place` initializer
+                // is promoted to a persistent borrow by the `VarDecl` handler.
+                self.symbols.add_transient_borrow(&name, *mutable);
+
                 Some(Type::Reference {
                     inner: Box::new(inner),
                     mutable: *mutable,
