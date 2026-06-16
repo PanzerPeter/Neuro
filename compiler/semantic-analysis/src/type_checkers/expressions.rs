@@ -221,6 +221,7 @@ impl TypeChecker {
                     }
                 }
                 Literal::Boolean(_) => Some(Type::Bool),
+                Literal::Char(_) => Some(Type::Char), // Char literals have char type (§1.2)
                 Literal::String(_) => Some(Type::String), // String literals have string type
             },
 
@@ -322,7 +323,8 @@ impl TypeChecker {
                         Some(Type::Bool)
                     }
 
-                    // Inequality operators: require numeric types (int/float), return bool
+                    // Ordering operators: require numeric or `char` operands (§1.2 gives
+                    // `char` a built-in total order), return bool.
                     BinaryOp::Less
                     | BinaryOp::Greater
                     | BinaryOp::LessEqual
@@ -336,7 +338,7 @@ impl TypeChecker {
                             return Some(Type::Unknown);
                         }
 
-                        if !left_ty.is_numeric() {
+                        if !left_ty.is_numeric() && !left_ty.is_char() {
                             self.record_error(TypeError::InvalidBinaryOperator {
                                 op: op.to_string(),
                                 left: left_ty.clone(),

@@ -285,6 +285,7 @@ fn resolve_syntax_type(ty: &ast_types::Type) -> CodegenResult<Type> {
             "f64" => Ok(Type::F64),
             // Other types
             "bool" => Ok(Type::Bool),
+            "char" => Ok(Type::Char),
             "string" => Ok(Type::String),
             "void" => Ok(Type::Void),
             // Struct types are recognised here as named types; their field layout is

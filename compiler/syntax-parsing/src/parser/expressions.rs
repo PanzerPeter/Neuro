@@ -78,6 +78,7 @@ impl Parser {
                 token.span,
             )),
             TokenKind::String(s) => Ok(Expr::Literal(Literal::String(s), token.span)),
+            TokenKind::Char(c) => Ok(Expr::Literal(Literal::Char(c), token.span)),
             TokenKind::True => Ok(Expr::Literal(Literal::Boolean(true), token.span)),
             TokenKind::False => Ok(Expr::Literal(Literal::Boolean(false), token.span)),
 

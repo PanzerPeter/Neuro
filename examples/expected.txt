@@ -21,6 +21,7 @@ basics/phase1_complete.nr       0
 basics/type_inference.nr        42
 
 # --- types ----------------------------------------------------------------
+types/char.nr                       65
 types/constants.nr                  51
 types/copy_clone.nr                 14
 types/extended_types.nr             0

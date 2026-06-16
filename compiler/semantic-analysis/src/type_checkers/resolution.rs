@@ -23,6 +23,7 @@ impl TypeChecker {
                 "f64" => Some(Type::F64),
                 // Other types
                 "bool" => Some(Type::Bool),
+                "char" => Some(Type::Char),
                 "string" => Some(Type::String),
                 "void" => Some(Type::Void),
                 name => {

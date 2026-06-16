@@ -35,6 +35,8 @@ impl<'ctx> TypeMapper<'ctx> {
             Type::F64 => Ok(self.context.f64_type().into()),
             // Other types
             Type::Bool => Ok(self.context.bool_type().into()),
+            // `char` is a 32-bit Unicode scalar value (§1.2).
+            Type::Char => Ok(self.context.i32_type().into()),
             // String fat pointer: { ptr, i64 } where ptr points to null-terminated UTF-8
             // bytes in read-only memory and i64 holds the byte count excluding the null.
             // O(1) length access without scanning; prerequisite for the ownership system.
@@ -74,7 +76,7 @@ impl<'ctx> TypeMapper<'ctx> {
         match ty {
             Type::I8 | Type::U8 => self.context.i8_type(),
             Type::I16 | Type::U16 => self.context.i16_type(),
-            Type::I32 | Type::U32 => self.context.i32_type(),
+            Type::I32 | Type::U32 | Type::Char => self.context.i32_type(),
             Type::I64 | Type::U64 => self.context.i64_type(),
             _ => panic!("map_int_type called on non-integer type {:?}", ty),
         }

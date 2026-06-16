@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.37.0] - 2026-06-15
+
+### Added
+- `lexer`/`parser`/`semantic`/`codegen`: `char` primitive type (§1.2). A `char` is a single 32-bit Unicode scalar value. Char literals are written with single quotes and support escapes — `'a'`, `'\n'`, `'\t'`, `'\\'`, `'\''`, `'\0'`, the `\xNN` byte escape, and the `\u{...}` unicode escape (`'\u{1F44D}'`). `char` is `Copy` (binding it does not move the source), has a built-in total order so all six comparison operators work directly (`'a' < 'b'`), and `as`-casts to and from integer types in both directions (`'A' as i32` → 65, `97 as char` → `'a'`); it is **not** castable to/from `float` or `bool` and has **no** arithmetic (`'a' + 1` is a compile error — compute on the integer code point instead). New surface: lexer `TokenKind::Char(char)` (single-scalar regex; `''`/`'ab'`/unterminated `'a` are lex errors via the new `LexError::InvalidCharLiteral`), `Literal::Char(char)`, semantic `Type::Char`, and backend `Type::Char` lowered to LLVM `i32`. Tests: 3 lexer unit, 1 semantic unit, 6 `neurc` integration (`char_type.rs`), example `types/char.nr`. 635 tests pass.
+
+---
+
 ## [1.36.0] - 2026-06-15
 
 ### Added

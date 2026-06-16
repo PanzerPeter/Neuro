@@ -153,6 +153,17 @@ pub enum TokenKind {
     #[regex(r#""([^"\\]|\\.)*""#, parse_string_catch_all, priority = 1)]
     String(String),
 
+    // Character literals (§1.2): a single Unicode scalar value between single
+    // quotes, e.g. `'a'`, `'\n'`, `'\u{1F44D}'`. The regex admits exactly one
+    // content unit — a non-quote/backslash/newline char, a recognized escape, a
+    // `\u{...}` unicode escape, or a `\xNN` byte escape — so `''`, `'ab'`, and an
+    // unterminated `'a` never match and fall through to a lex error.
+    #[regex(
+        r"'([^'\\\n]|\\['nrt\\0]|\\u\{[0-9a-fA-F]+\}|\\x[0-9a-fA-F]{2})'",
+        parse_char
+    )]
+    Char(char),
+
     // Arithmetic operators
     #[token("+")]
     Plus,
@@ -315,6 +326,7 @@ impl Token {
             TokenKind::Float(_) => "<float>",
             TokenKind::FloatSuffix(_) => "<float>",
             TokenKind::String(_) => "<string>",
+            TokenKind::Char(_) => "<char>",
             TokenKind::Plus => "+",
             TokenKind::Minus => "-",
             TokenKind::Star => "*",
@@ -501,6 +513,50 @@ fn parse_string(lex: &mut logos::Lexer<TokenKind>) -> Result<String, LexError> {
 fn parse_string_catch_all(lex: &mut logos::Lexer<TokenKind>) -> Result<String, LexError> {
     // Try to parse the string, which will report any invalid escapes
     parse_string(lex)
+}
+
+/// Parse a character literal into its single Unicode scalar value (§1.2). The
+/// regex guarantees exactly one content unit between the quotes; this decodes a
+/// recognized escape (`\n`, `\u{...}`, `\xNN`, …) or returns the lone character.
+/// A `\u{...}` payload outside the valid scalar range (e.g. a surrogate) is the
+/// one case the regex cannot reject, so it is validated here.
+fn parse_char(lex: &mut logos::Lexer<TokenKind>) -> Result<char, LexError> {
+    let slice = lex.slice();
+    let span = Span::new(lex.span().start, lex.span().end);
+    let content = &slice[1..slice.len() - 1]; // Strip the surrounding single quotes
+    let mut chars = content.chars();
+
+    let invalid = |inner: &str| LexError::InvalidCharLiteral {
+        literal: format!("'{}'", inner),
+        span,
+    };
+
+    let first = chars.next().ok_or_else(|| invalid(content))?;
+    if first != '\\' {
+        return Ok(first);
+    }
+
+    match chars.next() {
+        Some('n') => Ok('\n'),
+        Some('r') => Ok('\r'),
+        Some('t') => Ok('\t'),
+        Some('\\') => Ok('\\'),
+        Some('\'') => Ok('\''),
+        Some('0') => Ok('\0'),
+        Some('x') => {
+            let hex: String = chars.by_ref().take(2).collect();
+            let code = u8::from_str_radix(&hex, 16).map_err(|_| invalid(content))?;
+            Ok(code as char)
+        }
+        Some('u') => {
+            // `\u{NNNN}` — the regex shape is fixed, so skip the leading `{` and
+            // read hex digits until `}`.
+            let hex: String = chars.take_while(|&c| c != '}').skip(1).collect();
+            let code = u32::from_str_radix(&hex, 16).map_err(|_| invalid(content))?;
+            char::from_u32(code).ok_or_else(|| invalid(content))
+        }
+        _ => Err(invalid(content)),
+    }
 }
 
 // ── Suffixed integer helpers ──────────────────────────────────────────────────

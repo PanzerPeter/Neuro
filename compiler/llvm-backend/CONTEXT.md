@@ -174,6 +174,12 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-06-15: `char` primitive type (§1.2). New backend `Type::Char` lowers to LLVM `i32`
+  (`map_type`/`map_int_type`); `Literal::Char` emits an i32 constant of the code point; the type pass
+  records `Type::Char`. Casts use `is_int_like`/`is_unsigned_like` so char↔integer (and char→char)
+  reuse the int-to-int path (char zero-extends, code points are non-negative). Char consts fold via the
+  `FoldedConst::Int` path. Comparisons hit the signed-int branch, which is correct since valid code
+  points are < 2^21.
 - 2026-06-15: `loop` as a value expression (§3.7). `LoopTargets` gained `break_slot:
   Option<PointerValue>`; `codegen_loop` takes the loop's `span_start`, allocates a result slot when
   the type pass recorded a non-`Void` type there, and returns the loaded value (`Stmt::Loop` discards

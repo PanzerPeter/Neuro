@@ -32,6 +32,12 @@ so `+=` is always consumed as a single token rather than `+` then `=`.
 `TokenKind::Const` was added as a reserved keyword for compile-time constant declarations
 (`const NAME: Type = expr`). It sits between `Mut` and `As` in declaration order.
 
+`TokenKind::Char(char)` lexes a single-quoted character literal (§1.2). The regex admits
+exactly one content unit — a plain char, a recognized escape (`\n`/`\t`/`\r`/`\\`/`\'`/`\0`),
+a `\u{...}` unicode escape, or a `\xNN` byte escape — so `''`, `'ab'`, and an unterminated
+`'a` never match and become lex errors. `parse_char` decodes the escape and validates the
+`\u{...}` scalar range, emitting `LexError::InvalidCharLiteral` on an out-of-range code point.
+
 ## Recent Updates
 - 2026-06-09: Added `TokenKind::Loop` keyword token for the `loop { ... }` infinite-loop statement (§3.7). Reserves the word so it cannot be an identifier. Sits directly after `While` in declaration order.
 - 2026-06-04: Added `TokenKind::Unsafe` keyword token for `unsafe { }` blocks (Phase 1.7 groundwork). Reserves the word so it cannot be an identifier. Sits after `Type` in declaration order.

@@ -17,7 +17,7 @@ Provide lightweight, zero-business-logic data structures used universally across
 No upstream dependencies within the Neuro workspace. This is the lowest-level infrastructure crate.
 
 ## Notes
-`Span` is a half-open byte-offset range `[start, end)` used by every AST node and token for accurate error reporting. `Identifier` wraps a `String` name with a `Span`. `Literal` enumerates all compile-time constant value kinds (integer, float, string, bool).
+`Span` is a half-open byte-offset range `[start, end)` used by every AST node and token for accurate error reporting. `Identifier` wraps a `String` name with a `Span`. `Literal` enumerates all compile-time constant value kinds (integer, float, string, bool, char). `Literal::Char(char)` holds a single Unicode scalar value (§1.2).
 
 `IntSuffix` is a `Copy` enum enumerating the eight integer literal type suffixes (`I8`–`U64`). It is carried by `Literal::Integer(i64, Option<IntSuffix>)`: `None` means no suffix was written (contextual inference applies); `Some(s)` means the suffix overrides inference and pins the type.
 
@@ -26,3 +26,4 @@ No upstream dependencies within the Neuro workspace. This is the lowest-level in
 ## Recent Updates
 - 2026-04-18: Added `IntSuffix` enum; changed `Literal::Integer(i64)` → `Literal::Integer(i64, Option<IntSuffix>)` to carry explicit type suffixes from the lexer through to semantic analysis.
 - 2026-05-25: Added `FloatSuffix` enum; changed `Literal::Float(f64)` → `Literal::Float(f64, Option<FloatSuffix>)` mirroring the integer-suffix encoding for `1.5f32`/`2.0f64` literals.
+- 2026-06-15: Added `Literal::Char(char)` for the `char` primitive type (§1.2).

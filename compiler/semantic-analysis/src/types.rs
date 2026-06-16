@@ -21,6 +21,9 @@ pub enum Type {
     F64,
     // Other types
     Bool,
+    /// A single Unicode scalar value (§1.2). 32-bit, `Copy`, ordered, and
+    /// `as`-castable to/from integer types. Does not participate in arithmetic.
+    Char,
     String,
     Void,
     Function {
@@ -60,6 +63,7 @@ impl Type {
             | (Type::F32, Type::F32)
             | (Type::F64, Type::F64)
             | (Type::Bool, Type::Bool)
+            | (Type::Char, Type::Char)
             | (Type::String, Type::String)
             | (Type::Void, Type::Void) => true,
 
@@ -161,6 +165,11 @@ impl Type {
             }
             // Bool to integer
             (Type::Bool, t2) if t2.is_integer() => true,
+            // char to/from integer, and char to char (§1.2). char is not castable
+            // to/from float or bool — the only conversions are integer-valued.
+            (Type::Char, t2) if t2.is_integer() => true,
+            (t1, Type::Char) if t1.is_integer() => true,
+            (Type::Char, Type::Char) => true,
             _ => false,
         }
     }
@@ -200,6 +209,11 @@ impl Type {
         matches!(self, Type::Bool)
     }
 
+    /// Check if this is the `char` type (§1.2).
+    pub(crate) fn is_char(&self) -> bool {
+        matches!(self, Type::Char)
+    }
+
     /// Check if this is a string type
     #[allow(dead_code)]
     pub(crate) fn is_string(&self) -> bool {
@@ -221,6 +235,7 @@ impl fmt::Display for Type {
             Type::F32 => write!(f, "f32"),
             Type::F64 => write!(f, "f64"),
             Type::Bool => write!(f, "bool"),
+            Type::Char => write!(f, "char"),
             Type::String => write!(f, "string"),
             Type::Void => write!(f, "void"),
             Type::Unknown => write!(f, "<error>"),
@@ -465,6 +480,34 @@ mod tests {
         assert!(!ref_i32
             .peel_string_ref()
             .is_compatible_with(&Type::I32.peel_string_ref()));
+    }
+
+    #[test]
+    fn char_type_compatibility_cast_and_display() {
+        // §1.2: char is its own type, Copy, ordered, and castable to/from integers only.
+        assert!(Type::Char.is_compatible_with(&Type::Char));
+        assert!(!Type::Char.is_compatible_with(&Type::I32));
+        assert!(!Type::Char.is_compatible_with(&Type::String));
+        assert!(Type::Char.is_char());
+        assert!(!Type::I32.is_char());
+        assert_eq!(Type::Char.to_string(), "char");
+
+        // char is not numeric (no arithmetic) but is not an integer/float/bool either.
+        assert!(!Type::Char.is_numeric());
+        assert!(!Type::Char.is_integer());
+
+        // Valid casts: char <-> integer, char -> char.
+        assert!(Type::I32.is_valid_cast(&Type::Char)); // char as i32
+        assert!(Type::U8.is_valid_cast(&Type::Char)); // char as u8
+        assert!(Type::Char.is_valid_cast(&Type::I32)); // i32 as char
+        assert!(Type::Char.is_valid_cast(&Type::U8)); // u8  as char
+        assert!(Type::Char.is_valid_cast(&Type::Char));
+
+        // Invalid casts: char <-> float / bool.
+        assert!(!Type::F64.is_valid_cast(&Type::Char));
+        assert!(!Type::Char.is_valid_cast(&Type::F64));
+        assert!(!Type::Bool.is_valid_cast(&Type::Char));
+        assert!(!Type::Char.is_valid_cast(&Type::Bool));
     }
 
     #[test]
