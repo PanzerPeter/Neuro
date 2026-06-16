@@ -58,9 +58,11 @@ Key design goals:
 
 - Primitive integers: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
 - Floating point: `f32`, `f64`
+- Half-precision: `f16`, `bf16` — scalar primitives with a narrow storage/cast/compare contract (no arithmetic; compute in `f32`)
 - Boolean: `bool`
+- Character: `char` — a single 32-bit Unicode scalar value
 - String: fat-pointer ABI (`{ ptr, i64 }`), literals with escape sequences (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`)
-- Integer and float literal type suffixes: `42i64`, `255u8`, `1.5f32`, `2.0f64`
+- Integer and float literal type suffixes: `42i64`, `255u8`, `1.5f32`, `2.0f64`, `1.5f16`, `0.02bf16`
 - Contextual numeric literal inference with range validation
 - Struct types: definition, instantiation, field access, field mutation
 
@@ -116,7 +118,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 635 tests passing across all components
+- 644 tests passing across all components
 
 ## Compilation Pipeline
 

@@ -11,6 +11,10 @@ pub(crate) enum Type {
     U16,
     U32,
     U64,
+    /// Half-precision floats (§1.2), lowered to LLVM `half` / `bfloat`. Scalar
+    /// contract is storage + `==`/`!=` + `as`-cast only; no arithmetic.
+    F16,
+    BF16,
     F32,
     F64,
     Bool,
@@ -42,6 +46,8 @@ impl Type {
                 "u16" => Type::U16,
                 "u32" => Type::U32,
                 "u64" => Type::U64,
+                "f16" => Type::F16,
+                "bf16" => Type::BF16,
                 "f32" => Type::F32,
                 "f64" => Type::F64,
                 "bool" => Type::Bool,
@@ -101,7 +107,12 @@ impl Type {
         self.is_unsigned_int() || matches!(self, Type::Char)
     }
 
+    /// Whether this type lowers to an LLVM floating-point value. Unlike the
+    /// semantic predicate, this **includes** `f16`/`bf16`: at the LLVM level they
+    /// are floats (`half`/`bfloat`), so equality and `as`-cast lowering route
+    /// through the float instructions. Arithmetic never reaches here — semantic
+    /// analysis rejects it for half-precision (§1.2).
     pub(crate) fn is_float(&self) -> bool {
-        matches!(self, Type::F32 | Type::F64)
+        matches!(self, Type::F16 | Type::BF16 | Type::F32 | Type::F64)
     }
 }

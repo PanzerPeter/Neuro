@@ -114,8 +114,15 @@ pub enum IntSuffix {
 }
 
 /// Type suffix on a float literal (e.g., the `f32` in `1.5f32`).
+///
+/// `F16`/`BF16` are the half-precision suffixes (`1.5f16`, `0.02bf16`, §1.2). The
+/// suffix is the only way to write a half-precision literal — they have no
+/// contextual default — because half-precision scalars carry a deliberately narrow
+/// contract (storage, copy, equality, and `as`-cast only; no arithmetic).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FloatSuffix {
+    F16,
+    BF16,
     F32,
     F64,
 }

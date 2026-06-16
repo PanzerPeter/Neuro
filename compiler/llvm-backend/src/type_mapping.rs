@@ -30,7 +30,9 @@ impl<'ctx> TypeMapper<'ctx> {
             Type::U16 => Ok(self.context.i16_type().into()),
             Type::U32 => Ok(self.context.i32_type().into()),
             Type::U64 => Ok(self.context.i64_type().into()),
-            // Floating point
+            // Floating point. `f16`/`bf16` lower to LLVM `half` / `bfloat` (§1.2).
+            Type::F16 => Ok(self.context.f16_type().into()),
+            Type::BF16 => Ok(self.context.bf16_type().into()),
             Type::F32 => Ok(self.context.f32_type().into()),
             Type::F64 => Ok(self.context.f64_type().into()),
             // Other types

@@ -19,6 +19,8 @@ impl TypeChecker {
                 "u32" => Some(Type::U32),
                 "u64" => Some(Type::U64),
                 // Floating point
+                "f16" => Some(Type::F16),
+                "bf16" => Some(Type::BF16),
                 "f32" => Some(Type::F32),
                 "f64" => Some(Type::F64),
                 // Other types

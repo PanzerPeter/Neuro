@@ -92,7 +92,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             (BasicValueEnum::FloatValue(fv), BasicTypeEnum::FloatType(ft)) => {
-                if matches!(target_sem, crate::types::Type::F64) {
+                // Choose ext vs trunc by bit width so half-precision targets coerce
+                // correctly (§1.2); equal-width never reaches here (guarded above).
+                if ft.get_bit_width() > fv.get_type().get_bit_width() {
                     Ok(self
                         .builder
                         .build_float_ext(fv, ft, "coerce")

@@ -84,6 +84,12 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-06-16: `f16`/`bf16` half-precision primitives (§1.2). New `Type::F16`/`Type::BF16`: `"f16"`/`"bf16"`
+  resolve in `resolve_type`; the `FloatSuffix::F16`/`BF16` literal suffixes infer to them; `is_half_float()`
+  added. Narrow contract — Copy (not move-tracked), `==`/`!=` via the compatible-type path, `as`-cast
+  to/from any numeric type and to/from each other (`is_valid_cast` half arms), but **no arithmetic**:
+  `+ - * / %` on a half operand emits `TypeError::HalfFloatArithmetic` ("compute in f32"). `is_float()`
+  deliberately still excludes halves so arithmetic/inference paths skip them.
 - 2026-06-15: `char` primitive type (§1.2). New `Type::Char`: `"char"` resolves in `resolve_type`;
   `Literal::Char` infers to `Type::Char`; `is_valid_cast` permits char↔integer and char→char only
   (no float/bool); ordering comparisons (`< > <= >=`) accept `char` (built-in total order) alongside

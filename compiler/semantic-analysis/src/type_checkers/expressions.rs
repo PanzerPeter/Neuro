@@ -284,6 +284,20 @@ impl TypeChecker {
                     | BinaryOp::Multiply
                     | BinaryOp::Divide
                     | BinaryOp::Modulo => {
+                        // Half-precision scalars have no arithmetic (§1.2): point the
+                        // programmer at the `f32` workaround rather than a generic error.
+                        if let Some(half) = [&left_ty, &right_ty]
+                            .into_iter()
+                            .find(|t| t.is_half_float())
+                        {
+                            self.record_error(TypeError::HalfFloatArithmetic {
+                                op: op.to_string(),
+                                ty: half.clone(),
+                                span: *span,
+                            });
+                            return Some(Type::Unknown);
+                        }
+
                         if !left_ty.is_numeric() {
                             self.record_error(TypeError::InvalidBinaryOperator {
                                 op: op.to_string(),

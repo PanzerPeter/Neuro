@@ -229,6 +229,42 @@ fn tokenize_float_suffixes() {
 }
 
 #[test]
+fn tokenize_half_precision_float_suffixes() {
+    // §1.2 — `f16` / `bf16` half-precision literals. `bf16` must not be mis-split
+    // as `b` + `f16`, and `1.5f16` must not be read as `1.5` + the `f16` ident.
+    let result = tokenize("1.5f16 0.02bf16 2e3f16 1.0bf16").unwrap();
+    assert_eq!(result.len(), 5); // 4 suffixed floats + EOF
+    match &result[0].kind {
+        TokenKind::FloatSuffix(tok) => {
+            assert!((tok.value - 1.5).abs() < 1e-10);
+            assert_eq!(tok.suffix, FloatSuffix::F16);
+        }
+        _ => panic!("expected FloatSuffix"),
+    }
+    match &result[1].kind {
+        TokenKind::FloatSuffix(tok) => {
+            assert!((tok.value - 0.02).abs() < 1e-10);
+            assert_eq!(tok.suffix, FloatSuffix::BF16);
+        }
+        _ => panic!("expected FloatSuffix"),
+    }
+    match &result[2].kind {
+        TokenKind::FloatSuffix(tok) => {
+            assert!((tok.value - 2e3).abs() < 1.0);
+            assert_eq!(tok.suffix, FloatSuffix::F16);
+        }
+        _ => panic!("expected FloatSuffix"),
+    }
+    match &result[3].kind {
+        TokenKind::FloatSuffix(tok) => {
+            assert!((tok.value - 1.0).abs() < 1e-10);
+            assert_eq!(tok.suffix, FloatSuffix::BF16);
+        }
+        _ => panic!("expected FloatSuffix"),
+    }
+}
+
+#[test]
 fn unsuffixed_floats_unchanged() {
     // Ensure plain floats still produce Float tokens, not FloatSuffix.
     let result = tokenize("3.15 0.5 1e10").unwrap();

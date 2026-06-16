@@ -16,6 +16,10 @@ pub enum Type {
     U16,
     U32,
     U64,
+    // Half-precision floating point (§1.2). Narrow scalar contract: binding,
+    // move/copy, `==`/`!=`, and `as`-cast only — no scalar arithmetic or ordering.
+    F16,
+    BF16,
     // Floating point
     F32,
     F64,
@@ -60,6 +64,8 @@ impl Type {
             | (Type::U16, Type::U16)
             | (Type::U32, Type::U32)
             | (Type::U64, Type::U64)
+            | (Type::F16, Type::F16)
+            | (Type::BF16, Type::BF16)
             | (Type::F32, Type::F32)
             | (Type::F64, Type::F64)
             | (Type::Bool, Type::Bool)
@@ -170,6 +176,10 @@ impl Type {
             (Type::Char, t2) if t2.is_integer() => true,
             (t1, Type::Char) if t1.is_integer() => true,
             (Type::Char, Type::Char) => true,
+            // f16/bf16 half-precision (§1.2): `as`-cast to/from any numeric type
+            // and to/from each other / themselves. No bool/char/string conversions.
+            (t1, t2) if t1.is_half_float() && (t2.is_numeric() || t2.is_half_float()) => true,
+            (t1, t2) if t2.is_half_float() && (t1.is_numeric() || t1.is_half_float()) => true,
             _ => false,
         }
     }
@@ -199,9 +209,19 @@ impl Type {
         matches!(self, Type::U8 | Type::U16 | Type::U32 | Type::U64)
     }
 
-    /// Check if this is a floating-point type
+    /// Check if this is a full-precision floating-point type (`f32`/`f64`).
+    ///
+    /// Deliberately excludes `f16`/`bf16`: half-precision has a narrow scalar
+    /// contract (no arithmetic), so it must not flow through the arithmetic and
+    /// contextual-inference paths gated on this predicate (§1.2). Use
+    /// [`Type::is_half_float`] for the half-precision-only checks.
     pub fn is_float(&self) -> bool {
         matches!(self, Type::F32 | Type::F64)
+    }
+
+    /// Check if this is a half-precision floating-point type (`f16`/`bf16`, §1.2).
+    pub(crate) fn is_half_float(&self) -> bool {
+        matches!(self, Type::F16 | Type::BF16)
     }
 
     /// Check if this is a boolean type
@@ -232,6 +252,8 @@ impl fmt::Display for Type {
             Type::U16 => write!(f, "u16"),
             Type::U32 => write!(f, "u32"),
             Type::U64 => write!(f, "u64"),
+            Type::F16 => write!(f, "f16"),
+            Type::BF16 => write!(f, "bf16"),
             Type::F32 => write!(f, "f32"),
             Type::F64 => write!(f, "f64"),
             Type::Bool => write!(f, "bool"),
@@ -508,6 +530,41 @@ mod tests {
         assert!(!Type::Char.is_valid_cast(&Type::F64));
         assert!(!Type::Bool.is_valid_cast(&Type::Char));
         assert!(!Type::Char.is_valid_cast(&Type::Bool));
+    }
+
+    #[test]
+    fn half_float_type_compatibility_cast_and_display() {
+        // §1.2: f16/bf16 are their own distinct types, Copy, with a narrow contract.
+        assert!(Type::F16.is_compatible_with(&Type::F16));
+        assert!(Type::BF16.is_compatible_with(&Type::BF16));
+        // f16 and bf16 are distinct, and neither is compatible with f32/f64.
+        assert!(!Type::F16.is_compatible_with(&Type::BF16));
+        assert!(!Type::F16.is_compatible_with(&Type::F32));
+        assert!(!Type::BF16.is_compatible_with(&Type::F64));
+
+        assert_eq!(Type::F16.to_string(), "f16");
+        assert_eq!(Type::BF16.to_string(), "bf16");
+
+        // Half-precision is neither numeric (no arithmetic) nor full-precision float.
+        assert!(Type::F16.is_half_float());
+        assert!(Type::BF16.is_half_float());
+        assert!(!Type::F16.is_numeric());
+        assert!(!Type::F16.is_float());
+        assert!(!Type::F32.is_half_float());
+
+        // Valid casts: half <-> any numeric type, half <-> half, half -> self.
+        assert!(Type::F32.is_valid_cast(&Type::F16)); // f16 as f32
+        assert!(Type::F16.is_valid_cast(&Type::F32)); // f32 as f16
+        assert!(Type::I32.is_valid_cast(&Type::F16)); // f16 as i32
+        assert!(Type::F16.is_valid_cast(&Type::U8)); // u8  as f16
+        assert!(Type::BF16.is_valid_cast(&Type::F16)); // f16 as bf16
+        assert!(Type::F16.is_valid_cast(&Type::F16));
+
+        // Invalid casts: half <-> bool / char / string.
+        assert!(!Type::Bool.is_valid_cast(&Type::F16));
+        assert!(!Type::F16.is_valid_cast(&Type::Bool));
+        assert!(!Type::Char.is_valid_cast(&Type::F16));
+        assert!(!Type::F16.is_valid_cast(&Type::Char));
     }
 
     #[test]

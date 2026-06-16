@@ -174,6 +174,12 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-06-16: `f16`/`bf16` half-precision primitives (§1.2). New backend `Type::F16`/`Type::BF16` lower to
+  LLVM `half`/`bfloat` (`map_type`, `from_ast`, `resolve_syntax_type`); the `FloatSuffix::F16`/`BF16`
+  literals emit half/bfloat constants and the type pass records the types. Backend `is_float()` includes
+  the halves so equality (`fcmp`) and `as`-cast route through the float instructions. The float→float cast
+  and `coerce_if_needed` now pick `fpext`/`fptrunc` by **bit width** (not a fixed F32/F64 pair); an
+  f16↔bf16 cast (equal width, different format) routes through f32. Half consts fold via the typed path.
 - 2026-06-15: `char` primitive type (§1.2). New backend `Type::Char` lowers to LLVM `i32`
   (`map_type`/`map_int_type`); `Literal::Char` emits an i32 constant of the code point; the type pass
   records `Type::Char`. Casts use `is_int_like`/`is_unsigned_like` so char↔integer (and char→char)
