@@ -91,6 +91,8 @@ impl<'ctx> CodegenContext<'ctx> {
             shared_types::Literal::Float(val, suffix_opt) => {
                 use shared_types::FloatSuffix;
                 let llvm_ty = match suffix_opt {
+                    Some(FloatSuffix::F16) => self.context.f16_type(),
+                    Some(FloatSuffix::BF16) => self.context.bf16_type(),
                     Some(FloatSuffix::F32) => self.context.f32_type(),
                     None | Some(FloatSuffix::F64) => self.context.f64_type(),
                 };
@@ -323,6 +325,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 llvm_int.const_int(*i as u64, !ty.is_unsigned_int()).into()
             }
             FoldedConst::Float(f) => match ty {
+                crate::types::Type::F16 => self.context.f16_type().const_float(*f).into(),
+                crate::types::Type::BF16 => self.context.bf16_type().const_float(*f).into(),
                 crate::types::Type::F32 => self.context.f32_type().const_float(*f).into(),
                 _ => self.context.f64_type().const_float(*f).into(),
             },
@@ -438,21 +442,38 @@ impl<'ctx> CodegenContext<'ctx> {
                         .into())
                 }
             }
-            // Float to Float
+            // Float to Float. Direction is chosen by bit width, not a fixed
+            // F32/F64 pair, so f16/bf16 widen and narrow correctly (§1.2):
+            // widening uses `fpext`, narrowing `fptrunc`. f16<->bf16 share a width
+            // but differ in format — LLVM has no direct conversion, so route
+            // through f32 (widen then narrow).
             (t1, t2) if t1.is_float() && t2.is_float() => {
                 let float_value = value.into_float_value();
-                // F32 to F64 is Ext, F64 to F32 is Trunc
-                // Assuming Type::F32 and Type::F64 only
-                if matches!(t2, crate::types::Type::F64) {
+                let target_ft = target_llvm.into_float_type();
+                let from_w = float_value.get_type().get_bit_width();
+                let to_w = target_ft.get_bit_width();
+
+                if from_w == to_w {
+                    let f32t = self.context.f32_type();
+                    let widened = self
+                        .builder
+                        .build_float_ext(float_value, f32t, "cast_f2f_w")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
                     Ok(self
                         .builder
-                        .build_float_ext(float_value, target_llvm.into_float_type(), "cast_f2f")
+                        .build_float_trunc(widened, target_ft, "cast_f2f_n")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into())
+                } else if to_w > from_w {
+                    Ok(self
+                        .builder
+                        .build_float_ext(float_value, target_ft, "cast_f2f")
                         .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                         .into())
                 } else {
                     Ok(self
                         .builder
-                        .build_float_trunc(float_value, target_llvm.into_float_type(), "cast_f2f")
+                        .build_float_trunc(float_value, target_ft, "cast_f2f")
                         .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                         .into())
                 }

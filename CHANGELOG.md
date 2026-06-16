@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.38.0] - 2026-06-16
+
+### Added
+- `lexer`/`semantic`/`codegen`: `f16` / `bf16` half-precision scalar primitives (§1.2) — the final Phase 1.5 item. `f16` is the IEEE-754 half float; `bf16` is bfloat16 (`f32`-sized exponent range, fewer mantissa bits). Both are first-class scalar primitives with a deliberately **narrow contract**: binding, move/copy (`Copy`), equality (`==` / `!=`), and `as`-cast to/from any numeric type and to/from each other — but **no scalar arithmetic** (`a + b` on a half operand is a compile error directing you to compute in `f32`: `(a as f32 + b as f32)`) and no ordering. Half-precision literals always carry a suffix (`1.5f16`, `0.02bf16`) — there is no contextual default. Full support as tensor element dtypes is separate and lands with the tensor type system (Phase 3A). New surface: lexer `FloatSuffix::F16`/`BF16` (the two float-suffix regexes now match `(bf16|f16|f32|f64)`, split via `split_float_suffix`), semantic `Type::F16`/`BF16` (`is_half_float()`; new `HalfFloatArithmetic` diagnostic), and backend `Type::F16`/`BF16` lowered to LLVM `half` / `bfloat` (float→float casts and `coerce_if_needed` now pick `fpext`/`fptrunc` by bit width; an `f16`↔`bf16` cast routes through `f32`). Tests: 1 lexer unit, 1 semantic unit, 7 `neurc` integration (`half_precision.rs`), example `types/half_precision.nr`. 644 tests pass. **Phase 1.5 (Syntax & Semantics Stabilization) is now complete.**
+
+---
+
 ## [1.37.0] - 2026-06-15
 
 ### Added

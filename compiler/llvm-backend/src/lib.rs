@@ -281,6 +281,8 @@ fn resolve_syntax_type(ty: &ast_types::Type) -> CodegenResult<Type> {
             "u32" => Ok(Type::U32),
             "u64" => Ok(Type::U64),
             // Floating point
+            "f16" => Ok(Type::F16),
+            "bf16" => Ok(Type::BF16),
             "f32" => Ok(Type::F32),
             "f64" => Ok(Type::F64),
             // Other types

@@ -103,6 +103,8 @@ impl TypeChecker {
 
 pub(crate) fn float_suffix_to_type(suffix: &FloatSuffix) -> Type {
     match suffix {
+        FloatSuffix::F16 => Type::F16,
+        FloatSuffix::BF16 => Type::BF16,
         FloatSuffix::F32 => Type::F32,
         FloatSuffix::F64 => Type::F64,
     }

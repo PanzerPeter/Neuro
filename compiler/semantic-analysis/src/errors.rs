@@ -54,6 +54,9 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("arithmetic operator {op} is not defined on half-precision type {ty} at {span:?}: compute in f32, e.g. `(a as f32 {op} b as f32)`")]
+    HalfFloatArithmetic { op: String, ty: Type, span: Span },
+
     #[error("return type mismatch at {span:?}: expected {expected}, found {found}")]
     ReturnTypeMismatch {
         expected: Type,

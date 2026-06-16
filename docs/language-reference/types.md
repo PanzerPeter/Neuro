@@ -5,6 +5,7 @@ Neuro is a statically typed language with explicit type annotations and planned 
 ## Current Status
 
 - Implemented: primitive types (integers, floats, booleans, `char`)
+- Implemented: half-precision scalars (`f16`, `bf16`) with a narrow storage/cast/compare contract
 - Implemented: extended integer types (`i8`-`i64`, `u8`-`u64`)
 - Implemented: function types
 - Implemented: void type
@@ -118,8 +119,12 @@ val shifted: u8   = a.shr(2)              // 50   (200 >> 2, logical)
 
 | Type | Size | Precision | Range (approx) |
 |------|------|-----------|----------------|
+| `f16` | 16-bit | ~3 decimal digits | ±6.1e-5 to ±65504 |
+| `bf16` | 16-bit | ~2 decimal digits | ±1.18e-38 to ±3.39e38 |
 | `f32` | 32-bit | ~7 decimal digits | ±1.18e-38 to ±3.40e38 |
 | `f64` | 64-bit | ~15 decimal digits | ±2.23e-308 to ±1.80e308 |
+
+`f16` is the IEEE-754 half float; `bf16` is bfloat16, which trades mantissa bits for an `f32`-sized exponent range. Both are full scalar primitives with a deliberately **narrow contract** — see [Half-Precision Types](#half-precision-types-f16--bf16) below.
 
 **Examples**:
 
@@ -144,7 +149,40 @@ val c = 1e10f32       // exponent form with suffix
 val d = 1.5e-5f64     // fractional + exponent with suffix
 ```
 
-Valid suffixes: `f32`, `f64`. The suffix attaches directly to the literal — no whitespace is permitted between the digits and the suffix. The exponent form (`1e10f32`) and the fractional form (`1.5f32`) both accept a suffix.
+Valid suffixes: `f16`, `bf16`, `f32`, `f64`. The suffix attaches directly to the literal — no whitespace is permitted between the digits and the suffix. The exponent form (`1e10f32`) and the fractional form (`1.5f32`) both accept a suffix.
+
+### Half-Precision Types (`f16` / `bf16`)
+
+Modern AI relies on half-precision for mixed-precision training, so `f16` and `bf16` are first-class scalar primitives. To avoid the cross-hardware inconsistency of half-precision ALUs, they carry a **narrow scalar contract**:
+
+| Operation | Supported? |
+|-----------|------------|
+| Binding, move/copy (`Copy`) | ✅ |
+| Equality (`==`, `!=`) | ✅ |
+| `as`-cast to/from any numeric type, and to/from each other | ✅ |
+| Suffixed literals (`1.5f16`, `0.02bf16`) | ✅ |
+| Arithmetic (`+`, `-`, `*`, `/`, `%`) | ❌ compile error |
+| Ordering (`<`, `>`, `<=`, `>=`) | ❌ compile error |
+
+Half-precision literals **must** carry their suffix — there is no contextual default, so `val x: f16 = 1.5` is an error; write `1.5f16`.
+
+Scalar arithmetic is intentionally undefined: half-precision math is not portably specified across hardware. Compute in `f32` and cast back:
+
+```neuro
+func main() -> i32 {
+    val a: bf16 = 10.0bf16
+    val b: bf16 = 4.0bf16
+
+    // val bad = a + b            // compile error: arithmetic not defined on bf16
+    val sum: bf16 = (a as f32 + b as f32) as bf16   // 14.0
+
+    val h: f16 = 1.5f16
+    val same: bool = h == 1.5f16  // equality is allowed
+    return sum as i32             // 14
+}
+```
+
+As **tensor element types** (`Tensor<bf16, [...]>`, Phase 3) the restriction lifts entirely: elementwise math, matmul, and reductions lower through MLIR to the accelerator's native half-precision units. The split keeps half-precision where it pays off — bulk tensor compute — without committing the scalar layer to non-portable semantics.
 
 ### Digit Separators
 

@@ -385,6 +385,8 @@ impl<'ctx> CodegenContext<'ctx> {
                     shared_types::Literal::Float(_, suffix_opt) => {
                         use shared_types::FloatSuffix;
                         match suffix_opt {
+                            Some(FloatSuffix::F16) => Type::F16,
+                            Some(FloatSuffix::BF16) => Type::BF16,
                             Some(FloatSuffix::F32) => Type::F32,
                             None | Some(FloatSuffix::F64) => Type::F64,
                         }
