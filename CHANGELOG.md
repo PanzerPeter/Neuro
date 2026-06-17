@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.41.2] - 2026-06-17
+
+### Fixed
+- `codegen`: `examples/types/half_precision.nr` failed to link on Windows CI — `Failed to execute MSVC cl.exe`. Root cause: LLVM lowers `fpext`/`fptrunc` on `half`/`bfloat` (and f16/bf16 comparisons, which widen to f32 first) to soft-float runtime calls (`__extendhfsf2`, `__truncsfhf2`, `__truncdfhf2`, `__truncsfbf2`, `__truncdfbf2`). Linux/macOS resolve these from libgcc/compiler-rt via the `cc` driver; the Windows linkers (clang → lld-link → MSVC) link no such runtime, so the symbols were undefined and linking fell through to a `cl.exe` that is not on `PATH`. The backend now ships its own definitions: `src/softfloat/` (`builtins.ll`, generated from `reference.c`) is linked into any module that uses `half`/`bfloat`, making the emitted object self-contained on every target. Definitions are `weak_odr` (a platform runtime may still override) and integer-only (they never recursively re-emit these libcalls), and were exhaustively verified against clang's native `_Float16`/`__bf16` — f32↔f16 and f32→bf16 over all 2³² inputs, f16→f32 over all 2¹⁶, and the f64 paths over 200M random inputs, with zero mismatches.
+
+### Security
+- `ci`: hardened the GitHub Actions workflows against the OpenSSF Scorecard findings. All third-party actions in `ci.yml` and `scorecard.yml` are now pinned by commit SHA (Pinned-Dependencies); `osv-scanner.yml` drops its workflow-wide `security-events: write` to `permissions: read-all` and grants the write scope per-job (Token-Permissions); and a new `.github/dependabot.yml` keeps the pinned actions and Cargo crates updated weekly (Dependency-Update-Tool).
+
+---
+
 ## [1.41.1] - 2026-06-17
 
 ### Fixed
