@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.41.3] - 2026-06-17
+
+### Fixed
+- `build`: `compiler/llvm-backend/src/softfloat/builtins.ll` — baked into the build via `include_str!` — was silently excluded from git by the broad `*.ll` ignore rule, so it existed locally but was missing on every CI runner. This broke the build (`couldn't read builtins.ll`), failing Clippy, Architecture Boundaries, the test matrix, and the dependabot PRs. The file is now committed and `.gitignore` carries a negation (`!.../builtins.ll`) so the source IR is tracked while generated `.ll` artifacts stay ignored.
+
+### Changed
+- `ci`: dropped dead `develop` branch triggers (only `main` exists) and merged the duplicate `release_smoke` and `build_artifacts` jobs — each rebuilt the release binary on all three OSes — into a single `release` job that builds once, runs smoke tests, then uploads artifacts.
+
+---
+
 ## [1.41.2] - 2026-06-17
 
 ### Fixed

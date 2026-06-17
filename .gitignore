@@ -70,6 +70,9 @@ cross/
 # static & generated libs
 *.bc
 *.ll
+# ...except hand-written LLVM IR sources that are baked into the build
+# via include_str! (not generated artifacts).
+!compiler/llvm-backend/src/softfloat/builtins.ll
 
 # linker / package manager artifacts
 *.map
