@@ -47,11 +47,13 @@ members = [
 ]
 
 [workspace.package]
-version = "1.41.0"
+version = "1.41.1"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Neuro Contributors"]
-license = "GPL-3.0"
+license-file = "LICENSE"
+# Custom non-OSI license (Neuro Shared Source License); never publish to crates.io.
+publish = false
 repository = "https://github.com/PanzerPeter/Neuro"
 homepage = "https://github.com/PanzerPeter/Neuro"
 keywords = ["compiler", "ai", "machine-learning", "tensor", "neural-networks"]
@@ -69,7 +71,8 @@ unicode-segmentation = "1.11"
 unicode-ident = "1.0"
 
 # LLVM Backend
-# Requires LLVM 20 installed system-wide with MLIR enabled.
+# Requires LLVM 20 installed system-wide (the backend emits LLVM IR via inkwell;
+# MLIR is not needed until the Phase 3 tensor dialects).
 # On CachyOS/Arch: sudo pacman -S llvm20
 # LLVM_SYS_201_PREFIX must point to the LLVM 20 installation (e.g. /usr/lib/llvm20).
 # Feature flag is llvm20-1 (inkwell uses the minor-version suffix scheme).

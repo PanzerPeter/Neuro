@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.41.1] - 2026-06-17
+
+### Fixed
+- `build`: workspace manifest declared `license = "GPL-3.0"`, which both misidentified the project (it ships under the custom **Neuro Shared Source License v2.1**, per `LICENSE`, README, and `CONTRIBUTING.md`) and used a now-deprecated SPDX form. Switched to `license-file = "LICENSE"` in `[workspace.package]`; all member crates now inherit `license-file.workspace = true`.
+- `docs`: corrected the LLVM dependency comment in `Cargo.toml` that claimed LLVM must be built "with MLIR enabled" — the current backend emits LLVM IR via inkwell and needs no MLIR, which only arrives with the Phase 3 tensor dialects.
+
+---
+
 ## [1.41.0] - 2026-06-17
 
 ### Added
