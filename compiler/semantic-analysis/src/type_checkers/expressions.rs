@@ -137,6 +137,77 @@ impl TypeChecker {
         Some(Type::Unknown)
     }
 
+    /// Enforce the §2.5 rules for the receiver of a `&mut self` method call, which
+    /// borrows the receiver mutably for the call's duration.
+    ///
+    /// A receiver reached through a `&mut T` borrow is already write-capable and
+    /// passes; a `&T` receiver cannot yield write access, so it is rejected. An
+    /// owned receiver must root in a `mut` binding — mutating `o.inner` needs `o`
+    /// itself mutable. A receiver with no place root (a call or literal temporary)
+    /// is not assignable, so it is rejected like any `&mut` of a value. Exclusivity
+    /// is tracked at binding granularity (matching `&place` borrows), so only a
+    /// receiver that *is* the binding registers the call's transient exclusive
+    /// borrow and checks for a coexisting borrow; both clear at statement end.
+    fn check_mut_self_receiver(&mut self, object: &Expr, obj_ty: &Type, span: shared_types::Span) {
+        if let Type::Reference { mutable, .. } = obj_ty {
+            if !mutable {
+                let name = Self::place_root_name(object).unwrap_or_else(|| "value".to_string());
+                self.record_error(TypeError::CannotBorrowMutably { name, span });
+            }
+            return;
+        }
+
+        let Some(name) = Self::place_root_name(object) else {
+            self.record_error(TypeError::CannotBorrowValue { span });
+            return;
+        };
+        let Some(info) = self.symbols.lookup(&name) else {
+            return;
+        };
+        if !info.mutable {
+            self.record_error(TypeError::CannotBorrowMutably {
+                name: name.clone(),
+                span,
+            });
+            return;
+        }
+        if Self::is_bare_binding(object) {
+            if let Some((shared, exclusive)) = self.symbols.borrow_counts(&name) {
+                if shared > 0 || exclusive > 0 {
+                    self.record_error(TypeError::CannotMutablyBorrowWhileBorrowed {
+                        name: name.clone(),
+                        span,
+                    });
+                }
+            }
+            self.symbols.add_transient_borrow(&name, true);
+        }
+    }
+
+    /// The root binding name of a place expression, peeling parentheses, field
+    /// access, and dereference (`(o).inner` and `*o` both root at `o`). A receiver
+    /// with no place root — a call or literal temporary — yields `None`.
+    fn place_root_name(expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Identifier(ident) => Some(ident.name.clone()),
+            Expr::Paren(inner, _) => Self::place_root_name(inner),
+            Expr::FieldAccess { object, .. } => Self::place_root_name(object),
+            Expr::Deref { operand, .. } => Self::place_root_name(operand),
+            _ => None,
+        }
+    }
+
+    /// Whether `expr` is exactly a binding (an identifier, possibly parenthesised),
+    /// as opposed to a sub-place like a field access. Borrow tracking is keyed by
+    /// binding, so only a bare binding registers a tracked borrow.
+    fn is_bare_binding(expr: &Expr) -> bool {
+        match expr {
+            Expr::Identifier(_) => true,
+            Expr::Paren(inner, _) => Self::is_bare_binding(inner),
+            _ => false,
+        }
+    }
+
     /// Type-check a plain identifier call (free function or previously registered
     /// method with a mangled name). Extracted so the `Call` arm can delegate here.
     pub(crate) fn check_plain_call(
@@ -583,6 +654,13 @@ impl TypeChecker {
                                 return Some(Type::Unknown);
                             }
                         };
+
+                        // Calling a `&mut self` method takes an exclusive borrow of the
+                        // receiver for the call (§2.5): the receiver must be a mutable
+                        // place and must not already be borrowed.
+                        if self.mut_self_methods.contains(&mangled) {
+                            self.check_mut_self_receiver(object, &obj_ty, *fa_span);
+                        }
 
                         // The mangled function's first parameter is `self` (the struct).
                         // Callers provide only the non-self arguments, so we skip param[0]

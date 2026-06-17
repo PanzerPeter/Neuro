@@ -37,12 +37,18 @@ Five-pass `check_program`:
 
 Struct types are nominal — two `Type::Struct` are compatible iff names match.
 
-`check_impl` binds `self` as an immutable var of the struct type, then the remaining params, before
-checking the body.
+`check_impl` binds `self` as a var of the struct type — **mutable for `&mut self`**, immutable for
+`&self` — then the remaining params, before checking the body. A `&mut self` body may therefore
+assign to `self.field` (§2.5).
 
 Method calls (`instance.method(args)`) — recognised in `check_expr` when the `Call`'s `func` is a
 `FieldAccess`; the object's struct type drives an `impl_methods` lookup for the mangled name, then
-arity/arg types are validated (skipping param[0] = `self`).
+arity/arg types are validated (skipping param[0] = `self`). When the resolved method is in
+`mut_self_methods` (a `&mut self` receiver), `check_mut_self_receiver` enforces the §2.5 borrow:
+the receiver must be a `mut` place (or reached through `&mut T`) and must not already be borrowed —
+the same coexistence rule as a `&mut place` borrow — registering a transient exclusive borrow that
+clears at statement end. A `&T` receiver or a non-`mut` binding is `CannotBorrowMutably`; a live
+borrow is `CannotMutablyBorrowWhileBorrowed`.
 
 Associated calls (`TypeName::func(args)`) — recognised when `func` is an `Expr::Path`; mangled name
 `TypeName__funcName` looked up directly in `functions`.
@@ -62,8 +68,9 @@ arity/type (`ArgumentCountMismatch`/`Mismatch`) and returns `Type::Unknown` — 
 call **diverges** (aborts) and must satisfy any context (unit stmt, non-`void` tail return, value
 binding) until a dedicated `!`/never type lands. Lowering lives in `llvm-backend`.
 
-`&mut self` / consuming `self` methods are rejected at registration with `UnsupportedSelfParam` until
-ownership lands (Phase 1.7).
+Consuming `self` methods are rejected at registration with `UnsupportedSelfParam` (they need the
+by-value struct ABI). `&mut self` is supported (§2.5): `register_impl` records its mangled key in
+`mut_self_methods` for the call-site borrow check above.
 
 Move-by-default ownership (§2.2, `type_checkers/moves.rs`): a non-`Copy` value is *moved* out of its
 source binding when placed into a new owner — `val`/`mut` initializer, assignment RHS, `return`,

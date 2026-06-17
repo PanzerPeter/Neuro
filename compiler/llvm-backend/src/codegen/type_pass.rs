@@ -45,10 +45,9 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<()> {
         let struct_name = &impl_def.type_name.name;
         for method in &impl_def.methods {
-            if matches!(
-                method.self_param,
-                Some(SelfParam::RefMut) | Some(SelfParam::Owned)
-            ) {
+            // Consuming `self` is rejected in semantic analysis and never lowered,
+            // so it needs no type info; `&self` / `&mut self` bodies are walked.
+            if matches!(method.self_param, Some(SelfParam::Owned)) {
                 continue;
             }
             self.visit_method_for_types(method, struct_name, func_types)?;

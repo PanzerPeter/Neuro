@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.41.0] - 2026-06-17
+
+### Added
+- `semantic` + `codegen`: `&mut self` instance methods (§2.5) — the Phase 1.7 ownership-gated receiver that was previously rejected. A method may now take `&mut self` and assign to `self.field`; the receiver is passed **by pointer** so the write propagates to the caller's value (a `&self` method stays by-value/read-only, and consuming `self` is still rejected pending the by-value struct ABI). Semantic: `register_impl` no longer rejects `&mut self` and records its mangled key in the new `mut_self_methods` set; `check_impl` binds `self` as a *mutable* variable for `&mut self`; the method-call site runs `check_mut_self_receiver`, which enforces the §2.5 borrow — the receiver must be a `mut` place (or reached through `&mut T`) and must not already be borrowed (`CannotBorrowMutably` / `CannotMutablyBorrowWhileBorrowed`), registering a transient exclusive borrow that clears at statement end. Codegen: `codegen_method` lowers a `&mut self` method's first LLVM parameter as `ptr`, binds `self` directly to it without a copy (recorded type still the struct, so field reads/writes pass through), and seeds `type_env["self"]`; `codegen_method_call` detects a by-pointer callee from its first param type and passes the receiver place's address via `get_struct_ptr_and_type`. Tests: 5 semantic unit (`moves.rs`), 3 `neurc` integration (`methods.rs`), example `structs/mut_self_accumulator.nr`. 677 tests pass.
+
+---
+
 ## [1.40.0] - 2026-06-17
 
 ### Added

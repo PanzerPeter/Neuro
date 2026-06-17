@@ -220,8 +220,9 @@ impl TypeChecker {
     /// Register all method signatures from an `impl` block into the global
     /// function table under mangled names (`StructName__methodName`).
     ///
-    /// Unsupported self-param variants (`&mut self`, consuming `self`) are
-    /// rejected here so they never reach codegen.
+    /// Consuming `self` is rejected here so it never reaches codegen; `&mut self`
+    /// is recorded in `mut_self_methods` so call sites can enforce its exclusive
+    /// borrow of the receiver (§2.5).
     pub(crate) fn register_impl(&mut self, def: &ImplDef) -> Option<()> {
         if !self.struct_defs.contains_key(&def.type_name.name) {
             self.record_error(TypeError::UnknownStruct {
@@ -238,28 +239,22 @@ impl TypeChecker {
         let mut method_entries: Vec<(String, String)> = Vec::new();
 
         for method in &def.methods {
-            // Reject self-param variants that require ownership semantics.
-            match &method.self_param {
-                Some(SelfParam::RefMut) => {
-                    self.errors.push(TypeError::UnsupportedSelfParam {
-                        type_name: struct_name.clone(),
-                        self_param: "&mut self".to_string(),
-                        span: method.span,
-                    });
-                    continue;
-                }
-                Some(SelfParam::Owned) => {
-                    self.errors.push(TypeError::UnsupportedSelfParam {
-                        type_name: struct_name.clone(),
-                        self_param: "self".to_string(),
-                        span: method.span,
-                    });
-                    continue;
-                }
-                _ => {}
+            // Consuming `self` still needs the by-value struct ABI, so reject it.
+            // `&mut self` is supported (§2.5) and recorded below.
+            if matches!(method.self_param, Some(SelfParam::Owned)) {
+                self.errors.push(TypeError::UnsupportedSelfParam {
+                    type_name: struct_name.clone(),
+                    self_param: "self".to_string(),
+                    span: method.span,
+                });
+                continue;
             }
 
             let mangled = format!("{}__{}", struct_name, method.name.name);
+
+            if matches!(method.self_param, Some(SelfParam::RefMut)) {
+                self.mut_self_methods.insert(mangled.clone());
+            }
 
             // Build the full parameter type list: implicit `self` first for instance methods.
             let mut param_types: Vec<Type> = Vec::new();
@@ -371,11 +366,8 @@ impl TypeChecker {
         let struct_name = def.type_name.name.clone();
 
         for method in &def.methods {
-            // Skip methods that were already rejected during registration.
-            if matches!(
-                method.self_param,
-                Some(SelfParam::RefMut) | Some(SelfParam::Owned)
-            ) {
+            // Skip consuming `self` methods, which were rejected during registration.
+            if matches!(method.self_param, Some(SelfParam::Owned)) {
                 continue;
             }
 
@@ -394,10 +386,15 @@ impl TypeChecker {
             self.symbols.push_scope();
             self.current_function_return_type = Some(return_type.clone());
 
-            // Bind `self` as an immutable variable of the struct type (for &self methods).
+            // Bind `self` as a variable of the struct type. A `&mut self` receiver
+            // is mutable so the body may assign to `self.field` (§2.5); `&self` is
+            // immutable.
             if method.self_param.is_some() {
                 let self_ty = Type::Struct(struct_name.clone());
-                let _ = self.symbols.define("self".to_string(), self_ty, false);
+                let self_mutable = matches!(method.self_param, Some(SelfParam::RefMut));
+                let _ = self
+                    .symbols
+                    .define("self".to_string(), self_ty, self_mutable);
             }
 
             // Bind remaining parameters (skip param[0] which is the implicit self).
@@ -407,10 +404,9 @@ impl TypeChecker {
                 &param_types[..]
             };
 
-            // `&self` and reference parameters outlive the call, so a returned
-            // reference may borrow them (the `&self` lifetime is applied to method
-            // outputs, §2.6). Only `&self` methods reach here (`&mut self` /
-            // consuming `self` are rejected above).
+            // `self` (`&self` or `&mut self`) and reference parameters outlive the
+            // call, so a returned reference may borrow them (the receiver lifetime
+            // is applied to method outputs, §2.6).
             self.current_fn_outliving = method
                 .params
                 .iter()

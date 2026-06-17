@@ -28,6 +28,10 @@ pub(crate) struct TypeChecker {
     ///
     /// The mangled key follows the convention `StructName__methodName`.
     impl_methods: HashMap<String, HashMap<String, String>>,
+    /// Mangled keys of `&mut self` methods (§2.5). Calling one takes an exclusive
+    /// borrow of the receiver, so the receiver must be a mutable place and must not
+    /// already be borrowed — checked at the call site like a `&mut place` borrow.
+    mut_self_methods: HashSet<String>,
     /// Compile-time constant names and their declared types (module and function scope).
     pub(crate) constants: HashMap<String, Type>,
     /// Collected type errors
@@ -80,6 +84,7 @@ impl TypeChecker {
             copy_structs: HashSet::new(),
             clone_structs: HashSet::new(),
             impl_methods: HashMap::new(),
+            mut_self_methods: HashSet::new(),
             constants: HashMap::new(),
             errors: Vec::new(),
             warnings: Vec::new(),

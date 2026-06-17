@@ -146,12 +146,10 @@ pub fn compile(
             Item::Impl(impl_def) => {
                 let struct_name = &impl_def.type_name.name;
                 for method in &impl_def.methods {
-                    // Only &self and associated functions are supported; others were
-                    // rejected by semantic analysis and must not reach codegen.
-                    if matches!(
-                        method.self_param,
-                        Some(SelfParam::RefMut) | Some(SelfParam::Owned)
-                    ) {
+                    // Consuming `self` was rejected by semantic analysis and must not
+                    // reach codegen; `&self`, `&mut self`, and associated functions
+                    // all need a registered signature.
+                    if matches!(method.self_param, Some(SelfParam::Owned)) {
                         continue;
                     }
 

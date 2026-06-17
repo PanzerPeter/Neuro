@@ -130,6 +130,40 @@ func main() -> i32 {
 - All struct fields are accessible via `self.field`.
 - The receiver is passed by value (read-only snapshot).
 
+### Mutating Methods (`&mut self`)
+
+A method may take `&mut self` to mutate the receiver in place (§2.5). Writes to
+`self.field` propagate back to the caller's value because the receiver is passed
+by pointer:
+
+```neuro
+struct Accumulator {
+    total: i32
+}
+
+impl Accumulator {
+    func add(&mut self, n: i32) {
+        self.total = self.total + n
+    }
+
+    func get(&self) -> i32 {
+        self.total
+    }
+}
+
+func main() -> i32 {
+    mut acc = Accumulator { total: 0 }
+    acc.add(10)
+    acc.add(32)
+    return acc.get()  // 42
+}
+```
+
+- Calling a `&mut self` method requires a `mut` receiver (or one reached through a
+  `&mut T`). Calling it on a `val` binding is a `cannot mutably borrow` error.
+- The call takes an **exclusive** borrow of the receiver for its duration, so it is
+  rejected while another borrow of that receiver is live (§2.5 aliasing rule).
+
 ### Associated Functions (no `self`)
 
 Associated functions belong to the type but do not take a receiver. They are called via `TypeName::func(args)`:
@@ -201,16 +235,14 @@ func main() -> i32 {
 
 The following are not yet implemented and will be rejected at compile time:
 
-- `&mut self` — mutable borrow receiver (ownership semantics pending)
-- `self` (consuming) — move semantics pending
-- Struct return types from functions (backend limitation)
+- `self` (consuming) — needs the by-value struct ABI
+- Struct return types from free functions (backend limitation; associated functions and methods may return structs)
 - Nested structs as field types
 - Generics on structs
 
 ```neuro
-// These are rejected with a clear error:
+// Consuming `self` is still rejected with a clear error:
 impl Foo {
-    func update(&mut self) { ... }  // Error: UnsupportedSelfParam
     func consume(self) { ... }      // Error: UnsupportedSelfParam
 }
 ```
@@ -230,7 +262,7 @@ Neuro uses nominal typing for structs: two struct types are compatible only if t
 | `DuplicateStructField` | Providing the same field twice in a literal |
 | `AssignToImmutableField` | Mutating a field on a `val` binding |
 | `MethodNotFound` | Calling a method that doesn't exist on the type |
-| `UnsupportedSelfParam` | Using `&mut self` or consuming `self` |
+| `UnsupportedSelfParam` | Using consuming `self` (by value) in a method |
 
 ## References
 

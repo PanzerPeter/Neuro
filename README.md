@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-668%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-677%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP & Phase 1.5 stabilization complete · Phase 1.7 (ownership) active · Phase 2 overlapping
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**668 Tests Passing**):
+Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**677 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -106,7 +106,7 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 | **String Type** | Literals with full escape sequence support (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==` and `!=` for byte-level comparison; `.len()` builtin method returning the `u64` byte length (O(1), excludes null terminator); `.clone()` builtin method returning a fresh `string` (§2.7) |
 | **Builtin Methods** | Compiler-known intrinsic method dispatch on primitive & string receivers (`receiver.method()`), alongside user-defined `impl` methods; `string.len()`, `string.clone()`; integer `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and right-shift `.shr(n)` (`ashr`/`lshr` by signedness) |
 | **Structs** | Definition, instantiation (`Name { field: value }`), field-init shorthand (`Point { x, y }`), functional update (`Point { x: 1.0, ..base }`), field read (`obj.field`), field mutation on `mut` bindings; nominal typing; definition-order independent |
-| **Methods** | `impl` blocks with `&self` instance methods; associated functions called via `TypeName::func(args)`; `&mut self` / consuming `self` rejected until ownership lands |
+| **Methods** | `impl` blocks with `&self` and `&mut self` instance methods; associated functions called via `TypeName::func(args)`. A `&mut self` method mutates `self.field` in place — passed by pointer so the write reaches the caller (§2.5); calling one requires a `mut` receiver (or a `&mut T`) and takes an exclusive borrow for the call (rejected while the receiver is otherwise borrowed). Consuming `self` is still rejected (needs the by-value struct ABI) |
 | **Type Aliases** | `type Name = Target` transparent aliases (§3.14) resolved at parse time across var/const/param/return/field/cast positions; chain resolution; duplicate, builtin-shadow, and cyclic-alias diagnostics |
 | **If/Block Expressions** | `val x = if cond { a } else { b }`; bare block-as-value with newline-separated statements and a final trailing expression; all arms type-checked; alloca-based lowering |
 | **Move Semantics** | Move-by-default for non-`Copy` values (`string` and structs without `@derive(Copy)`). Binding, assignment, `return`, struct-field store, and by-value call arguments move the source; reading a moved binding is a `use of moved value` error. `.clone()` opts out; `Copy` scalars are duplicated. Conditional (`if`/`while`/`for`) moves don't leak past their branch (§2.2) |
@@ -133,7 +133,7 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 >
 > If memory safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
 
-String fat pointers, move-by-default (use-after-move detection), the `Copy` trait, immutable borrows (`&T`), mutable borrows (`&mut T` with the `*` deref operator), flow-sensitive borrow exclusivity (the `&`/`&mut` aliasing rules), and lifetime elision for returned references (§2.6) have already landed; the remaining work — full lifetime inference, explicit lifetime annotations, and `Drop` / deterministic destruction — is tracked under Phase 1.7 in the roadmap.
+String fat pointers, move-by-default (use-after-move detection), the `Copy` trait, immutable borrows (`&T`), mutable borrows (`&mut T` with the `*` deref operator), flow-sensitive borrow exclusivity (the `&`/`&mut` aliasing rules), lifetime elision for returned references (§2.6), and `&mut self` methods (in-place receiver mutation, §2.5) have already landed; the remaining work — full lifetime inference, explicit lifetime annotations, and `Drop` / deterministic destruction — is tracked under Phase 1.7 in the roadmap.
 
 ---
 
@@ -484,7 +484,7 @@ Tensor/AI path: AST → Neuro High-Level IR
 |:---:|---|:---:|
 | **1**   | Core MVP — types, functions, control flow, LLVM backend | ✅ Complete |
 | **1.5** | Syntax & semantics stabilization — parser fixes, `const`, `as` casts, compound assignment, bitwise ops, integer suffixes, if/block expressions, `while true` lint, IEEE-754 float comparisons, string fat pointers | ✅ Complete |
-| **1.7** | Ownership & borrow checker — move semantics ✅, `Copy` trait ✅, immutable borrows `&T` ✅, mutable borrows `&mut T` ✅, borrow exclusivity ✅, lifetime elision / returned-reference outlives ✅, full lifetime inference, drop / deterministic destruction, remove implicit copies | 🔄 In progress |
+| **1.7** | Ownership & borrow checker — move semantics ✅, `Copy` trait ✅, immutable borrows `&T` ✅, mutable borrows `&mut T` ✅, borrow exclusivity ✅, lifetime elision / returned-reference outlives ✅, `&mut self` methods ✅, full lifetime inference, drop / deterministic destruction, remove implicit copies | 🔄 In progress |
 | **1.8** | Backend plumbing — `neuro-hir` typed IR crate, `melior` integration, HIR lowering pipeline shared by LLVM + future MLIR backends | 📋 Planned |
 | **2**   | Core language — arrays, tuples, structs ✅, methods ✅, enums, pattern matching, generics, traits, closures, type aliases, newtypes, `Option`/`Result`, `??`, `?`, modules, prelude, string interpolation | 🔄 In progress |
 | **3**   | Tensors & MLIR — `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | 📋 Planned |
