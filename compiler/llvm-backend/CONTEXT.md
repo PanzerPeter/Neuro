@@ -26,6 +26,9 @@ inkwell 0.9.0 (feature `llvm20-1`, LLVM 20 bindings) is a third-party crate, not
 Requires LLVM 20 with MLIR enabled; set `LLVM_SYS_201_PREFIX` (e.g. `/usr/lib/llvm20`) before building.
 `semantic-analysis` is not a production dependency — neurc orders type-check before codegen.
 `syntax-parsing` appears only in `[dev-dependencies]` (integration tests).
+`src/softfloat/` carries self-contained f16/bf16 conversion builtins (`builtins.ll`, generated
+from `reference.c`); `compile` links them into the module whenever it uses `half`/`bfloat`, so the
+emitted object resolves the half-precision libcalls without a platform runtime. See **Soft-Float ABI**.
 
 ## String ABI
 `string` = anonymous LLVM struct `{ ptr, i64 }`:
@@ -174,6 +177,18 @@ IEEE-754 floats); a single `const_int`/`const_float`/`const_struct` builds the f
 `type_env` after each `type_env.clear()` (`visit_function_for_types` / `visit_method_for_types`) so
 type inference resolves const identifiers in bodies.
 
+## Soft-Float ABI
+On generic x86-64, LLVM lowers `fpext`/`fptrunc` on `half`/`bfloat` — and f16/bf16 comparisons,
+which widen to f32 first — to runtime calls: `__extendhfsf2`, `__truncsfhf2`, `__truncdfhf2`,
+`__truncsfbf2`, `__truncdfbf2`. Linux/macOS get these from libgcc/compiler-rt (linked by the `cc`
+driver); the Windows linkers (clang → lld-link → MSVC) link no such runtime, so the symbols are
+undefined and linking fails. `src/softfloat/` provides our own definitions and `compile` links them
+in (`module_uses_half_precision` gate, after codegen, before `verify`). They are `weak_odr`, so a
+platform runtime may still override; integer-only, so they never recursively re-emit these libcalls.
+`builtins.ll` is generated from `reference.c` (`clang -O2 -emit-llvm`, then stripped of
+target-specific datalayout/triple/attributes and marked `weak_odr`) and was exhaustively verified
+against clang's native `_Float16`/`__bf16`. Regenerate via that command if LLVM's IR syntax changes.
+
 ## Future: MLIR Integration (Phase 3+)
 When tensor ops land, `melior` (Rust MLIR bindings, same LLVM 20 / MLIR 20 install) joins inkwell.
 Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arith) → Enzyme MLIR AD pass
@@ -181,6 +196,10 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-06-17: Self-contained f16/bf16 soft-float builtins (`src/softfloat/`). `compile` links
+  `__extendhfsf2`/`__truncsfhf2`/`__truncdfhf2`/`__truncsfbf2`/`__truncdfbf2` (weak_odr) into any
+  module that uses `half`/`bfloat`, so the emitted object no longer depends on libgcc/compiler-rt —
+  fixing the Windows link failure for `examples/types/half_precision.nr`. See **Soft-Float ABI**.
 - 2026-06-16: `f16`/`bf16` half-precision primitives (§1.2). New backend `Type::F16`/`Type::BF16` lower to
   LLVM `half`/`bfloat` (`map_type`, `from_ast`, `resolve_syntax_type`); the `FloatSuffix::F16`/`BF16`
   literals emit half/bfloat constants and the type pass records the types. Backend `is_float()` includes

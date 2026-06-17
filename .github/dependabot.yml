@@ -1,0 +1,28 @@
+# Dependabot keeps dependencies — including the SHA-pinned GitHub Actions in
+# .github/workflows — current, satisfying the Scorecard Dependency-Update-Tool
+# check while preserving pinned-by-digest hardening.
+version: 2
+updates:
+  # GitHub Actions used by the CI / security workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Rust crates in the Cargo workspace.
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "build"
+    groups:
+      cargo:
+        patterns:
+          - "*"

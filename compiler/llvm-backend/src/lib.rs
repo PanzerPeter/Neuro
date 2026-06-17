@@ -9,6 +9,7 @@
 
 mod codegen;
 mod errors;
+mod softfloat;
 mod type_mapping;
 mod types;
 
@@ -222,6 +223,15 @@ pub fn compile(
             }
             Item::Const(_) | Item::Struct(_) => {}
         }
+    }
+
+    // Link self-contained soft-float conversion builtins when the module uses
+    // f16/bf16, so the emitted object resolves the half-precision libcalls
+    // itself instead of depending on a platform runtime (libgcc/compiler-rt),
+    // which is absent under the Windows linkers. See `softfloat`.
+    if softfloat::module_uses_half_precision(&codegen_ctx.module) {
+        softfloat::link_builtins(codegen_ctx.context, &codegen_ctx.module)
+            .map_err(CodegenError::LlvmError)?;
     }
 
     // Verify the module
