@@ -11,13 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.41.4] - 2026-06-17
-
-### Fixed
-- `ci`: the Scorecard workflow's `github/codeql-action/upload-sarif` step was pinned to SHA `b0c4fd77…`, which does not exist in the `github/codeql-action` repo. Scorecard's webapp verification rejected it as an imposter commit (`http response 400 … imposter commit`), failing the "Scorecard supply-chain security" job on every push to `main`. Repinned to the real v3.30.5 commit `3599b3baa15b485a2e49ef411a7a4bb2452e7f93`.
-
----
-
 ## [1.41.3] - 2026-06-17
 
 ### Fixed
