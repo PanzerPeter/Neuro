@@ -363,6 +363,154 @@ mod tests {
     }
 
     #[test]
+    fn mut_self_method_type_checks_and_allows_field_write() {
+        // §2.5: a `&mut self` method may assign to `self.field`, and calling it on
+        // a `mut` binding is sound.
+        let errs = errors(
+            r#"
+            struct Counter { value: i32 }
+            impl Counter {
+                func increment(&mut self) { self.value = self.value + 1 }
+            }
+            func main() -> i32 {
+                mut c = Counter { value: 0 }
+                c.increment()
+                return 0
+            }
+            "#,
+        );
+        assert!(errs.is_empty(), "&mut self must type-check; got {errs:?}");
+    }
+
+    #[test]
+    fn mut_self_field_write_through_self_in_ref_self_is_rejected() {
+        // A `&self` method is read-only: assigning to `self.field` must fail.
+        let errs = errors(
+            r#"
+            struct Counter { value: i32 }
+            impl Counter {
+                func bad(&self) { self.value = 1 }
+            }
+            func main() -> i32 { 0 }
+            "#,
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("immutable") || e.contains("cannot assign")),
+            "writing self.field in a &self method must be rejected; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn mut_self_on_immutable_binding_is_rejected() {
+        let errs = errors(
+            r#"
+            struct Counter { value: i32 }
+            impl Counter {
+                func increment(&mut self) { self.value = self.value + 1 }
+            }
+            func main() -> i32 {
+                val c = Counter { value: 0 }
+                c.increment()
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("cannot mutably borrow 'c'")),
+            "calling &mut self on a val must be rejected; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn mut_self_call_while_shared_borrowed_is_rejected() {
+        let errs = errors(
+            r#"
+            struct Counter { value: i32 }
+            impl Counter {
+                func increment(&mut self) { self.value = self.value + 1 }
+            }
+            func main() -> i32 {
+                mut c = Counter { value: 0 }
+                val r = &c
+                c.increment()
+                return r.value
+            }
+            "#,
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("cannot borrow 'c' as mutable")),
+            "calling &mut self while shared-borrowed must conflict; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn mut_self_on_field_of_immutable_binding_is_rejected() {
+        // Mutating `o.inner` through a `&mut self` method needs the *root* binding
+        // `o` to be mutable; a `val` root is rejected (§2.5). Semantic-only — nested
+        // struct fields are not lowered yet, so this exercises the check in isolation.
+        let errs = errors(
+            r#"
+            struct Inner { v: i32 }
+            struct Outer { inner: Inner }
+            impl Inner {
+                func bump(&mut self) { self.v = self.v + 1 }
+            }
+            func main() -> i32 {
+                val o = Outer { inner: Inner { v: 0 } }
+                o.inner.bump()
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("cannot mutably borrow 'o'")),
+            "a &mut self call rooted in a val binding must be rejected; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn mut_self_on_temporary_receiver_is_rejected() {
+        // A call-result receiver has no place to borrow, so a `&mut self` call on it
+        // is rejected like any `&mut` of a temporary value.
+        let errs = errors(
+            r#"
+            struct C { v: i32 }
+            impl C {
+                func new() -> C { C { v: 0 } }
+                func bump(&mut self) { self.v = self.v + 1 }
+            }
+            func main() -> i32 {
+                C::new().bump()
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("cannot borrow")),
+            "a &mut self call on a temporary must be rejected; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn consuming_self_is_still_rejected() {
+        let errs = errors(
+            r#"
+            struct Wrapper { value: i32 }
+            impl Wrapper {
+                func unwrap(self) -> i32 { self.value }
+            }
+            func main() -> i32 { 0 }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("not yet supported")),
+            "consuming self must still be rejected; got {errs:?}"
+        );
+    }
+
+    #[test]
     fn reassigning_a_mut_revives_the_binding() {
         let errs = errors(
             r#"

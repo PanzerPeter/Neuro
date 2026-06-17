@@ -59,15 +59,22 @@ function params/returns (Phase 2+; type mapper errors there). Layout in `Codegen
 the identifier grammar forbids `__` in user names).
 
 `&self` methods take the struct **by value** as `param[0]` (named `self` in the alloca map) —
-correct for read-only access; callers load their stack var and pass the value. `&mut self` /
-consuming `self` are rejected by semantic analysis before codegen.
+correct for read-only access; callers load their stack var and pass the value. `&mut self` methods
+take the struct **by pointer**: `codegen_method` emits `param[0]` as `ptr` and binds `self`
+directly to it (no copy) with the recorded type still the struct, so `self.field` reads/writes go
+through to the caller's storage (§2.5). It also seeds `type_env["self"]` so a `self.field = …`
+write resolves the struct without relying on the (per-item, possibly stale) type-pass env.
+Consuming `self` is still rejected by semantic analysis before codegen.
 
 Associated functions (no `self_param`) lower identically without the implicit first param; callers
 invoke `TypeName::func(args)` → `codegen_call("StructName__funcName", args)`.
 
 Method calls (`instance.method(args)`) are recognised in `codegen_expr` when the `Call`'s `func` is
 a `FieldAccess`. `fa_struct_names` (keyed by `Call` span start) carries the struct name so
-`codegen_method_call` reconstructs the mangled name without re-querying the AST.
+`codegen_method_call` reconstructs the mangled name without re-querying the AST. The call site
+detects a by-pointer (`&mut self`) callee from its first LLVM param being a pointer and passes the
+receiver place's address (via `get_struct_ptr_and_type`, which auto-loads a `&mut Struct` receiver)
+rather than the loaded value.
 
 ## Builtin Method ABI
 Intrinsics on non-struct (primitive/string) receivers resolve in `resolve_builtin_method`

@@ -4,9 +4,9 @@
 //   struct with mixed i32/f64 fields · direct field mutation on a `mut`
 //   binding · &self query method · f64 division · while loop · `as` cast.
 //
-// Methods take `&self` only (`&mut self` is a later phase), so the running
-// state is advanced by assigning to the fields directly on the mutable
-// binding in `main`, and the method side stays read-only.
+// This example advances the running state by assigning to the fields directly
+// on the mutable binding in `main`, keeping the method side read-only (`&self`).
+// For the in-place `&mut self` style, see `structs/mut_self_accumulator.nr`.
 
 struct RunningStats {
     count: i32,

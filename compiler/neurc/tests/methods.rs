@@ -141,10 +141,41 @@ func main() -> i32 {
     assert_eq!(exit_code, 42, "20 + 22 should equal 42");
 }
 
-// ── AC4: &mut self and consuming self are rejected ───────────────────────────
+// ── AC4: &mut self mutates in place; consuming self is still rejected ─────────
 
 #[test]
-fn ref_mut_self_is_rejected() {
+fn mut_self_method_mutates_in_place() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Counter {
+    value: i32
+}
+
+impl Counter {
+    func increment(&mut self) {
+        self.value = self.value + 1
+    }
+
+    func get(&self) -> i32 {
+        self.value
+    }
+}
+
+func main() -> i32 {
+    mut c = Counter { value: 40 }
+    c.increment()
+    c.increment()
+    return c.get()
+}
+"#;
+    let exit_code = test
+        .compile_and_run("mut_self.nr", source)
+        .expect("&mut self method should compile and run");
+    assert_eq!(exit_code, 42, "two increments of 40 should yield 42");
+}
+
+#[test]
+fn mut_self_on_immutable_binding_is_rejected() {
     let test = CompileTest::new();
     let source = r#"
 struct Counter {
@@ -158,18 +189,58 @@ impl Counter {
 }
 
 func main() -> i32 {
-    mut c = Counter { value: 0 }
+    val c = Counter { value: 0 }
     c.increment()
     return 0
 }
 "#;
-    let source_path = test.write_source("mut_self.nr", source);
+    let source_path = test.write_source("mut_self_immutable.nr", source);
     let result = test.compile(&source_path);
-    assert!(result.is_err(), "&mut self should be rejected");
+    assert!(
+        result.is_err(),
+        "calling &mut self on a val binding must be rejected"
+    );
     let err = result.unwrap_err();
     assert!(
-        err.contains("not yet supported") || err.contains("UnsupportedSelfParam"),
-        "error should mention unsupported self param, got: {}",
+        err.contains("mutably borrow") || err.contains("CannotBorrowMutably"),
+        "error should mention the receiver is not mutable, got: {}",
+        err
+    );
+}
+
+#[test]
+fn mut_self_while_borrowed_is_rejected() {
+    let test = CompileTest::new();
+    // §2.5: calling a `&mut self` method takes an exclusive borrow, so it conflicts
+    // with a live shared borrow of the same receiver.
+    let source = r#"
+struct Counter {
+    value: i32
+}
+
+impl Counter {
+    func increment(&mut self) {
+        self.value = self.value + 1
+    }
+}
+
+func main() -> i32 {
+    mut c = Counter { value: 0 }
+    val r = &c
+    c.increment()
+    return r.value
+}
+"#;
+    let source_path = test.write_source("mut_self_borrowed.nr", source);
+    let result = test.compile(&source_path);
+    assert!(
+        result.is_err(),
+        "calling &mut self while shared-borrowed must be rejected"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("already borrowed") || err.contains("borrow 'c' as mutable"),
+        "error should mention the exclusivity conflict, got: {}",
         err
     );
 }

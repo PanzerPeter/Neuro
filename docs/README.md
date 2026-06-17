@@ -110,7 +110,8 @@ Key design goals:
 ### Structs and Methods (Phase 2)
 
 - `struct` definitions with any primitive or struct field types
-- `impl` blocks: instance methods (`&self`) and associated functions (`TypeName::func`)
+- `impl` blocks: instance methods (`&self` and `&mut self`) and associated functions (`TypeName::func`)
+- `&mut self` methods mutate `self.field` in place (passed by pointer, §2.5); calling one needs a `mut` receiver and takes an exclusive borrow for the call. Consuming `self` is still rejected
 - Nominal typing; forward-reference support (definition order independent)
 
 ### Compilation
@@ -118,7 +119,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 668 tests passing across all components
+- 677 tests passing across all components
 
 ## Compilation Pipeline
 

@@ -61,6 +61,7 @@ control_flow/while_true_lint.nr       7
 
 # --- structs & methods ----------------------------------------------------
 structs/methods.nr  42
+structs/mut_self_accumulator.nr  42
 structs/neuron.nr   4
 structs/structs.nr  50
 structs/struct_update.nr  14

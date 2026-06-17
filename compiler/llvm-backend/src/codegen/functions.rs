@@ -37,12 +37,13 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(call_result.try_as_basic_value().basic())
     }
 
-    /// Call a method: load the receiver as a value and prepend it to the argument list.
+    /// Lower a method call, prepending the receiver to the argument list. Returns
+    /// `None` when the method returns unit `()`.
     ///
-    /// For `&self` methods the struct is passed by value — this is sound because
-    /// `&self` methods are read-only; mutations inside the method body do not
-    /// propagate back to the caller (ownership semantics are pending).
-    /// Lower a method call. Returns `None` when the method returns unit `()`.
+    /// A `&self` method takes the struct by value (read-only, so mutations do not
+    /// escape). A `&mut self` method takes the struct by pointer — detected by its
+    /// first LLVM parameter being a pointer — so the receiver's storage address is
+    /// passed and field writes in the body propagate back to the caller (§2.5).
     pub(crate) fn codegen_method_call(
         &mut self,
         mangled_name: &str,
@@ -54,21 +55,32 @@ impl<'ctx> CodegenContext<'ctx> {
             .get(mangled_name)
             .ok_or_else(|| CodegenError::UndefinedFunction(mangled_name.to_string()))?;
 
-        // Load the receiver struct value. A `&Struct` receiver (§2.4) lowers to a pointer to
-        // the struct; the `&self` method takes the struct by value, so dereference the borrow.
-        let raw_self = self.codegen_expr(receiver)?;
-        let self_val = match raw_self {
-            BasicValueEnum::PointerValue(ptr) => {
-                let struct_name = mangled_name.split("__").next().unwrap_or(mangled_name);
-                let struct_ty = self.get_struct_llvm_type(struct_name)?;
-                self.builder
-                    .build_load(struct_ty, ptr, "deref.self")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+        let self_by_pointer = function
+            .get_type()
+            .get_param_types()
+            .first()
+            .is_some_and(|t| t.is_pointer_type());
+
+        let struct_name = mangled_name.split("__").next().unwrap_or(mangled_name);
+        let self_arg: BasicValueEnum<'ctx> = if self_by_pointer {
+            // `&mut self`: pass the receiver place's address (auto-loading through a
+            // `&mut Struct` receiver), so the callee writes through to it.
+            let (self_ptr, _) = self.get_struct_ptr_and_type(receiver, struct_name)?;
+            self_ptr.into()
+        } else {
+            // `&self`: pass the struct value, dereferencing a `&Struct` borrow (§2.4).
+            match self.codegen_expr(receiver)? {
+                BasicValueEnum::PointerValue(ptr) => {
+                    let struct_ty = self.get_struct_llvm_type(struct_name)?;
+                    self.builder
+                        .build_load(struct_ty, ptr, "deref.self")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                }
+                other => other,
             }
-            other => other,
         };
         let mut arg_values: Vec<BasicMetadataValueEnum> =
-            vec![BasicMetadataValueEnum::from(self_val)];
+            vec![BasicMetadataValueEnum::from(self_arg)];
 
         for arg in args {
             let val = self.codegen_expr(arg)?;
@@ -91,10 +103,9 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<()> {
         let struct_name = &impl_def.type_name.name;
         for method in &impl_def.methods {
-            if matches!(
-                method.self_param,
-                Some(SelfParam::RefMut) | Some(SelfParam::Owned)
-            ) {
+            // Consuming `self` is rejected in semantic analysis; everything else
+            // (`&self`, `&mut self`, associated functions) is lowered.
+            if matches!(method.self_param, Some(SelfParam::Owned)) {
                 continue;
             }
             self.codegen_method(method, struct_name, func_types)?;
@@ -128,9 +139,17 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         };
 
+        // A `&mut self` receiver is passed by pointer so the body's field writes
+        // reach the caller's value (§2.5); every other parameter is by value.
+        let self_by_pointer = matches!(method.self_param, Some(SelfParam::RefMut));
+
         let mut llvm_param_types = Vec::new();
-        for param_ty in param_types {
-            let llvm_ty = if let Type::Struct(name) = param_ty {
+        for (i, param_ty) in param_types.iter().enumerate() {
+            let llvm_ty: BasicTypeEnum = if i == 0 && self_by_pointer {
+                self.context
+                    .ptr_type(inkwell::AddressSpace::default())
+                    .into()
+            } else if let Type::Struct(name) = param_ty {
                 self.get_struct_llvm_type(name)?.into()
             } else {
                 self.type_mapper.map_type(param_ty)?
@@ -161,20 +180,38 @@ impl<'ctx> CodegenContext<'ctx> {
         let non_self_start = if method.self_param.is_some() { 1 } else { 0 };
 
         if method.self_param.is_some() {
-            // Allocate and store the `self` struct value.
+            // Record `self`'s Neuro type so a `self.field = …` write in a `&mut self`
+            // body resolves its struct here, not from the (per-function, possibly
+            // stale) type-pass `type_env` left over from another item.
+            self.type_env
+                .insert("self".to_string(), Type::Struct(struct_name.to_string()));
+
             let self_val = function
                 .get_nth_param(0)
                 .ok_or_else(|| CodegenError::InternalError("missing self parameter".to_string()))?;
-            let self_type = self_val.get_type();
-            let alloca = self
-                .builder
-                .build_alloca(self_type, "self")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.builder
-                .build_store(alloca, self_val)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.variables.insert("self".to_string(), alloca);
-            self.variable_types.insert("self".to_string(), self_type);
+            if self_by_pointer {
+                // `&mut self`: the parameter is already a pointer to the caller's
+                // struct. Bind `self` directly to it (no copy) so reads and field
+                // writes go through to the caller. The recorded type is the struct
+                // (not the pointer), matching how an owned struct binding reads.
+                let struct_ty = self.get_struct_llvm_type(struct_name)?;
+                self.variables
+                    .insert("self".to_string(), self_val.into_pointer_value());
+                self.variable_types
+                    .insert("self".to_string(), struct_ty.into());
+            } else {
+                // `&self`: allocate and store a private copy of the struct value.
+                let self_type = self_val.get_type();
+                let alloca = self
+                    .builder
+                    .build_alloca(self_type, "self")
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                self.builder
+                    .build_store(alloca, self_val)
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                self.variables.insert("self".to_string(), alloca);
+                self.variable_types.insert("self".to_string(), self_type);
+            }
         }
 
         for (i, param) in method.params.iter().enumerate() {

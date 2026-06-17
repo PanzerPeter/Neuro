@@ -14,7 +14,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string slices (`&string`), move semantics, immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods            |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable` |
-| `structs/`       | Struct definition, field access/mutation, `impl` methods               |
+| `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
 | `showcase/`      | **Bigger programs that combine many features at once** — incl. mutable borrows `&mut T` + `*` deref (`mutable_borrows.nr`) |
 
 The single source of truth for each program's expected exit code is
@@ -83,9 +83,9 @@ No Rust edits are needed — discovery is automatic.
 
 - No arrays yet (Phase 2+).
 - Ownership/borrow checker not yet implemented (Phase 1.7).
-- `&mut self` and consuming `self` on methods not yet supported — methods are
-  `&self` only, so struct state is mutated by assigning to fields directly on a
-  `mut` binding (see `showcase/running_stats.nr`).
+- `&self` and `&mut self` methods are supported; a `&mut self` method mutates
+  struct state in place (see `structs/mut_self_accumulator.nr`). Consuming `self`
+  is not yet supported.
 - Right shift is the `.shr(n)` method, not a `>>` operator (Phase 2+).
 - Prefer `return` over a tail-position `if`/`else` *expression* as a function's
   implicit return value; assign it to a `val` first if you need the value form
