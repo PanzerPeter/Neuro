@@ -89,8 +89,22 @@ reference releases its old borrow first (`release_borrow_of`). Transient borrows
 end of every statement (`clear_transient_borrows`), so a borrow never outlives the statement that
 took it. Lexical, not NLL: only direct-borrow initializers create tracked persistent borrows, so the
 analysis never rejects a valid program — it may miss borrows that escape through compound
-expressions. Read/move-while-borrowed and returned-reference outlives are not yet checked (they await
-lifetime inference).
+expressions. Read/move-while-borrowed is not yet checked (it awaits full lifetime inference).
+
+Returned-reference outlives (§2.6, lifetime elision; `declarations.rs` + `statements.rs`): a function
+or method whose declared return type is a `Type::Reference` must not return a reference borrowing a
+place that dies with the call. `current_fn_outliving: HashSet<String>` holds the names that outlive
+the call — reference-typed parameters (single-input elision applies the input lifetime to outputs)
+plus `self` for an instance method (the `&self` lifetime is applied to method outputs). It is rebuilt
+per function/method and cleared on exit. At each `return` and trailing implicit-return whose type is a
+reference, `check_returned_reference` walks the returned expression: a `&place` whose root place
+(`root_place_name`, peeling parens/field-access/deref) is local emits `ReturnsReferenceToLocal`; a
+returned reference *binding* is flagged when its `borrow_provenance` (the place a `val r = &x`
+initializer recorded) is local; `if`/`else` arms and bare/`unsafe` blocks are followed into their tail
+expressions. `is_local_to_function` treats a name as local when it is a live binding absent from the
+outliving set, and conservatively treats an absent name (constant, out-of-scope place) as non-local so
+a valid program is never rejected. Elision-only: no annotation syntax, and ambiguous multi-reference
+signatures are accepted as long as the borrowee is a parameter (explicit `<'a>` lands with generics).
 
 Const declarations (`const NAME: Type = expr`): `constants: HashMap<String, Type>` holds both
 module-level and body consts. `is_const_expr` validates the RHS (literals, arithmetic on literals,
@@ -99,6 +113,13 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-06-17: Returned-reference outlives / lifetime elision §2.6. New `current_fn_outliving:
+  HashSet<String>` on `TypeChecker` (reference params + `self`), rebuilt in `check_function` /
+  `check_impl` and cleared on exit. New `SymbolTable::borrow_provenance`. New
+  `check_returned_reference` (+ free fns `tail_expr` / `root_place_name`, method
+  `is_local_to_function`) invoked from `Stmt::Return` and both trailing implicit-return sites when the
+  return type is a `Type::Reference`. New error `ReturnsReferenceToLocal`. Elision-only — no annotation
+  surface; explicit `<'a>` awaits generics. Tests in `type_checkers/tests/mod.rs`.
 - 2026-06-16: Borrow exclusivity §2.4/§2.5. `SymbolInfo` gained persistent/transient borrow counters
   plus a `borrows` provenance; new `SymbolTable` methods `borrow_counts` / `add_transient_borrow` /
   `attach_borrow` / `release_borrow_of` / `clear_transient_borrows`, and `pop_scope` now releases a

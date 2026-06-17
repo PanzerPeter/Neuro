@@ -202,4 +202,7 @@ pub enum TypeError {
 
     #[error("cannot borrow '{name}' as immutable at {span:?}: it is already mutably borrowed; an active `&mut` borrow excludes all other borrows of '{name}' (§2.4)")]
     CannotBorrowWhileMutablyBorrowed { name: String, span: Span },
+
+    #[error("cannot return a reference to '{name}' at {span:?}: it is local to this function and does not outlive the call; return a reference derived from a parameter instead (§2.6)")]
+    ReturnsReferenceToLocal { name: String, span: Span },
 }

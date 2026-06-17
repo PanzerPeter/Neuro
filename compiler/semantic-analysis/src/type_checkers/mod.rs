@@ -36,6 +36,11 @@ pub(crate) struct TypeChecker {
     warnings: Vec<Warning>,
     /// Current function's return type (for validating return statements)
     current_function_return_type: Option<Type>,
+    /// Names of bindings in the current function whose storage outlives the call:
+    /// reference-typed parameters and the `self` receiver of an instance method.
+    /// A returned reference is only safe when it ultimately borrows one of these —
+    /// borrowing any other (function-local) place dangles (§2.6).
+    current_fn_outliving: HashSet<String>,
     /// Currently active loops, innermost last (§3.7). Stack depth doubles as the
     /// loop-nesting count used to reject `break` / `continue` outside any loop;
     /// each entry carries its label and value-break typing state.
@@ -79,6 +84,7 @@ impl TypeChecker {
             errors: Vec::new(),
             warnings: Vec::new(),
             current_function_return_type: None,
+            current_fn_outliving: HashSet::new(),
             loop_stack: Vec::new(),
         }
     }
