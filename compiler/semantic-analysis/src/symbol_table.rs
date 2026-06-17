@@ -174,6 +174,15 @@ impl SymbolTable {
         }
     }
 
+    /// The place `holder` borrows, if `holder` is a reference binding created by a
+    /// direct `&place` initializer (`val holder = &place`). Lets the
+    /// returned-reference check trace a returned local reference back to the place
+    /// it points into and reject it when that place is itself function-local (§2.6).
+    pub(crate) fn borrow_provenance(&self, holder: &str) -> Option<String> {
+        self.lookup(holder)
+            .and_then(|info| info.borrows.as_ref().map(|prov| prov.place.clone()))
+    }
+
     /// Release the persistent borrow held by `holder`, if any — used before a
     /// `mut` reference binding is reassigned, so its previous borrowee is freed
     /// before the new borrow is checked. No-op when `holder` holds no borrow.

@@ -531,9 +531,42 @@ The diagnostics are `cannot borrow '<name>' as mutable` (a `&mut` while any borr
 `cannot borrow '<name>' as immutable` (a `&` while a `&mut` is live).
 
 > **Deferred:** this is a lexical check, not non-lexical liveness (NLL). Reading or moving a
-> value while it is borrowed, and verifying that a returned reference does not outlive its
-> borrowee, land with **lifetime inference** (§2.6), which extends the same borrow-region
-> analysis.
+> value while it is borrowed lands with full **lifetime inference**, which extends the same
+> borrow-region analysis.
+
+### Lifetimes — Returned References (§2.6)
+
+Lifetimes are **inferred** — there is no annotation syntax yet. The elision rules match Rust: a
+single input reference lifetime is applied to the outputs, and the `&self` lifetime is applied to
+a method's outputs. In practice this means a function or method that **returns a reference** may
+borrow one of its reference parameters (or, in a method, `&self`); the returned borrow then lives
+as long as the caller's borrow.
+
+```neuro
+func first(a: &i32, b: &i32) -> &i32 {
+    a                       // ok — the returned borrow outlives the call
+}
+```
+
+The borrow checker rejects returning a reference to a value that dies when the function returns —
+a body-local or a by-value parameter — because the reference would dangle:
+
+```neuro
+func dangle() -> &i32 {
+    val local: i32 = 5
+    return &local           // ERROR: cannot return a reference to 'local' — it is local to
+                            //        this function and does not outlive the call
+}
+```
+
+The check follows a returned reference through a local reference binding (`val r = &local; r` is
+also rejected) and into the arms of a returned `if`/`else`. The diagnostic is
+`cannot return a reference to '<name>'`.
+
+> **Deferred:** this is elision only. Explicit lifetime annotations (`func longest<'a>(a: &'a string,
+> b: &'a string) -> &'a string`) need a generic-parameter parse surface and land with **generics**
+> (Phase 2B); until then an ambiguous multi-reference signature is accepted as long as the returned
+> borrow targets a parameter.
 
 ### String Slices (`&string`)
 

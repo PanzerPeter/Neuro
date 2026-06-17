@@ -34,6 +34,7 @@ types/integer_overflow.nr           55
 types/immutable_borrows.nr          0
 types/integer_suffixes.nr           0
 types/move_semantics.nr             0
+types/returned_reference.nr         60
 types/string_clone.nr               5
 types/string_len.nr                 0
 types/string_slice.nr               0

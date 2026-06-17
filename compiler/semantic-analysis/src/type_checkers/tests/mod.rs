@@ -682,3 +682,114 @@ func main() -> i32 {
         "reassigning `r` away from `x` frees `x` to be borrowed again; got {errors:?}"
     );
 }
+
+fn returns_ref_to_local(errors: &[TypeError]) -> bool {
+    errors
+        .iter()
+        .any(|e| matches!(e, TypeError::ReturnsReferenceToLocal { .. }))
+}
+
+#[test]
+fn returning_reference_to_local_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func dangle() -> &i32 {
+    val local: i32 = 5
+    return &local
+}
+"#,
+    );
+    assert!(
+        returns_ref_to_local(&errors),
+        "borrowing a body-local and returning it dangles (§2.6); got {errors:?}"
+    );
+}
+
+#[test]
+fn returning_reference_to_owned_parameter_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func dangle(n: i32) -> &i32 {
+    return &n
+}
+"#,
+    );
+    assert!(
+        returns_ref_to_local(&errors),
+        "a by-value parameter does not outlive the call (§2.6); got {errors:?}"
+    );
+}
+
+#[test]
+fn returning_a_reference_parameter_is_accepted() {
+    let errors = semantic_errors(
+        r#"
+func identity(r: &i32) -> &i32 {
+    r
+}
+"#,
+    );
+    assert!(
+        !returns_ref_to_local(&errors),
+        "a reference parameter outlives the call (single-input elision, §2.6); got {errors:?}"
+    );
+}
+
+#[test]
+fn returning_reference_through_local_binding_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func leak() -> &i32 {
+    val local: i32 = 7
+    val r: &i32 = &local
+    r
+}
+"#,
+    );
+    assert!(
+        returns_ref_to_local(&errors),
+        "a local reference binding that borrows a local dangles transitively (§2.6); got {errors:?}"
+    );
+}
+
+#[test]
+fn returning_a_reference_in_an_if_arm_is_checked() {
+    // The `else` arm yields a local reference binding whose borrowee is a body
+    // local; the `then` arm yields the sound reference parameter. The walk into
+    // both arms of the returned `if`-expression must still flag the bad arm.
+    let errors = semantic_errors(
+        r#"
+func pick(cond: bool, r: &i32) -> &i32 {
+    val local: i32 = 1
+    val bad: &i32 = &local
+    return if cond { r } else { bad }
+}
+"#,
+    );
+    assert!(
+        returns_ref_to_local(&errors),
+        "the dangling `else` arm must be caught even when another arm is sound (§2.6); got {errors:?}"
+    );
+}
+
+#[test]
+fn returning_a_borrow_of_self_is_accepted() {
+    // `&self` outlives the call, so a method may return a borrow of `self` (the
+    // `&self` lifetime is applied to method outputs, §2.6). Without `self` in the
+    // outliving set this would be wrongly flagged as a local.
+    let errors = semantic_errors(
+        r#"
+struct Wrapper { value: i32 }
+
+impl Wrapper {
+    func me(&self) -> &Wrapper {
+        return &self
+    }
+}
+"#,
+    );
+    assert!(
+        !returns_ref_to_local(&errors),
+        "a borrow of `&self` outlives the call (§2.6); got {errors:?}"
+    );
+}

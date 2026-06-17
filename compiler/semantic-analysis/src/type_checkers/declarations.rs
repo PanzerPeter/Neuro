@@ -64,6 +64,17 @@ impl TypeChecker {
         self.symbols.push_scope();
         self.current_function_return_type = Some(return_type.clone());
 
+        // Reference-typed parameters outlive the call, so a returned reference may
+        // safely borrow one (single-input-reference elision, §2.6). Owned
+        // parameters and body locals do not outlive the call.
+        self.current_fn_outliving = func
+            .params
+            .iter()
+            .zip(param_types.iter())
+            .filter(|(_, ty)| matches!(ty, Type::Reference { .. }))
+            .map(|(param, _)| param.name.name.clone())
+            .collect();
+
         // Define parameters in function scope (parameters are immutable by default)
         for (param, param_ty) in func.params.iter().zip(param_types.iter()) {
             // Skip Unknown types to avoid cascading errors
@@ -102,6 +113,11 @@ impl TypeChecker {
                         });
                     }
                 }
+                // A trailing reference expression is an implicit return; verify it
+                // does not borrow a function-local place (§2.6).
+                if matches!(return_type, Type::Reference { .. }) {
+                    self.check_returned_reference(expr);
+                }
                 // Note: If check_expr failed, the error is already recorded
             }
             // Note: Other statement types at the end are allowed - LLVM will catch missing returns
@@ -110,6 +126,7 @@ impl TypeChecker {
         // Exit function scope
         self.symbols.pop_scope();
         self.current_function_return_type = None;
+        self.current_fn_outliving.clear();
 
         Some(())
     }
@@ -390,6 +407,21 @@ impl TypeChecker {
                 &param_types[..]
             };
 
+            // `&self` and reference parameters outlive the call, so a returned
+            // reference may borrow them (the `&self` lifetime is applied to method
+            // outputs, §2.6). Only `&self` methods reach here (`&mut self` /
+            // consuming `self` are rejected above).
+            self.current_fn_outliving = method
+                .params
+                .iter()
+                .zip(non_self_params.iter())
+                .filter(|(_, ty)| matches!(ty, Type::Reference { .. }))
+                .map(|(param, _)| param.name.name.clone())
+                .collect();
+            if method.self_param.is_some() {
+                self.current_fn_outliving.insert("self".to_string());
+            }
+
             for (param, param_ty) in method.params.iter().zip(non_self_params.iter()) {
                 if matches!(param_ty, Type::Unknown) {
                     continue;
@@ -421,11 +453,15 @@ impl TypeChecker {
                             });
                         }
                     }
+                    if matches!(return_type, Type::Reference { .. }) {
+                        self.check_returned_reference(expr);
+                    }
                 }
             }
 
             self.symbols.pop_scope();
             self.current_function_return_type = None;
+            self.current_fn_outliving.clear();
         }
     }
 }

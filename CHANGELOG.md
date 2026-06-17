@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.40.0] - 2026-06-17
+
+### Added
+- `semantic`: returned-reference outlives / lifetime elision (§2.6) — the borrow checker now verifies that a function or method whose declared return type is a reference does not return a reference borrowing a place that dies with the call. Under lifetime elision a single input reference lifetime is applied to the output, and the `&self` lifetime is applied to method outputs, so returning one of the reference parameters (or a borrow of `&self`) is sound; borrowing a body-local or a by-value parameter and returning it — directly (`return &local`) or through a local reference binding (`val r = &local; r`) — is rejected with the new `ReturnsReferenceToLocal` diagnostic. New surface: `current_fn_outliving: HashSet<String>` on the type checker (reference-typed parameters plus `self`, rebuilt per function/method and cleared on exit), `SymbolTable::borrow_provenance` (the place a `val r = &x` binding recorded), and `check_returned_reference` (with helpers `tail_expr` / `root_place_name` / `is_local_to_function`) invoked from `Stmt::Return` and both trailing implicit-return sites when the return type is a `Type::Reference`. The walk follows `if`/`else` arms and bare/`unsafe` blocks into their tail expressions. Elision-only — no annotation syntax; ambiguous multi-reference signatures are accepted as long as the borrowee is a parameter (explicit `<'a>` lands with generics, Phase 2B). Conservative: a name absent from the symbol table is treated as non-local, so a valid program is never rejected. Tests: 6 semantic unit, 5 `neurc` integration (`returned_reference.rs`), example `types/returned_reference.nr`. 668 tests pass.
+
+---
+
 ## [1.39.0] - 2026-06-16
 
 ### Added
