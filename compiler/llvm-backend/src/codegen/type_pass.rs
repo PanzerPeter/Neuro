@@ -414,7 +414,23 @@ impl<'ctx> CodegenContext<'ctx> {
                     })?
                     .clone();
 
+                let right_ty = self
+                    .expr_types
+                    .get(&right.span().start)
+                    .ok_or_else(|| {
+                        CodegenError::InternalError("missing type for right operand".to_string())
+                    })?
+                    .clone();
+
                 let result_ty = match op {
+                    // String concatenation (§2.7) yields a fresh owned `string`, even when
+                    // an operand is a `&string` slice — so the result is never a reference.
+                    BinaryOp::Add
+                        if matches!(left_ty.referent(), Type::String)
+                            || matches!(right_ty.referent(), Type::String) =>
+                    {
+                        Type::String
+                    }
                     BinaryOp::Add
                     | BinaryOp::Subtract
                     | BinaryOp::Multiply

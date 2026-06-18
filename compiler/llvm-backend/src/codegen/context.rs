@@ -257,6 +257,39 @@ impl<'ctx> CodegenContext<'ctx> {
             .add_function("write", fn_type, Some(inkwell::module::Linkage::External))
     }
 
+    /// Get the external libc `malloc` declaration, inserting it on first use.
+    /// `malloc(size: i64) -> ptr`. Backs the heap buffer for runtime string
+    /// concatenation (§2.7); `size_t` is 64-bit on every supported target.
+    pub(crate) fn get_or_declare_malloc(&self) -> FunctionValue<'ctx> {
+        if let Some(f) = self.module.get_function("malloc") {
+            return f;
+        }
+        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let fn_type = ptr_type.fn_type(&[self.context.i64_type().into()], false);
+        self.module
+            .add_function("malloc", fn_type, Some(inkwell::module::Linkage::External))
+    }
+
+    /// Get the external libc `memcpy` declaration, inserting it on first use.
+    /// `memcpy(dst: ptr, src: ptr, n: i64) -> dst`. Copies each operand's bytes
+    /// into the freshly allocated buffer during string concatenation (§2.7).
+    pub(crate) fn get_or_declare_memcpy(&self) -> FunctionValue<'ctx> {
+        if let Some(f) = self.module.get_function("memcpy") {
+            return f;
+        }
+        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let fn_type = ptr_type.fn_type(
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                self.context.i64_type().into(),
+            ],
+            false,
+        );
+        self.module
+            .add_function("memcpy", fn_type, Some(inkwell::module::Linkage::External))
+    }
+
     /// Get the external libc `abort` declaration, inserting it on first use.
     /// `abort() -> void`. Terminates the process via SIGABRT without unwinding the stack,
     /// which is exactly the §1.2 panic contract (no landing pads, `Drop`/`defer` skipped).

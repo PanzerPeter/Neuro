@@ -11,8 +11,22 @@ val sum: i32 = 10 + 20      // 30
 val total: f64 = 3.14 + 2.86  // 6.00
 ```
 
-**Types**: Works with numeric types (integers and floats)
+**Types**: Works with numeric types (integers and floats), and with `string` (concatenation)
 **Requirement**: Both operands must be the same type
+
+On two strings, `+` is **concatenation** (§2.7): it allocates a new owned, immutable `string`
+holding the left operand's bytes followed by the right operand's. A `&string` slice may stand in
+for either side. Operands are read, not consumed, so they remain usable afterward.
+
+```neuro
+val greeting: string = "Hello, " + "Neuro!"   // "Hello, Neuro!"
+val a: string = "ab"
+val b: string = "cd"
+val joined: string = a + &b                   // "abcd"; a and b still valid
+```
+
+> The concatenated buffer is heap-allocated and not yet freed — runtime heap strings leak until
+> `Drop` / deterministic destruction lands (Phase 1.7). See the alpha memory warning in the README.
 
 ### Subtraction (`-`)
 
@@ -359,6 +373,9 @@ a * (b + c)     // Force addition before multiplication
 - `f32`, `f64`
 
 Both operands must be the same type.
+
+`+` additionally works on `string` (and `&string`) as concatenation, producing a new owned
+`string`. The other arithmetic operators have no string meaning.
 
 ### Integer-Only Operators
 

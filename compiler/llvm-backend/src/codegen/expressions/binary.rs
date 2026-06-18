@@ -90,6 +90,89 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))
     }
 
+    /// Concatenate two string fat-pointers into a new owned `string` (§2.7).
+    ///
+    /// Allocates `len1 + len2` bytes via `malloc` and copies both operands' bytes
+    /// in with `memcpy`, returning a fresh `{ ptr, len }`. The result is a new,
+    /// immutable, heap-backed string; the operands are read, not consumed. The
+    /// buffer has no null terminator (consistent with the fat-pointer `len`
+    /// contract, §1.5) and is not yet freed — runtime heap strings leak until
+    /// `Drop` lands (Phase 1.7); see the alpha memory warning in the README.
+    pub(crate) fn codegen_string_concat(
+        &self,
+        lhs: BasicValueEnum<'ctx>,
+        rhs: BasicValueEnum<'ctx>,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let lhs_struct = lhs.into_struct_value();
+        let rhs_struct = rhs.into_struct_value();
+
+        let ptr1 = self
+            .builder
+            .build_extract_value(lhs_struct, 0, "cat.s1.ptr")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_pointer_value();
+        let len1 = self
+            .builder
+            .build_extract_value(lhs_struct, 1, "cat.s1.len")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_int_value();
+        let ptr2 = self
+            .builder
+            .build_extract_value(rhs_struct, 0, "cat.s2.ptr")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_pointer_value();
+        let len2 = self
+            .builder
+            .build_extract_value(rhs_struct, 1, "cat.s2.len")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_int_value();
+
+        let total_len = self
+            .builder
+            .build_int_add(len1, len2, "cat.len")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+        let malloc_fn = self.get_or_declare_malloc();
+        let buf = self
+            .builder
+            .build_call(malloc_fn, &[total_len.into()], "cat.buf")
+            .map_err(|e| CodegenError::LlvmError(format!("failed to call malloc: {}", e)))?
+            .try_as_basic_value()
+            .basic()
+            .ok_or_else(|| CodegenError::InternalError("malloc returned void".to_string()))?
+            .into_pointer_value();
+
+        let memcpy_fn = self.get_or_declare_memcpy();
+        self.builder
+            .build_call(memcpy_fn, &[buf.into(), ptr1.into(), len1.into()], "")
+            .map_err(|e| CodegenError::LlvmError(format!("failed to call memcpy: {}", e)))?;
+
+        // SAFETY: `buf` was just allocated with `len1 + len2` bytes, so offsetting
+        // by `len1` stays within the allocation; the second copy writes the
+        // remaining `len2` bytes starting at that offset.
+        let dst2 = unsafe {
+            self.builder
+                .build_in_bounds_gep(self.context.i8_type(), buf, &[len1], "cat.dst2")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+        };
+        self.builder
+            .build_call(memcpy_fn, &[dst2.into(), ptr2.into(), len2.into()], "")
+            .map_err(|e| CodegenError::LlvmError(format!("failed to call memcpy: {}", e)))?;
+
+        let fat_ptr_type = self.type_mapper.map_type(&Type::String)?.into_struct_type();
+        let with_ptr = self
+            .builder
+            .build_insert_value(fat_ptr_type.get_undef(), buf, 0, "cat.res.ptr")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_struct_value();
+        let fat_ptr = self
+            .builder
+            .build_insert_value(with_ptr, total_len, 1, "cat.res")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+        Ok(fat_ptr.into_struct_value().into())
+    }
+
     /// Normalize a string operand to its `{ ptr, len }` fat-pointer struct value,
     /// auto-dereferencing a `&string` slice (§2.7) — a borrow lowers to a pointer
     /// to the fat pointer, so it is loaded; an owned `string` is already the struct.
@@ -342,6 +425,16 @@ impl<'ctx> CodegenContext<'ctx> {
                     .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                     .into()),
             };
+        }
+
+        // String concatenation (§2.7): `string + string` allocates a fresh heap
+        // buffer and copies both operands' bytes in. Either operand may be owned or
+        // a `&string` slice, so each is normalized to its fat pointer first. Handled
+        // before the numeric coercion below, which assumes scalar operands.
+        if matches!(op, BinaryOp::Add) && matches!(left_ty.referent(), Type::String) {
+            let lhs_str = self.load_string_fatptr(lhs)?;
+            let rhs_str = self.load_string_fatptr(rhs)?;
+            return self.codegen_string_concat(lhs_str, rhs_str);
         }
 
         // Coerce both operands to the left-operand semantic type.  Literals always

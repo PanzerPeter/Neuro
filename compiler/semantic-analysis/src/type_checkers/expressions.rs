@@ -355,6 +355,29 @@ impl TypeChecker {
                     | BinaryOp::Multiply
                     | BinaryOp::Divide
                     | BinaryOp::Modulo => {
+                        // String concatenation (§2.7): `+` joins two strings into a new
+                        // owned, immutable `string`. A `&string` slice participates too, so
+                        // a single string reference is peeled exactly as equality does. The
+                        // other arithmetic operators have no string meaning. Checked before
+                        // the numeric path, which would reject a non-numeric operand.
+                        let left_cat = left_ty.peel_string_ref();
+                        let right_cat = right_ty.peel_string_ref();
+                        if matches!(left_cat, Type::String) || matches!(right_cat, Type::String) {
+                            if matches!(op, BinaryOp::Add)
+                                && matches!(left_cat, Type::String)
+                                && matches!(right_cat, Type::String)
+                            {
+                                return Some(Type::String);
+                            }
+                            self.record_error(TypeError::InvalidBinaryOperator {
+                                op: op.to_string(),
+                                left: left_ty.clone(),
+                                right: right_ty.clone(),
+                                span: *span,
+                            });
+                            return Some(Type::Unknown);
+                        }
+
                         // Half-precision scalars have no arithmetic (§1.2): point the
                         // programmer at the `f32` workaround rather than a generic error.
                         if let Some(half) = [&left_ty, &right_ty]

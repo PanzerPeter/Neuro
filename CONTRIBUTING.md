@@ -291,11 +291,11 @@ one of the bigger open items.
 
 **Open** (items are ordered by dependency; earlier ones unblock later):
 
-- [ ] **`&string` slice type** (§2.7). A borrowed, non-owning `(ptr, len)` view into UTF-8 data; codegen is a no-op (the ABI already matches). Prerequisite for `.slice(range)`.
+- [x] **`&string` slice type** (§2.7, v1.32.0). A borrowed, non-owning `(ptr, len)` view into UTF-8 data; byte-level `==`/`!=` across any owned/borrowed combination. Prerequisite for `.slice(range)`.
 - [ ] **Explicit lifetime annotations `<'a>`** (§2.6). `func longest<'a>(a: &'a string, b: &'a string) -> &'a string` for the advanced patterns elision cannot express. Needs `'a` lifetime tokens and a generic-parameter list — parse surface that lands with generics (Phase 2B).
 - [ ] **`Drop` trait + deterministic destruction.** Destructor runs at scope exit. No GC, no ARC. First heap consumer is the string concat / format machinery.
 - [x] **Remove ARC.** Closed v1.41.6 as an audit — no ARC was ever introduced; a whole-repo scan finds zero reference-counting plumbing. The memory model has always been owned-or-borrowed (move-by-default + `&T`/`&mut T`).
-- [ ] **Runtime string ops behind the borrow checker.** `String::new`, `string + &string` concat, `.push_str`, `.clear` — the first features that exercise heap + `Drop`.
+- [ ] **Runtime string ops behind the borrow checker.** `String::new`, `string + &string` concat, `.push_str`, `.clear` — the first features that exercise heap + `Drop`. Concatenation `+` landed v1.42.0 (`malloc` + `memcpy` → new owned immutable `string`; leaks until `Drop`); the growable-builder half remains open (needs a mutable string type + `Drop`).
 
 ### Non-Code Contributions
 

@@ -550,3 +550,76 @@ fn user_function_shadows_panic_builtin() {
     assert_eq!(ty, Some(Type::I32));
     assert!(!checker.has_errors(), "got: {:?}", checker.into_errors());
 }
+
+/// `string + string` type-checks to `string` (§2.7 concatenation), distinct from
+/// the numeric arithmetic path.
+#[test]
+fn string_concat_yields_string() {
+    let mut checker = TypeChecker::new();
+
+    let concat = Expr::Binary {
+        left: Box::new(Expr::Literal(
+            Literal::String("foo".to_string()),
+            Span::new(0, 5),
+        )),
+        op: BinaryOp::Add,
+        right: Box::new(Expr::Literal(
+            Literal::String("bar".to_string()),
+            Span::new(8, 13),
+        )),
+        span: Span::new(0, 13),
+    };
+
+    let ty = checker.check_expr(&concat, None);
+    assert_eq!(ty, Some(Type::String));
+    assert!(!checker.has_errors(), "got: {:?}", checker.into_errors());
+}
+
+/// Only `+` joins strings; `string - string` is an invalid-operator error.
+#[test]
+fn string_subtract_is_rejected() {
+    let mut checker = TypeChecker::new();
+
+    let sub = Expr::Binary {
+        left: Box::new(Expr::Literal(
+            Literal::String("foo".to_string()),
+            Span::new(0, 5),
+        )),
+        op: BinaryOp::Subtract,
+        right: Box::new(Expr::Literal(
+            Literal::String("bar".to_string()),
+            Span::new(8, 13),
+        )),
+        span: Span::new(0, 13),
+    };
+
+    let ty = checker.check_expr(&sub, None);
+    assert_eq!(ty, Some(Type::Unknown));
+    assert!(checker
+        .into_errors()
+        .iter()
+        .any(|e| matches!(e, TypeError::InvalidBinaryOperator { .. })));
+}
+
+/// Mixing a string with a non-string under `+` is rejected (no silent coercion).
+#[test]
+fn string_plus_integer_is_rejected() {
+    let mut checker = TypeChecker::new();
+
+    let mixed = Expr::Binary {
+        left: Box::new(Expr::Literal(
+            Literal::String("foo".to_string()),
+            Span::new(0, 5),
+        )),
+        op: BinaryOp::Add,
+        right: Box::new(Expr::Literal(Literal::Integer(1, None), Span::new(8, 9))),
+        span: Span::new(0, 9),
+    };
+
+    let ty = checker.check_expr(&mixed, None);
+    assert_eq!(ty, Some(Type::Unknown));
+    assert!(checker
+        .into_errors()
+        .iter()
+        .any(|e| matches!(e, TypeError::InvalidBinaryOperator { .. })));
+}
