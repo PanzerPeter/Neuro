@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.41.6] - 2026-06-18
+
+### Changed
+- `docs`: closed the Phase 1.7 "Remove ARC" roadmap item as an audit. A whole-repo scan (`Arc`/`Rc<`/`Arc::new`/`Rc::new`, the `refcount`/`strong_count`/`retain`/`release_ref` vocabulary, and arc-like crate dependencies) returns zero hits — no reference-counting plumbing was ever introduced. The alpha memory model has always been owned-or-borrowed (move-by-default plus `&T`/`&mut T`), so there is nothing to strip. Marked complete in the roadmap and CONTRIBUTING priorities; the `Drop` half is tracked separately and lands with the trait system (Phase 2B §3.9).
+
+---
+
 ## [1.41.5] - 2026-06-18
 
 ### Changed

@@ -294,7 +294,7 @@ one of the bigger open items.
 - [ ] **`&string` slice type** (§2.7). A borrowed, non-owning `(ptr, len)` view into UTF-8 data; codegen is a no-op (the ABI already matches). Prerequisite for `.slice(range)`.
 - [ ] **Explicit lifetime annotations `<'a>`** (§2.6). `func longest<'a>(a: &'a string, b: &'a string) -> &'a string` for the advanced patterns elision cannot express. Needs `'a` lifetime tokens and a generic-parameter list — parse surface that lands with generics (Phase 2B).
 - [ ] **`Drop` trait + deterministic destruction.** Destructor runs at scope exit. No GC, no ARC. First heap consumer is the string concat / format machinery.
-- [ ] **Remove ARC.** Strip any reference-counting plumbing introduced during the alpha — everything is owned-or-borrowed from here on.
+- [x] **Remove ARC.** Closed v1.41.6 as an audit — no ARC was ever introduced; a whole-repo scan finds zero reference-counting plumbing. The memory model has always been owned-or-borrowed (move-by-default + `&T`/`&mut T`).
 - [ ] **Runtime string ops behind the borrow checker.** `String::new`, `string + &string` concat, `.push_str`, `.clear` — the first features that exercise heap + `Drop`.
 
 ### Non-Code Contributions
