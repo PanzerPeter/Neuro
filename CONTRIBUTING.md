@@ -288,14 +288,19 @@ one of the bigger open items.
 - [x] `&mut self` methods — in-place receiver mutation (§2.5, v1.41.0).
 - [x] Panic runtime — `panic`/`assert`/`unreachable`, abort, no unwinding (§1.2).
 - [x] `unsafe { }` block infrastructure — inert outside `@kernel` (§3).
+- [x] `&string` slice type — borrowed `(ptr, len)` UTF-8 view; byte-level `==`/`!=` (§2.7, v1.32.0).
+- [x] Remove ARC — audit: no reference-counting plumbing ever existed (v1.41.6).
+- [x] String concatenation `+` — `malloc`+`memcpy` → new owned immutable `string` (§2.7, v1.42.0).
 
-**Open** (items are ordered by dependency; earlier ones unblock later):
+**Open** (ordered by dependency; earlier ones unblock later):
 
-- [x] **`&string` slice type** (§2.7, v1.32.0). A borrowed, non-owning `(ptr, len)` view into UTF-8 data; byte-level `==`/`!=` across any owned/borrowed combination. Prerequisite for `.slice(range)`.
-- [ ] **Explicit lifetime annotations `<'a>`** (§2.6). `func longest<'a>(a: &'a string, b: &'a string) -> &'a string` for the advanced patterns elision cannot express. Needs `'a` lifetime tokens and a generic-parameter list — parse surface that lands with generics (Phase 2B).
-- [ ] **`Drop` trait + deterministic destruction.** Destructor runs at scope exit. No GC, no ARC. First heap consumer is the string concat / format machinery.
-- [x] **Remove ARC.** Closed v1.41.6 as an audit — no ARC was ever introduced; a whole-repo scan finds zero reference-counting plumbing. The memory model has always been owned-or-borrowed (move-by-default + `&T`/`&mut T`).
-- [ ] **Runtime string ops behind the borrow checker.** `String::new`, `string + &string` concat, `.push_str`, `.clear` — the first features that exercise heap + `Drop`. Concatenation `+` landed v1.42.0 (`malloc` + `memcpy` → new owned immutable `string`; leaks until `Drop`); the growable-builder half remains open (needs a mutable string type + `Drop`).
+- [ ] **`Drop` trait + deterministic destruction.** Runs the destructor at scope exit (on normal exit only, never on panic); no GC, no ARC. Recognized as a compiler-known lang-item like `Copy`/`Clone` — it reuses impl-blocks, scope tracking, and move analysis, so it does **not** wait for the general trait system (Phase 2B). First heap consumer is the string concat/format machinery; landing it makes the v1.42.0 concat buffer leak-free and unblocks the growable-string half below. **Keystone open item — coordinate on an issue before starting.**
+- [ ] **String `.slice(range)`.** Borrowed `&string` sub-slice (zero copy); panics on a mid-codepoint boundary in both debug and release. Depends only on the landed `&string` slice type + panic runtime, so it is implementable now — the smallest open item.
+- [ ] **Runtime string ops (growable half).** `String::new`, `.push_str`, `.clear`. Needs a mutable growable string type + `Drop` (concatenation `+` already landed v1.42.0; it leaks until `Drop`).
+
+Explicit lifetime annotations `<'a>` were moved to Phase 2B — they need the
+generic-parameter list + `'a` lifetime tokens, the parse surface that lands with
+generics. Lifetime *elision* (v1.40.0, landed above) covers the common cases.
 
 ### Non-Code Contributions
 

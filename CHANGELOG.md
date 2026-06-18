@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.42.1] - 2026-06-18
+
+### Changed
+- `docs`: reorganized the private roadmap and synced `CONTRIBUTING.md` so each phase is implementable strictly in order — every open item's prerequisites land in an earlier or the same phase. Resolved `Drop` as a **Phase 1.7 compiler-known lang-item** (recognized specially like `Copy`/`Clone`, reusing impl-blocks + scope/move tracking) rather than gating it on the Phase 2B trait system, making it the keystone next item. Relocated three misplaced items to where their prerequisites live: explicit lifetime annotations `<'a>` → Phase 2B (after Generics, which provides the parse surface); `String.slice(range)` → Phase 1.7 (a string op depending only on `&string` + the panic runtime, both landed); `Layer::require_grad(bool)` → Phase 6 (depends on the Layer trait + `.parameters()`, not the GPU backend). Demoted the duplicate `await`-in-`pool` checkbox in Phase 3 to a forward-dependency note (it is implemented in Phase 7, where `await` exists). No compiler code changed.
+
+---
+
 ## [1.42.0] - 2026-06-18
 
 ### Added
