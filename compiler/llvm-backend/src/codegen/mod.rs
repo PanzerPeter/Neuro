@@ -1,4 +1,5 @@
 pub(crate) mod context;
+pub(crate) mod drops;
 pub(crate) mod expressions;
 pub(crate) mod functions;
 pub(crate) mod panic;

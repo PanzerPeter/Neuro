@@ -96,6 +96,28 @@ pub(crate) struct LoopTargets<'ctx> {
     /// stores `v` here before branching to `break_bb`; the loop expression loads
     /// it at exit. `None` for `while`/`for` (unit) and unit `loop`s.
     pub(crate) break_slot: Option<PointerValue<'ctx>>,
+    /// Index of this loop's body drop scope in `drop_scopes`. A `break`/`continue`
+    /// leaving the loop runs the destructors of every scope from the innermost open
+    /// one down to and including this one, before branching (§2.1).
+    pub(crate) drop_scope_depth: usize,
+}
+
+/// A live owned binding (local or by-value parameter) of a `Drop` type whose
+/// destructor must run at scope exit (§2.1).
+///
+/// `flag_ptr` is an `i1` slot initialized to `true` at the binding site and set
+/// `false` when the value is moved out, so the scope-exit drop is elided for a
+/// moved value (§2.2) — the runtime drop-flag mechanism that keeps conditional
+/// moves sound.
+pub(crate) struct DropEntry<'ctx> {
+    /// Source binding name, used to clear the flag when the value is moved.
+    pub(crate) name: String,
+    /// Address of the binding's storage; passed as the `&mut self` receiver to `drop`.
+    pub(crate) storage_ptr: PointerValue<'ctx>,
+    /// The `i1` drop-flag slot.
+    pub(crate) flag_ptr: PointerValue<'ctx>,
+    /// Struct name, used to resolve the `{struct}__drop` destructor function.
+    pub(crate) struct_name: String,
 }
 
 /// Central state container for LLVM IR code generation.
@@ -182,6 +204,16 @@ pub(crate) struct CodegenContext<'ctx> {
     /// in panic-family diagnostics (§1.2). `None` when the caller did not supply source
     /// (e.g. the library doctest); panic diagnostics then omit the location suffix.
     pub(crate) source: Option<SourceFile>,
+
+    /// Names of structs implementing the `Drop` lang-item (`impl Drop for T`, §2.1).
+    /// A binding of such a type gets a scope-exit destructor call. Empty for programs
+    /// with no Drop types, in which case all drop machinery below stays inert.
+    pub(crate) drop_types: std::collections::HashSet<String>,
+
+    /// Stack of lexical drop scopes, innermost last. Each scope lists the owned
+    /// `Drop`-typed bindings declared in it, in declaration order; on normal scope
+    /// exit they are dropped in reverse (LIFO). Empty unless `drop_types` is non-empty.
+    pub(crate) drop_scopes: Vec<Vec<DropEntry<'ctx>>>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -212,7 +244,14 @@ impl<'ctx> CodegenContext<'ctx> {
             global_const_types: HashMap::new(),
             overflow_checks: false,
             source: None,
+            drop_types: std::collections::HashSet::new(),
+            drop_scopes: Vec::new(),
         }
+    }
+
+    /// Record the set of structs implementing `Drop` (§2.1) before code generation.
+    pub(crate) fn set_drop_types(&mut self, drop_types: std::collections::HashSet<String>) {
+        self.drop_types = drop_types;
     }
 
     /// Enable or disable debug-build integer overflow trapping.

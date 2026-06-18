@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-701%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-712%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP & Phase 1.5 stabilization complete · Phase 1.7 (ownership) active · Phase 2 overlapping
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**701 Tests Passing**):
+Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**712 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -98,6 +98,7 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 | **Variables & Constants** | `val` (immutable) / `mut` (mutable) with type-safe reassignment; module- and function-scope `const` emitted as LLVM globals |
 | **Structs & Methods** | Definition, instantiation, field-init shorthand, functional update (`..base`), field read/mutation; `impl` blocks with `&self` / `&mut self` instance methods and `TypeName::func` associated functions |
 | **Move Semantics** | Move-by-default for non-`Copy` values; use-after-move is a compile error; `.clone()` opts out; `@derive(Copy, Clone)` on structs |
+| **Deterministic `Drop`** | `impl Drop for T { func drop(&mut self) }` runs a destructor at scope exit, in reverse declaration order, on normal exit only (never during a panic); a moved-out value is dropped exactly once; a `Copy` type may not implement `Drop` |
 | **Borrows** | Immutable `&T` and mutable `&mut T` references with the `*` deref operator; flow-sensitive borrow exclusivity (shared XOR mutable) enforced at compile time |
 | **Lifetimes (elision)** | Returned-reference lifetime elision; returning a borrow of a local or by-value parameter is rejected as it would dangle |
 | **Strings** | Fat-pointer `string` with full escape support; `&string` borrowed slices; byte-level `==`/`!=`; `+` concatenation (heap-allocated new string); builtin `.len()` / `.clone()` / `.slice(a..b)` (zero-copy sub-slice, panics on out-of-bounds or mid-codepoint boundary) |
@@ -111,13 +112,13 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 >
 > Stack-allocated values (integers, booleans, structs with primitive fields) are reclaimed automatically on function return via LLVM `alloca`. String literals are emitted into read-only program memory (`.rodata`) and consume no heap, so a program that only reads literal strings does not leak today.
 >
-> However, **no destructor, drop, or ownership system exists yet**. As soon as runtime string operations (concatenation, formatting, dynamic builders) land, every heap buffer they allocate will leak until the borrow checker and drop semantics are in place. The same applies to any future heap-allocated value (boxed types, dynamic arrays, owning collections).
+> The ownership system is now substantially in place: move-by-default, borrows, and **deterministic `Drop`** (user destructors run at scope exit) have landed. What remains is broader heap support — the growable-string builder and owning collections — plus full lifetime inference. Until those land, `+` string concatenation still leaks its heap buffer (it allocates a buffer no `Drop` impl yet frees), and runtime string builders do not exist.
 >
-> Building the ownership tracker, borrow checker, and deterministic destruction is the primary goal of **Phase 1.7**. Do not assume memory safety semantics until those land.
+> Completing the ownership tracker, borrow checker, and deterministic destruction is the primary goal of **Phase 1.7**. Do not assume full memory safety semantics until they all land.
 >
 > If memory safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
 
-String fat pointers, move-by-default (use-after-move detection), the `Copy` trait, immutable borrows (`&T`), mutable borrows (`&mut T` with the `*` deref operator), flow-sensitive borrow exclusivity (the `&`/`&mut` aliasing rules), lifetime elision for returned references (§2.6), and `&mut self` methods (in-place receiver mutation, §2.5) have already landed; the remaining work — full lifetime inference, explicit lifetime annotations, and `Drop` / deterministic destruction — is tracked under Phase 1.7 in the roadmap.
+String fat pointers, move-by-default (use-after-move detection), the `Copy` trait, immutable borrows (`&T`), mutable borrows (`&mut T` with the `*` deref operator), flow-sensitive borrow exclusivity (the `&`/`&mut` aliasing rules), lifetime elision for returned references (§2.6), `&mut self` methods (in-place receiver mutation, §2.5), and deterministic `Drop` (scope-exit destructors, §2.1) have already landed; the remaining work — full lifetime inference, explicit lifetime annotations, and the growable runtime-string / owning-collection heap types — is tracked under Phase 1.7 in the roadmap.
 
 ---
 
@@ -468,7 +469,7 @@ Tensor/AI path: AST → Neuro High-Level IR
 |:---:|---|:---:|
 | **1**   | Core MVP — types, functions, control flow, LLVM backend | ✅ Complete |
 | **1.5** | Syntax & semantics stabilization — parser fixes, `const`, `as` casts, compound assignment, bitwise ops, integer suffixes, if/block expressions, `while true` lint, IEEE-754 float comparisons, string fat pointers | ✅ Complete |
-| **1.7** | Ownership & borrow checker — move semantics ✅, `Copy` trait ✅, immutable borrows `&T` ✅, mutable borrows `&mut T` ✅, borrow exclusivity ✅, lifetime elision / returned-reference outlives ✅, `&mut self` methods ✅, full lifetime inference, drop / deterministic destruction, remove implicit copies | 🔄 In progress |
+| **1.7** | Ownership & borrow checker — move semantics ✅, `Copy` trait ✅, immutable borrows `&T` ✅, mutable borrows `&mut T` ✅, borrow exclusivity ✅, lifetime elision / returned-reference outlives ✅, `&mut self` methods ✅, deterministic `Drop` ✅, full lifetime inference, growable heap string / collections | 🔄 In progress |
 | **1.8** | Backend plumbing — `neuro-hir` typed IR crate, `melior` integration, HIR lowering pipeline shared by LLVM + future MLIR backends | 📋 Planned |
 | **2**   | Core language — arrays, tuples, structs ✅, methods ✅, enums, pattern matching, generics, traits, closures, type aliases, newtypes, `Option`/`Result`, `??`, `?`, modules, prelude, string interpolation | 🔄 In progress |
 | **3**   | Tensors & MLIR — `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | 📋 Planned |

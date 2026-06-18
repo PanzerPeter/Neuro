@@ -338,6 +338,57 @@ fn test_parse_method_with_allow_attribute() {
 }
 
 #[test]
+fn test_parse_inherent_impl_has_no_trait_name() {
+    use syntax_parsing::Item;
+
+    let source = r#"
+        struct Counter { value: i32 }
+
+        impl Counter {
+            func tick(&self) -> i32 { 0 }
+        }
+    "#;
+    let items = parse(source).expect("parse should succeed");
+    let impl_def = items
+        .iter()
+        .find_map(|item| match item {
+            Item::Impl(i) => Some(i),
+            _ => None,
+        })
+        .expect("expected impl block");
+    assert!(impl_def.trait_name.is_none());
+    assert_eq!(impl_def.type_name.name, "Counter");
+}
+
+#[test]
+fn test_parse_drop_trait_impl_records_trait_name() {
+    use syntax_parsing::Item;
+
+    let source = r#"
+        struct Handle { id: i32 }
+
+        impl Drop for Handle {
+            func drop(&mut self) { }
+        }
+    "#;
+    let items = parse(source).expect("parse should succeed");
+    let impl_def = items
+        .iter()
+        .find_map(|item| match item {
+            Item::Impl(i) => Some(i),
+            _ => None,
+        })
+        .expect("expected impl block");
+    assert_eq!(
+        impl_def.trait_name.as_ref().map(|t| t.name.as_str()),
+        Some("Drop")
+    );
+    assert_eq!(impl_def.type_name.name, "Handle");
+    assert_eq!(impl_def.methods.len(), 1);
+    assert_eq!(impl_def.methods[0].name.name, "drop");
+}
+
+#[test]
 fn test_parse_struct_with_derive_attribute() {
     use syntax_parsing::Item;
 

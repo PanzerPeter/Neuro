@@ -210,6 +210,51 @@ func main() -> i32 {
 }
 ```
 
+## Destructors (`impl Drop`)
+
+A struct can define a destructor by implementing the built-in `Drop` trait. Its
+`drop(&mut self)` method runs automatically when an owner of the value goes out
+of scope (§2.1):
+
+```neuro
+struct Guard {
+    sink: &mut i32
+}
+
+impl Drop for Guard {
+    func drop(&mut self) {
+        *self.sink = *self.sink + 1   // record that the destructor ran
+    }
+}
+
+func main() -> i32 {
+    mut dropped: i32 = 0
+    {
+        val g = Guard { sink: &mut dropped }
+    }                 // `g` goes out of scope here → `drop` runs, dropped == 1
+    return dropped    // 1
+}
+```
+
+Rules:
+
+- Destructors run **only on normal scope exit** — fall-through, `return`,
+  `break`, and `continue`. A panic aborts the process without running any
+  destructor (§1.2: there is no stack unwinding).
+- When several owned values leave the same scope, they are dropped in **reverse
+  declaration order** (LIFO).
+- A value that has been **moved** out (rebound, returned, passed by value, or
+  stored into a struct) is dropped exactly once, by its final owner — never
+  twice. Reading a moved value is already a compile error (§2.2).
+- A `Copy` type may **not** implement `Drop` (a type with a destructor is moved,
+  not duplicated). `@derive(Copy)` together with `impl Drop` is a compile error.
+- The `drop` method must be exactly `drop(&mut self)` — no extra parameters and
+  no return type — and an `impl Drop` block may contain no other methods.
+
+Not yet supported: reassigning a `Drop` binding does not run the prior value's
+destructor, and a struct's `Drop`-typed fields are not dropped automatically
+(no recursive destructor glue).
+
 ## Definition Order Independence
 
 Structs and `impl` blocks can appear in any order. Forward references are supported:

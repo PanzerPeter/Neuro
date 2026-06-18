@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.44.0] - 2026-06-18
+
+### Added
+- `codegen`: `Drop` trait + deterministic destruction (Phase 1.7, §2.1). `impl Drop for T { func drop(&mut self) { ... } }` defines a destructor that runs automatically when an owned binding of `T` leaves its lexical scope, in reverse declaration order, on **normal** exit only — fall-through, `return`, `break`, and `continue`. A panic aborts without running destructors (§1.2: no stack unwinding, no landing pads). `Drop` is recognized as a compiler-known lang-item (like `Copy`/`Clone`), without the general trait system: the parser accepts `impl TraitName for Type` (`ImplDef::trait_name`); semantic analysis validates the destructor shape (`drop(&mut self)`, no params, no return → `InvalidDropImpl`) and rejects a `Copy` type that implements `Drop` (`DropTypeCannotBeCopy`). The backend (`llvm-backend/src/codegen/drops.rs`) tracks a lexical drop-scope stack and inserts flag-guarded `{struct}__drop` calls at scope exit; each owned binding carries an `i1` drop flag, cleared at every move site, so a value moved out (rebind, return, `break` value, by-value call argument, struct-field store) is dropped exactly once — never double-dropped (§2.2). All drop machinery is inert for programs that declare no `Drop` types. New `examples/types/drop.nr`, `neurc/tests/drop_destructors.rs`, and semantic/parser unit tests. Known limitations (deferred): reassigning a `Drop` binding does not drop its prior value, and a struct's `Drop`-typed fields are not auto-dropped (no recursive drop glue).
+
+---
+
 ## [1.43.0] - 2026-06-18
 
 ### Added

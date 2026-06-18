@@ -10,6 +10,10 @@ const DERIVE_ATTRIBUTE: &str = "derive";
 const COPY_TRAIT: &str = "Copy";
 /// Derive argument requesting the `Clone` trait.
 const CLONE_TRAIT: &str = "Clone";
+/// The compiler-known `Drop` lang-item trait name (§2.1).
+const DROP_TRAIT: &str = "Drop";
+/// The destructor method name required inside an `impl Drop` block.
+const DROP_METHOD: &str = "drop";
 
 impl TypeChecker {
     /// Check a function definition
@@ -234,6 +238,16 @@ impl TypeChecker {
 
         let struct_name = def.type_name.name.clone();
 
+        // Recognize the compiler-known `Drop` lang-item (§2.1). It is matched by name
+        // here exactly like `Copy`/`Clone` derives, without the general trait system.
+        if def
+            .trait_name
+            .as_ref()
+            .is_some_and(|t| t.name == DROP_TRAIT)
+        {
+            self.register_drop_impl(def, &struct_name);
+        }
+
         // Accumulate (method_name, mangled_key) to insert into impl_methods after
         // all mutable borrows of `self` for type resolution are finished.
         let mut method_entries: Vec<(String, String)> = Vec::new();
@@ -299,6 +313,50 @@ impl TypeChecker {
         }
 
         Some(())
+    }
+
+    /// Validate and record an `impl Drop for T` block (§2.1).
+    ///
+    /// A Drop type must contain exactly the destructor `drop(&mut self)` — no
+    /// parameters, no return — and must not also be `Copy` (a type with a
+    /// destructor is moved, never duplicated, §2.3). The method itself is
+    /// registered by the normal `impl` path under `T__drop`; this only enforces the
+    /// lang-item shape and records `T` as a Drop type for scope-exit insertion.
+    fn register_drop_impl(&mut self, def: &ImplDef, struct_name: &str) {
+        if self.copy_structs.contains(struct_name) {
+            self.record_error(TypeError::DropTypeCannotBeCopy {
+                type_name: struct_name.to_string(),
+                span: def.type_name.span,
+            });
+        }
+
+        let mut reason: Option<String> = None;
+        match def.methods.as_slice() {
+            [method] if method.name.name == DROP_METHOD => {
+                if !matches!(method.self_param, Some(SelfParam::RefMut)) {
+                    reason = Some("`drop` must take `&mut self`".to_string());
+                } else if !method.params.is_empty() {
+                    reason =
+                        Some("`drop` must take no parameters other than `&mut self`".to_string());
+                } else if method.return_type.is_some() {
+                    reason = Some("`drop` must not return a value".to_string());
+                }
+            }
+            _ => {
+                reason = Some(
+                    "an `impl Drop` block must contain exactly one method: `drop(&mut self)`"
+                        .to_string(),
+                );
+            }
+        }
+
+        if let Some(reason) = reason {
+            self.record_error(TypeError::InvalidDropImpl {
+                type_name: struct_name.to_string(),
+                reason,
+                span: def.span,
+            });
+        }
     }
 
     /// Register a module-level constant name and type in the constants map.
