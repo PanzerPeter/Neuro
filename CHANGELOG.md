@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.42.0] - 2026-06-18
+
+### Added
+- `codegen`: string concatenation with `+` (Phase 1.7, §2.7). `a + b` on two strings allocates a fresh heap buffer via libc `malloc`, copies both operands' bytes in with `memcpy`, and returns a new owned, immutable `string` `{ ptr, len }` (no NUL terminator, consistent with the `len` contract). A `&string` slice may stand in for either operand; the result is always an owned `string`, never a reference. Operands are read, not consumed — like `==`, `+` borrows-to-read and never moves, so both stay usable afterward. Semantic analysis peels a single string reference in the arithmetic arm (`string + string -> string`); any other arithmetic operator on a string, or mixing a string with a non-string, is `InvalidBinaryOperator`. `malloc`/`memcpy` join the existing first-use libc externs (`memcmp`/`write`/`abort`). New `neurc/tests/string_concat.rs` end-to-end coverage and `examples/types/string_concat.nr`.
+
+### Notes
+- Concatenated buffers are heap-allocated and **not yet freed** — runtime heap strings leak until `Drop` / deterministic destruction lands (Phase 1.7). The growable-builder half of "Runtime string ops" (`String::new` / `.push_str` / `.clear`) stays open: it needs a mutable growable string type, which contradicts the current immutable-`string` spec (§2.7) and depends on `Drop`.
+
+---
+
 ## [1.41.6] - 2026-06-18
 
 ### Changed

@@ -257,14 +257,18 @@ An empty literal (`''`), a multi-character literal (`'ab'`), and an unterminated
 ## String Type
 
 The `string` type is an immutable, UTF-8 encoded fat pointer `{ ptr, i64 }` — a pointer to
-the bytes plus a stored byte length. Equality (`==`, `!=`) compares byte content.
+the bytes plus a stored byte length. Equality (`==`, `!=`) compares byte content; the `+`
+operator concatenates two strings into a new owned `string` (§2.7).
 
 ### Storage and the `len` Guarantee
 
 String **literals** live in read-only program memory (`.rodata`) for the lifetime of the
 program; they are **not** heap-allocated, so a program that only reads literals never leaks.
-(Runtime, heap-backed strings — concatenation, builders — arrive with the ownership system in
-Phase 1.7. Both forms share the same `{ ptr, i64 }` ABI, so consumers cannot tell them apart.)
+**Concatenation** (`a + b`) is the first runtime heap-backed string: it `malloc`s a fresh buffer
+and copies both operands' bytes in, yielding a new owned `string`. Both literal and heap-backed
+forms share the same `{ ptr, i64 }` ABI, so consumers cannot tell them apart. Until `Drop` /
+deterministic destruction lands (Phase 1.7), concatenated buffers leak — see the alpha memory
+warning in the README. (Growable builders — `String::new` / `.push_str` — also await that work.)
 
 The pointer addresses a NUL-terminated byte sequence so it doubles as a valid C string for
 future FFI, but the stored `len` field **excludes** that trailing NUL. `len` is the

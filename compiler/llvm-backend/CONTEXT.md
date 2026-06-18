@@ -50,6 +50,16 @@ check uses `select` to pass `n=0` to `memcmp` when lengths differ (safe, no extr
 (load through the pointer for a borrow, pass through an owned struct value) and then `codegen_string_eq`.
 Detection keys off `left_ty.referent() == String`, covering owned, borrowed, and mixed operands.
 
+`+` on strings is concatenation (§2.7). `codegen_binary` routes `Add` with a `String` referent to
+`codegen_string_concat` *before* the numeric coercion: both operands are normalized with
+`load_string_fatptr`, a `len1 + len2` buffer is `malloc`'d, each operand's bytes are `memcpy`'d in
+(the second at a `gep i8` offset of `len1`), and a fresh `{ ptr, len }` is returned. The result is a
+new owned, immutable string with **no** NUL terminator (consistent with the `len` contract). The
+type pass infers the result as owned `String` even when an operand is `&string`, so the value is
+never a reference. The heap buffer is not yet freed — runtime heap strings leak until `Drop` lands
+(Phase 1.7). `malloc`/`memcpy` are declared on first use in `context.rs` like the existing libc
+externs (`memcmp`/`write`/`abort`).
+
 ## Struct ABI
 User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding —
 LLVM handles alignment). Values live on the stack via `alloca`, initialised field-by-field with

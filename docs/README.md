@@ -119,7 +119,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 679 tests passing across all components
+- 685 tests passing across all components
 
 ## Compilation Pipeline
 

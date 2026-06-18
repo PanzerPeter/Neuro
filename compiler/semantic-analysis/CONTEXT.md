@@ -170,6 +170,12 @@ expression context.
   referent and move-recorded. New errors `CannotBorrowMutably` / `CannotDereference` /
   `CannotAssignThroughRef`. Unit tests in `types.rs` and `moves.rs`. Flow-sensitive aliasing
   exclusivity is deferred to lifetime inference.
+- 2026-06-18: String concatenation `+` §2.7. The arithmetic arm of `check_expr` now peels each
+  operand with `Type::peel_string_ref` before the numeric path: when both are `string` and the op
+  is `+`, the result is `Type::String` (a new owned string). Any other arithmetic op on a string,
+  or mixing a string with a non-string, is `InvalidBinaryOperator`. Operands are not consuming
+  positions, so `+` borrows-to-read and never moves (matching `==`). Unit tests in
+  `tests/expr_tests.rs`.
 - 2026-06-09: `&string` slice equality §2.7. `&string` is a borrowed string slice; the
   `Equal`/`NotEqual` arm of `check_expr` now compares operands through `Type::peel_string_ref`,
   which normalizes `&string` → `string` (one layer, string only) so an owned `string` and a
