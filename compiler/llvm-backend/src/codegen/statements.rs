@@ -21,6 +21,10 @@ impl<'ctx> CodegenContext<'ctx> {
         declared_ty: Option<&ast_types::Type>,
         init: Option<&Expr>,
     ) -> CodegenResult<()> {
+        // Resolve whether this binding owns a `Drop` value before the initializer is
+        // consumed, so its destructor can be scheduled for scope exit (§2.1).
+        let drop_name = self.drop_struct_name(declared_ty, init);
+
         let init_val = if let Some(expr) = init {
             Some(self.codegen_expr(expr)?)
         } else {
@@ -45,6 +49,15 @@ impl<'ctx> CodegenContext<'ctx> {
             })?;
             self.variables.insert(name.to_string(), alloca);
             self.variable_types.insert(name.to_string(), alloca_ty);
+
+            // Binding a place into a new owner moves it (`val b = a`): clear the source's
+            // drop flag so it is not also dropped (§2.2). Then register the new binding.
+            if let Some(expr) = init {
+                self.mark_moved_for_drop(expr);
+            }
+            if let Some(struct_name) = drop_name {
+                self.register_local_drop(name, alloca, struct_name)?;
+            }
         }
 
         Ok(())
@@ -128,6 +141,11 @@ impl<'ctx> CodegenContext<'ctx> {
             CodegenError::LlvmError(format!("failed to store value in assignment: {}", e))
         })?;
 
+        // Assigning a place moves it into the target (§2.2). The prior value held by a
+        // reassigned `Drop` binding is not dropped here (a known limitation); the target
+        // is still dropped once at scope exit.
+        self.mark_moved_for_drop(value);
+
         Ok(())
     }
 
@@ -144,6 +162,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.build_store(ptr, val).map_err(|e| {
             CodegenError::LlvmError(format!("failed to store through reference: {}", e))
         })?;
+        self.mark_moved_for_drop(value);
         Ok(())
     }
 
@@ -156,10 +175,15 @@ impl<'ctx> CodegenContext<'ctx> {
             if self.current_block_terminated() {
                 return Ok(());
             }
+            // Returning a place moves it out, so it must not be dropped; every other
+            // live `Drop` binding in the function is destroyed before control leaves (§2.1).
+            self.mark_moved_for_drop(expr);
+            self.emit_drops_through(0)?;
             self.builder
                 .build_return(Some(&ret_val))
                 .map_err(|e| CodegenError::LlvmError(format!("failed to build return: {}", e)))?;
         } else {
+            self.emit_drops_through(0)?;
             self.builder.build_return(None).map_err(|e| {
                 CodegenError::LlvmError(format!("failed to build void return: {}", e))
             })?;
@@ -192,11 +216,20 @@ impl<'ctx> CodegenContext<'ctx> {
                 CodegenError::LlvmError(format!("failed to build conditional branch: {}", e))
             })?;
 
-        // Generate then block
+        // Generate then block in its own drop scope so locals declared in the branch
+        // are destroyed at the branch's end (§2.1).
         self.builder.position_at_end(then_bb);
+        self.push_drop_scope();
         for stmt in then_block {
+            if self.current_block_terminated() {
+                break;
+            }
             self.codegen_stmt(stmt)?;
         }
+        if !self.current_block_terminated() {
+            self.emit_top_scope_drops()?;
+        }
+        self.pop_drop_scope();
         // After nested control flow the builder may be positioned at a block that is NOT
         // then_bb (e.g. the merge block of an inner if).  Checking then_bb would miss that
         // case, so we check whichever block the builder currently occupies.
@@ -218,9 +251,17 @@ impl<'ctx> CodegenContext<'ctx> {
         if let Some(((elif_cond, elif_stmts), rest)) = else_if_blocks.split_first() {
             self.codegen_if(elif_cond, elif_stmts, rest, else_block)?;
         } else if let Some(else_stmts) = else_block {
+            self.push_drop_scope();
             for stmt in else_stmts {
+                if self.current_block_terminated() {
+                    break;
+                }
                 self.codegen_stmt(stmt)?;
             }
+            if !self.current_block_terminated() {
+                self.emit_top_scope_drops()?;
+            }
+            self.pop_drop_scope();
         }
         // Same: check current insert block, not the fixed else_bb, for the same reason.
         if let Some(current_bb) = self.builder.get_insert_block() {
@@ -237,25 +278,6 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(merge_bb);
 
         Ok(())
-    }
-
-    /// Generate code for a while statement
-    /// Resolve the branch target for a `break`/`continue` (§3.7).
-    ///
-    /// An unlabeled statement targets the innermost loop; a labeled one targets
-    /// the nearest enclosing loop carrying that label. Label resolution is
-    /// validated in semantic analysis, so a miss here is an internal error.
-    fn resolve_loop_target(
-        &self,
-        label: Option<&shared_types::Identifier>,
-        is_break: bool,
-    ) -> CodegenResult<inkwell::basic_block::BasicBlock<'ctx>> {
-        let targets = self.lookup_loop_target(label)?;
-        Ok(if is_break {
-            targets.break_bb
-        } else {
-            targets.continue_bb
-        })
     }
 
     /// Resolve the [`LoopTargets`] a `break`/`continue` refers to: the innermost
@@ -318,11 +340,14 @@ impl<'ctx> CodegenContext<'ctx> {
             })?;
 
         self.builder.position_at_end(body_bb);
+        let body_scope_index = self.drop_scopes.len();
+        self.push_drop_scope();
         self.loop_targets.push(LoopTargets {
             label: label.map(str::to_string),
             continue_bb: cond_bb,
             break_bb: exit_bb,
             break_slot: None,
+            drop_scope_depth: body_scope_index,
         });
         for stmt in body {
             if let Some(current_bb) = self.builder.get_insert_block() {
@@ -333,6 +358,10 @@ impl<'ctx> CodegenContext<'ctx> {
             self.codegen_stmt(stmt)?;
         }
         let _ = self.loop_targets.pop();
+        if !self.current_block_terminated() {
+            self.emit_top_scope_drops()?;
+        }
+        self.pop_drop_scope();
 
         if let Some(tail_bb) = self.builder.get_insert_block() {
             if tail_bb.get_terminator().is_none() {
@@ -398,11 +427,14 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         self.builder.position_at_end(body_bb);
+        let body_scope_index = self.drop_scopes.len();
+        self.push_drop_scope();
         self.loop_targets.push(LoopTargets {
             label: label.map(str::to_string),
             continue_bb: body_bb,
             break_bb: exit_bb,
             break_slot: result_slot,
+            drop_scope_depth: body_scope_index,
         });
         for stmt in body {
             if let Some(current_bb) = self.builder.get_insert_block() {
@@ -413,6 +445,10 @@ impl<'ctx> CodegenContext<'ctx> {
             self.codegen_stmt(stmt)?;
         }
         let _ = self.loop_targets.pop();
+        if !self.current_block_terminated() {
+            self.emit_top_scope_drops()?;
+        }
+        self.pop_drop_scope();
 
         if let Some(tail_bb) = self.builder.get_insert_block() {
             if tail_bb.get_terminator().is_none() {
@@ -517,11 +553,14 @@ impl<'ctx> CodegenContext<'ctx> {
             })?;
 
         self.builder.position_at_end(body_bb);
+        let body_scope_index = self.drop_scopes.len();
+        self.push_drop_scope();
         self.loop_targets.push(LoopTargets {
             label: label.map(str::to_string),
             continue_bb: step_bb,
             break_bb: exit_bb,
             break_slot: None,
+            drop_scope_depth: body_scope_index,
         });
         for stmt in body {
             if let Some(current_bb) = self.builder.get_insert_block() {
@@ -532,6 +571,10 @@ impl<'ctx> CodegenContext<'ctx> {
             self.codegen_stmt(stmt)?;
         }
         let _ = self.loop_targets.pop();
+        if !self.current_block_terminated() {
+            self.emit_top_scope_drops()?;
+        }
+        self.pop_drop_scope();
 
         if let Some(tail_bb) = self.builder.get_insert_block() {
             if tail_bb.get_terminator().is_none() {
@@ -632,6 +675,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let target = self.lookup_loop_target(label.as_ref())?;
                 let break_bb = target.break_bb;
                 let break_slot = target.break_slot;
+                let drop_depth = target.drop_scope_depth;
 
                 // A value-carrying `break v` (§3.7) stores `v` into the loop's result
                 // slot before exiting; semantic analysis guarantees the slot exists.
@@ -644,7 +688,13 @@ impl<'ctx> CodegenContext<'ctx> {
                                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
                         }
                     }
+                    // A broken-out place is moved out of the loop and must not be dropped.
+                    self.mark_moved_for_drop(value_expr);
                 }
+
+                // Destroy every binding from here down to the loop's body scope before
+                // leaving the loop (§2.1).
+                self.emit_drops_through(drop_depth)?;
 
                 if let Some(current_bb) = self.builder.get_insert_block() {
                     if current_bb.get_terminator().is_none() {
@@ -662,7 +712,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 Ok(())
             }
             Stmt::Continue { label, .. } => {
-                let continue_bb = self.resolve_loop_target(label.as_ref(), false)?;
+                let target = self.lookup_loop_target(label.as_ref())?;
+                let continue_bb = target.continue_bb;
+                let drop_depth = target.drop_scope_depth;
+
+                // Re-entering the loop ends this iteration's body scope, so its bindings
+                // are destroyed before the back-edge (§2.1).
+                self.emit_drops_through(drop_depth)?;
 
                 if let Some(current_bb) = self.builder.get_insert_block() {
                     if current_bb.get_terminator().is_none() {

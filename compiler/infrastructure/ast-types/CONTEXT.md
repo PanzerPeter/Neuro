@@ -17,7 +17,9 @@ Provide the canonical Abstract Syntax Tree (AST) node definitions shared by all 
 ## Notes
 Extracted from `syntax-parsing` to eliminate the cross-slice dependency that `semantic-analysis` and `llvm-backend` previously had on `syntax-parsing`. All three consumer slices now depend only on this infrastructure crate, not on each other. `syntax-parsing/src/ast/mod.rs` re-exports all types from here for backwards compatibility.
 
-`Item::Impl` carries an `ImplDef` (type name + list of `MethodDef`). Each `MethodDef` holds an
+`Item::Impl` carries an `ImplDef` (optional `trait_name` + type name + list of `MethodDef`).
+`trait_name` is `Some` for a trait implementation (`impl Drop for T`, §2.1) and `None` for an
+inherent block (`impl T`). Each `MethodDef` holds an
 `Option<SelfParam>` distinguishing associated functions (`None`) from instance methods (`Some`).
 `SelfParam::Ref` (`&self`) is the only variant currently supported end-to-end; `RefMut` and
 `Owned` are parsed but rejected by semantic analysis until ownership semantics land.

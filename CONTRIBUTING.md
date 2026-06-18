@@ -294,7 +294,7 @@ one of the bigger open items.
 
 **Open** (ordered by dependency; earlier ones unblock later):
 
-- [ ] **`Drop` trait + deterministic destruction.** Runs the destructor at scope exit (on normal exit only, never on panic); no GC, no ARC. Recognized as a compiler-known lang-item like `Copy`/`Clone` — it reuses impl-blocks, scope tracking, and move analysis, so it does **not** wait for the general trait system (Phase 2B). First heap consumer is the string concat/format machinery; landing it makes the v1.42.0 concat buffer leak-free and unblocks the growable-string half below. **Keystone open item — coordinate on an issue before starting.**
+- [x] **`Drop` trait + deterministic destruction.** Runs the destructor at scope exit (on normal exit only, never on panic); no GC, no ARC (v1.44.0). Recognized as a compiler-known lang-item like `Copy`/`Clone` — reuses impl-blocks, scope tracking, and move analysis, so it does **not** wait for the general trait system (Phase 2B). The backend threads a lexical drop-scope stack with per-binding runtime flags so a moved-out value is dropped exactly once. Deferred: reassignment does not drop the prior value; struct `Drop` fields are not auto-dropped.
 - [x] **String `.slice(range)`.** Borrowed `&string` sub-slice (zero copy); panics on an out-of-bounds range or a mid-codepoint boundary in both debug and release (v1.43.0). Range `a..b` / `a..=b` is a parse node accepted only as a `.slice` argument.
 - [ ] **Runtime string ops (growable half).** `String::new`, `.push_str`, `.clear`. Needs a mutable growable string type + `Drop` (concatenation `+` already landed v1.42.0; it leaks until `Drop`).
 

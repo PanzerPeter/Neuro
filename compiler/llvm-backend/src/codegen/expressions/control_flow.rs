@@ -116,29 +116,45 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Codegen all stmts in an arm; store the last `Stmt::Expr`'s value into `alloca`.
+    ///
+    /// The arm is its own drop scope: locals declared in it are destroyed before
+    /// control reaches the merge block, while a yielded place escapes (its drop flag
+    /// is cleared as a move, §2.2).
     fn codegen_arm_into_alloca(
         &mut self,
         stmts: &[Stmt],
         alloca: PointerValue<'ctx>,
     ) -> CodegenResult<()> {
+        self.push_drop_scope();
         let Some((last, init)) = stmts.split_last() else {
+            self.pop_drop_scope();
             return Ok(());
         };
         for stmt in init {
+            if self.current_block_terminated() {
+                break;
+            }
             self.codegen_stmt(stmt)?;
         }
-        if let Stmt::Expr(expr) = last {
-            let val = self.codegen_expr(expr)?;
-            // A diverging arm value (e.g. `else { panic("x") }`) terminates the block with
-            // `unreachable`; there is no result to store and the caller skips the merge branch.
-            if !self.current_block_terminated() {
-                self.builder
-                    .build_store(alloca, val)
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        if !self.current_block_terminated() {
+            if let Stmt::Expr(expr) = last {
+                let val = self.codegen_expr(expr)?;
+                // A diverging arm value (e.g. `else { panic("x") }`) terminates the block
+                // with `unreachable`; there is no result to store and the caller skips merge.
+                if !self.current_block_terminated() {
+                    self.mark_moved_for_drop(expr);
+                    self.builder
+                        .build_store(alloca, val)
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                }
+            } else {
+                self.codegen_stmt(last)?;
             }
-        } else {
-            self.codegen_stmt(last)?;
         }
+        if !self.current_block_terminated() {
+            self.emit_top_scope_drops()?;
+        }
+        self.pop_drop_scope();
         Ok(())
     }
 
@@ -147,17 +163,32 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         stmts: &[Stmt],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        self.push_drop_scope();
         let Some((last, init)) = stmts.split_last() else {
+            self.pop_drop_scope();
             return Ok(self.context.i32_type().const_int(0, false).into());
         };
         for stmt in init {
+            if self.current_block_terminated() {
+                break;
+            }
             self.codegen_stmt(stmt)?;
         }
-        if let Stmt::Expr(expr) = last {
-            self.codegen_expr(expr)
+        let result = if let Stmt::Expr(expr) = last {
+            let val = self.codegen_expr(expr)?;
+            // The yielded place escapes the block, so it is moved out, not dropped here.
+            self.mark_moved_for_drop(expr);
+            val
         } else {
-            self.codegen_stmt(last)?;
-            Ok(self.context.i32_type().const_int(0, false).into())
+            if !self.current_block_terminated() {
+                self.codegen_stmt(last)?;
+            }
+            self.context.i32_type().const_int(0, false).into()
+        };
+        if !self.current_block_terminated() {
+            self.emit_top_scope_drops()?;
         }
+        self.pop_drop_scope();
+        Ok(result)
     }
 }

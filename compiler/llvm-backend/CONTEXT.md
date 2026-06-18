@@ -181,6 +181,25 @@ code: `codegen_stmt` early-returns when the block is already terminated, and `co
 `codegen_body`'s tail path skip the `ret` when evaluating the returned expr terminated the block
 (`func f() -> i32 { panic("x") }`). Keeps LLVM from seeing instructions after a terminator.
 
+## Drop ABI (deterministic destruction, §2.1)
+`drops.rs` inserts a `{struct}__drop(&mut self)` call at each lexical scope exit for an owned binding
+of a `Drop` type. `drop_types: HashSet<String>` (filled by `compile` from `impl Drop for T` blocks)
+gates everything: when empty, the scope stack stays empty and zero IR is emitted, so non-Drop
+programs are unaffected. `drop_scopes: Vec<Vec<DropEntry>>` is a stack of lexical scopes; each
+`DropEntry` records the binding name, storage `alloca`, an `i1` drop flag, and the struct name.
+
+`codegen_function`/`codegen_method` open the body scope (and register by-value `Drop` struct
+*method* params — free functions cannot take struct values today); `codegen_var_decl` registers a
+local and allocates its flag (init `true`). Branch/loop/block bodies (`codegen_if`,
+`codegen_while`/`loop`/`for_range`, `codegen_arm_into_alloca`, `codegen_block_expr`) push/pop their
+own scope and emit the scope's drops in reverse declaration order at normal fall-through. `return`
+runs every open scope (`emit_drops_through(0)`); `break`/`continue` run down to the loop body scope
+recorded in `LoopTargets.drop_scope_depth`. A panic aborts without running drops (§1.2: no landing
+pads). Each drop is flag-guarded (`if flag { drop(); flag = false }`), and `mark_moved_for_drop`
+clears a binding's flag at every move site (bind/assign/return/break value/call arg/struct-field
+store), so a moved value is dropped exactly once (§2.2). Known limits: reassigning a `Drop` binding
+does not drop its prior value, and a struct's `Drop` fields are not auto-dropped (no recursive glue).
+
 ## Constant Declarations ABI
 Module-level consts emit as `@NAME = internal constant TYPE VALUE` globals before any function defs;
 their LLVM value is also stored in `CodegenContext.const_values` so body references resolve without
@@ -213,6 +232,11 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-06-18: `Drop` deterministic destruction (§2.1). New `codegen/drops.rs` + `DropEntry`,
+  `drop_types`, `drop_scopes` on the context, and `LoopTargets.drop_scope_depth`. `compile`
+  collects `impl Drop for T` types. Scope-exit destructor insertion with runtime drop flags for
+  move elision, threaded through function/method bodies, branches, loops, and block expressions.
+  See **Drop ABI**.
 - 2026-06-17: Self-contained f16/bf16 soft-float builtins (`src/softfloat/`). `compile` links
   `__extendhfsf2`/`__truncsfhf2`/`__truncdfhf2`/`__truncsfbf2`/`__truncdfbf2` (weak_odr) into any
   module that uses `half`/`bfloat`, so the emitted object no longer depends on libgcc/compiler-rt —

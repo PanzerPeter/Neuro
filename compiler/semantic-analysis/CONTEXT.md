@@ -26,7 +26,11 @@ Five-pass `check_program`:
    `copy_structs`/`clone_structs`). Pass 1b runs `validate_copy_derive` per struct once all are
    registered (so a Copy field that is another struct resolves regardless of order).
 2. Pre-register all `Item::Impl` method signatures into `functions` (mangled `StructName__methodName`)
-   and `impl_methods` (struct → method → mangled key).
+   and `impl_methods` (struct → method → mangled key). An `impl Drop for T` block (`trait_name ==
+   "Drop"`, §2.1) is additionally validated by `register_drop_impl`: it must hold exactly the
+   destructor `drop(&mut self)` (no params, no return, else `InvalidDropImpl`) and `T` must not be
+   `Copy` (else `DropTypeCannotBeCopy`). The backend recomputes the Drop-type set from the AST, so no
+   Drop state is kept on the checker.
 3. Pre-register all `Item::Const` names/types into `constants` (forward refs + cross-function
    visibility, no ordering constraint).
 4. Full-check: `check_function` / `check_impl` / `check_const_item`.

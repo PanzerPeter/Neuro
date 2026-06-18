@@ -25,6 +25,7 @@ types/borrow_exclusivity.nr         31
 types/char.nr                       65
 types/constants.nr                  51
 types/copy_clone.nr                 14
+types/drop.nr                       3
 types/extended_types.nr             0
 types/extended_types_arithmetic.nr  0
 types/float_ops.nr                  42

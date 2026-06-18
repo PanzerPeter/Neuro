@@ -186,10 +186,27 @@ pub fn compile(
         }
     }
 
+    // Collect the structs implementing `Drop` (§2.1) so codegen can insert their
+    // scope-exit destructor calls. Semantic analysis has already validated the
+    // `impl Drop for T { func drop(&mut self) }` shape and the no-Copy rule.
+    let mut drop_types: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for item in items {
+        if let Item::Impl(impl_def) = item {
+            if impl_def
+                .trait_name
+                .as_ref()
+                .is_some_and(|t| t.name == "Drop")
+            {
+                drop_types.insert(impl_def.type_name.name.clone());
+            }
+        }
+    }
+
     // Initialize LLVM context
     let context = LLVMContext::create();
     let mut codegen_ctx = CodegenContext::new(&context, "neuro_module");
     codegen_ctx.set_struct_defs(struct_defs);
+    codegen_ctx.set_drop_types(drop_types);
 
     // Supply source so panic-family builtins can render `file:line:col` in their
     // runtime diagnostics (§1.2).

@@ -450,18 +450,43 @@ impl Parser {
         let start = self.consume(TokenKind::Impl, "'impl'")?;
         self.skip_newlines();
 
-        let name_token = self.consume(TokenKind::Identifier(String::new()), "struct name")?;
-        let type_name = if let TokenKind::Identifier(n) = name_token.kind {
+        // The first identifier is the struct name for an inherent `impl T`, or the
+        // trait name when a `for` follows it (`impl Drop for T`). Read it, then peek
+        // for `for` to decide which form this is.
+        let first = self.consume(TokenKind::Identifier(String::new()), "type or trait name")?;
+        let first_ident = if let TokenKind::Identifier(n) = first.kind {
             Identifier {
                 name: n,
-                span: name_token.span,
+                span: first.span,
             }
         } else {
             return Err(ParseError::UnexpectedToken {
-                found: name_token.kind,
-                expected: "struct name".to_string(),
-                span: name_token.span,
+                found: first.kind,
+                expected: "type or trait name".to_string(),
+                span: first.span,
             });
+        };
+
+        self.skip_newlines();
+        let (trait_name, type_name) = if self.check(&TokenKind::For) {
+            self.advance(); // consume `for`
+            self.skip_newlines();
+            let ty_token = self.consume(TokenKind::Identifier(String::new()), "struct name")?;
+            let ty = if let TokenKind::Identifier(n) = ty_token.kind {
+                Identifier {
+                    name: n,
+                    span: ty_token.span,
+                }
+            } else {
+                return Err(ParseError::UnexpectedToken {
+                    found: ty_token.kind,
+                    expected: "struct name".to_string(),
+                    span: ty_token.span,
+                });
+            };
+            (Some(first_ident), ty)
+        } else {
+            (None, first_ident)
         };
 
         self.skip_newlines();
@@ -479,6 +504,7 @@ impl Parser {
         let close = self.consume(TokenKind::RightBrace, "'}'")?;
 
         Ok(ImplDef {
+            trait_name,
             type_name,
             methods,
             span: start.span.merge(close.span),

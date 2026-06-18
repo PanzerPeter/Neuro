@@ -26,6 +26,10 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut arg_values = Vec::new();
         for arg in args {
             let val = self.codegen_expr(arg)?;
+            // A by-value argument moves an owned `Drop` place into the callee, which
+            // now owns it; clearing the flag prevents a double drop here (§2.2). A
+            // borrow (`&x`) is not an identifier place, so it is left untouched.
+            self.mark_moved_for_drop(arg);
             arg_values.push(BasicMetadataValueEnum::from(val));
         }
 
@@ -84,6 +88,9 @@ impl<'ctx> CodegenContext<'ctx> {
 
         for arg in args {
             let val = self.codegen_expr(arg)?;
+            // The receiver is borrowed (`&self`/`&mut self`) and never moved; only the
+            // explicit by-value arguments move an owned `Drop` place into the callee.
+            self.mark_moved_for_drop(arg);
             arg_values.push(BasicMetadataValueEnum::from(val));
         }
 
@@ -231,6 +238,19 @@ impl<'ctx> CodegenContext<'ctx> {
                 .insert(param.name.name.clone(), param_type);
         }
 
+        // Open the method-body drop scope. A by-value `Drop`-typed parameter (not the
+        // borrowed `self` receiver) is moved into the method and owned by it, so it is
+        // registered for destruction at method exit (§2.1).
+        self.push_drop_scope();
+        for (i, param) in method.params.iter().enumerate() {
+            if let Some(Type::Struct(name)) = param_types.get(non_self_start + i) {
+                if self.drop_types.contains(name) {
+                    if let Some(alloca) = self.variables.get(&param.name.name).copied() {
+                        self.register_local_drop(&param.name.name, alloca, name.clone())?;
+                    }
+                }
+            }
+        }
         self.codegen_body(&method.body, return_type)
     }
 
@@ -312,6 +332,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 .insert(param.name.name.clone(), param_type);
         }
 
+        // Open the function-body drop scope. Free functions cannot take struct values
+        // by value today, so no `Drop` parameters are registered here; locals are
+        // registered as their declarations are lowered.
+        self.push_drop_scope();
         self.codegen_body(&func_def.body, return_type)
     }
 
@@ -323,6 +347,10 @@ impl<'ctx> CodegenContext<'ctx> {
     /// if-expression's value rather than falling through with `unreachable`, which
     /// produces no instruction at `-O0` and lets execution run off the end of the
     /// function.
+    /// The caller is responsible for opening the function-body drop scope (and
+    /// registering by-value `Drop` parameters into it) before calling this; the
+    /// function scope is popped here on the way out. Drops for owned `Drop` bindings
+    /// run before every normal return path (§2.1).
     fn codegen_body(&mut self, body: &[Stmt], return_type: &Type) -> CodegenResult<()> {
         let tail_is_value = !matches!(return_type, Type::Void)
             && matches!(
@@ -342,7 +370,8 @@ impl<'ctx> CodegenContext<'ctx> {
             // terminating the block before the tail expression. Skip the tail and the
             // return in that case — there is no live block to emit into.
             if !self.current_block_terminated() {
-                let ret_val = match body.last() {
+                let tail = body.last();
+                let ret_val = match tail {
                     Some(Stmt::Expr(expr)) => self.codegen_expr(expr)?,
                     Some(Stmt::If {
                         condition,
@@ -367,6 +396,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 // in which case the block is already terminated and `ret_val` is a discarded
                 // placeholder — do not append a `ret` after the `unreachable`.
                 if !self.current_block_terminated() {
+                    // A tail `Stmt::Expr(<place>)` is an implicit return that moves the
+                    // place out, so it must not be dropped here.
+                    if let Some(Stmt::Expr(expr)) = tail {
+                        self.mark_moved_for_drop(expr);
+                    }
+                    self.emit_drops_through(0)?;
                     self.builder
                         .build_return(Some(&ret_val))
                         .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -386,6 +421,7 @@ impl<'ctx> CodegenContext<'ctx> {
             if let Some(current_bb) = self.builder.get_insert_block() {
                 if current_bb.get_terminator().is_none() {
                     if matches!(return_type, Type::Void) {
+                        self.emit_drops_through(0)?;
                         self.builder.build_return(None).map_err(|e| {
                             CodegenError::LlvmError(format!("failed to build void return: {}", e))
                         })?;
@@ -401,6 +437,7 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         }
 
+        self.pop_drop_scope();
         Ok(())
     }
 }

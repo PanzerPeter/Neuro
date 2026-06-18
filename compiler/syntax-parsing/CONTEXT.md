@@ -26,9 +26,11 @@ Struct literal disambiguation: `Parser` carries `no_struct_lit: bool`, set `true
 if/while/for and `else if` conditions, so `Identifier { ... }` does not consume the `{` opening the
 body block (same strategy as Rust). All condition sites set/clear the flag symmetrically.
 
-`impl` blocks: `parse_program` dispatches `TokenKind::Impl` → `parse_impl_def` (`impl TypeName
-{ method* }`); each method via `parse_method_def`, which calls `try_parse_self_param` to detect
-`&self`/`&mut self`/`self` before the param list.
+`impl` blocks: `parse_program` dispatches `TokenKind::Impl` → `parse_impl_def`, which accepts both
+inherent `impl TypeName { method* }` and trait `impl TraitName for TypeName { method* }` (a `for`
+after the first identifier selects the trait form, recording `ImplDef::trait_name`). Each method
+via `parse_method_def`, which calls `try_parse_self_param` to detect `&self`/`&mut self`/`self`
+before the param list.
 
 Path expressions: when `parse_prefix` sees `Identifier` `::`, it produces `Expr::Path { type_name,
 member, span }` — the `func` of an `Expr::Call` for associated calls like `Point::new(x, y)`.

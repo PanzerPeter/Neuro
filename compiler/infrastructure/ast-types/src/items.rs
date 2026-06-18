@@ -90,8 +90,14 @@ pub struct MethodDef {
 }
 
 /// An `impl` block associating methods with a named struct type.
+///
+/// `trait_name` is `Some` for a trait implementation (`impl Drop for T`) and
+/// `None` for a plain inherent block (`impl T`). Today the only recognized
+/// trait is the compiler-known `Drop` lang-item (§2.1); other trait names parse
+/// but are validated against the unknown-trait set in semantic analysis.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImplDef {
+    pub trait_name: Option<Identifier>,
     pub type_name: Identifier,
     pub methods: Vec<MethodDef>,
     pub span: Span,

@@ -46,6 +46,16 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("type '{type_name}' implements Drop at {span:?} and so cannot be Copy: a type with a destructor must be moved, not duplicated (§2.1)")]
+    DropTypeCannotBeCopy { type_name: String, span: Span },
+
+    #[error("invalid `impl Drop for {type_name}` at {span:?}: {reason}")]
+    InvalidDropImpl {
+        type_name: String,
+        reason: String,
+        span: Span,
+    },
+
     #[error("cannot apply binary operator {op} to types {left} and {right} at {span:?}")]
     InvalidBinaryOperator {
         op: String,

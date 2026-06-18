@@ -62,6 +62,9 @@ impl<'ctx> CodegenContext<'ctx> {
                     ))
                 })?;
             let val = self.codegen_expr(&field_init.value)?;
+            // A place stored into a struct field is moved into the aggregate (§2.2),
+            // so it must not also be dropped at the surrounding scope's exit.
+            self.mark_moved_for_drop(&field_init.value);
             agg = self
                 .builder
                 .build_insert_value(
@@ -170,6 +173,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder
             .build_store(field_ptr, val)
             .map_err(|e| CodegenError::LlvmError(format!("failed to store field: {}", e)))?;
+        self.mark_moved_for_drop(value);
         Ok(())
     }
 
