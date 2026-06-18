@@ -407,6 +407,25 @@ impl Parser {
                 })
             }
 
+            // Range expression `start..end` / `start..=end` (§2.7). Only meaningful as
+            // a `string.slice` argument; semantic analysis rejects it elsewhere. The
+            // right operand is parsed at `Range` precedence so a stray second `..` ends
+            // the expression rather than chaining.
+            TokenKind::DotDot | TokenKind::DotDotEqual => {
+                let op_token = self.advance().ok_or(ParseError::UnexpectedEof {
+                    expected: "'..' or '..='".to_string(),
+                })?;
+                let inclusive = matches!(op_token.kind, TokenKind::DotDotEqual);
+                let right = self.parse_expr(Precedence::Range)?;
+                let span = left.span().merge(right.span());
+                Ok(Expr::Range {
+                    start: Box::new(left),
+                    end: Box::new(right),
+                    inclusive,
+                    span,
+                })
+            }
+
             // Type casts
             TokenKind::As => {
                 self.advance(); // consume 'as'
@@ -523,6 +542,7 @@ impl Parser {
             TokenKind::QuestionQuestion => Precedence::NullCoalesce,
             TokenKind::Plus | TokenKind::Minus => Precedence::Sum,
             TokenKind::Star | TokenKind::Slash | TokenKind::Percent => Precedence::Product,
+            TokenKind::DotDot | TokenKind::DotDotEqual => Precedence::Range,
             TokenKind::As => Precedence::Cast,
             TokenKind::LeftParen => Precedence::Call,
             TokenKind::Dot => Precedence::FieldAccess,

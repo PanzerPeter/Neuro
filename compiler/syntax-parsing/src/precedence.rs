@@ -5,6 +5,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Precedence {
     Lowest,
+    Range,        // .. ..= (Appendix B: loosest binary operator, looser than ??)
     NullCoalesce, // ?? (Appendix B row 14: looser than ||, tighter than range)
     LogicalOr,    // ||
     LogicalAnd,   // &&

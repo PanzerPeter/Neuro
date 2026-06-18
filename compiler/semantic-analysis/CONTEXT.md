@@ -56,8 +56,11 @@ Associated calls (`TypeName::func(args)`) — recognised when `func` is an `Expr
 Builtin method dispatch: for a non-struct (primitive/string) receiver, `resolve_builtin_method`
 checks a fixed compiler-known set before `MethodNotFound`, returning the result type (and an arity
 diagnostic on wrong count). Intrinsics: `string.len() -> u64`, `string.clone() -> string` (§2.7,
-nullary); and on any integer receiver `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, `.shr(n)`
-(§1.2/§1.4) — each one same-typed arg (`check_unary_int_intrinsic_arg`), returns the receiver type.
+nullary); `string.slice(a..b) -> &string` (§2.7, `check_string_slice`: one `Expr::Range` arg with
+integer bounds, else `SliceExpectsRange`); and on any integer receiver `wrapping_{add,sub,mul}`,
+`saturating_{add,sub,mul}`, `.shr(n)` (§1.2/§1.4) — each one same-typed arg
+(`check_unary_int_intrinsic_arg`), returns the receiver type. A bare `Expr::Range` outside a
+`.slice` argument is `RangeNotAllowed`.
 A struct receiver's `.clone()` (§2.3) is a nullary builtin when the struct derives `Clone`/`Copy` and
 no user `clone` method exists (user method shadows); returns the struct type.
 

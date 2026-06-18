@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.43.0] - 2026-06-18
+
+### Added
+- `codegen`: string `.slice(range)` (Phase 1.7, §2.7). `s.slice(a..b)` (exclusive) and `s.slice(a..=b)` (inclusive) return a borrowed `&string` view into the receiver's UTF-8 data — zero copy, since strings are immutable; the slice is just `(ptr + start, len)`. Indices are byte offsets. Both build modes run a runtime check that panics (abort, no unwinding) on an out-of-bounds range (`start > end`, `end > len`, negative `start`) or a range endpoint that splits a multi-byte UTF-8 code point. A `&string` receiver auto-derefs (§2.4), and the result is itself a `&string` (so `.slice(...).len()` and `==` work). Range expressions `a..b` / `a..=b` are now a parse node (precedence below `??`), accepted by semantic analysis **only** as a `.slice` argument — used anywhere else they are a `RangeNotAllowed` error; `for`-range loops are unchanged. New `BuiltinMethod::StringSlice`, a `codegen_guard_or_panic` panic-runtime helper, `examples/types/string_slice_method.nr`, and end-to-end coverage in `neurc/tests/string_slice.rs`.
+
+---
+
 ## [1.42.1] - 2026-06-18
 
 ### Changed

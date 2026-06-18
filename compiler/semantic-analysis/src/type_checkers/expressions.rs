@@ -48,6 +48,9 @@ impl TypeChecker {
                 }
                 Some(Type::String)
             }
+            // §2.7 — borrowed sub-slice. Takes a single range argument `a..b` / `a..=b`
+            // and yields a `&string` view into the receiver's UTF-8 data (zero copy).
+            (Type::String, "slice") => Some(self.check_string_slice(args, call_span)),
             // §1.2, §1.4 — wrapping/saturating arithmetic and the right-shift method.
             // Each takes one same-typed argument and returns the receiver's integer type.
             // Matched on `recv` (not the referent): integer intrinsics require a value
@@ -86,6 +89,47 @@ impl TypeChecker {
                 });
             }
         }
+    }
+
+    /// Type-check `string.slice(range)` (§2.7): exactly one `a..b` / `a..=b` argument
+    /// whose bounds are integers. Returns the `&string` slice type; on any violation a
+    /// diagnostic is recorded and the `&string` type is still returned so checking
+    /// continues with the documented result type.
+    fn check_string_slice(&mut self, args: &[Expr], call_span: Span) -> Type {
+        let slice_ty = Type::Reference {
+            inner: Box::new(Type::String),
+            mutable: false,
+        };
+
+        if args.len() != 1 {
+            self.record_error(TypeError::ArgumentCountMismatch {
+                expected: 1,
+                found: args.len(),
+                span: call_span,
+            });
+            return slice_ty;
+        }
+
+        let Expr::Range { start, end, .. } = &args[0] else {
+            self.record_error(TypeError::SliceExpectsRange {
+                span: args[0].span(),
+            });
+            return slice_ty;
+        };
+
+        for bound in [start.as_ref(), end.as_ref()] {
+            if let Some(bound_ty) = self.check_expr(bound, Some(&Type::U64)) {
+                if !matches!(bound_ty, Type::Unknown) && !bound_ty.is_integer() {
+                    self.record_error(TypeError::Mismatch {
+                        expected: Type::U64,
+                        found: bound_ty,
+                        span: bound.span(),
+                    });
+                }
+            }
+        }
+
+        slice_ty
     }
 
     /// Type-check a call to a compiler-known panic-family builtin (§1.2):
@@ -1137,6 +1181,19 @@ impl TypeChecker {
                         Some(Type::Unknown)
                     }
                 }
+            }
+
+            // A range `a..b` is not a first-class value (§2.7): it is consumed directly
+            // by `string.slice` via `check_string_slice`, so reaching it through the
+            // general expression path means it was used somewhere a range is not allowed.
+            // Still check the bounds for cascaded diagnostics.
+            Expr::Range {
+                start, end, span, ..
+            } => {
+                let _ = self.check_expr(start, None);
+                let _ = self.check_expr(end, None);
+                self.record_error(TypeError::RangeNotAllowed { span: *span });
+                Some(Type::Unknown)
             }
         }
     }

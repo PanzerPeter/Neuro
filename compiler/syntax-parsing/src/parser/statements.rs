@@ -349,9 +349,11 @@ impl Parser {
         self.consume(TokenKind::In, "'in'")?;
         self.skip_newlines();
 
-        // Range expressions must not be struct literals or `{` would be consumed
+        // Range expressions must not be struct literals or `{` would be consumed.
+        // Parse the start bound at `Range` precedence so the loop's own `..` / `..=`
+        // separator is not swallowed as a range expression (§1.6, §2.7).
         self.no_struct_lit = true;
-        let start = self.parse_expr(Precedence::Lowest)?;
+        let start = self.parse_expr(Precedence::Range)?;
         self.skip_newlines();
 
         let mut inclusive = false;

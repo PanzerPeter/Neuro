@@ -49,6 +49,10 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-06-18: Range expressions for `string.slice` (§2.7). `parse_infix` handles `..` / `..=`
+  (`TokenKind::DotDot` / `DotDotEqual`) → `Expr::Range`, at the new `Precedence::Range` (below `??`).
+  `parse_for` now parses the range start bound at `Precedence::Range` so the loop's own `..` / `..=`
+  separator is not swallowed — `for`-range behaviour is unchanged.
 - 2026-06-15: `char` literals (§1.2). `parse_prefix` maps `TokenKind::Char(c)` → `Expr::Literal(Literal::Char(c))`.
 - 2026-06-15: `loop` as a value expression (§3.7). `parse_prefix` dispatches `TokenKind::Loop` to
   `parse_loop_expr` (and `label: loop` to `parse_labeled_loop_expr`), producing `Expr::Loop`. `break`

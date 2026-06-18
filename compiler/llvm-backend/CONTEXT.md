@@ -101,6 +101,13 @@ calls (`s.clone().len()`) nest two `Call` nodes sharing `span.start` — same wo
 - `string.clone()` (§2.7) → the receiver's own fat-pointer value: strings are immutable /
   `.rodata`-backed, so a `{ ptr, len }` copy is observationally deep. Must duplicate the buffer
   once heap strings land.
+- `string.slice(a..b)` / `.slice(a..=b)` (§2.7) → `BuiltinMethod::StringSlice`, lowered in
+  `codegen_string_slice` (`expressions/methods.rs`). Computes a `(ptr+start, end-start)` fat pointer
+  (`end` = `b+1` for `..=`); runtime bounds (`0 <= start <= end <= len`) and UTF-8 codepoint-boundary
+  checks at both endpoints route through `codegen_guard_or_panic` (`panic.rs`) — abort, no unwinding,
+  in every build. Result is a `&string`: the computed fat pointer is spilled to an `alloca` and its
+  address returned, matching the `&place` opaque-pointer ABI. The `Expr::Range` argument is consumed
+  here; reaching it through general `codegen_expr` is an internal error.
 - `struct.clone()` (§2.3) → handled in the type-pass struct method-call arm (not
   `resolve_builtin_method`, which is keyed by `Type`): when receiver is a struct, field is `clone`,
   and no `StructName__clone` exists, it tags `BuiltinMethod::StructClone`. Semantic analysis already

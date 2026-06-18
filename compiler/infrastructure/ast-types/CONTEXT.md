@@ -26,6 +26,10 @@ Extracted from `syntax-parsing` to eliminate the cross-slice dependency that `se
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-06-18: String `.slice(range)` (§2.7). Added `Expr::Range { start, end, inclusive, span }`,
+  the `a..b` / `a..=b` node. Not a first-class value: it is only valid as a `string.slice`
+  argument (semantic-analysis rejects it elsewhere). `for`-range loops keep their bounds on
+  `Stmt::ForRange` and never produce this node.
 - 2026-06-15: `loop` as a value expression (§3.7). Added `Expr::Loop { label, body, span }` — the
   value-producing form, distinct from `Stmt::Loop` (statement form, value discarded). `Stmt::Break`
   gained `value: Option<Expr>` for `break v`. The targeted `loop` evaluates to its value-`break`s

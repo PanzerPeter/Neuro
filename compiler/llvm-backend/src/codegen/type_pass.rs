@@ -753,6 +753,13 @@ impl<'ctx> CodegenContext<'ctx> {
                     .insert(span.start, Type::Reference(Box::new(inner)));
             }
 
+            // Range `a..b` (§2.7): only ever a `string.slice` argument. Record the bound
+            // types so codegen can coerce them; the node itself has no value type.
+            Expr::Range { start, end, .. } => {
+                self.visit_expr_for_types(start, func_types)?;
+                self.visit_expr_for_types(end, func_types)?;
+            }
+
             // Dereference `*operand` (§2.5): the result type is the referent `T`. Record
             // it so codegen can pick the correct load type.
             Expr::Deref { operand, span } => {

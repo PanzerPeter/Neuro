@@ -75,6 +75,35 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(self.context.i32_type().const_int(0, false).into())
     }
 
+    /// Emit a runtime guard: continue when `ok` (an `i1`) is true, otherwise print
+    /// `panic: <message>` with the source location for `offset` and abort (§1.2). The
+    /// builder is left positioned at the continuation block. Shared by the bounds and
+    /// UTF-8 codepoint-boundary checks of `string.slice` (§2.7).
+    pub(crate) fn codegen_guard_or_panic(
+        &mut self,
+        ok: inkwell::values::IntValue<'ctx>,
+        message: &str,
+        offset: usize,
+    ) -> CodegenResult<()> {
+        let parent_fn = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("runtime guard outside a function during codegen".into())
+        })?;
+        let fail_bb = self.context.append_basic_block(parent_fn, "guard.fail");
+        let cont_bb = self.context.append_basic_block(parent_fn, "guard.cont");
+
+        self.builder
+            .build_conditional_branch(ok, cont_bb, fail_bb)
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+        self.builder.position_at_end(fail_bb);
+        let location = self.panic_location_suffix(offset);
+        self.emit_write_cstr(&format!("panic: {}{}\n", message, location))?;
+        self.emit_abort_unreachable()?;
+
+        self.builder.position_at_end(cont_bb);
+        Ok(())
+    }
+
     /// Lower `assert(cond)`: continue on a true condition, abort on a false one.
     fn codegen_assert(&mut self, condition: &Expr, location: &str) -> CodegenResult<()> {
         let cond_val = self.codegen_expr(condition)?.into_int_value();

@@ -205,4 +205,12 @@ pub enum TypeError {
 
     #[error("cannot return a reference to '{name}' at {span:?}: it is local to this function and does not outlive the call; return a reference derived from a parameter instead (§2.6)")]
     ReturnsReferenceToLocal { name: String, span: Span },
+
+    #[error(
+        "a range expression `a..b` is only valid as the argument to `.slice()` at {span:?} (§2.7)"
+    )]
+    RangeNotAllowed { span: Span },
+
+    #[error("`.slice()` expects a range argument `a..b` or `a..=b` at {span:?} (§2.7)")]
+    SliceExpectsRange { span: Span },
 }

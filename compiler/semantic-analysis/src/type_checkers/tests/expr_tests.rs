@@ -279,6 +279,96 @@ fn string_clone_with_argument_rejected() {
 }
 
 #[test]
+fn string_slice_resolves_to_string_reference() {
+    let mut checker = TypeChecker::new();
+
+    // "hello".slice(0..3)
+    let expr = Expr::Call {
+        func: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Literal(
+                Literal::String("hello".to_string()),
+                Span::new(0, 7),
+            )),
+            field: make_ident("slice"),
+            span: Span::new(0, 13),
+        }),
+        args: vec![Expr::Range {
+            start: Box::new(Expr::Literal(Literal::Integer(0, None), Span::new(14, 15))),
+            end: Box::new(Expr::Literal(Literal::Integer(3, None), Span::new(17, 18))),
+            inclusive: false,
+            span: Span::new(14, 18),
+        }],
+        span: Span::new(0, 19),
+    };
+
+    let ty = checker.check_expr(&expr, None);
+    assert_eq!(
+        ty,
+        Some(Type::Reference {
+            inner: Box::new(Type::String),
+            mutable: false,
+        })
+    );
+    assert!(
+        !checker.has_errors(),
+        "string.slice(range) should type-check cleanly, got: {:?}",
+        checker.into_errors()
+    );
+}
+
+#[test]
+fn string_slice_without_range_is_rejected() {
+    let mut checker = TypeChecker::new();
+
+    // "hello".slice(3) — argument must be a range, not a bare integer
+    let expr = Expr::Call {
+        func: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Literal(
+                Literal::String("hello".to_string()),
+                Span::new(0, 7),
+            )),
+            field: make_ident("slice"),
+            span: Span::new(0, 13),
+        }),
+        args: vec![Expr::Literal(Literal::Integer(3, None), Span::new(14, 15))],
+        span: Span::new(0, 16),
+    };
+
+    checker.check_expr(&expr, None);
+    let errors = checker.into_errors();
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::SliceExpectsRange { .. })),
+        "Expected SliceExpectsRange, got: {:?}",
+        errors
+    );
+}
+
+#[test]
+fn range_outside_slice_is_rejected() {
+    let mut checker = TypeChecker::new();
+
+    // 0..5 used as a standalone value
+    let expr = Expr::Range {
+        start: Box::new(Expr::Literal(Literal::Integer(0, None), Span::new(0, 1))),
+        end: Box::new(Expr::Literal(Literal::Integer(5, None), Span::new(3, 4))),
+        inclusive: false,
+        span: Span::new(0, 4),
+    };
+
+    checker.check_expr(&expr, None);
+    let errors = checker.into_errors();
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::RangeNotAllowed { .. })),
+        "Expected RangeNotAllowed, got: {:?}",
+        errors
+    );
+}
+
+#[test]
 fn unknown_builtin_method_reports_method_not_found() {
     let mut checker = TypeChecker::new();
 
