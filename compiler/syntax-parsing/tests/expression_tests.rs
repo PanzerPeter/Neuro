@@ -575,3 +575,44 @@ fn test_parse_struct_update_only_base() {
         other => panic!("Expected struct literal, got {:?}", other),
     }
 }
+
+#[test]
+fn test_parse_exclusive_range() {
+    // `a..b` parses to a Range expression (§2.7) — only valid as a slice argument.
+    let expr = parse_expr("0..5").expect("range should parse");
+    match expr {
+        Expr::Range {
+            start,
+            end,
+            inclusive,
+            ..
+        } => {
+            assert!(!inclusive);
+            assert!(matches!(*start, Expr::Literal(Literal::Integer(0, _), _)));
+            assert!(matches!(*end, Expr::Literal(Literal::Integer(5, _), _)));
+        }
+        other => panic!("Expected range expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_inclusive_range() {
+    let expr = parse_expr("1..=3").expect("inclusive range should parse");
+    match expr {
+        Expr::Range { inclusive, .. } => assert!(inclusive),
+        other => panic!("Expected inclusive range expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_slice_call_with_range_argument() {
+    // The range threads through a method call's argument list.
+    let expr = parse_expr("s.slice(0..5)").expect("slice call should parse");
+    match expr {
+        Expr::Call { args, .. } => {
+            assert_eq!(args.len(), 1);
+            assert!(matches!(args[0], Expr::Range { .. }));
+        }
+        other => panic!("Expected call expression, got {:?}", other),
+    }
+}

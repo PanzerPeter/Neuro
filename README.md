@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-685%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-701%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP & Phase 1.5 stabilization complete · Phase 1.7 (ownership) active · Phase 2 overlapping
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**685 Tests Passing**):
+Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**701 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -100,7 +100,7 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 | **Move Semantics** | Move-by-default for non-`Copy` values; use-after-move is a compile error; `.clone()` opts out; `@derive(Copy, Clone)` on structs |
 | **Borrows** | Immutable `&T` and mutable `&mut T` references with the `*` deref operator; flow-sensitive borrow exclusivity (shared XOR mutable) enforced at compile time |
 | **Lifetimes (elision)** | Returned-reference lifetime elision; returning a borrow of a local or by-value parameter is rejected as it would dangle |
-| **Strings** | Fat-pointer `string` with full escape support; `&string` borrowed slices; byte-level `==`/`!=`; `+` concatenation (heap-allocated new string); builtin `.len()` / `.clone()` |
+| **Strings** | Fat-pointer `string` with full escape support; `&string` borrowed slices; byte-level `==`/`!=`; `+` concatenation (heap-allocated new string); builtin `.len()` / `.clone()` / `.slice(a..b)` (zero-copy sub-slice, panics on out-of-bounds or mid-codepoint boundary) |
 | **Panic Runtime** | `panic(msg)`, `assert(cond)`, `unreachable()` — print a located diagnostic to stderr and abort (no unwinding) |
 | **LLVM Backend + CLI** | Native executable generation via inkwell 0.9.0 (LLVM 20); `neurc check` (type-check) and `neurc compile` (native binary) |
 | **…and many more** | Half-precision `f16`/`bf16` scalars, `char`, type aliases, integer-overflow traps (debug) / wrapping (release), bitwise operators, compound assignment, if/block-as-value expressions, builtin integer methods (`wrapping_*`, `saturating_*`, `.shr`), attributes & lints, `unsafe` blocks. See [CHANGELOG.md](CHANGELOG.md) and [docs/](docs/) for the full list |

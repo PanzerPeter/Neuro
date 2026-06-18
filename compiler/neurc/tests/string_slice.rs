@@ -165,3 +165,163 @@ func main() -> i32 {
         "comparing &i32 with i32 must remain a type error; got: {stderr}"
     );
 }
+
+// --- string.slice(range) (§2.7) ------------------------------------------
+
+/// Compile + run, asserting the process did NOT exit cleanly (a panic aborts via
+/// SIGABRT, so `status.code()` is `None`, surfaced as a non-zero/`-1` code).
+fn run_expecting_abort(source: &str) {
+    let test = CompileTest::new();
+    let code = test
+        .compile_and_run("test.nr", source)
+        .expect("program should compile and run");
+    assert_ne!(
+        code, 0,
+        "expected the slice to panic and abort, but it exited 0:\n{source}"
+    );
+}
+
+#[test]
+fn slice_extracts_a_substring() {
+    let source = r#"
+func main() -> i32 {
+    val s = "hello, world"
+    if s.slice(0..5) == "hello" { return 0 }
+    return 1
+}
+"#;
+    run_expecting(source, 0);
+}
+
+#[test]
+fn inclusive_slice_includes_the_upper_bound() {
+    let source = r#"
+func main() -> i32 {
+    val s = "hello, world"
+    if s.slice(7..=11) == "world" { return 0 }
+    return 1
+}
+"#;
+    run_expecting(source, 0);
+}
+
+#[test]
+fn empty_slice_is_the_empty_string() {
+    let source = r#"
+func main() -> i32 {
+    val s = "abc"
+    if s.slice(1..1) == "" { return 0 }
+    return 1
+}
+"#;
+    run_expecting(source, 0);
+}
+
+#[test]
+fn slice_len_is_the_byte_span() {
+    let source = r#"
+func main() -> i32 {
+    val s = "hello, world"
+    return s.slice(0..5).len() as i32
+}
+"#;
+    run_expecting(source, 5);
+}
+
+#[test]
+fn slice_of_a_borrowed_string_argument() {
+    // `.slice` auto-derefs a `&string` receiver (§2.4) and the result re-borrows it.
+    let source = r#"
+func first_two(s: &string) -> bool {
+    s.slice(0..2) == "ne"
+}
+func main() -> i32 {
+    val lang = "neuro"
+    if first_two(&lang) { return 0 }
+    return 1
+}
+"#;
+    run_expecting(source, 0);
+}
+
+#[test]
+fn out_of_bounds_slice_aborts() {
+    let source = r#"
+func main() -> i32 {
+    val s = "hi"
+    val bad = s.slice(0..9)
+    return 0
+}
+"#;
+    run_expecting_abort(source);
+}
+
+#[test]
+fn reversed_range_aborts() {
+    let source = r#"
+func main() -> i32 {
+    val s = "hello"
+    val bad = s.slice(4..1)
+    return 0
+}
+"#;
+    run_expecting_abort(source);
+}
+
+#[test]
+fn mid_codepoint_slice_aborts() {
+    // "é" is two UTF-8 bytes (0xC3 0xA9); slicing 0..1 splits the code point.
+    let source = "
+func main() -> i32 {
+    val s = \"\u{e9}\"
+    val bad = s.slice(0..1)
+    return 0
+}
+";
+    run_expecting_abort(source);
+}
+
+#[test]
+fn slice_requires_a_range_argument() {
+    let source = r#"
+func main() -> i32 {
+    val s = "hello"
+    val bad = s.slice(3)
+    return 0
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(
+        !success,
+        "slice with a non-range argument must be a type error; got: {stderr}"
+    );
+}
+
+#[test]
+fn range_outside_slice_is_rejected() {
+    let source = r#"
+func main() -> i32 {
+    val r = 0..5
+    return 0
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(
+        !success,
+        "a range expression outside .slice() must be a type error; got: {stderr}"
+    );
+}
+
+#[test]
+fn for_range_loop_still_parses_and_runs() {
+    // Regression: adding `..` as an expression operator must not break for-ranges.
+    let source = r#"
+func main() -> i32 {
+    mut total: i32 = 0
+    for i in 0..5 { total = total + i }
+    for j in 1..=3 { total = total + j }
+    return total
+}
+"#;
+    run_expecting(source, 16);
+}

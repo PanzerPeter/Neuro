@@ -137,6 +137,13 @@ impl<'ctx> CodegenContext<'ctx> {
 
             // Dereference `*operand` (§2.5): load the referent through the reference.
             Expr::Deref { operand, span } => self.codegen_deref(operand, span.start),
+
+            // A range `a..b` is not a value (§2.7): it is consumed directly by
+            // `string.slice`'s lowering. Semantic analysis rejects any other position,
+            // so reaching the general expression path here is an internal inconsistency.
+            Expr::Range { .. } => Err(CodegenError::InternalError(
+                "range expression reached codegen outside a slice argument".into(),
+            )),
         }
     }
 

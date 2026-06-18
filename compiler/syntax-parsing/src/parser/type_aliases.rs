@@ -320,6 +320,10 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
         Expr::Unsafe { stmts, .. } => rewrite_block(stmts, resolved),
         Expr::Reference { operand, .. } => rewrite_expr(operand, resolved),
         Expr::Deref { operand, .. } => rewrite_expr(operand, resolved),
+        Expr::Range { start, end, .. } => {
+            rewrite_expr(start, resolved);
+            rewrite_expr(end, resolved);
+        }
         Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } => {}
     }
 }

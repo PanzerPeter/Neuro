@@ -118,6 +118,17 @@ pub enum Expr {
         operand: Box<Expr>,
         span: Span,
     },
+    /// Range expression `start..end` (exclusive) or `start..=end` (inclusive).
+    ///
+    /// Ranges are not a first-class value type: this node is only valid as the
+    /// argument to `string.slice` (§2.7). `for`-range loops carry their bounds
+    /// directly on [`Stmt::ForRange`] and never produce this node.
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+        inclusive: bool,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -140,6 +151,7 @@ impl Expr {
             Expr::Unsafe { span, .. } => *span,
             Expr::Reference { span, .. } => *span,
             Expr::Deref { span, .. } => *span,
+            Expr::Range { span, .. } => *span,
         }
     }
 }

@@ -285,6 +285,8 @@ syntax:
 val s: string = "hello, world"
 val n: u64 = s.len()    // 12 — O(1) read of the stored byte length
 val copy: string = s.clone()   // a fresh string equal to s
+val hello: &string = s.slice(0..5)    // "hello" — borrowed, zero copy
+val world: &string = s.slice(7..=11)  // "world" — inclusive upper bound
 ```
 
 **`.len() -> u64`** — returns the number of UTF-8 bytes, read directly from the fat pointer
@@ -301,6 +303,23 @@ immutable and shared safely. `.clone()` takes no arguments and returns a `string
 chains with other builtin methods (`"hi".clone().len()`). `Copy` scalar types
 (`i8`..`u64`, `f32`/`f64`, `bool`) do not provide `.clone()`: assignment already duplicates
 them.
+
+**`.slice(range) -> &string`** — returns a borrowed `&string` view into the receiver's UTF-8
+data, with no allocation: since strings are immutable, a sub-range is just a `(ptr + start,
+len)` fat pointer (the analogue of Rust's `&str`). The range is exclusive (`s.slice(a..b)`)
+or inclusive (`s.slice(a..=b)`). **Indices are byte offsets**, not character offsets. The
+slice is itself a `&string`, so it chains (`s.slice(0..5).len()`) and compares byte-wise
+(`s.slice(0..5) == "hello"`). Two boundary rules are enforced at runtime in **both** debug and
+release builds and **panic** (abort, no unwinding — see [control flow](control-flow.md)) on
+violation:
+
+- **Bounds:** the range must satisfy `0 <= start <= end <= len`. An out-of-bounds or reversed
+  range panics with `string slice out of bounds`.
+- **Code-point alignment:** each endpoint must fall on a UTF-8 code-point boundary. A range
+  that splits a multi-byte code point panics with `string slice splits a UTF-8 code point`.
+
+A range expression `a..b` / `a..=b` is valid **only** as a `.slice` argument; used anywhere
+else it is a compile error.
 
 ## Struct Types
 

@@ -23,6 +23,9 @@ pub(crate) enum BuiltinMethod {
     StringLen,
     /// `string.clone()` → a copy of the string fat pointer value (§2.7).
     StringClone,
+    /// `string.slice(a..b)` → a borrowed `&string` sub-slice; panics on an out-of-bounds
+    /// or mid-codepoint boundary (§2.7).
+    StringSlice,
     /// `struct.clone()` → a copy of the struct aggregate value, for `@derive(Clone)` types (§2.3).
     StructClone,
     /// `int.wrapping_add(rhs)` → two's-complement wrapping add (§1.2).
@@ -54,6 +57,12 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<(Built
     match (recv.referent(), method) {
         (Type::String, "len") => Some((BuiltinMethod::StringLen, Type::U64)),
         (Type::String, "clone") => Some((BuiltinMethod::StringClone, Type::String)),
+        // The slice's result is a borrowed `&string` view (§2.7); lowered to an opaque
+        // pointer to the computed fat pointer.
+        (Type::String, "slice") => Some((
+            BuiltinMethod::StringSlice,
+            Type::Reference(Box::new(Type::String)),
+        )),
         // Integer intrinsics require a value receiver (matched on `recv`, not the referent):
         // reading a scalar through `&T` needs the deref operator. They return the receiver's
         // own integer type (§1.2, §1.4).
@@ -330,6 +339,25 @@ mod tests {
         assert!(matches!(
             resolved,
             Some((BuiltinMethod::StringClone, Type::String))
+        ));
+    }
+
+    #[test]
+    fn string_slice_resolves_to_string_reference() {
+        let resolved = resolve_builtin_method(&Type::String, "slice");
+        assert!(matches!(
+            resolved,
+            Some((BuiltinMethod::StringSlice, Type::Reference(inner))) if matches!(*inner, Type::String)
+        ));
+    }
+
+    #[test]
+    fn slice_resolves_through_a_string_borrow() {
+        // A `&string` receiver auto-derefs (§2.4), so `.slice` resolves on it too.
+        let recv = Type::Reference(Box::new(Type::String));
+        assert!(matches!(
+            resolve_builtin_method(&recv, "slice"),
+            Some((BuiltinMethod::StringSlice, _))
         ));
     }
 
