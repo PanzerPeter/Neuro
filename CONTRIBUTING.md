@@ -271,25 +271,31 @@ borrowing, lifetimes, and deterministic `Drop`. No GC, no reference counting.
 This is multi-month work that does not block surface-syntax features; items are
 ordered by dependency, earlier ones unblock later ones.
 
-`[x]` = landed · `[ ]` = open. The borrow checker is large — coordinate on an
-issue before starting one of the bigger items.
+`[x]` = landed · `[ ]` = open. Landed items are summarized in one line — see
+[CHANGELOG.md](CHANGELOG.md) and the README capabilities table for full
+behavior. The borrow checker is large — coordinate on an issue before starting
+one of the bigger open items.
 
-- [x] **BUG (codegen): tail-position `if`/`else` implicit return miscompiled** (§1.8). Fixed in v1.23.2. A statement-position tail `if` was lowered as a void statement, so a non-void return emitted `unreachable` → fall-through segfault at `-O0`. `codegen_body` now treats a trailing `Stmt::If { else_block: Some(..), .. }` as a value-producing if-expression.
-- [x] **Move semantics by default** (§2.2). Landed in v1.29.0 scoped to `string` (the only non-`Copy` type today): binding, assignment, `return`, struct-field store, and by-value call arguments move the source; reading it afterward is `UseOfMovedValue`. `.clone()` is the opt-out. Conditional regions snapshot/restore move state so a move in one branch never invalidates a path that did not run it. Struct move-tracking arrives with `Copy` / `@derive(Copy)` below.
-- [x] **`Copy` trait + `@derive(Copy, Clone)`** (§2.3). Landed in v1.30.0. Built-in for primitive scalars. A struct that derives `Copy` is duplicated on assignment (exempt from move); a struct without it is move-tracked. Deriving `Copy` requires every field to be `Copy` (else `CopyDeriveNonCopyField`). `Copy` implies `Clone`; `@derive(Clone)` enables `struct.clone()` as a builtin deep copy (a user `clone` method shadows it).
-- [x] **`.clone()` method** (§2.7). Landed as the `string.clone() -> string` builtin (v1.27.0) — the canonical opt-out of move-by-default for non-`Copy` types. Copies the `(ptr, len)` fat pointer (observationally a deep copy while strings are immutable / `.rodata`-backed). Broader non-`Copy` clone (structs via `@derive(Clone)`) lands with `Copy` / move below.
-- [x] **Immutable borrows `&T`** (§2.4). Landed in v1.31.0. `&T` reference type (params/returns/locals) + `&place` borrow expression. Borrowing does not move the borrowee, and `&T` is `Copy`. Method/field access auto-derefs through a borrow: `s.len()` / `s.clone()` on `&string`, `r.field` / `r.method()` on `&Struct`. Borrowing a temporary or a `const` is `CannotBorrowValue`. References lower to opaque pointers. Lifetime checking and the `*` deref operator land with `&mut T` below.
-- [ ] **`&string` slice type** (§2.7). A borrowed, non-owning `(ptr, len)` view into UTF-8 data; codegen is a no-op (the ABI already matches). Lands with `&T`. Prerequisite for `.slice(range)`.
-- [x] **Mutable borrows `&mut T`** (§2.5). Landed in v1.33.0. `&mut T` reference type (params/returns/locals) + `&mut place` borrow expression + the prefix `*` dereference operator (read `*r`, write `*r = v` / `*place = value`). `&mut` requires a `mut` binding (`CannotBorrowMutably`); `*` applies only to a reference (`CannotDereference`); writing through `*` requires a `&mut` (`CannotAssignThroughRef`). `&mut T` and `&T` are distinct types (no implicit coercion). References lower to opaque pointers; a deref is a load/store through the pointer. The flow-sensitive aliasing rule landed separately below.
-- [x] **Flow-sensitive borrow exclusivity** (§2.4, §2.5). Landed in v1.39.0. At most one `&mut` borrow of a place may be live at a time, and no `&` may coexist with a live `&mut`; any number of `&` borrows coexist. Lexical borrow regions: a borrow held by a binding lives until the binding leaves scope, a borrow passed to a call ends with the statement. New errors `CannotMutablyBorrowWhileBorrowed` / `CannotBorrowWhileMutablyBorrowed`. Read/move-while-borrowed awaits full lifetime inference.
-- [x] **Lifetime elision + returned-reference outlives** (§2.6). Landed in v1.40.0. Implicit lifetimes only — no annotation syntax. A reference-returning function or method may return a borrow of one of its reference parameters (or `&self`); returning a borrow of a body-local or by-value parameter, directly or through a local reference binding, is rejected with `ReturnsReferenceToLocal`. The check (`check_returned_reference`) follows `if`/block tails and consults the `current_fn_outliving` set plus `SymbolTable::borrow_provenance`.
-- [x] **`&mut self` methods** (§2.5). Landed in v1.41.0. Instance methods may take `&mut self` and assign to `self.field`; the receiver is passed by pointer so the write reaches the caller. Calling one requires a mutable receiver (or a `&mut T`) and takes an exclusive borrow for the call — rejected on a `val` binding (`CannotBorrowMutably`) or while the receiver is otherwise borrowed (`CannotMutablyBorrowWhileBorrowed`). Consuming `self` stays rejected (`UnsupportedSelfParam`) pending the by-value struct ABI.
+**Landed:**
+
+- [x] Move semantics by default (§2.2, v1.29.0) — `.clone()` opts out.
+- [x] `.clone()` builtin on `string` (§2.7, v1.27.0).
+- [x] `Copy` trait + `@derive(Copy, Clone)` on structs (§2.3, v1.30.0).
+- [x] Immutable borrows `&T` (§2.4, v1.31.0).
+- [x] Mutable borrows `&mut T` + `*` deref operator (§2.5, v1.33.0).
+- [x] Flow-sensitive borrow exclusivity — shared XOR mutable (§2.4/§2.5, v1.39.0).
+- [x] Lifetime elision + returned-reference outlives check (§2.6, v1.40.0).
+- [x] `&mut self` methods — in-place receiver mutation (§2.5, v1.41.0).
+- [x] Panic runtime — `panic`/`assert`/`unreachable`, abort, no unwinding (§1.2).
+- [x] `unsafe { }` block infrastructure — inert outside `@kernel` (§3).
+
+**Open** (items are ordered by dependency; earlier ones unblock later):
+
+- [ ] **`&string` slice type** (§2.7). A borrowed, non-owning `(ptr, len)` view into UTF-8 data; codegen is a no-op (the ABI already matches). Prerequisite for `.slice(range)`.
 - [ ] **Explicit lifetime annotations `<'a>`** (§2.6). `func longest<'a>(a: &'a string, b: &'a string) -> &'a string` for the advanced patterns elision cannot express. Needs `'a` lifetime tokens and a generic-parameter list — parse surface that lands with generics (Phase 2B).
 - [ ] **`Drop` trait + deterministic destruction.** Destructor runs at scope exit. No GC, no ARC. First heap consumer is the string concat / format machinery.
-- [x] **Panic runtime — abort, no unwinding** (§1.2). `panic` / `assert` / `unreachable` print a diagnostic with source location and abort; the stack is not unwound. `Drop` / `defer` run only on normal scope exit. (Rerouting integer-overflow, array-bounds, and string-slice checks through this runtime remains a follow-up.)
 - [ ] **Remove ARC.** Strip any reference-counting plumbing introduced during the alpha — everything is owned-or-borrowed from here on.
 - [ ] **Runtime string ops behind the borrow checker.** `String::new`, `string + &string` concat, `.push_str`, `.clear` — the first features that exercise heap + `Drop`.
-- [x] **`unsafe { }` block infrastructure** (§3, prep for Phase 5 `@kernel`). Reserved keyword + block parsing + AST node. Outside `@kernel` bodies, `unsafe` is inert.
 
 ### Non-Code Contributions
 

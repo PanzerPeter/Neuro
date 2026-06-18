@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-677%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-679%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 Core MVP & Phase 1.5 stabilization complete · Phase 1.7 (ownership) active · Phase 2 overlapping
 
@@ -88,38 +88,22 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**677 Tests Passing**):
+Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**679 Tests Passing**):
 
 | Feature | Details |
 |---|---|
-| **Static Typing + Inference** | All integer types (i8–u64), f16/bf16/f32/f64, bool, char, string; explicit `as` casting; contextual numeric literal inference; integer literal type suffixes (`42i64`, `255u8`); float literal type suffixes (`1.5f32`, `2.0f64`, `1.5f16`, `0.02bf16`); underscore digit separators (`1_000_000`, `0xFF_FF`, `0b1010_0011`) |
-| **Half-Precision Scalars** | `f16` (IEEE-754 half) and `bf16` (bfloat16) are scalar primitives with a narrow contract (§1.2): binding, `Copy`, `==`/`!=`, and `as`-cast to/from any numeric type and to/from each other. Suffix literals `1.5f16`/`0.02bf16` (no contextual default). No scalar arithmetic or ordering — `a + b` errors and directs you to compute in `f32`. Full tensor-dtype support lands in Phase 3 |
-| **Char Type** | `char` is a 32-bit Unicode scalar value (§1.2); single-quoted literals with escapes (`'a'`, `'\n'`, `'\u{1F44D}'`); `Copy`; built-in comparison (`==`/`!=`/`<`/`>`/`<=`/`>=`); `as`-cast to/from integer types; no arithmetic (compute on the integer code point) |
+| **Static Typing + Inference** | All integer types (i8–u64), f16/bf16/f32/f64, bool, char, string; explicit `as` casting; contextual literal inference; literal type suffixes (`42i64`, `1.5f32`) and digit separators (`1_000_000`) |
 | **Functions** | Parameters, explicit and expression-based implicit returns, recursion, forward references |
-| **Control Flow** | if/else/elif, while loops, `loop { }` infinite loops, `loop` as a value expression (`val x = loop { ... break v }`, §3.7), range-for (`for i in 0..n` and `0..=n`), break, continue, value-carrying `break v`, loop labels (`outer: for ... { break outer }` / `continue outer`) |
-| **Mutable Variables** | `val` (immutable) and `mut` (mutable) with type-safe reassignment |
-| **Compound Assignment** | `+=`, `-=`, `*=`, `/=`, `%=` desugared at parse time to `target = target OP expr` |
-| **Constants** | `const NAME: Type = expr` at module and function scope; constant-expression validation; forward references; emitted as LLVM globals |
-| **Integer Overflow** | `+`/`-`/`*` trap at runtime on overflow in debug builds (`-O0`); wrap (two's complement) in release builds (`-O1..-O3`); division/modulo/bitwise/float unaffected |
-| **Bitwise Operators** | `&`, `\|`, `^`, `~`, `<<` on integer types; correct precedence per Appendix B (Shl > BitAnd > BitXor > BitOr); floats and bools rejected |
-| **Attributes & Lints** | `@name(args)` attributes on functions/methods; `while true` lint with `@allow(prefer_loop_over_while_true)` suppression |
-| **String Type** | Literals with full escape sequence support (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==` and `!=` for byte-level comparison; `.len()` builtin method returning the `u64` byte length (O(1), excludes null terminator); `.clone()` builtin method returning a fresh `string` (§2.7) |
-| **Builtin Methods** | Compiler-known intrinsic method dispatch on primitive & string receivers (`receiver.method()`), alongside user-defined `impl` methods; `string.len()`, `string.clone()`; integer `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and right-shift `.shr(n)` (`ashr`/`lshr` by signedness) |
-| **Structs** | Definition, instantiation (`Name { field: value }`), field-init shorthand (`Point { x, y }`), functional update (`Point { x: 1.0, ..base }`), field read (`obj.field`), field mutation on `mut` bindings; nominal typing; definition-order independent |
-| **Methods** | `impl` blocks with `&self` and `&mut self` instance methods; associated functions called via `TypeName::func(args)`. A `&mut self` method mutates `self.field` in place — passed by pointer so the write reaches the caller (§2.5); calling one requires a `mut` receiver (or a `&mut T`) and takes an exclusive borrow for the call (rejected while the receiver is otherwise borrowed). Consuming `self` is still rejected (needs the by-value struct ABI) |
-| **Type Aliases** | `type Name = Target` transparent aliases (§3.14) resolved at parse time across var/const/param/return/field/cast positions; chain resolution; duplicate, builtin-shadow, and cyclic-alias diagnostics |
-| **If/Block Expressions** | `val x = if cond { a } else { b }`; bare block-as-value with newline-separated statements and a final trailing expression; all arms type-checked; alloca-based lowering |
-| **Move Semantics** | Move-by-default for non-`Copy` values (`string` and structs without `@derive(Copy)`). Binding, assignment, `return`, struct-field store, and by-value call arguments move the source; reading a moved binding is a `use of moved value` error. `.clone()` opts out; `Copy` scalars are duplicated. Conditional (`if`/`while`/`for`) moves don't leak past their branch (§2.2) |
-| **Copy / Clone** | `@derive(Copy, Clone)` on structs (§2.3). A `Copy` struct is duplicated on assignment instead of moved; deriving `Copy` requires every field to be `Copy` (else a compile error). `Copy` implies `Clone`; `@derive(Clone)` enables `struct.clone()` as a builtin deep copy (a user `clone` method shadows it). Unknown derive args are accepted and ignored |
-| **Immutable Borrows** | `&T` reference type (params/returns/locals) and `&place` borrow expression (§2.4). Borrowing does not move the borrowee, and `&T` is `Copy`. Method/field access auto-derefs through a borrow: `.len()`/`.clone()` on `&string`, field read and `&self` methods on `&Struct`. Borrowing a temporary or `const` is `CannotBorrowValue`. Lowers to an opaque pointer. |
-| **Mutable Borrows** | `&mut T` reference type and `&mut place` borrow expression, plus the prefix `*` dereference operator for reading (`*r`) and writing (`*r = v`, `*place = value`) through a reference (§2.5). `&mut` requires a `mut` binding (`CannotBorrowMutably`); `*` applies only to a reference (`CannotDereference`); writing through `*` requires a `&mut` (`CannotAssignThroughRef`). `&mut T` and `&T` are distinct types — no implicit coercion. Borrows lower to the place's storage pointer; a deref is a load/store. |
-| **Borrow Exclusivity** | Flow-sensitive aliasing rules enforced at compile time (§2.4, §2.5): any number of shared `&T` borrows of a place may coexist, but a `&mut T` borrow is exclusive — while it is live, no other borrow of that place may exist. Lexical borrow regions: a borrow held by a binding lives until the binding leaves scope; a borrow passed to a call ends with the statement. Diagnostics `cannot borrow … as mutable` / `cannot borrow … as immutable`. Read/move-while-borrowed awaits lifetime inference |
-| **Returned References** | Lifetime elision for reference-returning functions and methods (§2.6): a single input reference lifetime is applied to outputs and the `&self` lifetime to method outputs, so returning one of the reference parameters (or a borrow of `&self`) is sound. Returning a borrow of a body-local or by-value parameter — directly (`return &local`) or through a local reference binding — is rejected (`cannot return a reference to '…'`) because it would dangle. Elision-only: no annotation syntax yet; a borrow of any parameter is accepted |
-| **String Slices** | `&string` is the borrowed string slice (§2.7): a non-owning `(ptr, len)` view. Equality `==` / `!=` compares the underlying UTF-8 bytes for any owned/borrowed combination (`&a == &b`, `&a == "lit"`, `"lit" == &a`); a borrowed operand is auto-dereferenced to its fat pointer before the byte compare. Reference-peeling is string-only, so `i32 == &string` stays a type error. Borrowing for a comparison never moves |
-| **Unsafe Blocks** | `unsafe { … }` reserved keyword + block expression (Phase 1.7 groundwork); inert — lowers identically to a bare block, evaluates to its trailing expression |
-| **Panic Runtime** | `panic(msg)`, `assert(cond)`, `unreachable()` builtins (§1.2): print a diagnostic (`message at file:line:col`) to stderr and abort via `abort()` — no stack unwinding. `assert` aborts only on a false condition. Divergent, so usable in tail-return position; a same-named user function shadows the builtin |
-| **LLVM Backend** | Native executable generation via inkwell 0.9.0 (LLVM 20) |
-| **CLI** | `neurc check` (type-check only) and `neurc compile` (produces native binary) |
+| **Control Flow** | if/else/elif, `while`, `loop` (incl. as a value expression), range-for (`0..n`, `0..=n`), `break`/`continue` with value-carrying breaks and loop labels |
+| **Variables & Constants** | `val` (immutable) / `mut` (mutable) with type-safe reassignment; module- and function-scope `const` emitted as LLVM globals |
+| **Structs & Methods** | Definition, instantiation, field-init shorthand, functional update (`..base`), field read/mutation; `impl` blocks with `&self` / `&mut self` instance methods and `TypeName::func` associated functions |
+| **Move Semantics** | Move-by-default for non-`Copy` values; use-after-move is a compile error; `.clone()` opts out; `@derive(Copy, Clone)` on structs |
+| **Borrows** | Immutable `&T` and mutable `&mut T` references with the `*` deref operator; flow-sensitive borrow exclusivity (shared XOR mutable) enforced at compile time |
+| **Lifetimes (elision)** | Returned-reference lifetime elision; returning a borrow of a local or by-value parameter is rejected as it would dangle |
+| **Strings** | Fat-pointer `string` with full escape support; `&string` borrowed slices; byte-level `==`/`!=`; builtin `.len()` / `.clone()` |
+| **Panic Runtime** | `panic(msg)`, `assert(cond)`, `unreachable()` — print a located diagnostic to stderr and abort (no unwinding) |
+| **LLVM Backend + CLI** | Native executable generation via inkwell 0.9.0 (LLVM 20); `neurc check` (type-check) and `neurc compile` (native binary) |
+| **…and many more** | Half-precision `f16`/`bf16` scalars, `char`, type aliases, integer-overflow traps (debug) / wrapping (release), bitwise operators, compound assignment, if/block-as-value expressions, builtin integer methods (`wrapping_*`, `saturating_*`, `.shr`), attributes & lints, `unsafe` blocks. See [CHANGELOG.md](CHANGELOG.md) and [docs/](docs/) for the full list |
 
 ### Current Memory Model
 

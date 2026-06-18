@@ -22,7 +22,7 @@ Examples of unacceptable behavior:
 - Trolling, insulting or derogatory comments, and personal or political attacks
 - Public or private harassment
 - Publishing others' private information, such as a physical or electronic address, without their explicit permission
-- Misrepresenting authorship or attribution — in particular, claiming contributions as your own without crediting the original author, or removing attribution required by the [Neuro Source-Available License](LICENSE)
+- Misrepresenting authorship or attribution — in particular, claiming contributions as your own without crediting the original author, or removing attribution required by the [Neuro Shared Source License v2.1](LICENSE)
 - Other conduct which could reasonably be considered inappropriate in a professional setting
 
 ## Enforcement Responsibilities
@@ -34,6 +34,10 @@ Project maintainers have the right and responsibility to remove, edit, or reject
 ## Scope
 
 This Code of Conduct applies within all project spaces, and also applies when an individual is officially representing the project in public spaces. Examples of representing our project include using an official project email address, posting via an official social media account, or acting as an appointed representative at an online or offline event.
+
+## Reporting
+
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported privately to the project maintainers via [GitHub's private security advisory form](https://github.com/PanzerPeter/Neuro/security/advisories/new) or by opening a confidential report through the repository's **Security** tab. All complaints will be reviewed and investigated promptly and fairly. Project maintainers are obligated to respect the privacy and security of the reporter of any incident.
 
 ## Enforcement Guidelines
 

@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.41.5] - 2026-06-18
+
+### Changed
+- `docs`: documentation sweep for accuracy and concision. Corrected the test count (`677` → `679`) in the README badge/capabilities header and `docs/README.md`. Compacted the README "Current Capabilities" table from ~30 exhaustive rows to a curated mix of core and advanced features ending in a "…and many more" pointer to the changelog/docs. Condensed the CONTRIBUTING Phase 1.7 checklist's landed items to one line each (full behavior stays in the changelog).
+
+### Fixed
+- `docs`: corrected the license name in `CODE_OF_CONDUCT.md` ("Neuro Source-Available License" → "Neuro Shared Source License v2.1") and in `docs/README.md` ("GPL v3.0 with Neuro Exceptions" → "Neuro Shared Source License v2.1"). Added a missing **Reporting** section to `CODE_OF_CONDUCT.md` (the enforcement ladder had no reporting channel). Refreshed the stale version/date footer in `docs/README.md` (`v1.31.1`/`2026-06-08` → `v1.41.4`/`2026-06-17`).
+
+---
+
 ## [1.41.4] - 2026-06-17
 
 ### Fixed
