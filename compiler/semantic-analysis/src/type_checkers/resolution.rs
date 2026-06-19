@@ -48,6 +48,27 @@ impl TypeChecker {
                     mutable: *mutable,
                 })
             }
+            // Fixed-size array `[T; N]` (§3.1). The element must be a `Copy` scalar
+            // primitive in this phase — non-Copy element arrays (strings, structs)
+            // need per-element move/Drop tracking, which is a documented follow-on.
+            ast_types::Type::Array {
+                element,
+                size,
+                span,
+            } => {
+                let element_ty = self.resolve_type(element)?;
+                if !self.is_type_copy(&element_ty) {
+                    self.record_error(TypeError::NonCopyArrayElement {
+                        ty: element_ty,
+                        span: *span,
+                    });
+                    return None;
+                }
+                Some(Type::Array {
+                    element: Box::new(element_ty),
+                    size: *size,
+                })
+            }
             ast_types::Type::Tensor { span, .. } => {
                 // Tensor types are Phase 3, not supported in Phase 1
                 self.record_error(TypeError::UnknownTypeName {

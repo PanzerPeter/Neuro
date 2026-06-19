@@ -129,6 +129,20 @@ pub enum Expr {
         inclusive: bool,
         span: Span,
     },
+    /// Array literal `[e0, e1, ...]` (§3.1). All elements must share one type; the
+    /// array's length is the element count.
+    ArrayLiteral {
+        elements: Vec<Expr>,
+        span: Span,
+    },
+    /// Array indexing `object[index]` (§3.1). `object` evaluates to an array (or a
+    /// borrow of one); `index` is an integer. Out-of-bounds access panics in debug
+    /// builds (§1.2).
+    Index {
+        object: Box<Expr>,
+        index: Box<Expr>,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -152,6 +166,8 @@ impl Expr {
             Expr::Reference { span, .. } => *span,
             Expr::Deref { span, .. } => *span,
             Expr::Range { span, .. } => *span,
+            Expr::ArrayLiteral { span, .. } => *span,
+            Expr::Index { span, .. } => *span,
         }
     }
 }

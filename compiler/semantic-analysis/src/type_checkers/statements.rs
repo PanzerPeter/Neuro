@@ -600,6 +600,121 @@ impl TypeChecker {
                 Some(())
             }
 
+            // `for x in arr` over an array value (§3.1). The iterable must be an array
+            // (or a borrow of one); `x` binds each element. Lowered as a counted loop.
+            Stmt::ForEach {
+                label,
+                iterator,
+                iterable,
+                body,
+                span: _,
+            } => {
+                let iterable_ty = self.check_expr(iterable, None).unwrap_or(Type::Unknown);
+                let element_ty = match iterable_ty.referent() {
+                    Type::Array { element, .. } => Some((**element).clone()),
+                    Type::Unknown => None,
+                    other => {
+                        self.record_error(TypeError::NotIndexable {
+                            found: other.clone(),
+                            span: iterable.span(),
+                        });
+                        None
+                    }
+                };
+
+                // Body moves are not guaranteed straight-line; restore move state after
+                // the loop (§2.2). A `for` yields unit, so it is not a value loop.
+                let move_snapshot = self.symbols.snapshot_moves();
+                self.loop_stack.push(LoopContext {
+                    label: label.as_ref().map(|l| l.name.clone()),
+                    is_value_loop: false,
+                    break_value_ty: None,
+                });
+                self.symbols.push_scope();
+
+                if let Some(element_ty) = element_ty {
+                    if let Err(duplicate_name) =
+                        self.symbols
+                            .define(iterator.name.clone(), element_ty, false)
+                    {
+                        self.record_error(TypeError::VariableAlreadyDefined {
+                            name: duplicate_name,
+                            span: iterator.span,
+                        });
+                    }
+                }
+
+                for stmt in body {
+                    let _ = self.check_stmt(stmt);
+                }
+
+                self.symbols.pop_scope();
+                self.loop_stack.pop();
+                self.symbols.restore_moves(&move_snapshot);
+
+                Some(())
+            }
+
+            // Array element assignment `arr[i] = v` (§3.1). The target must be a mutable
+            // array binding; the index an integer; the value the element type.
+            Stmt::IndexAssignment {
+                target,
+                index,
+                value,
+                span,
+            } => {
+                let symbol = if let Some(s) = self.symbols.lookup(&target.name) {
+                    s.clone()
+                } else {
+                    self.record_error(TypeError::UndefinedVariable {
+                        name: target.name.clone(),
+                        span: target.span,
+                    });
+                    return None;
+                };
+
+                if !symbol.mutable {
+                    self.record_error(TypeError::AssignToImmutable {
+                        name: target.name.clone(),
+                        span: target.span,
+                    });
+                    return None;
+                }
+
+                let element_ty = match &symbol.ty {
+                    Type::Array { element, .. } => (**element).clone(),
+                    other => {
+                        self.record_error(TypeError::NotIndexable {
+                            found: other.clone(),
+                            span: *span,
+                        });
+                        return None;
+                    }
+                };
+
+                let idx_ty = self.check_expr(index, None).unwrap_or(Type::Unknown);
+                if !matches!(idx_ty, Type::Unknown) && !idx_ty.is_integer() {
+                    self.record_error(TypeError::IndexNotInteger {
+                        found: idx_ty,
+                        span: index.span(),
+                    });
+                }
+
+                let value_ty = self
+                    .check_expr(value, Some(&element_ty))
+                    .unwrap_or(Type::Unknown);
+                if !matches!(value_ty, Type::Unknown) && !value_ty.is_compatible_with(&element_ty) {
+                    self.record_error(TypeError::Mismatch {
+                        expected: element_ty,
+                        found: value_ty,
+                        span: *span,
+                    });
+                }
+                self.record_move(value);
+
+                Some(())
+            }
+
             Stmt::Break { label, value, span } => {
                 self.check_loop_control_label(label.as_ref(), *span, true);
                 if let Some(value_expr) = value {

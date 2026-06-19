@@ -127,6 +127,13 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-06-19: Arrays §3.1. New `Type::Array { element, size }` (compatible only on equal element type
+  and length; `[T; N]` Display). `resolve_type` resolves `[T; N]` and rejects a non-Copy element
+  (`NonCopyArrayElement`). `check_expr` handles array literals (homogeneous, length vs annotation) and
+  indexing (`NotIndexable` / `IndexNotInteger`); `array.len()` resolves to `u64`. `Stmt::ForEach` binds
+  the element type; `Stmt::IndexAssignment` requires a mutable array target. Arrays are `Copy` when the
+  element is. New diagnostics: `NotIndexable`, `IndexNotInteger`, `ArrayLengthMismatch`,
+  `CannotInferEmptyArray`, `NonCopyArrayElement`.
 - 2026-06-17: Returned-reference outlives / lifetime elision §2.6. New `current_fn_outliving:
   HashSet<String>` on `TypeChecker` (reference params + `self`), rebuilt in `check_function` /
   `check_impl` and cleared on exit. New `SymbolTable::borrow_provenance`. New

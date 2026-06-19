@@ -51,6 +51,10 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-06-19: Arrays §3.1. `parse_type` parses `[T; N]`; `parse_prefix` parses `[..]` array literals;
+  `parse_infix` + `get_precedence` parse `a[i]` indexing (call precedence); `parse_for_stmt` branches
+  `Stmt::ForRange` vs `Stmt::ForEach` on the presence of a `..` / `..=`; the identifier-statement path
+  builds `Stmt::IndexAssignment` for `arr[i] = v`. Alias-rewrite covers the new nodes.
 - 2026-06-18: Range expressions for `string.slice` (§2.7). `parse_infix` handles `..` / `..=`
   (`TokenKind::DotDot` / `DotDotEqual`) → `Expr::Range`, at the new `Precedence::Range` (below `??`).
   `parse_for` now parses the range start bound at `Precedence::Range` so the loop's own `..` / `..=`

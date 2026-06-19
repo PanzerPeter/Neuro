@@ -114,12 +114,18 @@ Key design goals:
 - `&mut self` methods mutate `self.field` in place (passed by pointer, §2.5); calling one needs a `mut` receiver and takes an exclusive borrow for the call. Consuming `self` is still rejected
 - Nominal typing; forward-reference support (definition order independent)
 
+### Arrays (Phase 2, §3.1)
+
+- Fixed-size `[T; N]` of `Copy` scalar elements: literals (with element-type inference), index read/write, `.len()` (compile-time `u64`)
+- Iteration `for x in arr` and `for x in &arr`, lowered as a counted loop over the storage
+- Out-of-bounds index panics in debug builds (`-O0`); release builds omit the check
+
 ### Compilation
 
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 712 tests passing across all components
+- 727 tests passing across all components
 
 ## Compilation Pipeline
 

@@ -57,6 +57,19 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// For loop over an array value (`for x in arr`, §3.1).
+    ///
+    /// `iterable` evaluates to an array (or a borrow of one); `iterator` binds each
+    /// element in turn. Lowered directly in codegen as a counted loop over the
+    /// array storage — it does not dispatch through an iterator protocol. An
+    /// optional `label` (§3.7) names the loop for labeled break/continue.
+    ForEach {
+        label: Option<Identifier>,
+        iterator: Identifier,
+        iterable: Expr,
+        body: Vec<Stmt>,
+        span: Span,
+    },
     /// Infinite loop statement (§3.7).
     ///
     /// Executes `body` repeatedly; the only exit is a `break`. `continue`
@@ -101,6 +114,15 @@ pub enum Stmt {
     /// `pointer` to have a `&mut T` type — enforced in semantic analysis.
     DerefAssignment {
         pointer: Expr,
+        value: Expr,
+        span: Span,
+    },
+    /// Array element assignment `target[index] = value` (§3.1). `target` is a
+    /// mutable array binding; `index` is an integer. Out-of-bounds access panics
+    /// in debug builds (§1.2).
+    IndexAssignment {
+        target: Identifier,
+        index: Expr,
         value: Expr,
         span: Span,
     },

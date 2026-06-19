@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.45.0] - 2026-06-19
+
+### Added
+- `codegen`: fixed-size arrays `[T; N]` (Phase 2A, §3.1). Array types `[T; N]`, array literals `[e0, e1, ...]` (with element-type inference and length from the element count), index read `arr[i]` and element assignment `arr[i] = v`, the `arr.len()` builtin (compile-time `u64` length), and direct array iteration `for x in arr` / `for x in &arr` (lowered as a counted loop over the storage — no iterator protocol). Element types are restricted to `Copy` scalar primitives (i8–u64, f16/bf16/f32/f64, bool, char), so an array is itself `Copy` and needs no move/Drop tracking. Out-of-bounds index access panics with a located diagnostic in debug builds (`-O0`); release builds omit the check, matching the integer-overflow policy (§1.2). New diagnostics: `NonCopyArrayElement`, `NotIndexable`, `IndexNotInteger`, `ArrayLengthMismatch`, `CannotInferEmptyArray`. New AST nodes (`Type::Array`, `Expr::ArrayLiteral`, `Expr::Index`, `Stmt::ForEach`, `Stmt::IndexAssignment`), semantic and backend `Type::Array`, `BuiltinMethod::ArrayLen`, `examples/types/arrays.nr`, end-to-end coverage in `neurc/tests/arrays.rs`, and semantic unit tests. Deferred: arrays of non-`Copy` elements (strings, structs), `.enumerate()` indexed iteration (needs tuples, §3.2), and a compile-time bounds-elision pass.
+
+---
+
 ## [1.44.0] - 2026-06-18
 
 ### Added

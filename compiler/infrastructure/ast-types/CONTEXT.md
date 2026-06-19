@@ -28,6 +28,9 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-06-19: Arrays §3.1. Added `Type::Array { element, size, span }`, `Expr::ArrayLiteral { elements, span }`,
+  `Expr::Index { object, index, span }`, `Stmt::ForEach { label, iterator, iterable, body, span }`, and
+  `Stmt::IndexAssignment { target, index, value, span }`, with their `span()` arms.
 - 2026-06-18: String `.slice(range)` (§2.7). Added `Expr::Range { start, end, inclusive, span }`,
   the `a..b` / `a..=b` node. Not a first-class value: it is only valid as a `string.slice`
   argument (semantic-analysis rejects it elsewhere). `for`-range loops keep their bounds on
