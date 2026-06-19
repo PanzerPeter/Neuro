@@ -11,7 +11,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | Directory        | What it covers                                                         |
 | ---------------- | ---------------------------------------------------------------------- |
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference |
-| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases |
+| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`) |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods            |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable` |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
@@ -81,7 +81,10 @@ No Rust edits are needed — discovery is automatic.
 
 ## Known language limitations (affect what examples can do)
 
-- No arrays yet (Phase 2+).
+- Fixed-size arrays `[T; N]` are supported (`types/arrays.nr`): literals,
+  indexing, element assignment, `.len()`, and `for x in arr` / `for x in &arr`.
+  Element types are limited to `Copy` scalars for now; growable `Vec<T>` and
+  `.enumerate()` are later phases.
 - Ownership/borrow checker not yet implemented (Phase 1.7).
 - `&self` and `&mut self` methods are supported; a `&mut self` method mutates
   struct state in place (see `structs/mut_self_accumulator.nr`). Consuming `self`

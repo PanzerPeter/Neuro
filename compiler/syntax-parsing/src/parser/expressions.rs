@@ -204,6 +204,28 @@ impl Parser {
                 Ok(Expr::Paren(Box::new(expr), span))
             }
 
+            // Array literal `[e0, e1, ...]` (§3.1). Elements parse at the lowest
+            // precedence so each may be a full expression; a trailing comma is not
+            // accepted (each element must be followed by `,` or the closing `]`).
+            TokenKind::LeftBracket => {
+                self.skip_newlines();
+                let mut elements = Vec::new();
+                if !self.check(&TokenKind::RightBracket) {
+                    loop {
+                        elements.push(self.parse_expr(Precedence::Lowest)?);
+                        self.skip_newlines();
+                        if !self.check(&TokenKind::Comma) {
+                            break;
+                        }
+                        self.advance(); // consume ','
+                        self.skip_newlines();
+                    }
+                }
+                let close = self.consume(TokenKind::RightBracket, "']' to close array literal")?;
+                let span = token.span.merge(close.span);
+                Ok(Expr::ArrayLiteral { elements, span })
+            }
+
             TokenKind::If => self.parse_if_expr(token.span),
 
             TokenKind::LeftBrace => self.parse_block_expr(token.span),
@@ -426,6 +448,22 @@ impl Parser {
                 })
             }
 
+            // Array indexing `object[index]` (§3.1). Binds at call precedence so
+            // `arr[i]` is a tight postfix on the preceding primary.
+            TokenKind::LeftBracket => {
+                self.advance(); // consume '['
+                self.skip_newlines();
+                let index = self.parse_expr(Precedence::Lowest)?;
+                self.skip_newlines();
+                let close = self.consume(TokenKind::RightBracket, "']' to close index")?;
+                let span = left.span().merge(close.span);
+                Ok(Expr::Index {
+                    object: Box::new(left),
+                    index: Box::new(index),
+                    span,
+                })
+            }
+
             // Type casts
             TokenKind::As => {
                 self.advance(); // consume 'as'
@@ -545,6 +583,7 @@ impl Parser {
             TokenKind::DotDot | TokenKind::DotDotEqual => Precedence::Range,
             TokenKind::As => Precedence::Cast,
             TokenKind::LeftParen => Precedence::Call,
+            TokenKind::LeftBracket => Precedence::Call,
             TokenKind::Dot => Precedence::FieldAccess,
             _ => Precedence::Lowest,
         }

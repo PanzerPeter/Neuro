@@ -223,4 +223,23 @@ pub enum TypeError {
 
     #[error("`.slice()` expects a range argument `a..b` or `a..=b` at {span:?} (§2.7)")]
     SliceExpectsRange { span: Span },
+
+    #[error("array element type {ty} is not Copy at {span:?}: arrays of non-Copy element types (strings, non-Copy structs) are not yet supported (§3.1)")]
+    NonCopyArrayElement { ty: Type, span: Span },
+
+    #[error("cannot index a value of type {found} at {span:?}: indexing applies only to arrays `[T; N]` (§3.1)")]
+    NotIndexable { found: Type, span: Span },
+
+    #[error("array index must be an integer, found {found} at {span:?} (§3.1)")]
+    IndexNotInteger { found: Type, span: Span },
+
+    #[error("array literal has {found} elements but type annotation expects {expected} at {span:?} (§3.1)")]
+    ArrayLengthMismatch {
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    #[error("cannot infer the element type of an empty array literal at {span:?}: add a type annotation like `[i32; 0]` (§3.1)")]
+    CannotInferEmptyArray { span: Span },
 }

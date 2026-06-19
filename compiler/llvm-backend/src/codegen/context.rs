@@ -42,6 +42,8 @@ pub(crate) enum BuiltinMethod {
     SaturatingMul,
     /// `int.shr(n)` → right shift: arithmetic for signed, logical for unsigned (§1.4).
     Shr,
+    /// `array.len()` → the compile-time element count `N` of `[T; N]`, as `u64` (§3.1).
+    ArrayLen,
 }
 
 /// Resolve a compiler-known intrinsic on a builtin receiver, returning the method
@@ -63,6 +65,9 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<(Built
             BuiltinMethod::StringSlice,
             Type::Reference(Box::new(Type::String)),
         )),
+        // `array.len()` (§3.1) → the static element count as `u64`. Auto-derefs a
+        // borrow of an array (`&[T; N]`) like the string builtins above.
+        (Type::Array { .. }, "len") => Some((BuiltinMethod::ArrayLen, Type::U64)),
         // Integer intrinsics require a value receiver (matched on `recv`, not the referent):
         // reading a scalar through `&T` needs the deref operator. They return the receiver's
         // own integer type (§1.2, §1.4).
@@ -187,6 +192,13 @@ pub(crate) struct CodegenContext<'ctx> {
     /// `Call` nodes that share the same `span.start`; the full `(start, end)` is unique per node.
     pub(crate) builtin_methods: HashMap<(usize, usize), (BuiltinMethod, Type)>,
 
+    /// Maps an `Index` expression's full span `(start, end)` → the indexed object's
+    /// type (an array, or a borrow of one). Keyed by the full span rather than
+    /// `span.start` because an `Index` node and its leftmost object subexpression
+    /// share `span.start`, so the element-type entry written at the node's start
+    /// would otherwise clobber the object's array-type entry in `expr_types` (§3.1).
+    pub(crate) index_object_types: HashMap<(usize, usize), Type>,
+
     /// Evaluated constant values (both module-level and function-level).
     /// `codegen_identifier` checks this before `variables` to allow locals to shadow consts.
     pub(crate) const_values: HashMap<String, BasicValueEnum<'ctx>>,
@@ -240,6 +252,7 @@ impl<'ctx> CodegenContext<'ctx> {
             fa_struct_names: HashMap::new(),
             binary_left_types: HashMap::new(),
             builtin_methods: HashMap::new(),
+            index_object_types: HashMap::new(),
             const_values: HashMap::new(),
             global_const_types: HashMap::new(),
             overflow_checks: false,

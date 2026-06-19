@@ -121,6 +121,29 @@ impl<'ctx> CodegenContext<'ctx> {
                         .into())
                 }
             }
+            // Element-wise array coercion (§3.1): rebuild an `[N x T]` aggregate at the
+            // target element width so an untyped `[1, 2, 3]` literal (default i32) fits a
+            // declared `[i64; N]`. Mirrors the scalar arms, applied per element.
+            (BasicValueEnum::ArrayValue(av), BasicTypeEnum::ArrayType(at)) => {
+                let crate::types::Type::Array { element, size } = target_sem else {
+                    return Ok(av.into());
+                };
+                let elem_llvm = self.type_mapper.map_type(element)?;
+                let mut agg = at.get_undef();
+                for i in 0..*size as u32 {
+                    let e = self
+                        .builder
+                        .build_extract_value(av, i, "arr.coerce.get")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                    let ce = self.coerce_if_needed(e, elem_llvm, element)?;
+                    agg = self
+                        .builder
+                        .build_insert_value(agg, ce, i, "arr.coerce.set")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into_array_value();
+                }
+                Ok(agg.into())
+            }
             _ => Ok(val),
         }
     }
@@ -671,6 +694,24 @@ impl<'ctx> CodegenContext<'ctx> {
                 *inclusive,
                 body,
             ),
+            Stmt::ForEach {
+                label,
+                iterator,
+                iterable,
+                body,
+                ..
+            } => self.codegen_for_each(
+                label.as_ref().map(|l| l.name.as_str()),
+                iterator,
+                iterable,
+                body,
+            ),
+            Stmt::IndexAssignment {
+                target,
+                index,
+                value,
+                ..
+            } => self.codegen_index_assignment(target, index, value),
             Stmt::Break { label, value, .. } => {
                 let target = self.lookup_loop_target(label.as_ref())?;
                 let break_bb = target.break_bb;

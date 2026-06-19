@@ -21,6 +21,7 @@ basics/phase1_complete.nr       0
 basics/type_inference.nr        42
 
 # --- types ----------------------------------------------------------------
+types/arrays.nr                     8
 types/borrow_exclusivity.nr         31
 types/char.nr                       65
 types/constants.nr                  51

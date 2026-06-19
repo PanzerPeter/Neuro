@@ -984,6 +984,37 @@ exactly the same code as writing the target type directly. Using an alias as a
 value-position constructor or path name (e.g. `MyAlias { ... }`) is not part of
 this feature.
 
+## Arrays (§3.1)
+
+A fixed-size array `[T; N]` holds exactly `N` values of element type `T`, with
+`N` fixed at compile time and part of the type — `[i32; 3]` and `[i32; 4]` are
+distinct types.
+
+```neuro
+val a: [i32; 4] = [10, 20, 30, 40]   // explicit type
+val b = [1, 2, 3]                    // inferred [i32; 3]
+
+val first = a[0]                     // index read
+mut c = [0, 0, 0]
+c[1] = 42                            // element assignment (mut binding)
+val n = a.len()                      // 4, as u64 (compile-time constant)
+
+for x in a {  }                      // iterate by value
+for x in &a {  }                     // iterate over a borrow
+```
+
+- **Element type**: currently restricted to `Copy` scalar primitives (the
+  integer types, `f16`/`bf16`/`f32`/`f64`, `bool`, `char`). An array of `Copy`
+  elements is itself `Copy`. Arrays of non-`Copy` elements (strings, structs)
+  are not yet supported.
+- **Literals** must be homogeneous; the length is the element count and, when a
+  `[T; N]` annotation is present, must equal `N`.
+- **Bounds**: an out-of-range index panics with a located diagnostic in debug
+  builds (`-O0`); release builds omit the check (matching the integer-overflow
+  policy).
+- **Iteration**: `for x in arr` / `for x in &arr` bind each element in order;
+  the indexed form `for (i, x) in arr.enumerate()` arrives with tuples (§3.2).
+
 ## References
 
 - [Variables](variables.md) - Variable declaration and usage

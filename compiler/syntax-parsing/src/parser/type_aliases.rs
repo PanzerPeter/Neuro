@@ -157,6 +157,7 @@ fn rewrite_type(ty: &mut Type, resolved: &HashMap<String, Type>) {
             }
         }
         Type::Reference { inner, .. } => rewrite_type(inner, resolved),
+        Type::Array { element, .. } => rewrite_type(element, resolved),
         Type::Tensor { element_type, .. } => rewrite_type(element_type, resolved),
     }
 }
@@ -250,6 +251,14 @@ fn rewrite_stmt(stmt: &mut Stmt, resolved: &HashMap<String, Type>) {
             rewrite_expr(end, resolved);
             rewrite_block(body, resolved);
         }
+        Stmt::ForEach { iterable, body, .. } => {
+            rewrite_expr(iterable, resolved);
+            rewrite_block(body, resolved);
+        }
+        Stmt::IndexAssignment { index, value, .. } => {
+            rewrite_expr(index, resolved);
+            rewrite_expr(value, resolved);
+        }
         Stmt::FieldAssignment { value, .. } => rewrite_expr(value, resolved),
         Stmt::DerefAssignment { pointer, value, .. } => {
             rewrite_expr(pointer, resolved);
@@ -324,6 +333,15 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
             rewrite_expr(start, resolved);
             rewrite_expr(end, resolved);
         }
+        Expr::ArrayLiteral { elements, .. } => {
+            for el in elements.iter_mut() {
+                rewrite_expr(el, resolved);
+            }
+        }
+        Expr::Index { object, index, .. } => {
+            rewrite_expr(object, resolved);
+            rewrite_expr(index, resolved);
+        }
         Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } => {}
     }
 }
@@ -352,6 +370,7 @@ mod tests {
         match ty {
             Type::Named(ident) => ident.name.as_str(),
             Type::Reference { .. } => "<reference>",
+            Type::Array { .. } => "<array>",
             Type::Tensor { .. } => "<tensor>",
         }
     }

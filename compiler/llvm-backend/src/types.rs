@@ -32,6 +32,11 @@ pub(crate) enum Type {
     /// Immutable borrow `&T` (§2.4). Lowered to an opaque LLVM pointer; the
     /// referent type drives auto-deref of method/field receivers.
     Reference(Box<Type>),
+    /// Fixed-size array `[T; N]` (§3.1). Lowered to an LLVM `[N x T]` aggregate.
+    Array {
+        element: Box<Type>,
+        size: usize,
+    },
 }
 
 impl Type {
@@ -58,6 +63,10 @@ impl Type {
             ast_types::Type::Reference { inner, .. } => {
                 Type::Reference(Box::new(Type::from_ast(inner)))
             }
+            ast_types::Type::Array { element, size, .. } => Type::Array {
+                element: Box::new(Type::from_ast(element)),
+                size: *size,
+            },
             // Tensor types (Phase 3) never reach the backend: semantic analysis rejects
             // every `Tensor<...>` annotation as an unknown type before codegen runs, so
             // this arm is an invariant assertion rather than a missing-feature stub.

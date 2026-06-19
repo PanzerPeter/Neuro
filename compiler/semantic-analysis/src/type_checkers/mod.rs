@@ -127,6 +127,11 @@ impl TypeChecker {
             // because it never moves the borrowed value (§2.4, §2.5). Note: aliasing
             // exclusivity for `&mut T` is enforced by the borrow checker, not here.
             Type::Reference { .. } => true,
+            // An array is `Copy` exactly when its element type is `Copy` (§2.3, §3.1).
+            // The element is currently restricted to Copy scalars at resolution time,
+            // so this recursion is always true in practice; it keeps the rule honest
+            // if the restriction is later relaxed.
+            Type::Array { element, .. } => self.is_type_copy(element),
             _ => true,
         }
     }

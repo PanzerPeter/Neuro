@@ -3,6 +3,7 @@
 // Category implementations live in the sibling submodules below; each adds
 // methods to the same `impl CodegenContext` block (Rust allows split impls).
 
+mod arrays;
 mod binary;
 mod control_flow;
 mod literals;
@@ -144,6 +145,16 @@ impl<'ctx> CodegenContext<'ctx> {
             Expr::Range { .. } => Err(CodegenError::InternalError(
                 "range expression reached codegen outside a slice argument".into(),
             )),
+
+            // Array literal `[e0, ...]` and indexing `object[index]` (§3.1).
+            Expr::ArrayLiteral { elements, span } => {
+                self.codegen_array_literal(elements, span.start)
+            }
+            Expr::Index {
+                object,
+                index,
+                span,
+            } => self.codegen_index(object, index, span),
         }
     }
 

@@ -349,20 +349,33 @@ impl Parser {
         self.consume(TokenKind::In, "'in'")?;
         self.skip_newlines();
 
-        // Range expressions must not be struct literals or `{` would be consumed.
-        // Parse the start bound at `Range` precedence so the loop's own `..` / `..=`
-        // separator is not swallowed as a range expression (§1.6, §2.7).
+        // The iterable expression must not be a struct literal or `{` would be
+        // consumed. Parse it at `Range` precedence so a `..` / `..=` separator is
+        // not swallowed as a range expression (§1.6, §2.7); the operator (if any)
+        // then distinguishes a numeric range from an array iterable (§3.1).
         self.no_struct_lit = true;
         let start = self.parse_expr(Precedence::Range)?;
         self.skip_newlines();
 
-        let mut inclusive = false;
-        if self.check(&TokenKind::DotDotEqual) {
+        let inclusive = if self.check(&TokenKind::DotDotEqual) {
             self.advance();
-            inclusive = true;
+            true
+        } else if self.check(&TokenKind::DotDot) {
+            self.advance();
+            false
         } else {
-            self.consume(TokenKind::DotDot, "'..' or '..='")?;
-        }
+            // No range operator: iterate the parsed expression as an array (§3.1).
+            self.no_struct_lit = false;
+            let body = self.parse_labeled_block(label.as_ref())?;
+            let end_span = body.last().map(stmt_span).unwrap_or(start.span());
+            return Ok(Stmt::ForEach {
+                label,
+                iterator,
+                iterable: start,
+                body,
+                span: start_span.merge(end_span),
+            });
+        };
 
         self.skip_newlines();
 
@@ -611,6 +624,28 @@ impl Parser {
                 }
 
                 let expr = self.parse_expr(Precedence::Lowest)?;
+                // Array element assignment `arr[i] = v` (§3.1): the parsed expression
+                // is an index whose object is a bare binding, followed by `=`.
+                if let Expr::Index { object, index, .. } = &expr {
+                    if matches!(object.as_ref(), Expr::Identifier(_))
+                        && self.check(&TokenKind::Equal)
+                    {
+                        let Expr::Identifier(target) = object.as_ref().clone() else {
+                            unreachable!("guarded by the matches! above")
+                        };
+                        let index = (**index).clone();
+                        self.advance(); // consume '='
+                        self.skip_newlines();
+                        let value = self.parse_expr(Precedence::Lowest)?;
+                        let span = target.span.merge(value.span());
+                        return Ok(Stmt::IndexAssignment {
+                            target,
+                            index,
+                            value,
+                            span,
+                        });
+                    }
+                }
                 Ok(Stmt::Expr(expr))
             }
             // `self` keyword as statement — detect `self.field = expr` field assignments
@@ -781,9 +816,11 @@ pub(crate) fn stmt_span(stmt: &Stmt) -> shared_types::Span {
         Stmt::While { span, .. } => *span,
         Stmt::Loop { span, .. } => *span,
         Stmt::ForRange { span, .. } => *span,
+        Stmt::ForEach { span, .. } => *span,
         Stmt::Break { span, .. } => *span,
         Stmt::Continue { span, .. } => *span,
         Stmt::FieldAssignment { span, .. } => *span,
+        Stmt::IndexAssignment { span, .. } => *span,
         Stmt::DerefAssignment { span, .. } => *span,
         Stmt::Expr(e) => e.span(),
     }

@@ -323,6 +323,11 @@ fn resolve_syntax_type(ty: &ast_types::Type) -> CodegenResult<Type> {
         ast_types::Type::Reference { inner, .. } => {
             Ok(Type::Reference(Box::new(resolve_syntax_type(inner)?)))
         }
+        // Fixed-size array `[T; N]` → backend array type (§3.1).
+        ast_types::Type::Array { element, size, .. } => Ok(Type::Array {
+            element: Box::new(resolve_syntax_type(element)?),
+            size: *size,
+        }),
         ast_types::Type::Tensor { .. } => Err(CodegenError::UnsupportedType(
             "tensor types not supported in Phase 1".to_string(),
         )),

@@ -43,6 +43,13 @@ pub enum Type {
         inner: Box<Type>,
         mutable: bool,
     },
+    /// Fixed-size array `[T; N]` (§3.1): `size` elements of `element`. Two array
+    /// types are compatible only when their element types match and their sizes
+    /// are equal — length is part of the type.
+    Array {
+        element: Box<Type>,
+        size: usize,
+    },
     Unknown,
 }
 
@@ -108,6 +115,19 @@ impl Type {
                     mutable: bm,
                 },
             ) => am == bm && a.is_compatible_with(b),
+
+            // Arrays match when their element types match and their lengths are equal
+            // (§3.1) — `[i32; 3]` and `[i32; 4]` are distinct types.
+            (
+                Type::Array {
+                    element: a,
+                    size: an,
+                },
+                Type::Array {
+                    element: b,
+                    size: bn,
+                },
+            ) => an == bn && a.is_compatible_with(b),
 
             // Unknown type for error recovery
             (Type::Unknown, _) | (_, Type::Unknown) => true,
@@ -269,6 +289,7 @@ impl fmt::Display for Type {
                     write!(f, "&{}", inner)
                 }
             }
+            Type::Array { element, size } => write!(f, "[{}; {}]", element, size),
             Type::Function { params, ret } => {
                 write!(f, "fn(")?;
                 for (i, param) in params.iter().enumerate() {

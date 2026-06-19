@@ -18,6 +18,14 @@ pub enum Type {
         span: Span,
     },
 
+    /// Fixed-size array type `[T; N]` (§3.1): `N` elements of `element`, with `N`
+    /// known at compile time. `span` covers the leading `[` through the closing `]`.
+    Array {
+        element: Box<Type>,
+        size: usize,
+        span: Span,
+    },
+
     /// Tensor type for multi-dimensional arrays.
     ///
     /// This variant is reserved for future language support and is not yet
@@ -36,6 +44,7 @@ impl Type {
         match self {
             Type::Named(ident) => ident.span,
             Type::Reference { span, .. } => *span,
+            Type::Array { span, .. } => *span,
             Type::Tensor { span, .. } => *span,
         }
     }

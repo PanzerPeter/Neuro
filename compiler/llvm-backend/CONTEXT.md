@@ -232,6 +232,12 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-06-19: Arrays §3.1. New `Type::Array { element, size }` (`from_ast`/`resolve_syntax_type`,
+  `map_type` → LLVM `[N x T]`). `codegen/expressions/arrays.rs` lowers array literals, index read/write
+  (with a debug-only bounds guard via `codegen_guard_or_panic`), and `for x in arr` / `for x in &arr`
+  (`codegen_for_each`). `BuiltinMethod::ArrayLen` → compile-time `u64` length. `coerce_if_needed` gained
+  an element-wise array arm (typed `[i64; N] = [..]` literals). New `index_object_types` map keys the
+  indexed object's array type by the `Index` span (the node shares `span.start` with its object).
 - 2026-06-18: `Drop` deterministic destruction (§2.1). New `codegen/drops.rs` + `DropEntry`,
   `drop_types`, `drop_scopes` on the context, and `LoopTargets.drop_scope_depth`. `compile`
   collects `impl Drop for T` types. Scope-exit destructor insertion with runtime drop flags for

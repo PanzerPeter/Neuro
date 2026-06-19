@@ -51,6 +51,18 @@ impl TypeChecker {
             // §2.7 — borrowed sub-slice. Takes a single range argument `a..b` / `a..=b`
             // and yields a `&string` view into the receiver's UTF-8 data (zero copy).
             (Type::String, "slice") => Some(self.check_string_slice(args, call_span)),
+            // §3.1 — array length, the compile-time `N` of `[T; N]`. Auto-derefs through
+            // a borrow of an array (`&[T; N]`). Takes no arguments and yields `u64`.
+            (Type::Array { .. }, "len") => {
+                if !args.is_empty() {
+                    self.record_error(TypeError::ArgumentCountMismatch {
+                        expected: 0,
+                        found: args.len(),
+                        span: call_span,
+                    });
+                }
+                Some(Type::U64)
+            }
             // §1.2, §1.4 — wrapping/saturating arithmetic and the right-shift method.
             // Each takes one same-typed argument and returns the receiver's integer type.
             // Matched on `recv` (not the referent): integer intrinsics require a value
@@ -1194,6 +1206,123 @@ impl TypeChecker {
                 let _ = self.check_expr(end, None);
                 self.record_error(TypeError::RangeNotAllowed { span: *span });
                 Some(Type::Unknown)
+            }
+
+            // Array literal `[e0, ...]` (§3.1): all elements share one type, fixed by
+            // the first and required of the rest. An empty literal needs a `[T; N]`
+            // annotation to know its element type.
+            Expr::ArrayLiteral { elements, span } => {
+                let expected_element = match expected {
+                    Some(Type::Array { element, .. }) => Some((**element).clone()),
+                    _ => None,
+                };
+
+                if elements.is_empty() {
+                    return match expected {
+                        Some(Type::Array { element, size }) => {
+                            if *size != 0 {
+                                self.record_error(TypeError::ArrayLengthMismatch {
+                                    expected: *size,
+                                    found: 0,
+                                    span: *span,
+                                });
+                            }
+                            Some(Type::Array {
+                                element: element.clone(),
+                                size: 0,
+                            })
+                        }
+                        _ => {
+                            self.record_error(TypeError::CannotInferEmptyArray { span: *span });
+                            Some(Type::Unknown)
+                        }
+                    };
+                }
+
+                let element_ty = self
+                    .check_expr(&elements[0], expected_element.as_ref())
+                    .unwrap_or(Type::Unknown);
+                for el in &elements[1..] {
+                    let el_ty = self
+                        .check_expr(el, Some(&element_ty))
+                        .unwrap_or(Type::Unknown);
+                    if !matches!(element_ty, Type::Unknown)
+                        && !matches!(el_ty, Type::Unknown)
+                        && !el_ty.is_compatible_with(&element_ty)
+                    {
+                        self.record_error(TypeError::Mismatch {
+                            expected: element_ty.clone(),
+                            found: el_ty,
+                            span: el.span(),
+                        });
+                    }
+                }
+
+                if matches!(element_ty, Type::Unknown) {
+                    return Some(Type::Unknown);
+                }
+
+                if !self.is_type_copy(&element_ty) {
+                    self.record_error(TypeError::NonCopyArrayElement {
+                        ty: element_ty,
+                        span: *span,
+                    });
+                    return Some(Type::Unknown);
+                }
+
+                let size = elements.len();
+                if let Some(Type::Array {
+                    size: expected_size,
+                    ..
+                }) = expected
+                {
+                    if *expected_size != size {
+                        self.record_error(TypeError::ArrayLengthMismatch {
+                            expected: *expected_size,
+                            found: size,
+                            span: *span,
+                        });
+                    }
+                }
+
+                Some(Type::Array {
+                    element: Box::new(element_ty),
+                    size,
+                })
+            }
+
+            // Array indexing `object[index]` (§3.1): the object is an array (or a
+            // borrow of one, auto-derefed per §2.4); the index is an integer; the
+            // result is the element type.
+            Expr::Index {
+                object,
+                index,
+                span,
+            } => {
+                let obj_ty = self.check_expr(object, None).unwrap_or(Type::Unknown);
+                let idx_ty = self.check_expr(index, None).unwrap_or(Type::Unknown);
+
+                if !matches!(idx_ty, Type::Unknown) && !idx_ty.is_integer() {
+                    self.record_error(TypeError::IndexNotInteger {
+                        found: idx_ty,
+                        span: index.span(),
+                    });
+                }
+
+                if matches!(obj_ty, Type::Unknown) {
+                    return Some(Type::Unknown);
+                }
+
+                match obj_ty.referent() {
+                    Type::Array { element, .. } => Some((**element).clone()),
+                    other => {
+                        self.record_error(TypeError::NotIndexable {
+                            found: other.clone(),
+                            span: *span,
+                        });
+                        Some(Type::Unknown)
+                    }
+                }
             }
         }
     }

@@ -310,6 +310,36 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 self.visit_loop_body_for_types(label, *span, body, func_types)?;
             }
+            Stmt::ForEach {
+                label,
+                iterator,
+                iterable,
+                body,
+                span,
+            } => {
+                self.visit_expr_for_types(iterable, func_types)?;
+                if let Some(iterable_ty) = self.expr_types.get(&iterable.span().start).cloned() {
+                    if let Type::Array { element, .. } = iterable_ty.referent() {
+                        self.type_env
+                            .insert(iterator.name.clone(), (**element).clone());
+                    }
+                }
+                self.visit_loop_body_for_types(label, *span, body, func_types)?;
+            }
+            Stmt::IndexAssignment {
+                target,
+                index,
+                value,
+                ..
+            } => {
+                self.visit_expr_for_types(index, func_types)?;
+                self.visit_expr_for_types(value, func_types)?;
+                // Record the target array's type at its identifier span so the
+                // index-assignment codegen can resolve the element type and length.
+                if let Some(ty) = self.type_env.get(&target.name).cloned() {
+                    self.expr_types.insert(target.span.start, ty);
+                }
+            }
             Stmt::Const {
                 name, ty, value, ..
             } => {
@@ -758,6 +788,68 @@ impl<'ctx> CodegenContext<'ctx> {
             Expr::Range { start, end, .. } => {
                 self.visit_expr_for_types(start, func_types)?;
                 self.visit_expr_for_types(end, func_types)?;
+            }
+
+            // Array literal `[e0, ...]` (§3.1): all elements share one type, taken from
+            // the first; the array type is `[element; count]`.
+            Expr::ArrayLiteral { elements, span } => {
+                for el in elements {
+                    self.visit_expr_for_types(el, func_types)?;
+                }
+                let element = match elements.first() {
+                    Some(first) => self
+                        .expr_types
+                        .get(&first.span().start)
+                        .cloned()
+                        .ok_or_else(|| {
+                            CodegenError::InternalError(
+                                "missing element type for array literal".to_string(),
+                            )
+                        })?,
+                    // An empty literal's element type is irrelevant to codegen size; it is
+                    // only reachable with a `[T; 0]` annotation that the var-decl path
+                    // applies directly, so a placeholder element type is sufficient here.
+                    None => Type::I32,
+                };
+                self.expr_types.insert(
+                    span.start,
+                    Type::Array {
+                        element: Box::new(element),
+                        size: elements.len(),
+                    },
+                );
+            }
+
+            // Array indexing `object[index]` (§3.1): the result is the element type of
+            // the object's array type (auto-derefed through a borrow, §2.4).
+            Expr::Index {
+                object,
+                index,
+                span,
+            } => {
+                self.visit_expr_for_types(object, func_types)?;
+                self.visit_expr_for_types(index, func_types)?;
+                let obj_ty = self
+                    .expr_types
+                    .get(&object.span().start)
+                    .cloned()
+                    .ok_or_else(|| {
+                        CodegenError::InternalError(
+                            "missing object type for index expression".to_string(),
+                        )
+                    })?;
+                let element = match obj_ty.referent() {
+                    Type::Array { element, .. } => (**element).clone(),
+                    // Semantic analysis rejects indexing a non-array; reaching here with
+                    // another type would be an internal inconsistency.
+                    other => other.clone(),
+                };
+                // Store the object's array type keyed by the full Index span before
+                // writing the element type at span.start, which shares its start with
+                // the object subexpression and would otherwise clobber it (§3.1).
+                self.index_object_types
+                    .insert((span.start, span.end), obj_ty);
+                self.expr_types.insert(span.start, element);
             }
 
             // Dereference `*operand` (§2.5): the result type is the referent `T`. Record

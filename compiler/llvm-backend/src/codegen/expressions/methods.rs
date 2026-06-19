@@ -43,6 +43,21 @@ impl<'ctx> CodegenContext<'ctx> {
             // `string.slice(a..b)` (§2.7) — a borrowed `&string` view into the receiver's
             // UTF-8 bytes, with runtime bounds and codepoint-boundary checks.
             BuiltinMethod::StringSlice => self.codegen_string_slice(receiver, args),
+            // `array.len()` (§3.1) — the static length `N` of `[T; N]`, read from the
+            // receiver type recorded by the type pass. A compile-time constant `u64`;
+            // the receiver is not evaluated (length is independent of its value).
+            BuiltinMethod::ArrayLen => {
+                let size = match recv_ty.referent() {
+                    Type::Array { size, .. } => *size,
+                    other => {
+                        return Err(CodegenError::InternalError(format!(
+                            "array len receiver is not an array: {:?}",
+                            other
+                        )))
+                    }
+                };
+                Ok(self.context.i64_type().const_int(size as u64, false).into())
+            }
             // `struct.clone()` (§2.3) — structs are stack-allocated aggregates with no heap
             // backing yet, so loading the receiver's value is a faithful deep copy. When a
             // struct gains a heap-owning field this must recurse into that field's clone.
@@ -363,8 +378,9 @@ impl<'ctx> CodegenContext<'ctx> {
             BuiltinMethod::StringLen
             | BuiltinMethod::StringClone
             | BuiltinMethod::StringSlice
-            | BuiltinMethod::StructClone => {
-                unreachable!("string/struct intrinsics are handled by codegen_builtin_method")
+            | BuiltinMethod::StructClone
+            | BuiltinMethod::ArrayLen => {
+                unreachable!("non-integer intrinsics are handled by codegen_builtin_method")
             }
         };
 

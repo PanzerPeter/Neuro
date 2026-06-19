@@ -2,7 +2,7 @@
 // Neuro semantic type to LLVM type mapping
 
 use inkwell::context::Context as LLVMContext;
-use inkwell::types::BasicTypeEnum;
+use inkwell::types::{BasicType, BasicTypeEnum};
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
@@ -56,6 +56,11 @@ impl<'ctx> TypeMapper<'ctx> {
                 .context
                 .ptr_type(inkwell::AddressSpace::default())
                 .into()),
+            // Fixed-size array `[T; N]` → LLVM `[N x T]` aggregate (§3.1).
+            Type::Array { element, size } => {
+                let elem_llvm = self.map_type(element)?;
+                Ok(elem_llvm.array_type(*size as u32).into())
+            }
             Type::Void => Err(CodegenError::UnsupportedType(
                 "void type cannot be used as a value".to_string(),
             )),
