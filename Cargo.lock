@@ -99,7 +99,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "ast-types"
-version = "1.46.0"
+version = "1.47.0"
 dependencies = [
  "shared-types",
 ]
@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "control-flow"
-version = "1.46.0"
+version = "1.47.0"
 dependencies = [
  "diagnostics",
  "shared-types",
@@ -431,7 +431,7 @@ checksum = "abd57806937c9cc163efc8ea3910e00a62e2aeb0b8119f1793a978088f8f6b04"
 
 [[package]]
 name = "diagnostics"
-version = "1.46.0"
+version = "1.47.0"
 dependencies = [
  "miette",
  "shared-types",
@@ -714,7 +714,7 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "lexical-analysis"
-version = "1.46.0"
+version = "1.47.0"
 dependencies = [
  "diagnostics",
  "logos",
@@ -749,7 +749,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "llvm-backend"
-version = "1.46.0"
+version = "1.47.0"
 dependencies = [
  "anyhow",
  "ast-types",
@@ -894,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "mlir-backend"
-version = "1.46.0"
+version = "1.47.0"
 dependencies = [
  "melior",
  "thiserror",
@@ -911,7 +911,7 @@ dependencies = [
 
 [[package]]
 name = "neurc"
-version = "1.46.0"
+version = "1.47.0"
 dependencies = [
  "anyhow",
  "cc",
@@ -929,6 +929,14 @@ dependencies = [
  "source-location",
  "syntax-parsing",
  "tempfile",
+]
+
+[[package]]
+name = "neuro-hir"
+version = "1.47.0"
+dependencies = [
+ "ast-types",
+ "shared-types",
 ]
 
 [[package]]
@@ -1069,7 +1077,7 @@ dependencies = [
 
 [[package]]
 name = "project-config"
-version = "1.46.0"
+version = "1.47.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -1189,7 +1197,7 @@ dependencies = [
 
 [[package]]
 name = "semantic-analysis"
-version = "1.46.0"
+version = "1.47.0"
 dependencies = [
  "anyhow",
  "ast-types",
@@ -1260,7 +1268,7 @@ dependencies = [
 
 [[package]]
 name = "shared-types"
-version = "1.46.0"
+version = "1.47.0"
 dependencies = [
  "serde",
  "thiserror",
@@ -1296,7 +1304,7 @@ dependencies = [
 
 [[package]]
 name = "source-location"
-version = "1.46.0"
+version = "1.47.0"
 dependencies = [
  "serde",
  "shared-types",
@@ -1342,7 +1350,7 @@ dependencies = [
 
 [[package]]
 name = "syntax-parsing"
-version = "1.46.0"
+version = "1.47.0"
 dependencies = [
  "ast-types",
  "diagnostics",

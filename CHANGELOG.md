@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.47.0] - 2026-06-26
+
+### Added
+- `infra`: introduce the `neuro-hir` typed HIR infrastructure crate (Phase 1.8 item 2). New `compiler/infrastructure/neuro-hir` defines the typed High-Level IR — the stable, backend-agnostic contract between the frontend (parser + type checker) and all backends (`llvm-backend`, `mlir-backend`). The HIR mirrors the surface AST (`ast-types`) one-to-one with two defining differences: every expression node carries its resolved type (`HirExpr { kind, ty, span }`, with a `HirType` that has **no `Unknown` variant** — reaching the HIR implies the program type-checked), and syntactic noise is normalized away (the `Expr::Paren` grouping node is dropped). `HirType`'s variant set mirrors the resolved types the semantic analyzer produces today (§1.2); no tensor/generic variants are added ahead of those language features. The crate is pure data (like `ast-types`), depending only on `shared-types` (`Span`, `Literal`) and `ast-types` (the `BinaryOp` / `UnaryOp` operator enums, reused unchanged). The AST → HIR lowering (item 3) and the backend migration onto HIR (item 4) are separate, later pipeline steps and are intentionally not part of this crate.
+
+---
+
 ## [1.46.0] - 2026-06-19
 
 ### Added
