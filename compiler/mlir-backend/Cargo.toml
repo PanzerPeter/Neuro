@@ -1,0 +1,22 @@
+[package]
+name = "mlir-backend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[dependencies]
+melior = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+
+[features]
+# The MLIR path is opt-in: enabling `mlir` pulls in melior (and an MLIR 20
+# toolchain at build time). Default builds compile a trivial placeholder so the
+# workspace builds and tests on stock LLVM 20 without MLIR — see CONTEXT.md.
+default = []
+mlir = ["dep:melior", "dep:thiserror"]
+
+[lib]
+path = "src/lib.rs"

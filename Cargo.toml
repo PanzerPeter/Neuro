@@ -16,6 +16,9 @@ members = [
     "compiler/control-flow",
     "compiler/llvm-backend",
 
+    # Phase 1.8: MLIR Backend Plumbing
+    "compiler/mlir-backend",
+
     # Compiler Driver
     "compiler/neurc",
 
@@ -47,7 +50,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.45.0"
+version = "1.46.0"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Neuro Contributors"]
@@ -83,6 +86,18 @@ unicode-ident = "1.0"
 # That fails to link on Windows CI, whose prebuilt LLVM only ships the x86 target
 # libs. We only ever initialize the native (x86) target, so target-x86 suffices.
 inkwell = { version = "0.9.0", default-features = false, features = ["llvm20-1", "target-x86"] }
+
+# MLIR Backend (Phase 1.8+)
+# Rust MLIR bindings, used alongside inkwell for the tensor / AD / GPU lowering
+# path. melior 0.25.1 is the newest release that targets MLIR 20 (via mlir-sys
+# 0.5.0); melior 0.26+ moved to MLIR 21/22. mlir-sys carries no llvm-sys
+# dependency — it discovers MLIR through `MLIR_SYS_200_PREFIX` and links its own
+# `MLIR` key, so it coexists with inkwell's `llvm-20` link without conflict.
+# MLIR_SYS_200_PREFIX and TABLEGEN_200_PREFIX must point at an LLVM 20 build that
+# includes MLIR (the same prefix as LLVM_SYS_201_PREFIX, so both bindings share
+# one libLLVM-20 dylib). Arch's stock llvm20 omits MLIR; build LLVM 20 with
+# -DLLVM_ENABLE_PROJECTS=mlir or use a prefix that ships mlir-c headers + libMLIR.
+melior = "0.25.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

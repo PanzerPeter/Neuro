@@ -44,6 +44,12 @@ brew install llvm@20
 export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)
 ```
 
+> **Optional — MLIR backend (Phase 1.8+):** the `mlir-backend` slice is gated
+> behind the off-by-default `mlir` cargo feature, so a normal build needs only
+> LLVM 20. To work on it you need an LLVM 20 install that includes MLIR plus a
+> matching libclang 20 (`MLIR_SYS_200_PREFIX` / `TABLEGEN_200_PREFIX` /
+> `LIBCLANG_PATH`); see [Optional: MLIR Backend](docs/getting-started/installation.md#optional-mlir-backend-phase-18).
+
 ```bash
 # Clone and verify the build
 git clone https://github.com/PanzerPeter/Neuro.git
@@ -142,6 +148,7 @@ compiler/
 ├── semantic-analysis/       # Type checker slice
 ├── control-flow/            # CFG analysis slice (Phase 2+)
 ├── llvm-backend/            # LLVM 20 / inkwell 0.9 codegen slice
+├── mlir-backend/            # MLIR / melior slice (Phase 1.8+, off-by-default `mlir` feature)
 │
 └── neurc/                   # Compiler driver — the only crate that depends on all slices
 ```

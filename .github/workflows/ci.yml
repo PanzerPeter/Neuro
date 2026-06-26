@@ -29,8 +29,10 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2.8.1
 
-      - name: Setup LLVM 20
+      - name: Setup LLVM 20 (+ MLIR for --all-features)
         uses: ./.github/actions/setup-llvm
+        with:
+          mlir: "true"
 
       - name: Check formatting
         run: cargo fmt --all -- --check

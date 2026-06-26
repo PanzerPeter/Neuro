@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.46.0] - 2026-06-19
+
+### Added
+- `infra`: integrate `melior` (Rust MLIR bindings) alongside inkwell (Phase 1.8). New `compiler/mlir-backend` slice hosts `melior 0.25.1` — the newest release targeting MLIR 20 (via `mlir-sys 0.5.0`; melior 0.26+ moved to MLIR 21/22) — behind an off-by-default `mlir` feature. With the feature disabled the crate is an empty placeholder, so the default `cargo build/test --workspace` still works on a stock LLVM 20 install with no MLIR toolchain; enabling `mlir` pulls in melior and exposes `emit_smoke_module`, which builds and verifies `func.func @neuro_smoke(index, index) -> index` (func/arith dialects) as the integration smoke test. `mlir-sys` carries no `llvm-sys` dependency and links its own `MLIR` key, so it coexists with inkwell's `llvm-20` link without a Cargo `links` conflict; pointing `MLIR_SYS_200_PREFIX` / `TABLEGEN_200_PREFIX` at the same LLVM 20 build as `LLVM_SYS_201_PREFIX` makes both bindings share one `libLLVM-20` dylib. CI gains an opt-in MLIR + matching libclang 20 install on Linux (`setup-llvm` `mlir` input) for the `--all-features` lint job; the Windows/macOS test legs build the placeholder. The HIR-consuming lowering entry point and a dedicated CI smoke job remain open (pending typed HIR, Phase 1.8 items 2–5).
+
+---
+
 ## [1.45.0] - 2026-06-19
 
 ### Added
