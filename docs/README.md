@@ -250,7 +250,7 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 | Component | Library | Version |
 |---|---|---|
 | CPU codegen | inkwell | 0.9.0 (LLVM 20) |
-| MLIR construction (Phase 3+) | melior | LLVM/MLIR 20 |
+| MLIR construction | melior | 0.25.1 (LLVM/MLIR 20) — integrated Phase 1.8 in the `mlir-backend` slice behind the off-by-default `mlir` feature |
 | Autodiff (Phase 4+) | Enzyme (MLIR dialect) | built against LLVM 20 |
 | GPU (Phase 5+) | MLIR nvgpu/rocdl/Triton | LLVM 20 backends |
 

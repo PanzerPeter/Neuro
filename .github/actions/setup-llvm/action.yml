@@ -1,6 +1,14 @@
 name: "Setup LLVM 20"
 description: "Installs LLVM 20 and sets LLVM_SYS_201_PREFIX for llvm-sys-201.x"
-inputs: {}
+inputs:
+  mlir:
+    description: >-
+      Also install the MLIR 20 dev libraries + a matching libclang 20 (Linux
+      only) and export MLIR_SYS_200_PREFIX / TABLEGEN_200_PREFIX / LIBCLANG_PATH.
+      Required only by jobs that enable the mlir-backend `mlir` feature (e.g. the
+      `--all-features` lint job). Default builds do not need it.
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -37,6 +45,32 @@ runs:
           echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20"
           echo "LLVM_LINK_LLVM_DYLIB=1"
           echo "PATH=/usr/lib/llvm-20/bin:$PATH"
+        } >> "$GITHUB_ENV"
+
+    # ── MLIR 20 + libclang 20 (Linux, opt-in) ──────────────────────────────────
+    # mlir-sys runs bindgen over the MLIR-C headers at build time and needs a
+    # libclang whose major version matches the headers (libclang 20 here). The
+    # apt.llvm.org llvm-20 channel ships both, so the version matches with no
+    # workaround. Only jobs enabling the mlir-backend `mlir` feature request this.
+    - name: Install MLIR 20 + libclang 20 (Linux)
+      if: runner.os == 'Linux' && inputs.mlir == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        sudo apt-get install -y \
+          libmlir-20-dev \
+          mlir-20-tools \
+          libclang-20-dev \
+          libclang-common-20-dev
+
+        test -f /usr/lib/llvm-20/include/mlir-c/IR.h \
+          || { echo "ERROR: MLIR-C headers missing"; exit 1; }
+
+        {
+          echo "MLIR_SYS_200_PREFIX=/usr/lib/llvm-20"
+          echo "TABLEGEN_200_PREFIX=/usr/lib/llvm-20"
+          echo "LIBCLANG_PATH=/usr/lib/llvm-20/lib"
         } >> "$GITHUB_ENV"
 
     # ── macOS ──────────────────────────────────────────────────────────────────

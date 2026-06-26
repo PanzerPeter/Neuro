@@ -11,6 +11,7 @@ This guide covers installation of the Neuro compiler on Linux and macOS.
 | C linker | any | `clang`, `gcc`, or system linker |
 
 **Optional:**
+- MLIR 20 + a matching libclang 20 for the experimental MLIR backend (Phase 1.8+) — see [MLIR Backend](#optional-mlir-backend-phase-18) below. Not needed for a normal build.
 - CUDA Toolkit 12+ for GPU support (Phase 5+, not yet implemented)
 
 ---
@@ -105,6 +106,38 @@ cargo test --workspace
 
 ---
 
+## Optional: MLIR Backend (Phase 1.8+)
+
+The MLIR lowering path (tensor / autodiff / GPU, Phase 3+) is being built out via
+the `melior` Rust MLIR bindings in the `mlir-backend` slice. It is **off by
+default** behind the `mlir` cargo feature, so nothing here is required for a
+normal Neuro build — the default `cargo build/test --workspace` compiles a
+placeholder and needs only LLVM 20.
+
+To build the MLIR path you need an LLVM 20 install that **includes MLIR** (the
+`mlir-c` headers and `libMLIR*`) plus a libclang whose major version matches
+(libclang 20). `mlir-sys` runs `bindgen` over the MLIR-C headers at build time,
+and a newer libclang misparses the LLVM 20 headers.
+
+```bash
+# Ubuntu/Debian (apt.llvm.org ships matching MLIR + libclang 20):
+sudo apt-get install -y libmlir-20-dev mlir-20-tools libclang-20-dev libclang-common-20-dev
+export MLIR_SYS_200_PREFIX=/usr/lib/llvm-20
+export TABLEGEN_200_PREFIX=/usr/lib/llvm-20
+export LIBCLANG_PATH=/usr/lib/llvm-20/lib
+
+# Point these at the SAME prefix as LLVM_SYS_201_PREFIX so inkwell and melior
+# share one libLLVM-20 dylib, then build/test the feature:
+cargo test -p mlir-backend --features mlir
+```
+
+On distributions whose stock `llvm20` package omits MLIR (e.g. Arch/CachyOS),
+build LLVM 20 from source with `-DLLVM_ENABLE_PROJECTS=mlir` into a prefix and
+set `MLIR_SYS_200_PREFIX` / `TABLEGEN_200_PREFIX` to it. If your system libclang
+is newer than 20, supply a libclang 20 separately and set `LIBCLANG_PATH` (plus
+`BINDGEN_EXTRA_CLANG_ARGS=-resource-dir=<libclang20>/clang/20`) so bindgen parses
+the MLIR-C headers correctly.
+
 ## Verifying the Installation
 
 ```bash
@@ -126,7 +159,7 @@ All tests should pass:
 
 ```bash
 cargo test --workspace
-# Expected: 348 tests passing, 0 failing
+# Expected: 727 tests passing, 0 failing
 ```
 
 ---
