@@ -138,6 +138,7 @@ Neuro uses **Vertical Slice Architecture (VSA)**. Each compiler feature is a sel
 compiler/
 ├── infrastructure/          # Shared utilities — no business logic
 │   ├── ast-types/           # AST node definitions (owned here, not in syntax-parsing)
+│   ├── neuro-hir/           # Typed HIR — backend-agnostic frontend↔backend contract (Phase 1.8)
 │   ├── shared-types/        # Span, Identifier, Literal
 │   ├── diagnostics/         # Error type infrastructure
 │   ├── source-location/     # Source mapping

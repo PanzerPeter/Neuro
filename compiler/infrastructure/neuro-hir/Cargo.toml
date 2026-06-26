@@ -1,0 +1,15 @@
+[package]
+name = "neuro-hir"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[dependencies]
+shared-types = { path = "../shared-types" }
+ast-types = { path = "../ast-types" }
+
+[lib]
+path = "src/lib.rs"
