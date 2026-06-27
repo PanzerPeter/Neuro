@@ -17,7 +17,8 @@ members = [
     "compiler/control-flow",
     "compiler/llvm-backend",
 
-    # Phase 1.8: MLIR Backend Plumbing
+    # Phase 1.8: HIR & MLIR Backend Plumbing
+    "compiler/hir-lowering",
     "compiler/mlir-backend",
 
     # Compiler Driver
@@ -51,7 +52,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.47.0"
+version = "1.48.0"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Neuro Contributors"]
@@ -134,7 +135,7 @@ debug = true
 split-debuginfo = "unpacked"
 debug-assertions = true
 overflow-checks = true
-incremental = true
+incremental = false
 
 [profile.release]
 opt-level = 3
@@ -147,7 +148,7 @@ panic = "abort"
 [profile.test]
 opt-level = 1
 debug = true
-incremental = true
+incremental = false
 
 [profile.bench]
 opt-level = 3

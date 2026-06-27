@@ -30,3 +30,9 @@ Lint warnings emitted by `semantic_analysis::type_check` are forwarded to stderr
 `print_warnings` in both `check_file` and `compile_file`. Warnings never cause a
 non-zero exit; they are informational guidance and may be silenced with `@allow(...)`
 on the enclosing function.
+
+After a successful `type_check`, both `check_file` and `compile_file` lower the AST to
+typed HIR via `hir_lowering::lower_program` (Phase 1.8). `check` reports the lowered item
+count; `compile` builds the HIR then still hands the AST to `llvm_backend::compile` — the
+backend's migration onto HIR is a later roadmap item, so the HIR is currently produced to
+exercise the lowering end-to-end on every compile, not yet consumed for codegen.

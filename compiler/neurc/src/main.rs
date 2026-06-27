@@ -116,7 +116,16 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
     match semantic_analysis::type_check(&ast) {
         Ok(warnings) => {
             print_warnings(&warnings);
-            println!("Type checking passed for {:?}", path);
+            // Lower the type-checked AST to typed HIR (Phase 1.8). The result is the
+            // backend-agnostic contract every backend will consume; building it here
+            // exercises the lowering end-to-end on every checked program.
+            let hir = hir_lowering::lower_program(&ast)
+                .map_err(|e| anyhow::anyhow!("HIR lowering error: {}", e))?;
+            println!(
+                "Type checking passed for {:?} ({} HIR items)",
+                path,
+                hir.items.len()
+            );
             Ok(())
         }
         Err(errors) => {
@@ -192,6 +201,15 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
         })
         .context("Type checking failed")?;
     print_warnings(&warnings);
+
+    // Lower to typed HIR (Phase 1.8). The backend still consumes the AST today; the
+    // backend migration onto HIR is the next roadmap item. Building HIR here proves
+    // the lowering runs end-to-end on every compiled program.
+    log::debug!("Lowering to typed HIR...");
+    let hir = hir_lowering::lower_program(&ast)
+        .map_err(|e| anyhow::anyhow!("HIR lowering error: {}", e))
+        .context("Failed to lower to HIR")?;
+    log::debug!("Lowered {} HIR items", hir.items.len());
 
     // Generate LLVM object code
     log::debug!("Generating LLVM IR and object code...");

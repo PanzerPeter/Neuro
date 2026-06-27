@@ -1,0 +1,23 @@
+[package]
+name = "hir-lowering"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Infrastructure (shared kernel) only — no feature-slice dependencies (VSA).
+shared-types = { path = "../infrastructure/shared-types" }
+ast-types = { path = "../infrastructure/ast-types" }
+neuro-hir = { path = "../infrastructure/neuro-hir" }
+thiserror = { workspace = true }
+
+# Tests build ASTs through the parser; this is a test-only convenience and never a
+# production cross-slice dependency (mirrors semantic-analysis's dev setup).
+[dev-dependencies]
+syntax-parsing = { path = "../syntax-parsing" }
+
+[lib]
+path = "src/lib.rs"

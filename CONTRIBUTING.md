@@ -147,6 +147,7 @@ compiler/
 ├── lexical-analysis/        # Tokenizer slice
 ├── syntax-parsing/          # Parser slice (depends on lexical-analysis by design)
 ├── semantic-analysis/       # Type checker slice
+├── hir-lowering/            # AST → typed HIR lowering slice (Phase 1.8)
 ├── control-flow/            # CFG analysis slice (Phase 2+)
 ├── llvm-backend/            # LLVM 20 / inkwell 0.9 codegen slice
 ├── mlir-backend/            # MLIR / melior slice (Phase 1.8+, off-by-default `mlir` feature)

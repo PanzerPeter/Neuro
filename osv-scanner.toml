@@ -1,0 +1,9 @@
+# OSV-Scanner configuration.
+# Auto-discovered by osv-scanner when scanning the repo root (-r ./).
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0436"
+# `paste` 1.0.15 is flagged as unmaintained (not an exploitable vulnerability).
+# It is a transitive dependency: melior -> tblgen -> paste. We cannot drop it
+# without dropping the MLIR bindings. Revisit when melior/tblgen stop using it.
+reason = "Unmaintained transitive dep (paste via melior/tblgen); no known vuln."
