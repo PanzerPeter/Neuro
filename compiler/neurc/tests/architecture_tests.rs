@@ -51,6 +51,7 @@ fn test_no_cross_slice_dependencies() {
         "compiler/lexical-analysis",
         "compiler/syntax-parsing",
         "compiler/semantic-analysis",
+        "compiler/hir-lowering",
         "compiler/control-flow",
         "compiler/llvm-backend",
     ];
@@ -143,6 +144,7 @@ fn test_all_slices_have_context_md() {
         "compiler/lexical-analysis",
         "compiler/syntax-parsing",
         "compiler/semantic-analysis",
+        "compiler/hir-lowering",
         "compiler/control-flow",
         "compiler/llvm-backend",
         "compiler/neurc",

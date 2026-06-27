@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.48.0] - 2026-06-27
+
+### Added
+- `infra`: implement the AST → HIR lowering strategy (Phase 1.8 item 3). New `compiler/hir-lowering` feature slice with the entry point `lower_program(items: &[Item]) -> Result<HirProgram, LoweringError>`: it consumes the type-checked surface AST and produces the typed HIR (`neuro-hir`) every backend will lower from. Because the HIR's defining property is that **every expression carries its resolved type** and the frontend type checker does not expose those types, the slice **re-derives** each expression's type from the AST rather than importing `semantic_analysis::Type` — importing it would couple two feature slices, which VSA forbids (duplication over coupling). Lowering assumes well-typedness (it computes types, not validates them) and a shape the checker should have rejected surfaces as a `LoweringError` instead of a panic. It faithfully mirrors the checker's contextual rules: literal inference (suffix → expected-type → `i32`/`f64` default), a body's trailing expression typed against the declared return type, builtin-method dispatch (`string`/array `.len()`, `.clone()`, `.slice(range)`, integer `wrapping_*`/`saturating_*`/`.shr`), struct/associated-method signatures via mangled keys, and `loop`-as-value typing via a loop-context stack. Three nodes carry a deliberately-chosen type the source has no first-class form for (a `loop` value-expression takes its `break v` type; a method-name callee carries the call's result type; a `Range` carries `void`), and divergent panic-family calls adopt their context's expected type. `neurc` runs the lowering after type-check in both `check` and `compile`; the LLVM backend still consumes the AST — the backend migration onto HIR is the next roadmap item. New slice `CONTEXT.md`, 11 slice unit tests, and `neurc/tests/hir_lowering.rs` end-to-end coverage; the architecture test enforces the slice's infrastructure-only dependencies.
+
+---
+
 ## [1.47.0] - 2026-06-26
 
 ### Added
