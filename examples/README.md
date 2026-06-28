@@ -85,6 +85,10 @@ No Rust edits are needed — discovery is automatic.
   indexing, element assignment, `.len()`, and `for x in arr` / `for x in &arr`.
   Element types are limited to `Copy` scalars for now; growable `Vec<T>` and
   `.enumerate()` are later phases.
+- Tuples `(T1, T2, ...)` are supported (`types/tuples.nr`): the tuple type,
+  literals, `.0` / `.1` index access, and destructuring binds `val (a, b) = t`
+  (with `_` wildcards and nesting). Elements are limited to `Copy` types for now,
+  so tuples holding a `string` or other non-Copy value are a later phase.
 - Ownership/borrow checker not yet implemented (Phase 1.7).
 - `&self` and `&mut self` methods are supported; a `&mut self` method mutates
   struct state in place (see `structs/mut_self_accumulator.nr`). Consuming `self`

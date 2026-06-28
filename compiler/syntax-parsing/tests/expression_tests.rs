@@ -16,6 +16,37 @@ fn test_parse_integer_literal() {
 }
 
 #[test]
+fn test_parse_tuple_literal() {
+    // §3.2: a comma after the first element makes `( ... )` a tuple literal.
+    let expr = parse_expr("(1, 2, 3)").expect("tuple literal should parse");
+    match expr {
+        Expr::TupleLiteral { elements, .. } => assert_eq!(elements.len(), 3),
+        other => panic!("expected tuple literal, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_single_paren_is_grouping_not_tuple() {
+    // §3.2: `(x)` with no comma is grouping, not a one-element tuple.
+    let expr = parse_expr("(7)").expect("grouping should parse");
+    assert!(
+        matches!(expr, Expr::Paren(_, _)),
+        "expected paren grouping, got {:?}",
+        expr
+    );
+}
+
+#[test]
+fn test_parse_tuple_index() {
+    // §3.2: a numeric token after `.` is a constant tuple index.
+    let expr = parse_expr("pair.1").expect("tuple index should parse");
+    match expr {
+        Expr::TupleIndex { index, .. } => assert_eq!(index, 1),
+        other => panic!("expected tuple index, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_parse_float_literal() {
     let result = parse_expr("2.5");
     assert!(result.is_ok());

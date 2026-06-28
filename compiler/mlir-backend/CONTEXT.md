@@ -49,8 +49,8 @@ free functions and `impl` methods become `func.func` *declarations* (empty regio
 private visibility — external symbols, not definitions); structs and constants are
 skipped. HIR types map to MLIR scalars (`i8`–`i64`, `i1` for `bool`, `i32` for
 `char`, `f16`/`bf16`/`f32`/`f64`), and every aggregate / reference / string type
-maps to an opaque `!llvm.ptr` until real tensor and struct lowering lands
-(Phase 3+). `void` is the empty result list in return position and an error
+— including the tuple type `(T1, T2, ...)` (§3.2) — maps to an opaque `!llvm.ptr`
+until real tensor and struct lowering lands (Phase 3+). `void` is the empty result list in return position and an error
 (`MlirError::UnsupportedType`) anywhere else. The module is run through the MLIR
 verifier before its textual form is returned.
 

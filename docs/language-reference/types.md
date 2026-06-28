@@ -12,8 +12,8 @@ Neuro is a statically typed language with explicit type annotations and planned 
 - Implemented: contextual inference for numeric literals
 - Implemented: string type
 - Implemented: structs (definition, instantiation, field access, field mutation)
-- Planned (Phase 2): arrays
-- Planned (Phase 2): tuples
+- Implemented: fixed-size arrays `[T; N]` of `Copy` elements
+- Implemented: tuples `(T1, T2, ...)` of `Copy` elements, with destructuring
 - Planned (Phase 2): generics
 - Planned (Phase 2): traits
 
@@ -748,9 +748,9 @@ func returns_i32() -> i32 {
 ### Phase 2 (In Progress)
 
 - ✅ Structs (user-defined types with nominal typing)
+- ✅ Arrays with fixed size (`[T; N]`)
+- ✅ Tuples for grouping values (`(T1, T2, ...)`, with destructuring)
 - Type inference for variable declarations
-- Arrays with fixed size
-- Tuples for grouping values
 - Generic functions with monomorphization
 
 ### Phase 3 (Planned)
@@ -1014,6 +1014,41 @@ for x in &a {  }                     // iterate over a borrow
   policy).
 - **Iteration**: `for x in arr` / `for x in &arr` bind each element in order;
   the indexed form `for (i, x) in arr.enumerate()` arrives with tuples (§3.2).
+
+## Tuples (§3.2)
+
+A tuple `(T1, T2, ...)` is an anonymous, fixed-size, **heterogeneous** aggregate.
+Element types may differ; the arity is part of the type, so `(i32, bool)` and
+`(i32, i32)` are distinct.
+
+```neuro
+val pair: (i32, i32) = (12, 30)     // explicit type
+val mixed = (5, true, 'a')          // inferred (i32, bool, char)
+
+val a = pair.0                      // index access by constant position
+val b = pair.1
+
+val (x, y) = pair                   // destructuring bind
+val (_, keep, _) = mixed            // `_` discards an element
+val ((p, q), r) = ((1, 2), 3)       // nested destructuring
+```
+
+- **Element type**: currently restricted to `Copy` types, so a tuple is itself
+  `Copy`. Tuples holding a `string` or another non-`Copy` value are not yet
+  supported (the same restriction as array elements).
+- **Grouping vs. tuple**: a single parenthesized expression `(x)` is grouping,
+  not a one-element tuple. A tuple literal needs at least two elements.
+- **Index access**: `t.0`, `t.1`, … read by a constant index; an out-of-range
+  index is a compile error. (Because `t.0.1` lexes as the float `0.1`, write a
+  nested access as `(t.0).1`.)
+- **Destructuring**: `val (a, b) = t` binds each position; `_` is a wildcard, and
+  patterns nest. It is a binding form, not a new value — it desugars to ordinary
+  bindings.
+- **Function boundaries**: tuples may be passed as parameters and returned, e.g.
+  `func min_max(a: i32, b: i32) -> (i32, i32)`.
+
+Struct and array destructuring patterns (`val Point { x, y } = p`,
+`val [first, ..rest] = arr`) are a planned follow-on.
 
 ## References
 

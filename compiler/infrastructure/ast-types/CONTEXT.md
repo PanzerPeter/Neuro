@@ -28,6 +28,11 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-06-28: Tuples §3.2. Added `Type::Tuple { elements, span }` (the `(T1, T2, ...)` type),
+  `Expr::TupleLiteral { elements, span }` (the `(e0, e1, ...)` literal, always ≥2 elements), and
+  `Expr::TupleIndex { object, index, span }` (the `t.0` / `t.1` constant-index access, distinct from
+  `FieldAccess` which names a struct field), with their `span()` arms. Destructuring `val (a, b) = e`
+  needs no AST node — the parser desugars it to a temp binding plus indexed bindings.
 - 2026-06-19: Arrays §3.1. Added `Type::Array { element, size, span }`, `Expr::ArrayLiteral { elements, span }`,
   `Expr::Index { object, index, span }`, `Stmt::ForEach { label, iterator, iterable, body, span }`, and
   `Stmt::IndexAssignment { target, index, value, span }`, with their `span()` arms.

@@ -199,6 +199,42 @@ impl Lowerer {
                 self.lower_array_literal(elements, expected, *span)
             }
 
+            Expr::TupleLiteral { elements, span } => {
+                self.lower_tuple_literal(elements, expected, *span)
+            }
+
+            Expr::TupleIndex {
+                object,
+                index,
+                span,
+            } => {
+                let object = self.lower_expr(object, None)?;
+                let HirType::Tuple(element_tys) = object.ty.referent().clone() else {
+                    return Err(LoweringError::Malformed {
+                        detail: format!("tuple index into non-tuple type '{}'", object.ty),
+                    });
+                };
+                let element_ty =
+                    element_tys
+                        .get(*index)
+                        .cloned()
+                        .ok_or_else(|| LoweringError::Malformed {
+                            detail: format!(
+                                "tuple index {} out of range for arity {}",
+                                index,
+                                element_tys.len()
+                            ),
+                        })?;
+                Ok(HirExpr::new(
+                    HirExprKind::TupleIndex {
+                        object: Box::new(object),
+                        index: *index,
+                    },
+                    element_ty,
+                    *span,
+                ))
+            }
+
             Expr::Index {
                 object,
                 index,
@@ -643,6 +679,31 @@ impl Lowerer {
                 element: Box::new(element_ty),
                 size: elements.len(),
             },
+            span,
+        ))
+    }
+
+    fn lower_tuple_literal(
+        &mut self,
+        elements: &[Expr],
+        expected: Option<&HirType>,
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let expected_elems = match expected {
+            Some(HirType::Tuple(es)) if es.len() == elements.len() => Some(es.clone()),
+            _ => None,
+        };
+        let mut lowered = Vec::with_capacity(elements.len());
+        let mut tys = Vec::with_capacity(elements.len());
+        for (i, el) in elements.iter().enumerate() {
+            let hint = expected_elems.as_ref().map(|es| &es[i]);
+            let el = self.lower_expr(el, hint)?;
+            tys.push(el.ty.clone());
+            lowered.push(el);
+        }
+        Ok(HirExpr::new(
+            HirExprKind::TupleLiteral { elements: lowered },
+            HirType::Tuple(tys),
             span,
         ))
     }

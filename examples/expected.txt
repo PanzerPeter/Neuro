@@ -43,6 +43,7 @@ types/string_len.nr                 0
 types/string_slice.nr               0
 types/string_slice_method.nr        12
 types/strings.nr                    0
+types/tuples.nr                     62
 types/type_aliases.nr               17
 types/underscore_separators.nr      0
 

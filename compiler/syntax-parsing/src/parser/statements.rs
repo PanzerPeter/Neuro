@@ -7,6 +7,18 @@ use crate::precedence::Precedence;
 
 use super::Parser;
 
+/// A binding pattern on the left of a destructuring `val`/`mut` (§3.2). Lives only
+/// during parsing — it is expanded to ordinary variable declarations and never
+/// reaches the AST.
+enum DestructurePattern {
+    /// `_` — matches and discards the value, binding nothing.
+    Wildcard,
+    /// A binding name.
+    Bind(Identifier),
+    /// A nested tuple pattern `(a, b, ...)`.
+    Tuple(Vec<DestructurePattern>),
+}
+
 impl Parser {
     /// Parse a const declaration statement: `const NAME: Type = expr`
     pub(crate) fn parse_const_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
@@ -699,6 +711,168 @@ impl Parser {
         }
     }
 
+    /// Parse one source statement and append the resulting AST statement(s) to
+    /// `out`. Most statements append exactly one node, but a tuple-destructuring
+    /// bind `val (a, b) = e` (§3.2) desugars to several — a temp binding plus one
+    /// projection per leaf — so it is spliced in here rather than forcing the
+    /// single-`Stmt` shape of [`Parser::parse_stmt`].
+    pub(crate) fn parse_stmt_into(&mut self, out: &mut Vec<Stmt>) -> ParseResult<()> {
+        self.skip_newlines();
+        if matches!(self.peek_kind(), Some(TokenKind::Val | TokenKind::Mut)) {
+            let mutable = matches!(self.peek_kind(), Some(TokenKind::Mut));
+            // Only `val (` / `mut (` is a destructuring bind; a following name is an
+            // ordinary variable declaration.
+            if matches!(self.peek_next_after_keyword(), Some(TokenKind::LeftParen)) {
+                let kw = self.advance().ok_or(ParseError::UnexpectedEof {
+                    expected: "'val' or 'mut'".to_string(),
+                })?;
+                let start_span = kw.span;
+                self.skip_newlines();
+                return self.parse_tuple_destructure(mutable, start_span, out);
+            }
+        }
+        out.push(self.parse_stmt()?);
+        Ok(())
+    }
+
+    /// The kind of the first non-newline token *after* the current `val`/`mut`
+    /// keyword, used to detect a destructuring pattern without consuming input.
+    fn peek_next_after_keyword(&self) -> Option<TokenKind> {
+        let mut i = self.current + 1;
+        while matches!(
+            self.tokens.get(i).map(|t| &t.kind),
+            Some(TokenKind::Newline)
+        ) {
+            i += 1;
+        }
+        self.tokens.get(i).map(|t| t.kind.clone())
+    }
+
+    /// Desugar a tuple-destructuring bind `val (a, b, ...) = expr` (§3.2). The
+    /// cursor sits on the opening `(`. The right-hand side is bound once to a fresh
+    /// immutable temporary, then each pattern leaf is bound to a tuple projection of
+    /// that temporary — so nested patterns and `_` wildcards need no new AST node.
+    fn parse_tuple_destructure(
+        &mut self,
+        mutable: bool,
+        start_span: Span,
+        out: &mut Vec<Stmt>,
+    ) -> ParseResult<()> {
+        let pattern = self.parse_tuple_pattern()?;
+        self.skip_newlines();
+        self.consume(TokenKind::Equal, "'=' in destructuring binding")?;
+        self.skip_newlines();
+        let init = self.parse_expr(Precedence::Lowest)?;
+        let init_span = init.span();
+
+        let tmp = Identifier {
+            name: format!("__destructure_{}", self.next_destructure_id()),
+            span: start_span,
+        };
+        out.push(Stmt::VarDecl {
+            name: tmp.clone(),
+            ty: None,
+            init: Some(init),
+            mutable: false,
+            span: start_span.merge(init_span),
+        });
+        self.expand_pattern(&pattern, Expr::Identifier(tmp), mutable, start_span, out);
+        Ok(())
+    }
+
+    /// Allocate a unique id for a destructuring temporary.
+    fn next_destructure_id(&mut self) -> usize {
+        let id = self.destructure_counter;
+        self.destructure_counter += 1;
+        id
+    }
+
+    /// Parse a parenthesized tuple pattern `(p0, p1, ...)`. Requires at least two
+    /// elements — a single `(p)` is not a tuple. The cursor sits on the `(`.
+    fn parse_tuple_pattern(&mut self) -> ParseResult<DestructurePattern> {
+        let open = self.consume(TokenKind::LeftParen, "'(' to open destructuring pattern")?;
+        let mut subs = Vec::new();
+        loop {
+            self.skip_newlines();
+            subs.push(self.parse_pattern_element()?);
+            self.skip_newlines();
+            if !self.check(&TokenKind::Comma) {
+                break;
+            }
+            self.advance(); // consume ','
+            self.skip_newlines();
+            if self.check(&TokenKind::RightParen) {
+                break; // trailing comma
+            }
+        }
+        let close = self.consume(TokenKind::RightParen, "')' to close destructuring pattern")?;
+        if subs.len() < 2 {
+            return Err(ParseError::UnexpectedToken {
+                found: TokenKind::RightParen,
+                expected: "a tuple pattern with at least two elements `(a, b, ...)`".to_string(),
+                span: open.span.merge(close.span),
+            });
+        }
+        Ok(DestructurePattern::Tuple(subs))
+    }
+
+    /// Parse one element of a destructuring pattern: a nested tuple pattern, the `_`
+    /// wildcard, or a binding name.
+    fn parse_pattern_element(&mut self) -> ParseResult<DestructurePattern> {
+        if self.check(&TokenKind::LeftParen) {
+            return self.parse_tuple_pattern();
+        }
+        let token = self.consume(TokenKind::Identifier(String::new()), "binding name or `_`")?;
+        let TokenKind::Identifier(name) = token.kind else {
+            return Err(ParseError::UnexpectedToken {
+                found: token.kind,
+                expected: "binding name or `_`".to_string(),
+                span: token.span,
+            });
+        };
+        if name == "_" {
+            Ok(DestructurePattern::Wildcard)
+        } else {
+            Ok(DestructurePattern::Bind(Identifier {
+                name,
+                span: token.span,
+            }))
+        }
+    }
+
+    /// Emit the variable declarations a destructuring pattern expands to. `access` is
+    /// the expression that reaches the value matched by `pattern` (the temporary for
+    /// the whole tuple, or a nested `.N` projection). A wildcard binds nothing.
+    fn expand_pattern(
+        &mut self,
+        pattern: &DestructurePattern,
+        access: Expr,
+        mutable: bool,
+        span: Span,
+        out: &mut Vec<Stmt>,
+    ) {
+        match pattern {
+            DestructurePattern::Wildcard => {}
+            DestructurePattern::Bind(name) => out.push(Stmt::VarDecl {
+                name: name.clone(),
+                ty: None,
+                init: Some(access),
+                mutable,
+                span,
+            }),
+            DestructurePattern::Tuple(subs) => {
+                for (i, sub) in subs.iter().enumerate() {
+                    let elem = Expr::TupleIndex {
+                        object: Box::new(access.clone()),
+                        index: i,
+                        span,
+                    };
+                    self.expand_pattern(sub, elem, mutable, span, out);
+                }
+            }
+        }
+    }
+
     /// Parse a block of statements (within braces)
     pub(crate) fn parse_block(&mut self) -> ParseResult<Vec<Stmt>> {
         self.consume(TokenKind::LeftBrace, "'{'")?;
@@ -707,7 +881,7 @@ impl Parser {
         let mut statements = Vec::new();
 
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
-            statements.push(self.parse_stmt()?);
+            self.parse_stmt_into(&mut statements)?;
             self.skip_newlines();
         }
 

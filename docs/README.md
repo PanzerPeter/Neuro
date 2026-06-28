@@ -122,12 +122,18 @@ Key design goals:
 - Iteration `for x in arr` and `for x in &arr`, lowered as a counted loop over the storage
 - Out-of-bounds index panics in debug builds (`-O0`); release builds omit the check
 
+### Tuples (Phase 2, §3.2)
+
+- Anonymous `(T1, T2, ...)` of `Copy` elements: literals, `.0`/`.1` constant index access
+- Destructuring binds `val (a, b) = t` with `_` wildcards and nesting (`val ((a, b), c) = ...`)
+- Usable as function parameters and return types; a single `(x)` stays grouping
+
 ### Compilation
 
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 746 tests passing across all components
+- 762 tests passing across all components
 
 ## Compilation Pipeline
 

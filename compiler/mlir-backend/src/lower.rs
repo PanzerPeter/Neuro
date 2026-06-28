@@ -161,6 +161,7 @@ fn map_type<'c>(context: &'c Context, ty: &HirType) -> Result<Type<'c>, MlirErro
         | HirType::Struct(_)
         | HirType::Reference { .. }
         | HirType::Array { .. }
+        | HirType::Tuple(_)
         // Address space 0; all LLVM pointers are opaque (`!llvm.ptr`) since LLVM 19.
         | HirType::Function { .. } => llvm::r#type::pointer(context, 0),
         HirType::Void => {

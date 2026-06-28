@@ -38,6 +38,34 @@ impl Parser {
                 span,
             });
         }
+        // Tuple type `(T1, T2, ...)` (§3.2): two or more element types separated by
+        // commas. A single parenthesized type is grouping, not a tuple, and the empty
+        // `()` unit type is not yet produced — both are rejected here.
+        if self.check(&TokenKind::LeftParen) {
+            let open = self.advance().ok_or(ParseError::UnexpectedEof {
+                expected: "'('".to_string(),
+            })?;
+            let mut elements = Vec::new();
+            loop {
+                self.skip_newlines();
+                elements.push(self.parse_type()?);
+                self.skip_newlines();
+                if !self.check(&TokenKind::Comma) {
+                    break;
+                }
+                self.advance(); // consume ','
+            }
+            let close = self.consume(TokenKind::RightParen, "')' to close tuple type")?;
+            if elements.len() < 2 {
+                return Err(ParseError::UnexpectedToken {
+                    found: TokenKind::RightParen,
+                    expected: "a tuple type with at least two elements `(T1, T2, ...)`".to_string(),
+                    span: close.span,
+                });
+            }
+            let span = open.span.merge(close.span);
+            return Ok(Type::Tuple { elements, span });
+        }
         // Borrow type `&T` (§2.4) / `&mut T` (§2.5). The referent is parsed
         // recursively, so the `&` distributes over whatever type follows. A `mut`
         // keyword immediately after `&` marks a mutable borrow.

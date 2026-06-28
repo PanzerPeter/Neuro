@@ -1,7 +1,56 @@
 // Neuro Programming Language - Syntax Parsing Tests
 // Statement parsing tests
 
-use syntax_parsing::parse;
+use syntax_parsing::{parse, Item, Stmt};
+
+/// Count the statements the first function body desugars to.
+fn first_fn_body_len(source: &str) -> usize {
+    let items = parse(source).expect("parse failed");
+    for item in &items {
+        if let Item::Function(func) = item {
+            return func.body.len();
+        }
+    }
+    panic!("no function found");
+}
+
+#[test]
+fn test_tuple_destructure_desugars_to_temp_plus_bindings() {
+    // §3.2: `val (a, b) = e` expands to a temp binding plus one bind per leaf — so
+    // three statements here. A `_` wildcard binds nothing.
+    let three = r#"
+        func test() {
+            val (a, b) = pair
+        }
+    "#;
+    // temp + a + b = 3
+    assert_eq!(first_fn_body_len(three), 3);
+
+    let wildcard = r#"
+        func test() {
+            val (_, keep, _) = triple
+        }
+    "#;
+    // temp + keep = 2 (the two `_` leaves bind nothing)
+    assert_eq!(first_fn_body_len(wildcard), 2);
+}
+
+#[test]
+fn test_tuple_destructure_temp_is_a_var_decl() {
+    let source = r#"
+        func test() {
+            val (a, b) = pair
+        }
+    "#;
+    let items = parse(source).expect("parse failed");
+    let Item::Function(func) = &items[0] else {
+        panic!("expected function");
+    };
+    assert!(
+        matches!(func.body.first(), Some(Stmt::VarDecl { .. })),
+        "first desugared statement should be the temp VarDecl"
+    );
+}
 
 #[test]
 fn test_parse_val_declaration_with_type_and_init() {

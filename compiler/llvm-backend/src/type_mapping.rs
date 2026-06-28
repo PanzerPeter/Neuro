@@ -61,6 +61,17 @@ impl<'ctx> TypeMapper<'ctx> {
                 let elem_llvm = self.map_type(element)?;
                 Ok(elem_llvm.array_type(*size as u32).into())
             }
+            // Tuple `(T1, T2, ...)` → anonymous LLVM struct `{ T1, T2, ... }` (§3.2).
+            // Elements are restricted to Copy non-struct types at resolution, so each
+            // maps directly here (a struct element would need field definitions and is
+            // not yet permitted — same restriction as arrays).
+            Type::Tuple(elements) => {
+                let mut field_tys = Vec::with_capacity(elements.len());
+                for el in elements {
+                    field_tys.push(self.map_type(el)?);
+                }
+                Ok(self.context.struct_type(&field_tys, false).into())
+            }
             Type::Void => Err(CodegenError::UnsupportedType(
                 "void type cannot be used as a value".to_string(),
             )),

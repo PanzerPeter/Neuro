@@ -94,6 +94,22 @@ val total = c.value + c.step
 
 Field access binds tighter than function calls in the precedence table.
 
+### Tuple Literals and Index Access (§3.2)
+
+A tuple literal groups two or more values; element access uses a constant index:
+
+```neuro
+val pair = (12, 30)       // (i32, i32)
+val mixed = (5, true)     // (i32, bool)
+val a = pair.0            // 12
+val b = pair.1            // 30
+```
+
+A single parenthesized expression `(x)` is grouping, not a one-element tuple.
+Tuple index `t.N` binds like field access; because `t.0.1` lexes as the float
+`0.1`, write a nested access as `(t.0).1`. Tuple destructuring (`val (a, b) = t`)
+is a binding form covered under [Variables](variables.md) and [Types](types.md).
+
 ### If Expressions
 
 `if`/`else` chains are expressions when every arm has an `else` branch:

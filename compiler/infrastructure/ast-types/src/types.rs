@@ -26,6 +26,13 @@ pub enum Type {
         span: Span,
     },
 
+    /// Anonymous tuple type `(T1, T2, ...)` (§3.2): a fixed-size, heterogeneous,
+    /// positionally-indexed aggregate. `span` covers the leading `(` through the
+    /// closing `)`. Always has at least two element types — a single
+    /// parenthesized type is grouping, and the empty tuple (unit) is a separate
+    /// concern not yet produced here.
+    Tuple { elements: Vec<Type>, span: Span },
+
     /// Tensor type for multi-dimensional arrays.
     ///
     /// This variant is reserved for future language support and is not yet
@@ -45,6 +52,7 @@ impl Type {
             Type::Named(ident) => ident.span,
             Type::Reference { span, .. } => *span,
             Type::Array { span, .. } => *span,
+            Type::Tuple { span, .. } => *span,
             Type::Tensor { span, .. } => *span,
         }
     }

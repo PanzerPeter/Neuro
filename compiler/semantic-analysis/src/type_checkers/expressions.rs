@@ -1324,6 +1324,62 @@ impl TypeChecker {
                     }
                 }
             }
+
+            // Tuple literal `(e0, e1, ...)` (§3.2): each element is checked against the
+            // corresponding element type of an expected tuple annotation, when present.
+            Expr::TupleLiteral { elements, .. } => {
+                let expected_elems = match expected {
+                    Some(Type::Tuple(es)) if es.len() == elements.len() => Some(es.clone()),
+                    _ => None,
+                };
+                let mut tys = Vec::with_capacity(elements.len());
+                for (i, el) in elements.iter().enumerate() {
+                    let hint = expected_elems.as_ref().map(|es| &es[i]);
+                    let el_ty = self.check_expr(el, hint).unwrap_or(Type::Unknown);
+                    if !self.is_type_copy(&el_ty) && !matches!(el_ty, Type::Unknown) {
+                        self.record_error(TypeError::NonCopyTupleElement {
+                            ty: el_ty.clone(),
+                            span: el.span(),
+                        });
+                    }
+                    tys.push(el_ty);
+                }
+                Some(Type::Tuple(tys))
+            }
+
+            // Tuple index `object.N` (§3.2): the object must be a tuple (or a borrow of
+            // one); `N` must be within bounds; the result is the N-th element type.
+            Expr::TupleIndex {
+                object,
+                index,
+                span,
+            } => {
+                let obj_ty = self.check_expr(object, None).unwrap_or(Type::Unknown);
+                if matches!(obj_ty, Type::Unknown) {
+                    return Some(Type::Unknown);
+                }
+                match obj_ty.referent() {
+                    Type::Tuple(elements) => {
+                        if let Some(el) = elements.get(*index) {
+                            Some(el.clone())
+                        } else {
+                            self.record_error(TypeError::TupleIndexOutOfBounds {
+                                index: *index,
+                                arity: elements.len(),
+                                span: *span,
+                            });
+                            Some(Type::Unknown)
+                        }
+                    }
+                    other => {
+                        self.record_error(TypeError::NotATuple {
+                            found: other.clone(),
+                            span: *span,
+                        });
+                        Some(Type::Unknown)
+                    }
+                }
+            }
         }
     }
 

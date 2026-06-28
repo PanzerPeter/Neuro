@@ -127,6 +127,14 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-06-28: Tuples §3.2. New `Type::Tuple(Vec<Type>)` (compatible only on equal arity with each
+  element matching; `(T1, T2, ...)` Display). `resolve_type` resolves the tuple type and rejects a
+  non-Copy element (`NonCopyTupleElement`). `check_expr` handles tuple literals (each element checked
+  against the expected tuple's element type when annotated; non-Copy element rejected) and tuple
+  indexing `t.N` (`NotATuple` on a non-tuple, `TupleIndexOutOfBounds` past the arity). A tuple is
+  `Copy` exactly when every element is. Destructuring `val (a, b) = e` is desugared in the parser, so
+  it reaches semantic analysis as ordinary bindings. New diagnostics: `NonCopyTupleElement`,
+  `NotATuple`, `TupleIndexOutOfBounds`.
 - 2026-06-19: Arrays §3.1. New `Type::Array { element, size }` (compatible only on equal element type
   and length; `[T; N]` Display). `resolve_type` resolves `[T; N]` and rejects a non-Copy element
   (`NonCopyArrayElement`). `check_expr` handles array literals (homogeneous, length vs annotation) and
