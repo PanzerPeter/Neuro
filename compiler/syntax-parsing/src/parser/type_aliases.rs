@@ -158,6 +158,11 @@ fn rewrite_type(ty: &mut Type, resolved: &HashMap<String, Type>) {
         }
         Type::Reference { inner, .. } => rewrite_type(inner, resolved),
         Type::Array { element, .. } => rewrite_type(element, resolved),
+        Type::Tuple { elements, .. } => {
+            for element in elements {
+                rewrite_type(element, resolved);
+            }
+        }
         Type::Tensor { element_type, .. } => rewrite_type(element_type, resolved),
     }
 }
@@ -342,6 +347,12 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
             rewrite_expr(object, resolved);
             rewrite_expr(index, resolved);
         }
+        Expr::TupleLiteral { elements, .. } => {
+            for el in elements.iter_mut() {
+                rewrite_expr(el, resolved);
+            }
+        }
+        Expr::TupleIndex { object, .. } => rewrite_expr(object, resolved),
         Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } => {}
     }
 }
@@ -371,6 +382,7 @@ mod tests {
             Type::Named(ident) => ident.name.as_str(),
             Type::Reference { .. } => "<reference>",
             Type::Array { .. } => "<array>",
+            Type::Tuple { .. } => "<tuple>",
             Type::Tensor { .. } => "<tensor>",
         }
     }

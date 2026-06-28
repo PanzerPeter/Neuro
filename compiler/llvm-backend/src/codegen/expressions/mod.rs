@@ -8,6 +8,7 @@ mod binary;
 mod control_flow;
 mod literals;
 mod methods;
+mod tuples;
 mod unary;
 
 use inkwell::types::BasicTypeEnum;
@@ -138,6 +139,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 let obj_ty = Type::from_hir(&object.ty);
                 self.codegen_index(object, index, &obj_ty, &expr.span)
             }
+
+            // Tuple literal `(e0, ...)` and element access `object.N` (§3.2).
+            HirExprKind::TupleLiteral { elements } => {
+                let tuple_ty = Type::from_hir(&expr.ty);
+                self.codegen_tuple_literal(elements, &tuple_ty)
+            }
+            HirExprKind::TupleIndex { object, index } => self.codegen_tuple_index(object, *index),
         }
     }
 

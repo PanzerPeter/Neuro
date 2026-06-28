@@ -132,6 +132,10 @@ impl TypeChecker {
             // so this recursion is always true in practice; it keeps the rule honest
             // if the restriction is later relaxed.
             Type::Array { element, .. } => self.is_type_copy(element),
+            // A tuple is `Copy` exactly when every element is `Copy` (§3.2, §490).
+            // Element Copy-ness is enforced at resolution, so this is always true in
+            // practice; it keeps the rule honest if that restriction is relaxed.
+            Type::Tuple(elements) => elements.iter().all(|e| self.is_type_copy(e)),
             _ => true,
         }
     }

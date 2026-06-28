@@ -123,4 +123,14 @@ pub enum HirExprKind {
         object: Box<HirExpr>,
         index: Box<HirExpr>,
     },
+    /// Tuple literal `(e0, e1, ...)` (§3.2). The element types live on the elements;
+    /// this expression's `ty` is the [`HirType::Tuple`] of them.
+    TupleLiteral {
+        elements: Vec<HirExpr>,
+    },
+    /// Tuple element access `object.N` (§3.2) by constant index.
+    TupleIndex {
+        object: Box<HirExpr>,
+        index: usize,
+    },
 }

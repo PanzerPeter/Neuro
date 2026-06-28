@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.51.0] - 2026-06-28
+
+### Added
+- `parser`: tuples and destructuring (§3.2, Phase 2A). Adds the anonymous tuple type `(T1, T2, ...)`, tuple literals `(e0, e1, ...)` (a single `(x)` stays grouping), constant element access `t.0` / `t.1`, and destructuring binds `val (a, b) = e` — with `_` wildcards and arbitrary nesting (`val ((a, b), c) = ...`). Tuples cross function boundaries, so a function may take and return them (`func swap(a, b) -> (i32, i32)`). The feature spans the pipeline: new `Type::Tuple` / `Expr::TupleLiteral` / `Expr::TupleIndex` AST nodes, the `HirType::Tuple` / `HirExprKind::TupleLiteral` / `HirExprKind::TupleIndex` typed-HIR mirror, and an LLVM lowering to an anonymous struct (`insert_value` for a literal, `extract_value` for an index). Destructuring needs no new node downstream — the parser desugars it to a fresh temp binding plus one projection per leaf, so semantic analysis, HIR, and codegen see ordinary bindings. Tuple elements are restricted to `Copy` types for now (so a tuple is itself `Copy`), mirroring the array element rule; non-Copy element tuples (e.g. `(i32, string)`) are a documented follow-on, as are struct/array destructuring patterns. New diagnostics: `NonCopyTupleElement`, `NotATuple`, `TupleIndexOutOfBounds`. 762 tests pass (+16); new example `examples/types/tuples.nr` (exit 62).
+
+---
+
 ## [1.50.1] - 2026-06-28
 
 ### Changed

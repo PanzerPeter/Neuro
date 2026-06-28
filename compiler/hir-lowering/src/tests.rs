@@ -62,6 +62,26 @@ fn comparison_yields_bool_and_arithmetic_keeps_operand_type() {
 }
 
 #[test]
+fn tuple_literal_and_index_carry_resolved_types() {
+    // §3.2: a tuple literal is typed `HirType::Tuple`, and `t.N` reads the N-th type.
+    let program = lower(
+        "func main() -> i32 { val t: (i32, bool) = (1, true)\n val first = t.0\n val second = t.1\n 0 }",
+    );
+    let body = function_body(&program, "main");
+    assert_eq!(
+        binding_init(body, "t").ty,
+        HirType::Tuple(vec![HirType::I32, HirType::Bool])
+    );
+    let first = binding_init(body, "first");
+    assert_eq!(first.ty, HirType::I32);
+    assert!(matches!(
+        first.kind,
+        HirExprKind::TupleIndex { index: 0, .. }
+    ));
+    assert_eq!(binding_init(body, "second").ty, HirType::Bool);
+}
+
+#[test]
 fn paren_is_normalized_away() {
     let program = lower("func main() -> i32 { val a = (1 + 2)\n 0 }");
     let body = function_body(&program, "main");

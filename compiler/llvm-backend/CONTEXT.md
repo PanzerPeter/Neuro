@@ -239,6 +239,12 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-06-28: Tuples §3.2. New backend `Type::Tuple(Vec<Type>)` (`from_hir`; `map_type` → anonymous
+  LLVM struct `{ T1, T2, ... }`). New `codegen/expressions/tuples.rs`: `codegen_tuple_literal` builds
+  the struct via `insert_value` (with per-element `coerce_if_needed` for default-typed literals), and
+  `codegen_tuple_index` reads element `N` via `extract_value`, auto-loading through a `&tuple` borrow
+  pointer first. Tuples flow through function params/returns since `map_type` supports them (unlike
+  bare structs). Destructuring is desugared in the parser, so the backend only sees literal/index nodes.
 - 2026-06-19: Arrays §3.1. New `Type::Array { element, size }` (`from_ast`/`resolve_syntax_type`,
   `map_type` → LLVM `[N x T]`). `codegen/expressions/arrays.rs` lowers array literals, index read/write
   (with a debug-only bounds guard via `codegen_guard_or_panic`), and `for x in arr` / `for x in &arr`

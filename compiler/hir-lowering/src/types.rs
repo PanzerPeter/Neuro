@@ -43,6 +43,13 @@ impl Lowerer {
                 element: Box::new(self.resolve_type(element)?),
                 size: *size,
             }),
+            ast_types::Type::Tuple { elements, .. } => {
+                let mut resolved = Vec::with_capacity(elements.len());
+                for element in elements {
+                    resolved.push(self.resolve_type(element)?);
+                }
+                Ok(HirType::Tuple(resolved))
+            }
             ast_types::Type::Tensor { .. } => Err(LoweringError::UnresolvedType {
                 name: "Tensor".to_string(),
             }),

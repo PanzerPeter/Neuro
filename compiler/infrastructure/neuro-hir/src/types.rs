@@ -49,6 +49,9 @@ pub enum HirType {
         element: Box<HirType>,
         size: usize,
     },
+    /// Anonymous tuple `(T1, T2, ...)` (§3.2): a positionally-indexed, heterogeneous
+    /// aggregate with at least two elements.
+    Tuple(Vec<HirType>),
     /// A function value: parameter types and return type.
     Function {
         params: Vec<HirType>,
@@ -100,6 +103,16 @@ impl fmt::Display for HirType {
                 }
             }
             HirType::Array { element, size } => write!(f, "[{}; {}]", element, size),
+            HirType::Tuple(elements) => {
+                write!(f, "(")?;
+                for (i, el) in elements.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", el)?;
+                }
+                write!(f, ")")
+            }
             HirType::Function { params, ret } => {
                 write!(f, "fn(")?;
                 for (i, param) in params.iter().enumerate() {

@@ -69,6 +69,25 @@ impl TypeChecker {
                     size: *size,
                 })
             }
+            // Tuple `(T1, T2, ...)` (§3.2). Each element must be `Copy` in this phase
+            // — non-Copy element tuples (e.g. holding a `string` or a non-Copy struct)
+            // need per-element move/Drop tracking, a documented follow-on (mirrors the
+            // array element rule).
+            ast_types::Type::Tuple { elements, span } => {
+                let mut resolved = Vec::with_capacity(elements.len());
+                for element in elements {
+                    let element_ty = self.resolve_type(element)?;
+                    if !self.is_type_copy(&element_ty) {
+                        self.record_error(TypeError::NonCopyTupleElement {
+                            ty: element_ty,
+                            span: *span,
+                        });
+                        return None;
+                    }
+                    resolved.push(element_ty);
+                }
+                Some(Type::Tuple(resolved))
+            }
             ast_types::Type::Tensor { span, .. } => {
                 // Tensor types are Phase 3, not supported in Phase 1
                 self.record_error(TypeError::UnknownTypeName {

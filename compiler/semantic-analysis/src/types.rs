@@ -50,6 +50,10 @@ pub enum Type {
         element: Box<Type>,
         size: usize,
     },
+    /// Anonymous tuple `(T1, T2, ...)` (§3.2): a positionally-indexed, heterogeneous
+    /// aggregate. Two tuple types are compatible only when they have the same arity
+    /// and each element type matches. Always has at least two elements.
+    Tuple(Vec<Type>),
     Unknown,
 }
 
@@ -128,6 +132,11 @@ impl Type {
                     size: bn,
                 },
             ) => an == bn && a.is_compatible_with(b),
+
+            // Tuples match when they have the same arity and each element matches (§3.2).
+            (Type::Tuple(a), Type::Tuple(b)) => {
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.is_compatible_with(y))
+            }
 
             // Unknown type for error recovery
             (Type::Unknown, _) | (_, Type::Unknown) => true,
@@ -290,6 +299,16 @@ impl fmt::Display for Type {
                 }
             }
             Type::Array { element, size } => write!(f, "[{}; {}]", element, size),
+            Type::Tuple(elements) => {
+                write!(f, "(")?;
+                for (i, el) in elements.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", el)?;
+                }
+                write!(f, ")")
+            }
             Type::Function { params, ret } => {
                 write!(f, "fn(")?;
                 for (i, param) in params.iter().enumerate() {
@@ -586,6 +605,30 @@ mod tests {
         assert!(!Type::F16.is_valid_cast(&Type::Bool));
         assert!(!Type::Char.is_valid_cast(&Type::F16));
         assert!(!Type::F16.is_valid_cast(&Type::Char));
+    }
+
+    #[test]
+    fn tuple_type_compatibility_and_display() {
+        // §3.2: tuples match on equal arity with each element matching.
+        let a = Type::Tuple(vec![Type::I32, Type::Bool]);
+        let b = Type::Tuple(vec![Type::I32, Type::Bool]);
+        let diff_elem = Type::Tuple(vec![Type::I32, Type::I32]);
+        let diff_arity = Type::Tuple(vec![Type::I32, Type::Bool, Type::I32]);
+
+        assert!(a.is_compatible_with(&b));
+        assert!(!a.is_compatible_with(&diff_elem));
+        assert!(!a.is_compatible_with(&diff_arity));
+        // A tuple is not compatible with a bare element type.
+        assert!(!a.is_compatible_with(&Type::I32));
+
+        assert_eq!(a.to_string(), "(i32, bool)");
+        assert_eq!(
+            Type::Tuple(vec![Type::F64, Type::Char, Type::U8]).to_string(),
+            "(f64, char, u8)"
+        );
+        // Nested tuple display.
+        let nested = Type::Tuple(vec![Type::Tuple(vec![Type::I32, Type::I32]), Type::Bool]);
+        assert_eq!(nested.to_string(), "((i32, i32), bool)");
     }
 
     #[test]

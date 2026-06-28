@@ -143,6 +143,20 @@ pub enum Expr {
         index: Box<Expr>,
         span: Span,
     },
+    /// Tuple literal `(e0, e1, ...)` (§3.2). Always has at least two elements; a
+    /// single parenthesized expression is [`Expr::Paren`] grouping instead.
+    TupleLiteral {
+        elements: Vec<Expr>,
+        span: Span,
+    },
+    /// Tuple element access `object.N` (§3.2), where `N` is a constant
+    /// non-negative index. Distinct from [`Expr::FieldAccess`], which names a
+    /// struct field by identifier.
+    TupleIndex {
+        object: Box<Expr>,
+        index: usize,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -168,6 +182,8 @@ impl Expr {
             Expr::Range { span, .. } => *span,
             Expr::ArrayLiteral { span, .. } => *span,
             Expr::Index { span, .. } => *span,
+            Expr::TupleLiteral { span, .. } => *span,
+            Expr::TupleIndex { span, .. } => *span,
         }
     }
 }

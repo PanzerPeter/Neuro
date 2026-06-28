@@ -240,6 +240,21 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("tuple element type {ty} is not Copy at {span:?}: tuples of non-Copy element types (strings, non-Copy structs) are not yet supported (§3.2)")]
+    NonCopyTupleElement { ty: Type, span: Span },
+
+    #[error("cannot index a value of type {found} at {span:?}: `.N` tuple indexing applies only to tuples `(T1, T2, ...)` (§3.2)")]
+    NotATuple { found: Type, span: Span },
+
+    #[error(
+        "tuple index {index} is out of range at {span:?}: the tuple has {arity} elements (§3.2)"
+    )]
+    TupleIndexOutOfBounds {
+        index: usize,
+        arity: usize,
+        span: Span,
+    },
+
     #[error("cannot infer the element type of an empty array literal at {span:?}: add a type annotation like `[i32; 0]` (§3.1)")]
     CannotInferEmptyArray { span: Span },
 }

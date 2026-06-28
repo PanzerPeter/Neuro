@@ -28,4 +28,6 @@ Two type derivations are contextual and faithfully mirror the checker:
 - **Literals** take a suffix type, else the expected type when it fits the literal's family, else the default `i32`/`f64`.
 - A **function/method body's trailing expression** is an implicit return, typed against the declared return type; nested block/`if`-arm tails are typed with no hint.
 
+Tuples (§3.2): `resolve_type` lowers the tuple type to `HirType::Tuple`; a tuple literal is typed by lowering each element (each hinted by the expected tuple's element type when annotated) and a `t.N` index reads the N-th element type off the (auto-derefed) tuple type. Destructuring is already desugared by the parser, so only the literal/index nodes reach here.
+
 Three nodes carry a deliberately-chosen type the source has no first-class form for: a `loop` value-expression takes its `break v` type (or `void`); a method-name callee `FieldAccess` carries the call's result type (there is no method value); a `Range` carries `void` (valid only as a `string.slice` argument — the slice lowering reads its bounds directly). Divergent panic-family calls (`panic`/`assert`/`unreachable`) adopt their context's expected type, or `void` in statement position.

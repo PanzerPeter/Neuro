@@ -51,6 +51,15 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-06-28: Tuples §3.2. `parse_type` parses the tuple type `(T1, T2, ...)` (≥2 elements; a single
+  `(T)` is grouping, `()` unit is rejected). `parse_prefix`'s `(` branch produces an
+  `Expr::TupleLiteral` when a comma follows the first expression, else `Expr::Paren`. The `.` infix
+  reads a following integer token as a constant `Expr::TupleIndex` (`t.0`), keeping identifier dots as
+  field access. Destructuring `val (a, b) = e` is a **parse-time desugar** (no AST node): block
+  collectors call the new `parse_stmt_into`, which detects `val (` / `mut (` and expands the pattern
+  via `parse_tuple_destructure` to a fresh `__destructure_N` temp binding plus one projection per leaf
+  — supporting `_` wildcards and nested patterns through a parse-local `DestructurePattern`. Alias
+  rewrite covers the new type/expr nodes.
 - 2026-06-19: Arrays §3.1. `parse_type` parses `[T; N]`; `parse_prefix` parses `[..]` array literals;
   `parse_infix` + `get_precedence` parse `a[i]` indexing (call precedence); `parse_for_stmt` branches
   `Stmt::ForRange` vs `Stmt::ForEach` on the presence of a `..` / `..=`; the identifier-statement path

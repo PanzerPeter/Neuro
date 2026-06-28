@@ -37,6 +37,9 @@ pub(crate) enum Type {
         element: Box<Type>,
         size: usize,
     },
+    /// Anonymous tuple `(T1, T2, ...)` (§3.2). Lowered to an anonymous LLVM struct
+    /// `{ T1, T2, ... }`; element access is `extractvalue` by constant index.
+    Tuple(Vec<Type>),
 }
 
 impl Type {
@@ -67,6 +70,7 @@ impl Type {
                 element: Box::new(Type::from_hir(element)),
                 size: *size,
             },
+            HirType::Tuple(elements) => Type::Tuple(elements.iter().map(Type::from_hir).collect()),
             HirType::Function { params, ret } => Type::Function {
                 params: params.iter().map(Type::from_hir).collect(),
                 ret: Box::new(Type::from_hir(ret)),

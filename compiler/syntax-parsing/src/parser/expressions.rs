@@ -197,11 +197,33 @@ impl Parser {
                 })
             }
 
+            // `( ... )` is either grouping or a tuple literal (§3.2). A comma after
+            // the first expression makes it a tuple; otherwise it is plain grouping.
             TokenKind::LeftParen => {
-                let expr = self.parse_expr(Precedence::Lowest)?;
-                let close = self.consume(TokenKind::RightParen, "')'")?;
-                let span = token.span.merge(close.span);
-                Ok(Expr::Paren(Box::new(expr), span))
+                self.skip_newlines();
+                let first = self.parse_expr(Precedence::Lowest)?;
+                self.skip_newlines();
+                if self.check(&TokenKind::Comma) {
+                    let mut elements = vec![first];
+                    while self.check(&TokenKind::Comma) {
+                        self.advance(); // consume ','
+                        self.skip_newlines();
+                        // A trailing comma before `)` closes the tuple.
+                        if self.check(&TokenKind::RightParen) {
+                            break;
+                        }
+                        elements.push(self.parse_expr(Precedence::Lowest)?);
+                        self.skip_newlines();
+                    }
+                    let close =
+                        self.consume(TokenKind::RightParen, "')' to close tuple literal")?;
+                    let span = token.span.merge(close.span);
+                    Ok(Expr::TupleLiteral { elements, span })
+                } else {
+                    let close = self.consume(TokenKind::RightParen, "')'")?;
+                    let span = token.span.merge(close.span);
+                    Ok(Expr::Paren(Box::new(first), span))
+                }
             }
 
             // Array literal `[e0, e1, ...]` (§3.1). Elements parse at the lowest
@@ -299,7 +321,7 @@ impl Parser {
         let mut stmts = Vec::new();
 
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
-            stmts.push(self.parse_stmt()?);
+            self.parse_stmt_into(&mut stmts)?;
             self.skip_newlines();
         }
 
@@ -360,7 +382,7 @@ impl Parser {
 
         let mut stmts = Vec::new();
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
-            stmts.push(self.parse_stmt()?);
+            self.parse_stmt_into(&mut stmts)?;
             self.skip_newlines();
         }
 
@@ -404,9 +426,33 @@ impl Parser {
                 })
             }
 
-            // Field access: `expr.field`
+            // Field access `expr.field` or tuple index `expr.0` (§3.2). A numeric
+            // token after the dot is a constant tuple index; an identifier names a
+            // struct field. (Chained `t.0.1` is lexed as `t` `.` `0.1`(float), so a
+            // nested tuple element is accessed as `(t.0).1`.)
             TokenKind::Dot => {
                 self.advance(); // consume '.'
+                if let Some(TokenKind::Integer(_)) = self.peek_kind() {
+                    let idx_token = self.advance().ok_or(ParseError::UnexpectedEof {
+                        expected: "tuple index".to_string(),
+                    })?;
+                    let TokenKind::Integer(n) = idx_token.kind else {
+                        unreachable!("guarded by peek above")
+                    };
+                    if n < 0 {
+                        return Err(ParseError::UnexpectedToken {
+                            found: idx_token.kind,
+                            expected: "a non-negative tuple index".to_string(),
+                            span: idx_token.span,
+                        });
+                    }
+                    let span = left.span().merge(idx_token.span);
+                    return Ok(Expr::TupleIndex {
+                        object: Box::new(left),
+                        index: n as usize,
+                        span,
+                    });
+                }
                 let field_token =
                     self.consume(TokenKind::Identifier(String::new()), "field name")?;
                 let field = if let TokenKind::Identifier(name) = field_token.kind {
