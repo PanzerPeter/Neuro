@@ -7,16 +7,24 @@
 
 ## Overview
 
-The LLVM backend slice generates native object code from a type-checked AST. It uses [inkwell](https://github.com/TheDan64/inkwell) (safe Rust bindings to LLVM 20) to produce optimized machine code for the host platform.
+The LLVM backend slice generates native object code from the typed High-Level IR (`neuro-hir`) — not the AST. Since Phase 1.8 the frontend lowers the type-checked AST to HIR (`hir-lowering`), where every expression already carries its resolved type, so the backend reads types inline instead of re-deriving them. It uses [inkwell](https://github.com/TheDan64/inkwell) (safe Rust bindings to LLVM 20) to produce optimized machine code for the host platform.
 
 **Entry point:**
 ```rust
-pub fn compile(items: &[Item], optimization: OptimizationLevelSetting) -> CodegenResult<Vec<u8>>
+pub fn compile(
+    program: &HirProgram,
+    optimization: OptimizationLevelSetting,
+    source: &str,
+    source_path: &str,
+) -> CodegenResult<Vec<u8>>
 ```
+
+`source` / `source_path` are carried through for located runtime-panic diagnostics (e.g. array
+bounds, slice boundaries).
 
 ## Architecture
 
-- **Dependencies**: `ast-types`, `shared-types`, `diagnostics`, `inkwell 0.9.0`
+- **Dependencies**: `neuro-hir` (the typed HIR it consumes), `ast-types`, `shared-types`, `source-location`, `diagnostics`, `inkwell 0.9.0`; `hir-lowering` is a dev-dependency (tests/benches lower before compiling)
 - **Public API**: single `compile()` function returning object code bytes
 - **All internals**: `pub(crate)` — `CodegenContext`, `TypeMapper`, `codegen_*` helpers
 - **Output**: platform object code (`.o`) passed to the system linker by `neurc`
@@ -137,7 +145,8 @@ let source = r#"
 
 let ast = parse(source)?;
 type_check(&ast)?;
-let object_code = compile(&ast, OptimizationLevelSetting::O2)?;
+let hir = lower_program(&ast)?;                  // hir-lowering: AST → typed HIR
+let object_code = compile(&hir, OptimizationLevelSetting::O2, source, "add.nr")?;
 std::fs::write("output.o", &object_code)?;
 ```
 
@@ -202,12 +211,15 @@ The `OptimizationLevelSetting` enum maps to LLVM's optimization levels:
 
 ## Future: MLIR Integration (Phase 3+)
 
-When tensor types are introduced, `melior` (Rust MLIR bindings for LLVM/MLIR 20) will be added alongside inkwell. Both crates link against the same LLVM 20 dylib via `LLVM_SYS_201_PREFIX`.
+`melior` (Rust MLIR bindings for LLVM/MLIR 20) is already integrated alongside inkwell in the
+`mlir-backend` slice behind the off-by-default `mlir` feature (Phase 1.8 scaffold); both crates link
+against the same LLVM 20 dylib via `LLVM_SYS_201_PREFIX`. When tensor types are introduced (Phase 3+)
+that slice will lower the **same typed HIR** this backend consumes.
 
 The planned lowering strategy:
 
 ```
-AST → Neuro High-Level IR
+typed HIR (neuro-hir)
   → MLIR dialects (linalg / tensor / func / arith)
   → Enzyme MLIR AD pass (@grad)
   → GPU dialects (nvgpu / rocdl / Triton)  or  llvm dialect

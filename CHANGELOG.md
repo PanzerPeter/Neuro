@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.50.1] - 2026-06-28
+
+### Changed
+- `docs`: sync the user-facing `docs/` tree with the Phase 1.8 backend pipeline. Rewrote `docs/compiler/compilation.md`, which had drifted to LLVM 18.1.8 / `LLVM_SYS_181_PREFIX` / inkwell 0.6.0 and a four-stage pipeline: it now documents the real **AST → typed HIR → LLVM** flow (the `hir_lowering::lower_program` stage, the `check` vs `compile` split, the actual `compile(&hir, …, source, source_path)` signature), replaces the "tests (planned)" / "known bug" sections with the real 746-test suite, and points toolchain setup at the installation guide instead of duplicating a stale LLVM 18 walkthrough. Updated `docs/README.md` (main pipeline diagram now shows the HIR lowering stage; component index gains HIR Lowering / MLIR Backend) and `docs/compiler/components/llvm-backend.md` (input is the typed HIR, not the AST; corrected entry-point signature, dependency list, and example). Added two new component docs: `docs/compiler/components/hir-lowering.md` and `docs/compiler/components/mlir-backend.md`. Also corrected the lingering LLVM 18.1.8 / `LLVM_SYS_181_PREFIX` references in `docs/guides/cli-usage.md` and `docs/guides/troubleshooting.md` to LLVM 20 / `LLVM_SYS_201_PREFIX`. No compiler code changed.
+
+---
+
 ## [1.50.0] - 2026-06-28
 
 ### Added
