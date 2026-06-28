@@ -40,39 +40,37 @@ pub(crate) enum Type {
 }
 
 impl Type {
-    pub(crate) fn from_ast(ast_ty: &ast_types::Type) -> Self {
-        match ast_ty {
-            ast_types::Type::Named(ident) => match ident.name.as_str() {
-                "i8" => Type::I8,
-                "i16" => Type::I16,
-                "i32" => Type::I32,
-                "i64" => Type::I64,
-                "u8" => Type::U8,
-                "u16" => Type::U16,
-                "u32" => Type::U32,
-                "u64" => Type::U64,
-                "f16" => Type::F16,
-                "bf16" => Type::BF16,
-                "f32" => Type::F32,
-                "f64" => Type::F64,
-                "bool" => Type::Bool,
-                "char" => Type::Char,
-                "string" => Type::String,
-                name => Type::Struct(name.to_string()),
-            },
-            ast_types::Type::Reference { inner, .. } => {
-                Type::Reference(Box::new(Type::from_ast(inner)))
-            }
-            ast_types::Type::Array { element, size, .. } => Type::Array {
-                element: Box::new(Type::from_ast(element)),
+    /// Lower a resolved HIR type to the backend's codegen type. The HIR is already
+    /// fully type-checked, so every variant maps directly with no name resolution.
+    pub(crate) fn from_hir(hir_ty: &neuro_hir::HirType) -> Self {
+        use neuro_hir::HirType;
+        match hir_ty {
+            HirType::I8 => Type::I8,
+            HirType::I16 => Type::I16,
+            HirType::I32 => Type::I32,
+            HirType::I64 => Type::I64,
+            HirType::U8 => Type::U8,
+            HirType::U16 => Type::U16,
+            HirType::U32 => Type::U32,
+            HirType::U64 => Type::U64,
+            HirType::F16 => Type::F16,
+            HirType::BF16 => Type::BF16,
+            HirType::F32 => Type::F32,
+            HirType::F64 => Type::F64,
+            HirType::Bool => Type::Bool,
+            HirType::Char => Type::Char,
+            HirType::String => Type::String,
+            HirType::Void => Type::Void,
+            HirType::Struct(name) => Type::Struct(name.clone()),
+            HirType::Reference { inner, .. } => Type::Reference(Box::new(Type::from_hir(inner))),
+            HirType::Array { element, size } => Type::Array {
+                element: Box::new(Type::from_hir(element)),
                 size: *size,
             },
-            // Tensor types (Phase 3) never reach the backend: semantic analysis rejects
-            // every `Tensor<...>` annotation as an unknown type before codegen runs, so
-            // this arm is an invariant assertion rather than a missing-feature stub.
-            ast_types::Type::Tensor { .. } => {
-                unreachable!("tensor types are rejected by semantic analysis before codegen")
-            }
+            HirType::Function { params, ret } => Type::Function {
+                params: params.iter().map(Type::from_hir).collect(),
+                ret: Box::new(Type::from_hir(ret)),
+            },
         }
     }
 

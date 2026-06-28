@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 shared-types = { path = "../infrastructure/shared-types" }
 ast-types = { path = "../infrastructure/ast-types" }
+neuro-hir = { path = "../infrastructure/neuro-hir" }
 diagnostics = { path = "../infrastructure/diagnostics" }
 source-location = { path = "../infrastructure/source-location" }
 inkwell = { workspace = true }
@@ -18,6 +19,10 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 syntax-parsing = { path = "../syntax-parsing" }
+# Tests and benchmarks build HIR through the lowering slice before invoking the
+# backend; this is a test-only convenience and never a production cross-slice
+# dependency (mirrors the existing syntax-parsing dev setup).
+hir-lowering = { path = "../hir-lowering" }
 criterion = { workspace = true }
 
 [lib]

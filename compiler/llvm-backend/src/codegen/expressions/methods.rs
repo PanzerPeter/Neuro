@@ -1,10 +1,10 @@
 // Neuro Programming Language - LLVM Backend
 // Codegen for expressions: Builtin method calls and integer intrinsics.
 
-use ast_types::*;
 use inkwell::intrinsics::Intrinsic;
 use inkwell::values::*;
 use inkwell::IntPredicate;
+use neuro_hir::{HirExpr, HirExprKind};
 
 use crate::codegen::context::{BuiltinMethod, CodegenContext};
 use crate::errors::{CodegenError, CodegenResult};
@@ -12,14 +12,14 @@ use crate::types::Type;
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Lower a compiler-known intrinsic method call on a builtin receiver. `recv_ty` is the
-    /// receiver's type as resolved during the type pass — used for the integer intrinsics'
-    /// signedness rather than `expr_types`, which an enclosing cast can clobber.
+    /// receiver's resolved HIR type (the call dispatcher maps it from `object.ty`), used for
+    /// the integer intrinsics' signedness and the string/array receiver shape.
     pub(crate) fn codegen_builtin_method(
         &mut self,
         kind: BuiltinMethod,
         recv_ty: &Type,
-        receiver: &Expr,
-        args: &[Expr],
+        receiver: &HirExpr,
+        args: &[HirExpr],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         match kind {
             // `string.len()` reads field 1 of the fat pointer `{ ptr, i64 }` — the
@@ -102,15 +102,19 @@ impl<'ctx> CodegenContext<'ctx> {
     /// lowers to a pointer to the computed fat pointer, matching the `&place` ABI.
     fn codegen_string_slice(
         &mut self,
-        receiver: &Expr,
-        args: &[Expr],
+        receiver: &HirExpr,
+        args: &[HirExpr],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let (start_expr, end_expr, inclusive, offset) = match args.first() {
-            Some(Expr::Range {
-                start,
-                end,
-                inclusive,
+            Some(HirExpr {
+                kind:
+                    HirExprKind::Range {
+                        start,
+                        end,
+                        inclusive,
+                    },
                 span,
+                ..
             }) => (start.as_ref(), end.as_ref(), *inclusive, span.start),
             _ => {
                 return Err(CodegenError::InternalError(
@@ -214,7 +218,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Lower a slice bound expression to an `i64` index, sign-extending or truncating a
     /// differently sized integer (a bare literal defaults to `i32` in the backend).
-    fn slice_index_to_i64(&mut self, expr: &Expr) -> CodegenResult<IntValue<'ctx>> {
+    fn slice_index_to_i64(&mut self, expr: &HirExpr) -> CodegenResult<IntValue<'ctx>> {
         let value = self.codegen_expr(expr)?.into_int_value();
         let i64_ty = self.context.i64_type();
         let width = value.get_type().get_bit_width();
@@ -300,7 +304,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Lower a string receiver to its `{ ptr, len }` fat-pointer value, auto-dereferencing
     /// an immutable borrow `&string` (§2.4): a borrowed receiver lowers to a pointer to the
     /// fat pointer, so the struct is loaded; an owned receiver is already the struct value.
-    fn string_receiver_struct(&mut self, receiver: &Expr) -> CodegenResult<StructValue<'ctx>> {
+    fn string_receiver_struct(&mut self, receiver: &HirExpr) -> CodegenResult<StructValue<'ctx>> {
         let recv_val = self.codegen_expr(receiver)?;
         match recv_val {
             BasicValueEnum::StructValue(sv) => Ok(sv),
@@ -326,8 +330,8 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         kind: BuiltinMethod,
         recv_ty: &Type,
-        receiver: &Expr,
-        args: &[Expr],
+        receiver: &HirExpr,
+        args: &[HirExpr],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let unsigned = recv_ty.is_unsigned_int();
 

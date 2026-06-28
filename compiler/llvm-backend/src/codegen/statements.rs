@@ -1,7 +1,7 @@
 use crate::codegen::context::LoopTargets;
-use ast_types::*;
 use inkwell::values::BasicValueEnum;
 use inkwell::IntPredicate;
+use neuro_hir::{HirConst, HirExpr, HirExprKind, HirStmt, HirType};
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::type_mapping::TypeMapper;
@@ -12,18 +12,18 @@ use super::context::CodegenContext;
 impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a variable declaration statement.
     ///
-    /// When `declared_ty` is `Some`, the alloca is created at that width and the
-    /// initializer value is widened/truncated to match (e.g. `val x: i64 = 42`
-    /// emits an i64 alloca with the literal sign-extended from i32).
+    /// The HIR carries the binding's resolved type (`ty`), declared or inferred, so
+    /// the alloca is created at that type and the initializer value is coerced to it
+    /// (e.g. `val x: i64 = 42` emits an i64 alloca with the literal sign-extended).
     pub(crate) fn codegen_var_decl(
         &mut self,
         name: &str,
-        declared_ty: Option<&ast_types::Type>,
-        init: Option<&Expr>,
+        ty: &HirType,
+        init: Option<&HirExpr>,
     ) -> CodegenResult<()> {
         // Resolve whether this binding owns a `Drop` value before the initializer is
         // consumed, so its destructor can be scheduled for scope exit (§2.1).
-        let drop_name = self.drop_struct_name(declared_ty, init);
+        let drop_name = self.drop_struct_name(ty);
 
         let init_val = if let Some(expr) = init {
             Some(self.codegen_expr(expr)?)
@@ -32,14 +32,11 @@ impl<'ctx> CodegenContext<'ctx> {
         };
 
         if let Some(val) = init_val {
-            let (alloca_ty, final_val) = if let Some(ast_ty) = declared_ty {
-                let target_sem = crate::types::Type::from_ast(ast_ty);
-                let llvm_target = self.type_mapper.map_type(&target_sem)?;
-                let coerced = self.coerce_if_needed(val, llvm_target, &target_sem)?;
-                (llvm_target, coerced)
-            } else {
-                (val.get_type(), val)
-            };
+            let target_sem = Type::from_hir(ty);
+            // `get_any_llvm_type` resolves struct types (which `map_type` rejects); the
+            // coercion is a no-op for non-scalar/array values whose type already matches.
+            let alloca_ty = self.get_any_llvm_type(&target_sem)?;
+            let final_val = self.coerce_if_needed(val, alloca_ty, &target_sem)?;
 
             let alloca = self.builder.build_alloca(alloca_ty, name).map_err(|e| {
                 CodegenError::LlvmError(format!("failed to allocate variable: {}", e))
@@ -49,6 +46,9 @@ impl<'ctx> CodegenContext<'ctx> {
             })?;
             self.variables.insert(name.to_string(), alloca);
             self.variable_types.insert(name.to_string(), alloca_ty);
+            // Record the binding's nominal type for later place statements (field /
+            // index assignment) that must recover a struct or array name.
+            self.type_env.insert(name.to_string(), target_sem);
 
             // Binding a place into a new owner moves it (`val b = a`): clear the source's
             // drop flag so it is not also dropped (§2.2). Then register the new binding.
@@ -149,7 +149,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Generate code for an assignment statement
-    pub(crate) fn codegen_assignment(&mut self, name: &str, value: &Expr) -> CodegenResult<()> {
+    pub(crate) fn codegen_assignment(&mut self, name: &str, value: &HirExpr) -> CodegenResult<()> {
         // Generate code for the value expression
         let val = self.codegen_expr(value)?;
 
@@ -176,8 +176,8 @@ impl<'ctx> CodegenContext<'ctx> {
     /// `pointer` evaluates to the referent's address; the value is stored there.
     pub(crate) fn codegen_deref_assignment(
         &mut self,
-        pointer: &Expr,
-        value: &Expr,
+        pointer: &HirExpr,
+        value: &HirExpr,
     ) -> CodegenResult<()> {
         let ptr_val = self.codegen_expr(pointer)?;
         let ptr = ptr_val.into_pointer_value();
@@ -190,7 +190,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Generate code for a return statement
-    pub(crate) fn codegen_return(&mut self, value: Option<&Expr>) -> CodegenResult<()> {
+    pub(crate) fn codegen_return(&mut self, value: Option<&HirExpr>) -> CodegenResult<()> {
         if let Some(expr) = value {
             let ret_val = self.codegen_expr(expr)?;
             // `return panic("x")`: evaluating the operand already terminated the block with
@@ -217,10 +217,10 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for an if/else statement
     pub(crate) fn codegen_if(
         &mut self,
-        condition: &Expr,
-        then_block: &[Stmt],
-        else_if_blocks: &[(Expr, Vec<Stmt>)],
-        else_block: &Option<Vec<Stmt>>,
+        condition: &HirExpr,
+        then_block: &[HirStmt],
+        else_if_blocks: &[(HirExpr, Vec<HirStmt>)],
+        else_block: &Option<Vec<HirStmt>>,
     ) -> CodegenResult<()> {
         let cond_val = self.codegen_expr(condition)?;
 
@@ -306,20 +306,17 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Resolve the [`LoopTargets`] a `break`/`continue` refers to: the innermost
     /// loop, or the nearest enclosing one carrying `label`. Label resolution is
     /// validated in semantic analysis, so a miss here is an internal error.
-    fn lookup_loop_target(
-        &self,
-        label: Option<&shared_types::Identifier>,
-    ) -> CodegenResult<&LoopTargets<'ctx>> {
+    fn lookup_loop_target(&self, label: Option<&str>) -> CodegenResult<&LoopTargets<'ctx>> {
         match label {
             Some(label) => self
                 .loop_targets
                 .iter()
                 .rev()
-                .find(|t| t.label.as_deref() == Some(label.name.as_str()))
+                .find(|t| t.label.as_deref() == Some(label))
                 .ok_or_else(|| {
                     CodegenError::InternalError(format!(
                         "undefined loop label '{}' during codegen",
-                        label.name
+                        label
                     ))
                 }),
             None => self.loop_targets.last().ok_or_else(|| {
@@ -333,8 +330,8 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn codegen_while(
         &mut self,
         label: Option<&str>,
-        condition: &Expr,
-        body: &[Stmt],
+        condition: &HirExpr,
+        body: &[HirStmt],
     ) -> CodegenResult<()> {
         let parent_fn = self
             .current_function
@@ -405,26 +402,22 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// Unlike `while`, there is no condition block: control branches
     /// unconditionally into the body and back to its top, so the only way out is a
-    /// `break`. `continue` re-enters the body from the top. `span_start` keys the
-    /// loop's result type (recorded by the type pass): when it is not `Void`, a
-    /// result slot is allocated, value-carrying `break`s store into it, and the
-    /// loaded value is returned. `Stmt::Loop` discards the result; `Expr::Loop`
-    /// binds it.
+    /// `break`. `continue` re-enters the body from the top. `result_ty` is the loop
+    /// expression's type (§3.7): when it is not `Void`, a result slot is allocated,
+    /// value-carrying `break`s store into it, and the loaded value is returned.
+    /// `Stmt::Loop` passes `Void` (the value is discarded); `Expr::Loop` passes its
+    /// resolved type.
     pub(crate) fn codegen_loop(
         &mut self,
         label: Option<&str>,
-        body: &[Stmt],
-        span_start: usize,
+        body: &[HirStmt],
+        result_ty: &Type,
     ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
         let parent_fn = self
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
 
-        let result_ty = self
-            .expr_types
-            .get(&span_start)
-            .cloned()
-            .unwrap_or(Type::Void);
+        let result_ty = result_ty.clone();
         let result_slot = if matches!(result_ty, Type::Void) {
             None
         } else {
@@ -502,19 +495,22 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn codegen_for_range(
         &mut self,
         label: Option<&str>,
-        iterator: &shared_types::Identifier,
-        start: &Expr,
-        end: &Expr,
+        iterator: &str,
+        start: &HirExpr,
+        end: &HirExpr,
         inclusive: bool,
-        body: &[Stmt],
+        body: &[HirStmt],
     ) -> CodegenResult<()> {
         let parent_fn = self
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
 
+        let iter_sem_ty = Type::from_hir(&start.ty);
         let start_val = self.codegen_expr(start)?;
         let end_val = self.codegen_expr(end)?;
-        let iter_name = iterator.name.clone();
+        let iter_name = iterator.to_string();
+        // Record the iterator's type so a body place statement can recover it.
+        self.type_env.insert(iter_name.clone(), iter_sem_ty.clone());
 
         let iter_alloca = self
             .builder
@@ -551,11 +547,6 @@ impl<'ctx> CodegenContext<'ctx> {
         let iter_int = iter_val.into_int_value();
         let end_int = end_val.into_int_value();
 
-        let iter_sem_ty = self
-            .expr_types
-            .get(&start.span().start)
-            .cloned()
-            .unwrap_or(Type::I32);
         let cmp_predicate = match (TypeMapper::is_unsigned_int(&iter_sem_ty), inclusive) {
             (true, true) => IntPredicate::ULE,
             (true, false) => IntPredicate::ULT,
@@ -643,7 +634,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Generate code for a statement
-    pub(crate) fn codegen_stmt(&mut self, stmt: &Stmt) -> CodegenResult<()> {
+    pub(crate) fn codegen_stmt(&mut self, stmt: &HirStmt) -> CodegenResult<()> {
         // Statements following a divergent statement (a `panic`/`unreachable` builtin, or
         // a `return`/`break`/`continue`) are dead code: the current block already has a
         // terminator. Emitting into it would append instructions after a terminator and
@@ -653,32 +644,30 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         match stmt {
-            Stmt::VarDecl { name, ty, init, .. } => {
-                self.codegen_var_decl(&name.name, ty.as_ref(), init.as_ref())
+            HirStmt::VarDecl { name, ty, init, .. } => {
+                self.codegen_var_decl(name, ty, init.as_ref())
             }
-            Stmt::Assignment { target, value, .. } => self.codegen_assignment(&target.name, value),
-            Stmt::Return { value, .. } => self.codegen_return(value.as_ref()),
-            Stmt::If {
+            HirStmt::Assignment { target, value, .. } => self.codegen_assignment(target, value),
+            HirStmt::Return { value, .. } => self.codegen_return(value.as_ref()),
+            HirStmt::If {
                 condition,
                 then_block,
                 else_if_blocks,
                 else_block,
                 ..
             } => self.codegen_if(condition, then_block, else_if_blocks, else_block),
-            Stmt::While {
+            HirStmt::While {
                 label,
                 condition,
                 body,
                 ..
-            } => self.codegen_while(label.as_ref().map(|l| l.name.as_str()), condition, body),
-            Stmt::Loop {
-                label, body, span, ..
-            } => {
+            } => self.codegen_while(label.as_deref(), condition, body),
+            HirStmt::Loop { label, body, .. } => {
                 // Statement position: the loop value (if any) is discarded.
-                self.codegen_loop(label.as_ref().map(|l| l.name.as_str()), body, span.start)?;
+                self.codegen_loop(label.as_deref(), body, &Type::Void)?;
                 Ok(())
             }
-            Stmt::ForRange {
+            HirStmt::ForRange {
                 label,
                 iterator,
                 start,
@@ -686,34 +675,22 @@ impl<'ctx> CodegenContext<'ctx> {
                 inclusive,
                 body,
                 ..
-            } => self.codegen_for_range(
-                label.as_ref().map(|l| l.name.as_str()),
-                iterator,
-                start,
-                end,
-                *inclusive,
-                body,
-            ),
-            Stmt::ForEach {
+            } => self.codegen_for_range(label.as_deref(), iterator, start, end, *inclusive, body),
+            HirStmt::ForEach {
                 label,
                 iterator,
                 iterable,
                 body,
                 ..
-            } => self.codegen_for_each(
-                label.as_ref().map(|l| l.name.as_str()),
-                iterator,
-                iterable,
-                body,
-            ),
-            Stmt::IndexAssignment {
+            } => self.codegen_for_each(label.as_deref(), iterator, iterable, body),
+            HirStmt::IndexAssignment {
                 target,
                 index,
                 value,
                 ..
             } => self.codegen_index_assignment(target, index, value),
-            Stmt::Break { label, value, .. } => {
-                let target = self.lookup_loop_target(label.as_ref())?;
+            HirStmt::Break { label, value, .. } => {
+                let target = self.lookup_loop_target(label.as_deref())?;
                 let break_bb = target.break_bb;
                 let break_slot = target.break_slot;
                 let drop_depth = target.drop_scope_depth;
@@ -752,8 +729,8 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 Ok(())
             }
-            Stmt::Continue { label, .. } => {
-                let target = self.lookup_loop_target(label.as_ref())?;
+            HirStmt::Continue { label, .. } => {
+                let target = self.lookup_loop_target(label.as_deref())?;
                 let continue_bb = target.continue_bb;
                 let drop_depth = target.drop_scope_depth;
 
@@ -776,31 +753,32 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 Ok(())
             }
-            Stmt::FieldAssignment {
+            HirStmt::FieldAssignment {
                 object,
                 field,
                 value,
                 ..
-            } => self.codegen_field_assignment(&object.name, &field.name, value),
+            } => self.codegen_field_assignment(object, field, value),
 
-            Stmt::DerefAssignment { pointer, value, .. } => {
+            HirStmt::DerefAssignment { pointer, value, .. } => {
                 self.codegen_deref_assignment(pointer, value)
             }
 
-            Stmt::Const {
+            HirStmt::Const {
                 name, ty, value, ..
             } => {
-                let declared_sem = crate::types::Type::from_ast(ty);
+                let declared_sem = Type::from_hir(ty);
                 let val = self.codegen_const_expr_typed(value, &declared_sem)?;
-                self.const_values.insert(name.name.clone(), val);
+                self.const_values.insert(name.clone(), val);
+                self.type_env.insert(name.clone(), declared_sem);
                 Ok(())
             }
 
-            Stmt::Expr(expr) => {
+            HirStmt::Expr(expr) => {
                 // A call in statement position may return unit `()`; dispatch directly so
                 // a void result is discarded rather than treated as a missing value.
-                if let Expr::Call { func, args, span } = expr {
-                    self.codegen_call_dispatch(func, args, span)?;
+                if let HirExprKind::Call { callee, args } = &expr.kind {
+                    self.codegen_call_dispatch(callee, args, &expr.span)?;
                 } else {
                     self.codegen_expr(expr)?;
                 }
@@ -810,18 +788,18 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Emit a module-level constant as an LLVM global constant and cache its value.
-    pub(crate) fn codegen_global_const(&mut self, def: &ast_types::ConstDef) -> CodegenResult<()> {
-        let declared_sem = crate::types::Type::from_ast(&def.ty);
+    pub(crate) fn codegen_global_const(&mut self, def: &HirConst) -> CodegenResult<()> {
+        let declared_sem = Type::from_hir(&def.ty);
         let val = self.codegen_const_expr_typed(&def.value, &declared_sem)?;
         let llvm_ty = val.get_type();
-        let global = self.module.add_global(llvm_ty, None, &def.name.name);
+        let global = self.module.add_global(llvm_ty, None, &def.name);
         global.set_initializer(&val);
         global.set_constant(true);
         global.set_linkage(inkwell::module::Linkage::Internal);
 
         // Cache the value directly so identifier resolution returns the constant without
         // emitting a load — consts are values, not memory locations.
-        self.const_values.insert(def.name.name.clone(), val);
+        self.const_values.insert(def.name.clone(), val);
         Ok(())
     }
 }

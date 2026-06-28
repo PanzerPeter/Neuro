@@ -16,9 +16,9 @@ mod types;
 // Public exports
 pub use errors::{CodegenError, CodegenResult};
 
-use ast_types::{Item, SelfParam};
 use inkwell::context::Context as LLVMContext;
 use inkwell::OptimizationLevel as LlvmOptimizationLevel;
+use neuro_hir::{HirItem, HirProgram, HirSelfParam};
 use std::collections::HashMap;
 use types::Type;
 
@@ -55,25 +55,17 @@ impl OptimizationLevelSetting {
 
 /// Compile Neuro AST to LLVM object code.
 ///
-/// This is the main entry point for the LLVM backend. It takes a type-checked
-/// AST and generates LLVM IR, then compiles it to object code.
-///
-/// # Phase 1 Support
-///
-/// Currently supports:
-/// - Function definitions with parameters and return types
-/// - Primitive types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f32`, `f64`, `bool`
-/// - Binary operators (arithmetic, comparison, logical)
-/// - Unary operators (negation, logical not)
-/// - Variable declarations
-/// - Function calls
-/// - If/else statements
-/// - While loops and range-for loops with `break` and `continue`
-/// - Return statements
+/// This is the main entry point for the LLVM backend. It consumes the typed HIR
+/// produced by `hir-lowering` and generates LLVM IR, then compiles it to object
+/// code. Every HIR node carries its resolved type, so the backend reads types
+/// directly rather than re-deriving them.
 ///
 /// # Arguments
 ///
-/// * `items` - Type-checked AST items (functions)
+/// * `program` - The typed HIR program (already type-checked and lowered)
+/// * `optimization` - Optimization level (also selects overflow trapping at -O0)
+/// * `source` / `source_path` - Original module text and path, used only to render
+///   `file:line:col` in panic-family runtime diagnostics (§1.2)
 ///
 /// # Returns
 ///
@@ -84,77 +76,66 @@ impl OptimizationLevelSetting {
 ///
 /// ```
 /// use syntax_parsing::parse;
+/// use hir_lowering::lower_program;
 /// use llvm_backend::{compile, OptimizationLevelSetting};
 ///
-/// fn main() {
-///     let source = r#"
-///         func add(a: i32, b: i32) -> i32 {
-///             return a + b
-///         }
-///     "#;
-///
-///     let ast = parse(source).unwrap();
-///     let object_code =
-///         compile(&ast, OptimizationLevelSetting::O2, source, "example.nr").unwrap();
-///     // Write object_code to file or link to executable
-/// }
+/// let source = "func add(a: i32, b: i32) -> i32 { return a + b }";
+/// let ast = parse(source).unwrap();
+/// let hir = lower_program(&ast).unwrap();
+/// let object_code =
+///     compile(&hir, OptimizationLevelSetting::O2, source, "example.nr").unwrap();
+/// // Write object_code to file or link to executable
 /// ```
 pub fn compile(
-    items: &[Item],
+    program: &HirProgram,
     optimization: OptimizationLevelSetting,
     source: &str,
     source_path: &str,
 ) -> CodegenResult<Vec<u8>> {
-    // Collect struct definitions first so resolve_syntax_type can recognise struct names
-    // when processing function parameter and return types below.
+    let items = &program.items;
+
+    // Collect struct definitions first so struct field/parameter types resolve below.
     let mut struct_defs: HashMap<String, Vec<(String, Type)>> = HashMap::new();
     for item in items {
-        if let Item::Struct(def) = item {
+        if let HirItem::Struct(def) = item {
             let mut fields = Vec::new();
             for field in &def.fields {
-                fields.push((field.name.name.clone(), resolve_syntax_type(&field.ty)?));
+                fields.push((field.name.clone(), Type::from_hir(&field.ty)));
             }
-            struct_defs.insert(def.name.name.clone(), fields);
+            struct_defs.insert(def.name.clone(), fields);
         }
     }
 
-    // Extract function types from AST (caller is responsible for semantic validation)
+    // Extract function signatures from the HIR (caller validated semantics already).
     let mut func_types = HashMap::new();
     for item in items {
         match item {
-            Item::Function(func_def) => {
-                let mut param_types = Vec::new();
-                for param in &func_def.params {
-                    let ty = resolve_syntax_type(&param.ty)?;
-                    param_types.push(ty);
-                }
-
-                let return_type = if let Some(ret_ty) = &func_def.return_type {
-                    resolve_syntax_type(ret_ty)?
-                } else {
-                    Type::Void
-                };
-
+            HirItem::Function(func_def) => {
+                let param_types = func_def
+                    .params
+                    .iter()
+                    .map(|p| Type::from_hir(&p.ty))
+                    .collect();
                 func_types.insert(
-                    func_def.name.name.clone(),
+                    func_def.name.clone(),
                     Type::Function {
                         params: param_types,
-                        ret: Box::new(return_type),
+                        ret: Box::new(Type::from_hir(&func_def.return_type)),
                     },
                 );
             }
 
-            Item::Impl(impl_def) => {
-                let struct_name = &impl_def.type_name.name;
+            HirItem::Impl(impl_def) => {
+                let struct_name = &impl_def.type_name;
                 for method in &impl_def.methods {
                     // Consuming `self` was rejected by semantic analysis and must not
                     // reach codegen; `&self`, `&mut self`, and associated functions
                     // all need a registered signature.
-                    if matches!(method.self_param, Some(SelfParam::Owned)) {
+                    if matches!(method.self_param, Some(HirSelfParam::Owned)) {
                         continue;
                     }
 
-                    let mangled = format!("{}__{}", struct_name, method.name.name);
+                    let mangled = format!("{}__{}", struct_name, method.name);
                     let mut param_types: Vec<Type> = Vec::new();
 
                     // Implicit `self` parameter for instance methods.
@@ -163,26 +144,20 @@ pub fn compile(
                     }
 
                     for param in &method.params {
-                        param_types.push(resolve_syntax_type(&param.ty)?);
+                        param_types.push(Type::from_hir(&param.ty));
                     }
-
-                    let return_type = if let Some(ret_ty) = &method.return_type {
-                        resolve_syntax_type(ret_ty)?
-                    } else {
-                        Type::Void
-                    };
 
                     func_types.insert(
                         mangled,
                         Type::Function {
                             params: param_types,
-                            ret: Box::new(return_type),
+                            ret: Box::new(Type::from_hir(&method.return_type)),
                         },
                     );
                 }
             }
 
-            Item::Struct(_) | Item::Const(_) => {}
+            HirItem::Struct(_) | HirItem::Const(_) => {}
         }
     }
 
@@ -191,13 +166,9 @@ pub fn compile(
     // `impl Drop for T { func drop(&mut self) }` shape and the no-Copy rule.
     let mut drop_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     for item in items {
-        if let Item::Impl(impl_def) = item {
-            if impl_def
-                .trait_name
-                .as_ref()
-                .is_some_and(|t| t.name == "Drop")
-            {
-                drop_types.insert(impl_def.type_name.name.clone());
+        if let HirItem::Impl(impl_def) = item {
+            if impl_def.trait_name.as_deref() == Some("Drop") {
+                drop_types.insert(impl_def.type_name.clone());
             }
         }
     }
@@ -218,13 +189,10 @@ pub fn compile(
     // Debug builds (-O0) trap on integer overflow; release builds wrap (§1.2).
     codegen_ctx.set_overflow_checks(optimization == OptimizationLevelSetting::O0);
 
-    // Store type information for expressions (including const types for identifier resolution)
-    codegen_ctx.store_expr_types(items, &func_types)?;
-
     // Emit module-level constants as LLVM global constants before any function.
     // This ensures all globals are defined before function bodies reference them.
     for item in items {
-        if let Item::Const(def) = item {
+        if let HirItem::Const(def) = item {
             codegen_ctx.codegen_global_const(def)?;
         }
     }
@@ -232,13 +200,13 @@ pub fn compile(
     // Generate code for each function and impl method
     for item in items {
         match item {
-            Item::Function(func_def) => {
+            HirItem::Function(func_def) => {
                 codegen_ctx.codegen_function(func_def, &func_types)?;
             }
-            Item::Impl(impl_def) => {
+            HirItem::Impl(impl_def) => {
                 codegen_ctx.codegen_impl(impl_def, &func_types)?;
             }
-            Item::Const(_) | Item::Struct(_) => {}
+            HirItem::Const(_) | HirItem::Struct(_) => {}
         }
     }
 
@@ -291,53 +259,17 @@ pub fn compile(
     Ok(object_code.as_slice().to_vec())
 }
 
-/// Helper function to resolve AST types to backend codegen types
-fn resolve_syntax_type(ty: &ast_types::Type) -> CodegenResult<Type> {
-    match ty {
-        ast_types::Type::Named(ident) => match ident.name.as_str() {
-            // Signed integers
-            "i8" => Ok(Type::I8),
-            "i16" => Ok(Type::I16),
-            "i32" => Ok(Type::I32),
-            "i64" => Ok(Type::I64),
-            // Unsigned integers
-            "u8" => Ok(Type::U8),
-            "u16" => Ok(Type::U16),
-            "u32" => Ok(Type::U32),
-            "u64" => Ok(Type::U64),
-            // Floating point
-            "f16" => Ok(Type::F16),
-            "bf16" => Ok(Type::BF16),
-            "f32" => Ok(Type::F32),
-            "f64" => Ok(Type::F64),
-            // Other types
-            "bool" => Ok(Type::Bool),
-            "char" => Ok(Type::Char),
-            "string" => Ok(Type::String),
-            "void" => Ok(Type::Void),
-            // Struct types are recognised here as named types; their field layout is
-            // resolved later by CodegenContext when it has access to struct_defs.
-            name => Ok(Type::Struct(name.to_string())),
-        },
-        // Immutable borrow `&T` (§2.4): an opaque pointer to the referent's storage.
-        ast_types::Type::Reference { inner, .. } => {
-            Ok(Type::Reference(Box::new(resolve_syntax_type(inner)?)))
-        }
-        // Fixed-size array `[T; N]` → backend array type (§3.1).
-        ast_types::Type::Array { element, size, .. } => Ok(Type::Array {
-            element: Box::new(resolve_syntax_type(element)?),
-            size: *size,
-        }),
-        ast_types::Type::Tensor { .. } => Err(CodegenError::UnsupportedType(
-            "tensor types not supported in Phase 1".to_string(),
-        )),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use type_mapping::TypeMapper;
+
+    /// Parse and lower `source` to typed HIR for the backend smoke tests. Mirrors the
+    /// `parse → lower → compile` pipeline `neurc` runs (lowering assumes well-typedness).
+    fn lower(source: &str) -> neuro_hir::HirProgram {
+        let ast = syntax_parsing::parse(source).expect("parsing failed");
+        hir_lowering::lower_program(&ast).expect("HIR lowering failed")
+    }
 
     #[test]
     fn test_type_mapper_primitives() {
@@ -371,8 +303,8 @@ mod tests {
             }
         "#;
 
-        let items = syntax_parsing::parse(source).expect("parsing failed");
-        let result = compile(&items, OptimizationLevelSetting::O0, source, "test.nr");
+        let hir = lower(source);
+        let result = compile(&hir, OptimizationLevelSetting::O0, source, "test.nr");
 
         assert!(result.is_ok(), "compilation failed: {:?}", result.err());
         let object_code = result.unwrap();
@@ -392,8 +324,8 @@ mod tests {
             }
         "#;
 
-        let items = syntax_parsing::parse(source).expect("parsing failed");
-        let result = compile(&items, OptimizationLevelSetting::O2, source, "test.nr");
+        let hir = lower(source);
+        let result = compile(&hir, OptimizationLevelSetting::O2, source, "test.nr");
 
         assert!(result.is_ok(), "compilation failed: {:?}", result.err());
         let object_code = result.unwrap();
@@ -413,8 +345,8 @@ mod tests {
             }
         "#;
 
-        let items = syntax_parsing::parse(source).expect("parsing failed");
-        let result = compile(&items, OptimizationLevelSetting::O0, source, "test.nr");
+        let hir = lower(source);
+        let result = compile(&hir, OptimizationLevelSetting::O0, source, "test.nr");
 
         assert!(result.is_ok(), "compilation failed: {:?}", result.err());
         assert!(
@@ -435,8 +367,8 @@ mod tests {
             }
         "#;
 
-        let items = syntax_parsing::parse(source).expect("parsing failed");
-        let result = compile(&items, OptimizationLevelSetting::O2, source, "test.nr");
+        let hir = lower(source);
+        let result = compile(&hir, OptimizationLevelSetting::O2, source, "test.nr");
 
         assert!(result.is_ok(), "compilation failed: {:?}", result.err());
         assert!(

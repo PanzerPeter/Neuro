@@ -4,10 +4,10 @@
 // aggregates stored in an alloca; indexing is a `getelementptr` + load/store with
 // a debug-build bounds guard routed through the panic runtime (§1.2).
 
-use ast_types::*;
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
+use neuro_hir::{HirExpr, HirExprKind, HirStmt};
 
 use crate::codegen::context::{CodegenContext, LoopTargets};
 use crate::errors::{CodegenError, CodegenResult};
@@ -20,14 +20,14 @@ impl<'ctx> CodegenContext<'ctx> {
     /// `coerce_if_needed`, mirroring the scalar initializer path.
     pub(crate) fn codegen_array_literal(
         &mut self,
-        elements: &[Expr],
-        span_start: usize,
+        elements: &[HirExpr],
+        array_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let (element_ty, size) = match self.expr_types.get(&span_start).cloned() {
-            Some(Type::Array { element, size }) => (*element, size),
+        let (element_ty, size) = match array_ty {
+            Type::Array { element, size } => ((**element).clone(), *size),
             _ => {
                 return Err(CodegenError::InternalError(
-                    "missing array type for array literal".to_string(),
+                    "array literal type is not an array".to_string(),
                 ))
             }
         };
@@ -51,20 +51,12 @@ impl<'ctx> CodegenContext<'ctx> {
     /// `getelementptr` + load of the element.
     pub(crate) fn codegen_index(
         &mut self,
-        object: &Expr,
-        index: &Expr,
+        object: &HirExpr,
+        index: &HirExpr,
+        obj_ty: &Type,
         span: &shared_types::Span,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        // The object's array type is keyed by the full Index span (it shares
-        // `span.start` with the object subexpression in `expr_types`).
-        let obj_ty = self
-            .index_object_types
-            .get(&(span.start, span.end))
-            .cloned()
-            .ok_or_else(|| {
-                CodegenError::InternalError("missing object type for index expression".to_string())
-            })?;
-        let (base_ptr, element_ty, size) = self.array_place_ptr(object, &obj_ty)?;
+        let (base_ptr, element_ty, size) = self.array_place_ptr(object, obj_ty)?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let elem_ptr = self.array_element_ptr(base_ptr, elem_llvm, size, index, span.start)?;
         self.builder
@@ -76,24 +68,34 @@ impl<'ctx> CodegenContext<'ctx> {
     /// (debug), then `getelementptr` + store.
     pub(crate) fn codegen_index_assignment(
         &mut self,
-        target: &shared_types::Identifier,
-        index: &Expr,
-        value: &Expr,
+        target: &str,
+        index: &HirExpr,
+        value: &HirExpr,
     ) -> CodegenResult<()> {
-        let object = Expr::Identifier(target.clone());
-        let obj_ty = self
-            .expr_types
-            .get(&target.span.start)
-            .cloned()
-            .ok_or_else(|| {
-                CodegenError::InternalError(
-                    "missing array type for index assignment target".to_string(),
-                )
-            })?;
-        let (base_ptr, element_ty, size) = self.array_place_ptr(&object, &obj_ty)?;
+        // The target is an owned array binding; recover its array type from the
+        // codegen-time local environment and its storage from `variables`.
+        let obj_ty = self.type_env.get(target).cloned().ok_or_else(|| {
+            CodegenError::InternalError(
+                "missing array type for index assignment target".to_string(),
+            )
+        })?;
+        let (element_ty, size) = match obj_ty.referent() {
+            Type::Array { element, size } => ((**element).clone(), *size),
+            other => {
+                return Err(CodegenError::InternalError(format!(
+                    "index assignment target is not an array: {:?}",
+                    other
+                )))
+            }
+        };
+        let base_ptr = self
+            .variables
+            .get(target)
+            .copied()
+            .ok_or_else(|| CodegenError::UndefinedVariable(target.to_string()))?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let elem_ptr =
-            self.array_element_ptr(base_ptr, elem_llvm, size, index, index.span().start)?;
+            self.array_element_ptr(base_ptr, elem_llvm, size, index, index.span.start)?;
         let val = self.codegen_expr(value)?;
         let val = self.coerce_if_needed(val, elem_llvm, &element_ty)?;
         self.builder.build_store(elem_ptr, val).map_err(|e| {
@@ -108,21 +110,15 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn codegen_for_each(
         &mut self,
         label: Option<&str>,
-        iterator: &shared_types::Identifier,
-        iterable: &Expr,
-        body: &[Stmt],
+        iterator: &str,
+        iterable: &HirExpr,
+        body: &[HirStmt],
     ) -> CodegenResult<()> {
         let parent_fn = self
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
 
-        let obj_ty = self
-            .expr_types
-            .get(&iterable.span().start)
-            .cloned()
-            .ok_or_else(|| {
-                CodegenError::InternalError("missing type for foreach iterable".to_string())
-            })?;
+        let obj_ty = Type::from_hir(&iterable.ty);
         let (base_ptr, element_ty, size) = self.array_place_ptr(iterable, &obj_ty)?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let arr_llvm = elem_llvm.array_type(size as u32);
@@ -138,10 +134,14 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         let elem_alloca = self
             .builder
-            .build_alloca(elem_llvm, &iterator.name)
+            .build_alloca(elem_llvm, iterator)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
-        let iter_name = iterator.name.clone();
+        // Record the element binding's resolved type so a place statement in the body
+        // (e.g. indexing a struct/array element) can recover its nominal type.
+        self.type_env
+            .insert(iterator.to_string(), element_ty.clone());
+        let iter_name = iterator.to_string();
         let previous_var = self.variables.insert(iter_name.clone(), elem_alloca);
         let previous_var_type = self.variable_types.insert(iter_name.clone(), elem_llvm);
 
@@ -267,7 +267,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// array-valued expression is materialised into a fresh temporary.
     fn array_place_ptr(
         &mut self,
-        object: &Expr,
+        object: &HirExpr,
         obj_ty: &Type,
     ) -> CodegenResult<(PointerValue<'ctx>, Type, usize)> {
         let (element_ty, size) = match obj_ty.referent() {
@@ -287,8 +287,8 @@ impl<'ctx> CodegenContext<'ctx> {
             return Ok((ptr, element_ty, size));
         }
 
-        if let Expr::Identifier(ident) = object {
-            if let Some(ptr) = self.variables.get(&ident.name).copied() {
+        if let HirExprKind::Variable(name) = &object.kind {
+            if let Some(ptr) = self.variables.get(name).copied() {
                 return Ok((ptr, element_ty, size));
             }
         }
@@ -312,15 +312,11 @@ impl<'ctx> CodegenContext<'ctx> {
         base_ptr: PointerValue<'ctx>,
         elem_llvm: BasicTypeEnum<'ctx>,
         size: usize,
-        index: &Expr,
+        index: &HirExpr,
         offset: usize,
     ) -> CodegenResult<PointerValue<'ctx>> {
         let i64t = self.context.i64_type();
-        let idx_sem = self
-            .expr_types
-            .get(&index.span().start)
-            .cloned()
-            .unwrap_or(Type::I32);
+        let idx_sem = Type::from_hir(&index.ty);
         let idx_val = self.codegen_expr(index)?.into_int_value();
         let idx64 = self.widen_index_to_i64(idx_val, &idx_sem)?;
 

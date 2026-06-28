@@ -10,62 +10,42 @@ mod literals;
 mod methods;
 mod unary;
 
-use ast_types::*;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::*;
+use neuro_hir::{HirExpr, HirExprKind};
 
-use crate::codegen::context::CodegenContext;
+use crate::codegen::context::{resolve_builtin_method, BuiltinMethod, CodegenContext};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// Generate code for an expression
-    pub(crate) fn codegen_expr(&mut self, expr: &Expr) -> CodegenResult<BasicValueEnum<'ctx>> {
-        match expr {
-            Expr::Cast {
-                expr: inner_expr,
-                target_type,
-                span,
-            } => {
-                let llvm_ty = crate::types::Type::from_ast(target_type);
-                self.codegen_cast(inner_expr, &llvm_ty, span)
+    /// Generate code for an expression. The HIR carries the resolved type on every
+    /// node (`expr.ty`), so the backend reads it directly instead of consulting a
+    /// span-keyed side table.
+    pub(crate) fn codegen_expr(&mut self, expr: &HirExpr) -> CodegenResult<BasicValueEnum<'ctx>> {
+        match &expr.kind {
+            HirExprKind::Cast { value } => {
+                let target_ty = Type::from_hir(&expr.ty);
+                self.codegen_cast(value, &target_ty)
             }
-            Expr::Literal(lit, _) => self.codegen_literal(lit),
-            Expr::Identifier(ident) => self.codegen_identifier(&ident.name),
-            Expr::Binary {
-                left,
-                op,
-                right,
-                span,
-            } => {
-                // The left-operand type is stored in `binary_left_types`, keyed by this node's
-                // full span, by visit_expr_for_types. `expr_types[span.start]` holds the result
-                // type (e.g. Bool for comparisons), which is not what codegen_binary needs when
-                // dispatching on the operand kind.
-                let left_ty = self
-                    .binary_left_types
-                    .get(&(span.start, span.end))
-                    .cloned()
-                    .ok_or_else(|| {
-                        CodegenError::InternalError(
-                            "missing type information for expression".to_string(),
-                        )
-                    })?;
+            HirExprKind::Literal(lit) => self.codegen_literal(lit),
+            HirExprKind::Variable(name) => self.codegen_identifier(name),
+            HirExprKind::Binary { op, left, right } => {
+                // `codegen_binary` dispatches on the left-operand type (instruction
+                // width / signedness), which is the operand's own type rather than the
+                // expression's result type (e.g. `Bool` for a comparison).
+                let left_ty = Type::from_hir(&left.ty);
                 self.codegen_binary(left, *op, right, &left_ty)
             }
-            Expr::Unary { op, operand, span } => {
-                let operand_ty = self.expr_types.get(&span.start).cloned().ok_or_else(|| {
-                    CodegenError::InternalError(
-                        "missing type information for expression".to_string(),
-                    )
-                })?;
+            HirExprKind::Unary { op, operand } => {
+                let operand_ty = Type::from_hir(&operand.ty);
                 self.codegen_unary(*op, operand, &operand_ty)
             }
-            Expr::Call { func, args, span } => {
+            HirExprKind::Call { callee, args } => {
                 // In value position a unit-returning call is an error — there is no
                 // value to bind. Statement position discards the result instead
                 // (see `codegen_call_dispatch` callers in `codegen_stmt`).
-                self.codegen_call_dispatch(func, args, span)?
+                self.codegen_call_dispatch(callee, args, &expr.span)?
                     .ok_or_else(|| {
                         CodegenError::InternalError(
                             "function call returned void when value expected".to_string(),
@@ -73,88 +53,91 @@ impl<'ctx> CodegenContext<'ctx> {
                     })
             }
 
-            Expr::Path { .. } => {
+            HirExprKind::Path { .. } => {
                 // A path expression used outside of a call position has no value
                 // representation at runtime; semantic analysis should have caught this.
                 Err(CodegenError::InternalError(
                     "path expression used outside of call position".to_string(),
                 ))
             }
-            Expr::Paren(inner, _) => self.codegen_expr(inner),
 
-            Expr::StructLiteral {
-                name, fields, base, ..
-            } => self.codegen_struct_literal(&name.name, fields, base.as_deref()),
-
-            Expr::FieldAccess {
-                object,
-                field,
-                span,
-            } => {
-                // The struct name for this field access was stored in fa_struct_names during
-                // type collection (keyed by the FieldAccess span.start). We cannot use
-                // expr_types here because the FieldAccess and its first sub-expression
-                // (the object Identifier) share the same span.start, and the later insert
-                // of the field type overwrites the earlier insert of the struct type.
-                let struct_name = self
-                    .fa_struct_names
-                    .get(&span.start)
-                    .ok_or_else(|| {
-                        CodegenError::InternalError(
-                            "missing struct name for field access".to_string(),
-                        )
-                    })?
-                    .clone();
-                self.codegen_field_access(object, &field.name, &struct_name)
+            HirExprKind::StructLiteral { name, fields, base } => {
+                self.codegen_struct_literal(name, fields, base.as_deref())
             }
 
-            Expr::If {
+            HirExprKind::FieldAccess { object, field } => {
+                // A `&Struct` receiver auto-derefs to read a field of the referent (§2.4).
+                let struct_name = match object.ty.referent() {
+                    neuro_hir::HirType::Struct(n) => n.clone(),
+                    other => {
+                        return Err(CodegenError::InternalError(format!(
+                            "field access on non-struct type: {}",
+                            other
+                        )))
+                    }
+                };
+                self.codegen_field_access(object, field, &struct_name)
+            }
+
+            HirExprKind::If {
                 condition,
                 then_block,
                 else_if_blocks,
                 else_block,
-                span,
-            } => self.codegen_if_expr(condition, then_block, else_if_blocks, else_block, span),
+            } => {
+                let result_ty = Type::from_hir(&expr.ty);
+                self.codegen_if_expr(
+                    condition,
+                    then_block,
+                    else_if_blocks,
+                    else_block,
+                    &result_ty,
+                )
+            }
 
-            Expr::Block { stmts, .. } => self.codegen_block_expr(stmts),
+            HirExprKind::Block { stmts } => self.codegen_block_expr(stmts),
 
             // A `loop` in value position (§3.7) lowers like the statement form, but
             // its `break v` result is loaded and returned. A unit loop (no value
             // `break`) yields the placeholder used elsewhere for void positions.
-            Expr::Loop { label, body, span } => {
-                let value =
-                    self.codegen_loop(label.as_ref().map(|l| l.name.as_str()), body, span.start)?;
+            HirExprKind::Loop { label, body } => {
+                let result_ty = Type::from_hir(&expr.ty);
+                let value = self.codegen_loop(label.as_deref(), body, &result_ty)?;
                 Ok(value.unwrap_or_else(|| self.context.i32_type().const_int(0, false).into()))
             }
 
             // `unsafe` is inert: lower its body identically to a bare block.
-            Expr::Unsafe { stmts, .. } => self.codegen_block_expr(stmts),
+            HirExprKind::Unsafe { stmts } => self.codegen_block_expr(stmts),
 
             // Borrow `&place` (§2.4) / `&mut place` (§2.5): the value of the borrow is
             // the storage pointer of the place. Every local/parameter is an alloca, so
             // its address is exactly the pointer already held in `variables`. Mutability
             // is a compile-time-only distinction — both lower to the same pointer.
-            Expr::Reference { operand, .. } => self.codegen_reference(operand),
+            HirExprKind::Reference { operand, .. } => self.codegen_reference(operand),
 
             // Dereference `*operand` (§2.5): load the referent through the reference.
-            Expr::Deref { operand, span } => self.codegen_deref(operand, span.start),
+            // The result type `T` is exactly this expression's type.
+            HirExprKind::Deref { operand } => {
+                let referent_ty = Type::from_hir(&expr.ty);
+                self.codegen_deref(operand, &referent_ty)
+            }
 
             // A range `a..b` is not a value (§2.7): it is consumed directly by
             // `string.slice`'s lowering. Semantic analysis rejects any other position,
             // so reaching the general expression path here is an internal inconsistency.
-            Expr::Range { .. } => Err(CodegenError::InternalError(
+            HirExprKind::Range { .. } => Err(CodegenError::InternalError(
                 "range expression reached codegen outside a slice argument".into(),
             )),
 
             // Array literal `[e0, ...]` and indexing `object[index]` (§3.1).
-            Expr::ArrayLiteral { elements, span } => {
-                self.codegen_array_literal(elements, span.start)
+            HirExprKind::ArrayLiteral { elements } => {
+                let array_ty = Type::from_hir(&expr.ty);
+                self.codegen_array_literal(elements, &array_ty)
             }
-            Expr::Index {
-                object,
-                index,
-                span,
-            } => self.codegen_index(object, index, span),
+            HirExprKind::Index { object, index } => {
+                let obj_ty = Type::from_hir(&object.ty);
+                self.codegen_index(object, index, &obj_ty, &expr.span)
+            }
         }
     }
 
@@ -164,56 +147,55 @@ impl<'ctx> CodegenContext<'ctx> {
     /// statement position (`codegen_stmt`), which discards a `None` result.
     pub(crate) fn codegen_call_dispatch(
         &mut self,
-        func: &Expr,
-        args: &[Expr],
+        callee: &HirExpr,
+        args: &[HirExpr],
         span: &shared_types::Span,
     ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
-        match func {
-            Expr::Identifier(ident) => {
+        match &callee.kind {
+            HirExprKind::Variable(name) => {
                 // Panic-family builtins (§1.2) lower to a diagnostic + `abort`. A user
                 // function of the same name shadows the builtin, matching the semantic
                 // resolver, so only intercept when none is registered.
-                if CodegenContext::is_panic_builtin(&ident.name)
-                    && !self.functions.contains_key(&ident.name)
-                {
-                    return Ok(Some(self.codegen_panic_builtin(
-                        &ident.name,
-                        args,
-                        *span,
-                    )?));
+                if CodegenContext::is_panic_builtin(name) && !self.functions.contains_key(name) {
+                    return Ok(Some(self.codegen_panic_builtin(name, args, *span)?));
                 }
-                self.codegen_call(&ident.name, args)
+                self.codegen_call(name, args)
             }
 
-            // Method call: `instance.method(args)` — pass self as first arg
-            Expr::FieldAccess { field, object, .. } => {
-                // Builtin intrinsics on primitive/string receivers are tagged by the
-                // type pass and lowered directly, bypassing struct mangling.
-                if let Some((kind, recv_ty)) =
-                    self.builtin_methods.get(&(span.start, span.end)).cloned()
-                {
-                    return Ok(Some(
+            // Method call: `instance.method(args)` — pass self as first arg.
+            HirExprKind::FieldAccess { object, field } => {
+                let recv_ty = Type::from_hir(&object.ty);
+                if let Type::Struct(struct_name) = recv_ty.referent() {
+                    let mangled = format!("{}__{}", struct_name, field);
+                    // `struct.clone()` (§2.3) is a builtin deep copy when no user method
+                    // named `clone` exists; semantic analysis has verified the struct
+                    // derives Clone. Every other field call is a user struct method.
+                    if field == "clone" && !self.functions.contains_key(&mangled) {
+                        return Ok(Some(self.codegen_builtin_method(
+                            BuiltinMethod::StructClone,
+                            &recv_ty,
+                            object,
+                            args,
+                        )?));
+                    }
+                    return self.codegen_method_call(&mangled, object, args);
+                }
+
+                // Non-struct receiver: a compiler-known intrinsic on a builtin type.
+                match resolve_builtin_method(&recv_ty, field) {
+                    Some((kind, _)) => Ok(Some(
                         self.codegen_builtin_method(kind, &recv_ty, object, args)?,
-                    ));
+                    )),
+                    None => Err(CodegenError::InternalError(format!(
+                        "unresolved builtin method '{}' on {:?} reached codegen",
+                        field, recv_ty
+                    ))),
                 }
-                let struct_name = self
-                    .fa_struct_names
-                    .get(&span.start)
-                    .ok_or_else(|| {
-                        CodegenError::InternalError(
-                            "missing struct name for method call".to_string(),
-                        )
-                    })?
-                    .clone();
-                let mangled = format!("{}__{}", struct_name, field.name);
-                self.codegen_method_call(&mangled, object, args)
             }
 
-            // Associated function call: `TypeName::func(args)`
-            Expr::Path {
-                type_name, member, ..
-            } => {
-                let mangled = format!("{}__{}", type_name.name, member.name);
+            // Associated function call: `TypeName::func(args)`.
+            HirExprKind::Path { type_name, member } => {
+                let mangled = format!("{}__{}", type_name, member);
                 self.codegen_call(&mangled, args)
             }
 
@@ -224,19 +206,16 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Lower a dereference `*operand` to a load of the referent (§2.5). The operand
-    /// evaluates to a pointer (a reference); the referent type recorded by the type
-    /// pass at `span_start` selects the load type.
+    /// evaluates to a pointer (a reference); `referent_ty` (this deref's result type)
+    /// selects the load type.
     fn codegen_deref(
         &mut self,
-        operand: &Expr,
-        span_start: usize,
+        operand: &HirExpr,
+        referent_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let ptr_val = self.codegen_expr(operand)?;
         let ptr = ptr_val.into_pointer_value();
-        let referent_ty = self.expr_types.get(&span_start).cloned().ok_or_else(|| {
-            CodegenError::InternalError("missing referent type for dereference".to_string())
-        })?;
-        let llvm_ty = self.get_any_llvm_type(&referent_ty)?;
+        let llvm_ty = self.get_any_llvm_type(referent_ty)?;
         self.builder.build_load(llvm_ty, ptr, "deref").map_err(|e| {
             CodegenError::LlvmError(format!("failed to load through reference: {}", e))
         })
@@ -244,16 +223,15 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Lower an immutable borrow `&place` to the storage pointer of the place (§2.4).
     /// Semantic analysis guarantees the operand is a live binding (identifier).
-    fn codegen_reference(&self, operand: &Expr) -> CodegenResult<BasicValueEnum<'ctx>> {
-        match operand {
-            Expr::Identifier(ident) => {
+    fn codegen_reference(&self, operand: &HirExpr) -> CodegenResult<BasicValueEnum<'ctx>> {
+        match &operand.kind {
+            HirExprKind::Variable(name) => {
                 let ptr = self
                     .variables
-                    .get(&ident.name)
-                    .ok_or_else(|| CodegenError::UndefinedVariable(ident.name.clone()))?;
+                    .get(name)
+                    .ok_or_else(|| CodegenError::UndefinedVariable(name.clone()))?;
                 Ok((*ptr).into())
             }
-            Expr::Paren(inner, _) => self.codegen_reference(inner),
             other => Err(CodegenError::InternalError(format!(
                 "borrow of a non-place expression reached codegen: {:?}",
                 other

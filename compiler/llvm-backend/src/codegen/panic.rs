@@ -8,8 +8,8 @@
 // syscall to stderr (fd 2) rather than buffered stdio, so the message reaches the
 // terminal before the process dies.
 
-use ast_types::Expr;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum};
+use neuro_hir::HirExpr;
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -32,7 +32,7 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn codegen_panic_builtin(
         &mut self,
         name: &str,
-        args: &[Expr],
+        args: &[HirExpr],
         span: shared_types::Span,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let location = self.panic_location_suffix(span.start);
@@ -105,7 +105,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Lower `assert(cond)`: continue on a true condition, abort on a false one.
-    fn codegen_assert(&mut self, condition: &Expr, location: &str) -> CodegenResult<()> {
+    fn codegen_assert(&mut self, condition: &HirExpr, location: &str) -> CodegenResult<()> {
         let cond_val = self.codegen_expr(condition)?.into_int_value();
 
         let parent_fn = self.current_function.ok_or_else(|| {

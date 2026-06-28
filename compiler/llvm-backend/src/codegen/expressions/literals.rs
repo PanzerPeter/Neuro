@@ -1,8 +1,8 @@
 // Neuro Programming Language - LLVM Backend
 // Codegen for expressions: Literals, identifiers, constant folding, and casts.
 
-use ast_types::*;
 use inkwell::values::*;
+use neuro_hir::{HirExpr, HirExprKind};
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -180,7 +180,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// specified by `declared_ty`, avoiding silent i32 truncation for i64/u8/etc.
     pub(crate) fn codegen_const_expr_typed(
         &self,
-        expr: &ast_types::Expr,
+        expr: &HirExpr,
         declared_ty: &crate::types::Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let folded = Self::fold_const(expr, &self.const_values)?;
@@ -189,13 +189,12 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Rust-level constant folder. Returns a `FoldedConst` scalar.
     fn fold_const(
-        expr: &ast_types::Expr,
+        expr: &HirExpr,
         consts: &std::collections::HashMap<String, BasicValueEnum<'_>>,
     ) -> CodegenResult<FoldedConst> {
-        match expr {
-            ast_types::Expr::Literal(lit, _) => Ok(FoldedConst::from_literal(lit)),
-            ast_types::Expr::Paren(inner, _) => Self::fold_const(inner, consts),
-            ast_types::Expr::Unary { op, operand, .. } => {
+        match &expr.kind {
+            HirExprKind::Literal(lit) => Ok(FoldedConst::from_literal(lit)),
+            HirExprKind::Unary { op, operand } => {
                 let v = Self::fold_const(operand, consts)?;
                 match op {
                     ast_types::UnaryOp::Negate => match v {
@@ -217,9 +216,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     },
                 }
             }
-            ast_types::Expr::Binary {
-                left, op, right, ..
-            } => {
+            HirExprKind::Binary { op, left, right } => {
                 let l = Self::fold_const(left, consts)?;
                 let r = Self::fold_const(right, consts)?;
                 use ast_types::BinaryOp;
@@ -291,21 +288,18 @@ impl<'ctx> CodegenContext<'ctx> {
                     )),
                 }
             }
-            ast_types::Expr::Cast {
-                expr: inner,
-                target_type,
-                ..
-            } => {
-                let v = Self::fold_const(inner, consts)?;
-                let target = crate::types::Type::from_ast(target_type);
+            HirExprKind::Cast { value } => {
+                let v = Self::fold_const(value, consts)?;
+                // The cast's target type is this expression's resolved type.
+                let target = crate::types::Type::from_hir(&expr.ty);
                 Ok(v.cast_to(&target))
             }
-            ast_types::Expr::Identifier(ident) => {
+            HirExprKind::Variable(name) => {
                 // Reconstruct FoldedConst from an already-emitted LLVM const value.
                 let bv = consts
-                    .get(&ident.name)
+                    .get(name)
                     .copied()
-                    .ok_or_else(|| CodegenError::UndefinedVariable(ident.name.clone()))?;
+                    .ok_or_else(|| CodegenError::UndefinedVariable(name.clone()))?;
                 FoldedConst::from_llvm(bv)
             }
             _ => Err(CodegenError::InternalError(
@@ -364,25 +358,22 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// Generate an `as` type cast cast from inner to target
+    /// Generate an `as` type cast from inner to target
     pub(crate) fn codegen_cast(
         &mut self,
-        inner: &Expr,
+        inner: &HirExpr,
         target_type: &crate::types::Type,
-        span: &shared_types::Span,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let value = self.codegen_expr(inner)?;
-        let inner_ty = self.expr_types.get(&(span.start + 1)).ok_or_else(|| {
-            CodegenError::InternalError("missing type information for cast".to_string())
-        })?;
+        let inner_ty = Type::from_hir(&inner.ty);
 
-        if inner_ty == target_type {
+        if &inner_ty == target_type {
             return Ok(value);
         }
 
         let target_llvm = self.type_mapper.map_type(target_type)?;
 
-        match (inner_ty, target_type) {
+        match (&inner_ty, target_type) {
             // Bool to int
             (crate::types::Type::Bool, t2) if t2.is_integer() => {
                 let int_value = value.into_int_value();
