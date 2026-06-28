@@ -9,32 +9,33 @@ Common problems and solutions when working with Neuro.
 **Symptoms**:
 ```
 error: No suitable version of LLVM was found system-wide or pointed
-       to by LLVM_SYS_181_PREFIX.
+       to by LLVM_SYS_201_PREFIX.
 ```
 
-**Cause**: LLVM_SYS_181_PREFIX not set or points to wrong location.
+**Cause**: LLVM_SYS_201_PREFIX not set or points to wrong location. Neuro requires LLVM 20.
 
 **Solution**:
 
 **Windows**:
 ```powershell
-# Set environment variable
-[System.Environment]::SetEnvironmentVariable('LLVM_SYS_181_PREFIX', 'C:\LLVM-1818', 'Machine')
+# Set environment variable (adjust path to your LLVM 20 install)
+[System.Environment]::SetEnvironmentVariable('LLVM_SYS_201_PREFIX', 'C:\LLVM-20', 'Machine')
 
 # Restart terminal and verify
-echo %LLVM_SYS_181_PREFIX%
+echo %LLVM_SYS_201_PREFIX%
 ```
 
 **Unix**:
 ```bash
-# Add to ~/.bashrc or ~/.zshrc
-export LLVM_SYS_181_PREFIX=/usr/lib/llvm-18
+# Add to ~/.bashrc or ~/.zshrc (path varies by distro)
+export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20   # Ubuntu/Debian
+# export LLVM_SYS_201_PREFIX=/usr/lib/llvm20  # Arch/CachyOS
 
 # Reload shell config
 source ~/.bashrc
 
 # Verify
-echo $LLVM_SYS_181_PREFIX
+echo $LLVM_SYS_201_PREFIX
 ```
 
 ### "LLVMConfig.cmake not found"
@@ -49,8 +50,8 @@ Could not find LLVMConfig.cmake
 **Solution**:
 
 Download and extract the full development package:
-- Windows: `clang+llvm-18.1.8-x86_64-pc-windows-msvc.tar.xz`
-- URL: https://github.com/llvm/llvm-project/releases/tag/llvmorg-18.1.8
+- Windows: the LLVM 20 `clang+llvm-20.*-x86_64-pc-windows-msvc.tar.xz` archive
+- URL: https://github.com/llvm/llvm-project/releases
 
 **DO NOT** use the `.exe` installer - it lacks required development files.
 

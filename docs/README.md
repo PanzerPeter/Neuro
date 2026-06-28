@@ -38,7 +38,9 @@
 - [Lexical Analysis](compiler/components/lexical-analysis.md) — Tokenizer
 - [Syntax Parsing](compiler/components/syntax-parsing.md) — AST generation
 - [Semantic Analysis](compiler/components/semantic-analysis.md) — Type checking
-- [LLVM Backend](compiler/components/llvm-backend.md) — Native code generation
+- [HIR Lowering](compiler/components/hir-lowering.md) — AST → typed High-Level IR (`neuro-hir`)
+- [LLVM Backend](compiler/components/llvm-backend.md) — Native code generation (from HIR)
+- [MLIR Backend](compiler/components/mlir-backend.md) — Experimental HIR → MLIR path (Phase 1.8 scaffold, off by default)
 
 ## What is Neuro?
 
@@ -134,14 +136,18 @@ Source File (.nr)
   → Lexical Analysis   — tokenization
   → Syntax Parsing     — AST generation
   → Semantic Analysis  — type checking
-  → LLVM Backend       — object code (inkwell / LLVM 20)
+  → HIR Lowering       — AST → typed High-Level IR (neuro-hir)
+  → LLVM Backend       — object code (consumes HIR; inkwell / LLVM 20)
   → System Linker      — native executable
 ```
 
+The typed **High-Level IR** (`neuro-hir`) is the backend-agnostic contract: every backend lowers
+from it. The LLVM backend consumes it today; the experimental `mlir-backend` consumes the same HIR
+behind the off-by-default `mlir` feature (Phase 1.8 scaffold).
+
 **Planned extension (Phase 3+):**
 ```
-Tensor/AI path:
-  → Neuro High-Level IR
+Tensor/AI path (lowers the same typed HIR):
   → MLIR (linalg / tensor / func / arith)
   → Enzyme MLIR AD pass (@grad)
   → GPU dialects (nvgpu / rocdl / Triton)  or  llvm dialect
@@ -263,6 +269,6 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 
 ---
 
-**Last Updated**: 2026-06-17
-**Version**: Phase 1.8 complete · Phase 1.7 (ownership) active · Phase 2 overlapping (v1.50.0)
+**Last Updated**: 2026-06-28
+**Version**: Phase 1.8 complete · Phase 1.7 (ownership) active · Phase 2 overlapping (v1.50.1)
 **Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.9.0

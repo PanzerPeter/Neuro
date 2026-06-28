@@ -109,17 +109,22 @@ RUST_LOG=info neurc compile program.nr    # Standard output
 RUST_LOG=debug neurc compile program.nr   # Detailed diagnostics
 ```
 
-### LLVM_SYS_181_PREFIX
+### LLVM_SYS_201_PREFIX
 
-Path to LLVM 18.1.8 installation (required):
+Path to the LLVM 20 installation (required to build the compiler):
 
 ```bash
-# Windows
-setx LLVM_SYS_181_PREFIX "C:\LLVM-1818"
+# Arch / CachyOS
+export LLVM_SYS_201_PREFIX=/usr/lib/llvm20
 
-# Unix
-export LLVM_SYS_181_PREFIX=/usr/lib/llvm-18
+# Ubuntu / Debian
+export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20
+
+# macOS (Homebrew)
+export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)
 ```
+
+See the [Installation Guide](../getting-started/installation.md) for full setup.
 
 ## Workflow Examples
 
@@ -264,7 +269,7 @@ Typical compilation times (Phase 1):
 
 **Requirements**:
 - MSVC Build Tools 2022 OR MinGW-w64
-- LLVM 18.1.8 (full development package)
+- LLVM 20 (full development package)
 - vcpkg with libxml2
 
 **Executable extension**: Always `.exe`
@@ -281,7 +286,7 @@ neurc compile examples/basics/hello.nr
 
 **Requirements**:
 - GCC or Clang
-- LLVM 18
+- LLVM 20
 - Build essentials (make, cmake, etc.)
 
 **Executable extension**: None (no extension)
@@ -296,7 +301,7 @@ chmod +x ./program
 
 **Requirements**:
 - Xcode Command Line Tools
-- LLVM 18 (via Homebrew)
+- LLVM 20 (via Homebrew, `llvm@20`)
 
 **Apple Silicon**: Fully supported
 
