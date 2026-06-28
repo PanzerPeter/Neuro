@@ -10,13 +10,18 @@ publish.workspace = true
 [dependencies]
 melior = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
+neuro-hir = { path = "../infrastructure/neuro-hir", optional = true }
+
+[dev-dependencies]
+shared-types = { path = "../infrastructure/shared-types" }
 
 [features]
 # The MLIR path is opt-in: enabling `mlir` pulls in melior (and an MLIR 20
-# toolchain at build time). Default builds compile a trivial placeholder so the
-# workspace builds and tests on stock LLVM 20 without MLIR — see CONTEXT.md.
+# toolchain at build time) plus the neuro-hir contract it lowers from. Default
+# builds compile a trivial placeholder so the workspace builds and tests on stock
+# LLVM 20 without MLIR — see CONTEXT.md.
 default = []
-mlir = ["dep:melior", "dep:thiserror"]
+mlir = ["dep:melior", "dep:thiserror", "dep:neuro-hir"]
 
 [lib]
 path = "src/lib.rs"
