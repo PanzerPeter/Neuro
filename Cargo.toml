@@ -71,7 +71,7 @@ anyhow = "1.0"
 miette = { version = "7.0", features = ["fancy"] }
 
 # Lexical Analysis
-logos = "0.14"
+logos = "0.16"
 unicode-segmentation = "1.11"
 unicode-ident = "1.0"
 
@@ -99,7 +99,7 @@ inkwell = { version = "0.9.0", default-features = false, features = ["llvm20-1",
 # includes MLIR (the same prefix as LLVM_SYS_201_PREFIX, so both bindings share
 # one libLLVM-20 dylib). Arch's stock llvm20 omits MLIR; build LLVM 20 with
 # -DLLVM_ENABLE_PROJECTS=mlir or use a prefix that ships mlir-c headers + libMLIR.
-melior = "0.25.1"
+melior = "0.27.0"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
