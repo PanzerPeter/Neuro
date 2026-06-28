@@ -471,7 +471,7 @@ Tensor/AI path: AST → Neuro High-Level IR
 | **1**   | Core MVP — types, functions, control flow, LLVM backend | ✅ Complete |
 | **1.5** | Syntax & semantics stabilization — parser fixes, `const`, `as` casts, compound assignment, bitwise ops, integer suffixes, if/block expressions, `while true` lint, IEEE-754 float comparisons, string fat pointers | ✅ Complete |
 | **1.7** | Ownership & borrow checker — move semantics ✅, `Copy` trait ✅, immutable borrows `&T` ✅, mutable borrows `&mut T` ✅, borrow exclusivity ✅, lifetime elision / returned-reference outlives ✅, `&mut self` methods ✅, deterministic `Drop` ✅, full lifetime inference, growable heap string / collections | 🔄 In progress |
-| **1.8** | Backend plumbing — `neuro-hir` typed IR crate ✅, `melior` integration ✅, AST → HIR lowering ✅, LLVM backend lowers from HIR ✅; remaining: mlir-backend HIR scaffold | 🔄 In progress |
+| **1.8** | Backend plumbing — `neuro-hir` typed IR crate ✅, `melior` integration ✅, AST → HIR lowering ✅, LLVM backend lowers from HIR ✅, mlir-backend HIR scaffold ✅ | ✅ Complete |
 | **2**   | Core language — arrays ✅, tuples, structs ✅, methods ✅, enums, pattern matching, generics, traits, closures, type aliases, newtypes, `Option`/`Result`, `??`, `?`, modules, prelude, string interpolation | 🔄 In progress |
 | **3**   | Tensors & MLIR — `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | 📋 Planned |
 | **4**   | Automatic differentiation — Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | 📋 Planned |

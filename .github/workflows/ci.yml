@@ -40,6 +40,9 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: Run MLIR backend smoke test
+        run: cargo test -p mlir-backend --features mlir
+
   security_audit:
     name: Security Audit
     runs-on: ubuntu-latest

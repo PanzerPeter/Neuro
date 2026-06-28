@@ -4,7 +4,7 @@ Thank you for your interest in contributing to the Neuro programming language co
 
 ## Project Status
 
-Neuro is in **Phase 1.7 — Ownership & Borrow Checker** (the active phase). Earlier phases (core MVP, syntax & semantics stabilization) are complete; the LLVM 20 backend, string fat pointers, structs, methods, casts, bitwise ops, literal suffixes, if/block expressions, builtin-method dispatch, integer overflow semantics, and type aliases have all landed. Phase 1.8 (HIR / MLIR plumbing) follows, with Phase 2 overlapping. We welcome contributions, but note:
+Neuro is in **Phase 1.7 — Ownership & Borrow Checker** (the active phase). Earlier phases (core MVP, syntax & semantics stabilization) are complete; the LLVM 20 backend, string fat pointers, structs, methods, casts, bitwise ops, literal suffixes, if/block expressions, builtin-method dispatch, integer overflow semantics, and type aliases have all landed. Phase 1.8 (HIR / MLIR plumbing) is complete — the typed HIR, AST→HIR lowering, the HIR-routed LLVM backend, and the `mlir-backend` HIR scaffold have all landed. Phase 2 overlaps. We welcome contributions, but note:
 
 - Architecture and design are still evolving
 - Breaking changes are expected between minor versions

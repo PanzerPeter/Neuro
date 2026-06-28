@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.50.0] - 2026-06-28
+
+### Added
+- `infra`: scaffold the `mlir-backend` HIR lowering path (Phase 1.8, final item). The `mlir`-gated slice gains `lower_program(&HirProgram) -> Result<String, MlirError>`: it walks the typed HIR and emits a trivial, verifier-clean MLIR module — one `func.func` *declaration* (empty region, private visibility) per free function and per `impl` method — proving the HIR → `melior` → verified MLIR pipeline end-to-end. HIR types map to their MLIR scalars (`i8`–`i64`, `i1` for `bool`, `i32` for `char`, `f16`/`bf16`/`f32`/`f64`); every aggregate / reference / string type maps to an opaque `!llvm.ptr` until real tensor and struct lowering arrives (Phase 3+). A method receiver lowers to a pointer parameter; `void` is the empty result list in return position and a new `MlirError::UnsupportedType` anywhere else. Function bodies are intentionally **not** lowered yet — that is the Phase 3 linalg/tensor work. The slice gains an `mlir`-gated infrastructure dependency on `neuro-hir` (the typed HIR contract it consumes), keeping the default placeholder build free of both MLIR and `neuro-hir`. The pre-existing HIR-independent `emit_smoke_module` wiring check is retained. CI now runs `cargo test -p mlir-backend --features mlir` on the MLIR-provisioned Linux job, so the scaffold is exercised, not just clippy-checked. Three new unit tests cover free-function lowering, method-with-receiver / `void`-return lowering, and scalar type mapping. **This completes Phase 1.8** (HIR & MLIR backend plumbing); the default `cargo test --workspace` stays at 746 (the `mlir` tests are feature-gated).
+
+---
+
 ## [1.49.0] - 2026-06-28
 
 ### Changed

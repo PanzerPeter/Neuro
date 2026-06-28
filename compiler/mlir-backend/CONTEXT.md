@@ -1,34 +1,38 @@
 # mlir-backend
 
 ## Purpose
-Anchor the `melior` (Rust MLIR bindings) integration for the Phase 3+ tensor /
-autodiff / GPU lowering path. As of Phase 1.8 item 1 it does not consume HIR or
-take part in compilation — it exists to bring `melior` into the workspace
-alongside inkwell and prove both bindings link the same LLVM 20 / MLIR 20
-toolchain. The HIR-consuming lowering entry point arrives once typed HIR exists
-(Phase 1.8 items 2–5).
+Lower the typed HIR to MLIR for the Phase 3+ tensor / autodiff / GPU path. As of
+the Phase 1.8 scaffold it consumes [`neuro_hir::HirProgram`] and emits a trivial,
+verifier-clean MLIR module (one `func.func` declaration per function / method),
+proving the HIR → `melior` → verified MLIR pipeline end-to-end. Real body lowering
+(linalg / tensor dialects) is Phase 3+.
 
 ## Feature Gate
 The MLIR path is opt-in behind the off-by-default `mlir` feature
-(`mlir = ["dep:melior", "dep:thiserror"]`). With the feature **disabled** this
-crate compiles to an empty placeholder and pulls in no MLIR toolchain, so the
-default `cargo build/test --workspace` works on stock LLVM 20 across all CI OSes.
-With the feature **enabled** it pulls in `melior` and exposes the entry point
-below. CI provisions MLIR only on Linux, where the `--all-features` lint job
-exercises the gated code; the Windows/macOS test legs build the placeholder.
+(`mlir = ["dep:melior", "dep:thiserror", "dep:neuro-hir"]`). With the feature
+**disabled** this crate compiles to an empty placeholder and pulls in no MLIR
+toolchain (nor `neuro-hir`), so the default `cargo build/test --workspace` works
+on stock LLVM 20 across all CI OSes. With the feature **enabled** it pulls in
+`melior` + `neuro-hir` and exposes the entry points below. CI provisions MLIR only
+on Linux, where the `--all-features` lint job and a dedicated
+`cargo test -p mlir-backend --features mlir` smoke step exercise the gated code;
+the Windows/macOS test legs build the placeholder.
 
-## Entry Point (feature `mlir`)
-- Type: Library function `emit_smoke_module`
-- Input: none
-- Output: `Result<String, MlirError>` — textual MLIR of a verified trivial module
+## Entry Points (feature `mlir`)
+- `lower_program(&HirProgram) -> Result<String, MlirError>` — the HIR → MLIR
+  scaffold: walks the typed HIR and returns the textual form of a verified module
+  of `func.func` declarations.
+- `emit_smoke_module() -> Result<String, MlirError>` — the pure-`melior` wiring
+  check (builds + verifies `func.func @neuro_smoke` with an `arith.addi` body),
+  independent of HIR.
 
 ## Data Ownership
 - Tables / Events Published / Events Consumed / Public Read Model: none
 
 ## Shared Kernel
-- none yet (the placeholder needs no infrastructure crate; the `mlir`-gated path
-  uses only the third-party `melior` + `thiserror`). A `diagnostics` dependency
-  arrives with the HIR-consuming lowering entry point.
+- `neuro-hir` (infrastructure) — the typed HIR contract `lower_program` consumes,
+  gated under the `mlir` feature. The crate adds no business logic of its own; the
+  `mlir`-gated path otherwise uses only the third-party `melior` + `thiserror`.
 
 ## Notes
 `melior 0.25.1` is the newest release targeting MLIR 20 (via `mlir-sys 0.5.0`);
@@ -40,8 +44,19 @@ its own `MLIR` key, so it coexists with inkwell's `llvm-20` link with no Cargo
 prefix must include MLIR (`mlir-c` headers + `libMLIR*`); Arch's stock `llvm20`
 omits MLIR, so build LLVM 20 with `-DLLVM_ENABLE_PROJECTS=mlir`.
 
-`emit_smoke_module` registers all dialects, builds
+`lower_program` registers all dialects, then maps each top-level `HirItem`:
+free functions and `impl` methods become `func.func` *declarations* (empty region,
+private visibility — external symbols, not definitions); structs and constants are
+skipped. HIR types map to MLIR scalars (`i8`–`i64`, `i1` for `bool`, `i32` for
+`char`, `f16`/`bf16`/`f32`/`f64`), and every aggregate / reference / string type
+maps to an opaque `!llvm.ptr` until real tensor and struct lowering lands
+(Phase 3+). `void` is the empty result list in return position and an error
+(`MlirError::UnsupportedType`) anywhere else. The module is run through the MLIR
+verifier before its textual form is returned.
+
+`emit_smoke_module` is the HIR-independent wiring check: it builds
 `func.func @neuro_smoke(index, index) -> index` whose body is a single
-`arith.addi`, runs the MLIR verifier, and returns the module's textual form. It
-is the Phase 1.8 integration smoke test (exercised by the crate's unit test and
-`cargo test --workspace`) until real HIR lowering lands.
+`arith.addi`, verifies it, and returns the textual form. Both functions are
+exercised by the crate's unit tests under `cargo test -p mlir-backend --features
+mlir`; the default `cargo test --workspace` builds the placeholder and runs
+neither.

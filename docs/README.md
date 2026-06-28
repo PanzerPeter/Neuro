@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Phase 1 & Phase 1.5 Complete, Phase 1.7 (ownership) active · Phase 2 overlapping — Alpha Development
+**Status**: Phase 1, 1.5 & 1.8 Complete, Phase 1.7 (ownership) active · Phase 2 overlapping — Alpha Development
 
 ## Quick Links
 
@@ -264,5 +264,5 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 ---
 
 **Last Updated**: 2026-06-17
-**Version**: Phase 1.7 (ownership) active · Phase 2 overlapping (v1.41.4)
+**Version**: Phase 1.8 complete · Phase 1.7 (ownership) active · Phase 2 overlapping (v1.50.0)
 **Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.9.0
