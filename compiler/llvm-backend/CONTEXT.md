@@ -1,22 +1,29 @@
 # llvm-backend
 
 ## Purpose
-Emit native object code from a type-checked Neuro AST via LLVM IR generation.
+Emit native object code from the typed Neuro HIR via LLVM IR generation.
 
 ## Entry Point
 - Type: Library function
-- Input: `items: &[Item], optimization: OptimizationLevelSetting, source: &str, source_path: &str`
+- Input: `program: &neuro_hir::HirProgram, optimization: OptimizationLevelSetting, source: &str, source_path: &str`
 - Output: `Result<Vec<u8>, CodegenError>`
+
+The backend consumes the typed HIR produced by `hir-lowering`: every HIR node carries its
+resolved type (`HirExpr::ty`), so codegen reads types inline rather than re-deriving them —
+there is no backend type-collection pass. A single `type_env` (binding name → resolved type),
+populated as bindings are lowered, exists only so the place statements `obj.field = …` and
+`arr[i] = …` can recover a binding's nominal struct/array type.
 
 `source` / `source_path` are the original module text and path, wrapped in a
 `source_location::SourceFile` solely to render `file:line:col` in panic-family runtime
-diagnostics (§1.2). They do not affect type-checking or codegen elsewhere.
+diagnostics (§1.2). They do not affect codegen elsewhere.
 
 ## Data Ownership
 - Tables / Events Published / Events Consumed / Public Read Model: none
 
 ## Shared Kernel
-- ast-types — read-only traversal of the type-checked AST
+- neuro-hir — the typed HIR the backend lowers from (`HirProgram` / `HirExpr` / `HirType`)
+- ast-types — the `BinaryOp` / `UnaryOp` operator enums (reused unchanged by the HIR)
 - shared-types — type system primitives
 - diagnostics — error type infrastructure
 - source-location — `SourceFile` byte-offset → line/column mapping for panic diagnostics (§1.2)
@@ -24,8 +31,8 @@ diagnostics (§1.2). They do not affect type-checking or codegen elsewhere.
 ## Notes
 inkwell 0.9.0 (feature `llvm20-1`, LLVM 20 bindings) is a third-party crate, not Shared Kernel.
 Requires LLVM 20 with MLIR enabled; set `LLVM_SYS_201_PREFIX` (e.g. `/usr/lib/llvm20`) before building.
-`semantic-analysis` is not a production dependency — neurc orders type-check before codegen.
-`syntax-parsing` appears only in `[dev-dependencies]` (integration tests).
+`semantic-analysis` is not a production dependency — neurc orders type-check then HIR lowering before codegen.
+`syntax-parsing` and `hir-lowering` appear only in `[dev-dependencies]` (tests/benches lower source to HIR before compiling).
 `src/softfloat/` carries self-contained f16/bf16 conversion builtins (`builtins.ll`, generated
 from `reference.c`); `compile` links them into the module whenever it uses `half`/`bfloat`, so the
 emitted object resolves the half-precision libcalls without a platform runtime. See **Soft-Float ABI**.

@@ -202,9 +202,9 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
         .context("Type checking failed")?;
     print_warnings(&warnings);
 
-    // Lower to typed HIR (Phase 1.8). The backend still consumes the AST today; the
-    // backend migration onto HIR is the next roadmap item. Building HIR here proves
-    // the lowering runs end-to-end on every compiled program.
+    // Lower to typed HIR (Phase 1.8). The LLVM backend consumes this HIR directly —
+    // every node carries its resolved type, so the backend no longer re-derives types
+    // from the AST.
     log::debug!("Lowering to typed HIR...");
     let hir = hir_lowering::lower_program(&ast)
         .map_err(|e| anyhow::anyhow!("HIR lowering error: {}", e))
@@ -217,7 +217,7 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
         OptimizationLevelSetting::from_u8(optimization).context("Invalid optimization level")?;
 
     let object_code =
-        llvm_backend::compile(&ast, optimization, &source, &input.display().to_string())
+        llvm_backend::compile(&hir, optimization, &source, &input.display().to_string())
             .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
             .context("Failed to generate object code")?;
 

@@ -1,8 +1,9 @@
 // Neuro Programming Language - LLVM Backend
 // Codegen for expressions: Unary operators.
 
-use ast_types::*;
+use ast_types::UnaryOp;
 use inkwell::values::*;
+use neuro_hir::HirExpr;
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -14,7 +15,7 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn codegen_unary(
         &mut self,
         op: UnaryOp,
-        operand: &Expr,
+        operand: &HirExpr,
         operand_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let val = self.codegen_expr(operand)?;

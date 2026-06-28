@@ -1,6 +1,6 @@
-use ast_types::*;
 use inkwell::types::*;
 use inkwell::values::*;
+use neuro_hir::{HirExpr, HirExprKind, HirFieldInit};
 use std::collections::HashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
@@ -37,8 +37,8 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn codegen_struct_literal(
         &mut self,
         name: &str,
-        fields: &[FieldInit],
-        base: Option<&Expr>,
+        fields: &[HirFieldInit],
+        base: Option<&HirExpr>,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let llvm_ty = self.get_struct_llvm_type(name)?;
         let def = self
@@ -54,11 +54,11 @@ impl<'ctx> CodegenContext<'ctx> {
         for field_init in fields {
             let idx = def
                 .iter()
-                .position(|(n, _)| n == &field_init.name.name)
+                .position(|(n, _)| n == &field_init.name)
                 .ok_or_else(|| {
                     CodegenError::InternalError(format!(
                         "struct '{}' has no field '{}'",
-                        name, field_init.name.name
+                        name, field_init.name
                     ))
                 })?;
             let val = self.codegen_expr(&field_init.value)?;
@@ -71,7 +71,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     agg,
                     val,
                     idx as u32,
-                    &format!("{}.{}", name, field_init.name.name),
+                    &format!("{}.{}", name, field_init.name),
                 )
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                 .into_struct_value();
@@ -82,7 +82,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Load a single field from a struct variable.
     pub(crate) fn codegen_field_access(
         &self,
-        object: &Expr,
+        object: &HirExpr,
         field_name: &str,
         struct_name: &str,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
@@ -118,7 +118,7 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         object_name: &str,
         field_name: &str,
-        value: &Expr,
+        value: &HirExpr,
     ) -> CodegenResult<()> {
         let ptr = self
             .variables
@@ -181,22 +181,22 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Only simple identifier objects are supported (no chained access).
     pub(crate) fn get_struct_ptr_and_type(
         &self,
-        object: &Expr,
+        object: &HirExpr,
         struct_name: &str,
     ) -> CodegenResult<(PointerValue<'ctx>, StructType<'ctx>)> {
-        match object {
-            Expr::Identifier(ident) => {
+        match &object.kind {
+            HirExprKind::Variable(name) => {
                 let alloca = self
                     .variables
-                    .get(&ident.name)
+                    .get(name)
                     .copied()
-                    .ok_or_else(|| CodegenError::UndefinedVariable(ident.name.clone()))?;
+                    .ok_or_else(|| CodegenError::UndefinedVariable(name.clone()))?;
                 let llvm_ty = self.get_struct_llvm_type(struct_name)?;
                 // A `&Struct` binding stores a pointer to the struct in its alloca (the
                 // mapped LLVM type is `ptr`, not the aggregate). Load that pointer to reach
                 // the borrowed struct; an owned struct binding's alloca is the struct itself.
-                let var_ty = self.variable_types.get(&ident.name).ok_or_else(|| {
-                    CodegenError::InternalError(format!("missing type for variable {}", ident.name))
+                let var_ty = self.variable_types.get(name).ok_or_else(|| {
+                    CodegenError::InternalError(format!("missing type for variable {}", name))
                 })?;
                 if var_ty.is_pointer_type() {
                     let struct_ptr = self

@@ -1,9 +1,9 @@
 // Neuro Programming Language - LLVM Backend
 // Codegen for expressions: Expression-position control flow (if-expressions, block expressions).
 
-use ast_types::*;
 use inkwell::basic_block::BasicBlock;
 use inkwell::values::*;
+use neuro_hir::{HirExpr, HirStmt};
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -11,19 +11,19 @@ use crate::types::Type;
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Codegen a value-producing if-expression using an alloca result slot.
+    ///
+    /// `result_ty` is the if-expression's resolved type — `expr.ty` for a value
+    /// position `if`, or the function return type when a tail `if` is the implicit
+    /// return. `Void` selects the statement form (no result slot).
     pub(crate) fn codegen_if_expr(
         &mut self,
-        condition: &Expr,
-        then_block: &[Stmt],
-        else_if_blocks: &[(Expr, Vec<Stmt>)],
-        else_block: &Option<Vec<Stmt>>,
-        span: &shared_types::Span,
+        condition: &HirExpr,
+        then_block: &[HirStmt],
+        else_if_blocks: &[(HirExpr, Vec<HirStmt>)],
+        else_block: &Option<Vec<HirStmt>>,
+        result_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let result_ty = self
-            .expr_types
-            .get(&span.start)
-            .cloned()
-            .unwrap_or(Type::Void);
+        let result_ty = result_ty.clone();
 
         if matches!(result_ty, Type::Void) {
             self.codegen_if(condition, then_block, else_if_blocks, else_block)?;
@@ -69,8 +69,8 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Recursively emit the else/elif arm of an if-expression, storing the result into `alloca`.
     fn codegen_if_expr_else_arm(
         &mut self,
-        else_if_blocks: &[(Expr, Vec<Stmt>)],
-        else_block: &Option<Vec<Stmt>>,
+        else_if_blocks: &[(HirExpr, Vec<HirStmt>)],
+        else_block: &Option<Vec<HirStmt>>,
         alloca: PointerValue<'ctx>,
         merge_bb: BasicBlock<'ctx>,
     ) -> CodegenResult<()> {
@@ -122,7 +122,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// is cleared as a move, §2.2).
     fn codegen_arm_into_alloca(
         &mut self,
-        stmts: &[Stmt],
+        stmts: &[HirStmt],
         alloca: PointerValue<'ctx>,
     ) -> CodegenResult<()> {
         self.push_drop_scope();
@@ -137,7 +137,7 @@ impl<'ctx> CodegenContext<'ctx> {
             self.codegen_stmt(stmt)?;
         }
         if !self.current_block_terminated() {
-            if let Stmt::Expr(expr) = last {
+            if let HirStmt::Expr(expr) = last {
                 let val = self.codegen_expr(expr)?;
                 // A diverging arm value (e.g. `else { panic("x") }`) terminates the block
                 // with `unreachable`; there is no result to store and the caller skips merge.
@@ -161,7 +161,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Codegen a block expression: run stmts, return the last `Stmt::Expr`'s value.
     pub(crate) fn codegen_block_expr(
         &mut self,
-        stmts: &[Stmt],
+        stmts: &[HirStmt],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         self.push_drop_scope();
         let Some((last, init)) = stmts.split_last() else {
@@ -174,7 +174,7 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             self.codegen_stmt(stmt)?;
         }
-        let result = if let Stmt::Expr(expr) = last {
+        let result = if let HirStmt::Expr(expr) = last {
             let val = self.codegen_expr(expr)?;
             // The yielded place escapes the block, so it is moved out, not dropped here.
             self.mark_moved_for_drop(expr);

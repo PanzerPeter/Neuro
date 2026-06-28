@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.49.0] - 2026-06-28
+
+### Changed
+- `codegen`: migrate the LLVM backend off the AST onto the typed HIR (Phase 1.8 item 4). The `compile` entry point now takes `&neuro_hir::HirProgram` instead of `&[ast_types::Item]`; `neurc` passes the lowered HIR straight to the backend. Because every HIR node carries its resolved type (`HirExpr::ty`), the backend reads types inline instead of re-deriving them, so the entire codegen-side type-collection pass is **deleted**: `codegen/type_pass.rs` (≈880 lines) and the span-keyed side tables it populated (`expr_types`, `binary_left_types`, `builtin_methods`, `index_object_types`, `fa_struct_names`, `tp_loop_*`, `global_const_types`) are gone. `CodegenContext` keeps a single `type_env` (name → resolved type), now populated as bindings are lowered, solely so the place statements `obj.field = …` and `arr[i] = …` can recover a binding's nominal struct/array type. Value-producing `if`/`loop` and array/index nodes take their result type from the HIR node (a tail `if` used as an implicit return takes the function's return type); builtin-method dispatch resolves from the receiver's `object.ty` at the call site, mirroring the former type pass. The backend gains an infrastructure dependency on `neuro-hir` and a dev-dependency on `hir-lowering` (tests/benches lower before compiling, mirroring the existing `syntax-parsing` dev setup). No language-surface or behavioral change: all 746 workspace tests pass against the HIR-routed backend, and the example binaries are byte-for-byte equivalent. Acceptance for the roadmap item ("full test suite passes against the HIR-routed backend") is met. The remaining Phase 1.8 item is the `mlir-backend` HIR scaffold.
+
+---
+
 ## [1.48.0] - 2026-06-27
 
 ### Added

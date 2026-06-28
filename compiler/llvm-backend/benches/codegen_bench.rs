@@ -51,27 +51,19 @@ fn bench_codegen(c: &mut Criterion) {
 
     for case in ["simple_function", "milestone_program", "factorial_program"] {
         let source = build_source(case);
-        let items = syntax_parsing::parse(source).expect("benchmark source must parse");
+        let ast = syntax_parsing::parse(source).expect("benchmark source must parse");
+        let hir = hir_lowering::lower_program(&ast).expect("benchmark source must lower");
 
-        group.bench_with_input(
-            BenchmarkId::new("compile", case),
-            &items,
-            |b, parsed_items| {
-                b.iter(|| {
-                    let result = compile(
-                        parsed_items,
-                        OptimizationLevelSetting::O2,
-                        source,
-                        "bench.nr",
-                    );
-                    assert!(
-                        result.is_ok(),
-                        "benchmark compilation failed: {:?}",
-                        result.err()
-                    );
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("compile", case), &hir, |b, program| {
+            b.iter(|| {
+                let result = compile(program, OptimizationLevelSetting::O2, source, "bench.nr");
+                assert!(
+                    result.is_ok(),
+                    "benchmark compilation failed: {:?}",
+                    result.err()
+                );
+            })
+        });
     }
 
     group.finish();

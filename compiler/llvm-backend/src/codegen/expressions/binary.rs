@@ -1,10 +1,11 @@
 // Neuro Programming Language - LLVM Backend
 // Codegen for expressions: Binary operators: arithmetic, comparison, logical, string equality.
 
-use ast_types::*;
+use ast_types::BinaryOp;
 use inkwell::intrinsics::Intrinsic;
 use inkwell::values::*;
 use inkwell::{FloatPredicate, IntPredicate};
+use neuro_hir::HirExpr;
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -202,9 +203,9 @@ impl<'ctx> CodegenContext<'ctx> {
     /// The two incoming values are merged with a phi node in the merge block.
     fn codegen_short_circuit(
         &mut self,
-        left: &Expr,
+        left: &HirExpr,
         op: BinaryOp,
-        right: &Expr,
+        right: &HirExpr,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let parent_fn = self.current_function.ok_or_else(|| {
             CodegenError::InternalError("logical operator outside a function".into())
@@ -391,9 +392,9 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a binary expression
     pub(crate) fn codegen_binary(
         &mut self,
-        left: &Expr,
+        left: &HirExpr,
         op: BinaryOp,
-        right: &Expr,
+        right: &HirExpr,
         left_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         // `&&` and `||` short-circuit (§1.4): the RHS must only be evaluated when

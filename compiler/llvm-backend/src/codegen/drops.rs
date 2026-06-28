@@ -9,8 +9,8 @@
 // program declares no `Drop` types: the scope stack stays empty and nothing is
 // emitted.
 
-use ast_types::Expr;
 use inkwell::values::{BasicValueEnum, PointerValue};
+use neuro_hir::{HirExpr, HirExprKind, HirType};
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
@@ -31,24 +31,15 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Resolve the `Drop`-type struct name a binding holds, or `None` if the binding
-    /// is not a Drop type. Prefers the declared annotation; otherwise reads the
-    /// initializer's recorded type. Only struct names present in `drop_types` match,
-    /// so this returns `None` for every program without Drop types.
-    pub(crate) fn drop_struct_name(
-        &self,
-        declared_ty: Option<&ast_types::Type>,
-        init: Option<&Expr>,
-    ) -> Option<String> {
+    /// is not a Drop type. The HIR carries the binding's resolved type, so this reads
+    /// it directly. Only struct names present in `drop_types` match, so this returns
+    /// `None` for every program without Drop types.
+    pub(crate) fn drop_struct_name(&self, binding_ty: &HirType) -> Option<String> {
         if self.drop_types.is_empty() {
             return None;
         }
-        let resolved = if let Some(decl) = declared_ty {
-            Some(Type::from_ast(decl))
-        } else {
-            init.and_then(|e| self.expr_types.get(&e.span().start).cloned())
-        };
-        match resolved {
-            Some(Type::Struct(name)) if self.drop_types.contains(&name) => Some(name),
+        match Type::from_hir(binding_ty) {
+            Type::Struct(name) if self.drop_types.contains(&name) => Some(name),
             _ => None,
         }
     }
@@ -87,15 +78,11 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Clear the drop flag of the place named by `expr` if it is a tracked `Drop`
     /// binding being moved out of (§2.2). A non-identifier, or a binding that is not
     /// Drop-tracked, is a no-op. Mirrors the move sites the type checker validates.
-    pub(crate) fn mark_moved_for_drop(&mut self, expr: &Expr) {
+    pub(crate) fn mark_moved_for_drop(&mut self, expr: &HirExpr) {
         if self.drop_scopes.is_empty() {
             return;
         }
-        let mut place = expr;
-        while let Expr::Paren(inner, _) = place {
-            place = inner;
-        }
-        let Expr::Identifier(ident) = place else {
+        let HirExprKind::Variable(name) = &expr.kind else {
             return;
         };
 
@@ -104,7 +91,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .iter()
             .rev()
             .flat_map(|scope| scope.iter().rev())
-            .find(|entry| entry.name == ident.name)
+            .find(|entry| &entry.name == name)
             .map(|entry| entry.flag_ptr);
 
         if let Some(flag_ptr) = flag_ptr {

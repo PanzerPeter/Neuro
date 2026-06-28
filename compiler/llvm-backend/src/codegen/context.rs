@@ -148,64 +148,23 @@ pub(crate) struct CodegenContext<'ctx> {
     /// Current function being compiled (for return type checking)
     pub(crate) current_function: Option<FunctionValue<'ctx>>,
 
-    /// Type information for expressions (needed for operator codegen)
-    pub(crate) expr_types: HashMap<usize, Type>, // Maps expression span.start -> Type
-
-    /// Variable type information during type collection (name -> Type)
+    /// Resolved Neuro types of the in-scope local bindings, parameters, and `self`
+    /// (name → type), populated as each binding is lowered. The HIR carries every
+    /// expression's type inline, so this only serves the place-statement codegen
+    /// (`object.field = …` and `target[i] = …`) that must recover the *binding's*
+    /// nominal type — a struct or array name LLVM types do not preserve.
     pub(crate) type_env: HashMap<String, Type>,
 
     /// Active loop targets for break/continue statements.
     pub(crate) loop_targets: Vec<LoopTargets<'ctx>>,
 
-    /// Type-collection-pass stack of loops currently being visited, innermost last,
-    /// as `(label, loop span.start)`. Lets a value-carrying `break v` resolve the
-    /// loop it targets (innermost, or by label) so its result type can be recorded.
-    pub(crate) tp_loop_stack: Vec<(Option<String>, usize)>,
-
-    /// Type-collection-pass map: loop `span.start` → the type its value-`break`s
-    /// produce (§3.7). Read back when finishing a `loop` to set its expression type
-    /// and size its result slot during codegen.
-    pub(crate) tp_loop_break_types: HashMap<usize, Type>,
-
     /// Struct field definitions (name → ordered [(field_name, field_type)]).
     /// Populated before code generation begins; used by GEP and insertvalue.
     pub(crate) struct_defs: HashMap<String, Vec<(String, Type)>>,
 
-    /// Maps FieldAccess span.start → struct name of the object.
-    /// Needed because FieldAccess and its first sub-expression (the object Identifier)
-    /// share the same span.start, causing expr_types collisions.
-    pub(crate) fa_struct_names: HashMap<usize, String>,
-
-    /// Maps a binary expression's full span `(start, end)` → its left-operand type, used by
-    /// `codegen_binary` to pick the comparison/arithmetic instruction width and signedness.
-    /// Keyed by the full span rather than `span.start + 1`: a binary node and its leftmost
-    /// descendant share the same `span.start`, so the parent's left-type slot would clobber
-    /// the child's. `(start, end)` is unique per node (the child's `end` is always smaller).
-    pub(crate) binary_left_types: HashMap<(usize, usize), Type>,
-
-    /// Maps a builtin method-call's `Call` full span `(start, end)` → the resolved intrinsic
-    /// plus the receiver's type, so `codegen_expr` lowers it directly instead of looking up a
-    /// struct method. The receiver type is stored here rather than read back from `expr_types`
-    /// because an enclosing cast (`x.shr(n) as T`) shares the receiver's `span.start` and
-    /// would overwrite that entry, losing the receiver's signedness. Keyed by the full span
-    /// rather than `span.start` because a chained builtin call (`s.clone().len()`) nests two
-    /// `Call` nodes that share the same `span.start`; the full `(start, end)` is unique per node.
-    pub(crate) builtin_methods: HashMap<(usize, usize), (BuiltinMethod, Type)>,
-
-    /// Maps an `Index` expression's full span `(start, end)` → the indexed object's
-    /// type (an array, or a borrow of one). Keyed by the full span rather than
-    /// `span.start` because an `Index` node and its leftmost object subexpression
-    /// share `span.start`, so the element-type entry written at the node's start
-    /// would otherwise clobber the object's array-type entry in `expr_types` (§3.1).
-    pub(crate) index_object_types: HashMap<(usize, usize), Type>,
-
     /// Evaluated constant values (both module-level and function-level).
     /// `codegen_identifier` checks this before `variables` to allow locals to shadow consts.
     pub(crate) const_values: HashMap<String, BasicValueEnum<'ctx>>,
-
-    /// Types of module-level constants, pre-populated so `visit_function_for_types`
-    /// can seed `type_env` after each clear.
-    pub(crate) global_const_types: HashMap<String, Type>,
 
     /// When true (debug builds, `-O0`), integer `+`/`-`/`*` are emitted with
     /// overflow detection that traps at runtime. When false (release builds),
@@ -243,18 +202,10 @@ impl<'ctx> CodegenContext<'ctx> {
             variable_types: HashMap::new(),
             functions: HashMap::new(),
             current_function: None,
-            expr_types: HashMap::new(),
             type_env: HashMap::new(),
             loop_targets: Vec::new(),
-            tp_loop_stack: Vec::new(),
-            tp_loop_break_types: HashMap::new(),
             struct_defs: HashMap::new(),
-            fa_struct_names: HashMap::new(),
-            binary_left_types: HashMap::new(),
-            builtin_methods: HashMap::new(),
-            index_object_types: HashMap::new(),
             const_values: HashMap::new(),
-            global_const_types: HashMap::new(),
             overflow_checks: false,
             source: None,
             drop_types: std::collections::HashSet::new(),

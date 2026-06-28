@@ -1,6 +1,6 @@
-use ast_types::*;
 use inkwell::types::*;
 use inkwell::values::*;
+use neuro_hir::{HirExpr, HirFunction, HirImpl, HirMethod, HirSelfParam, HirStmt};
 use std::collections::HashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
@@ -16,7 +16,7 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn codegen_call(
         &mut self,
         func_name: &str,
-        args: &[Expr],
+        args: &[HirExpr],
     ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
         let function = *self
             .functions
@@ -51,8 +51,8 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn codegen_method_call(
         &mut self,
         mangled_name: &str,
-        receiver: &Expr,
-        args: &[Expr],
+        receiver: &HirExpr,
+        args: &[HirExpr],
     ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
         let function = *self
             .functions
@@ -105,14 +105,14 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Generate LLVM functions for all supported methods in an `impl` block.
     pub(crate) fn codegen_impl(
         &mut self,
-        impl_def: &ImplDef,
+        impl_def: &HirImpl,
         func_types: &HashMap<String, Type>,
     ) -> CodegenResult<()> {
-        let struct_name = &impl_def.type_name.name;
+        let struct_name = &impl_def.type_name;
         for method in &impl_def.methods {
             // Consuming `self` is rejected in semantic analysis; everything else
             // (`&self`, `&mut self`, associated functions) is lowered.
-            if matches!(method.self_param, Some(SelfParam::Owned)) {
+            if matches!(method.self_param, Some(HirSelfParam::Owned)) {
                 continue;
             }
             self.codegen_method(method, struct_name, func_types)?;
@@ -127,11 +127,11 @@ impl<'ctx> CodegenContext<'ctx> {
     /// parameter, named `self`, passed by value.
     pub(crate) fn codegen_method(
         &mut self,
-        method: &MethodDef,
+        method: &HirMethod,
         struct_name: &str,
         func_types: &HashMap<String, Type>,
     ) -> CodegenResult<()> {
-        let mangled = format!("{}__{}", struct_name, method.name.name);
+        let mangled = format!("{}__{}", struct_name, method.name);
 
         let func_type_info = func_types
             .get(&mangled)
@@ -148,7 +148,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         // A `&mut self` receiver is passed by pointer so the body's field writes
         // reach the caller's value (§2.5); every other parameter is by value.
-        let self_by_pointer = matches!(method.self_param, Some(SelfParam::RefMut));
+        let self_by_pointer = matches!(method.self_param, Some(HirSelfParam::RefMut));
 
         let mut llvm_param_types = Vec::new();
         for (i, param_ty) in param_types.iter().enumerate() {
@@ -182,6 +182,8 @@ impl<'ctx> CodegenContext<'ctx> {
         self.current_function = Some(function);
         self.variables.clear();
         self.variable_types.clear();
+        // The local type environment is per-body; clear any entries left by a prior item.
+        self.type_env.clear();
 
         // Bind parameters: param[0] is `self` for instance methods.
         let non_self_start = if method.self_param.is_some() { 1 } else { 0 };
@@ -228,14 +230,16 @@ impl<'ctx> CodegenContext<'ctx> {
             let param_type = param_val.get_type();
             let alloca = self
                 .builder
-                .build_alloca(param_type, &param.name.name)
+                .build_alloca(param_type, &param.name)
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
             self.builder
                 .build_store(alloca, param_val)
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.variables.insert(param.name.name.clone(), alloca);
-            self.variable_types
-                .insert(param.name.name.clone(), param_type);
+            self.variables.insert(param.name.clone(), alloca);
+            self.variable_types.insert(param.name.clone(), param_type);
+            if let Some(sem_ty) = param_types.get(non_self_start + i) {
+                self.type_env.insert(param.name.clone(), sem_ty.clone());
+            }
         }
 
         // Open the method-body drop scope. A by-value `Drop`-typed parameter (not the
@@ -245,8 +249,8 @@ impl<'ctx> CodegenContext<'ctx> {
         for (i, param) in method.params.iter().enumerate() {
             if let Some(Type::Struct(name)) = param_types.get(non_self_start + i) {
                 if self.drop_types.contains(name) {
-                    if let Some(alloca) = self.variables.get(&param.name.name).copied() {
-                        self.register_local_drop(&param.name.name, alloca, name.clone())?;
+                    if let Some(alloca) = self.variables.get(&param.name).copied() {
+                        self.register_local_drop(&param.name, alloca, name.clone())?;
                     }
                 }
             }
@@ -257,13 +261,13 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a function definition
     pub(crate) fn codegen_function(
         &mut self,
-        func_def: &FunctionDef,
+        func_def: &HirFunction,
         func_types: &HashMap<String, Type>,
     ) -> CodegenResult<()> {
         // Get function type information
         let func_type_info = func_types
-            .get(&func_def.name.name)
-            .ok_or_else(|| CodegenError::UndefinedFunction(func_def.name.name.clone()))?;
+            .get(&func_def.name)
+            .ok_or_else(|| CodegenError::UndefinedFunction(func_def.name.clone()))?;
 
         let (param_types, return_type) = match func_type_info {
             Type::Function { params, ret } => (params, &**ret),
@@ -292,10 +296,10 @@ impl<'ctx> CodegenContext<'ctx> {
         // Create the function
         let function = self
             .module
-            .add_function(&func_def.name.name, llvm_ret_type, None);
+            .add_function(&func_def.name, llvm_ret_type, None);
 
         // Record the function for later calls
-        self.functions.insert(func_def.name.name.clone(), function);
+        self.functions.insert(func_def.name.clone(), function);
 
         // Create entry basic block
         let entry = self.context.append_basic_block(function, "entry");
@@ -307,6 +311,8 @@ impl<'ctx> CodegenContext<'ctx> {
         // Clear variables for new function scope
         self.variables.clear();
         self.variable_types.clear();
+        // The local type environment is per-body; clear any entries left by a prior item.
+        self.type_env.clear();
 
         // Allocate and store parameters
         for (i, param) in func_def.params.iter().enumerate() {
@@ -318,7 +324,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
             let alloca = self
                 .builder
-                .build_alloca(param_type, &param.name.name)
+                .build_alloca(param_type, &param.name)
                 .map_err(|e| {
                     CodegenError::LlvmError(format!("failed to allocate parameter: {}", e))
                 })?;
@@ -327,9 +333,11 @@ impl<'ctx> CodegenContext<'ctx> {
                 CodegenError::LlvmError(format!("failed to store parameter: {}", e))
             })?;
 
-            self.variables.insert(param.name.name.clone(), alloca);
-            self.variable_types
-                .insert(param.name.name.clone(), param_type);
+            self.variables.insert(param.name.clone(), alloca);
+            self.variable_types.insert(param.name.clone(), param_type);
+            if let Some(sem_ty) = param_types.get(i) {
+                self.type_env.insert(param.name.clone(), sem_ty.clone());
+            }
         }
 
         // Open the function-body drop scope. Free functions cannot take struct values
@@ -351,12 +359,12 @@ impl<'ctx> CodegenContext<'ctx> {
     /// registering by-value `Drop` parameters into it) before calling this; the
     /// function scope is popped here on the way out. Drops for owned `Drop` bindings
     /// run before every normal return path (§2.1).
-    fn codegen_body(&mut self, body: &[Stmt], return_type: &Type) -> CodegenResult<()> {
+    fn codegen_body(&mut self, body: &[HirStmt], return_type: &Type) -> CodegenResult<()> {
         let tail_is_value = !matches!(return_type, Type::Void)
             && matches!(
                 body.last(),
-                Some(Stmt::Expr(_))
-                    | Some(Stmt::If {
+                Some(HirStmt::Expr(_))
+                    | Some(HirStmt::If {
                         else_block: Some(_),
                         ..
                     })
@@ -372,19 +380,21 @@ impl<'ctx> CodegenContext<'ctx> {
             if !self.current_block_terminated() {
                 let tail = body.last();
                 let ret_val = match tail {
-                    Some(Stmt::Expr(expr)) => self.codegen_expr(expr)?,
-                    Some(Stmt::If {
+                    Some(HirStmt::Expr(expr)) => self.codegen_expr(expr)?,
+                    // A tail `if` is the implicit return, so its result type is the
+                    // function's declared return type.
+                    Some(HirStmt::If {
                         condition,
                         then_block,
                         else_if_blocks,
                         else_block,
-                        span,
+                        ..
                     }) => self.codegen_if_expr(
                         condition,
                         then_block,
                         else_if_blocks,
                         else_block,
-                        span,
+                        return_type,
                     )?,
                     _ => {
                         return Err(CodegenError::InternalError(
@@ -396,9 +406,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 // in which case the block is already terminated and `ret_val` is a discarded
                 // placeholder — do not append a `ret` after the `unreachable`.
                 if !self.current_block_terminated() {
-                    // A tail `Stmt::Expr(<place>)` is an implicit return that moves the
+                    // A tail `HirStmt::Expr(<place>)` is an implicit return that moves the
                     // place out, so it must not be dropped here.
-                    if let Some(Stmt::Expr(expr)) = tail {
+                    if let Some(HirStmt::Expr(expr)) = tail {
                         self.mark_moved_for_drop(expr);
                     }
                     self.emit_drops_through(0)?;
