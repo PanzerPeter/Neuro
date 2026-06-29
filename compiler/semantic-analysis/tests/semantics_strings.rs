@@ -1,4 +1,3 @@
-// Neuro Programming Language - Semantic Analysis
 // Integration tests: String type
 
 use semantic_analysis::{type_check, TypeError};

@@ -1,4 +1,3 @@
-// Neuro Programming Language - LLVM Backend
 // Codegen for tuples `(T1, T2, ...)` (§3.2): literals build an anonymous LLVM
 // struct value; element access `t.N` is an `extractvalue` by constant index.
 

@@ -1,4 +1,3 @@
-// Neuro Programming Language - Semantic Analysis
 // Symbol table with lexical scoping support
 
 use std::collections::HashMap;

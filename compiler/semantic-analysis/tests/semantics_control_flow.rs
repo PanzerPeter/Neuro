@@ -1,4 +1,3 @@
-// Neuro Programming Language - Semantic Analysis
 // Integration tests: Control flow: if / while / break / continue
 
 use semantic_analysis::{type_check, TypeError};

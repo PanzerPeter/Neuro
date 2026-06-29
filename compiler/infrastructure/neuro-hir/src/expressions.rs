@@ -1,4 +1,3 @@
-// Neuro Programming Language - Typed HIR
 // Expression nodes
 
 use shared_types::{Literal, Span};

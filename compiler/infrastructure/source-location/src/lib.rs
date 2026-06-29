@@ -1,19 +1,6 @@
-//! Neuro Programming Language - Source Location
-//!
-//! Infrastructure component for mapping byte offsets to human-readable line/column positions
-//! and extracting source code snippets for error reporting.
-//!
-//! # Overview
-//!
-//! This crate provides utilities for:
-//! - Converting byte offsets to line/column positions
-//! - Extracting source code snippets for error messages
-//! - Caching line start positions for efficient lookups
-//!
-//! # Architecture
-//!
-//! Pure infrastructure with no business logic. Used by the diagnostics system
-//! and error reporting throughout the compiler.
+//! Maps byte offsets to human-readable line/column positions and extracts
+//! source snippets for error reporting. Line starts are cached for fast lookup.
+//! Pure infrastructure with no business logic.
 
 use shared_types::Span;
 

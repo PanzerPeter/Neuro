@@ -1,4 +1,3 @@
-// Neuro Programming Language - LLVM Backend
 // Code generation error definitions
 
 use thiserror::Error;

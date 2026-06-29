@@ -1,4 +1,3 @@
-// Neuro Programming Language - LLVM Backend
 // Codegen for expressions: Literals, identifiers, constant folding, and casts.
 
 use inkwell::values::*;

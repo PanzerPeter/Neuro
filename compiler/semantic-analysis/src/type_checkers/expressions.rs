@@ -390,11 +390,10 @@ impl TypeChecker {
                     }
                 }
 
-                // Check both operands even if one fails, for better error reporting
-                // For binary operations, operands must match each other
-                // First check left without expected type to get its natural type
+                // Check both operands even if one fails, for better error reporting.
+                // Left is checked bare to get its natural type, then right uses it
+                // as the expected type for symmetric inference.
                 let left_ty = self.check_expr(left, None).unwrap_or(Type::Unknown);
-                // Then check right with left's type as expected (for symmetric type inference)
                 let right_ty = self
                     .check_expr(right, Some(&left_ty))
                     .unwrap_or(Type::Unknown);

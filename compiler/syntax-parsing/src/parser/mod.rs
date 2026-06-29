@@ -1,4 +1,3 @@
-// Neuro Programming Language - Syntax Parsing
 // Parser implementation using Pratt parsing for expressions
 
 use lexical_analysis::{Token, TokenKind};

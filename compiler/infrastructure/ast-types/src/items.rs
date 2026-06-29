@@ -1,4 +1,3 @@
-// Neuro Programming Language - AST Types
 // Top-level item AST nodes
 
 use shared_types::{Identifier, Span};

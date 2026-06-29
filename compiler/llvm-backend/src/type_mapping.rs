@@ -1,4 +1,3 @@
-// Neuro Programming Language - LLVM Backend
 // Neuro semantic type to LLVM type mapping
 
 use inkwell::context::Context as LLVMContext;

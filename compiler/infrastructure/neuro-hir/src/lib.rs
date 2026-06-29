@@ -1,4 +1,4 @@
-//! Neuro Programming Language - Typed High-Level IR (HIR)
+//! Typed High-Level IR (HIR).
 //!
 //! Infrastructure crate defining the **typed HIR**: the stable, backend-agnostic
 //! contract between the frontend (parser + type checker) and every backend. Both

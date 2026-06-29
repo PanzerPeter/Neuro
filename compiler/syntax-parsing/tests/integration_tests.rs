@@ -1,4 +1,3 @@
-// Neuro Programming Language - Syntax Parsing Tests
 // Integration tests with complete programs
 
 use syntax_parsing::parse;

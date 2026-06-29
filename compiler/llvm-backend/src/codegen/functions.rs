@@ -264,7 +264,6 @@ impl<'ctx> CodegenContext<'ctx> {
         func_def: &HirFunction,
         func_types: &HashMap<String, Type>,
     ) -> CodegenResult<()> {
-        // Get function type information
         let func_type_info = func_types
             .get(&func_def.name)
             .ok_or_else(|| CodegenError::UndefinedFunction(func_def.name.clone()))?;
@@ -278,14 +277,12 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         };
 
-        // Map parameter types to LLVM types
         let mut llvm_param_types = Vec::new();
         for param_ty in param_types {
             let llvm_ty = self.type_mapper.map_type(param_ty)?;
             llvm_param_types.push(BasicMetadataTypeEnum::from(llvm_ty));
         }
 
-        // Map return type to LLVM type
         let llvm_ret_type = if matches!(return_type, Type::Void) {
             self.context.void_type().fn_type(&llvm_param_types, false)
         } else {
@@ -293,15 +290,13 @@ impl<'ctx> CodegenContext<'ctx> {
             ret_basic_type.fn_type(&llvm_param_types, false)
         };
 
-        // Create the function
         let function = self
             .module
             .add_function(&func_def.name, llvm_ret_type, None);
 
-        // Record the function for later calls
+        // Record the function so later call sites can resolve it.
         self.functions.insert(func_def.name.clone(), function);
 
-        // Create entry basic block
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
 

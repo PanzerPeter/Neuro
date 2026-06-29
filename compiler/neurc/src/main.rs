@@ -1,6 +1,3 @@
-// Neuro Programming Language - Compiler Driver
-// Main entry point for the neurc compiler
-
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use llvm_backend::OptimizationLevelSetting;
@@ -102,17 +99,13 @@ fn validate_source_file(path: &Path) -> Result<()> {
 
 /// Check a Neuro source file for syntax and type errors
 fn check_file(path: &PathBuf) -> anyhow::Result<()> {
-    // Validate file extension
     validate_source_file(path)?;
 
-    // Read source file
     let source = fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("Failed to read file {:?}: {}", path, e))?;
 
-    // Parse the source code
     let ast = syntax_parsing::parse(&source).map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
 
-    // Type check the program
     match semantic_analysis::type_check(&ast) {
         Ok(warnings) => {
             print_warnings(&warnings);
@@ -148,48 +141,23 @@ fn print_warnings(warnings: &[semantic_analysis::Warning]) {
 
 /// Compile a Neuro source file to a native executable.
 ///
-/// This function orchestrates the complete compilation pipeline:
-/// 1. Read source file
-/// 2. Lexical analysis and parsing
-/// 3. Semantic analysis (type checking)
-/// 4. LLVM code generation (object code)
-/// 5. Linking to create executable
-///
-/// # Arguments
-///
-/// * `input` - Path to the input .nr source file
-/// * `output` - Optional path for the output executable (defaults to input name without extension)
-/// * `optimization` - Optimization level (0-3)
-///
-/// # Returns
-///
-/// * `Ok(())` - Compilation succeeded, executable created
-/// * `Err(anyhow::Error)` - Compilation failed with detailed error context
-///
-/// # Examples
-///
-/// ```ignore
-/// compile_file(Path::new("program.nr"), None, 2)?;
-/// // Creates "program" (or "program.exe" on Windows)
-/// ```
+/// Pipeline: read source → parse → type-check → lower to HIR → LLVM object
+/// code → link. `output` defaults to the input name without its extension
+/// (plus `.exe` on Windows).
 fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result<()> {
-    // Validate file extension
     validate_source_file(input)?;
 
-    // Read source file
     let source = fs::read_to_string(input)
         .context(format!("Failed to read source file: {}", input.display()))?;
 
     log::info!("Compiling {}", input.display());
     log::info!("Using optimization level -O{}", optimization);
 
-    // Parse the source code
     log::debug!("Parsing source...");
     let ast = syntax_parsing::parse(&source)
         .map_err(|e| anyhow::anyhow!("Parse error: {}", e))
         .context("Failed to parse source file")?;
 
-    // Type check the program
     log::debug!("Type checking...");
     let warnings = semantic_analysis::type_check(&ast)
         .map_err(|errors| {
@@ -211,7 +179,6 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
         .context("Failed to lower to HIR")?;
     log::debug!("Lowered {} HIR items", hir.items.len());
 
-    // Generate LLVM object code
     log::debug!("Generating LLVM IR and object code...");
     let optimization =
         OptimizationLevelSetting::from_u8(optimization).context("Invalid optimization level")?;
@@ -221,8 +188,7 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
             .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
             .context("Failed to generate object code")?;
 
-    // Write object code to temporary file
-    // On Windows, MSVC expects .obj extension; on Unix, .o is conventional
+    // MSVC expects .obj on Windows; .o is conventional on Unix.
     log::debug!("Writing object file...");
     let object_extension = if cfg!(target_os = "windows") {
         "obj"
@@ -239,34 +205,28 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
         .write_all(&object_code)
         .context("Failed to write object code to temporary file")?;
 
-    // Ensure data is flushed to disk
     object_file.flush().context("Failed to flush object file")?;
 
-    // Persist the tempfile to prevent early deletion
-    // The linker needs the file to exist for the duration of the linking process
+    // Persist past the TempFile guard so the file survives until the linker reads it.
     let (_, object_path) = object_file
         .keep()
         .context("Failed to persist temporary object file")?;
 
-    // Determine output executable path
     let output_path = if let Some(out) = output {
         out.to_path_buf()
     } else {
-        // Default: same name as input file, without extension
+        // Default: input name with the extension stripped (`.exe` on Windows).
         let mut default_output = input.with_extension("");
-        // On Windows, add .exe extension
         if cfg!(target_os = "windows") {
             default_output.set_extension("exe");
         }
         default_output
     };
 
-    // Link object file to create executable
     log::debug!("Linking to create executable: {}", output_path.display());
     link_object_to_executable(&object_path, &output_path)
         .context("Failed to link object file to executable")?;
 
-    // Clean up the temporary object file
     let _ = fs::remove_file(&object_path);
 
     println!(
@@ -278,26 +238,10 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
     Ok(())
 }
 
-/// Link an object file to a native executable using the system linker.
+/// Link an object file to a native executable via the platform's C compiler,
+/// which acts as a linker driver (C runtime, startup code, etc.).
 ///
-/// This function invokes the platform's C compiler as a linker driver,
-/// which handles platform-specific linking requirements (C runtime, startup code, etc.).
-///
-/// # Arguments
-///
-/// * `object_path` - Path to the input object file (.o or .obj)
-/// * `output_path` - Path for the output executable
-///
-/// # Returns
-///
-/// * `Ok(())` - Linking succeeded
-/// * `Err(anyhow::Error)` - Linking failed
-///
-/// # Implementation Notes
-///
-/// - On Windows: Tries clang first (part of LLVM installation), then falls back to MSVC cl.exe
-/// - On Unix: Uses cc (gcc/clang) as linker driver
-/// - Automatically links against C runtime for startup code
+/// Windows tries clang, then lld-link, then MSVC cl.exe; Unix uses cc.
 fn link_object_to_executable(object_path: &Path, output_path: &Path) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
@@ -312,14 +256,12 @@ fn link_object_to_executable(object_path: &Path, output_path: &Path) -> Result<(
 
 #[cfg(target_os = "windows")]
 fn link_windows(object_path: &Path, output_path: &Path) -> Result<()> {
-    // Try linking with clang first (it's available from LLVM installation)
-    // Clang acts as a linker driver and handles all the details
     log::debug!("Attempting to link with clang");
     let clang_result = Command::new("clang")
         .arg(object_path)
         .arg("-o")
         .arg(output_path)
-        .arg("-Wl,/subsystem:console") // Pass subsystem flag to linker
+        .arg("-Wl,/subsystem:console")
         .output();
 
     match clang_result {
@@ -337,7 +279,6 @@ fn link_windows(object_path: &Path, output_path: &Path) -> Result<()> {
         }
     }
 
-    // Try lld-link (LLVM's linker for Windows)
     log::debug!("Attempting to link with lld-link");
     let lld_result = Command::new("lld-link")
         .arg(format!("/OUT:{}", output_path.display()))
@@ -364,16 +305,15 @@ fn link_windows(object_path: &Path, output_path: &Path) -> Result<()> {
         }
     }
 
-    // Fall back to MSVC link.exe
-    // Note: We need to find the real MSVC link.exe, not Git's link utility
+    // Fall back to MSVC: cl.exe acts as a linker driver and locates the real
+    // link.exe (not Git's `link` utility).
     log::debug!("Attempting to link with MSVC link.exe via vcvarsall.bat");
 
-    // Try using cl.exe as a linker driver (it will find the right link.exe)
     let output = Command::new("cl")
-        .arg("/nologo") // Suppress startup banner
-        .arg(object_path) // Input object file
-        .arg(format!("/Fe{}", output_path.display())) // Output executable (no colon, no space)
-        .arg("/link") // Following args are for the linker
+        .arg("/nologo")
+        .arg(object_path)
+        .arg(format!("/Fe{}", output_path.display())) // /Fe takes no colon or space
+        .arg("/link") // subsequent args go to the linker
         .arg("/SUBSYSTEM:CONSOLE")
         .arg("/ENTRY:main")
         .output()
@@ -400,8 +340,7 @@ fn link_windows(object_path: &Path, output_path: &Path) -> Result<()> {
 
 #[cfg(not(target_os = "windows"))]
 fn link_unix(object_path: &Path, output_path: &Path) -> Result<()> {
-    // On Unix, use cc (which is usually gcc or clang)
-    // The cc command acts as a linker driver
+    // cc (gcc or clang) acts as the linker driver.
     let output = Command::new("cc")
         .arg(object_path)
         .arg("-o")

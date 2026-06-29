@@ -1,6 +1,5 @@
-// Neuro Compiler - Integration tests for type inference
+// Integration tests for type inference (numeric literal inference, semantic analysis)
 mod common;
-// Tests for numeric literal type inference feature (semantic analysis)
 //
 // NOTE: These tests focus on type checking behavior. Full code generation
 // with inferred types requires passing type information from semantic analysis

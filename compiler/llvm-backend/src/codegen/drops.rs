@@ -1,4 +1,3 @@
-// Neuro Programming Language - LLVM Backend
 // Deterministic destruction (`Drop`, §2.1): scope-exit destructor insertion.
 //
 // A binding of a `Drop` type runs its `{struct}__drop(&mut self)` destructor when

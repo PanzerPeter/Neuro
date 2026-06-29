@@ -1,14 +1,5 @@
-//! Neuro Programming Language - Shared Types
-//!
-//! Infrastructure component providing common type definitions used across
-//! compiler slices. This crate contains lightweight data structures for
-//! representing source locations, identifiers, and literal values.
-//!
-//! # Architecture
-//!
-//! This is a pure infrastructure crate with no business logic. It provides
-//! only data structures and simple operations that are universally needed
-//! across the compiler.
+//! Common type definitions shared across compiler slices: source locations,
+//! identifiers, and literal values. Pure infrastructure with no business logic.
 
 /// Source code span representing a location in the source file.
 ///

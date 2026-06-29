@@ -1,20 +1,8 @@
-//! Neuro Programming Language - Diagnostics
+//! Collecting and formatting compiler diagnostics (errors, warnings, hints).
 //!
-//! Infrastructure component for collecting and formatting compiler diagnostic messages
-//! (errors, warnings, hints, and informational messages).
-//!
-//! # Overview
-//!
-//! This crate provides:
-//! - Diagnostic severity levels (Error, Warning, Info, Hint)
-//! - Diagnostic error codes for categorization
-//! - Builder pattern for constructing diagnostics with spans and notes
-//! - Diagnostic collector for accumulating multiple diagnostics
-//!
-//! # Architecture
-//!
-//! Pure infrastructure with no business logic. Used throughout the compiler
-//! for error reporting and user feedback.
+//! Severity levels, error codes for categorization, a builder for attaching
+//! spans and notes, and a collector that accumulates multiple diagnostics.
+//! Pure infrastructure with no business logic.
 //!
 //! # Examples
 //!

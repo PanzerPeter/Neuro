@@ -1,4 +1,3 @@
-// Neuro Programming Language - Syntax Parsing
 // Operator precedence definitions for Pratt parsing
 
 /// Operator precedence for Pratt parsing

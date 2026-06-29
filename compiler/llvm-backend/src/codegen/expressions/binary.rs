@@ -1,4 +1,3 @@
-// Neuro Programming Language - LLVM Backend
 // Codegen for expressions: Binary operators: arithmetic, comparison, logical, string equality.
 
 use ast_types::BinaryOp;

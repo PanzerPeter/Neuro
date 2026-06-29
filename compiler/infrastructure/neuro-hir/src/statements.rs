@@ -1,4 +1,3 @@
-// Neuro Programming Language - Typed HIR
 // Statement nodes
 
 use shared_types::Span;
