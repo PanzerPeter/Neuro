@@ -208,14 +208,18 @@ jobs:
           toolchain: stable
       - name: Rust Cache
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2.8.1
-      - name: Setup LLVM 20
+      - name: Setup LLVM 20 (+ MLIR for the mlir feature)
         uses: ./.github/actions/setup-llvm
+        with:
+          mlir: "true"
       - name: Install tarpaulin
         uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.62.13
         with:
           tool: cargo-tarpaulin
       - name: Generate Coverage
-        run: cargo tarpaulin --workspace --verbose --timeout 300 --out Xml
+        # --features mlir so the HIR->MLIR lowering in mlir-backend is measured;
+        # without it the Phase 1.8 mlir-gated code reports as 0% covered.
+        run: cargo tarpaulin --workspace --features mlir --verbose --timeout 300 --out Xml
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@04b047e8bb82a0c002c8312c1c880fbc6a999d45 # v5.5.1
         with:
