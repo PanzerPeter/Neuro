@@ -28,6 +28,11 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-06-29: Struct + array destructuring §3.2. Added `Expr::ArrayRest { array, start, exact, span }`,
+  a compiler-internal node the array-pattern desugar produces for the trailing `..rest` sub-slice
+  (`[T; N - start]`), with its `span()` arm. `exact` records a rest-less pattern (length must match
+  exactly). Struct destructuring `val Point { x, y } = p` needs no AST node (desugars to field-access
+  bindings); only the array remainder does, because its size is known only after type checking.
 - 2026-06-28: Tuples §3.2. Added `Type::Tuple { elements, span }` (the `(T1, T2, ...)` type),
   `Expr::TupleLiteral { elements, span }` (the `(e0, e1, ...)` literal, always ≥2 elements), and
   `Expr::TupleIndex { object, index, span }` (the `t.0` / `t.1` constant-index access, distinct from

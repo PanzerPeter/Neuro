@@ -132,4 +132,12 @@ pub enum HirExprKind {
         object: Box<HirExpr>,
         index: usize,
     },
+    /// Trailing remainder of an array destructuring pattern (§3.2): a fresh
+    /// `[T; N - start]` array copying elements `start..N` of `array` (a `[T; N]`).
+    /// The arity rules are validated before lowering; this node's `ty` carries
+    /// the resulting array type.
+    ArrayRest {
+        array: Box<HirExpr>,
+        start: usize,
+    },
 }

@@ -145,6 +145,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.codegen_tuple_literal(elements, &tuple_ty)
             }
             HirExprKind::TupleIndex { object, index } => self.codegen_tuple_index(object, *index),
+
+            // Array rest remainder `..rest` from a destructuring desugar (§3.2).
+            HirExprKind::ArrayRest { array, start } => {
+                let rest_ty = Type::from_hir(&expr.ty);
+                self.codegen_array_rest(array, *start, &rest_ty)
+            }
         }
     }
 

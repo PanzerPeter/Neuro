@@ -46,6 +46,57 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(agg.into())
     }
 
+    /// Lower an array rest remainder `..rest` (§3.2): build a fresh `[T; N - start]`
+    /// aggregate holding elements `start..N` of the source array. `rest_ty` is the
+    /// already-sized remainder type carried by the HIR node. Emitted from the
+    /// `val [a, b, ..rest] = arr` desugar; arity was validated upstream.
+    pub(crate) fn codegen_array_rest(
+        &mut self,
+        array: &HirExpr,
+        start: usize,
+        rest_ty: &Type,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let rest_len = match rest_ty {
+            Type::Array { size, .. } => *size,
+            _ => {
+                return Err(CodegenError::InternalError(
+                    "array rest type is not an array".to_string(),
+                ))
+            }
+        };
+        let obj_ty = Type::from_hir(&array.ty);
+        let (base_ptr, element_ty, size) = self.array_place_ptr(array, &obj_ty)?;
+        let elem_llvm = self.get_any_llvm_type(&element_ty)?;
+        let src_arr_llvm = elem_llvm.array_type(size as u32);
+        let rest_arr_llvm = elem_llvm.array_type(rest_len as u32);
+        let i64t = self.context.i64_type();
+
+        let mut agg = rest_arr_llvm.get_undef();
+        for offset in 0..rest_len {
+            let src_index = (start + offset) as u64;
+            let elem_ptr = unsafe {
+                self.builder
+                    .build_in_bounds_gep(
+                        src_arr_llvm,
+                        base_ptr,
+                        &[i64t.const_zero(), i64t.const_int(src_index, false)],
+                        "arr.rest.src",
+                    )
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            };
+            let elem_val = self
+                .builder
+                .build_load(elem_llvm, elem_ptr, "arr.rest.elem")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            agg = self
+                .builder
+                .build_insert_value(agg, elem_val, offset as u32, "arr.rest.ins")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .into_array_value();
+        }
+        Ok(agg.into())
+    }
+
     /// Lower an array index read `object[index]` (§3.1): bounds-check (debug), then
     /// `getelementptr` + load of the element.
     pub(crate) fn codegen_index(

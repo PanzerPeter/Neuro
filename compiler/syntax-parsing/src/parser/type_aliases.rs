@@ -353,6 +353,7 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
             }
         }
         Expr::TupleIndex { object, .. } => rewrite_expr(object, resolved),
+        Expr::ArrayRest { array, .. } => rewrite_expr(array, resolved),
         Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } => {}
     }
 }

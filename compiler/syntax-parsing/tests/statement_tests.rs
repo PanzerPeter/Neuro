@@ -35,6 +35,73 @@ fn test_tuple_destructure_desugars_to_temp_plus_bindings() {
 }
 
 #[test]
+fn test_struct_destructure_desugars_to_temp_plus_field_binds() {
+    // §3.2: `val Point { x, y } = p` expands to a temp binding plus one field bind
+    // per name — temp + x + y = 3 statements.
+    let source = r#"
+        func test() {
+            val Point { x, y } = p
+        }
+    "#;
+    assert_eq!(first_fn_body_len(source), 3);
+}
+
+#[test]
+fn test_array_destructure_with_rest_desugars() {
+    // §3.2: `val [a, b, ..rest] = arr` → temp + a + b + rest bind = 4 statements.
+    let with_rest = r#"
+        func test() {
+            val [a, b, ..rest] = arr
+        }
+    "#;
+    assert_eq!(first_fn_body_len(with_rest), 4);
+
+    // A rest-less pattern adds a discarded arity-assert statement:
+    // temp + a + b + arity-assert = 4.
+    let exact = r#"
+        func test() {
+            val [a, b] = arr
+        }
+    "#;
+    assert_eq!(first_fn_body_len(exact), 4);
+
+    // A bare `..` binds nothing but keeps a bounds-assert statement:
+    // temp + a + bounds-assert = 3.
+    let bare_rest = r#"
+        func test() {
+            val [a, ..] = arr
+        }
+    "#;
+    assert_eq!(first_fn_body_len(bare_rest), 3);
+}
+
+#[test]
+fn test_array_destructure_rejects_elements_after_rest() {
+    let source = r#"
+        func test() {
+            val [a, ..rest, b] = arr
+        }
+    "#;
+    assert!(
+        parse(source).is_err(),
+        "an element after a `..` rest pattern must be a parse error"
+    );
+}
+
+#[test]
+fn test_array_destructure_rejects_two_rests() {
+    let source = r#"
+        func test() {
+            val [a, .., ..] = arr
+        }
+    "#;
+    assert!(
+        parse(source).is_err(),
+        "more than one `..` rest pattern must be a parse error"
+    );
+}
+
+#[test]
 fn test_tuple_destructure_temp_is_a_var_decl() {
     let source = r#"
         func test() {

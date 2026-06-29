@@ -607,9 +607,24 @@ val flag = true     // Infers bool
 // Tuple destructuring
 val (x, y) = get_point()
 
-// Struct destructuring
+// Struct destructuring — binds each named field by its own name
 val Point { x, y } = point
+
+// Array destructuring — binds positionally
+val [a, b, c] = triple
+
+// Array destructuring with a trailing rest: `rest` is a fresh `[T; N - 2]` array
+val [first, second, ..rest] = numbers
+
+// A bare `..` ignores the remainder; `_` discards a single element
+val [head, ..] = numbers
+val [_, mid, _] = triple
 ```
+
+A rest-less array pattern must bind every element — `val [a, b] = arr` where `arr`
+has more than two elements is a compile error; add a `..rest` (or `..`) to capture
+the remainder. `mut` patterns make every binding mutable. Patterns nest, so an
+element may itself be a tuple, struct, or array pattern.
 
 ### Pattern Matching in Declarations
 

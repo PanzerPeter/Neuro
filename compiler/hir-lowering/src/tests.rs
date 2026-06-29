@@ -189,3 +189,25 @@ fn unresolved_binding_is_an_error_not_a_panic() {
         Err(LoweringError::UnresolvedBinding { .. })
     ));
 }
+
+#[test]
+fn array_rest_remainder_is_sized_subarray() {
+    // §3.2: `val [a, ..rest] = arr` lowers `rest` to an ArrayRest holding the tail.
+    // For a `[i64; 4]` source with one leading element, rest is `[i64; 3]`.
+    let program = lower(
+        "func main() -> i32 { val arr: [i64; 4] = [1, 2, 3, 4]\n val [a, ..rest] = arr\n 0 }",
+    );
+    let body = function_body(&program, "main");
+    let rest = binding_init(body, "rest");
+    let HirExprKind::ArrayRest { start, .. } = &rest.kind else {
+        panic!("rest binding should lower to an ArrayRest node");
+    };
+    assert_eq!(*start, 1);
+    assert_eq!(
+        rest.ty,
+        HirType::Array {
+            element: Box::new(HirType::I64),
+            size: 3,
+        }
+    );
+}

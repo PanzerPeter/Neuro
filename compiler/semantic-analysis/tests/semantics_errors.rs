@@ -16,6 +16,42 @@ fn error_undefined_variable() {
 }
 
 #[test]
+fn error_array_destructure_length_mismatch() {
+    // §3.2: a rest-less array pattern must bind every element. Binding two from a
+    // four-element array is an arity error.
+    let source = r#"func test() -> i32 {
+        val arr: [i32; 4] = [1, 2, 3, 4]
+        val [a, b] = arr
+        return a + b
+    }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let result = type_check(&items);
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+    assert!(errors
+        .iter()
+        .any(|e| matches!(e, TypeError::ArrayPatternLengthMismatch { .. })));
+}
+
+#[test]
+fn error_array_destructure_too_many_before_rest() {
+    // A pattern that binds more leading elements than the array holds, even with a
+    // rest, is an arity error.
+    let source = r#"func test() -> i32 {
+        val arr: [i32; 2] = [1, 2]
+        val [a, b, c, ..rest] = arr
+        return a
+    }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let result = type_check(&items);
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+    assert!(errors
+        .iter()
+        .any(|e| matches!(e, TypeError::ArrayPatternLengthMismatch { .. })));
+}
+
+#[test]
 fn error_type_mismatch() {
     let source = r#"func test() -> i32 {
         val x: i32 = true
