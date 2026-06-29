@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.51.1] - 2026-06-29
+
+### Changed
+- `ci`: include the mlir-backend `mlir` feature in the coverage job. The `coverage` job now provisions MLIR 20 (`setup-llvm` with `mlir: "true"`) and runs `cargo tarpaulin --workspace --features mlir`, so the Phase 1.8 HIR→MLIR lowering is measured instead of reporting as 0% covered.
+
+---
+
 ## [1.51.0] - 2026-06-28
 
 ### Added
