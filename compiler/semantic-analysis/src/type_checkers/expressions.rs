@@ -1324,6 +1324,47 @@ impl TypeChecker {
                 }
             }
 
+            // Array rest pattern remainder `..rest` (§3.2): the compiler-internal node
+            // a `val [a, b, ..rest] = arr` desugar produces. The source must be an
+            // array; the result is the `[T; N - start]` tail. `exact` (no rest binding
+            // in the pattern) requires the lengths to match precisely.
+            Expr::ArrayRest {
+                array,
+                start,
+                exact,
+                span,
+            } => {
+                let arr_ty = self.check_expr(array, None).unwrap_or(Type::Unknown);
+                if matches!(arr_ty, Type::Unknown) {
+                    return Some(Type::Unknown);
+                }
+                match arr_ty.referent() {
+                    Type::Array { element, size } => {
+                        let n = *size;
+                        let mismatch = if *exact { n != *start } else { *start > n };
+                        if mismatch {
+                            self.record_error(TypeError::ArrayPatternLengthMismatch {
+                                expected: *start,
+                                found: n,
+                                span: *span,
+                            });
+                            return Some(Type::Unknown);
+                        }
+                        Some(Type::Array {
+                            element: element.clone(),
+                            size: n - *start,
+                        })
+                    }
+                    other => {
+                        self.record_error(TypeError::NotIndexable {
+                            found: other.clone(),
+                            span: *span,
+                        });
+                        Some(Type::Unknown)
+                    }
+                }
+            }
+
             // Tuple literal `(e0, e1, ...)` (§3.2): each element is checked against the
             // corresponding element type of an expected tuple annotation, when present.
             Expr::TupleLiteral { elements, .. } => {

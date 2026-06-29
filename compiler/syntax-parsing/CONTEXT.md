@@ -51,6 +51,14 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-06-29: Struct + array destructuring §3.2. `parse_stmt_into` now detects `val`/`mut` followed by a
+  tuple `(`, array `[`, or struct `Name {` pattern and routes to `parse_destructure_bind`, which parses
+  any top-level pattern (`parse_top_pattern`), binds the RHS to a `__destructure_N` temp, and expands.
+  `DestructurePattern` gained `Struct { fields }` (shorthand field binds → `FieldAccess`) and
+  `Array(Vec<ArrayPatternElem>)` (positional `Index` binds + an optional trailing `Rest`). A rest
+  expands to `Expr::ArrayRest { start, exact: false }`; a rest-less array adds a discarded
+  `ArrayRest { exact: true }` arity assertion. Element/struct patterns nest through
+  `parse_pattern_element`. Alias rewrite covers the new `ArrayRest` node.
 - 2026-06-28: Tuples §3.2. `parse_type` parses the tuple type `(T1, T2, ...)` (≥2 elements; a single
   `(T)` is grouping, `()` unit is rejected). `parse_prefix`'s `(` branch produces an
   `Expr::TupleLiteral` when a comma follows the first expression, else `Expr::Paren`. The `.` infix

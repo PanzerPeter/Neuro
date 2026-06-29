@@ -89,6 +89,11 @@ No Rust edits are needed — discovery is automatic.
   literals, `.0` / `.1` index access, and destructuring binds `val (a, b) = t`
   (with `_` wildcards and nesting). Elements are limited to `Copy` types for now,
   so tuples holding a `string` or other non-Copy value are a later phase.
+- Struct and array destructuring patterns are supported (`types/destructuring.nr`):
+  `val Point { x, y } = p` binds each field by name; `val [a, b, c] = arr` binds
+  array elements positionally; `val [first, ..rest] = arr` captures the remainder as
+  a fresh `[T; N - k]` array, and a bare `..` ignores it. A rest-less array pattern
+  must match the array's length exactly.
 - Ownership/borrow checker not yet implemented (Phase 1.7).
 - `&self` and `&mut self` methods are supported; a `&mut self` method mutates
   struct state in place (see `structs/mut_self_accumulator.nr`). Consuming `self`

@@ -128,12 +128,20 @@ Key design goals:
 - Destructuring binds `val (a, b) = t` with `_` wildcards and nesting (`val ((a, b), c) = ...`)
 - Usable as function parameters and return types; a single `(x)` stays grouping
 
+### Struct + array destructuring (Phase 2, §3.2)
+
+- Struct patterns `val Point { x, y } = p` bind each field by its own name
+- Array patterns `val [a, b, c] = arr` bind positionally; `val [first, ..rest] = arr`
+  captures the remainder as a fresh `[T; N - k]` array, and a bare `..` ignores it
+- Rest-less array patterns are arity-checked against the array length; patterns nest
+  and work with `mut`
+
 ### Compilation
 
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 762 tests passing across all components
+- 775 tests passing across all components
 
 ## Compilation Pipeline
 

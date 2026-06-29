@@ -41,6 +41,7 @@ types/string_clone.nr               5
 types/string_concat.nr              10
 types/string_len.nr                 0
 types/string_slice.nr               0
+types/destructuring.nr              72
 types/string_slice_method.nr        12
 types/strings.nr                    0
 types/tuples.nr                     62

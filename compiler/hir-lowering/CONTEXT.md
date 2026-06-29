@@ -30,4 +30,6 @@ Two type derivations are contextual and faithfully mirror the checker:
 
 Tuples (§3.2): `resolve_type` lowers the tuple type to `HirType::Tuple`; a tuple literal is typed by lowering each element (each hinted by the expected tuple's element type when annotated) and a `t.N` index reads the N-th element type off the (auto-derefed) tuple type. Destructuring is already desugared by the parser, so only the literal/index nodes reach here.
 
+Struct + array destructuring (§3.2): the parser desugars these, so only the array-rest node reaches lowering. `Expr::ArrayRest { array, start, exact }` lowers to `HirExprKind::ArrayRest { array, start }` typed `[T; N - start]` (re-derived from the source array's `HirType`); a defensive arity re-check (`exact ⇒ N == start`, else `start <= N`) raises `Malformed` rather than underflowing `N - start`.
+
 Three nodes carry a deliberately-chosen type the source has no first-class form for: a `loop` value-expression takes its `break v` type (or `void`); a method-name callee `FieldAccess` carries the call's result type (there is no method value); a `Range` carries `void` (valid only as a `string.slice` argument — the slice lowering reads its bounds directly). Divergent panic-family calls (`panic`/`assert`/`unreachable`) adopt their context's expected type, or `void` in statement position.

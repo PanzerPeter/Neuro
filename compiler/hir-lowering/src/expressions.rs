@@ -257,6 +257,42 @@ impl Lowerer {
                 ))
             }
 
+            Expr::ArrayRest {
+                array,
+                start,
+                exact,
+                span,
+            } => {
+                let array = self.lower_expr(array, None)?;
+                let HirType::Array { element, size } = array.ty.referent().clone() else {
+                    return Err(LoweringError::Malformed {
+                        detail: format!("array rest pattern on non-array type '{}'", array.ty),
+                    });
+                };
+                // Arity is validated in semantic analysis; re-check here so a
+                // malformed input surfaces as an error rather than a subtraction
+                // underflow on `size - start`.
+                if (*exact && size != *start) || (!*exact && *start > size) {
+                    return Err(LoweringError::Malformed {
+                        detail: format!(
+                            "array destructuring binds {} element(s) but the array has {}",
+                            start, size
+                        ),
+                    });
+                }
+                Ok(HirExpr::new(
+                    HirExprKind::ArrayRest {
+                        array: Box::new(array),
+                        start: *start,
+                    },
+                    HirType::Array {
+                        element,
+                        size: size - *start,
+                    },
+                    *span,
+                ))
+            }
+
             Expr::If {
                 condition,
                 then_block,

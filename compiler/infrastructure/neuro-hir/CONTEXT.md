@@ -30,6 +30,9 @@ differences that make it the *typed* contract:
    span lives on the enclosing node.
 
 ## Recent Updates
+- 2026-06-29: Struct + array destructuring §3.2. Added `HirExprKind::ArrayRest { array, start }`, the
+  typed mirror of the AST's array-rest node; its `ty` carries the resolved `[T; N - start]` remainder
+  type. Struct destructuring carries no HIR node (the parser desugars it to field accesses).
 - 2026-06-28: Tuples §3.2. Added `HirType::Tuple(Vec<HirType>)` (with `(T1, T2, ...)` Display) and the
   `HirExprKind::TupleLiteral { elements }` / `HirExprKind::TupleIndex { object, index }` expression
   kinds — the typed mirror of the AST's tuple nodes. Destructuring carries no HIR node (the parser

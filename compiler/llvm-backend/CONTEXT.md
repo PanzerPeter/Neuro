@@ -239,6 +239,12 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-06-29: Struct + array destructuring §3.2. `codegen/expressions/arrays.rs` gained
+  `codegen_array_rest`: builds a fresh `[T; N - start]` aggregate by loading elements `start..N` of the
+  source array (via `array_place_ptr`) and `insert_value`-ing them. Lowers `HirExprKind::ArrayRest`; a
+  zero-length remainder (the rest-less arity-assert form) yields an undef `[T; 0]` discarded in
+  statement position. Struct/array destructuring otherwise reaches the backend as ordinary
+  field-access / index bindings (parser-desugared).
 - 2026-06-28: Tuples §3.2. New backend `Type::Tuple(Vec<Type>)` (`from_hir`; `map_type` → anonymous
   LLVM struct `{ T1, T2, ... }`). New `codegen/expressions/tuples.rs`: `codegen_tuple_literal` builds
   the struct via `insert_value` (with per-element `coerce_if_needed` for default-typed literals), and

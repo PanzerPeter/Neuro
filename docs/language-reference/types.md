@@ -1047,8 +1047,11 @@ val ((p, q), r) = ((1, 2), 3)       // nested destructuring
 - **Function boundaries**: tuples may be passed as parameters and returned, e.g.
   `func min_max(a: i32, b: i32) -> (i32, i32)`.
 
-Struct and array destructuring patterns (`val Point { x, y } = p`,
-`val [first, ..rest] = arr`) are a planned follow-on.
+Struct and array destructuring patterns are also supported: `val Point { x, y } = p`
+binds each named field, and `val [first, second, ..rest] = arr` binds array elements
+positionally with an optional trailing `..rest` (a fresh `[T; N - k]` remainder) or
+bare `..` to ignore it. A rest-less array pattern must match the array's length
+exactly. See [Variables → Destructuring](variables.md#destructuring).
 
 ## References
 

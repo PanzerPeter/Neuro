@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.52.0] - 2026-06-29
+
+### Added
+- Struct and array destructuring patterns (§3.2). `val Point { x, y } = p` binds
+  each named struct field; `val [a, b, c] = arr` binds array elements positionally;
+  `val [first, second, ..rest] = arr` captures the remainder as a fresh
+  `[T; N - k]` array, and a bare `..` ignores it. A rest-less array pattern must
+  match the array's length exactly (`ArrayPatternLengthMismatch` otherwise).
+  Patterns nest and `mut` makes the bindings mutable. Like tuple destructuring,
+  these are parse-time desugars; the only new node is the internal `ArrayRest`
+  remainder, threaded through HIR and lowered to a sub-array copy in the backend.
+
+---
+
 ## [1.51.2] - 2026-06-29
 
 ### Changed

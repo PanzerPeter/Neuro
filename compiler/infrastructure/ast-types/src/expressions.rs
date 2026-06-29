@@ -154,6 +154,21 @@ pub enum Expr {
         index: usize,
         span: Span,
     },
+    /// The trailing remainder of an array destructuring pattern (§3.2): the
+    /// `..rest` sub-slice produced when desugaring `val [a, b, ..rest] = arr`.
+    ///
+    /// Compiler-internal — never written in source. `array` is the source array
+    /// `[T; N]`; the result is a fresh `[T; N - start]` holding elements
+    /// `start..N`. `exact` records that the pattern had no rest binding, so the
+    /// length must match precisely (`N == start`); when `false` the pattern only
+    /// requires `start <= N`. The size `N` is known only after type checking,
+    /// which is why this cannot be desugared to an array literal at parse time.
+    ArrayRest {
+        array: Box<Expr>,
+        start: usize,
+        exact: bool,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -181,6 +196,7 @@ impl Expr {
             Expr::Index { span, .. } => *span,
             Expr::TupleLiteral { span, .. } => *span,
             Expr::TupleIndex { span, .. } => *span,
+            Expr::ArrayRest { span, .. } => *span,
         }
     }
 }

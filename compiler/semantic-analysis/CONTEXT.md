@@ -127,6 +127,11 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-06-29: Struct + array destructuring §3.2. `check_expr` handles `Expr::ArrayRest { array, start,
+  exact }`: the source must be an array `[T; N]`; the result is the `[T; N - start]` remainder. `exact`
+  (a rest-less array pattern) requires `N == start`; otherwise `start <= N`. New diagnostic
+  `ArrayPatternLengthMismatch { expected, found }`. Struct/array destructuring otherwise reaches
+  semantic analysis as ordinary field-access / index bindings (parser-desugared).
 - 2026-06-28: Tuples §3.2. New `Type::Tuple(Vec<Type>)` (compatible only on equal arity with each
   element matching; `(T1, T2, ...)` Display). `resolve_type` resolves the tuple type and rejects a
   non-Copy element (`NonCopyTupleElement`). `check_expr` handles tuple literals (each element checked

@@ -1,5 +1,5 @@
 use lexical_analysis::TokenKind;
-use shared_types::{Identifier, Span};
+use shared_types::{Identifier, Literal, Span};
 
 use crate::ast::{BinaryOp, Expr, Stmt};
 use crate::errors::{ParseError, ParseResult};
@@ -17,6 +17,21 @@ enum DestructurePattern {
     Bind(Identifier),
     /// A nested tuple pattern `(a, b, ...)`.
     Tuple(Vec<DestructurePattern>),
+    /// A struct pattern `Name { field, field, ... }` binding each field by its name.
+    /// The type name is syntax-only — field access in the desugar resolves against
+    /// the scrutinee's own type — so it is not retained.
+    Struct { fields: Vec<Identifier> },
+    /// An array pattern `[p0, p1, ..rest]` binding elements positionally with an
+    /// optional trailing rest.
+    Array(Vec<ArrayPatternElem>),
+}
+
+/// One element of an array destructuring pattern (§3.2).
+enum ArrayPatternElem {
+    /// A positional sub-pattern.
+    Pattern(DestructurePattern),
+    /// A trailing rest `..` (discarded) or `..name` (binds the remainder).
+    Rest(Option<Identifier>),
 }
 
 impl Parser {
@@ -720,45 +735,67 @@ impl Parser {
         self.skip_newlines();
         if matches!(self.peek_kind(), Some(TokenKind::Val | TokenKind::Mut)) {
             let mutable = matches!(self.peek_kind(), Some(TokenKind::Mut));
-            // Only `val (` / `mut (` is a destructuring bind; a following name is an
-            // ordinary variable declaration.
-            if matches!(self.peek_next_after_keyword(), Some(TokenKind::LeftParen)) {
+            // A tuple `(`, array `[`, or struct `Name {` pattern after the keyword is a
+            // destructuring bind (§3.2); anything else is an ordinary variable
+            // declaration (`val name`, `val name: T`).
+            if self.starts_destructure_pattern() {
                 let kw = self.advance().ok_or(ParseError::UnexpectedEof {
                     expected: "'val' or 'mut'".to_string(),
                 })?;
                 let start_span = kw.span;
                 self.skip_newlines();
-                return self.parse_tuple_destructure(mutable, start_span, out);
+                return self.parse_destructure_bind(mutable, start_span, out);
             }
         }
         out.push(self.parse_stmt()?);
         Ok(())
     }
 
-    /// The kind of the first non-newline token *after* the current `val`/`mut`
-    /// keyword, used to detect a destructuring pattern without consuming input.
-    fn peek_next_after_keyword(&self) -> Option<TokenKind> {
-        let mut i = self.current + 1;
-        while matches!(
-            self.tokens.get(i).map(|t| &t.kind),
-            Some(TokenKind::Newline)
-        ) {
-            i += 1;
+    /// Whether the tokens after the current `val`/`mut` keyword open a destructuring
+    /// pattern: `(` (tuple), `[` (array), or `Name {` (struct). A bare name followed
+    /// by `:` or `=` is an ordinary variable declaration.
+    fn starts_destructure_pattern(&self) -> bool {
+        let (first, second) = self.peek_two_after_keyword();
+        match first {
+            Some(TokenKind::LeftParen | TokenKind::LeftBracket) => true,
+            Some(TokenKind::Identifier(_)) => matches!(second, Some(TokenKind::LeftBrace)),
+            _ => false,
         }
-        self.tokens.get(i).map(|t| t.kind.clone())
     }
 
-    /// Desugar a tuple-destructuring bind `val (a, b, ...) = expr` (§3.2). The
-    /// cursor sits on the opening `(`. The right-hand side is bound once to a fresh
-    /// immutable temporary, then each pattern leaf is bound to a tuple projection of
-    /// that temporary — so nested patterns and `_` wildcards need no new AST node.
-    fn parse_tuple_destructure(
+    /// The first two non-newline token kinds *after* the current `val`/`mut` keyword,
+    /// used to detect a destructuring pattern without consuming input.
+    fn peek_two_after_keyword(&self) -> (Option<TokenKind>, Option<TokenKind>) {
+        let mut i = self.current + 1;
+        let next_non_newline = |start: usize| {
+            let mut j = start;
+            while matches!(
+                self.tokens.get(j).map(|t| &t.kind),
+                Some(TokenKind::Newline)
+            ) {
+                j += 1;
+            }
+            j
+        };
+        i = next_non_newline(i);
+        let first = self.tokens.get(i).map(|t| t.kind.clone());
+        let j = next_non_newline(i + 1);
+        let second = self.tokens.get(j).map(|t| t.kind.clone());
+        (first, second)
+    }
+
+    /// Desugar a destructuring bind `val PATTERN = expr` (§3.2), where `PATTERN` is a
+    /// tuple, array, or struct pattern. The cursor sits on the pattern's opening
+    /// token. The right-hand side is bound once to a fresh immutable temporary, then
+    /// each pattern leaf is bound to a projection of that temporary — so the only new
+    /// AST node any pattern needs is the array-rest remainder ([`Expr::ArrayRest`]).
+    fn parse_destructure_bind(
         &mut self,
         mutable: bool,
         start_span: Span,
         out: &mut Vec<Stmt>,
     ) -> ParseResult<()> {
-        let pattern = self.parse_tuple_pattern()?;
+        let pattern = self.parse_top_pattern()?;
         self.skip_newlines();
         self.consume(TokenKind::Equal, "'=' in destructuring binding")?;
         self.skip_newlines();
@@ -778,6 +815,29 @@ impl Parser {
         });
         self.expand_pattern(&pattern, Expr::Identifier(tmp), mutable, start_span, out);
         Ok(())
+    }
+
+    /// Parse the top-level destructuring pattern: a tuple `(`, array `[`, or struct
+    /// `Name {`. A bare-name pattern is never a top-level destructure (it is an
+    /// ordinary `val name = ...`), so it is rejected here.
+    fn parse_top_pattern(&mut self) -> ParseResult<DestructurePattern> {
+        match self.peek_kind() {
+            Some(TokenKind::LeftParen) => self.parse_tuple_pattern(),
+            Some(TokenKind::LeftBracket) => self.parse_array_pattern(),
+            Some(TokenKind::Identifier(_)) => self.parse_struct_pattern(),
+            _ => {
+                let (found, span) = self
+                    .peek()
+                    .map(|t| (t.kind.clone(), t.span))
+                    .unwrap_or((TokenKind::Eof, Span::new(0, 0)));
+                Err(ParseError::UnexpectedToken {
+                    found,
+                    expected: "a tuple `(`, array `[`, or struct `Name {` destructuring pattern"
+                        .to_string(),
+                    span,
+                })
+            }
+        }
     }
 
     /// Allocate a unique id for a destructuring temporary.
@@ -816,11 +876,132 @@ impl Parser {
         Ok(DestructurePattern::Tuple(subs))
     }
 
-    /// Parse one element of a destructuring pattern: a nested tuple pattern, the `_`
-    /// wildcard, or a binding name.
+    /// Parse a struct pattern `Name { field, field, ... }` (§3.2). Each field is a
+    /// shorthand binding: `Point { x, y }` binds `x` and `y` to the matching fields.
+    /// The cursor sits on the type-name identifier.
+    fn parse_struct_pattern(&mut self) -> ParseResult<DestructurePattern> {
+        let name_token = self.consume(TokenKind::Identifier(String::new()), "struct type name")?;
+        if !matches!(name_token.kind, TokenKind::Identifier(_)) {
+            return Err(ParseError::UnexpectedToken {
+                found: name_token.kind,
+                expected: "struct type name".to_string(),
+                span: name_token.span,
+            });
+        }
+        self.consume(TokenKind::LeftBrace, "'{' to open struct pattern")?;
+        let mut fields = Vec::new();
+        loop {
+            self.skip_newlines();
+            if self.check(&TokenKind::RightBrace) {
+                break;
+            }
+            let field = self.consume(TokenKind::Identifier(String::new()), "struct field name")?;
+            let TokenKind::Identifier(field_name) = field.kind else {
+                return Err(ParseError::UnexpectedToken {
+                    found: field.kind,
+                    expected: "struct field name".to_string(),
+                    span: field.span,
+                });
+            };
+            fields.push(Identifier {
+                name: field_name,
+                span: field.span,
+            });
+            self.skip_newlines();
+            if !self.check(&TokenKind::Comma) {
+                break;
+            }
+            self.advance(); // consume ','
+        }
+        let close = self.consume(TokenKind::RightBrace, "'}' to close struct pattern")?;
+        if fields.is_empty() {
+            return Err(ParseError::UnexpectedToken {
+                found: TokenKind::RightBrace,
+                expected: "at least one field in a struct pattern `Name { field, ... }`"
+                    .to_string(),
+                span: name_token.span.merge(close.span),
+            });
+        }
+        Ok(DestructurePattern::Struct { fields })
+    }
+
+    /// Parse an array pattern `[p0, p1, ..rest]` (§3.2). Elements bind positionally;
+    /// an optional trailing rest `..` discards or `..name` captures the remainder. At
+    /// most one rest is allowed and it must come last. The cursor sits on the `[`.
+    fn parse_array_pattern(&mut self) -> ParseResult<DestructurePattern> {
+        let open = self.consume(TokenKind::LeftBracket, "'[' to open array pattern")?;
+        let mut elems = Vec::new();
+        let mut seen_rest = false;
+        loop {
+            self.skip_newlines();
+            if self.check(&TokenKind::RightBracket) {
+                break;
+            }
+            if self.check(&TokenKind::DotDot) {
+                let dotdot = self.advance().ok_or(ParseError::UnexpectedEof {
+                    expected: "'..' rest pattern".to_string(),
+                })?;
+                if seen_rest {
+                    return Err(ParseError::UnexpectedToken {
+                        found: TokenKind::DotDot,
+                        expected: "at most one `..` rest pattern in an array pattern".to_string(),
+                        span: dotdot.span,
+                    });
+                }
+                seen_rest = true;
+                // An optional name binds the remainder; bare `..` discards it.
+                let name = if let Some(TokenKind::Identifier(_)) = self.peek_kind() {
+                    let tok = self.advance().ok_or(ParseError::UnexpectedEof {
+                        expected: "rest binding name".to_string(),
+                    })?;
+                    let TokenKind::Identifier(n) = tok.kind else {
+                        unreachable!("peeked an identifier")
+                    };
+                    Some(Identifier {
+                        name: n,
+                        span: tok.span,
+                    })
+                } else {
+                    None
+                };
+                elems.push(ArrayPatternElem::Rest(name));
+            } else {
+                if seen_rest {
+                    return Err(ParseError::UnexpectedToken {
+                        found: self
+                            .peek()
+                            .map(|t| t.kind.clone())
+                            .unwrap_or(TokenKind::Eof),
+                        expected: "no elements after a `..` rest pattern".to_string(),
+                        span: self.peek().map(|t| t.span).unwrap_or(open.span),
+                    });
+                }
+                elems.push(ArrayPatternElem::Pattern(self.parse_pattern_element()?));
+            }
+            self.skip_newlines();
+            if !self.check(&TokenKind::Comma) {
+                break;
+            }
+            self.advance(); // consume ','
+        }
+        self.consume(TokenKind::RightBracket, "']' to close array pattern")?;
+        Ok(DestructurePattern::Array(elems))
+    }
+
+    /// Parse one element of a destructuring pattern: a nested tuple/array/struct
+    /// pattern, the `_` wildcard, or a binding name.
     fn parse_pattern_element(&mut self) -> ParseResult<DestructurePattern> {
         if self.check(&TokenKind::LeftParen) {
             return self.parse_tuple_pattern();
+        }
+        if self.check(&TokenKind::LeftBracket) {
+            return self.parse_array_pattern();
+        }
+        // `Name {` opens a nested struct pattern; a bare name is a binding.
+        if matches!(self.peek_kind(), Some(TokenKind::Identifier(_)))
+            && matches!(self.peek_second_kind(), Some(TokenKind::LeftBrace))
+        {
+            return self.parse_struct_pattern();
         }
         let token = self.consume(TokenKind::Identifier(String::new()), "binding name or `_`")?;
         let TokenKind::Identifier(name) = token.kind else {
@@ -838,6 +1019,18 @@ impl Parser {
                 span: token.span,
             }))
         }
+    }
+
+    /// The kind of the token immediately after the current one, skipping newlines.
+    fn peek_second_kind(&self) -> Option<TokenKind> {
+        let mut i = self.current + 1;
+        while matches!(
+            self.tokens.get(i).map(|t| &t.kind),
+            Some(TokenKind::Newline)
+        ) {
+            i += 1;
+        }
+        self.tokens.get(i).map(|t| t.kind.clone())
     }
 
     /// Emit the variable declarations a destructuring pattern expands to. `access` is
@@ -868,6 +1061,72 @@ impl Parser {
                         span,
                     };
                     self.expand_pattern(sub, elem, mutable, span, out);
+                }
+            }
+            DestructurePattern::Struct { fields } => {
+                for field in fields {
+                    let access_field = Expr::FieldAccess {
+                        object: Box::new(access.clone()),
+                        field: field.clone(),
+                        span,
+                    };
+                    out.push(Stmt::VarDecl {
+                        name: field.clone(),
+                        ty: None,
+                        init: Some(access_field),
+                        mutable,
+                        span,
+                    });
+                }
+            }
+            DestructurePattern::Array(elems) => {
+                // Count the leading positional patterns (everything before the rest).
+                let lead = elems
+                    .iter()
+                    .take_while(|e| matches!(e, ArrayPatternElem::Pattern(_)))
+                    .count();
+                for (i, elem) in elems.iter().enumerate() {
+                    match elem {
+                        ArrayPatternElem::Pattern(sub) => {
+                            let index = Expr::Literal(Literal::Integer(i as i64, None), span);
+                            let access_i = Expr::Index {
+                                object: Box::new(access.clone()),
+                                index: Box::new(index),
+                                span,
+                            };
+                            self.expand_pattern(sub, access_i, mutable, span, out);
+                        }
+                        ArrayPatternElem::Rest(name) => {
+                            let rest = Expr::ArrayRest {
+                                array: Box::new(access.clone()),
+                                start: lead,
+                                exact: false,
+                                span,
+                            };
+                            match name {
+                                // A named rest binds the remainder; a bare `..` keeps
+                                // the node only as a `start <= N` bounds assertion.
+                                Some(n) => out.push(Stmt::VarDecl {
+                                    name: n.clone(),
+                                    ty: None,
+                                    init: Some(rest),
+                                    mutable,
+                                    span,
+                                }),
+                                None => out.push(Stmt::Expr(rest)),
+                            }
+                        }
+                    }
+                }
+                // With no rest, the pattern must match the array length exactly; emit a
+                // discarded `ArrayRest` whose `exact` flag carries that arity check.
+                if !elems.iter().any(|e| matches!(e, ArrayPatternElem::Rest(_))) {
+                    out.push(Stmt::Expr(Expr::ArrayRest {
+                        array: Box::new(access),
+                        start: lead,
+                        exact: true,
+                        span,
+                    }));
                 }
             }
         }

@@ -256,4 +256,11 @@ pub enum TypeError {
 
     #[error("cannot infer the element type of an empty array literal at {span:?}: add a type annotation like `[i32; 0]` (§3.1)")]
     CannotInferEmptyArray { span: Span },
+
+    #[error("array destructuring pattern binds {expected} element(s) but the array has {found} at {span:?}: list every element or add a `..rest` pattern (§3.2)")]
+    ArrayPatternLengthMismatch {
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
 }
