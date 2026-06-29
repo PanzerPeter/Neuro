@@ -1,4 +1,3 @@
-// Neuro Programming Language - LLVM Backend
 // Backend-local type model for code generation decisions
 
 #[derive(Debug, Clone, PartialEq, Eq)]

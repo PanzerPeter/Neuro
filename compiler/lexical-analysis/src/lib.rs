@@ -1,16 +1,9 @@
-// Neuro Programming Language - Lexical Analysis
-// Feature slice for tokenization and lexical processing
-//
-// This slice follows Vertical Slice Architecture (VSA) principles:
-// - Self-contained tokenization functionality
-// - Minimal dependencies (only infrastructure)
-// - Clear module boundaries with pub(crate) for internals
-// - Public API: tokenize() and Lexer struct
+// Feature slice for tokenization and lexical processing.
+// Public API: the `Lexer` struct and `tokenize()`.
 
 mod errors;
 mod tokens;
 
-// Public exports
 pub use errors::{LexError, LexResult};
 pub use tokens::{FloatSuffixToken, IntegerSuffixToken, Token, TokenKind};
 
@@ -65,7 +58,6 @@ impl<'source> Lexer<'source> {
     pub fn is_valid_identifier(s: &str) -> bool {
         let mut chars = s.chars();
 
-        // Check first character
         let Some(first) = chars.next() else {
             return false;
         };
@@ -74,7 +66,6 @@ impl<'source> Lexer<'source> {
             return false;
         }
 
-        // Check remaining characters
         chars.all(unicode_ident::is_xid_continue)
     }
 }
@@ -93,19 +84,10 @@ impl<'source> Iterator for Lexer<'source> {
     }
 }
 
-/// Convenience function to tokenize Neuro source code
+/// Tokenize Neuro source into a token stream terminated by an `Eof` token.
 ///
-/// This is the main entry point for lexical analysis. It takes Neuro source code
-/// and produces a stream of tokens. Returns early on the first lexical error.
-///
-/// # Arguments
-///
-/// * `source` - The Neuro source code as a string
-///
-/// # Returns
-///
-/// * `Ok(Vec<Token>)` - Successfully tokenized source (includes EOF token)
-/// * `Err(LexError)` - First lexical error encountered (invalid character, unterminated string, etc.)
+/// The main entry point for lexical analysis; returns early on the first
+/// lexical error (invalid character, unterminated string, etc.).
 ///
 /// # Examples
 ///
@@ -121,12 +103,10 @@ pub fn tokenize(source: &str) -> LexResult<Vec<Token>> {
     let lexer = Lexer::new(source);
     let mut tokens = Vec::new();
 
-    // Collect tokens, returning early on first error
     for result in lexer {
         tokens.push(result?);
     }
 
-    // Add EOF token
     let eof_span = Span::new(source.len(), source.len());
     tokens.push(Token::new(TokenKind::Eof, eof_span));
 

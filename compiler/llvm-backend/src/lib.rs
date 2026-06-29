@@ -1,11 +1,5 @@
-// Neuro Programming Language - LLVM Backend
-// Feature slice for LLVM IR generation and optimization
-//
-// This slice follows Vertical Slice Architecture (VSA) principles:
-// - Self-contained code generation functionality
-// - Minimal dependencies (only infrastructure and LLVM)
-// - Clear module boundaries with pub(crate) for internals
-// - Public API limited to compile() entry point
+// Feature slice for LLVM IR generation and optimization.
+// Public API: the `compile()` entry point.
 
 mod codegen;
 mod errors;
@@ -13,7 +7,6 @@ mod softfloat;
 mod type_mapping;
 mod types;
 
-// Public exports
 pub use errors::{CodegenError, CodegenResult};
 
 use inkwell::context::Context as LLVMContext;
@@ -53,24 +46,17 @@ impl OptimizationLevelSetting {
     }
 }
 
-/// Compile Neuro AST to LLVM object code.
+/// Compile a typed HIR program to linkable LLVM object code.
 ///
-/// This is the main entry point for the LLVM backend. It consumes the typed HIR
-/// produced by `hir-lowering` and generates LLVM IR, then compiles it to object
-/// code. Every HIR node carries its resolved type, so the backend reads types
-/// directly rather than re-deriving them.
+/// The backend's entry point. It consumes the HIR produced by `hir-lowering`
+/// and emits LLVM IR, then object code; every HIR node carries its resolved
+/// type, so the backend reads types directly rather than re-deriving them.
 ///
 /// # Arguments
 ///
-/// * `program` - The typed HIR program (already type-checked and lowered)
 /// * `optimization` - Optimization level (also selects overflow trapping at -O0)
 /// * `source` / `source_path` - Original module text and path, used only to render
 ///   `file:line:col` in panic-family runtime diagnostics (§1.2)
-///
-/// # Returns
-///
-/// * `Ok(Vec<u8>)` - LLVM object code (can be linked to executable)
-/// * `Err(CodegenError)` - Code generation failed
 ///
 /// # Examples
 ///

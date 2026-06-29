@@ -1,4 +1,3 @@
-// Neuro Programming Language - Syntax Parsing Tests
 // Expression parsing tests
 
 use shared_types::{FloatSuffix, Literal};

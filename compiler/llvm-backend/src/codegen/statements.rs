@@ -150,16 +150,14 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Generate code for an assignment statement
     pub(crate) fn codegen_assignment(&mut self, name: &str, value: &HirExpr) -> CodegenResult<()> {
-        // Generate code for the value expression
         let val = self.codegen_expr(value)?;
 
-        // Lookup the variable pointer (must already exist)
+        // The variable's alloca must already exist from its declaration.
         let var_ptr = self
             .variables
             .get(name)
             .ok_or_else(|| CodegenError::UndefinedVariable(name.to_string()))?;
 
-        // Store the new value into the variable
         self.builder.build_store(*var_ptr, val).map_err(|e| {
             CodegenError::LlvmError(format!("failed to store value in assignment: {}", e))
         })?;
@@ -232,7 +230,6 @@ impl<'ctx> CodegenContext<'ctx> {
         let else_bb = self.context.append_basic_block(parent_fn, "else");
         let merge_bb = self.context.append_basic_block(parent_fn, "ifcont");
 
-        // Build conditional branch
         self.builder
             .build_conditional_branch(cond_val.into_int_value(), then_bb, else_bb)
             .map_err(|e| {

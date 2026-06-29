@@ -1,4 +1,3 @@
-// Neuro Programming Language - Lexical Analysis
 // Lexical error definitions
 
 use shared_types::Span;

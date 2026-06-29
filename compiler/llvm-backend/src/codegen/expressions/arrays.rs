@@ -1,4 +1,3 @@
-// Neuro Programming Language - LLVM Backend
 // Codegen for fixed-size arrays `[T; N]` (§3.1): literals, indexing, element
 // assignment, and `for x in arr` iteration. Arrays lower to LLVM `[N x T]`
 // aggregates stored in an alloca; indexing is a `getelementptr` + load/store with

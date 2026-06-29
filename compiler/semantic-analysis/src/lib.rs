@@ -1,11 +1,5 @@
-// Neuro Programming Language - Semantic Analysis
-// Feature slice for type checking and semantic validation
-//
-// This slice follows Vertical Slice Architecture (VSA) principles:
-// - Self-contained type checking functionality
-// - Minimal dependencies (only infrastructure and syntax-parsing)
-// - Clear module boundaries with pub(crate) for internals
-// - Public API limited to type_check() entry point
+// Feature slice for type checking and semantic validation.
+// Public API: the `type_check()` entry point.
 
 mod errors;
 mod symbol_table;
@@ -13,7 +7,6 @@ pub(crate) mod type_checkers;
 mod types;
 mod warnings;
 
-// Public exports
 pub use errors::TypeError;
 pub use types::Type;
 pub use warnings::{Warning, WarningCode};
@@ -21,37 +14,11 @@ pub use warnings::{Warning, WarningCode};
 use ast_types::Item;
 use type_checkers::TypeChecker;
 
-/// Type check a Neuro program.
+/// Type check a Neuro program: expression/statement types, declarations,
+/// call sites, control-flow conditions, and return-type matching.
 ///
-/// This function performs semantic analysis on a parsed Neuro program, validating:
-/// - Type correctness of expressions and statements
-/// - Variable and function declarations
-/// - Function signatures and call sites
-/// - Control flow (if/else) conditions
-/// - Return type matching
-///
-/// # Phase 1 Support
-///
-/// Currently supports:
-/// - Primitive types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f32`, `f64`, `bool`
-/// - Function definitions with parameters and return types
-/// - Variable declarations (`val` and `mut`)
-/// - Binary operators (arithmetic, comparison, logical)
-/// - Unary operators (negation, logical not)
-/// - Function calls
-/// - If/else statements
-/// - While loops and range-for loops with `break` and `continue` validation
-/// - Return statements
-/// - Lexical scoping
-///
-/// # Arguments
-///
-/// * `items` - A slice of AST items (functions) from the parser
-///
-/// # Returns
-///
-/// * `Ok(Vec<Warning>)` - Program is type-correct; vector may be empty or contain non-fatal lints
-/// * `Err(Vec<TypeError>)` - One or more type errors were found
+/// Returns the collected non-fatal lint [`Warning`]s on success, or the
+/// [`TypeError`]s otherwise.
 ///
 /// # Examples
 ///

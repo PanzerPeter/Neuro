@@ -1,4 +1,3 @@
-// Neuro Programming Language - LLVM Backend
 // Codegen for expressions: Builtin method calls and integer intrinsics.
 
 use inkwell::intrinsics::Intrinsic;

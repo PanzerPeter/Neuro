@@ -1,4 +1,3 @@
-// Neuro Programming Language - AST Types
 // Type AST nodes
 
 use shared_types::{Identifier, Span};

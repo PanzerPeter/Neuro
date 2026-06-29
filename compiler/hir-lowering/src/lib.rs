@@ -1,4 +1,4 @@
-//! Neuro Programming Language - AST → HIR Lowering
+//! AST → HIR lowering.
 //!
 //! Feature slice implementing the Phase 1.8 lowering strategy: it consumes the
 //! type-checked surface AST ([`ast_types`]) and produces the typed High-Level IR

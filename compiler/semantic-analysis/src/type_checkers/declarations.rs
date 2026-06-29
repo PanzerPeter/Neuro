@@ -103,11 +103,10 @@ impl TypeChecker {
             let _ = self.check_stmt(stmt);
         }
 
-        // Validate trailing expressions for expression-based returns
-        // If the last statement is an expression, it must match the return type
+        // A trailing expression acts as an expression-based return, so it must
+        // match the declared return type.
         if !matches!(return_type, Type::Void) && !func.body.is_empty() {
             if let Some(Stmt::Expr(expr)) = func.body.last() {
-                // Trailing expression - validate it matches return type with type inference
                 if let Some(expr_type) = self.check_expr(expr, Some(&return_type)) {
                     if !expr_type.is_compatible_with(&return_type) {
                         self.record_error(TypeError::ReturnTypeMismatch {

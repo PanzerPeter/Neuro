@@ -1,4 +1,3 @@
-// Neuro Programming Language - LLVM Backend
 // Codegen for expressions: Expression-position control flow (if-expressions, block expressions).
 
 use inkwell::basic_block::BasicBlock;

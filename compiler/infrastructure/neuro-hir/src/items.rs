@@ -1,4 +1,3 @@
-// Neuro Programming Language - Typed HIR
 // Top-level item nodes
 
 use shared_types::Span;

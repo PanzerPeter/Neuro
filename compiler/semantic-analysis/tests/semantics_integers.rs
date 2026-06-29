@@ -1,4 +1,3 @@
-// Neuro Programming Language - Semantic Analysis
 // Integration tests: Extended integer types and width/sign mismatches
 
 use semantic_analysis::{type_check, TypeError};

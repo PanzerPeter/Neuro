@@ -1,4 +1,3 @@
-// Neuro Programming Language - Typed HIR
 // Resolved type representation
 
 use std::fmt;

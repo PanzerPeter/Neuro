@@ -1,4 +1,3 @@
-// Neuro Programming Language - Semantic Analysis
 // Integration tests: Lints
 
 use semantic_analysis::type_check;

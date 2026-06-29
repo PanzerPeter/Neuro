@@ -1,4 +1,3 @@
-// Neuro Programming Language - Lexical Analysis
 // Token type definitions
 
 use logos::Logos;

@@ -1,6 +1,3 @@
-// Neuro Programming Language - AST Types
-// Expression AST nodes
-
 use std::fmt;
 
 use shared_types::{Identifier, Literal, Span};

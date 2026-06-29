@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.51.2] - 2026-06-29
+
+### Changed
+- Cleaned up comments across the compiler: removed repeated file-header banners
+  and VSA boilerplate, trimmed verbose crate/function doc blocks to their useful
+  core, and dropped inline comments that merely restated the code. Substantive
+  "why" comments and spec references were preserved. No behavioral change.
+
+---
+
 ## [1.51.1] - 2026-06-29
 
 ### Changed

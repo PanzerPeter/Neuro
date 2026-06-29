@@ -52,12 +52,11 @@ members = [
 ]
 
 [workspace.package]
-version = "1.51.1"
+version = "1.51.2"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Neuro Contributors"]
 license-file = "LICENSE"
-# Custom non-OSI license (Neuro Shared Source License); never publish to crates.io.
 publish = false
 repository = "https://github.com/PanzerPeter/Neuro"
 homepage = "https://github.com/PanzerPeter/Neuro"

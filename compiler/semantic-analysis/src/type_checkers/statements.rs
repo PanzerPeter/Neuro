@@ -259,15 +259,13 @@ impl TypeChecker {
                     None
                 };
 
-                // Check initializer type with expected type hint
-                // If declared type exists, pass it as expected for type inference
+                // Pass any declared type as the expected hint for inference.
                 let init_ty = if let Some(init_expr) = init {
                     self.check_expr(init_expr, declared_ty.as_ref())
                 } else {
                     None
                 };
 
-                // Determine final type
                 let final_ty = match (declared_ty, init_ty) {
                     (Some(decl), Some(init)) => {
                         // Both declared and initialized: types must match
@@ -304,7 +302,6 @@ impl TypeChecker {
                     return Some(());
                 }
 
-                // Define variable in current scope
                 if let Err(duplicate_name) =
                     self.symbols.define(name.name.clone(), final_ty, *mutable)
                 {
@@ -344,7 +341,6 @@ impl TypeChecker {
                 // conflict against the borrow being overwritten (§2.4, §2.5).
                 self.symbols.release_borrow_of(&target.name);
 
-                // Check the value expression with expected type hint
                 let value_ty = self
                     .check_expr(value, expected_ty.as_ref())
                     .unwrap_or(Type::Unknown);
@@ -362,7 +358,6 @@ impl TypeChecker {
 
                 // Lookup the target variable again for validation
                 if let Some(symbol_info) = self.symbols.lookup(&target.name) {
-                    // Check if variable is mutable
                     if !symbol_info.mutable {
                         self.record_error(TypeError::AssignToImmutable {
                             name: target.name.clone(),
@@ -384,7 +379,6 @@ impl TypeChecker {
 
                     Some(())
                 } else {
-                    // Variable not defined
                     self.record_error(TypeError::UndefinedVariable {
                         name: target.name.clone(),
                         span: target.span,
@@ -394,8 +388,7 @@ impl TypeChecker {
             }
 
             Stmt::Return { value, span } => {
-                // Check return value with expected return type hint
-                // Clone the expected type to avoid borrow checker issues
+                // Cloned to release the borrow on `self` before `check_expr`.
                 let expected_return = self.current_function_return_type.clone();
                 let return_ty = if let Some(expr) = value {
                     self.check_expr(expr, expected_return.as_ref())
@@ -454,7 +447,6 @@ impl TypeChecker {
                 // so only unconditional (straight-line) moves persist (§2.2).
                 let move_snapshot = self.symbols.snapshot_moves();
 
-                // Check then block
                 self.symbols.push_scope();
                 for stmt in then_block {
                     let _ = self.check_stmt(stmt);
@@ -462,7 +454,6 @@ impl TypeChecker {
                 self.symbols.pop_scope();
                 self.symbols.restore_moves(&move_snapshot);
 
-                // Check else-if blocks
                 for (else_if_cond, else_if_stmts) in else_if_blocks {
                     if let Some(cond_ty) = self.check_expr(else_if_cond, Some(&Type::Bool)) {
                         if !cond_ty.is_bool() {
@@ -482,7 +473,6 @@ impl TypeChecker {
                     self.symbols.restore_moves(&move_snapshot);
                 }
 
-                // Check else block
                 if let Some(else_stmts) = else_block {
                     self.symbols.push_scope();
                     for stmt in else_stmts {

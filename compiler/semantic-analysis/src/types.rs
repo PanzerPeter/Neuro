@@ -1,4 +1,3 @@
-// Neuro Programming Language - Semantic Analysis
 // Type system definitions and type predicates
 
 use std::fmt;

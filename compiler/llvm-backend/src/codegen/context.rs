@@ -1,4 +1,3 @@
-// Neuro Programming Language - LLVM Backend
 // Code generation context and LLVM IR generation
 
 use inkwell::attributes::Attribute;

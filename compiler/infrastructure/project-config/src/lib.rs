@@ -1,20 +1,6 @@
-//! Neuro Programming Language - Project Configuration
-//!
-//! Infrastructure component for parsing and managing project configuration from `neuro.toml` files.
-//!
-//! # Overview
-//!
-//! This crate provides:
-//! - Project configuration data structures
-//! - TOML parsing for `neuro.toml` files
-//! - Package metadata (name, version, authors, license)
-//! - Build configuration (optimization levels, target platforms)
-//! - Dependency management structures (future: full dependency resolution)
-//!
-//! # Architecture
-//!
-//! Pure infrastructure using serde for serialization/deserialization.
-//! No business logic - just data structures and parsing.
+//! Parsing and managing project configuration from `neuro.toml` files:
+//! package metadata, build configuration, and (future) dependency resolution.
+//! Pure serde-backed infrastructure with no business logic.
 //!
 //! # Examples
 //!
