@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.53.1] - 2026-06-30
+
+### Security
+- Bump `anyhow` 1.0.102 → 1.0.103 to resolve RUSTSEC-2026-0190
+  (unsoundness in `Error::downcast_mut()`). Clears the OSV-Scanner CI
+  failure on `--fail-on-vuln`.
+
+---
+
 ## [1.53.0] - 2026-06-30
 
 ### Added
