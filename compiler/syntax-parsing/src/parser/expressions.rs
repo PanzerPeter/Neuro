@@ -121,6 +121,13 @@ impl Parser {
                             span: member_token.span,
                         });
                     };
+                    // `EnumName::Variant { ... }` is a struct-variant construction
+                    // (§3.5); the trailing brace is the only enum-construction shape
+                    // distinguishable at parse time. Suppressed inside a `no_struct_lit`
+                    // context (an `if`/`while` condition), exactly like a struct literal.
+                    if !self.no_struct_lit && self.check(&TokenKind::LeftBrace) {
+                        return self.parse_enum_struct_literal(ident, member);
+                    }
                     let span = ident.span.merge(member.span);
                     Ok(Expr::Path {
                         type_name: ident,

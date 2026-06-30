@@ -127,6 +127,14 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-06-30: Enums with associated data §3.5. New `Type::Enum(String)` (nominal, `Copy`) and an
+  `enum_defs` table (name → `Vec<EnumVariantInfo>` with `VariantForm` + resolved fields), registered
+  in a pre-pass before structs. `resolve_type` resolves an enum name; `register_enum` rejects
+  duplicates and non-scalar payloads (`UnsupportedEnumPayload` — payloads limited to scalar Copy
+  primitives this phase). Construction type-checking: `E::V` (Path) → unit, `E::V(..)` (Call→Path) →
+  tuple, `E::V { .. }` (`EnumStructLiteral`) → struct, with arity/field/form diagnostics
+  (`UnknownEnumVariant`, `EnumVariantFormMismatch`, `EnumVariantArityMismatch`,
+  `Unknown/Missing/DuplicateEnumField`, `EnumAlreadyDefined`).
 - 2026-06-29: Struct + array destructuring §3.2. `check_expr` handles `Expr::ArrayRest { array, start,
   exact }`: the source must be an array `[T; N]`; the result is the `[T; N - start]` remainder. `exact`
   (a rest-less array pattern) requires `N == start`; otherwise `start <= N`. New diagnostic

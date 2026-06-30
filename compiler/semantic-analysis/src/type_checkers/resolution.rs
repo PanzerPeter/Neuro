@@ -31,6 +31,8 @@ impl TypeChecker {
                 name => {
                     if self.struct_defs.contains_key(name) {
                         Some(Type::Struct(name.to_string()))
+                    } else if self.enum_defs.contains_key(name) {
+                        Some(Type::Enum(name.to_string()))
                     } else {
                         self.record_error(TypeError::UnknownTypeName {
                             name: name.to_string(),

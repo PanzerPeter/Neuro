@@ -136,12 +136,19 @@ Key design goals:
 - Rest-less array patterns are arity-checked against the array length; patterns nest
   and work with `mut`
 
+### Enums (1E, §3.5)
+
+- Tagged unions `enum E { A, B(i32), C { x: f64 } }` with unit, tuple, and struct-field variants
+- Construct via `E::A` / `E::B(1)` / `E::C { x: 1.0 }`; usable as bindings, function
+  parameters/returns, and struct fields; an enum is `Copy`
+- Scalar `Copy` payloads only; non-generic; deconstruction (`match`) is the next 1E item
+
 ### Compilation
 
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 775 tests passing across all components
+- 784 tests passing across all components
 
 ## Compilation Pipeline
 
@@ -284,5 +291,5 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 ---
 
 **Last Updated**: 2026-06-28
-**Version**: Phase 1 (Core Language) in progress — 1A–1D complete, 1E active (v1.52.0)
+**Version**: Phase 1 (Core Language) in progress — 1A–1D complete, 1E active (v1.53.0)
 **Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.9.0

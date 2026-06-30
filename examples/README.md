@@ -37,6 +37,9 @@ isolation:
 - [`showcase/simulation.nr`](showcase/simulation.nr) — a bit-flag state machine.
   Bitwise `<<`/`|`/`&`/`^`, `.shr(n)`, struct state, `&self` predicate +
   popcount methods, `while` with `break`. Exit `2`.
+- [`showcase/enum_records.nr`](showcase/enum_records.nr) — enums with associated
+  data (§3.5, all three variant forms) alongside a struct with an enum field,
+  `impl` methods, a fixed-size array + `for`-in loop. Exit `28`.
 
 ## Compiling and running
 

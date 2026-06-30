@@ -17,6 +17,9 @@ pub(crate) struct TypeChecker {
     functions: HashMap<String, Type>,
     /// Struct definitions: name → ordered list of (field_name, field_type)
     struct_defs: HashMap<String, Vec<(String, Type)>>,
+    /// Enum definitions: name → ordered list of variants (§3.5). The order is the
+    /// declaration order, which is also the discriminant order used by codegen.
+    enum_defs: HashMap<String, Vec<EnumVariantInfo>>,
     /// Names of structs that derive `Copy` (`@derive(Copy)`). A Copy struct is
     /// duplicated on assignment instead of moved (§2.3).
     copy_structs: HashSet<String>,
@@ -50,6 +53,24 @@ pub(crate) struct TypeChecker {
     loop_stack: Vec<LoopContext>,
 }
 
+/// The construction form of an enum variant (§3.5), determining how it is built:
+/// `Color::Red`, `Move(1, 2)`, or `Circle { radius: 5.0 }`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VariantForm {
+    Unit,
+    Tuple,
+    Struct,
+}
+
+/// A resolved enum variant: its name, construction form, and ordered payload
+/// fields. Each field carries an optional name (`Some` for struct variants, `None`
+/// for tuple variants) and its resolved type.
+pub(crate) struct EnumVariantInfo {
+    pub(crate) name: String,
+    pub(crate) form: VariantForm,
+    pub(crate) fields: Vec<(Option<String>, Type)>,
+}
+
 /// Per-active-loop tracking for `break`/`continue` resolution and value-break
 /// typing (§3.7).
 struct LoopContext {
@@ -80,6 +101,7 @@ impl TypeChecker {
             symbols: SymbolTable::new(),
             functions: HashMap::new(),
             struct_defs: HashMap::new(),
+            enum_defs: HashMap::new(),
             copy_structs: HashSet::new(),
             clone_structs: HashSet::new(),
             impl_methods: HashMap::new(),
@@ -157,8 +179,28 @@ impl TypeChecker {
         self.clone_structs.contains(name)
     }
 
+    /// Look up a variant of an enum by name, returning its resolved info (§3.5).
+    pub(crate) fn lookup_enum_variant(
+        &self,
+        enum_name: &str,
+        variant: &str,
+    ) -> Option<&EnumVariantInfo> {
+        self.enum_defs
+            .get(enum_name)?
+            .iter()
+            .find(|v| v.name == variant)
+    }
+
     /// Check a complete program
     pub(crate) fn check_program(&mut self, items: &[Item]) -> Result<(), ()> {
+        // Pass 0: register enum definitions before structs, so an enum used as a
+        // struct field type (or vice versa) resolves regardless of source order.
+        for item in items {
+            if let Item::Enum(def) = item {
+                self.register_enum(def);
+            }
+        }
+
         // Pass 1: register struct definitions so type names resolve in method signatures.
         // This also records each struct's Copy/Clone derivation intent.
         for item in items {
@@ -201,7 +243,8 @@ impl TypeChecker {
                 Item::Const(def) => {
                     let _ = self.check_const_item(def);
                 }
-                Item::Struct(_) => {}
+                // Enums carry no bodies; their variants are validated at registration.
+                Item::Struct(_) | Item::Enum(_) => {}
             }
         }
 
@@ -237,7 +280,7 @@ impl TypeChecker {
                         self.lint_method(method, suppress_while_true);
                     }
                 }
-                Item::Struct(_) | Item::Const(_) => {}
+                Item::Struct(_) | Item::Const(_) | Item::Enum(_) => {}
             }
         }
     }

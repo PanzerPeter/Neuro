@@ -51,6 +51,11 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-06-30: Enums with associated data §3.5. `parse_program` dispatches `TokenKind::Enum` to
+  `parse_enum_def`; `parse_enum_variant` reads unit / `(tuple)` / `{ named }` payloads. A path
+  followed by `{` in the prefix parser (when struct literals are allowed) parses as
+  `parse_enum_struct_literal` → `Expr::EnumStructLiteral`. New `consume_identifier` helper. Type-alias
+  `rewrite_item`/`rewrite_expr` recurse into enum payload types and enum-literal field values.
 - 2026-06-29: Struct + array destructuring §3.2. `parse_stmt_into` now detects `val`/`mut` followed by a
   tuple `(`, array `[`, or struct `Name {` pattern and routes to `parse_destructure_bind`, which parses
   any top-level pattern (`parse_top_pattern`), binds the RHS to a `__destructure_N` temp, and expands.

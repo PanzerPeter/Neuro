@@ -51,6 +51,19 @@ pub enum Expr {
         field: Identifier,
         span: Span,
     },
+    /// Struct-variant enum construction: `Shape::Circle { radius: 5.0 }` (§3.5).
+    ///
+    /// Distinct from [`Expr::StructLiteral`] (a struct name) and [`Expr::Path`] (a
+    /// unit/tuple variant or associated function): only a `Type::variant { ... }`
+    /// brace form lands here, because it is the one enum-construction shape the
+    /// parser can distinguish syntactically. Unit and tuple variants are parsed as
+    /// `Path` / `Call(Path)` and resolved against the enum table in later passes.
+    EnumStructLiteral {
+        enum_name: Identifier,
+        variant: Identifier,
+        fields: Vec<FieldInit>,
+        span: Span,
+    },
     /// Path expression: `TypeName::member` — used for associated function references.
     /// Appears as the `func` of `Expr::Call` when calling `Point::new(args)`.
     Path {
@@ -183,6 +196,7 @@ impl Expr {
             Expr::Paren(_, span) => *span,
             Expr::StructLiteral { span, .. } => *span,
             Expr::FieldAccess { span, .. } => *span,
+            Expr::EnumStructLiteral { span, .. } => *span,
             Expr::Path { span, .. } => *span,
             Expr::Cast { span, .. } => *span,
             Expr::If { span, .. } => *span,

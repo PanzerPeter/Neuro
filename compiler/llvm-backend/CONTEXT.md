@@ -239,6 +239,13 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-06-30: Enums with associated data §3.5. New `Type::Enum(String)`; `compile` builds an
+  `enum_words` table (each enum's widest-variant field count) handed to the `TypeMapper`, which maps an
+  enum to the tagged union `{ i32 tag, [W x i64] payload }` (works as param/return/field via
+  `map_type`). New `codegen/expressions/enums.rs::codegen_enum_construct` packs the discriminant tag
+  plus each scalar payload field into its own 64-bit slot (floats bitcast to int width, then
+  zero-extend) — lossless round-trip for the eventual `match`. Dispatched from the `HirExprKind::EnumConstruct`
+  arm. Payloads are scalar Copy primitives only (semantic-enforced).
 - 2026-06-29: Struct + array destructuring §3.2. `codegen/expressions/arrays.rs` gained
   `codegen_array_rest`: builds a fresh `[T; N - start]` aggregate by loading elements `start..N` of the
   source array (via `array_place_ptr`) and `insert_value`-ing them. Lowers `HirExprKind::ArrayRest`; a

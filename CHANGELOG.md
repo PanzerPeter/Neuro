@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.53.0] - 2026-06-30
+
+### Added
+- Enums with associated data (§3.5). `enum Foo { Bar, Baz(i32), Qux { x: f64 } }`
+  declares a tagged union of unit, tuple, and struct-field variants. Construction
+  uses `Foo::Bar` (unit), `Foo::Baz(1)` (tuple), and `Foo::Qux { x: 1.0 }` (struct).
+  Enum values bind to `val`/`mut`, cross function boundaries (parameter and return),
+  and live in struct fields; an enum is `Copy`. Backends lower each enum to a tagged
+  union `{ i32 tag, [W x i64] payload }`, packing each scalar payload field into its
+  own 64-bit slot. New `Item::Enum` / `EnumDef` / `VariantPayload` AST nodes,
+  `Expr::EnumStructLiteral` for the brace form, nominal `Type::Enum` / `HirType::Enum`,
+  and the single `HirExprKind::EnumConstruct` node all three forms normalize to.
+  Limitations (Phase 1E): variant payloads are restricted to scalar `Copy` primitives,
+  enums are non-generic, and deconstruction (reading a variant) awaits pattern
+  matching (the next 1E item).
+
+---
+
 ## [1.52.0] - 2026-06-29
 
 ### Added

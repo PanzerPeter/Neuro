@@ -183,6 +183,23 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
                 rewrite_type(&mut field.ty, resolved);
             }
         }
+        Item::Enum(def) => {
+            for variant in &mut def.variants {
+                match &mut variant.payload {
+                    crate::ast::VariantPayload::Unit => {}
+                    crate::ast::VariantPayload::Tuple(tys) => {
+                        for ty in tys.iter_mut() {
+                            rewrite_type(ty, resolved);
+                        }
+                    }
+                    crate::ast::VariantPayload::Struct(fields) => {
+                        for field in fields.iter_mut() {
+                            rewrite_type(&mut field.ty, resolved);
+                        }
+                    }
+                }
+            }
+        }
         Item::Impl(def) => {
             for method in &mut def.methods {
                 for param in &mut method.params {
@@ -306,6 +323,11 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
             }
         }
         Expr::FieldAccess { object, .. } => rewrite_expr(object, resolved),
+        Expr::EnumStructLiteral { fields, .. } => {
+            for field in fields.iter_mut() {
+                rewrite_expr(&mut field.value, resolved);
+            }
+        }
         Expr::Cast {
             expr, target_type, ..
         } => {

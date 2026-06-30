@@ -9,8 +9,8 @@ pub mod types;
 
 pub use expressions::{BinaryOp, Expr, FieldInit, UnaryOp};
 pub use items::{
-    Attribute, ConstDef, FieldDef, FunctionDef, ImplDef, Item, MethodDef, Parameter, SelfParam,
-    StructDef,
+    Attribute, ConstDef, EnumDef, EnumVariant, FieldDef, FunctionDef, ImplDef, Item, MethodDef,
+    Parameter, SelfParam, StructDef, VariantPayload,
 };
 pub use statements::Stmt;
 pub use types::Type;

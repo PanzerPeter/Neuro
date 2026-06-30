@@ -64,6 +64,15 @@ pub enum LoweringError {
     Malformed { detail: String },
 }
 
+/// A resolved enum variant for lowering: its name and ordered payload fields. The
+/// optional name distinguishes a struct variant's field from a tuple variant's
+/// positional element; reordering struct-literal fields into this declared order is
+/// how the single [`neuro_hir::HirExprKind::EnumConstruct`] payload is built (§3.5).
+struct EnumVariantData {
+    name: String,
+    fields: Vec<(Option<String>, HirType)>,
+}
+
 /// Per-active-loop state used to resolve `break`/`continue` targets and to type a
 /// `loop` used as a value expression (§3.7), mirroring the checker's loop stack.
 struct LoopCtx {
@@ -84,6 +93,9 @@ struct Lowerer {
     functions: HashMap<String, (Vec<HirType>, HirType)>,
     /// Struct name → ordered `(field_name, field_type)` list.
     structs: HashMap<String, Vec<(String, HirType)>>,
+    /// Enum name → ordered variants. Each variant carries its name and ordered
+    /// payload fields `(optional field name, type)`; the index doubles as the tag.
+    enums: HashMap<String, Vec<EnumVariantData>>,
     /// Structs that support `.clone()` (derive `Clone`, or `Copy` which implies it).
     clone_structs: HashSet<String>,
     /// Struct name → method name → mangled key into [`Self::functions`].
@@ -119,6 +131,7 @@ impl Lowerer {
         Self {
             functions: HashMap::new(),
             structs: HashMap::new(),
+            enums: HashMap::new(),
             clone_structs: HashSet::new(),
             impl_methods: HashMap::new(),
             constants: HashMap::new(),

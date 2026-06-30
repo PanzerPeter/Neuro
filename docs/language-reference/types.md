@@ -431,6 +431,67 @@ val w = v.clone()  // independent copy; v stays usable
 | `UnknownStruct` | Struct literal references an undeclared struct name |
 | `CopyDeriveNonCopyField` | `@derive(Copy)` on a struct with a non-`Copy` field |
 
+## Enum Types (§3.5)
+
+Enums are user-defined types that hold exactly one of several named **variants**. A variant may be a bare tag, carry a positional **tuple** payload, or carry **named fields** — all three may appear in one enum. Like structs, enums use nominal typing.
+
+### Definition
+
+```neuro
+// Bare variants
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+// Mixed variant shapes
+enum Shape {
+    Circle { radius: f64 },              // named-field variant
+    Rectangle { width: f64, height: f64 },
+    Triangle { base: f64, height: f64 }
+}
+
+enum Message {
+    Quit,                                // unit variant
+    Move(i32, i32),                      // tuple variant
+    Write(bool)
+}
+```
+
+### Construction
+
+Each variant shape has its own construction syntax, all prefixed with the enum name:
+
+```neuro
+val c = Color::Red                       // unit variant
+val m = Message::Move(1, 2)              // tuple variant
+val s = Shape::Circle { radius: 5.0 }    // struct variant
+```
+
+An enum value can be bound to a `val`/`mut`, passed to and returned from functions, and stored in a struct field. Enums are **`Copy`** (their payloads are scalar `Copy` primitives — see below), so binding or passing one duplicates it rather than moving it.
+
+### Memory Layout
+
+An enum is a tagged union: a discriminant identifying the active variant, plus storage for the widest variant's payload. Two enums with the same variant names but declared separately are distinct types.
+
+### Phase 1E Limitations
+
+- **Payloads are scalar `Copy` primitives only** — integers, floats, `bool`, `char`. A payload of `string`, a struct, an array, a tuple, or a reference is rejected (`UnsupportedEnumPayload`); broader payloads arrive with pattern matching and heap support.
+- **Non-generic** — generic enums such as `Option<T>` arrive with the generics system (1F).
+- **No deconstruction yet** — reading a variant's tag or payload needs `match` (the next 1E item, §3.6). Until then an enum value is constructed and carried, not inspected.
+
+### Type Errors
+
+| Error | Cause |
+|---|---|
+| `EnumAlreadyDefined` | Two `enum` (or an `enum` and a `struct`) share a name |
+| `UnknownEnumVariant` | Construction names a variant the enum does not declare |
+| `EnumVariantFormMismatch` | A variant built with the wrong syntax (e.g. a struct variant called like a function) |
+| `EnumVariantArityMismatch` | A tuple variant built with the wrong number of arguments |
+| `UnknownEnumField` / `MissingEnumField` / `DuplicateEnumField` | Struct-variant field set is wrong |
+| `UnsupportedEnumPayload` | A variant payload is not a scalar `Copy` primitive |
+
 ## References — Immutable Borrows (`&T`)
 
 An **immutable borrow** `&T` is a non-owning reference to a value (§2.4). It lets a
@@ -742,9 +803,10 @@ func returns_i32() -> i32 {
 - Explicit type conversions via `as`
 - Function types, strict type checking, type-mismatch error reporting
 - Structs, methods, fixed-size arrays `[T; N]`, tuples + destructuring, type aliases
+- Enums with associated data `enum E { A, B(T), C { f: T } }` (§3.5)
 
 **In progress / planned (still Phase 1):**
-- Enums, pattern matching, newtypes (1E)
+- Pattern matching, newtypes (1E)
 - Generics + monomorphization, traits, operator traits, static/dynamic dispatch, closures (1F)
 - `Option` / `Result`, collections, modules, prelude (1G)
 

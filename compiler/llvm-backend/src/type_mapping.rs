@@ -1,5 +1,7 @@
 // Neuro semantic type to LLVM type mapping
 
+use std::collections::HashMap;
+
 use inkwell::context::Context as LLVMContext;
 use inkwell::types::{BasicType, BasicTypeEnum};
 
@@ -9,11 +11,42 @@ use crate::types::Type;
 /// Maps Neuro semantic types to LLVM types
 pub(crate) struct TypeMapper<'ctx> {
     context: &'ctx LLVMContext,
+    /// Enum name → payload word count `W`: the number of 64-bit slots a value of
+    /// that enum reserves for variant data, sized to its largest variant (§3.5).
+    /// Populated before code generation so every enum type maps to a single,
+    /// consistent `{ i32, [W x i64] }` aggregate.
+    enum_words: HashMap<String, u32>,
 }
 
 impl<'ctx> TypeMapper<'ctx> {
     pub(crate) fn new(context: &'ctx LLVMContext) -> Self {
-        Self { context }
+        Self {
+            context,
+            enum_words: HashMap::new(),
+        }
+    }
+
+    /// Record each enum's payload word count before code generation begins.
+    pub(crate) fn set_enum_words(&mut self, enum_words: HashMap<String, u32>) {
+        self.enum_words = enum_words;
+    }
+
+    /// The LLVM tagged-union type for a named enum: `{ i32 tag, [W x i64] payload }`
+    /// (§3.5). The tag is the variant discriminant; the payload reserves `W` 64-bit
+    /// slots — one per field of the widest variant — into which scalar payload
+    /// values are packed. `W == 0` (an all-unit enum) yields a zero-length array.
+    pub(crate) fn enum_struct_type(
+        &self,
+        name: &str,
+    ) -> CodegenResult<inkwell::types::StructType<'ctx>> {
+        let words = *self.enum_words.get(name).ok_or_else(|| {
+            CodegenError::UnsupportedType(format!("unknown enum type '{}'", name))
+        })?;
+        let tag_ty = self.context.i32_type();
+        let payload_ty = self.context.i64_type().array_type(words);
+        Ok(self
+            .context
+            .struct_type(&[tag_ty.into(), payload_ty.into()], false))
     }
 
     /// Convert a Neuro semantic type to an LLVM type
@@ -84,6 +117,10 @@ impl<'ctx> TypeMapper<'ctx> {
                 "struct '{}' as a function parameter or return type is not yet supported",
                 name
             ))),
+            // Enum `{ i32 tag, [W x i64] payload }` (§3.5). Unlike structs, the enum
+            // layout is self-contained (the word count comes from `enum_words`), so an
+            // enum maps directly here and works as a parameter, return, or field type.
+            Type::Enum(name) => Ok(self.enum_struct_type(name)?.into()),
         }
     }
 
