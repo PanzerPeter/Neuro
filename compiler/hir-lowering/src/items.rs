@@ -1,12 +1,14 @@
 //! Top-level item registration and lowering.
 
-use ast_types::{ConstDef, FunctionDef, ImplDef, Item, MethodDef, SelfParam, StructDef};
+use ast_types::{
+    ConstDef, EnumDef, FunctionDef, ImplDef, Item, MethodDef, SelfParam, StructDef, VariantPayload,
+};
 use neuro_hir::{
-    HirConst, HirField, HirFunction, HirImpl, HirItem, HirMethod, HirParam, HirProgram,
-    HirSelfParam, HirStmt, HirStruct, HirType,
+    HirConst, HirEnum, HirEnumField, HirEnumVariant, HirField, HirFunction, HirImpl, HirItem,
+    HirMethod, HirParam, HirProgram, HirSelfParam, HirStmt, HirStruct, HirType,
 };
 
-use crate::{Lowerer, LoweringError};
+use crate::{EnumVariantData, Lowerer, LoweringError};
 
 /// The `@derive(...)` attribute name and the trait arguments lowering cares about.
 const DERIVE_ATTRIBUTE: &str = "derive";
@@ -18,6 +20,11 @@ impl Lowerer {
     /// pre-pass so bodies see every item regardless of source order — mirroring the
     /// checker's registration passes.
     pub(crate) fn register_items(&mut self, items: &[Item]) -> Result<(), LoweringError> {
+        for item in items {
+            if let Item::Enum(def) = item {
+                self.register_enum(def)?;
+            }
+        }
         for item in items {
             if let Item::Struct(def) = item {
                 self.register_struct(def)?;
@@ -62,6 +69,38 @@ impl Lowerer {
         if copy || clone {
             self.clone_structs.insert(def.name.name.clone());
         }
+        Ok(())
+    }
+
+    /// Resolve an enum's variants and payload field types into the lowering table
+    /// (§3.5). Mirrors the checker's registration; payload-type Copy/scalar
+    /// validation is the checker's job and not repeated here.
+    fn register_enum(&mut self, def: &EnumDef) -> Result<(), LoweringError> {
+        let mut variants = Vec::with_capacity(def.variants.len());
+        for variant in &def.variants {
+            let fields = match &variant.payload {
+                VariantPayload::Unit => Vec::new(),
+                VariantPayload::Tuple(tys) => {
+                    let mut fields = Vec::with_capacity(tys.len());
+                    for ty in tys {
+                        fields.push((None, self.resolve_type(ty)?));
+                    }
+                    fields
+                }
+                VariantPayload::Struct(field_defs) => {
+                    let mut fields = Vec::with_capacity(field_defs.len());
+                    for field in field_defs {
+                        fields.push((Some(field.name.name.clone()), self.resolve_type(&field.ty)?));
+                    }
+                    fields
+                }
+            };
+            variants.push(EnumVariantData {
+                name: variant.name.name.clone(),
+                fields,
+            });
+        }
+        self.enums.insert(def.name.name.clone(), variants);
         Ok(())
     }
 
@@ -132,6 +171,7 @@ impl Lowerer {
                     hir_items.push(HirItem::Function(self.lower_function(func)?))
                 }
                 Item::Struct(def) => hir_items.push(HirItem::Struct(self.lower_struct(def)?)),
+                Item::Enum(def) => hir_items.push(HirItem::Enum(self.lower_enum(def)?)),
                 Item::Impl(def) => hir_items.push(HirItem::Impl(self.lower_impl(def)?)),
                 Item::Const(def) => hir_items.push(HirItem::Const(self.lower_const(def)?)),
             }
@@ -151,6 +191,45 @@ impl Lowerer {
         Ok(HirStruct {
             name: def.name.name.clone(),
             fields,
+            span: def.span,
+        })
+    }
+
+    fn lower_enum(&self, def: &EnumDef) -> Result<HirEnum, LoweringError> {
+        let mut variants = Vec::with_capacity(def.variants.len());
+        for variant in &def.variants {
+            let fields = match &variant.payload {
+                VariantPayload::Unit => Vec::new(),
+                VariantPayload::Tuple(tys) => {
+                    let mut fields = Vec::with_capacity(tys.len());
+                    for ty in tys {
+                        fields.push(HirEnumField {
+                            name: None,
+                            ty: self.resolve_type(ty)?,
+                        });
+                    }
+                    fields
+                }
+                VariantPayload::Struct(field_defs) => {
+                    let mut fields = Vec::with_capacity(field_defs.len());
+                    for field in field_defs {
+                        fields.push(HirEnumField {
+                            name: Some(field.name.name.clone()),
+                            ty: self.resolve_type(&field.ty)?,
+                        });
+                    }
+                    fields
+                }
+            };
+            variants.push(HirEnumVariant {
+                name: variant.name.name.clone(),
+                fields,
+                span: variant.span,
+            });
+        }
+        Ok(HirEnum {
+            name: def.name.name.clone(),
+            variants,
             span: def.span,
         })
     }

@@ -5,6 +5,7 @@
 mod arrays;
 mod binary;
 mod control_flow;
+mod enums;
 mod literals;
 mod methods;
 mod tuples;
@@ -151,6 +152,14 @@ impl<'ctx> CodegenContext<'ctx> {
                 let rest_ty = Type::from_hir(&expr.ty);
                 self.codegen_array_rest(array, *start, &rest_ty)
             }
+
+            // Enum construction `E::V` / `E::V(..)` / `E::V { .. }` (§3.5).
+            HirExprKind::EnumConstruct {
+                enum_name,
+                tag,
+                payload,
+                ..
+            } => self.codegen_enum_construct(enum_name, *tag, payload),
         }
     }
 

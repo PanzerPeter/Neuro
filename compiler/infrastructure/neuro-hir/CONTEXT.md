@@ -6,8 +6,8 @@ Provide the typed High-Level IR (HIR) node definitions — the stable, backend-a
 ## Entry Point
 - Type: Library (no entry function — pure data)
 - Public types: `HirProgram`, `HirItem`, `HirFunction`, `HirParam`, `HirStruct`, `HirField`,
-  `HirImpl`, `HirMethod`, `HirSelfParam`, `HirConst`, `HirStmt`, `HirExpr`, `HirExprKind`,
-  `HirFieldInit`, `HirType`
+  `HirEnum`, `HirEnumVariant`, `HirEnumField`, `HirImpl`, `HirMethod`, `HirSelfParam`, `HirConst`,
+  `HirStmt`, `HirExpr`, `HirExprKind`, `HirFieldInit`, `HirType`
 
 ## Data Ownership
 - Tables / Events Published / Events Consumed / Public Read Model: none
@@ -30,6 +30,11 @@ differences that make it the *typed* contract:
    span lives on the enclosing node.
 
 ## Recent Updates
+- 2026-06-30: Enums with associated data §3.5. Added `HirType::Enum(String)` (nominal), `HirItem::Enum`
+  with `HirEnum { name, variants }` / `HirEnumVariant { name, fields }` / `HirEnumField { name:
+  Option<String>, ty }`, and `HirExprKind::EnumConstruct { enum_name, variant, tag, payload }` — the
+  single node all three surface construction forms normalize to (payload in declared field order; `tag`
+  is the variant's declaration index). Consumed by both backends.
 - 2026-06-29: Struct + array destructuring §3.2. Added `HirExprKind::ArrayRest { array, start }`, the
   typed mirror of the AST's array-rest node; its `ty` carries the resolved `[T; N - start]` remainder
   type. Struct destructuring carries no HIR node (the parser desugars it to field accesses).

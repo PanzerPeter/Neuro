@@ -217,6 +217,12 @@ impl<'ctx> CodegenContext<'ctx> {
         self.drop_types = drop_types;
     }
 
+    /// Record each enum's payload word count (§3.5) so enum types map to the
+    /// `{ i32, [W x i64] }` tagged union before code generation begins.
+    pub(crate) fn set_enum_words(&mut self, enum_words: std::collections::HashMap<String, u32>) {
+        self.type_mapper.set_enum_words(enum_words);
+    }
+
     /// Enable or disable debug-build integer overflow trapping.
     /// Enabled for `-O0` (debug), disabled for `-O1..-O3` (release).
     pub(crate) fn set_overflow_checks(&mut self, enabled: bool) {

@@ -14,6 +14,10 @@ const PANIC_BUILTINS: &[&str] = &["panic", "assert", "unreachable"];
 /// The deep-copy method shared by `string` and `Clone`-deriving structs (§2.3, §2.7).
 const CLONE_METHOD: &str = "clone";
 
+/// An enum variant's ordered payload fields: each `(optional field name, type)`.
+/// `Some` name marks a struct-variant field; `None` a tuple-variant element (§3.5).
+type PayloadFields = Vec<(Option<String>, HirType)>;
+
 impl Lowerer {
     /// Lower an expression to a typed [`HirExpr`], deriving its resolved type from
     /// the surrounding `expected` type where the language's contextual inference
@@ -102,6 +106,16 @@ impl Lowerer {
 
             Expr::Call { func, args, span } => self.lower_call(func, args, expected, *span),
 
+            // A bare path is a unit-variant enum construction `E::V` (§3.5) when the
+            // type names an enum, else an associated-function reference.
+            Expr::Path {
+                type_name,
+                member,
+                span,
+            } if self.enums.contains_key(&type_name.name) => {
+                self.lower_enum_construct(&type_name.name, &member.name, Vec::new(), *span)
+            }
+
             Expr::Path {
                 type_name,
                 member,
@@ -128,6 +142,13 @@ impl Lowerer {
                 base,
                 span,
             } => self.lower_struct_literal(name, fields, base, *span),
+
+            Expr::EnumStructLiteral {
+                enum_name,
+                variant,
+                fields,
+                span,
+            } => self.lower_enum_struct_literal(&enum_name.name, &variant.name, fields, *span),
 
             Expr::FieldAccess {
                 object,
@@ -377,6 +398,13 @@ impl Lowerer {
             Expr::FieldAccess { object, field, .. } => {
                 self.lower_method_call(object, &field.name, args, span)
             }
+            // `Enum::Variant(args)` is a tuple-variant construction (§3.5) when the
+            // type names an enum; otherwise an associated-function call.
+            Expr::Path {
+                type_name, member, ..
+            } if self.enums.contains_key(&type_name.name) => {
+                self.lower_enum_tuple_call(&type_name.name, &member.name, args, span)
+            }
             Expr::Path {
                 type_name, member, ..
             } => self.lower_assoc_call(&type_name.name, &member.name, args, span),
@@ -550,6 +578,114 @@ impl Lowerer {
                 target: format!("{}.{}", recv, method),
             }),
         }
+    }
+
+    /// Look up an enum variant by name, returning its discriminant tag (declaration
+    /// index) and a clone of its ordered payload fields. The clone frees the enum
+    /// table's immutable borrow before the mutable argument lowering that follows.
+    fn enum_variant(
+        &self,
+        enum_name: &str,
+        variant: &str,
+    ) -> Result<(u32, PayloadFields), LoweringError> {
+        let variants = self
+            .enums
+            .get(enum_name)
+            .ok_or_else(|| LoweringError::UnresolvedType {
+                name: enum_name.to_string(),
+            })?;
+        variants
+            .iter()
+            .enumerate()
+            .find(|(_, v)| v.name == variant)
+            .map(|(i, v)| (i as u32, v.fields.clone()))
+            .ok_or_else(|| LoweringError::UnresolvedCall {
+                target: format!("{}::{}", enum_name, variant),
+            })
+    }
+
+    /// Assemble the single [`HirExprKind::EnumConstruct`] node every surface form
+    /// lowers to. `payload` is already in the variant's declared field order.
+    fn build_enum_construct(
+        &self,
+        enum_name: &str,
+        variant: &str,
+        tag: u32,
+        payload: Vec<HirExpr>,
+        span: shared_types::Span,
+    ) -> HirExpr {
+        HirExpr::new(
+            HirExprKind::EnumConstruct {
+                enum_name: enum_name.to_string(),
+                variant: variant.to_string(),
+                tag,
+                payload,
+            },
+            HirType::Enum(enum_name.to_string()),
+            span,
+        )
+    }
+
+    /// Lower a unit-variant construction `E::V` — an empty payload (§3.5).
+    fn lower_enum_construct(
+        &mut self,
+        enum_name: &str,
+        variant: &str,
+        payload: Vec<HirExpr>,
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let (tag, _) = self.enum_variant(enum_name, variant)?;
+        Ok(self.build_enum_construct(enum_name, variant, tag, payload, span))
+    }
+
+    /// Lower a tuple-variant construction `E::V(args)`: arguments are positional, so
+    /// they are the payload as-is, lowered against the declared field types (§3.5).
+    fn lower_enum_tuple_call(
+        &mut self,
+        enum_name: &str,
+        variant: &str,
+        args: &[Expr],
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let (tag, fields) = self.enum_variant(enum_name, variant)?;
+        let field_tys: Vec<HirType> = fields.into_iter().map(|(_, t)| t).collect();
+        let payload = self.lower_args(args, &field_tys)?;
+        Ok(self.build_enum_construct(enum_name, variant, tag, payload, span))
+    }
+
+    /// Lower a struct-variant construction `E::V { field: expr, ... }`: the provided
+    /// fields are reordered into the variant's declared field order before becoming
+    /// the payload, so codegen sees a single positional layout (§3.5).
+    fn lower_enum_struct_literal(
+        &mut self,
+        enum_name: &str,
+        variant: &str,
+        fields: &[FieldInit],
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let (tag, declared) = self.enum_variant(enum_name, variant)?;
+        let mut payload = Vec::with_capacity(declared.len());
+        for (field_name, field_ty) in &declared {
+            let Some(field_name) = field_name else {
+                return Err(LoweringError::Malformed {
+                    detail: format!(
+                        "tuple variant '{}::{}' constructed with field names",
+                        enum_name, variant
+                    ),
+                });
+            };
+            let provided = fields
+                .iter()
+                .find(|f| &f.name.name == field_name)
+                .ok_or_else(|| LoweringError::Malformed {
+                    detail: format!(
+                        "missing field '{}' for enum variant '{}::{}'",
+                        field_name, enum_name, variant
+                    ),
+                })?;
+            payload.push(self.lower_expr(&provided.value, Some(field_ty))?);
+        }
+        Ok(self.build_enum_construct(enum_name, variant, tag, payload, span))
     }
 
     /// Lower an associated-function call `TypeName::func(args)`.

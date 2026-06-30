@@ -92,6 +92,21 @@ pub fn compile(
         }
     }
 
+    // Collect each enum's payload word count `W` (§3.5): the widest variant's field
+    // count, so every value of the enum maps to one `{ i32, [W x i64] }` aggregate.
+    let mut enum_words: HashMap<String, u32> = HashMap::new();
+    for item in items {
+        if let HirItem::Enum(def) = item {
+            let words = def
+                .variants
+                .iter()
+                .map(|v| v.fields.len())
+                .max()
+                .unwrap_or(0) as u32;
+            enum_words.insert(def.name.clone(), words);
+        }
+    }
+
     // Extract function signatures from the HIR (caller validated semantics already).
     let mut func_types = HashMap::new();
     for item in items {
@@ -143,7 +158,7 @@ pub fn compile(
                 }
             }
 
-            HirItem::Struct(_) | HirItem::Const(_) => {}
+            HirItem::Struct(_) | HirItem::Const(_) | HirItem::Enum(_) => {}
         }
     }
 
@@ -163,6 +178,7 @@ pub fn compile(
     let context = LLVMContext::create();
     let mut codegen_ctx = CodegenContext::new(&context, "neuro_module");
     codegen_ctx.set_struct_defs(struct_defs);
+    codegen_ctx.set_enum_words(enum_words);
     codegen_ctx.set_drop_types(drop_types);
 
     // Supply source so panic-family builtins can render `file:line:col` in their
@@ -192,7 +208,7 @@ pub fn compile(
             HirItem::Impl(impl_def) => {
                 codegen_ctx.codegen_impl(impl_def, &func_types)?;
             }
-            HirItem::Const(_) | HirItem::Struct(_) => {}
+            HirItem::Const(_) | HirItem::Struct(_) | HirItem::Enum(_) => {}
         }
     }
 

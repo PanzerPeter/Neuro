@@ -73,6 +73,7 @@ structs/structs.nr  50
 structs/struct_update.nr  14
 
 # --- showcase (multiple features working together) ------------------------
+showcase/enum_records.nr    28
 showcase/mutable_borrows.nr 47
 showcase/num_algorithms.nr  32
 showcase/perceptron.nr      8

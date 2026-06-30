@@ -96,6 +96,27 @@ impl Parser {
         }
     }
 
+    /// Consume an identifier token, returning it as an [`Identifier`]. `role`
+    /// describes what was expected (e.g. "enum name") for the error message.
+    pub(super) fn consume_identifier(
+        &mut self,
+        role: &str,
+    ) -> ParseResult<shared_types::Identifier> {
+        let token = self.consume(TokenKind::Identifier(String::new()), role)?;
+        if let TokenKind::Identifier(name) = token.kind {
+            Ok(shared_types::Identifier {
+                name,
+                span: token.span,
+            })
+        } else {
+            Err(ParseError::UnexpectedToken {
+                found: token.kind,
+                expected: role.to_string(),
+                span: token.span,
+            })
+        }
+    }
+
     /// Skip newline tokens (whitespace handling)
     pub(super) fn skip_newlines(&mut self) {
         while matches!(self.peek_kind(), Some(TokenKind::Newline)) {

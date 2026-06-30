@@ -211,3 +211,47 @@ fn array_rest_remainder_is_sized_subarray() {
         }
     );
 }
+
+#[test]
+fn enum_construction_lowers_to_enum_construct() {
+    // §3.5: each surface form normalizes to a single `EnumConstruct` node carrying
+    // the variant's discriminant tag and a payload in declared field order. The
+    // struct-variant form reorders provided fields into declaration order.
+    let program = lower(
+        "enum Shape { Circle { radius: f64 }, Rectangle { width: f64, height: f64 } }\n\
+         enum Msg { Quit, Move(i32, i32) }\n\
+         func main() -> i32 {\n\
+            val a = Msg::Quit\n\
+            val b = Msg::Move(1, 2)\n\
+            val c = Shape::Rectangle { height: 3.0, width: 2.0 }\n\
+            0\n\
+         }",
+    );
+    let body = function_body(&program, "main");
+
+    let a = binding_init(body, "a");
+    let HirExprKind::EnumConstruct { tag, payload, .. } = &a.kind else {
+        panic!("unit variant should lower to EnumConstruct");
+    };
+    assert_eq!(*tag, 0);
+    assert!(payload.is_empty());
+    assert_eq!(a.ty, HirType::Enum("Msg".to_string()));
+
+    let b = binding_init(body, "b");
+    let HirExprKind::EnumConstruct { tag, payload, .. } = &b.kind else {
+        panic!("tuple variant should lower to EnumConstruct");
+    };
+    assert_eq!(*tag, 1);
+    assert_eq!(payload.len(), 2);
+    assert_eq!(payload[0].ty, HirType::I32);
+
+    let c = binding_init(body, "c");
+    let HirExprKind::EnumConstruct { tag, payload, .. } = &c.kind else {
+        panic!("struct variant should lower to EnumConstruct");
+    };
+    // Rectangle is the second variant of Shape.
+    assert_eq!(*tag, 1);
+    // Fields are reordered into declaration order: width (2.0) then height (3.0).
+    assert_eq!(payload.len(), 2);
+    assert_eq!(c.ty, HirType::Enum("Shape".to_string()));
+}

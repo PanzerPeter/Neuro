@@ -74,9 +74,9 @@ pub fn lower_program(program: &HirProgram) -> Result<String, MlirError> {
                     module.body().append_operation(op);
                 }
             }
-            // Structs and constants carry no callable surface; the scaffold module
-            // is a set of function declarations only.
-            HirItem::Struct(_) | HirItem::Const(_) => {}
+            // Structs, enums, and constants carry no callable surface; the scaffold
+            // module is a set of function declarations only.
+            HirItem::Struct(_) | HirItem::Enum(_) | HirItem::Const(_) => {}
         }
     }
 
@@ -159,6 +159,7 @@ fn map_type<'c>(context: &'c Context, ty: &HirType) -> Result<Type<'c>, MlirErro
         HirType::F64 => Type::float64(context),
         HirType::String
         | HirType::Struct(_)
+        | HirType::Enum(_)
         | HirType::Reference { .. }
         | HirType::Array { .. }
         | HirType::Tuple(_)

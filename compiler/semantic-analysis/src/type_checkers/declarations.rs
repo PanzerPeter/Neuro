@@ -1,7 +1,9 @@
-use super::TypeChecker;
+use super::{EnumVariantInfo, TypeChecker, VariantForm};
 use crate::errors::TypeError;
 use crate::types::Type;
-use ast_types::{ConstDef, Expr, FunctionDef, ImplDef, SelfParam, Stmt, StructDef};
+use ast_types::{
+    ConstDef, EnumDef, Expr, FunctionDef, ImplDef, SelfParam, Stmt, StructDef, VariantPayload,
+};
 use shared_types::Span;
 
 /// The attribute name carrying trait derivations (`@derive(...)`).
@@ -132,6 +134,82 @@ impl TypeChecker {
         self.current_fn_outliving.clear();
 
         Some(())
+    }
+
+    /// Register an enum definition: its variants, their construction form, and each
+    /// payload field's resolved type (§3.5).
+    ///
+    /// Payload types are restricted to scalar `Copy` primitives in this phase
+    /// (integers, floats, `bool`, `char`); a non-scalar payload (string, struct,
+    /// array, tuple, reference) is rejected with `UnsupportedEnumPayload` so the
+    /// tagged-union codegen stays a fixed-width slot layout. Broader payloads land
+    /// with pattern matching and heap support.
+    pub(crate) fn register_enum(&mut self, def: &EnumDef) {
+        if self.enum_defs.contains_key(&def.name.name)
+            || self.struct_defs.contains_key(&def.name.name)
+        {
+            self.record_error(TypeError::EnumAlreadyDefined {
+                name: def.name.name.clone(),
+                span: def.name.span,
+            });
+            return;
+        }
+
+        let mut variants: Vec<EnumVariantInfo> = Vec::new();
+        for variant in &def.variants {
+            let (form, fields) = match &variant.payload {
+                VariantPayload::Unit => (VariantForm::Unit, Vec::new()),
+                VariantPayload::Tuple(tys) => {
+                    let mut fields = Vec::with_capacity(tys.len());
+                    for ty in tys {
+                        let resolved = self.resolve_enum_payload_type(ty);
+                        fields.push((None, resolved));
+                    }
+                    (VariantForm::Tuple, fields)
+                }
+                VariantPayload::Struct(field_defs) => {
+                    let mut fields = Vec::with_capacity(field_defs.len());
+                    for field in field_defs {
+                        let resolved = self.resolve_enum_payload_type(&field.ty);
+                        fields.push((Some(field.name.name.clone()), resolved));
+                    }
+                    (VariantForm::Struct, fields)
+                }
+            };
+            variants.push(EnumVariantInfo {
+                name: variant.name.name.clone(),
+                form,
+                fields,
+            });
+        }
+
+        self.enum_defs.insert(def.name.name.clone(), variants);
+    }
+
+    /// Resolve an enum-variant payload type, rejecting any non-scalar payload with
+    /// `UnsupportedEnumPayload` and recovering as `Type::Unknown`.
+    fn resolve_enum_payload_type(&mut self, ty: &ast_types::Type) -> Type {
+        let Some(resolved) = self.resolve_type(ty) else {
+            return Type::Unknown;
+        };
+        if Self::is_scalar_payload(&resolved) {
+            resolved
+        } else {
+            self.record_error(TypeError::UnsupportedEnumPayload {
+                ty: resolved,
+                span: ty.span(),
+            });
+            Type::Unknown
+        }
+    }
+
+    /// Whether `ty` is a scalar `Copy` primitive admissible as an enum payload in
+    /// this phase: any integer, full- or half-precision float, `bool`, or `char`.
+    fn is_scalar_payload(ty: &Type) -> bool {
+        ty.is_integer()
+            || ty.is_float()
+            || ty.is_half_float()
+            || matches!(ty, Type::Bool | Type::Char)
     }
 
     /// Register a struct definition without checking field initializers.

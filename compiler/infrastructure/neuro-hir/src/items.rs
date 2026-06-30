@@ -20,8 +20,35 @@ pub struct HirProgram {
 pub enum HirItem {
     Function(HirFunction),
     Struct(HirStruct),
+    Enum(HirEnum),
     Impl(HirImpl),
     Const(HirConst),
+}
+
+/// An enum definition (§3.5): an ordered list of variants. The order is the
+/// declaration order, which backends use as the discriminant (tag) order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HirEnum {
+    pub name: String,
+    pub variants: Vec<HirEnumVariant>,
+    pub span: Span,
+}
+
+/// A single enum variant with its resolved payload fields. A field's `name` is
+/// `Some` for a struct variant and `None` for a tuple variant; a unit variant has
+/// no fields. Fields are in declaration order — the order codegen packs them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HirEnumVariant {
+    pub name: String,
+    pub fields: Vec<HirEnumField>,
+    pub span: Span,
+}
+
+/// A single payload field of an enum variant.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HirEnumField {
+    pub name: Option<String>,
+    pub ty: HirType,
 }
 
 /// A free function. The return type is always resolved — `HirType::Void` when

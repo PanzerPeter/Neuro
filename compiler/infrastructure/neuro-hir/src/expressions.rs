@@ -132,6 +132,17 @@ pub enum HirExprKind {
         object: Box<HirExpr>,
         index: usize,
     },
+    /// Enum construction (§3.5): builds the `variant`-th value of `enum_name` from
+    /// the lowered `payload`, which is in the variant's declared field order (the
+    /// three surface forms — unit `E::V`, tuple `E::V(..)`, and struct `E::V { .. }`
+    /// — all normalize to this single node). `tag` is the variant's discriminant
+    /// (its declaration index). The expression's `ty` is [`HirType::Enum`].
+    EnumConstruct {
+        enum_name: String,
+        variant: String,
+        tag: u32,
+        payload: Vec<HirExpr>,
+    },
     /// Trailing remainder of an array destructuring pattern (§3.2): a fresh
     /// `[T; N - start]` array copying elements `start..N` of `array` (a `[T; N]`).
     /// The arity rules are validated before lowering; this node's `ty` carries

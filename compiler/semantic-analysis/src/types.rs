@@ -35,6 +35,10 @@ pub enum Type {
     },
     /// User-defined struct type, identified by name (nominal typing).
     Struct(std::string::String),
+    /// User-defined enum type, identified by name (nominal typing, §3.5). A tagged
+    /// union of variants; in Phase 1E its payloads are scalar `Copy` primitives, so
+    /// an enum is `Copy`.
+    Enum(std::string::String),
     /// Borrow `&T` (§2.4) / `&mut T` (§2.5): a non-owning reference to `inner`.
     /// References are `Copy` and never move the borrowed value. `mutable`
     /// distinguishes a write-capable `&mut T` from a read-only `&T`.
@@ -102,8 +106,9 @@ impl Type {
                     && r1.is_compatible_with(r2)
             }
 
-            // Struct types match by name (nominal typing)
+            // Struct and enum types match by name (nominal typing).
             (Type::Struct(a), Type::Struct(b)) => a == b,
+            (Type::Enum(a), Type::Enum(b)) => a == b,
 
             // References match when their referents match and their mutability
             // agrees (§2.4, §2.5). There is no implicit `&mut T` → `&T` coercion —
@@ -290,6 +295,7 @@ impl fmt::Display for Type {
             Type::Void => write!(f, "void"),
             Type::Unknown => write!(f, "<error>"),
             Type::Struct(name) => write!(f, "{}", name),
+            Type::Enum(name) => write!(f, "{}", name),
             Type::Reference { inner, mutable } => {
                 if *mutable {
                     write!(f, "&mut {}", inner)

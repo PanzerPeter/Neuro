@@ -113,11 +113,46 @@ pub struct ConstDef {
     pub span: Span,
 }
 
+/// The data a single enum variant carries (§3.5).
+///
+/// A variant is one of three shapes: a bare tag, a positional tuple of payload
+/// types, or a set of named fields. The payload types are restricted to scalar
+/// `Copy` primitives by semantic analysis (a documented Phase-1E limitation); the
+/// AST itself imposes no restriction.
+#[derive(Debug, Clone, PartialEq)]
+pub enum VariantPayload {
+    /// A bare variant with no data: `Red`.
+    Unit,
+    /// A tuple variant with positional fields: `Move(i32, i32)`.
+    Tuple(Vec<Type>),
+    /// A struct-like variant with named fields: `Circle { radius: f64 }`.
+    Struct(Vec<FieldDef>),
+}
+
+/// A single variant in an enum definition (§3.5).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumVariant {
+    pub name: Identifier,
+    pub payload: VariantPayload,
+    pub span: Span,
+}
+
+/// Enum definition (§3.5): a tagged union of named variants, each optionally
+/// carrying associated data. Non-generic in Phase 1E — generic enums (`Option<T>`)
+/// arrive with the generics system (1F).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumDef {
+    pub name: Identifier,
+    pub variants: Vec<EnumVariant>,
+    pub span: Span,
+}
+
 /// Top-level AST item
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     Function(FunctionDef),
     Struct(StructDef),
+    Enum(EnumDef),
     Impl(ImplDef),
     Const(ConstDef),
 }

@@ -263,4 +263,63 @@ pub enum TypeError {
         found: usize,
         span: Span,
     },
+
+    #[error("enum '{name}' is already defined at {span:?}")]
+    EnumAlreadyDefined { name: String, span: Span },
+
+    #[error("enum variant payload type {ty} is not supported at {span:?}: enum variants may only carry scalar Copy primitives (integers, floats, bool, char) in this phase (§3.5)")]
+    UnsupportedEnumPayload { ty: Type, span: Span },
+
+    #[error("enum '{enum_name}' has no variant '{variant}' at {span:?} (§3.5)")]
+    UnknownEnumVariant {
+        enum_name: String,
+        variant: String,
+        span: Span,
+    },
+
+    #[error(
+        "enum variant '{enum_name}::{variant}' is a {expected} variant at {span:?}: {hint} (§3.5)"
+    )]
+    EnumVariantFormMismatch {
+        enum_name: String,
+        variant: String,
+        expected: String,
+        hint: String,
+        span: Span,
+    },
+
+    #[error("enum variant '{enum_name}::{variant}' takes {expected} field(s) but {found} were provided at {span:?} (§3.5)")]
+    EnumVariantArityMismatch {
+        enum_name: String,
+        variant: String,
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    #[error("enum variant '{enum_name}::{variant}' has no field '{field}' at {span:?} (§3.5)")]
+    UnknownEnumField {
+        enum_name: String,
+        variant: String,
+        field: String,
+        span: Span,
+    },
+
+    #[error(
+        "missing field '{field}' for enum variant '{enum_name}::{variant}' at {span:?} (§3.5)"
+    )]
+    MissingEnumField {
+        enum_name: String,
+        variant: String,
+        field: String,
+        span: Span,
+    },
+
+    #[error("field '{field}' is set more than once for enum variant '{enum_name}::{variant}' at {span:?} (§3.5)")]
+    DuplicateEnumField {
+        enum_name: String,
+        variant: String,
+        field: String,
+        span: Span,
+    },
 }

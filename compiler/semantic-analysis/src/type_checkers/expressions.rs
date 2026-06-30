@@ -1,9 +1,9 @@
-use super::TypeChecker;
+use super::{TypeChecker, VariantForm};
 use crate::errors::TypeError;
 use crate::types::Type;
 use ast_types::FieldInit;
 use ast_types::{BinaryOp, Expr, UnaryOp};
-use shared_types::{Literal, Span};
+use shared_types::{Identifier, Literal, Span};
 use std::collections::HashMap;
 
 /// The builtin deep-copy method name shared by `string` and Clone-deriving structs (§2.3, §2.7).
@@ -262,6 +262,236 @@ impl TypeChecker {
             Expr::Paren(inner, _) => Self::is_bare_binding(inner),
             _ => false,
         }
+    }
+
+    /// Type-check a bare path enum construction `E::V` (§3.5): valid only for a
+    /// unit variant. A tuple/struct variant used here is a form error. Returns the
+    /// enum type for error recovery in every case.
+    fn check_enum_unit_path(&mut self, enum_name: &str, variant: &str, span: Span) -> Type {
+        let recovery = Type::Enum(enum_name.to_string());
+        let Some(info) = self.lookup_enum_variant(enum_name, variant) else {
+            self.record_error(TypeError::UnknownEnumVariant {
+                enum_name: enum_name.to_string(),
+                variant: variant.to_string(),
+                span,
+            });
+            return recovery;
+        };
+        match info.form {
+            VariantForm::Unit => {}
+            VariantForm::Tuple => self.record_error(TypeError::EnumVariantFormMismatch {
+                enum_name: enum_name.to_string(),
+                variant: variant.to_string(),
+                expected: "tuple".to_string(),
+                hint: "construct it with arguments, e.g. `E::V(...)`".to_string(),
+                span,
+            }),
+            VariantForm::Struct => self.record_error(TypeError::EnumVariantFormMismatch {
+                enum_name: enum_name.to_string(),
+                variant: variant.to_string(),
+                expected: "struct".to_string(),
+                hint: "construct it with braces, e.g. `E::V { field: ... }`".to_string(),
+                span,
+            }),
+        }
+        recovery
+    }
+
+    /// Type-check a tuple-variant enum construction `E::V(args)` (§3.5): the variant
+    /// must be a tuple variant, and the arguments must match its field types by
+    /// position. Returns the enum type for error recovery.
+    fn check_enum_tuple_call(
+        &mut self,
+        enum_name: &str,
+        variant: &str,
+        args: &[Expr],
+        span: Span,
+    ) -> Type {
+        let recovery = Type::Enum(enum_name.to_string());
+        let info = match self.lookup_enum_variant(enum_name, variant) {
+            Some(info) => info,
+            None => {
+                self.record_error(TypeError::UnknownEnumVariant {
+                    enum_name: enum_name.to_string(),
+                    variant: variant.to_string(),
+                    span,
+                });
+                for arg in args {
+                    let _ = self.check_expr(arg, None);
+                }
+                return recovery;
+            }
+        };
+
+        match info.form {
+            VariantForm::Tuple => {}
+            VariantForm::Unit => {
+                self.record_error(TypeError::EnumVariantFormMismatch {
+                    enum_name: enum_name.to_string(),
+                    variant: variant.to_string(),
+                    expected: "unit".to_string(),
+                    hint: "construct it without arguments, e.g. `E::V`".to_string(),
+                    span,
+                });
+                for arg in args {
+                    let _ = self.check_expr(arg, None);
+                }
+                return recovery;
+            }
+            VariantForm::Struct => {
+                self.record_error(TypeError::EnumVariantFormMismatch {
+                    enum_name: enum_name.to_string(),
+                    variant: variant.to_string(),
+                    expected: "struct".to_string(),
+                    hint: "construct it with braces, e.g. `E::V { field: ... }`".to_string(),
+                    span,
+                });
+                for arg in args {
+                    let _ = self.check_expr(arg, None);
+                }
+                return recovery;
+            }
+        }
+
+        // Clone the field types so the immutable enum-table borrow ends before the
+        // mutable `check_expr` calls below.
+        let field_tys: Vec<Type> = info.fields.iter().map(|(_, t)| t.clone()).collect();
+
+        if args.len() != field_tys.len() {
+            self.record_error(TypeError::EnumVariantArityMismatch {
+                enum_name: enum_name.to_string(),
+                variant: variant.to_string(),
+                expected: field_tys.len(),
+                found: args.len(),
+                span,
+            });
+        }
+
+        for (arg, expected_ty) in args.iter().zip(field_tys.iter()) {
+            if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
+                if !arg_ty.is_compatible_with(expected_ty) {
+                    self.record_error(TypeError::Mismatch {
+                        expected: expected_ty.clone(),
+                        found: arg_ty,
+                        span: arg.span(),
+                    });
+                }
+            }
+        }
+        recovery
+    }
+
+    /// Type-check a struct-variant enum construction `E::V { field: expr, ... }`
+    /// (§3.5): every declared field must be provided exactly once with a matching
+    /// type, and no unknown fields. Returns the enum type for error recovery.
+    fn check_enum_struct_literal(
+        &mut self,
+        enum_name: &Identifier,
+        variant: &Identifier,
+        fields: &[FieldInit],
+        span: Span,
+    ) -> Type {
+        let recovery = Type::Enum(enum_name.name.clone());
+
+        if !self.enum_defs.contains_key(&enum_name.name) {
+            self.record_error(TypeError::UnknownPathType {
+                type_name: enum_name.name.clone(),
+                member: variant.name.clone(),
+                span,
+            });
+            for field in fields {
+                let _ = self.check_expr(&field.value, None);
+            }
+            return recovery;
+        }
+
+        let info_fields: Vec<(Option<String>, Type)> =
+            match self.lookup_enum_variant(&enum_name.name, &variant.name) {
+                Some(info) if info.form == VariantForm::Struct => info.fields.clone(),
+                Some(_) => {
+                    self.record_error(TypeError::EnumVariantFormMismatch {
+                        enum_name: enum_name.name.clone(),
+                        variant: variant.name.clone(),
+                        expected: "non-struct".to_string(),
+                        hint: "this variant is not constructed with braces".to_string(),
+                        span,
+                    });
+                    for field in fields {
+                        let _ = self.check_expr(&field.value, None);
+                    }
+                    return recovery;
+                }
+                None => {
+                    self.record_error(TypeError::UnknownEnumVariant {
+                        enum_name: enum_name.name.clone(),
+                        variant: variant.name.clone(),
+                        span,
+                    });
+                    for field in fields {
+                        let _ = self.check_expr(&field.value, None);
+                    }
+                    return recovery;
+                }
+            };
+
+        let mut seen: HashMap<String, Span> = HashMap::new();
+        for FieldInit {
+            name: fname,
+            value,
+            span: fspan,
+        } in fields
+        {
+            if seen.insert(fname.name.clone(), *fspan).is_some() {
+                self.record_error(TypeError::DuplicateEnumField {
+                    enum_name: enum_name.name.clone(),
+                    variant: variant.name.clone(),
+                    field: fname.name.clone(),
+                    span: *fspan,
+                });
+                continue;
+            }
+
+            match info_fields
+                .iter()
+                .find(|(n, _)| n.as_deref() == Some(&fname.name))
+            {
+                Some((_, expected_ty)) => {
+                    if let Some(actual_ty) = self.check_expr(value, Some(expected_ty)) {
+                        if !actual_ty.is_compatible_with(expected_ty) {
+                            self.record_error(TypeError::Mismatch {
+                                expected: expected_ty.clone(),
+                                found: actual_ty,
+                                span: value.span(),
+                            });
+                        }
+                    }
+                }
+                None => {
+                    self.record_error(TypeError::UnknownEnumField {
+                        enum_name: enum_name.name.clone(),
+                        variant: variant.name.clone(),
+                        field: fname.name.clone(),
+                        span: *fspan,
+                    });
+                    let _ = self.check_expr(value, None);
+                }
+            }
+        }
+
+        for (field_name, _) in &info_fields {
+            if let Some(field_name) = field_name {
+                if !seen.contains_key(field_name) {
+                    self.record_error(TypeError::MissingEnumField {
+                        enum_name: enum_name.name.clone(),
+                        variant: variant.name.clone(),
+                        field: field_name.clone(),
+                        span,
+                    });
+                }
+            }
+        }
+
+        recovery
     }
 
     /// Type-check a plain identifier call (free function or previously registered
@@ -780,12 +1010,21 @@ impl TypeChecker {
                         Some(return_type)
                     }
 
-                    // Associated function call: `TypeName::func(args)`
+                    // Associated function call: `TypeName::func(args)`, or a
+                    // tuple-variant enum construction `Enum::Variant(args)` (§3.5).
                     Expr::Path {
                         type_name,
                         member,
                         span: path_span,
                     } => {
+                        if self.enum_defs.contains_key(&type_name.name) {
+                            return Some(self.check_enum_tuple_call(
+                                &type_name.name,
+                                &member.name,
+                                args,
+                                *path_span,
+                            ));
+                        }
                         if !self.struct_defs.contains_key(&type_name.name) {
                             self.record_error(TypeError::UnknownPathType {
                                 type_name: type_name.name.clone(),
@@ -852,6 +1091,11 @@ impl TypeChecker {
                 member,
                 span,
             } => {
+                // A standalone path is either a unit-variant enum value `E::V` (§3.5)
+                // or an associated-function reference `Type::func`.
+                if self.enum_defs.contains_key(&type_name.name) {
+                    return Some(self.check_enum_unit_path(&type_name.name, &member.name, *span));
+                }
                 // Standalone path expression (not used as a call target).
                 // Validate the struct and member exist; the type is a function type.
                 if !self.struct_defs.contains_key(&type_name.name) {
@@ -967,6 +1211,14 @@ impl TypeChecker {
 
                 Some(Type::Struct(name.name.clone()))
             }
+
+            // Struct-variant enum construction `E::V { field: expr, ... }` (§3.5).
+            Expr::EnumStructLiteral {
+                enum_name,
+                variant,
+                fields,
+                span,
+            } => Some(self.check_enum_struct_literal(enum_name, variant, fields, *span)),
 
             Expr::FieldAccess {
                 object,

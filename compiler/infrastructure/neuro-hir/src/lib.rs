@@ -30,8 +30,8 @@ pub mod types;
 
 pub use expressions::{HirExpr, HirExprKind, HirFieldInit};
 pub use items::{
-    HirConst, HirField, HirFunction, HirImpl, HirItem, HirMethod, HirParam, HirProgram,
-    HirSelfParam, HirStruct,
+    HirConst, HirEnum, HirEnumField, HirEnumVariant, HirField, HirFunction, HirImpl, HirItem,
+    HirMethod, HirParam, HirProgram, HirSelfParam, HirStruct,
 };
 pub use statements::HirStmt;
 pub use types::HirType;

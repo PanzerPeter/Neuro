@@ -28,6 +28,12 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-06-30: Enums with associated data §3.5. Added `Item::Enum(EnumDef)`; `EnumDef { name, variants,
+  span }`, `EnumVariant { name, payload, span }`, and `VariantPayload::{Unit, Tuple(Vec<Type>),
+  Struct(Vec<FieldDef>)}`. Added `Expr::EnumStructLiteral { enum_name, variant, fields, span }` for the
+  brace construction form (`E::V { f: x }`); unit/tuple variants reuse `Expr::Path` / `Expr::Call(Path)`
+  and are disambiguated against the enum table in later passes. An enum *type* annotation is a plain
+  `Type::Named`. Interpreted by semantic-analysis, hir-lowering, and llvm-backend.
 - 2026-06-29: Struct + array destructuring §3.2. Added `Expr::ArrayRest { array, start, exact, span }`,
   a compiler-internal node the array-pattern desugar produces for the trailing `..rest` sub-slice
   (`[T; N - start]`), with its `span()` arm. `exact` records a rest-less pattern (length must match

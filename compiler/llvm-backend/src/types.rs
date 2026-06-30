@@ -28,6 +28,10 @@ pub(crate) enum Type {
     /// User-defined struct, identified by name. Field layout is resolved via the
     /// CodegenContext struct_defs table rather than embedding it in the type.
     Struct(std::string::String),
+    /// User-defined enum, identified by name (§3.5). Lowered to a tagged union
+    /// `{ i32 tag, [W x i64] payload }`; `W` is resolved from the enum-word table
+    /// the `TypeMapper` holds, so the type need not carry the layout itself.
+    Enum(std::string::String),
     /// Immutable borrow `&T` (§2.4). Lowered to an opaque LLVM pointer; the
     /// referent type drives auto-deref of method/field receivers.
     Reference(Box<Type>),
@@ -64,6 +68,7 @@ impl Type {
             HirType::String => Type::String,
             HirType::Void => Type::Void,
             HirType::Struct(name) => Type::Struct(name.clone()),
+            HirType::Enum(name) => Type::Enum(name.clone()),
             HirType::Reference { inner, .. } => Type::Reference(Box::new(Type::from_hir(inner))),
             HirType::Array { element, size } => Type::Array {
                 element: Box::new(Type::from_hir(element)),

@@ -29,6 +29,7 @@ impl Lowerer {
                 "string" => HirType::String,
                 "void" => HirType::Void,
                 name if self.structs.contains_key(name) => HirType::Struct(name.to_string()),
+                name if self.enums.contains_key(name) => HirType::Enum(name.to_string()),
                 name => {
                     return Err(LoweringError::UnresolvedType {
                         name: name.to_string(),

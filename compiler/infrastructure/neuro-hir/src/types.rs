@@ -37,6 +37,9 @@ pub enum HirType {
     Void,
     /// A user-defined struct, identified by name (nominal typing).
     Struct(String),
+    /// A user-defined enum, identified by name (nominal typing, §3.5). A tagged
+    /// union; its variant layout lives on the [`crate::HirEnum`] item.
+    Enum(String),
     /// Borrow `&T` (§2.4) / `&mut T` (§2.5). `mutable` distinguishes a
     /// write-capable `&mut T` from a read-only `&T`.
     Reference {
@@ -94,6 +97,7 @@ impl fmt::Display for HirType {
             HirType::String => write!(f, "string"),
             HirType::Void => write!(f, "void"),
             HirType::Struct(name) => write!(f, "{}", name),
+            HirType::Enum(name) => write!(f, "{}", name),
             HirType::Reference { inner, mutable } => {
                 if *mutable {
                     write!(f, "&mut {}", inner)
