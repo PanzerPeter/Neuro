@@ -1,6 +1,6 @@
 # End-to-End Compilation
 
-**Status**: Implemented · Phase 1.8 backend pipeline (AST → typed HIR → LLVM)
+**Status**: Implemented · 1D backend pipeline (AST → typed HIR → LLVM)
 **Slice**: `compiler/neurc` (orchestrator)
 **Dependencies**: `lexical-analysis`, `syntax-parsing`, `semantic-analysis`, `hir-lowering`, `llvm-backend`
 
@@ -51,7 +51,7 @@ Native Executable (`.exe` on Windows, no extension on Unix)
 
 The typed HIR (`neuro-hir`) is the stable, backend-agnostic contract between the frontend (parser +
 type checker) and the backends. `llvm-backend` consumes it today; the experimental `mlir-backend`
-consumes the same HIR behind the off-by-default `mlir` feature (Phase 1.8 scaffold). See the
+consumes the same HIR behind the off-by-default `mlir` feature (1D scaffold). See the
 [HIR Lowering](components/hir-lowering.md) and [LLVM Backend](components/llvm-backend.md) component
 docs.
 
@@ -142,7 +142,7 @@ feature-gated).
 
 - Debug information (`-g`), position-independent code, cross-compilation, LTO.
 - Parallel / incremental compilation and build caching.
-- The MLIR tensor/autodiff/GPU path (Phase 3+), lowering the same typed HIR via `mlir-backend`.
+- The MLIR tensor/autodiff/GPU path (Phase 2+), lowering the same typed HIR via `mlir-backend`.
 
 ## Setup
 

@@ -38,7 +38,7 @@ differences that make it the *typed* contract:
   kinds — the typed mirror of the AST's tuple nodes. Destructuring carries no HIR node (the parser
   desugars it before lowering).
 
-Scope of Phase 1.8 item 2: this crate defines the HIR types only. The AST → HIR lowering (item 3)
+Scope of 1D item 2: this crate defines the HIR types only. The AST → HIR lowering (item 3)
 and the `llvm-backend` migration onto HIR (item 4) are separate pipeline steps that produce/consume
 these types; they are intentionally not part of this crate. No frontend-only data (attributes such
 as `@allow` lint suppression) is carried into the HIR — those are consumed before lowering. Backend

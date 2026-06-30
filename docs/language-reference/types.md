@@ -14,8 +14,8 @@ Neuro is a statically typed language with explicit type annotations and planned 
 - Implemented: structs (definition, instantiation, field access, field mutation)
 - Implemented: fixed-size arrays `[T; N]` of `Copy` elements
 - Implemented: tuples `(T1, T2, ...)` of `Copy` elements, with destructuring
-- Planned (Phase 2): generics
-- Planned (Phase 2): traits
+- Planned (1F): generics
+- Planned (1F): traits
 
 ## Primitive Types
 
@@ -113,7 +113,7 @@ val floored: u8   = b.saturating_sub(a)   // 0    (unsigned underflow clamps to 
 val shifted: u8   = a.shr(2)              // 50   (200 >> 2, logical)
 ```
 
-`checked_*` (which returns `Option<T>` on overflow) is deferred until `Option` lands in Phase 2C.
+`checked_*` (which returns `Option<T>` on overflow) is deferred until `Option` lands in 1G.
 
 ### Floating-Point Types
 
@@ -182,7 +182,7 @@ func main() -> i32 {
 }
 ```
 
-As **tensor element types** (`Tensor<bf16, [...]>`, Phase 3) the restriction lifts entirely: elementwise math, matmul, and reductions lower through MLIR to the accelerator's native half-precision units. The split keeps half-precision where it pays off — bulk tensor compute — without committing the scalar layer to non-portable semantics.
+As **tensor element types** (`Tensor<bf16, [...]>`, Phase 2) the restriction lifts entirely: elementwise math, matmul, and reductions lower through MLIR to the accelerator's native half-precision units. The split keeps half-precision where it pays off — bulk tensor compute — without committing the scalar layer to non-portable semantics.
 
 ### Digit Separators
 
@@ -267,7 +267,7 @@ program; they are **not** heap-allocated, so a program that only reads literals 
 **Concatenation** (`a + b`) is the first runtime heap-backed string: it `malloc`s a fresh buffer
 and copies both operands' bytes in, yielding a new owned `string`. Both literal and heap-backed
 forms share the same `{ ptr, i64 }` ABI, so consumers cannot tell them apart. Until `Drop` /
-deterministic destruction lands (Phase 1.7), concatenated buffers leak — see the alpha memory
+deterministic destruction lands (1C), concatenated buffers leak — see the alpha memory
 warning in the README. (Growable builders — `String::new` / `.push_str` — also await that work.)
 
 The pointer addresses a NUL-terminated byte sequence so it doubles as a valid C string for
@@ -295,7 +295,7 @@ byte count, a multi-byte code point contributes more than one to the length.
 
 **`.clone() -> string`** — returns a fresh `string` equal to its receiver. It is the
 canonical explicit deep copy for non-`Copy` owned types and, now that move-by-default has
-landed (Phase 1.7, §2.2 — see [variables](variables.md#move-semantics-ownership)), the way to
+landed (1C, §2.2 — see [variables](variables.md#move-semantics-ownership)), the way to
 keep using a value after it would otherwise be moved. Today strings
 are immutable and `.rodata`-backed (no heap string type exists yet), so the clone copies the
 `(ptr, len)` fat pointer — observationally a deep copy because the pointee bytes are
@@ -588,7 +588,7 @@ also rejected) and into the arms of a returned `if`/`else`. The diagnostic is
 
 > **Deferred:** this is elision only. Explicit lifetime annotations (`func longest<'a>(a: &'a string,
 > b: &'a string) -> &'a string`) need a generic-parameter parse surface and land with **generics**
-> (Phase 2B); until then an ambiguous multi-reference signature is accepted as long as the returned
+> (1F); until then an ambiguous multi-reference signature is accepted as long as the returned
 > borrow targets a parameter.
 
 ### String Slices (`&string`)
@@ -733,36 +733,26 @@ func returns_i32() -> i32 {
 
 ## Type System Features
 
-### Phase 1 (Complete ✅)
+### Phase 1 — Core Language
 
-**Implemented**:
-- Primitive types (i8-i64, u8-u64, f32, f64, bool)
+**Landed (✅):**
+- Primitive types (i8-i64, u8-u64, f32, f64, bool, char, f16/bf16)
 - String type with fat pointer ABI (`{ ptr, i64 }`)
-- Explicit type annotations
-- Contextual numeric literal inference with range validation
-- Explicit type conversions via `as` operator
-- Function types
-- Strict type checking
-- Type mismatch error reporting
+- Explicit type annotations + contextual numeric inference with range validation
+- Explicit type conversions via `as`
+- Function types, strict type checking, type-mismatch error reporting
+- Structs, methods, fixed-size arrays `[T; N]`, tuples + destructuring, type aliases
 
-### Phase 2 (In Progress)
+**In progress / planned (still Phase 1):**
+- Enums, pattern matching, newtypes (1E)
+- Generics + monomorphization, traits, operator traits, static/dynamic dispatch, closures (1F)
+- `Option` / `Result`, collections, modules, prelude (1G)
 
-- ✅ Structs (user-defined types with nominal typing)
-- ✅ Arrays with fixed size (`[T; N]`)
-- ✅ Tuples for grouping values (`(T1, T2, ...)`, with destructuring)
-- Type inference for variable declarations
-- Generic functions with monomorphization
-
-### Phase 3 (Planned)
+### Phase 2 — Tensors (Planned)
 
 - Static tensor types: `Tensor<f32, [3, 3]>`
 - Compile-time shape checking
 - Broadcasting rules
-
-### Phase 4+ (Future)
-
-- Traits (type classes)
-- Associated types
 - Dynamic tensor shapes
 - Advanced type system features
 

@@ -439,9 +439,9 @@ func is_positive_verbose(x: i32) -> bool {
 }
 ```
 
-## Future Features (Phase 2)
+## Future Features (Phase 1)
 
-### Pattern Matching (Phase 2)
+### Pattern Matching (Phase 1)
 
 ```neuro
 // Not yet implemented

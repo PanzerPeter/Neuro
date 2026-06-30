@@ -4,7 +4,7 @@ Thank you for your interest in contributing to the Neuro programming language co
 
 ## Project Status
 
-Neuro is in **Phase 1.7 — Ownership & Borrow Checker** (the active phase). Earlier phases (core MVP, syntax & semantics stabilization) are complete; the LLVM 20 backend, string fat pointers, structs, methods, casts, bitwise ops, literal suffixes, if/block expressions, builtin-method dispatch, integer overflow semantics, and type aliases have all landed. Phase 1.8 (HIR / MLIR plumbing) is complete — the typed HIR, AST→HIR lowering, the HIR-routed LLVM backend, and the `mlir-backend` HIR scaffold have all landed. Phase 2 overlaps. We welcome contributions, but note:
+Neuro is in **Phase 1 — Core Language** (v1.x), the umbrella phase covering the full general-purpose language. It is divided into lettered sub-phases, implemented strictly in dependency order. **Sub-phase 1E (Type System Expansion) is the active sub-phase.** Completed so far: 1A (core MVP), 1B (syntax & semantics stabilization — casts, bitwise ops, literal suffixes, if/block expressions, builtin-method dispatch, integer overflow, etc.), 1C (ownership & borrow checker — move semantics, `Copy`, `&T`/`&mut T`, borrow exclusivity, lifetime elision, `&mut self`, deterministic `Drop`; one flagged item remains), and 1D (HIR / MLIR plumbing — typed HIR, AST→HIR lowering, HIR-routed LLVM backend, `mlir-backend` scaffold). Within 1E, structs, methods, arrays, tuples, destructuring, and type aliases have landed; enums, pattern matching, and newtypes are open. Completing all of Phase 1 (1A–1H) ships **v2.0.0** and opens Phase 2 (Tensors). We welcome contributions, but note:
 
 - Architecture and design are still evolving
 - Breaking changes are expected between minor versions
@@ -44,7 +44,7 @@ brew install llvm@20
 export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)
 ```
 
-> **Optional — MLIR backend (Phase 1.8+):** the `mlir-backend` slice is gated
+> **Optional — MLIR backend (sub-phase 1D+):** the `mlir-backend` slice is gated
 > behind the off-by-default `mlir` cargo feature, so a normal build needs only
 > LLVM 20. To work on it you need an LLVM 20 install that includes MLIR plus a
 > matching libclang 20 (`MLIR_SYS_200_PREFIX` / `TABLEGEN_200_PREFIX` /
@@ -138,7 +138,7 @@ Neuro uses **Vertical Slice Architecture (VSA)**. Each compiler feature is a sel
 compiler/
 ├── infrastructure/          # Shared utilities — no business logic
 │   ├── ast-types/           # AST node definitions (owned here, not in syntax-parsing)
-│   ├── neuro-hir/           # Typed HIR — backend-agnostic frontend↔backend contract (Phase 1.8)
+│   ├── neuro-hir/           # Typed HIR — backend-agnostic frontend↔backend contract (1D)
 │   ├── shared-types/        # Span, Identifier, Literal
 │   ├── diagnostics/         # Error type infrastructure
 │   ├── source-location/     # Source mapping
@@ -147,10 +147,10 @@ compiler/
 ├── lexical-analysis/        # Tokenizer slice
 ├── syntax-parsing/          # Parser slice (depends on lexical-analysis by design)
 ├── semantic-analysis/       # Type checker slice
-├── hir-lowering/            # AST → typed HIR lowering slice (Phase 1.8)
-├── control-flow/            # CFG analysis slice (Phase 2+)
+├── hir-lowering/            # AST → typed HIR lowering slice (1D)
+├── control-flow/            # CFG analysis slice (not yet active)
 ├── llvm-backend/            # LLVM 20 / inkwell 0.9 codegen slice
-├── mlir-backend/            # MLIR / melior slice (Phase 1.8+, off-by-default `mlir` feature)
+├── mlir-backend/            # MLIR / melior slice (1D+, off-by-default `mlir` feature)
 │
 └── neurc/                   # Compiler driver — the only crate that depends on all slices
 ```
@@ -273,19 +273,30 @@ cargo run -p neurc -- compile examples/basics/hello.nr
 
 ## Current Contribution Priorities
 
-### Phase 1.7 — Ownership & Borrow Checker (active)
+### Phase 1 — Core Language: current priorities
 
-**Goal:** Deterministic, zero-overhead memory management — move-by-default,
-borrowing, lifetimes, and deterministic `Drop`. No GC, no reference counting.
-This is multi-month work that does not block surface-syntax features; items are
-ordered by dependency, earlier ones unblock later ones.
+The active sub-phase is **1E (Type System Expansion)**. The roadmap is
+dependency-ordered, so pick the **topmost open item** — its prerequisites are
+already done. Coordinate on an issue before starting a large item.
 
-`[x]` = landed · `[ ]` = open. Landed items are summarized in one line — see
-[CHANGELOG.md](CHANGELOG.md) and the README capabilities table for full
-behavior. The borrow checker is large — coordinate on an issue before starting
-one of the bigger open items.
+**Open now — 1E (Type System):**
 
-**Landed:**
+- [ ] **Enums with associated data** (§3.5). Tagged-union codegen:
+      `enum Foo { Bar, Baz(i32), Qux { x: f64 } }`. Prerequisite for pattern matching.
+- [ ] **Pattern matching** (§3.6). `match` with exhaustiveness checking + guards;
+      required for `Option`/`Result` ergonomics in 1G.
+- [ ] **Newtype declarations** (§3.15). `newtype Meters = f64` — distinct nominal
+      type, zero overhead; construction `Meters(3.5)`, inner access `.0`.
+
+**Next, in dependency order:** 1F (generics → explicit lifetimes → trait
+declarations → operator traits → static/dynamic dispatch → closures) → 1G (error
+handling, collections, modules, prelude) → 1H (string interpolation, triple-quoted
+strings, nested comments, named arguments). See the [Quick Roadmap](README.md#quick-roadmap).
+
+`[x]` = landed · `[ ]` = open. See [CHANGELOG.md](CHANGELOG.md) and the README
+capabilities table for full behavior.
+
+**Recently landed (sub-phase 1C — Ownership & Borrow Checker):**
 
 - [x] Move semantics by default (§2.2, v1.29.0) — `.clone()` opts out.
 - [x] `.clone()` builtin on `string` (§2.7, v1.27.0).
@@ -301,13 +312,15 @@ one of the bigger open items.
 - [x] Remove ARC — audit: no reference-counting plumbing ever existed (v1.41.6).
 - [x] String concatenation `+` — `malloc`+`memcpy` → new owned immutable `string` (§2.7, v1.42.0).
 
-**Open** (ordered by dependency; earlier ones unblock later):
+- [x] **`Drop` trait + deterministic destruction** (v1.44.0). Runs at scope exit (normal exit only, never on panic); a compiler-known lang-item like `Copy`/`Clone` (no general trait system needed), dropping a moved-out value exactly once. Deferred: reassignment does not drop the prior value; struct `Drop` fields are not auto-dropped.
+- [x] **String `.slice(range)`** (v1.43.0). Borrowed `&string` sub-slice (zero copy); panics on an out-of-bounds range or a mid-codepoint boundary in both builds.
 
-- [x] **`Drop` trait + deterministic destruction.** Runs the destructor at scope exit (on normal exit only, never on panic); no GC, no ARC (v1.44.0). Recognized as a compiler-known lang-item like `Copy`/`Clone` — reuses impl-blocks, scope tracking, and move analysis, so it does **not** wait for the general trait system (Phase 2B). The backend threads a lexical drop-scope stack with per-binding runtime flags so a moved-out value is dropped exactly once. Deferred: reassignment does not drop the prior value; struct `Drop` fields are not auto-dropped.
-- [x] **String `.slice(range)`.** Borrowed `&string` sub-slice (zero copy); panics on an out-of-bounds range or a mid-codepoint boundary in both debug and release (v1.43.0). Range `a..b` / `a..=b` is a parse node accepted only as a `.slice` argument.
-- [ ] **Runtime string ops (growable half).** `String::new`, `.push_str`, `.clear`. Needs a mutable growable string type + `Drop` (concatenation `+` already landed v1.42.0; it leaks until `Drop`).
+⚑ **One flagged 1C item remains:** growable runtime string ops (`String::new` /
+`.push_str` / `.clear`) are blocked by the immutable-`string` spec contradiction.
+Recommendation pending sign-off: relocate to **1G** alongside the heap-backed
+collections. It does not block 1E onward.
 
-Explicit lifetime annotations `<'a>` were moved to Phase 2B — they need the
+Explicit lifetime annotations `<'a>` are scheduled in **1F** — they need the
 generic-parameter list + `'a` lifetime tokens, the parse surface that lands with
 generics. Lifetime *elision* (v1.40.0, landed above) covers the common cases.
 

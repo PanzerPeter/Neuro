@@ -239,7 +239,7 @@ This shows:
 
 ## Current Feature Summary
 
-Phase 1 and Phase 1.5 are complete. Phase 1.7 (ownership) is active with Phase 2 overlapping. The current compiler supports:
+Phase 1 (Core Language) sub-phases 1A–1D are complete; 1E (type system) is active. The current compiler supports:
 
 ### Types
 - Integers: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
@@ -276,12 +276,11 @@ Phase 1 and Phase 1.5 are complete. Phase 1.7 (ownership) is active with Phase 2
 - Compound assignment: `+=`, `-=`, `*=`, `/=`, `%=`
 - Type cast: `as` for numeric conversions and bool-to-int
 
-### Not Yet Implemented (Phase 1.7 / Phase 2)
-- Ownership and borrow checker (Phase 1.7)
-- String interpolation (Phase 2)
-- Enums, pattern matching, tuples (Phase 2)
-- Module system and imports (Phase 2)
-- Generic functions and traits (Phase 2)
+### Not Yet Implemented (later in Phase 1)
+- Enums and pattern matching (1E)
+- Generic functions, traits, and closures (1F)
+- `Option` / `Result`, collections, module system and imports (1G)
+- String interpolation (1H)
 
 ## Common Issues
 

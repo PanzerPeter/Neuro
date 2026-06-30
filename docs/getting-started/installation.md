@@ -11,8 +11,8 @@ This guide covers installation of the Neuro compiler on Linux and macOS.
 | C linker | any | `clang`, `gcc`, or system linker |
 
 **Optional:**
-- MLIR 20 + a matching libclang 20 for the experimental MLIR backend (Phase 1.8+) — see [MLIR Backend](#optional-mlir-backend-phase-18) below. Not needed for a normal build.
-- CUDA Toolkit 12+ for GPU support (Phase 5+, not yet implemented)
+- MLIR 20 + a matching libclang 20 for the experimental MLIR backend (1D+) — see [MLIR Backend](#optional-mlir-backend-phase-18) below. Not needed for a normal build.
+- CUDA Toolkit 12+ for GPU support (Phase 4+, not yet implemented)
 
 ---
 
@@ -106,9 +106,9 @@ cargo test --workspace
 
 ---
 
-## Optional: MLIR Backend (Phase 1.8+)
+## Optional: MLIR Backend (1D+)
 
-The MLIR lowering path (tensor / autodiff / GPU, Phase 3+) is being built out via
+The MLIR lowering path (tensor / autodiff / GPU, Phase 2+) is being built out via
 the `melior` Rust MLIR bindings in the `mlir-backend` slice. It is **off by
 default** behind the `mlir` cargo feature, so nothing here is required for a
 normal Neuro build — the default `cargo build/test --workspace` compiles a

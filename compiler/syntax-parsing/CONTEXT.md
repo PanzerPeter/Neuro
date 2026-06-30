@@ -113,7 +113,7 @@ only (var/const/param/return/field/cast); alias as value constructor or path nam
   `: value` desugars to `field: field` (`FieldInit { value: Expr::Identifier(name) }`); a trailing
   `..expr` sets `StructLiteral.base` and ends the field list. `rewrite_expr` recurses into `base`.
   Parse-time desugaring; semantic/codegen see only `base`.
-- 2026-06-04: `unsafe { }` block expressions (Phase 1.7). New `parse_unsafe_expr` prefix handler
+- 2026-06-04: `unsafe { }` block expressions (1C). New `parse_unsafe_expr` prefix handler
   (`TokenKind::Unsafe`) → `Expr::Unsafe { stmts, span }`; body parses as a statement block; inert.
   `rewrite_expr` recurses into the block. Reaches the prefix parser via expression-statement
   fallthrough (no statement-parser change).

@@ -313,7 +313,7 @@ Error: unexpected token `}`, expected expression
   at line 5, column 12
 ```
 
-Future (Phase 2+):
+Future (Phase 1+):
 - Error recovery to report multiple errors
 - Suggestion system for common mistakes
 - Better recovery from missing delimiters
@@ -458,11 +458,11 @@ pub struct Parameter { ... }
 
 - **semantic-analysis**: Type checking the AST
 - **llvm-backend**: Code generation from AST
-- **LSP server** (Phase 7): AST-based features
+- **LSP server** (Phase 8): AST-based features
 
 ## Grammar Reference
 
-### EBNF Grammar (Phase 1 + Phase 2 structs/methods)
+### EBNF Grammar (Phase 1, incl. structs/methods)
 
 Structs and `impl` blocks are now supported as top-level items.
 
@@ -577,10 +577,10 @@ Binary(Subtract)
 - [ ] **Better error recovery**: Continue parsing after errors
 - [ ] **Error messages**: "Did you mean?" suggestions
 - [ ] **Attributes**: `@gpu`, `@inline`, etc.
-- [ ] **Pattern matching**: `match` expressions (Phase 2)
-- [ ] **Loops**: `while`, `for` (Phase 2)
-- [ ] **Structs**: Type definitions (Phase 2)
-- [ ] **Macros**: Procedural and declarative (Phase 8)
+- [ ] **Pattern matching**: `match` expressions (Phase 1)
+- [ ] **Loops**: `while`, `for` (Phase 1)
+- [ ] **Structs**: Type definitions (Phase 1)
+- [ ] **Macros**: Procedural and declarative (Phase 7)
 
 ## Troubleshooting
 

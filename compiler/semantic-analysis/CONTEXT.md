@@ -236,7 +236,7 @@ expression context.
 - 2026-06-04: Panic runtime §1.2 — `resolve_panic_builtin` recognizes `panic`/`assert`/`unreachable`
   in `check_plain_call` before ordinary resolution (user funcs shadow); each returns `Type::Unknown`;
   wrong arity/type reuse `ArgumentCountMismatch`/`Mismatch`. No new variants.
-- 2026-06-04: `Expr::Unsafe` type-checking (Phase 1.7) — identical to `Expr::Block` (pushes a scope,
+- 2026-06-04: `Expr::Unsafe` type-checking (1C) — identical to `Expr::Block` (pushes a scope,
   yields the trailing expr's type). Inert.
 - 2026-05-31: Integer primitive methods §1.2/§1.4 — `resolve_builtin_method` resolves
   `wrapping`/`saturating`/`.shr(n)` on integer receivers; `check_unary_int_intrinsic_arg` enforces
@@ -252,8 +252,8 @@ expression context.
   lint `prefer-loop-over-while-true` (`while true`, suppressed by `@allow(...)`; parenthesised
   `while (true)` deliberately not matched). Public signature now `Result<Vec<Warning>, Vec<TypeError>>`.
 - 2026-05-18: `BinaryOp::NullCoalesce` rejection — `OperatorNotYetSupported { op, hint, span }`
-  (hint: "requires Option<T>/Result<T,E> — Phase 2"), returns `Unknown` for recovery. `??` is parsed
-  only to lock in R-to-L associativity ahead of Phase 2.
+  (hint: "requires Option<T>/Result<T,E> — 1G"), returns `Unknown` for recovery. `??` is parsed
+  only to lock in R-to-L associativity ahead of 1G.
 - 2026-05-13: IEEE-754 native float comparison §1.2/§3.10 — inequalities (`<`,`>`,`<=`,`>=`)
   restricted to `is_numeric()`, rejecting struct/string/bool (prevents codegen panics). NaN handled
   natively via LLVM `fcmp`.

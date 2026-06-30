@@ -95,7 +95,7 @@ func main() -> i32 {
 }
 ```
 
-> **Phase 2 limitation**: Structs as function *return* types are not yet supported.
+> **Phase 1 limitation**: Structs as function *return* types are not yet supported.
 
 ## impl Blocks
 
@@ -276,7 +276,7 @@ func main() -> i32 {
 }
 ```
 
-## Unsupported (Phase 2+)
+## Unsupported (Phase 1+)
 
 The following are not yet implemented and will be rejected at compile time:
 

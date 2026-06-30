@@ -45,7 +45,7 @@ emitted object resolves the half-precision libcalls without a platform runtime. 
 Literals are emitted to `.rodata`, never heap-allocated; the appended NUL
 (`STRING_NULL_TERMINATOR` in `literals.rs`) exists only for C-string FFI validity. `len` is
 authoritative — interior NULs are legal counted content, so consumers must not treat data as
-NUL-terminated. Phase 1.7 heap strings share this exact ABI (indistinguishable to consumers).
+NUL-terminated. 1C heap strings share this exact ABI (indistinguishable to consumers).
 
 Passed/returned by value. On x86-64 SysV this fits two registers, so no sret indirection.
 The semantic `Type::String` is unchanged — the fat-pointer layout is a backend-only detail.
@@ -64,14 +64,14 @@ Detection keys off `left_ty.referent() == String`, covering owned, borrowed, and
 new owned, immutable string with **no** NUL terminator (consistent with the `len` contract). The
 type pass infers the result as owned `String` even when an operand is `&string`, so the value is
 never a reference. The heap buffer is not yet freed — runtime heap strings leak until `Drop` lands
-(Phase 1.7). `malloc`/`memcpy` are declared on first use in `context.rs` like the existing libc
+(1C). `malloc`/`memcpy` are declared on first use in `context.rs` like the existing libc
 externs (`memcmp`/`write`/`abort`).
 
 ## Struct ABI
 User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding —
 LLVM handles alignment). Values live on the stack via `alloca`, initialised field-by-field with
 `insertvalue`; reads = `getelementptr`+`load`, writes = `getelementptr`+`store`. Not yet usable as
-function params/returns (Phase 2+; type mapper errors there). Layout in `CodegenContext.struct_defs`;
+function params/returns (a later sub-phase; type mapper errors there). Layout in `CodegenContext.struct_defs`;
 `get_struct_llvm_type` rebuilds the type on demand (LLVM dedups by structure).
 
 ## Method ABI
@@ -232,7 +232,7 @@ platform runtime may still override; integer-only, so they never recursively re-
 target-specific datalayout/triple/attributes and marked `weak_odr`) and was exhaustively verified
 against clang's native `_Float16`/`__bf16`. Regenerate via that command if LLVM's IR syntax changes.
 
-## Future: MLIR Integration (Phase 3+)
+## Future: MLIR Integration (Phase 2+)
 When tensor ops land, `melior` (Rust MLIR bindings, same LLVM 20 / MLIR 20 install) joins inkwell.
 Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arith) → Enzyme MLIR AD pass
 → GPU dialects (nvgpu/rocdl) or `llvm` dialect → inkwell for final LLVM IR. inkwell stays the terminal
@@ -326,7 +326,7 @@ emission layer in all paths.
 - 2026-06-04: Panic runtime §1.2 — new `panic.rs`; `compile` gained `source`/`source_path`;
   `get_or_declare_write`/`abort` (`context.rs`); terminated-block guards in `codegen_stmt`/
   `codegen_return`/`codegen_body` tail. See "Panic Runtime ABI".
-- 2026-06-04: `Expr::Unsafe` lowering (Phase 1.7) via `codegen_block_expr` like `Expr::Block` (shared
+- 2026-06-04: `Expr::Unsafe` lowering (1C) via `codegen_block_expr` like `Expr::Block` (shared
   `Expr::Block | Expr::Unsafe` type-pass arm). Inert — identical IR to a bare block.
 - 2026-06-04: Fixed binary-operand type-map collision (§1.4). A binary node and its leftmost
   descendant share `span.start`, so a parent (`&&`, left `Bool`) clobbered its child comparison's left

@@ -32,6 +32,6 @@ non-zero exit; they are informational guidance and may be silenced with `@allow(
 on the enclosing function.
 
 After a successful `type_check`, both `check_file` and `compile_file` lower the AST to
-typed HIR via `hir_lowering::lower_program` (Phase 1.8). `check` reports the lowered item
+typed HIR via `hir_lowering::lower_program` (1D). `check` reports the lowered item
 count; `compile` hands the HIR directly to `llvm_backend::compile`, which lowers native
 object code from the typed HIR (the backend no longer consumes the AST).

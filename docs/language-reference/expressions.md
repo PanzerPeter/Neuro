@@ -149,8 +149,8 @@ val x: i32 = unsafe {
 ```
 
 `unsafe` is currently **inert**: it is a reserved keyword and produces a
-distinct AST node, but carries no special semantics yet. It exists as Phase 1.7
-groundwork for the GPU-kernel aliasing model (Phase 5), where `unsafe { }` will
+distinct AST node, but carries no special semantics yet. It exists as 1C
+groundwork for the GPU-kernel aliasing model (Phase 4), where `unsafe { }` will
 gate raw `KernelOut` index writes. Until then it behaves identically to `{ }`.
 
 ### Parenthesized Expressions

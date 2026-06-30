@@ -26,7 +26,7 @@ val joined: string = a + &b                   // "abcd"; a and b still valid
 ```
 
 > The concatenated buffer is heap-allocated and not yet freed — runtime heap strings leak until
-> `Drop` / deterministic destruction lands (Phase 1.7). See the alpha memory warning in the README.
+> `Drop` / deterministic destruction lands (1C). See the alpha memory warning in the README.
 
 ### Subtraction (`-`)
 
@@ -320,10 +320,10 @@ val config = load_config()     ?? Config::default()
 
 **Precedence**: level 14 — looser than `||` (so `a ?? b || c` means `a ?? (b || c)`), tighter than range operators.
 
-**Status**: the operator is tokenized and parsed today so the precedence and associativity are locked in. Type checking and codegen are deferred to Phase 2, where `Option<T>` and `Result<T, E>` land — until then, using `??` produces:
+**Status**: the operator is tokenized and parsed today so the precedence and associativity are locked in. Type checking and codegen are deferred to Phase 1, where `Option<T>` and `Result<T, E>` land — until then, using `??` produces:
 
 ```
-error: operator '??' is not yet supported … requires Option<T> / Result<T, E> — available in Phase 2
+error: operator '??' is not yet supported … requires Option<T> / Result<T, E> — available in Phase 1
 ```
 
 ## Operator Precedence

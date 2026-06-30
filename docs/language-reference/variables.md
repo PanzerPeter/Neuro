@@ -196,7 +196,7 @@ x = 20        // OK: i32
 ```neuro
 mut result: i32 = 0
 result = add(5, 3)              // Function call result
-result = if x > 0 { 1 } else { 0 }  // Conditional (Phase 2)
+result = if x > 0 { 1 } else { 0 }  // Conditional (Phase 1)
 result = x * 2 + y              // Complex expression
 ```
 
@@ -340,11 +340,11 @@ func shadowing() -> i32 {
 ```
 
 **Shadowing vs. Reassignment**:
-- Shadowing creates a new variable (can have different type in Phase 2)
+- Shadowing creates a new variable (can have different type in Phase 1)
 - Reassignment modifies existing variable (must have same type)
 
 ```neuro
-// Shadowing (Phase 2 feature for type change)
+// Shadowing (Phase 1 feature for type change)
 val x: i32 = 5
 val x: f64 = 3.14  // New variable, different type
 
@@ -370,10 +370,10 @@ mut y: i32 = 0            // OK: initialized
 ```neuro
 val x: i32 = 10 + 20              // Arithmetic
 val y: i32 = add(5, 3)            // Function call
-val z: i32 = if true { 1 } else { 0 }  // Conditional (Phase 2)
+val z: i32 = if true { 1 } else { 0 }  // Conditional (Phase 1)
 ```
 
-### Uninitialized Variables (Phase 2+)
+### Uninitialized Variables (Phase 1+)
 
 Future phases may support uninitialized variables with explicit type:
 
@@ -590,7 +590,7 @@ mut y: i32 = 10
 y = 20  // Reassigns existing variable
 ```
 
-## Future Features (Phase 2+)
+## Future Features (Phase 1+)
 
 ### Type Inference
 
