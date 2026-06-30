@@ -413,7 +413,7 @@ pub enum TypeError { ... }
 
 - **llvm-backend**: Uses `Type` for code generation
 - **neurc**: Reports type errors to user
-- **LSP server** (Phase 7): Type information for IDE features
+- **LSP server** (Phase 8): Type information for IDE features
 
 ## Examples
 
@@ -447,26 +447,21 @@ func bad_example() -> i32 {
 **Errors**:
 1. `TypeError::InvalidBinaryOperator`: Cannot apply `+` to `string` and `i32`
 
-## Future Enhancements (Post-Phase 1)
+## Future Enhancements
 
-### Phase 2: Enhanced Type System
-- [x] **Structs**: User-defined types with nominal typing
-- [x] **Methods**: `impl` blocks with `&self` instance methods and associated functions
-- [ ] **Enums**: Algebraic data types with associated data
-- [ ] **Pattern matching**: `match` with exhaustiveness checking
-- [ ] **Arrays**: Fixed-size arrays `[i32; 10]`
-- [ ] **Explicit conversions**: `as i64`, `as f32`
-- [ ] **Generic functions**: Monomorphization
+### Remaining Phase 1 (Core Language) work
+- [x] **Structs / Methods**: user-defined types with nominal typing; `impl` blocks
+- [x] **Arrays**: fixed-size `[T; N]`
+- [x] **Explicit conversions**: `as i64`, `as f32`
+- [x] **Lifetime analysis / borrow checker**: move semantics, borrows, lifetime elision, `Drop` (sub-phase 1C)
+- [ ] **Enums + pattern matching** (1E)
+- [ ] **Generics**: monomorphization (1F)
+- [ ] **Traits + associated types**: type classes for polymorphism (1F)
 
-### Phase 3: Tensor Types
+### Phase 2: Tensor Types
 - [ ] **Static tensor types**: `Tensor<f32, [3, 3]>`
-- [ ] **Shape checking**: Compile-time tensor dimension validation
+- [ ] **Shape checking**: compile-time tensor dimension validation
 - [ ] **Broadcasting**: NumPy-style broadcasting rules
-
-### Phase 4+: Advanced Features
-- [ ] **Traits**: Type classes for polymorphism
-- [ ] **Associated types**: Types associated with traits
-- [ ] **Lifetime analysis**: Borrow checker (if needed)
 
 ## Troubleshooting
 

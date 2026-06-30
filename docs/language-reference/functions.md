@@ -582,7 +582,7 @@ func right() -> i32 {
 }
 ```
 
-## Future Features (Phase 2+)
+## Future Features (Phase 1+)
 
 ### Default Parameters
 
@@ -612,7 +612,7 @@ func sum(values: ...i32) -> i32 {
 ### Higher-Order Functions
 
 ```neuro
-// Phase 2: closures and function types
+// Phase 1: closures and function types
 func apply(f: fn(i32) -> i32, x: i32) -> i32 {
     f(x)
 }
@@ -621,7 +621,7 @@ func apply(f: fn(i32) -> i32, x: i32) -> i32 {
 ### Generic Functions
 
 ```neuro
-// Phase 2: generics
+// Phase 1: generics
 func identity<T>(x: T) -> T {
     x
 }

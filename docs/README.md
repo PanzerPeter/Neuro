@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Phase 1, 1.5 & 1.8 Complete, Phase 1.7 (ownership) active · Phase 2 overlapping — Alpha Development
+**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1D complete, 1E (type system) active — Alpha Development
 
 ## Quick Links
 
@@ -40,7 +40,7 @@
 - [Semantic Analysis](compiler/components/semantic-analysis.md) — Type checking
 - [HIR Lowering](compiler/components/hir-lowering.md) — AST → typed High-Level IR (`neuro-hir`)
 - [LLVM Backend](compiler/components/llvm-backend.md) — Native code generation (from HIR)
-- [MLIR Backend](compiler/components/mlir-backend.md) — Experimental HIR → MLIR path (Phase 1.8 scaffold, off by default)
+- [MLIR Backend](compiler/components/mlir-backend.md) — Experimental HIR → MLIR path (1D scaffold, off by default)
 
 ## What is Neuro?
 
@@ -49,10 +49,10 @@ Neuro is a compiled language designed for high-performance AI workloads. It gene
 Key design goals:
 
 - **Static typing** with inference for safety and performance
-- **Tensor primitives** as first-class language types (Phase 3+)
-- **IR-level AD** via Enzyme MLIR (no runtime gradient tape) (Phase 4+)
-- **GPU acceleration** via MLIR `nvgpu`/`rocdl`/Triton dialects (Phase 5+)
-- **Zero-copy Python interop** via DLPack (Phase 6+)
+- **Tensor primitives** as first-class language types (Phase 2+)
+- **IR-level AD** via Enzyme MLIR (no runtime gradient tape) (Phase 3+)
+- **GPU acceleration** via MLIR `nvgpu`/`rocdl`/Triton dialects (Phase 4+)
+- **Zero-copy Python interop** via DLPack (Phase 7+)
 
 ## Current Features
 
@@ -105,30 +105,30 @@ Key design goals:
 - Logical: `&&`, `||`, `!`
 - Bitwise: `&`, `|`, `^`, `~`, `<<` (integer types only)
 - Type cast: `n as f64`, `pi as i32`
-- Null-coalescing `??`: tokenized and parsed (R-to-L associativity); codegen deferred to Phase 2
+- Null-coalescing `??`: tokenized and parsed (R-to-L associativity); codegen deferred to 1G
 - String equality: `==` and `!=` via length-check + `memcmp`
 - Builtin method dispatch on primitive & string receivers: `string.len() -> u64` (O(1) fat-pointer read), `.clone()`, and `.slice(a..b) -> &string` (zero-copy sub-slice; panics on out-of-bounds or mid-codepoint boundary)
 
-### Structs and Methods (Phase 2)
+### Structs and Methods (1E)
 
 - `struct` definitions with any primitive or struct field types
 - `impl` blocks: instance methods (`&self` and `&mut self`) and associated functions (`TypeName::func`)
 - `&mut self` methods mutate `self.field` in place (passed by pointer, §2.5); calling one needs a `mut` receiver and takes an exclusive borrow for the call. Consuming `self` is still rejected
 - Nominal typing; forward-reference support (definition order independent)
 
-### Arrays (Phase 2, §3.1)
+### Arrays (1E, §3.1)
 
 - Fixed-size `[T; N]` of `Copy` scalar elements: literals (with element-type inference), index read/write, `.len()` (compile-time `u64`)
 - Iteration `for x in arr` and `for x in &arr`, lowered as a counted loop over the storage
 - Out-of-bounds index panics in debug builds (`-O0`); release builds omit the check
 
-### Tuples (Phase 2, §3.2)
+### Tuples (1E, §3.2)
 
 - Anonymous `(T1, T2, ...)` of `Copy` elements: literals, `.0`/`.1` constant index access
 - Destructuring binds `val (a, b) = t` with `_` wildcards and nesting (`val ((a, b), c) = ...`)
 - Usable as function parameters and return types; a single `(x)` stays grouping
 
-### Struct + array destructuring (Phase 2, §3.2)
+### Struct + array destructuring (1E, §3.2)
 
 - Struct patterns `val Point { x, y } = p` bind each field by its own name
 - Array patterns `val [a, b, c] = arr` bind positionally; `val [first, ..rest] = arr`
@@ -157,9 +157,9 @@ Source File (.nr)
 
 The typed **High-Level IR** (`neuro-hir`) is the backend-agnostic contract: every backend lowers
 from it. The LLVM backend consumes it today; the experimental `mlir-backend` consumes the same HIR
-behind the off-by-default `mlir` feature (Phase 1.8 scaffold).
+behind the off-by-default `mlir` feature (1D scaffold).
 
-**Planned extension (Phase 3+):**
+**Planned extension (Phase 2+):**
 ```
 Tensor/AI path (lowers the same typed HIR):
   → MLIR (linalg / tensor / func / arith)
@@ -251,7 +251,7 @@ See [Installation Guide](getting-started/installation.md) for other distribution
 
 ## Roadmap
 
-See the [Quick Roadmap in the project README](../README.md#quick-roadmap) for the phase-by-phase status, and [CONTRIBUTING.md](../CONTRIBUTING.md#current-contribution-priorities) for the active Phase 1.7 checklist.
+See the [Quick Roadmap in the project README](../README.md#quick-roadmap) for the phase-by-phase status, and [CONTRIBUTING.md](../CONTRIBUTING.md#current-contribution-priorities) for the active Phase 1 (sub-phase 1E) priorities.
 
 ## Architecture
 
@@ -270,9 +270,9 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 | Component | Library | Version |
 |---|---|---|
 | CPU codegen | inkwell | 0.9.0 (LLVM 20) |
-| MLIR construction | melior | 0.25.1 (LLVM/MLIR 20) — integrated Phase 1.8 in the `mlir-backend` slice behind the off-by-default `mlir` feature |
-| Autodiff (Phase 4+) | Enzyme (MLIR dialect) | built against LLVM 20 |
-| GPU (Phase 5+) | MLIR nvgpu/rocdl/Triton | LLVM 20 backends |
+| MLIR construction | melior | 0.25.1 (LLVM/MLIR 20) — integrated 1D in the `mlir-backend` slice behind the off-by-default `mlir` feature |
+| Autodiff (Phase 3+) | Enzyme (MLIR dialect) | built against LLVM 20 |
+| GPU (Phase 4+) | MLIR nvgpu/rocdl/Triton | LLVM 20 backends |
 
 ## Project Resources
 
@@ -284,5 +284,5 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 ---
 
 **Last Updated**: 2026-06-28
-**Version**: Phase 1.8 complete · Phase 1.7 (ownership) active · Phase 2 overlapping (v1.50.1)
+**Version**: Phase 1 (Core Language) in progress — 1A–1D complete, 1E active (v1.52.0)
 **Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.9.0

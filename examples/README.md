@@ -94,7 +94,7 @@ No Rust edits are needed — discovery is automatic.
   array elements positionally; `val [first, ..rest] = arr` captures the remainder as
   a fresh `[T; N - k]` array, and a bare `..` ignores it. A rest-less array pattern
   must match the array's length exactly.
-- Ownership/borrow checker not yet implemented (Phase 1.7).
+- Move semantics, borrows (`&T`/`&mut T`), borrow exclusivity, lifetime elision, and deterministic `Drop` are implemented (sub-phase 1C). Growable heap strings (`String` builder) and owning collections (`Vec`, `HashMap`) are not yet implemented (1G).
 - `&self` and `&mut self` methods are supported; a `&mut self` method mutates
   struct state in place (see `structs/mut_self_accumulator.nr`). Consuming `self`
   is not yet supported.

@@ -1,16 +1,16 @@
 # MLIR Backend (Experimental)
 
-**Status**: Phase 1.8 scaffold — off by default behind the `mlir` cargo feature
+**Status**: 1D scaffold — off by default behind the `mlir` cargo feature
 **Crate**: `compiler/mlir-backend`
 **Library**: melior 0.25.1 (Rust MLIR bindings, LLVM/MLIR 20)
 
 ## Overview
 
-The MLIR backend is the future tensor / autodiff / GPU lowering path (Phase 3+). It consumes the
+The MLIR backend is the future tensor / autodiff / GPU lowering path (Phase 2+). It consumes the
 same typed High-Level IR ([`neuro-hir`](hir-lowering.md)) the LLVM backend consumes. As of the
-Phase 1.8 scaffold it emits a trivial, verifier-clean MLIR module — one `func.func` *declaration* per
+1D scaffold it emits a trivial, verifier-clean MLIR module — one `func.func` *declaration* per
 function and `impl` method — proving the HIR → `melior` → verified-MLIR pipeline end-to-end. Real
-body lowering (linalg / tensor dialects) is Phase 3+.
+body lowering (linalg / tensor dialects) is Phase 2+.
 
 ## Feature Gate
 
@@ -48,10 +48,10 @@ pub fn emit_smoke_module() -> Result<String, MlirError>;
 - HIR scalar types map to MLIR scalars: `i8`–`i64`, `i1` for `bool`, `i32` for `char`,
   `f16` / `bf16` / `f32` / `f64`.
 - Every aggregate / reference / string type maps to an opaque `!llvm.ptr` until real tensor and
-  struct lowering lands (Phase 3+).
+  struct lowering lands (Phase 2+).
 - `void` is the empty result list in return position; anywhere else it is a
   `MlirError::UnsupportedType`.
-- Function bodies are intentionally **not** lowered yet — that is the Phase 3 linalg/tensor work. The
+- Function bodies are intentionally **not** lowered yet — that is the Phase 2 linalg/tensor work. The
   module is run through the MLIR verifier before its textual form is returned.
 
 ## Coexistence with inkwell

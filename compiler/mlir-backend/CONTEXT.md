@@ -1,11 +1,11 @@
 # mlir-backend
 
 ## Purpose
-Lower the typed HIR to MLIR for the Phase 3+ tensor / autodiff / GPU path. As of
-the Phase 1.8 scaffold it consumes [`neuro_hir::HirProgram`] and emits a trivial,
+Lower the typed HIR to MLIR for the Phase 2+ tensor / autodiff / GPU path. As of
+the 1D scaffold it consumes [`neuro_hir::HirProgram`] and emits a trivial,
 verifier-clean MLIR module (one `func.func` declaration per function / method),
 proving the HIR → `melior` → verified MLIR pipeline end-to-end. Real body lowering
-(linalg / tensor dialects) is Phase 3+.
+(linalg / tensor dialects) is Phase 2+.
 
 ## Feature Gate
 The MLIR path is opt-in behind the off-by-default `mlir` feature
@@ -50,7 +50,7 @@ private visibility — external symbols, not definitions); structs and constants
 skipped. HIR types map to MLIR scalars (`i8`–`i64`, `i1` for `bool`, `i32` for
 `char`, `f16`/`bf16`/`f32`/`f64`), and every aggregate / reference / string type
 — including the tuple type `(T1, T2, ...)` (§3.2) — maps to an opaque `!llvm.ptr`
-until real tensor and struct lowering lands (Phase 3+). `void` is the empty result list in return position and an error
+until real tensor and struct lowering lands (Phase 2+). `void` is the empty result list in return position and an error
 (`MlirError::UnsupportedType`) anywhere else. The module is run through the MLIR
 verifier before its textual form is returned.
 

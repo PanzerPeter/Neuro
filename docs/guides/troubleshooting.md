@@ -543,15 +543,14 @@ Include in bug reports:
 - Documentation: [README.md](../../README.md)
 - Development Guidelines: [CONTRIBUTING.md](../../CONTRIBUTING.md)
 
-## Known Limitations (Phase 1)
+## Known Limitations (current)
 
-These are not bugs, but current limitations:
+These are not bugs, but current limitations of Phase 1 (Core Language):
 
-1. **Type inference**: Numeric literals default to i32/f64
-2. **String type**: Basic support pending
-3. **Loops**: Not yet implemented (Phase 2)
-4. **Arrays**: Not yet implemented (Phase 2)
-5. **Optimization**: `-O0` through `-O3` supported (higher levels may increase compile time)
+1. **Type inference**: bare numeric literals default to `i32` / `f64` unless a type is in scope
+2. **Generics, traits, enums, pattern matching**: not yet implemented (sub-phases 1E / 1F)
+3. **Modules / imports**: single-file compilation only for now (sub-phase 1G)
+4. **Optimization**: `-O0` through `-O3` supported (higher levels may increase compile time)
 
 Planned features are tracked through project issues and changelog updates.
 
@@ -590,7 +589,7 @@ Check that `main` returns the expected exit code and performs desired operations
 
 ### Why can't I mix i32 and i64?
 
-Neuro uses strict typing with no implicit conversions. Explicit conversion operators coming in Phase 2.
+Neuro uses strict typing with no implicit conversions. Explicit conversion operators coming in Phase 1.
 
 ### Why is compilation slow?
 
@@ -602,7 +601,7 @@ Use `neurc check` for rapid feedback without code generation.
 
 ### Can I use Neuro for production?
 
-Not yet - Phase 1 is alpha stage. Wait for Phase 2+ for production readiness.
+Not yet - Phase 1 is alpha stage. Wait for Phase 1+ for production readiness.
 
 ## Still Stuck?
 

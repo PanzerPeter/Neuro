@@ -17,4 +17,4 @@ Parse and hold project metadata from `neuro.toml` workspace configuration files 
 No upstream dependencies within the Neuro workspace (uses only `serde`/`toml` from the ecosystem).
 
 ## Notes
-Pure infrastructure: data structures and TOML deserialization only, no compiler business logic. Read by `neurc` at startup to discover workspace settings. Dependency resolution fields are present as data structures but resolution logic is a Phase 7+ feature.
+Pure infrastructure: data structures and TOML deserialization only, no compiler business logic. Read by `neurc` at startup to discover workspace settings. Dependency resolution fields are present as data structures but resolution logic is a Phase 9 feature.

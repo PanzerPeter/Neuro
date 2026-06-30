@@ -7,7 +7,7 @@
 
 ## Overview
 
-The LLVM backend slice generates native object code from the typed High-Level IR (`neuro-hir`) — not the AST. Since Phase 1.8 the frontend lowers the type-checked AST to HIR (`hir-lowering`), where every expression already carries its resolved type, so the backend reads types inline instead of re-deriving them. It uses [inkwell](https://github.com/TheDan64/inkwell) (safe Rust bindings to LLVM 20) to produce optimized machine code for the host platform.
+The LLVM backend slice generates native object code from the typed High-Level IR (`neuro-hir`) — not the AST. Since 1D the frontend lowers the type-checked AST to HIR (`hir-lowering`), where every expression already carries its resolved type, so the backend reads types inline instead of re-deriving them. It uses [inkwell](https://github.com/TheDan64/inkwell) (safe Rust bindings to LLVM 20) to produce optimized machine code for the host platform.
 
 **Entry point:**
 ```rust
@@ -209,11 +209,11 @@ The `OptimizationLevelSetting` enum maps to LLVM's optimization levels:
 | `O2` | Default | Standard release build |
 | `O3` | Aggressive | Maximum optimization |
 
-## Future: MLIR Integration (Phase 3+)
+## Future: MLIR Integration (Phase 2+)
 
 `melior` (Rust MLIR bindings for LLVM/MLIR 20) is already integrated alongside inkwell in the
-`mlir-backend` slice behind the off-by-default `mlir` feature (Phase 1.8 scaffold); both crates link
-against the same LLVM 20 dylib via `LLVM_SYS_201_PREFIX`. When tensor types are introduced (Phase 3+)
+`mlir-backend` slice behind the off-by-default `mlir` feature (1D scaffold); both crates link
+against the same LLVM 20 dylib via `LLVM_SYS_201_PREFIX`. When tensor types are introduced (Phase 2+)
 that slice will lower the **same typed HIR** this backend consumes.
 
 The planned lowering strategy:

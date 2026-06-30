@@ -10,7 +10,7 @@
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
 [![Tests](https://img.shields.io/badge/tests-775%20passing-success.svg)](#)
 
-**Status:** Alpha — Phase 1 Core MVP & Phase 1.5 stabilization complete · Phase 1.7 (ownership) active · Phase 2 overlapping
+**Status:** Alpha — Phase 1 (Core Language) in progress · sub-phases 1A–1D complete (MVP, syntax & semantics, ownership/borrow checker, HIR & MLIR plumbing) · 1E (type system) active · → v2.0.0 when Phase 1 completes
 
 ---
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2 overlapping. The following features are fully implemented and tested (**775 Tests Passing**):
+Phase 1 (Core Language) sub-phases 1A–1D are complete; 1E (type system) is active. The following features are fully implemented and tested (**775 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -117,11 +117,11 @@ Phase 1 and Phase 1.5 are complete; Phase 1.7 (ownership) is active with Phase 2
 >
 > The ownership system is now substantially in place: move-by-default, borrows, and **deterministic `Drop`** (user destructors run at scope exit) have landed. What remains is broader heap support — the growable-string builder and owning collections — plus full lifetime inference. Until those land, `+` string concatenation still leaks its heap buffer (it allocates a buffer no `Drop` impl yet frees), and runtime string builders do not exist.
 >
-> Completing the ownership tracker, borrow checker, and deterministic destruction is the primary goal of **Phase 1.7**. Do not assume full memory safety semantics until they all land.
+> The ownership tracker, borrow checker, and deterministic destruction are sub-phase **1C** — now essentially complete (one flagged item, growable runtime strings, remains). Do not assume memory-safety semantics beyond what has actually landed.
 >
 > If memory safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
 
-String fat pointers, move-by-default (use-after-move detection), the `Copy` trait, immutable borrows (`&T`), mutable borrows (`&mut T` with the `*` deref operator), flow-sensitive borrow exclusivity (the `&`/`&mut` aliasing rules), lifetime elision for returned references (§2.6), `&mut self` methods (in-place receiver mutation, §2.5), and deterministic `Drop` (scope-exit destructors, §2.1) have already landed; the remaining work — full lifetime inference, explicit lifetime annotations, and the growable runtime-string / owning-collection heap types — is tracked under Phase 1.7 in the roadmap.
+String fat pointers, move-by-default (use-after-move detection), the `Copy` trait, immutable borrows (`&T`), mutable borrows (`&mut T` with the `*` deref operator), flow-sensitive borrow exclusivity (the `&`/`&mut` aliasing rules), lifetime elision for returned references (§2.6), `&mut self` methods (in-place receiver mutation, §2.5), and deterministic `Drop` (scope-exit destructors, §2.1) have already landed; the remaining work — explicit lifetime annotations (scheduled with generics in 1F) and the growable runtime-string / owning-collection heap types (1G) — is tracked in the roadmap.
 
 ---
 
@@ -405,15 +405,15 @@ func main() -> i32 {
 }
 ```
 
-### Planned (Phase 3+): Tensor Types
+### Planned (Phase 2+): Tensor Types
 
-Tensor types and compile-time shape verification require the MLIR lowering infrastructure planned for Phase 3. Shape constraints (`[784, 128]`) are encoded as static type parameters and verified at compile time via the MLIR type system — this is not a simple feature and depends on both the `melior` bindings and a typed High-Level IR (`neuro-hir`) that does not yet exist.
+Tensor types and compile-time shape verification require the MLIR lowering infrastructure planned for Phase 2. Shape constraints (`[784, 128]`) are encoded as static type parameters and verified at compile time via the MLIR type system — this is not a simple feature and depends on both the `melior` bindings (landed) and the typed High-Level IR (`neuro-hir`, landed in sub-phase 1D).
 
 ```neuro
-// Static tensor — shape verified at compile time (Phase 3)
+// Static tensor — shape verified at compile time (Phase 2)
 val weights: Tensor<f32, [784, 128]> = ...
 
-// Automatic differentiation via Enzyme MLIR (Phase 4)
+// Automatic differentiation via Enzyme MLIR (Phase 3)
 @grad(model) {
     val loss = model.forward(batch).cross_entropy(labels)
     model.backward(loss)
@@ -438,7 +438,7 @@ compiler/
 ├── lexical-analysis/        # Tokenizer (logos, Unicode XID)
 ├── syntax-parsing/          # Pratt + statement parser → AST
 ├── semantic-analysis/       # Type checker, scope analysis
-├── control-flow/            # CFG builder (Phase 2+)
+├── control-flow/            # CFG builder (not yet active)
 ├── llvm-backend/            # inkwell 0.9 / LLVM 20 codegen
 └── neurc/                   # CLI compiler driver
 ```
@@ -455,7 +455,7 @@ Source (.nr)
   → System Linker      (native executable)
 ```
 
-**Planned extension (Phase 3+):**
+**Planned extension (Phase 2+):**
 ```
 Tensor/AI path: AST → Neuro High-Level IR
   → MLIR (linalg/tensor/func/arith, LLVM 20 / MLIR 20)
@@ -468,21 +468,29 @@ Tensor/AI path: AST → Neuro High-Level IR
 
 ## Quick Roadmap
 
+Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships **v(N+1).0.0**. We are in **Phase 1** (v1.x), divided into lettered sub-phases.
+
 | Phase | Goal | Status |
 |:---:|---|:---:|
-| **1**   | Core MVP — types, functions, control flow, LLVM backend | ✅ Complete |
-| **1.5** | Syntax & semantics stabilization — parser fixes, `const`, `as` casts, compound assignment, bitwise ops, integer suffixes, if/block expressions, `while true` lint, IEEE-754 float comparisons, string fat pointers | ✅ Complete |
-| **1.7** | Ownership & borrow checker — move semantics ✅, `Copy` trait ✅, immutable borrows `&T` ✅, mutable borrows `&mut T` ✅, borrow exclusivity ✅, lifetime elision / returned-reference outlives ✅, `&mut self` methods ✅, deterministic `Drop` ✅, full lifetime inference, growable heap string / collections | 🔄 In progress |
-| **1.8** | Backend plumbing — `neuro-hir` typed IR crate ✅, `melior` integration ✅, AST → HIR lowering ✅, LLVM backend lowers from HIR ✅, mlir-backend HIR scaffold ✅ | ✅ Complete |
-| **2**   | Core language — arrays ✅, tuples ✅, structs ✅, methods ✅, enums, pattern matching, generics, traits, closures, type aliases, newtypes, `Option`/`Result`, `??`, `?`, modules, prelude, string interpolation | 🔄 In progress |
-| **3**   | Tensors & MLIR — `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | 📋 Planned |
-| **4**   | Automatic differentiation — Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | 📋 Planned |
-| **5**   | GPU acceleration — MLIR GPU dialects (nvgpu / rocdl / Triton), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | 📋 Planned |
-| **6**   | Neural network standard library — `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | 📋 Planned |
-| **7**   | Async runtime — `async func`, `Future<T>`, `spawn`, `JoinHandle`, `join` / `race`, executor for data-loader / I/O overlap | 📋 Planned |
-| **8**   | Interop & advanced features — Python FFI via DLPack, spread operator, advanced pattern matching, custom attributes, `defer` | 📋 Planned |
-| **9**   | Developer experience — Language Server Protocol, diagnostics polish, formatter | 📋 Planned |
-| **10**  | Package manager & optimization passes — `neurpm`, loop unrolling, AD-aware inlining heuristics | 📋 Planned |
+| **1** | **Core Language** — the full general-purpose language; completing it ships **v2.0.0** | 🔄 In progress |
+| 1A | Core MVP — types, functions, control flow, LLVM backend | ✅ Complete |
+| 1B | Syntax & semantics stabilization — parser fixes, `const`, `as` casts, compound assignment, bitwise ops, integer suffixes, if/block expressions, `while true` lint, IEEE-754 float comparisons, string fat pointers | ✅ Complete |
+| 1C | Ownership & borrow checker — move semantics, `Copy`, `&T`, `&mut T`, borrow exclusivity, lifetime elision / returned-reference outlives, `&mut self` methods, deterministic `Drop` | ✅ Complete ¹ |
+| 1D | Backend plumbing — `neuro-hir` typed IR crate, `melior` integration, AST → HIR lowering, HIR-routed LLVM backend, mlir-backend HIR scaffold | ✅ Complete |
+| 1E | Type system — arrays ✅, tuples ✅, structs ✅, methods ✅, destructuring ✅, type aliases ✅; enums, pattern matching, newtype | 🔄 In progress |
+| 1F | Generics, traits & dispatch — generics, explicit lifetimes, trait declarations, operator traits, static/dynamic dispatch (`impl`/`dyn`), closures | 📋 Planned |
+| 1G | Error handling, modules & prelude — `Option`/`Result`, collections, `??`, `?`, multi-file modules, imports, prelude | 📋 Planned |
+| 1H | Language cleanup — string interpolation, triple-quoted strings, nested comments, named arguments | 📋 Planned |
+| **2** | Tensors & MLIR — `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | 📋 Planned |
+| **3** | Automatic differentiation — Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | 📋 Planned |
+| **4** | GPU acceleration — MLIR GPU dialects (nvgpu / rocdl / Triton), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | 📋 Planned |
+| **5** | Neural network standard library — `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | 📋 Planned |
+| **6** | Async runtime — `async func`, `Future<T>`, `spawn`, `JoinHandle`, `join` / `race`, executor for data-loader / I/O overlap | 📋 Planned |
+| **7** | Interop & advanced features — Python FFI via DLPack, spread operator, advanced pattern matching, custom attributes, `defer` | 📋 Planned |
+| **8** | Developer experience — Language Server Protocol, diagnostics polish, formatter, `@test` runner | 📋 Planned |
+| **9** | Package manager & distribution — `neurpm`, cross-OS installer / uninstaller / self-updater, signed release binaries, optimization passes (loop unrolling, AD-aware inlining, LTO) | 📋 Planned |
+
+¹ Sub-phase 1C is essentially complete; one flagged item (growable runtime strings) remains, with relocation to 1G pending sign-off.
 
 ---
 
@@ -546,7 +554,7 @@ vsce package
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture guidelines, coding standards, and the pull request process.
 
-The project is in early alpha — breaking changes are expected. Contributions should focus on **Phase 1.7** and **Phase 2** items.
+The project is in early alpha — breaking changes are expected. Contributions should focus on **Phase 1 (Core Language)** items — currently sub-phase **1E** (type system).
 
 ---
 
@@ -556,7 +564,7 @@ AI development is stuck in a fragmented paradigm: developers iterate in an inter
 
 Neuro is built to unify this stack:
 1. **True Native Performance:** Compiled AOT via LLVM 20—no heavy runtime interpreter, no global interpreter lock (GIL).
-2. **AI-First Type System:** Native compile-time shape verification for tensors using MLIR (Phase 3), preventing runtime dimension mismatches before a single line of training executes.
+2. **AI-First Type System:** Native compile-time shape verification for tensors using MLIR (Phase 2), preventing runtime dimension mismatches before a single line of training executes.
 3. **Immutability by Default:** A modern `val`/`mut` paradigm to ensure highly parallelized tensor computations are thread-safe by design.
 
 ---

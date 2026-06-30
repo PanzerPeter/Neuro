@@ -259,7 +259,7 @@ pub enum TokenKind {
 ### Downstream Consumers
 
 - **syntax-parsing**: Consumes token stream for AST generation
-- **LSP server** (Phase 7): Uses tokens for syntax highlighting
+- **LSP server** (Phase 8): Uses tokens for syntax highlighting
 
 ### Dependencies
 

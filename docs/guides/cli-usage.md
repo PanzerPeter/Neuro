@@ -374,7 +374,7 @@ See [Troubleshooting Guide](troubleshooting.md) for common issues and solutions.
 - Quiet mode: `-q` flag
 - Color output control: `--color` option
 
-### Planned for Phase 2+
+### Planned for Phase 1+
 
 - Multiple file compilation
 - Module system support

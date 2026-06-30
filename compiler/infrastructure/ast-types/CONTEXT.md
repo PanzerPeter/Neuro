@@ -74,12 +74,12 @@ the callee of associated-function calls (`Point::new(args)`).
   (`Point { x: 1.0, ..p }`, §3.3). `None` is a plain literal (all fields listed). Field-init
   shorthand (`Point { x, y }`) needs no AST change — the parser desugars a bare field to
   `FieldInit { value: Expr::Identifier(field_name) }`.
-- 2026-06-04: Added `Expr::Unsafe { stmts, span }` for `unsafe { }` block expressions (Phase 1.7 groundwork). Structurally identical to `Expr::Block`; the distinct node lets later phases (Phase 5 `@kernel`) attach the kernel-aliasing relaxation. Inert today — no special semantics.
+- 2026-06-04: Added `Expr::Unsafe { stmts, span }` for `unsafe { }` block expressions (1C groundwork). Structurally identical to `Expr::Block`; the distinct node lets later phases (Phase 4 `@kernel`) attach the kernel-aliasing relaxation. Inert today — no special semantics.
 - 2026-05-20: Added `Attribute { name, args, span }` struct. `FunctionDef` and `MethodDef` now carry `attributes: Vec<Attribute>`. Semantics are interpreted by later passes (e.g. `@allow(prefer_loop_over_while_true)`); unknown attribute names are accepted so the surface stays forward-compatible with future `@grad`, `@gpu`, `@no_prelude`.
 - 2026-04-04: Added `inclusive: bool` to `Stmt::ForRange` to support `..=` inclusive range iteration.
 - 2026-04-16: Added `ConstDef` struct and `Item::Const(ConstDef)` for module-level constants (§1.3).
   Added `Stmt::Const { name, ty, value, span }` for function-body constants.
-- 2026-05-18: Added `BinaryOp::NullCoalesce` (`??`) variant. Carries no semantics here — semantic-analysis rejects it until Phase 2 lands Option/Result. Defined now so the AST shape is final for the parser's R-to-L associativity test.
+- 2026-05-18: Added `BinaryOp::NullCoalesce` (`??`) variant. Carries no semantics here — semantic-analysis rejects it until 1G lands Option/Result. Defined now so the AST shape is final for the parser's R-to-L associativity test.
 - 2026-04-28: Added `Expr::If { condition, then_block, else_if_blocks, else_block, span }` and
   `Expr::Block { stmts, span }` for value-producing if-expressions and block expressions (§1.8).
   `expressions.rs` now `use super::statements::Stmt` for the block payload types.
