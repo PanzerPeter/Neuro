@@ -39,6 +39,7 @@ a `\u{...}` unicode escape, or a `\xNN` byte escape — so `''`, `'ab'`, and an 
 `\u{...}` scalar range, emitting `LexError::InvalidCharLiteral` on an out-of-range code point.
 
 ## Recent Updates
+- 2026-07-02: Added `TokenKind::FatArrow` (`=>`) for `match` arms (§3.6). Sits after `Arrow` in declaration order; logos longest-match keeps `=>` a single token distinct from `=` then `>`.
 - 2026-06-09: Added `TokenKind::Loop` keyword token for the `loop { ... }` infinite-loop statement (§3.7). Reserves the word so it cannot be an identifier. Sits directly after `While` in declaration order.
 - 2026-06-04: Added `TokenKind::Unsafe` keyword token for `unsafe { }` blocks (1C groundwork). Reserves the word so it cannot be an identifier. Sits after `Type` in declaration order.
 - 2026-06-03: Added `TokenKind::Type` keyword token for §3.14 type-alias declarations (`type Name = TargetType`). Sits after `Where` in declaration order.

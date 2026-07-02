@@ -118,6 +118,12 @@ impl TypeChecker {
                     self.check_returned_reference(tail);
                 }
             }
+            // Each arm body can produce the returned reference (§3.6).
+            Expr::Match { arms, .. } => {
+                for arm in arms {
+                    self.check_returned_reference(&arm.body);
+                }
+            }
             _ => {}
         }
     }

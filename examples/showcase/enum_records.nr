@@ -1,12 +1,14 @@
-// Showcase — enums working alongside structs, methods, arrays, and loops.
+// Showcase — pattern matching working alongside enums, structs, methods, arrays,
+// and loops.
 //
 // Integration example combining several Phase-1E features:
-//   enums with associated data (§3.5, all three variant forms)
-//   · structs with an enum field · impl methods (&self)
-//   · fixed-size arrays + for-in iteration (§3.1) · compound assignment.
+//   pattern matching (§3.6, enum deconstruction + payload binding, value/or/range
+//   patterns, guards, wildcard) · enums with associated data (§3.5, all three
+//   variant forms) · structs with an enum field · impl methods (&self) ·
+//   fixed-size arrays + for-in iteration (§3.1) · compound assignment.
 //
-// Enums are constructed (unit, tuple, and struct variants) and one is stored in
-// a struct field; the numeric result is composed from the struct and array data.
+// Enums are constructed and then deconstructed with `match`; the numeric result is
+// composed from the struct, array, and matched enum data.
 
 enum Status { Active, Idle, Done }
 
@@ -32,11 +34,38 @@ enum Signal {
     Range { lo: i32, hi: i32 }
 }
 
+// Deconstruct each variant form: unit, tuple (binds `n`), struct (binds `lo`/`hi`).
+func signal_value(s: Signal) -> i32 {
+    match s {
+        Signal::Stop => 0,
+        Signal::Go(n) => n,
+        Signal::Range { lo, hi } => hi - lo
+    }
+}
+
+// Value patterns over an integer: literal, or-pattern, range, guard, wildcard.
+func bucket(n: i32) -> i32 {
+    match n {
+        0 => 0,
+        1 | 2 => 1,
+        3..=9 => 2,
+        n if n < 0 => 9,
+        _ => 3
+    }
+}
+
+func status_bonus(st: Status) -> i32 {
+    match st {
+        Status::Active => 1,
+        Status::Idle => 2,
+        Status::Done => 3
+    }
+}
+
 func main() -> i32 {
     val w1 = Worker::new(Status::Active, 5)
     val w2 = Worker { status: Status::Idle, work: 8 }
 
-    // Construct each enum form; they ride alongside the numeric computation.
     val a = Signal::Stop
     val b = Signal::Go(3)
     val c = Signal::Range { lo: 1, hi: 2 }
@@ -50,5 +79,19 @@ func main() -> i32 {
 
     sum += w1.doubled()     // + (5 * 2) = 20
     sum += w2.work          // + 8       = 28
-    return sum              // 28
+
+    // Deconstruct the constructed signals.
+    sum += signal_value(a)  // + 0 = 28
+    sum += signal_value(b)  // + 3 = 31
+    sum += signal_value(c)  // + 1 = 32
+
+    // Value-pattern buckets.
+    sum += bucket(7)        // + 2 = 34
+    sum += bucket(-4)       // + 9 = 43
+
+    // Match on the enum stored in a struct field.
+    sum += status_bonus(w1.status)  // + 1 = 44
+    sum += status_bonus(w2.status)  // + 2 = 46
+
+    return sum              // 46
 }

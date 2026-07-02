@@ -7,7 +7,9 @@ pub mod items;
 pub mod statements;
 pub mod types;
 
-pub use expressions::{BinaryOp, Expr, FieldInit, UnaryOp};
+pub use expressions::{
+    BinaryOp, EnumPatternPayload, Expr, FieldInit, FieldPattern, MatchArm, Pattern, UnaryOp,
+};
 pub use items::{
     Attribute, ConstDef, EnumDef, EnumVariant, FieldDef, FunctionDef, ImplDef, Item, MethodDef,
     Parameter, SelfParam, StructDef, VariantPayload,

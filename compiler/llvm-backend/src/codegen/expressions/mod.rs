@@ -7,6 +7,7 @@ mod binary;
 mod control_flow;
 mod enums;
 mod literals;
+mod matches;
 mod methods;
 mod tuples;
 mod unary;
@@ -160,6 +161,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 payload,
                 ..
             } => self.codegen_enum_construct(enum_name, *tag, payload),
+
+            // Pattern matching `match scrutinee { ... }` (§3.6).
+            HirExprKind::Match { scrutinee, arms } => {
+                let result_ty = Type::from_hir(&expr.ty);
+                self.codegen_match(scrutinee, arms, &result_ty)
+            }
         }
     }
 

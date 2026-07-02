@@ -127,6 +127,13 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-07-02: Pattern matching §3.6 (`type_checkers/matches.rs`). `check_match` types the scrutinee
+  (restricted to enum / integer / `char` / `bool`), checks each arm's patterns against it, introduces
+  pattern bindings into a per-arm scope for the guard and body, unifies arm-body types (first arm drives
+  literal inference), and verifies exhaustiveness (enum variant coverage, both `bool` values, or a `_`
+  catch-all; guarded arms never count). New `TypeError`s: `NonExhaustiveMatch`, `UnsupportedMatchScrutinee`,
+  `PatternTypeMismatch`, `MatchArmTypeMismatch`, `InvalidRangePattern`, `VariantPatternFormMismatch`,
+  `OrPatternBinding`, `RefutablePayloadPattern`. `check_returned_reference` recurses into arm bodies (§2.6).
 - 2026-06-30: Enums with associated data §3.5. New `Type::Enum(String)` (nominal, `Copy`) and an
   `enum_defs` table (name → `Vec<EnumVariantInfo>` with `VariantForm` + resolved fields), registered
   in a pre-pass before structs. `resolve_type` resolves an enum name; `register_enum` rejects

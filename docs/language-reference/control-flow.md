@@ -439,18 +439,27 @@ func is_positive_verbose(x: i32) -> bool {
 }
 ```
 
-## Future Features (Phase 1)
+## Pattern Matching (§3.6)
 
-### Pattern Matching (Phase 1)
+`match` selects a branch by deconstructing a value, and is itself an expression.
+The first arm whose pattern matches (and whose optional `if` guard holds) runs:
 
 ```neuro
-// Not yet implemented
-match value {
-    0 => "zero",
-    1 => "one",
-    _ => "other",
+func classify(n: i32) -> i32 {
+    match n {
+        0            => 1,        // literal
+        1 | 2        => 2,        // or-pattern
+        3..=9        => 3,        // inclusive range
+        n if n < 0   => 4,        // bare binding + guard
+        _            => 9         // wildcard
+    }
 }
 ```
+
+Enum variants deconstruct and bind their payloads (`E::Tuple(a)`,
+`E::Struct { field }`). A `match` must be exhaustive. See
+[Expressions → Match Expressions](expressions.md) for the full pattern grammar,
+exhaustiveness rules, and current Phase-1E limits.
 
 ## References
 

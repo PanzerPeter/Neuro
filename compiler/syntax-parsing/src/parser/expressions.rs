@@ -263,6 +263,8 @@ impl Parser {
 
             TokenKind::Unsafe => self.parse_unsafe_expr(token.span),
 
+            TokenKind::Match => self.parse_match_expr(token.span),
+
             _ => Err(ParseError::UnexpectedToken {
                 found: token.kind,
                 expected: "expression".to_string(),
