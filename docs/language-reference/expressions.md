@@ -121,6 +121,48 @@ val sign: i32  = if n < 0 { -1 } else if n == 0 { 0 } else { 1 }
 
 All arms must produce the same type. An `if` without `else` has type `Void` and cannot be used as a value.
 
+### Match Expressions (§3.6)
+
+`match` is an expression that exhaustively deconstructs a value. The first arm
+whose pattern matches — and whose optional `if` guard holds — supplies the
+value; all arm bodies must have the same type.
+
+```neuro
+enum Shape { Circle(i32), Rect { w: i32, h: i32 }, Unit }
+
+func area(s: Shape) -> i32 {
+    match s {
+        Shape::Circle(r)       => r * r * 3,   // tuple variant — binds `r`
+        Shape::Rect { w, h }   => w * h,        // struct variant — binds `w`, `h`
+        Shape::Unit            => 0
+    }
+}
+
+func classify(n: i32) -> i32 {
+    match n {
+        0            => 1,        // literal
+        1 | 2        => 2,        // or-pattern
+        3..=9        => 3,        // inclusive range (`..` is exclusive)
+        n if n < 0   => 4,        // bare binding + guard
+        _            => 9         // wildcard catch-all
+    }
+}
+```
+
+**Patterns**: `_` (wildcard), a bare identifier (binds the whole scrutinee), a
+literal, an inclusive `a..=b` / exclusive `a..b` range over an ordered scalar,
+or an enum variant pattern (`E::Unit`, `E::Tuple(a, b)`, `E::Struct { field }`).
+
+**Exhaustiveness**: every case must be handled. An enum match must cover every
+variant or include a `_` arm; an integer/`char` match requires a `_` arm; a
+`bool` match needs both `true` and `false` (or `_`). A guarded arm does not
+count toward exhaustiveness.
+
+**Phase 1E limits**: the scrutinee must be an enum, integer, `char`, or `bool`;
+enum-payload sub-patterns must be bindings or `_` (match a payload *value* with a
+guard, e.g. `Some(n) if n == 0`); and alternatives of an `|`-pattern may not
+bind.
+
 ### Block Expressions
 
 A `{ … }` block is an expression whose value is its final (trailing) expression:

@@ -376,6 +376,19 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
         }
         Expr::TupleIndex { object, .. } => rewrite_expr(object, resolved),
         Expr::ArrayRest { array, .. } => rewrite_expr(array, resolved),
+        // Patterns carry no type annotations, so only the scrutinee, guards, and
+        // bodies can host an aliased cast target.
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            rewrite_expr(scrutinee, resolved);
+            for arm in arms.iter_mut() {
+                if let Some(guard) = &mut arm.guard {
+                    rewrite_expr(guard, resolved);
+                }
+                rewrite_expr(&mut arm.body, resolved);
+            }
+        }
         Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } => {}
     }
 }

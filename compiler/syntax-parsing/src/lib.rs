@@ -7,8 +7,9 @@ mod parser;
 mod precedence;
 
 pub use ast::{
-    Attribute, BinaryOp, EnumDef, EnumVariant, Expr, FieldDef, FieldInit, FunctionDef, ImplDef,
-    Item, MethodDef, Parameter, SelfParam, Stmt, StructDef, Type, UnaryOp, VariantPayload,
+    Attribute, BinaryOp, EnumDef, EnumPatternPayload, EnumVariant, Expr, FieldDef, FieldInit,
+    FieldPattern, FunctionDef, ImplDef, Item, MatchArm, MethodDef, Parameter, Pattern, SelfParam,
+    Stmt, StructDef, Type, UnaryOp, VariantPayload,
 };
 pub use errors::{ParseError, ParseResult};
 

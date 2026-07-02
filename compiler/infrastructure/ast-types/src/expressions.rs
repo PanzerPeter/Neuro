@@ -182,6 +182,90 @@ pub enum Expr {
         exact: bool,
         span: Span,
     },
+    /// Pattern-matching expression `match scrutinee { arm, ... }` (§3.6). Exhaustively
+    /// deconstructs `scrutinee` against each arm's pattern(s) in order; the first arm
+    /// whose pattern matches (and whose guard, if any, holds) supplies the value.
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<MatchArm>,
+        span: Span,
+    },
+}
+
+/// One arm of a `match` expression (§3.6): one or more `|`-separated patterns, an
+/// optional `if` guard, and a body expression. The arm fires when any pattern matches
+/// and the guard (if present) evaluates `true`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    /// `|`-separated alternative patterns. Alternatives may not bind (§3.6 scope).
+    pub patterns: Vec<Pattern>,
+    pub guard: Option<Box<Expr>>,
+    pub body: Box<Expr>,
+    pub span: Span,
+}
+
+/// A `match` arm pattern (§3.6).
+///
+/// Payload sub-patterns of an enum variant are restricted to bindings and wildcards
+/// (a documented Phase-1E limit, mirroring enums' scalar-only payloads); a literal in
+/// a payload position is expressed with a guard instead.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    /// `_` — matches anything, binds nothing.
+    Wildcard(Span),
+    /// A bare identifier — matches anything and binds the whole scrutinee to `name`.
+    Binding(Identifier),
+    /// A literal value pattern: `0`, `'a'`, `true`.
+    Literal(Literal, Span),
+    /// A range pattern `start..end` (exclusive) / `start..=end` (inclusive) over an
+    /// ordered scalar (integer or `char`).
+    Range {
+        start: Literal,
+        end: Literal,
+        inclusive: bool,
+        span: Span,
+    },
+    /// An enum variant pattern: `Color::Red`, `Shape::Circle { radius }`, `Maybe::Some(n)`.
+    Enum {
+        enum_name: Identifier,
+        variant: Identifier,
+        payload: EnumPatternPayload,
+        span: Span,
+    },
+}
+
+/// The payload sub-patterns of an enum-variant pattern (§3.6), matching the variant's
+/// construction form.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EnumPatternPayload {
+    /// No payload: `Color::Red`.
+    Unit,
+    /// Positional payload sub-patterns: `Maybe::Some(n)`, `Pair::Two(_, y)`.
+    Tuple(Vec<Pattern>),
+    /// Named-field payload sub-patterns: `Shape::Circle { radius }` (shorthand binds
+    /// `radius`) or `Shape::Circle { radius: r }`.
+    Struct(Vec<FieldPattern>),
+}
+
+/// One `field: sub_pattern` (or shorthand `field`) entry of a struct-variant pattern (§3.6).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldPattern {
+    pub field: Identifier,
+    pub pattern: Pattern,
+    pub span: Span,
+}
+
+impl Pattern {
+    /// The source span of this pattern.
+    pub fn span(&self) -> Span {
+        match self {
+            Pattern::Wildcard(span) => *span,
+            Pattern::Binding(ident) => ident.span,
+            Pattern::Literal(_, span) => *span,
+            Pattern::Range { span, .. } => *span,
+            Pattern::Enum { span, .. } => *span,
+        }
+    }
 }
 
 impl Expr {
@@ -211,6 +295,7 @@ impl Expr {
             Expr::TupleLiteral { span, .. } => *span,
             Expr::TupleIndex { span, .. } => *span,
             Expr::ArrayRest { span, .. } => *span,
+            Expr::Match { span, .. } => *span,
         }
     }
 }

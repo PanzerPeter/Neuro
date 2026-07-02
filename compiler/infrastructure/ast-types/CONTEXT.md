@@ -28,6 +28,11 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-07-02: Pattern matching §3.6. Added `Expr::Match { scrutinee, arms, span }` (with its `span()`
+  arm) and the pattern types `MatchArm { patterns, guard, body, span }`, `Pattern::{Wildcard, Binding,
+  Literal, Range, Enum}` (with `Pattern::span()`), `EnumPatternPayload::{Unit, Tuple, Struct}`, and
+  `FieldPattern { field, pattern, span }`. Payload sub-patterns are restricted to bindings/`_` in this
+  phase; or-patterns cannot bind (enforced in semantic analysis).
 - 2026-06-30: Enums with associated data §3.5. Added `Item::Enum(EnumDef)`; `EnumDef { name, variants,
   span }`, `EnumVariant { name, payload, span }`, and `VariantPayload::{Unit, Tuple(Vec<Type>),
   Struct(Vec<FieldDef>)}`. Added `Expr::EnumStructLiteral { enum_name, variant, fields, span }` for the

@@ -141,7 +141,16 @@ Key design goals:
 - Tagged unions `enum E { A, B(i32), C { x: f64 } }` with unit, tuple, and struct-field variants
 - Construct via `E::A` / `E::B(1)` / `E::C { x: 1.0 }`; usable as bindings, function
   parameters/returns, and struct fields; an enum is `Copy`
-- Scalar `Copy` payloads only; non-generic; deconstruction (`match`) is the next 1E item
+- Scalar `Copy` payloads only; non-generic
+
+### Pattern Matching (1E, §3.6)
+
+- `match` as an exhaustive expression; the first matching (and guard-passing) arm supplies the value
+- Patterns: `_` wildcard, bare binding, literals, `a..=b` / `a..b` ranges, `|` or-patterns, and enum
+  variant patterns (`E::Unit`, `E::Tuple(a)`, `E::Struct { field }`) that bind their payload
+- `if` guards on arms; exhaustiveness enforced (enum variant coverage / both bools / a `_` arm)
+- Phase-1E limits: scrutinee is enum/integer/`char`/`bool`; payload sub-patterns are binding-or-`_`;
+  `|`-alternatives may not bind
 
 ### Compilation
 

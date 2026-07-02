@@ -322,4 +322,43 @@ pub enum TypeError {
         field: String,
         span: Span,
     },
+
+    #[error("non-exhaustive match at {span:?}: {reason} — add the missing pattern(s) or a `_` wildcard arm (§3.6)")]
+    NonExhaustiveMatch { reason: String, span: Span },
+
+    #[error("cannot match on a value of type {ty} at {span:?}: `match` supports enums, integers, `char`, and `bool` in this phase (§3.6)")]
+    UnsupportedMatchScrutinee { ty: Type, span: Span },
+
+    #[error("this pattern matches {pattern_ty} but the value being matched has type {scrutinee_ty} at {span:?} (§3.6)")]
+    PatternTypeMismatch {
+        pattern_ty: String,
+        scrutinee_ty: Type,
+        span: Span,
+    },
+
+    #[error(
+        "match arms have incompatible types at {span:?}: expected {expected}, found {found} (§3.6)"
+    )]
+    MatchArmTypeMismatch {
+        expected: Type,
+        found: Type,
+        span: Span,
+    },
+
+    #[error("a range pattern requires an ordered scalar (integer or `char`) at {span:?} (§3.6)")]
+    InvalidRangePattern { span: Span },
+
+    #[error("enum variant '{enum_name}::{variant}' is a {expected} variant; its pattern must match that form at {span:?} (§3.6)")]
+    VariantPatternFormMismatch {
+        enum_name: String,
+        variant: String,
+        expected: String,
+        span: Span,
+    },
+
+    #[error("an alternative (`|`) pattern may not bind a variable at {span:?}: move the binding to a separate arm (§3.6)")]
+    OrPatternBinding { span: Span },
+
+    #[error("a payload sub-pattern must be a binding or `_` at {span:?}: match a payload value with a guard instead (e.g. `Some(n) if n == 0`) (§3.6)")]
+    RefutablePayloadPattern { span: Span },
 }

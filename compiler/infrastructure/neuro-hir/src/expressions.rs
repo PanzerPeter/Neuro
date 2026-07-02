@@ -151,4 +151,59 @@ pub enum HirExprKind {
         array: Box<HirExpr>,
         start: usize,
     },
+    /// Pattern-matching expression `match scrutinee { ... }` (§3.6), fully resolved.
+    ///
+    /// Each arm carries its refutable tests (already keyed to variant tags / literal
+    /// values / ranges), the payload/scrutinee bindings it introduces, an optional
+    /// guard, and a body. The frontend has verified exhaustiveness, so a value with no
+    /// matching arm cannot occur at runtime.
+    Match {
+        scrutinee: Box<HirExpr>,
+        arms: Vec<HirMatchArm>,
+    },
+}
+
+/// One resolved arm of a [`HirExprKind::Match`] (§3.6).
+#[derive(Debug, Clone, PartialEq)]
+pub struct HirMatchArm {
+    /// OR-alternatives: the arm's pattern part fires when any test matches. A
+    /// catch-all (`_` / bare binding) is a single [`HirMatchTest::Wildcard`].
+    pub tests: Vec<HirMatchTest>,
+    /// Bindings the arm introduces, in scope for its guard and body.
+    pub bindings: Vec<HirMatchBinding>,
+    pub guard: Option<HirExpr>,
+    pub body: HirExpr,
+}
+
+/// A single refutable test of the scrutinee (§3.6). Payload sub-patterns never
+/// contribute a test (they are irrefutable binding/`_` forms), so only the tag /
+/// scalar value is examined here.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HirMatchTest {
+    /// Matches unconditionally (`_` or a bare binding).
+    Wildcard,
+    /// Enum-variant tag equals `tag`.
+    Tag { tag: u32 },
+    /// Scalar (integer / `char` / `bool`) equals `value` (encoded as the low bits of
+    /// an `i64`).
+    IntEq { value: i64 },
+    /// Ordered scalar lies in `lo..=hi` (an exclusive `..` is normalized to `hi - 1`).
+    IntRange { lo: i64, hi: i64 },
+}
+
+/// A binding introduced by a match arm (§3.6), in scope for its guard and body.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HirMatchBinding {
+    pub name: String,
+    pub ty: HirType,
+    pub source: HirBindingSource,
+}
+
+/// Where a [`HirMatchBinding`]'s value comes from.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HirBindingSource {
+    /// The whole scrutinee value (a bare binding `n => ...`).
+    Scrutinee,
+    /// Enum payload slot `slot`, decoded back to the binding's type (§3.5 layout).
+    EnumPayload { slot: usize },
 }

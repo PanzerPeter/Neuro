@@ -1672,6 +1672,13 @@ impl TypeChecker {
                     }
                 }
             }
+
+            // Pattern matching `match scrutinee { ... }` (§3.6).
+            Expr::Match {
+                scrutinee,
+                arms,
+                span,
+            } => Some(self.check_match(scrutinee, arms, *span, expected)),
         }
     }
 

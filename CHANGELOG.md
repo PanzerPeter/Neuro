@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.54.0] - 2026-07-02
+
+### Added
+- Pattern matching (§3.6). `match` is an exhaustive expression that deconstructs a
+  value. Patterns cover the `_` wildcard, a bare binding, literals, inclusive/exclusive
+  ranges (`a..=b` / `a..b`) over ordered scalars, `|` or-patterns, and enum variant
+  patterns (`E::Unit`, `E::Tuple(a, b)`, `E::Struct { field }`) that bind their payload.
+  Arms may carry an `if` guard; all arm bodies unify to one type and a `match` is usable
+  as a value or in statement position. Exhaustiveness is enforced: an enum match must
+  cover every variant or add `_`; an integer/`char` match needs `_`; a `bool` match needs
+  both `true` and `false` (or `_`); guarded arms do not count. New `=>` (`FatArrow`) token;
+  new `Expr::Match` / `Pattern` AST, `HirExprKind::Match` typed-HIR node, and a
+  test-block-chain codegen with enum-payload decode. Phase-1E limits: the scrutinee must be
+  an enum / integer / `char` / `bool`; enum-payload sub-patterns must be a binding or `_`
+  (match a payload value with a guard); `|`-alternatives may not bind.
+
+---
+
 ## [1.53.1] - 2026-06-30
 
 ### Security

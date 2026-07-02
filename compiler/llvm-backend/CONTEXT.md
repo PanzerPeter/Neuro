@@ -239,6 +239,14 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-07-02: Pattern matching §3.6 (`codegen/expressions/matches.rs`). `codegen_match` evaluates the
+  scrutinee once into an alloca, then builds a per-arm test-block chain: each arm ORs its `HirMatchTest`s
+  (tag compare / scalar `==` / range `lo<=x<=hi`, signed vs unsigned by scrutinee type) and branches to
+  the arm body or the next test. An arm body materializes its bindings (whole scrutinee, or an enum
+  payload slot decoded by `decode_enum_payload_field` — the inverse of the §3.5 pack), evaluates the
+  guard (branching to the next arm on failure), then the body into a shared result slot. Bindings are
+  saved/restored in the name maps per arm; the fall-through block is `unreachable` (exhaustiveness is a
+  frontend guarantee). Dispatched from the `HirExprKind::Match` arm.
 - 2026-06-30: Enums with associated data §3.5. New `Type::Enum(String)`; `compile` builds an
   `enum_words` table (each enum's widest-variant field count) handed to the `TypeMapper`, which maps an
   enum to the tagged union `{ i32 tag, [W x i64] payload }` (works as param/return/field via

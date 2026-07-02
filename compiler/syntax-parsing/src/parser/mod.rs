@@ -6,6 +6,7 @@ use crate::errors::{ParseError, ParseResult};
 
 mod expressions;
 mod items;
+mod patterns;
 mod statements;
 mod type_aliases;
 mod types;

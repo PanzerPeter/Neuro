@@ -51,6 +51,11 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-07-02: Pattern matching §3.6 (`parser/patterns.rs`). `parse_prefix` dispatches `TokenKind::Match`
+  to `parse_match_expr`, which parses the scrutinee with struct-literals suppressed, then arms. Each arm
+  is `pattern ('|' pattern)* ('if' guard)? '=>' body` (`parse_match_arm`); `parse_pattern` reads
+  wildcard/binding/literal/range/`E::V` variant patterns (with `(tuple)` / `{ named }` payloads). A
+  leading `-` on a numeric literal and `..`/`..=` ranges are handled in `parse_pattern_literal`.
 - 2026-06-30: Enums with associated data §3.5. `parse_program` dispatches `TokenKind::Enum` to
   `parse_enum_def`; `parse_enum_variant` reads unit / `(tuple)` / `{ named }` payloads. A path
   followed by `{` in the prefix parser (when struct literals are allowed) parses as

@@ -62,6 +62,7 @@ control_flow/labeled_breaks.nr        4
 control_flow/loop_statement.nr        12
 control_flow/loop_value.nr            0
 control_flow/panic_assert.nr          7
+control_flow/pattern_matching.nr      209
 control_flow/unsafe_block.nr          24
 control_flow/while_true_lint.nr       7
 
@@ -73,7 +74,7 @@ structs/structs.nr  50
 structs/struct_update.nr  14
 
 # --- showcase (multiple features working together) ------------------------
-showcase/enum_records.nr    28
+showcase/enum_records.nr    46
 showcase/mutable_borrows.nr 47
 showcase/num_algorithms.nr  32
 showcase/perceptron.nr      8

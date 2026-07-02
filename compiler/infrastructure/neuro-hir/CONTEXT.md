@@ -30,6 +30,11 @@ differences that make it the *typed* contract:
    span lives on the enclosing node.
 
 ## Recent Updates
+- 2026-07-02: Pattern matching §3.6. Added `HirExprKind::Match { scrutinee, arms }` with the fully
+  resolved `HirMatchArm { tests, bindings, guard, body }`. `HirMatchTest::{Wildcard, Tag, IntEq,
+  IntRange}` are the refutable tests (an exclusive `a..b` is pre-normalized to `a..=b-1`);
+  `HirMatchBinding { name, ty, source }` with `HirBindingSource::{Scrutinee, EnumPayload { slot }}`
+  describes each binding so the backend needs no pattern/exhaustiveness logic.
 - 2026-06-30: Enums with associated data §3.5. Added `HirType::Enum(String)` (nominal), `HirItem::Enum`
   with `HirEnum { name, variants }` / `HirEnumVariant { name, fields }` / `HirEnumField { name:
   Option<String>, ty }`, and `HirExprKind::EnumConstruct { enum_name, variant, tag, payload }` — the

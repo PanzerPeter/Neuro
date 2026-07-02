@@ -232,6 +232,8 @@ pub enum TokenKind {
     At,
     #[token("->")]
     Arrow,
+    #[token("=>")]
+    FatArrow,
     #[token("::")]
     ColonColon,
     #[token("..=")]
@@ -355,6 +357,7 @@ impl Token {
             TokenKind::Equal => "=",
             TokenKind::At => "@",
             TokenKind::Arrow => "->",
+            TokenKind::FatArrow => "=>",
             TokenKind::ColonColon => "::",
             TokenKind::Dot => ".",
             TokenKind::DotDot => "..",

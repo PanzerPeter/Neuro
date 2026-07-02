@@ -88,6 +88,7 @@ struct LoopContext {
 mod declarations;
 mod expressions;
 mod literals;
+mod matches;
 mod moves;
 mod resolution;
 mod statements;
