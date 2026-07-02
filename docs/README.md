@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1D complete, 1E (type system) active — Alpha Development
+**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1E complete, 1F (generics, traits & dispatch) active — Alpha Development
 
 ## Quick Links
 
@@ -152,12 +152,20 @@ Key design goals:
 - Phase-1E limits: scrutinee is enum/integer/`char`/`bool`; payload sub-patterns are binding-or-`_`;
   `|`-alternatives may not bind
 
+### Newtypes (1E, §3.15)
+
+- `newtype Meters = i32` creates a distinct nominal type wrapping an inner type
+- Not interchangeable with the inner type (unlike a transparent `type` alias)
+- Construct with `Meters(30)`; read the wrapped value with `.0`; forwards `Copy`/`Clone`
+- Usable as a binding, function parameter/return, and struct field
+- Phase-1E limit: the inner type must be `Copy`; operator/trait impls on a newtype await 1F+
+
 ### Compilation
 
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 784 tests passing across all components
+- 806 tests passing across all components
 
 ## Compilation Pipeline
 

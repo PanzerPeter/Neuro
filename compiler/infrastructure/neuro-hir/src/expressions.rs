@@ -143,6 +143,19 @@ pub enum HirExprKind {
         tag: u32,
         payload: Vec<HirExpr>,
     },
+    /// Newtype construction `Name(value)` (§3.15). The wrapper is transparent at
+    /// runtime, so backends lower this to `value` unchanged; the expression's `ty` is
+    /// the [`HirType::Newtype`].
+    NewtypeConstruct {
+        name: String,
+        value: Box<HirExpr>,
+    },
+    /// Newtype inner access `object.0` (§3.15). A newtype is representationally
+    /// identical to its inner type, so backends lower this to `object` unchanged; the
+    /// expression's `ty` is the inner type.
+    NewtypeAccess {
+        object: Box<HirExpr>,
+    },
     /// Trailing remainder of an array destructuring pattern (§3.2): a fresh
     /// `[T; N - start]` array copying elements `start..N` of `array` (a `[T; N]`).
     /// The arity rules are validated before lowering; this node's `ty` carries

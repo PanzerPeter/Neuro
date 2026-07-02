@@ -69,6 +69,9 @@ impl Type {
             HirType::Void => Type::Void,
             HirType::Struct(name) => Type::Struct(name.clone()),
             HirType::Enum(name) => Type::Enum(name.clone()),
+            // A newtype is transparent at runtime (§3.15): erase it to its inner type
+            // so codegen never needs to know a newtype exists.
+            HirType::Newtype { inner, .. } => Type::from_hir(inner),
             HirType::Reference { inner, .. } => Type::Reference(Box::new(Type::from_hir(inner))),
             HirType::Array { element, size } => Type::Array {
                 element: Box::new(Type::from_hir(element)),

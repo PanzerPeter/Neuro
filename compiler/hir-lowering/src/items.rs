@@ -20,6 +20,14 @@ impl Lowerer {
     /// pre-pass so bodies see every item regardless of source order — mirroring the
     /// checker's registration passes.
     pub(crate) fn register_items(&mut self, items: &[Item]) -> Result<(), LoweringError> {
+        // Newtype names first so they resolve as struct fields, enum payloads, or
+        // other newtypes' inners regardless of source order (§3.15).
+        for item in items {
+            if let Item::Newtype(def) = item {
+                self.newtypes
+                    .insert(def.name.name.clone(), def.inner.clone());
+            }
+        }
         for item in items {
             if let Item::Enum(def) = item {
                 self.register_enum(def)?;
@@ -174,6 +182,9 @@ impl Lowerer {
                 Item::Enum(def) => hir_items.push(HirItem::Enum(self.lower_enum(def)?)),
                 Item::Impl(def) => hir_items.push(HirItem::Impl(self.lower_impl(def)?)),
                 Item::Const(def) => hir_items.push(HirItem::Const(self.lower_const(def)?)),
+                // A newtype is transparent at runtime and produces no HIR item; it
+                // survives only as the `HirType::Newtype` its annotations resolve to.
+                Item::Newtype(_) => {}
             }
         }
         Ok(HirProgram { items: hir_items })

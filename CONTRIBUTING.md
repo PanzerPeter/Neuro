@@ -4,7 +4,7 @@ Thank you for your interest in contributing to the Neuro programming language co
 
 ## Project Status
 
-Neuro is in **Phase 1 — Core Language** (v1.x), the umbrella phase covering the full general-purpose language. It is divided into lettered sub-phases, implemented strictly in dependency order. **Sub-phase 1E (Type System Expansion) is the active sub-phase.** Completed so far: 1A (core MVP), 1B (syntax & semantics stabilization — casts, bitwise ops, literal suffixes, if/block expressions, builtin-method dispatch, integer overflow, etc.), 1C (ownership & borrow checker — move semantics, `Copy`, `&T`/`&mut T`, borrow exclusivity, lifetime elision, `&mut self`, deterministic `Drop`; one flagged item remains), and 1D (HIR / MLIR plumbing — typed HIR, AST→HIR lowering, HIR-routed LLVM backend, `mlir-backend` scaffold). Within 1E, structs, methods, arrays, tuples, destructuring, type aliases, enums, and pattern matching have landed; newtypes are open. Completing all of Phase 1 (1A–1H) ships **v2.0.0** and opens Phase 2 (Tensors). We welcome contributions, but note:
+Neuro is in **Phase 1 — Core Language** (v1.x), the umbrella phase covering the full general-purpose language. It is divided into lettered sub-phases, implemented strictly in dependency order. **Sub-phase 1F (Generics, Traits & Dispatch) is the active sub-phase.** Completed so far: 1A (core MVP), 1B (syntax & semantics stabilization — casts, bitwise ops, literal suffixes, if/block expressions, builtin-method dispatch, integer overflow, etc.), 1C (ownership & borrow checker — move semantics, `Copy`, `&T`/`&mut T`, borrow exclusivity, lifetime elision, `&mut self`, deterministic `Drop`; one flagged item remains), 1D (HIR / MLIR plumbing — typed HIR, AST→HIR lowering, HIR-routed LLVM backend, `mlir-backend` scaffold), and 1E (type system — structs, methods, arrays, tuples, destructuring, type aliases, enums, pattern matching, and newtypes). Completing all of Phase 1 (1A–1H) ships **v2.0.0** and opens Phase 2 (Tensors). We welcome contributions, but note:
 
 - Architecture and design are still evolving
 - Breaking changes are expected between minor versions
@@ -275,11 +275,11 @@ cargo run -p neurc -- compile examples/basics/hello.nr
 
 ### Phase 1 — Core Language: current priorities
 
-The active sub-phase is **1E (Type System Expansion)**. The roadmap is
-dependency-ordered, so pick the **topmost open item** — its prerequisites are
-already done. Coordinate on an issue before starting a large item.
+The active sub-phase is **1F (Generics, Traits & Dispatch)** — sub-phase 1E is
+complete. The roadmap is dependency-ordered, so pick the **topmost open item** — its
+prerequisites are already done. Coordinate on an issue before starting a large item.
 
-**Open now — 1E (Type System):**
+**Recently completed — 1E (Type System):**
 
 - [x] **Enums with associated data** (§3.5). Tagged-union codegen:
       `enum Foo { Bar, Baz(i32), Qux { x: f64 } }`. Prerequisite for pattern matching.
@@ -288,8 +288,12 @@ already done. Coordinate on an issue before starting a large item.
       required for `Option`/`Result` ergonomics in 1G. Landed v1.54.0 (enum
       deconstruction, value/or/range/wildcard patterns, guards; scrutinee is
       enum/integer/`char`/`bool`).
-- [ ] **Newtype declarations** (§3.15). `newtype Meters = f64` — distinct nominal
-      type, zero overhead; construction `Meters(3.5)`, inner access `.0`.
+- [x] **Newtype declarations** (§3.15). `newtype Meters = f64` — distinct nominal
+      type, zero overhead; construction `Meters(3.5)`, inner access `.0`. Landed
+      v1.55.0 (Copy-inner only; backends erase the wrapper). Completes 1E.
+
+**Open now — 1F (Generics, Traits & Dispatch):** generics (§3.8) is the topmost
+open item.
 
 **Next, in dependency order:** 1F (generics → explicit lifetimes → trait
 declarations → operator traits → static/dynamic dispatch → closures) → 1G (error

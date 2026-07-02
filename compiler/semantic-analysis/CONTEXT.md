@@ -127,6 +127,14 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-07-02: Newtype declarations §3.15. New `Type::Newtype(String)` (distinct nominal, NOT compatible
+  with its inner type) plus a `newtype_defs` name→inner table. Passes: `predeclare_newtype` reserves
+  each name (rejecting builtin/struct/enum/newtype collisions via `NewtypeAlreadyDefined`), then
+  `resolve_newtype_inners` resolves inner types once all nominal names are known and rejects cyclic
+  (`CyclicNewtype`) and non-Copy (`NewtypeInnerNotCopy`) inners — inner is restricted to Copy types this
+  phase, so a newtype forwards Copy. Construction `Name(value)` is handled in `check_plain_call` (one
+  inner-typed arg); `.0` on a newtype yields the inner type in the `TupleIndex` check. New `TypeError`s:
+  `NewtypeAlreadyDefined`, `NewtypeInnerNotCopy`, `CyclicNewtype`.
 - 2026-07-02: Pattern matching §3.6 (`type_checkers/matches.rs`). `check_match` types the scrutinee
   (restricted to enum / integer / `char` / `bool`), checks each arm's patterns against it, introduces
   pattern bindings into a per-arm scope for the guard and body, unifies arm-body types (first arm drives

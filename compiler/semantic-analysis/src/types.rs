@@ -39,6 +39,11 @@ pub enum Type {
     /// union of variants; in Phase 1E its payloads are scalar `Copy` primitives, so
     /// an enum is `Copy`.
     Enum(std::string::String),
+    /// User-defined newtype, identified by name (nominal typing, §3.15). A distinct
+    /// wrapper over an inner type — not interchangeable with it. In Phase 1E the
+    /// inner type is restricted to `Copy` types, so a newtype is `Copy`; the inner
+    /// type is looked up in the checker's newtype table rather than embedded here.
+    Newtype(std::string::String),
     /// Borrow `&T` (§2.4) / `&mut T` (§2.5): a non-owning reference to `inner`.
     /// References are `Copy` and never move the borrowed value. `mutable`
     /// distinguishes a write-capable `&mut T` from a read-only `&T`.
@@ -106,9 +111,11 @@ impl Type {
                     && r1.is_compatible_with(r2)
             }
 
-            // Struct and enum types match by name (nominal typing).
+            // Struct, enum, and newtype types match by name (nominal typing). A
+            // newtype is deliberately NOT compatible with its inner type (§3.15).
             (Type::Struct(a), Type::Struct(b)) => a == b,
             (Type::Enum(a), Type::Enum(b)) => a == b,
+            (Type::Newtype(a), Type::Newtype(b)) => a == b,
 
             // References match when their referents match and their mutability
             // agrees (§2.4, §2.5). There is no implicit `&mut T` → `&T` coercion —
@@ -296,6 +303,7 @@ impl fmt::Display for Type {
             Type::Unknown => write!(f, "<error>"),
             Type::Struct(name) => write!(f, "{}", name),
             Type::Enum(name) => write!(f, "{}", name),
+            Type::Newtype(name) => write!(f, "{}", name),
             Type::Reference { inner, mutable } => {
                 if *mutable {
                     write!(f, "&mut {}", inner)

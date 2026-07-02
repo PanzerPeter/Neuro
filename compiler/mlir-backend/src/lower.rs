@@ -157,6 +157,8 @@ fn map_type<'c>(context: &'c Context, ty: &HirType) -> Result<Type<'c>, MlirErro
         HirType::BF16 => Type::bfloat16(context),
         HirType::F32 => Type::float32(context),
         HirType::F64 => Type::float64(context),
+        // A newtype is transparent (§3.15): map it to its inner type.
+        HirType::Newtype { inner, .. } => map_type(context, inner)?,
         HirType::String
         | HirType::Struct(_)
         | HirType::Enum(_)

@@ -20,6 +20,10 @@ pub(crate) struct TypeChecker {
     /// Enum definitions: name → ordered list of variants (§3.5). The order is the
     /// declaration order, which is also the discriminant order used by codegen.
     enum_defs: HashMap<String, Vec<EnumVariantInfo>>,
+    /// Newtype definitions: name → resolved inner type (§3.15). A newtype is a
+    /// distinct nominal type wrapping this inner type; construction is `Name(value)`
+    /// and the inner value is read via `.0`.
+    newtype_defs: HashMap<String, Type>,
     /// Names of structs that derive `Copy` (`@derive(Copy)`). A Copy struct is
     /// duplicated on assignment instead of moved (§2.3).
     copy_structs: HashSet<String>,
@@ -103,6 +107,7 @@ impl TypeChecker {
             functions: HashMap::new(),
             struct_defs: HashMap::new(),
             enum_defs: HashMap::new(),
+            newtype_defs: HashMap::new(),
             copy_structs: HashSet::new(),
             clone_structs: HashSet::new(),
             impl_methods: HashMap::new(),
@@ -145,6 +150,13 @@ impl TypeChecker {
         match ty {
             Type::String | Type::Void | Type::Function { .. } | Type::Unknown => false,
             Type::Struct(name) => self.copy_structs.contains(name),
+            // A newtype forwards `Copy` from its inner type (§3.15). Cycles are
+            // rejected at registration, so this recursion terminates.
+            Type::Newtype(name) => self
+                .newtype_defs
+                .get(name)
+                .map(|inner| self.is_type_copy(inner))
+                .unwrap_or(false),
             // A borrow `&T` / `&mut T` is `Copy` — copying the reference is sound
             // because it never moves the borrowed value (§2.4, §2.5). Note: aliasing
             // exclusivity for `&mut T` is enforced by the borrow checker, not here.
@@ -180,6 +192,11 @@ impl TypeChecker {
         self.clone_structs.contains(name)
     }
 
+    /// Look up a newtype's resolved inner type by name (§3.15).
+    pub(crate) fn lookup_newtype_inner(&self, name: &str) -> Option<&Type> {
+        self.newtype_defs.get(name)
+    }
+
     /// Look up a variant of an enum by name, returning its resolved info (§3.5).
     pub(crate) fn lookup_enum_variant(
         &self,
@@ -194,6 +211,16 @@ impl TypeChecker {
 
     /// Check a complete program
     pub(crate) fn check_program(&mut self, items: &[Item]) -> Result<(), ()> {
+        // Pass 0a: pre-register newtype NAMES (§3.15) so a newtype used as a struct
+        // field, enum payload, or another newtype's inner resolves regardless of
+        // source order. Inner types are resolved and validated in pass 1c, once every
+        // nominal name is known.
+        for item in items {
+            if let Item::Newtype(def) = item {
+                self.predeclare_newtype(def);
+            }
+        }
+
         // Pass 0: register enum definitions before structs, so an enum used as a
         // struct field type (or vice versa) resolves regardless of source order.
         for item in items {
@@ -209,6 +236,12 @@ impl TypeChecker {
                 let _ = self.register_struct(def);
             }
         }
+
+        // Pass 1c: resolve and validate newtype inner types now that every nominal
+        // name is registered — enforces the Copy-inner restriction and rejects cycles
+        // (§3.15). Runs before Copy-derive validation so a struct with a newtype field
+        // sees the newtype's real Copy-ness.
+        self.resolve_newtype_inners(items);
 
         // Pass 1b: validate `@derive(Copy)` — every field of a Copy struct must itself
         // be Copy (§2.3). Runs after all structs are registered so a Copy field that is
@@ -244,8 +277,8 @@ impl TypeChecker {
                 Item::Const(def) => {
                     let _ = self.check_const_item(def);
                 }
-                // Enums carry no bodies; their variants are validated at registration.
-                Item::Struct(_) | Item::Enum(_) => {}
+                // Enums and newtypes carry no bodies; they are validated at registration.
+                Item::Struct(_) | Item::Enum(_) | Item::Newtype(_) => {}
             }
         }
 
@@ -281,7 +314,7 @@ impl TypeChecker {
                         self.lint_method(method, suppress_while_true);
                     }
                 }
-                Item::Struct(_) | Item::Const(_) | Item::Enum(_) => {}
+                Item::Struct(_) | Item::Const(_) | Item::Enum(_) | Item::Newtype(_) => {}
             }
         }
     }

@@ -148,6 +148,12 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             HirExprKind::TupleIndex { object, index } => self.codegen_tuple_index(object, *index),
 
+            // Newtype construction and inner access (§3.15) are transparent: a newtype
+            // is representationally identical to its inner type, so both lower to the
+            // inner value unchanged.
+            HirExprKind::NewtypeConstruct { value, .. } => self.codegen_expr(value),
+            HirExprKind::NewtypeAccess { object } => self.codegen_expr(object),
+
             // Array rest remainder `..rest` from a destructuring desugar (§3.2).
             HirExprKind::ArrayRest { array, start } => {
                 let rest_ty = Type::from_hir(&expr.ty);

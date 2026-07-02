@@ -239,6 +239,11 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-07-02: Newtype declarations §3.15. A newtype is transparent at runtime: `Type::from_hir` erases
+  `HirType::Newtype { inner, .. }` to `from_hir(inner)`, so codegen never sees a newtype type. The two
+  transparent expression kinds lower straight through — `HirExprKind::NewtypeConstruct { value, .. }` and
+  `HirExprKind::NewtypeAccess { object }` both codegen their inner expression unchanged. No new backend
+  `Type` variant, type-mapping, or item handling.
 - 2026-07-02: Pattern matching §3.6 (`codegen/expressions/matches.rs`). `codegen_match` evaluates the
   scrutinee once into an alloca, then builds a per-arm test-block chain: each arm ORs its `HirMatchTest`s
   (tag compare / scalar `==` / range `lo<=x<=hi`, signed vs unsigned by scrutinee type) and branches to

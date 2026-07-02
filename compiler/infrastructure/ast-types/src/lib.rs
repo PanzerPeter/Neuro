@@ -12,7 +12,7 @@ pub use expressions::{
 };
 pub use items::{
     Attribute, ConstDef, EnumDef, EnumVariant, FieldDef, FunctionDef, ImplDef, Item, MethodDef,
-    Parameter, SelfParam, StructDef, VariantPayload,
+    NewtypeDef, Parameter, SelfParam, StructDef, VariantPayload,
 };
 pub use statements::Stmt;
 pub use types::Type;

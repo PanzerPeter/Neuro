@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.55.0] - 2026-07-02
+
+### Added
+- Newtype declarations (§3.15). `newtype Name = T` creates a **distinct nominal type**
+  that wraps an inner type — unlike a transparent `type` alias, the newtype and its inner
+  type are not interchangeable, so `Meters` and `Seconds` over `i32` are different types.
+  Construct a value with `Name(value)` and read the wrapped value back with `.0`. A newtype
+  forwards `Copy`/`Clone` from its inner type and may be a binding, a function parameter or
+  return type, and a struct field. New `newtype` keyword, `Item::Newtype` AST, semantic
+  `Type::Newtype` (name→inner table with builtin/nominal collision, cycle, and non-Copy-inner
+  rejection), typed-HIR `HirType::Newtype { name, inner }` plus transparent
+  `NewtypeConstruct` / `NewtypeAccess` nodes, and full backend erasure (a newtype lowers to
+  its inner type at zero runtime cost). **Completes sub-phase 1E (Type System Expansion).**
+  Phase-1E limit: the inner type must be `Copy` (non-Copy wrappers, and operator/trait impls
+  on a newtype, await 1F+).
+
+---
+
 ## [1.54.0] - 2026-07-02
 
 ### Added

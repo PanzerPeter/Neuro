@@ -28,6 +28,11 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-07-02: Newtype declarations §3.15. Added `NewtypeDef { name, inner, span }` and
+  `Item::Newtype(NewtypeDef)`. Unlike a `type` alias (expanded at parse time), a newtype survives as
+  its own item; a newtype *type* annotation is a plain `Type::Named`, construction reuses
+  `Expr::Call(Identifier)`, and inner access reuses `Expr::TupleIndex` (`.0`). Interpreted by
+  semantic-analysis, hir-lowering, and both backends.
 - 2026-07-02: Pattern matching §3.6. Added `Expr::Match { scrutinee, arms, span }` (with its `span()`
   arm) and the pattern types `MatchArm { patterns, guard, body, span }`, `Pattern::{Wildcard, Binding,
   Literal, Range, Enum}` (with `Pattern::span()`), `EnumPatternPayload::{Unit, Tuple, Struct}`, and

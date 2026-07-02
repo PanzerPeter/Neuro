@@ -8,9 +8,9 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-792%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-806%20passing-success.svg)](#)
 
-**Status:** Alpha — Phase 1 (Core Language) in progress · sub-phases 1A–1D complete (MVP, syntax & semantics, ownership/borrow checker, HIR & MLIR plumbing) · 1E (type system) active · → v2.0.0 when Phase 1 completes
+**Status:** Alpha — Phase 1 (Core Language) in progress · sub-phases 1A–1E complete (MVP, syntax & semantics, ownership/borrow checker, HIR & MLIR plumbing, type system) · 1F (generics, traits & dispatch) active · → v2.0.0 when Phase 1 completes
 
 ---
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 (Core Language) sub-phases 1A–1D are complete; 1E (type system) is active. The following features are fully implemented and tested (**792 Tests Passing**):
+Phase 1 (Core Language) sub-phases 1A–1E are complete; 1F (generics, traits & dispatch) is active. The following features are fully implemented and tested (**806 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -102,6 +102,7 @@ Phase 1 (Core Language) sub-phases 1A–1D are complete; 1E (type system) is act
 | **Destructuring** | Struct `val Point { x, y } = p` (field-name binds) and array `val [a, b, c] = arr` / `val [first, ..rest] = arr` (positional, with a trailing `..rest` remainder or bare `..`); arity-checked, nests, and works with `mut` |
 | **Enums** | Tagged unions `enum E { A, B(i32), C { x: f64 } }` with unit, tuple, and struct-field variants (§3.5); construct via `E::A` / `E::B(1)` / `E::C { x: 1.0 }`; usable as bindings, function parameters/returns, and struct fields; `Copy`. Scalar payloads only |
 | **Pattern Matching** | `match` as an exhaustive expression (§3.6): enum variant deconstruction with payload binding (`E::B(n)`, `E::C { x }`), literal / `\|` or / `a..=b` range / `_` wildcard patterns, `if` guards; usable as a value. Scrutinee is enum/integer/`char`/`bool`; exhaustiveness enforced |
+| **Newtypes** | `newtype Meters = i32` (§3.15): a distinct nominal type wrapping an inner type — not interchangeable with it, unlike a `type` alias; construct `Meters(30)`, read the inner value with `.0`; forwards `Copy`/`Clone`, usable as binding, parameter, return, and struct field. Inner type restricted to `Copy` |
 | **Move Semantics** | Move-by-default for non-`Copy` values; use-after-move is a compile error; `.clone()` opts out; `@derive(Copy, Clone)` on structs |
 | **Deterministic `Drop`** | `impl Drop for T { func drop(&mut self) }` runs a destructor at scope exit, in reverse declaration order, on normal exit only (never during a panic); a moved-out value is dropped exactly once; a `Copy` type may not implement `Drop` |
 | **Borrows** | Immutable `&T` and mutable `&mut T` references with the `*` deref operator; flow-sensitive borrow exclusivity (shared XOR mutable) enforced at compile time |
@@ -479,8 +480,8 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | 1B | Syntax & semantics stabilization — parser fixes, `const`, `as` casts, compound assignment, bitwise ops, integer suffixes, if/block expressions, `while true` lint, IEEE-754 float comparisons, string fat pointers | ✅ Complete |
 | 1C | Ownership & borrow checker — move semantics, `Copy`, `&T`, `&mut T`, borrow exclusivity, lifetime elision / returned-reference outlives, `&mut self` methods, deterministic `Drop` | ✅ Complete ¹ |
 | 1D | Backend plumbing — `neuro-hir` typed IR crate, `melior` integration, AST → HIR lowering, HIR-routed LLVM backend, mlir-backend HIR scaffold | ✅ Complete |
-| 1E | Type system — arrays ✅, tuples ✅, structs ✅, methods ✅, destructuring ✅, type aliases ✅, enums ✅, pattern matching ✅; newtype | 🔄 In progress |
-| 1F | Generics, traits & dispatch — generics, explicit lifetimes, trait declarations, operator traits, static/dynamic dispatch (`impl`/`dyn`), closures | 📋 Planned |
+| 1E | Type system — arrays ✅, tuples ✅, structs ✅, methods ✅, destructuring ✅, type aliases ✅, enums ✅, pattern matching ✅, newtype ✅ | ✅ Complete |
+| 1F | Generics, traits & dispatch — generics, explicit lifetimes, trait declarations, operator traits, static/dynamic dispatch (`impl`/`dyn`), closures | 🔄 In progress |
 | 1G | Error handling, modules & prelude — `Option`/`Result`, collections, `??`, `?`, multi-file modules, imports, prelude | 📋 Planned |
 | 1H | Language cleanup — string interpolation, triple-quoted strings, nested comments, named arguments | 📋 Planned |
 | **2** | Tensors & MLIR — `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | 📋 Planned |
@@ -556,7 +557,7 @@ vsce package
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture guidelines, coding standards, and the pull request process.
 
-The project is in early alpha — breaking changes are expected. Contributions should focus on **Phase 1 (Core Language)** items — currently sub-phase **1E** (type system).
+The project is in early alpha — breaking changes are expected. Contributions should focus on **Phase 1 (Core Language)** items — currently sub-phase **1F** (generics, traits & dispatch).
 
 ---
 

@@ -502,6 +502,12 @@ impl TypeChecker {
         args: &[ast_types::Expr],
         span: shared_types::Span,
     ) -> Option<Type> {
+        // Newtype construction `Name(value)` (§3.15): a call whose callee names a
+        // newtype builds a value of that newtype from a single inner-typed argument.
+        if let Some(inner) = self.lookup_newtype_inner(func_name).cloned() {
+            return Some(self.check_newtype_construction(func_name, &inner, args, span));
+        }
+
         // A user-defined function of the same name shadows the builtin: only consult the
         // panic-family resolver when no such function is registered.
         if !self.functions.contains_key(func_name) {
@@ -551,6 +557,40 @@ impl TypeChecker {
         }
 
         Some(return_type)
+    }
+
+    /// Type-check a newtype construction `Name(value)` (§3.15): exactly one argument,
+    /// whose type must match the newtype's inner type. Yields the newtype.
+    fn check_newtype_construction(
+        &mut self,
+        name: &str,
+        inner: &Type,
+        args: &[ast_types::Expr],
+        span: shared_types::Span,
+    ) -> Type {
+        if args.len() != 1 {
+            self.record_error(TypeError::ArgumentCountMismatch {
+                expected: 1,
+                found: args.len(),
+                span,
+            });
+            // Still type-check any arguments so their own errors surface.
+            for arg in args {
+                let _ = self.check_expr(arg, Some(inner));
+            }
+            return Type::Newtype(name.to_string());
+        }
+
+        if let Some(arg_ty) = self.check_expr(&args[0], Some(inner)) {
+            if !arg_ty.is_compatible_with(inner) {
+                self.record_error(TypeError::Mismatch {
+                    expected: inner.clone(),
+                    found: arg_ty,
+                    span: args[0].span(),
+                });
+            }
+        }
+        Type::Newtype(name.to_string())
     }
 
     /// Check an expression and return its type.
@@ -1658,6 +1698,24 @@ impl TypeChecker {
                             self.record_error(TypeError::TupleIndexOutOfBounds {
                                 index: *index,
                                 arity: elements.len(),
+                                span: *span,
+                            });
+                            Some(Type::Unknown)
+                        }
+                    }
+                    // `.0` on a newtype reads its single inner value (§3.15). A newtype
+                    // has exactly one field, so any index other than 0 is out of range.
+                    Type::Newtype(nt_name) => {
+                        if *index == 0 {
+                            Some(
+                                self.lookup_newtype_inner(nt_name)
+                                    .cloned()
+                                    .unwrap_or(Type::Unknown),
+                            )
+                        } else {
+                            self.record_error(TypeError::TupleIndexOutOfBounds {
+                                index: *index,
+                                arity: 1,
                                 span: *span,
                             });
                             Some(Type::Unknown)

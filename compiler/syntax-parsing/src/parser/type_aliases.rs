@@ -215,6 +215,8 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
             rewrite_type(&mut def.ty, resolved);
             rewrite_expr(&mut def.value, resolved);
         }
+        // A newtype's inner may itself be written via a `type` alias, so expand it.
+        Item::Newtype(def) => rewrite_type(&mut def.inner, resolved),
     }
 }
 
