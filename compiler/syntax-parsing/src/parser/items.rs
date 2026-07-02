@@ -3,7 +3,7 @@ use shared_types::Identifier;
 
 use crate::ast::{
     Attribute, ConstDef, EnumDef, EnumVariant, Expr, FieldDef, FieldInit, FunctionDef, ImplDef,
-    Item, MethodDef, Parameter, SelfParam, StructDef, VariantPayload,
+    Item, MethodDef, NewtypeDef, Parameter, SelfParam, StructDef, VariantPayload,
 };
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
@@ -56,13 +56,18 @@ impl Parser {
                 items.push(Item::Const(c));
             } else if self.check(&TokenKind::Type) {
                 alias_decls.push(self.parse_type_alias()?);
+            } else if self.check(&TokenKind::Newtype) {
+                let nt = self.parse_newtype_def()?;
+                items.push(Item::Newtype(nt));
             } else {
                 let token = self.peek().ok_or(ParseError::UnexpectedEof {
-                    expected: "function, struct, enum, impl, const, or type definition".to_string(),
+                    expected: "function, struct, enum, impl, const, type, or newtype definition"
+                        .to_string(),
                 })?;
                 return Err(ParseError::UnexpectedToken {
                     found: token.kind.clone(),
-                    expected: "function, struct, enum, impl, const, or type definition".to_string(),
+                    expected: "function, struct, enum, impl, const, type, or newtype definition"
+                        .to_string(),
                     span: token.span,
                 });
             }
@@ -188,6 +193,26 @@ impl Parser {
             value,
             span,
         })
+    }
+
+    /// Parse a newtype declaration: `newtype Name = InnerType` (§3.15).
+    ///
+    /// Unlike a `type` alias, a newtype is a distinct nominal type, so it is kept as
+    /// an `Item::Newtype` for semantic analysis rather than expanded at parse time.
+    pub(crate) fn parse_newtype_def(&mut self) -> ParseResult<NewtypeDef> {
+        let start = self.consume(TokenKind::Newtype, "'newtype'")?;
+        self.skip_newlines();
+
+        let name = self.consume_identifier("newtype name")?;
+
+        self.skip_newlines();
+        self.consume(TokenKind::Equal, "'='")?;
+        self.skip_newlines();
+
+        let inner = self.parse_type()?;
+        let span = start.span.merge(inner.span());
+
+        Ok(NewtypeDef { name, inner, span })
     }
 
     /// Parse a function definition

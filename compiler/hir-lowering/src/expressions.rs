@@ -230,30 +230,39 @@ impl Lowerer {
                 span,
             } => {
                 let object = self.lower_expr(object, None)?;
-                let HirType::Tuple(element_tys) = object.ty.referent().clone() else {
-                    return Err(LoweringError::Malformed {
-                        detail: format!("tuple index into non-tuple type '{}'", object.ty),
-                    });
-                };
-                let element_ty =
-                    element_tys
-                        .get(*index)
-                        .cloned()
-                        .ok_or_else(|| LoweringError::Malformed {
-                            detail: format!(
-                                "tuple index {} out of range for arity {}",
-                                index,
-                                element_tys.len()
-                            ),
+                match object.ty.referent().clone() {
+                    HirType::Tuple(element_tys) => {
+                        let element_ty = element_tys.get(*index).cloned().ok_or_else(|| {
+                            LoweringError::Malformed {
+                                detail: format!(
+                                    "tuple index {} out of range for arity {}",
+                                    index,
+                                    element_tys.len()
+                                ),
+                            }
                         })?;
-                Ok(HirExpr::new(
-                    HirExprKind::TupleIndex {
-                        object: Box::new(object),
-                        index: *index,
-                    },
-                    element_ty,
-                    *span,
-                ))
+                        Ok(HirExpr::new(
+                            HirExprKind::TupleIndex {
+                                object: Box::new(object),
+                                index: *index,
+                            },
+                            element_ty,
+                            *span,
+                        ))
+                    }
+                    // `.0` on a newtype reads its transparent inner value (§3.15). The
+                    // checker guarantees the index is 0.
+                    HirType::Newtype { inner, .. } => Ok(HirExpr::new(
+                        HirExprKind::NewtypeAccess {
+                            object: Box::new(object),
+                        },
+                        *inner,
+                        *span,
+                    )),
+                    other => Err(LoweringError::Malformed {
+                        detail: format!("tuple index into non-tuple type '{}'", other),
+                    }),
+                }
             }
 
             Expr::Index {
@@ -567,6 +576,11 @@ impl Lowerer {
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
         match func {
+            // Newtype construction `Name(value)` (§3.15) takes precedence over a
+            // same-named free function in call position, matching the checker.
+            Expr::Identifier(ident) if self.newtypes.contains_key(&ident.name) => {
+                self.lower_newtype_construct(&ident.name, args, span)
+            }
             Expr::Identifier(ident) => self.lower_ident_call(&ident.name, args, expected, span),
             Expr::FieldAccess { object, field, .. } => {
                 self.lower_method_call(object, &field.name, args, span)
@@ -588,6 +602,41 @@ impl Lowerer {
                 ),
             }),
         }
+    }
+
+    /// Lower a newtype construction `Name(value)` (§3.15) to a transparent
+    /// [`HirExprKind::NewtypeConstruct`] wrapper. The checker guarantees exactly one
+    /// argument that matches the inner type.
+    fn lower_newtype_construct(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let inner_ast = self.newtypes[name].clone();
+        let inner_ty = self.resolve_type(&inner_ast)?;
+        let [arg] = args else {
+            return Err(LoweringError::Malformed {
+                detail: format!(
+                    "newtype '{}' construction expects one argument, found {}",
+                    name,
+                    args.len()
+                ),
+            });
+        };
+        let value = self.lower_expr(arg, Some(&inner_ty))?;
+        let nt_ty = HirType::Newtype {
+            name: name.to_string(),
+            inner: Box::new(inner_ty),
+        };
+        Ok(HirExpr::new(
+            HirExprKind::NewtypeConstruct {
+                name: name.to_string(),
+                value: Box::new(value),
+            },
+            nt_ty,
+            span,
+        ))
     }
 
     /// Lower a plain identifier call: a registered free function, or one of the

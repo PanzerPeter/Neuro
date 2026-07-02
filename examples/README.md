@@ -41,6 +41,9 @@ isolation:
   (§3.6) deconstructing enums with associated data (§3.5, all three variant
   forms) alongside a struct with an enum field, `impl` methods, a fixed-size
   array + `for`-in loop, plus value/or/range/guard patterns. Exit `46`.
+- [`showcase/unit_types.nr`](showcase/unit_types.nr) — newtype units of measure
+  (§3.15) flowing through a struct with newtype fields, `impl` methods, an enum
+  + `match`, and a fixed-size array + `for`-in loop. Exit `94`.
 
 ## Compiling and running
 
@@ -93,6 +96,10 @@ No Rust edits are needed — discovery is automatic.
   literals, `.0` / `.1` index access, and destructuring binds `val (a, b) = t`
   (with `_` wildcards and nesting). Elements are limited to `Copy` types for now,
   so tuples holding a `string` or other non-Copy value are a later phase.
+- Newtypes are supported (`types/newtype.nr`): `newtype Meters = i32` creates a
+  distinct nominal type wrapping an inner type, constructed `Meters(30)` and read
+  back with `.0`. Unlike a `type` alias, a newtype is *not* interchangeable with
+  its inner type. The inner type is limited to `Copy` types for now (§3.15).
 - Struct and array destructuring patterns are supported (`types/destructuring.nr`):
   `val Point { x, y } = p` binds each field by name; `val [a, b, c] = arr` binds
   array elements positionally; `val [first, ..rest] = arr` captures the remainder as

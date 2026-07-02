@@ -81,6 +81,8 @@ pub enum TokenKind {
     Where,
     #[token("type")]
     Type,
+    #[token("newtype")]
+    Newtype,
     #[token("unsafe")]
     Unsafe,
     #[token("self")]
@@ -320,6 +322,7 @@ impl Token {
             TokenKind::Match => "match",
             TokenKind::Where => "where",
             TokenKind::Type => "type",
+            TokenKind::Newtype => "newtype",
             TokenKind::Unsafe => "unsafe",
             TokenKind::SelfLower => "self",
             TokenKind::SelfUpper => "Self",

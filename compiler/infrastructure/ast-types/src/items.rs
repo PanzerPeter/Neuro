@@ -147,6 +147,19 @@ pub struct EnumDef {
     pub span: Span,
 }
 
+/// A `newtype` declaration (§3.15): a distinct nominal type wrapping `inner`.
+///
+/// Unlike a transparent `type` alias (which is expanded away at parse time), a
+/// newtype survives to semantic analysis as its own type — the wrapper and the
+/// inner type are not interchangeable. Construction is `Name(value)` and the inner
+/// value is read via `.0`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewtypeDef {
+    pub name: Identifier,
+    pub inner: Type,
+    pub span: Span,
+}
+
 /// Top-level AST item
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
@@ -155,4 +168,5 @@ pub enum Item {
     Enum(EnumDef),
     Impl(ImplDef),
     Const(ConstDef),
+    Newtype(NewtypeDef),
 }

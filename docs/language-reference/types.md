@@ -492,6 +492,50 @@ An enum is a tagged union: a discriminant identifying the active variant, plus s
 | `UnknownEnumField` / `MissingEnumField` / `DuplicateEnumField` | Struct-variant field set is wrong |
 | `UnsupportedEnumPayload` | A variant payload is not a scalar `Copy` primitive |
 
+## Newtype Declarations (§3.15)
+
+A `newtype` creates a **distinct nominal type** that wraps an inner type. Unlike a `type` alias — which is transparent, so the alias and its target are interchangeable — a newtype and its inner type are *different types*. This buys unit-of-measure and domain-identifier safety at zero runtime cost.
+
+```neuro
+newtype Meters = i32
+newtype Seconds = i32
+newtype Celsius = f64
+```
+
+### Construction and Inner Access
+
+Build a newtype value by calling the newtype name with a single inner-typed argument, and read the wrapped value back with `.0`:
+
+```neuro
+val d: Meters = Meters(30)     // construction
+val raw: i32 = d.0             // inner access
+```
+
+### Distinctness
+
+Because a newtype is a separate type, its values are not interchangeable with the inner type or with another newtype over the same inner type:
+
+```neuro
+val m: Meters = Meters(3)
+val bad: i32 = m               // ERROR: expected i32, found Meters
+val also_bad = Meters(1) + Seconds(2)  // ERROR: arithmetic is not defined on newtypes
+```
+
+A newtype forwards `Copy`/`Clone` from its inner type, so a `Copy`-inner newtype is itself `Copy`. It can be a `val`/`mut` binding, a function parameter or return type, and a struct field.
+
+### Phase 1E Limitations
+
+- **Inner type must be `Copy`** — integers, floats, `bool`, `char`, and other `Copy` aggregates. A non-Copy inner such as `string` is rejected (`NewtypeInnerNotCopy`); non-Copy wrappers arrive with broader move/heap support.
+- **No inherent methods or operator traits yet** — arithmetic and other operators on a newtype await the trait system (1F). Use `.0` to compute on the inner value.
+
+### Type Errors
+
+| Error | Cause |
+|---|---|
+| `NewtypeAlreadyDefined` | A newtype reuses a builtin, struct, enum, or newtype name |
+| `NewtypeInnerNotCopy` | The wrapped inner type is not `Copy` |
+| `CyclicNewtype` | A newtype wraps itself directly or transitively |
+
 ## References — Immutable Borrows (`&T`)
 
 An **immutable borrow** `&T` is a non-owning reference to a value (§2.4). It lets a

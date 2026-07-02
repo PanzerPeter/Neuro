@@ -40,6 +40,13 @@ pub enum HirType {
     /// A user-defined enum, identified by name (nominal typing, §3.5). A tagged
     /// union; its variant layout lives on the [`crate::HirEnum`] item.
     Enum(String),
+    /// A user-defined newtype (§3.15): a distinct nominal wrapper carrying its
+    /// resolved `inner` type. The wrapper is transparent at runtime, so backends
+    /// erase it to `inner`; it stays distinct only in the type system.
+    Newtype {
+        name: String,
+        inner: Box<HirType>,
+    },
     /// Borrow `&T` (§2.4) / `&mut T` (§2.5). `mutable` distinguishes a
     /// write-capable `&mut T` from a read-only `&T`.
     Reference {
@@ -98,6 +105,7 @@ impl fmt::Display for HirType {
             HirType::Void => write!(f, "void"),
             HirType::Struct(name) => write!(f, "{}", name),
             HirType::Enum(name) => write!(f, "{}", name),
+            HirType::Newtype { name, .. } => write!(f, "{}", name),
             HirType::Reference { inner, mutable } => {
                 if *mutable {
                     write!(f, "&mut {}", inner)

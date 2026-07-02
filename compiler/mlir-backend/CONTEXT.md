@@ -51,7 +51,8 @@ skipped. HIR types map to MLIR scalars (`i8`–`i64`, `i1` for `bool`, `i32` for
 `char`, `f16`/`bf16`/`f32`/`f64`), and every aggregate / reference / string type
 — including the tuple type `(T1, T2, ...)` (§3.2) and the enum type (§3.5) — maps
 to an opaque `!llvm.ptr` until real tensor and struct lowering lands (Phase 2+).
-Enum items, like structs and constants, carry no callable surface and are skipped. `void` is the empty result list in return position and an error
+A newtype (§3.15) is transparent: `HirType::Newtype { inner, .. }` maps to the mapping of its inner
+type. Enum items, like structs and constants, carry no callable surface and are skipped. `void` is the empty result list in return position and an error
 (`MlirError::UnsupportedType`) anywhere else. The module is run through the MLIR
 verifier before its textual form is returned.
 

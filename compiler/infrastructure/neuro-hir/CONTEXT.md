@@ -30,6 +30,11 @@ differences that make it the *typed* contract:
    span lives on the enclosing node.
 
 ## Recent Updates
+- 2026-07-02: Newtype declarations §3.15. Added `HirType::Newtype { name, inner }` (a nominal wrapper
+  that carries its resolved inner type so backends can erase it) and the transparent expression kinds
+  `HirExprKind::NewtypeConstruct { name, value }` (`Name(value)`) and `HirExprKind::NewtypeAccess {
+  object }` (`.0`). A newtype produces no `HirItem` — it dissolves into these types/nodes, which both
+  backends lower straight through to the inner value.
 - 2026-07-02: Pattern matching §3.6. Added `HirExprKind::Match { scrutinee, arms }` with the fully
   resolved `HirMatchArm { tests, bindings, guard, body }`. `HirMatchTest::{Wildcard, Tag, IntEq,
   IntRange}` are the refutable tests (an exclusive `a..b` is pre-normalized to `a..=b-1`);

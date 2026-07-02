@@ -267,6 +267,19 @@ pub enum TypeError {
     #[error("enum '{name}' is already defined at {span:?}")]
     EnumAlreadyDefined { name: String, span: Span },
 
+    #[error("type name '{name}' is already defined at {span:?}: a newtype may not reuse the name of an existing type (§3.15)")]
+    NewtypeAlreadyDefined { name: String, span: Span },
+
+    #[error("newtype '{name}' wraps non-Copy inner type {inner} at {span:?}: newtype inner types are restricted to Copy types in this phase (§3.15)")]
+    NewtypeInnerNotCopy {
+        name: String,
+        inner: Type,
+        span: Span,
+    },
+
+    #[error("newtype '{name}' is cyclic at {span:?}: a newtype may not wrap itself directly or transitively (§3.15)")]
+    CyclicNewtype { name: String, span: Span },
+
     #[error("enum variant payload type {ty} is not supported at {span:?}: enum variants may only carry scalar Copy primitives (integers, floats, bool, char) in this phase (§3.5)")]
     UnsupportedEnumPayload { ty: Type, span: Span },
 

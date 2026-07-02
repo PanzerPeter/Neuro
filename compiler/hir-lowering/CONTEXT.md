@@ -36,4 +36,13 @@ Struct + array destructuring (§3.2): the parser desugars these, so only the arr
 
 Pattern matching (§3.6): `lower_match` fully resolves each arm. `pattern_test` maps a pattern to a `HirMatchTest` (variant tag / `IntEq` / `IntRange`, with `char`/`bool` literals as scalar codepoints/0-1 and an exclusive `a..b` normalized to `a..=b-1`); `pattern_bindings` resolves a single arm's bindings to `HirBindingSource::Scrutinee` (bare binding) or `EnumPayload { slot }` (payload field, slot = declared field position). Bindings are defined in a per-arm scope so the guard and body lower correctly; the body-type hint is the caller's expected type, else the first arm's type. The match type is the first arm's body type.
 
+Newtypes (§3.15): a registration pre-pass records each newtype's inner AST type (`newtypes` table).
+`resolve_type` maps a newtype name to `HirType::Newtype { name, inner }`, resolving the inner
+recursively (a newtype may wrap another; the checker already rejected cycles). Construction
+`Name(value)` — a `Call` whose identifier callee names a newtype — lowers to
+`HirExprKind::NewtypeConstruct { name, value }` (value hinted by the inner type), taking precedence
+over a same-named function like the checker. Inner access `.0` on a newtype-typed object lowers to
+`HirExprKind::NewtypeAccess { object }` typed as the inner type. No `HirItem` is emitted — a newtype
+is purely a type-system distinction that the backends erase.
+
 Three nodes carry a deliberately-chosen type the source has no first-class form for: a `loop` value-expression takes its `break v` type (or `void`); a method-name callee `FieldAccess` carries the call's result type (there is no method value); a `Range` carries `void` (valid only as a `string.slice` argument — the slice lowering reads its bounds directly). Divergent panic-family calls (`panic`/`assert`/`unreachable`) adopt their context's expected type, or `void` in statement position.

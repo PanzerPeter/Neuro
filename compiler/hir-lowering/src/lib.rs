@@ -96,6 +96,9 @@ struct Lowerer {
     /// Enum name → ordered variants. Each variant carries its name and ordered
     /// payload fields `(optional field name, type)`; the index doubles as the tag.
     enums: HashMap<String, Vec<EnumVariantData>>,
+    /// Newtype name → its inner surface type (§3.15). Kept as the AST type so a
+    /// newtype annotation resolves recursively (a newtype may wrap another newtype).
+    newtypes: HashMap<String, ast_types::Type>,
     /// Structs that support `.clone()` (derive `Clone`, or `Copy` which implies it).
     clone_structs: HashSet<String>,
     /// Struct name → method name → mangled key into [`Self::functions`].
@@ -132,6 +135,7 @@ impl Lowerer {
             functions: HashMap::new(),
             structs: HashMap::new(),
             enums: HashMap::new(),
+            newtypes: HashMap::new(),
             clone_structs: HashSet::new(),
             impl_methods: HashMap::new(),
             constants: HashMap::new(),

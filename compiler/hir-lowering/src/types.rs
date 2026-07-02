@@ -30,6 +30,16 @@ impl Lowerer {
                 "void" => HirType::Void,
                 name if self.structs.contains_key(name) => HirType::Struct(name.to_string()),
                 name if self.enums.contains_key(name) => HirType::Enum(name.to_string()),
+                // A newtype resolves to its nominal wrapper carrying the resolved
+                // inner type (§3.15). Cycles were rejected by the checker, so this
+                // recursion terminates.
+                name if self.newtypes.contains_key(name) => {
+                    let inner_ast = self.newtypes[name].clone();
+                    HirType::Newtype {
+                        name: name.to_string(),
+                        inner: Box::new(self.resolve_type(&inner_ast)?),
+                    }
+                }
                 name => {
                     return Err(LoweringError::UnresolvedType {
                         name: name.to_string(),
