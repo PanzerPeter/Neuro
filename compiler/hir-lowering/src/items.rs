@@ -8,7 +8,7 @@ use neuro_hir::{
     HirMethod, HirParam, HirProgram, HirSelfParam, HirStmt, HirStruct, HirType,
 };
 
-use crate::{EnumVariantData, Lowerer, LoweringError};
+use crate::{EnumVariantData, Lowerer, LoweringError, MonoInstance};
 
 /// The `@derive(...)` attribute name and the trait arguments lowering cares about.
 const DERIVE_ATTRIBUTE: &str = "derive";
@@ -152,6 +152,14 @@ impl Lowerer {
     }
 
     fn register_function(&mut self, func: &FunctionDef) -> Result<(), LoweringError> {
+        // A generic function (§3.8) is a template, not a callable signature: record it
+        // for monomorphization and skip the concrete-signature registration below.
+        if !func.generics.is_empty() {
+            self.generic_templates
+                .insert(func.name.name.clone(), func.clone());
+            return Ok(());
+        }
+
         let mut params = Vec::with_capacity(func.params.len());
         for param in &func.params {
             params.push(self.resolve_type(&param.ty)?);
@@ -175,6 +183,9 @@ impl Lowerer {
         let mut hir_items = Vec::with_capacity(items.len());
         for item in items {
             match item {
+                // A generic template is not lowered directly (§3.8); only its concrete
+                // instantiations, discovered at call sites, reach the HIR.
+                Item::Function(func) if !func.generics.is_empty() => {}
                 Item::Function(func) => {
                     hir_items.push(HirItem::Function(self.lower_function(func)?))
                 }
@@ -187,7 +198,66 @@ impl Lowerer {
                 Item::Newtype(_) => {}
             }
         }
+
+        // Drain the monomorphization worklist: lowering the ordinary items above (and
+        // each instance below) enqueues every generic instantiation it calls, so this
+        // loop runs until the transitive closure of instances is emitted (§3.8).
+        while let Some(instance) = self.mono_pending.pop() {
+            let hir_fn = self.lower_mono_instance(&instance)?;
+            self.mono_items.push(HirItem::Function(hir_fn));
+        }
+        hir_items.append(&mut self.mono_items);
+
         Ok(HirProgram { items: hir_items })
+    }
+
+    /// Lower one monomorphized instance of a generic template: substitute its type
+    /// parameters (via [`Lowerer::type_subst`]) and emit a concrete function named by
+    /// the instance's mangled name (§3.8).
+    fn lower_mono_instance(
+        &mut self,
+        instance: &MonoInstance,
+    ) -> Result<HirFunction, LoweringError> {
+        let template = match self.generic_templates.get(&instance.fn_name) {
+            Some(t) => t.clone(),
+            None => {
+                return Err(LoweringError::UnresolvedCall {
+                    target: instance.fn_name.clone(),
+                })
+            }
+        };
+
+        let saved = std::mem::replace(&mut self.type_subst, instance.subst.clone());
+
+        let mut params = Vec::with_capacity(template.params.len());
+        for param in &template.params {
+            params.push(HirParam {
+                name: param.name.name.clone(),
+                ty: self.resolve_type(&param.ty)?,
+                span: param.span,
+            });
+        }
+        let return_type = match &template.return_type {
+            Some(t) => self.resolve_type(t)?,
+            None => HirType::Void,
+        };
+
+        self.push_scope();
+        for param in &params {
+            self.define(param.name.clone(), param.ty.clone());
+        }
+        let body = self.lower_body(&template.body, &return_type)?;
+        self.pop_scope();
+
+        self.type_subst = saved;
+
+        Ok(HirFunction {
+            name: instance.mangled.clone(),
+            params,
+            return_type,
+            body,
+            span: template.span,
+        })
     }
 
     fn lower_struct(&self, def: &StructDef) -> Result<HirStruct, LoweringError> {

@@ -344,6 +344,70 @@ fn newtype_construction_lowers_to_transparent_wrapper() {
     assert_eq!(value.ty, HirType::I32);
 }
 
+/// Names of every free function in the lowered program (monomorphized instances
+/// included; generic templates are erased).
+fn function_names(program: &HirProgram) -> Vec<String> {
+    program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            HirItem::Function(f) => Some(f.name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn generic_function_monomorphizes_per_type_argument() {
+    // `identity<T>` used at i32 and f64 produces two concrete instances and no
+    // generic template survives into the HIR (§3.8).
+    let program = lower(
+        "func identity<T>(x: T) -> T { x }\n\
+         func main() -> i32 { val a = identity(1)\n val b = identity(2.0)\n a }",
+    );
+    let names = function_names(&program);
+    assert!(names.contains(&"main".to_string()));
+    assert!(
+        !names.contains(&"identity".to_string()),
+        "the generic template must not survive into the HIR: {:?}",
+        names
+    );
+    let instances = names
+        .iter()
+        .filter(|n| n.starts_with("identity__g"))
+        .count();
+    assert_eq!(
+        instances, 2,
+        "one instance per distinct type argument: {:?}",
+        names
+    );
+}
+
+#[test]
+fn repeated_instantiation_is_emitted_once() {
+    // Two calls at the same type share a single monomorphized instance.
+    let program = lower(
+        "func identity<T>(x: T) -> T { x }\n\
+         func main() -> i32 { val a = identity(1)\n identity(a) }",
+    );
+    let instances = function_names(&program)
+        .iter()
+        .filter(|n| n.starts_with("identity__g"))
+        .count();
+    assert_eq!(instances, 1);
+}
+
+#[test]
+fn generic_instance_return_type_is_concrete() {
+    // The call expression's type is the substituted concrete type, never a placeholder.
+    let program = lower("func identity<T>(x: T) -> T { x }\nfunc main() -> i32 { identity(7) }");
+    let body = function_body(&program, "main");
+    let HirStmt::Expr(call) = body.last().expect("tail expression") else {
+        panic!("expected a trailing expression statement");
+    };
+    assert_eq!(call.ty, HirType::I32);
+}
+
 #[test]
 fn newtype_inner_access_lowers_to_inner_type() {
     // `m.0` becomes a NewtypeAccess whose type is the inner type (§3.15).

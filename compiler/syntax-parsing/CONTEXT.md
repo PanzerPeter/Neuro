@@ -51,6 +51,11 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-07-03: Generic functions §3.8. `parse_function` now parses an optional generic parameter
+  list `<T, U: Bound + Other>` (new `parse_generic_params`) between the function name and its
+  parameter list, filling `FunctionDef.generics`. Bounds after `:` are `+`-separated trait names,
+  recorded but not enforced. A duplicate type-parameter name is a `DuplicateParameter` error. No
+  new call-site surface (turbofish is a follow-on); type arguments are inferred downstream.
 - 2026-07-02: Newtype declarations §3.15. `parse_program` dispatches `TokenKind::Newtype` to
   `parse_newtype_def` (`newtype Name = InnerType`), pushing an `Item::Newtype`. Unlike a `type` alias,
   a newtype is a distinct nominal type, so it is NOT expanded away — it stays an item for semantic

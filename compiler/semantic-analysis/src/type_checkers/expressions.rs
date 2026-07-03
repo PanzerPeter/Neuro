@@ -502,6 +502,12 @@ impl TypeChecker {
         args: &[ast_types::Expr],
         span: shared_types::Span,
     ) -> Option<Type> {
+        // A call to a generic function (§3.8): infer its type arguments from the call
+        // arguments and yield the substituted return type.
+        if self.generic_funcs.contains_key(func_name) {
+            return Some(self.check_generic_call(func_name, args, span));
+        }
+
         // Newtype construction `Name(value)` (§3.15): a call whose callee names a
         // newtype builds a value of that newtype from a single inner-typed argument.
         if let Some(inner) = self.lookup_newtype_inner(func_name).cloned() {
@@ -557,6 +563,72 @@ impl TypeChecker {
         }
 
         Some(return_type)
+    }
+
+    /// Type-check a call to a generic function (§3.8): infer each type parameter from
+    /// the corresponding argument, validate arity and per-argument compatibility, and
+    /// return the substituted return type.
+    ///
+    /// Type arguments are restricted to `Copy` types this phase: generic bodies are
+    /// checked abstractly (a bare `T` has no move semantics), which is sound precisely
+    /// when the concrete argument is `Copy`. Non-`Copy` generics await broader move
+    /// support. Bounds are not enforced (the trait system does not exist yet).
+    fn check_generic_call(
+        &mut self,
+        func_name: &str,
+        args: &[ast_types::Expr],
+        span: shared_types::Span,
+    ) -> Type {
+        let sig = match self.generic_funcs.get(func_name) {
+            Some(s) => s.clone(),
+            None => return Type::Unknown,
+        };
+
+        if args.len() != sig.params.len() {
+            self.record_error(TypeError::ArgumentCountMismatch {
+                expected: sig.params.len(),
+                found: args.len(),
+                span,
+            });
+        }
+
+        let mut subst: std::collections::HashMap<String, Type> = std::collections::HashMap::new();
+        for (arg, param) in args.iter().zip(sig.params.iter()) {
+            let arg_ty = self.check_expr(arg, None).unwrap_or(Type::Unknown);
+            if !matches!(arg_ty, Type::Unknown)
+                && !super::declarations::unify_generic(param, &arg_ty, &mut subst)
+            {
+                self.record_error(TypeError::Mismatch {
+                    expected: super::declarations::substitute_generic(param, &subst),
+                    found: arg_ty,
+                    span: arg.span(),
+                });
+            }
+            // A by-value argument moves a non-Copy binding into the callee.
+            self.record_move(arg);
+        }
+
+        // Every type parameter must have been inferred, and each argument type must be
+        // Copy (the abstract-body soundness condition).
+        for pname in &sig.param_names {
+            match subst.get(pname) {
+                Some(ty) if !self.is_type_copy(ty) => {
+                    self.record_error(TypeError::GenericArgumentNotCopy {
+                        param: pname.clone(),
+                        ty: ty.clone(),
+                        span,
+                    });
+                }
+                Some(_) => {}
+                None => {
+                    // Unresolved parameter — a well-formed inferable call always binds
+                    // every parameter, so this only fires alongside an earlier arity or
+                    // argument error; the substituted return keeps `Generic` visible.
+                }
+            }
+        }
+
+        super::declarations::substitute_generic(&sig.ret, &subst)
     }
 
     /// Type-check a newtype construction `Name(value)` (§3.15): exactly one argument,

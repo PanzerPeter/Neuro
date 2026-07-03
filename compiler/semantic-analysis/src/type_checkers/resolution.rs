@@ -29,7 +29,11 @@ impl TypeChecker {
                 "string" => Some(Type::String),
                 "void" => Some(Type::Void),
                 name => {
-                    if self.struct_defs.contains_key(name) {
+                    // A name matching an in-scope generic parameter resolves to a
+                    // generic placeholder rather than erroring as unknown (§3.8).
+                    if self.generic_scope.contains(name) {
+                        Some(Type::Generic(name.to_string()))
+                    } else if self.struct_defs.contains_key(name) {
                         Some(Type::Struct(name.to_string()))
                     } else if self.enum_defs.contains_key(name) {
                         Some(Type::Enum(name.to_string()))

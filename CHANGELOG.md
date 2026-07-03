@@ -11,6 +11,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.56.0] - 2026-07-03
+
+### Added
+- `parser`/`semantic`/`codegen`: **generic functions** with monomorphization.
+  A function may declare type parameters in angle brackets —
+  `func identity<T>(x: T) -> T { x }`, `func choose<T>(c: bool, a: T, b: T) -> T`,
+  multiple parameters `<T, U>` — and the compiler emits one specialized copy per
+  distinct set of concrete type arguments, so a type parameter carries zero
+  runtime cost. Type arguments are inferred from the call's value arguments (for
+  example `identity(5)` selects the `i32` instance and `identity(2.0)` the `f64`
+  instance). Trait bounds (`<T: Bound>`) parse but are not yet enforced (the trait
+  system is a separate, later feature), so a generic body may use only operations
+  valid for any type — binding, returning, passing to another function, and
+  building/observing tuples. Type arguments are restricted to `Copy` types this
+  phase. Generic structs, generic `impl` blocks, const (value) parameters, `where`
+  clauses, and explicit turbofish type arguments are tracked as follow-on work.
+- New showcase example `showcase/generic_toolkit.nr` combining generic functions
+  with enums, pattern matching, and tuples.
+
+### Changed
+- `codegen`: the LLVM backend now declares every function/method signature in a
+  pre-pass before emitting any body, so a call resolves regardless of definition
+  order — required so a monomorphized generic instance can be called by, or call,
+  items that appear before it.
+
+---
+
 ## [1.55.1] - 2026-07-03
 
 Documentation-accuracy audit follow-up. No code or behavior change.

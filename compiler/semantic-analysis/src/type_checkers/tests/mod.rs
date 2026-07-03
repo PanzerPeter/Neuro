@@ -24,6 +24,7 @@ fn make_function(
 ) -> FunctionDef {
     FunctionDef {
         name: make_ident(name),
+        generics: Vec::new(),
         params: params
             .into_iter()
             .map(|(pname, pty)| Parameter {
@@ -1164,5 +1165,76 @@ func main() -> i32 {
             .iter()
             .any(|e| matches!(e, TypeError::TupleIndexOutOfBounds { .. })),
         "a newtype has only index 0; `.1` must be rejected; got {errors:?}"
+    );
+}
+
+// --- Generics (§3.8) ---
+
+#[test]
+fn generic_call_type_checks_and_infers_return_type() {
+    // A well-formed generic function and its inferable call are accepted; the call's
+    // result flows into a matching return with no error.
+    let errors = semantic_errors(
+        r#"
+func identity<T>(x: T) -> T { x }
+func main() -> i32 { return identity(41) }
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+#[test]
+fn generic_body_operation_without_bound_is_rejected() {
+    // A bare `T` has no `+` without a trait bound (the trait system does not exist yet).
+    let errors = semantic_errors("func bad<T>(a: T, b: T) -> T { a + b }");
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::InvalidBinaryOperator { .. })),
+        "arithmetic on an unbounded generic must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn generic_param_not_used_in_a_parameter_is_rejected() {
+    let errors = semantic_errors("func p<T>(s: string) -> T { s }");
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::GenericParamNotInferable { .. })),
+        "a non-inferable type parameter must be reported; got {errors:?}"
+    );
+}
+
+#[test]
+fn non_copy_generic_argument_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func identity<T>(x: T) -> T { x }
+func main() -> i32 { val s = identity("hi")
+    return 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::GenericArgumentNotCopy { .. })),
+        "a non-Copy type argument must be reported; got {errors:?}"
+    );
+}
+
+#[test]
+fn generic_argument_count_mismatch_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func pair<T, U>(a: T, b: U) -> T { a }
+func main() -> i32 { return pair(1) }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ArgumentCountMismatch { .. })),
+        "a wrong-arity generic call must be reported; got {errors:?}"
     );
 }

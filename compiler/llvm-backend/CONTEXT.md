@@ -239,6 +239,13 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-07-03: Generic functions §3.8 (backend support). No generics reach the backend — hir-lowering
+  monomorphizes them into concrete functions — but their call graph is no longer definition-ordered
+  (a monomorphized instance may be called by, or call, items before it). `compile` now runs a
+  **signature pre-declaration pass** over every function/method before any body: `declare_function` /
+  `declare_method` / `declare_impl` add the LLVM signature and register it in `functions`, and
+  `codegen_function` / `codegen_method` fetch that declaration instead of adding it. So a call
+  resolves regardless of order.
 - 2026-07-02: Newtype declarations §3.15. A newtype is transparent at runtime: `Type::from_hir` erases
   `HirType::Newtype { inner, .. }` to `from_hir(inner)`, so codegen never sees a newtype type. The two
   transparent expression kinds lower straight through — `HirExprKind::NewtypeConstruct { value, .. }` and

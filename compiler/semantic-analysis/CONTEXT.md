@@ -127,6 +127,15 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-07-03: Generic functions §3.8. New `Type::Generic(String)` (a nominal type-parameter
+  placeholder, compatible only with itself). A generic `FunctionDef` is registered in a
+  `generic_funcs` table (signature carrying `Generic` placeholders + the ordered parameter names),
+  NOT in `functions`; `generic_scope` puts its parameters in scope so `resolve_type` maps their
+  names to `Generic`. Generic bodies are checked once abstractly, so only type-agnostic operations
+  type-check (no bounds/trait system yet). `check_generic_call` infers each type argument by
+  unifying declared parameter types against argument types (`unify_generic`), validates arity and
+  the `Copy`-argument restriction, and returns the substituted return type (`substitute_generic`).
+  New errors: `GenericParamShadowsBuiltin`, `GenericParamNotInferable`, `GenericArgumentNotCopy`.
 - 2026-07-02: Newtype declarations §3.15. New `Type::Newtype(String)` (distinct nominal, NOT compatible
   with its inner type) plus a `newtype_defs` name→inner table. Passes: `predeclare_newtype` reserves
   each name (rejecting builtin/struct/enum/newtype collisions via `NewtypeAlreadyDefined`), then

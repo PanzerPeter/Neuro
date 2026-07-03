@@ -38,6 +38,14 @@ pub(crate) struct TypeChecker {
     /// borrow of the receiver, so the receiver must be a mutable place and must not
     /// already be borrowed — checked at the call site like a `&mut place` borrow.
     mut_self_methods: HashSet<String>,
+    /// Generic free-function templates (§3.8), keyed by name. A generic function is
+    /// NOT placed in `functions` — calls to it route through generic inference, which
+    /// substitutes concrete type arguments per call site (monomorphization).
+    generic_funcs: HashMap<String, GenericFnSig>,
+    /// Type-parameter names in scope while checking a generic function's signature and
+    /// body. A `Named` annotation matching one resolves to [`Type::Generic`] instead of
+    /// erroring as an unknown type. Empty outside a generic function.
+    pub(crate) generic_scope: HashSet<String>,
     /// Compile-time constant names and their declared types (module and function scope).
     pub(crate) constants: HashMap<String, Type>,
     /// Collected type errors
@@ -64,6 +72,16 @@ pub(crate) enum VariantForm {
     Unit,
     Tuple,
     Struct,
+}
+
+/// A generic free-function template's resolved signature (§3.8). Parameter and
+/// return types carry [`Type::Generic`] placeholders for the type parameters named
+/// in `param_names` (declaration order, which is also the monomorphization order).
+#[derive(Clone)]
+pub(crate) struct GenericFnSig {
+    pub(crate) param_names: Vec<String>,
+    pub(crate) params: Vec<Type>,
+    pub(crate) ret: Type,
 }
 
 /// A resolved enum variant: its name, construction form, and ordered payload
@@ -112,6 +130,8 @@ impl TypeChecker {
             clone_structs: HashSet::new(),
             impl_methods: HashMap::new(),
             mut_self_methods: HashSet::new(),
+            generic_funcs: HashMap::new(),
+            generic_scope: HashSet::new(),
             constants: HashMap::new(),
             errors: Vec::new(),
             warnings: Vec::new(),
