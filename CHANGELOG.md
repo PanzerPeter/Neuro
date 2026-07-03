@@ -11,6 +11,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.55.1] - 2026-07-03
+
+Documentation-accuracy audit follow-up. No code or behavior change.
+
+### Fixed
+- `docs`: resolved three `cargo doc` intra-doc-link warnings so the workspace
+  documentation builds cleanly. The `mlir-backend` crate-level docs referenced
+  `lower_program` / `emit_smoke_module` (both `#[cfg(feature = "mlir")]`-gated, so
+  unresolvable in the default doc build) and `semantic-analysis`'s public
+  `Type::is_float` linked to the `pub(crate)` `Type::is_half_float`; all three are
+  now plain code spans.
+- `docs`: refreshed the `README.md` **Workspace Layout** diagram, which had gone
+  stale — it now lists every workspace member, including the `neuro-hir`,
+  `source-location`, and `project-config` infrastructure crates and the
+  `hir-lowering` and `mlir-backend` slices added in sub-phase 1D.
+- `docs`: corrected the `README.md` compilation-pipeline diagram to show HIR
+  lowering (`neuro-hir`) in the **current** Phase-1 path — the LLVM backend has
+  consumed typed HIR since v1.49.0 — instead of listing HIR only under the
+  Phase-2+ planned extension.
+- `docs`: updated `AGENTS.md` (the `@compiler-dev` scope and `@architect`
+  infrastructure-crate list now include `hir-lowering`, `mlir-backend`, and
+  `neuro-hir`) and `DESIGN.md` (the memory-model paragraph now reflects landed
+  move/borrow/`Drop` semantics rather than a blanket "heap is leaked").
+- `docs`: refreshed stale test-count references (746 / 727 → **806**) in
+  `docs/compiler/compilation.md` and `docs/getting-started/installation.md`.
+
+---
+
 ## [1.55.0] - 2026-07-02
 
 ### Added

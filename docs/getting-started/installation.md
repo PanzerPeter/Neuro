@@ -159,7 +159,7 @@ All tests should pass:
 
 ```bash
 cargo test --workspace
-# Expected: 727 tests passing, 0 failing
+# Expected: 806 tests passing, 0 failing
 ```
 
 ---
