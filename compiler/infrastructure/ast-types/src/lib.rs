@@ -11,8 +11,8 @@ pub use expressions::{
     BinaryOp, EnumPatternPayload, Expr, FieldInit, FieldPattern, MatchArm, Pattern, UnaryOp,
 };
 pub use items::{
-    Attribute, ConstDef, EnumDef, EnumVariant, FieldDef, FunctionDef, ImplDef, Item, MethodDef,
-    NewtypeDef, Parameter, SelfParam, StructDef, VariantPayload,
+    Attribute, ConstDef, EnumDef, EnumVariant, FieldDef, FunctionDef, GenericParam, ImplDef, Item,
+    MethodDef, NewtypeDef, Parameter, SelfParam, StructDef, VariantPayload,
 };
 pub use statements::Stmt;
 pub use types::Type;

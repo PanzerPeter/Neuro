@@ -21,6 +21,15 @@ pub enum TypeError {
     #[error("undefined function '{name}' at {span:?}")]
     UndefinedFunction { name: String, span: Span },
 
+    #[error("generic type parameter '{name}' at {span:?} shadows a built-in type name")]
+    GenericParamShadowsBuiltin { name: String, span: Span },
+
+    #[error("generic type parameter '{name}' at {span:?} is never used in a parameter, so it cannot be inferred; explicit type arguments (turbofish) are not yet supported")]
+    GenericParamNotInferable { name: String, span: Span },
+
+    #[error("type argument '{ty}' for generic parameter '{param}' at {span:?} is not Copy; generic type arguments are restricted to Copy types in this phase")]
+    GenericArgumentNotCopy { param: String, ty: Type, span: Span },
+
     #[error("variable '{name}' already defined in this scope at {span:?}")]
     VariableAlreadyDefined { name: String, span: Span },
 

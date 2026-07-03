@@ -199,6 +199,22 @@ pub fn compile(
         }
     }
 
+    // Pre-declare every function/method signature before generating any body, so a
+    // call resolves regardless of definition order. Monomorphized generic instances
+    // (§3.8) may be called by — or call — items appearing before them, so lazy
+    // per-item declaration is not sufficient.
+    for item in items {
+        match item {
+            HirItem::Function(func_def) => {
+                codegen_ctx.declare_function(func_def, &func_types)?;
+            }
+            HirItem::Impl(impl_def) => {
+                codegen_ctx.declare_impl(impl_def, &func_types)?;
+            }
+            HirItem::Const(_) | HirItem::Struct(_) | HirItem::Enum(_) => {}
+        }
+    }
+
     // Generate code for each function and impl method
     for item in items {
         match item {

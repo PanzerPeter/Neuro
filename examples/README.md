@@ -44,6 +44,10 @@ isolation:
 - [`showcase/unit_types.nr`](showcase/unit_types.nr) — newtype units of measure
   (§3.15) flowing through a struct with newtype fields, `impl` methods, an enum
   + `match`, and a fixed-size array + `for`-in loop. Exit `94`.
+- [`showcase/generic_toolkit.nr`](showcase/generic_toolkit.nr) — generic functions
+  (§3.8) monomorphized at several concrete types (`identity<T>`, `choose<T>`,
+  `second<T, U>`) working together with an enum + pattern matching and a tuple
+  used as a generic type argument. Exit `44`.
 
 ## Compiling and running
 

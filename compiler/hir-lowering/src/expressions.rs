@@ -648,6 +648,12 @@ impl Lowerer {
         expected: Option<&HirType>,
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
+        // A call to a generic function (§3.8): infer its type arguments, queue the
+        // matching monomorphized instance, and emit a call to that instance's name.
+        if self.generic_templates.contains_key(name) {
+            return self.lower_generic_call(name, args, span);
+        }
+
         if let Some((params, ret)) = self.functions.get(name).cloned() {
             let args = self.lower_args(args, &params)?;
             let callee = HirExpr::new(
@@ -698,6 +704,75 @@ impl Lowerer {
         Err(LoweringError::UnresolvedCall {
             target: name.to_string(),
         })
+    }
+
+    /// Lower a call to a generic function to a call to its monomorphized instance
+    /// (§3.8). The concrete type arguments are inferred by unifying the template's
+    /// parameter annotations against the lowered arguments' resolved types; the
+    /// instance is queued for emission and the call refers to its mangled name.
+    fn lower_generic_call(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let template = self.generic_templates[name].clone();
+        let gnames: std::collections::HashSet<String> = template
+            .generics
+            .iter()
+            .map(|g| g.name.name.clone())
+            .collect();
+
+        // Arguments drive inference, so lower them with no expected type first.
+        let mut lowered_args = Vec::with_capacity(args.len());
+        for arg in args {
+            lowered_args.push(self.lower_expr(arg, None)?);
+        }
+
+        let mut subst: std::collections::HashMap<String, HirType> =
+            std::collections::HashMap::new();
+        for (param, larg) in template.params.iter().zip(lowered_args.iter()) {
+            crate::unify_ast_hir(&param.ty, &larg.ty, &gnames, &mut subst);
+        }
+
+        // Resolve the concrete parameter and return types under the inferred bindings.
+        let saved = std::mem::replace(&mut self.type_subst, subst.clone());
+        let mut param_tys = Vec::with_capacity(template.params.len());
+        for param in &template.params {
+            param_tys.push(self.resolve_type(&param.ty)?);
+        }
+        let ret = match &template.return_type {
+            Some(t) => self.resolve_type(t)?,
+            None => HirType::Void,
+        };
+        self.type_subst = saved;
+
+        let mangled = crate::mangle_instance(name, &template.generics, &subst);
+        if !self.mono_seen.contains(&mangled) {
+            self.mono_seen.insert(mangled.clone());
+            self.mono_pending.push(crate::MonoInstance {
+                mangled: mangled.clone(),
+                fn_name: name.to_string(),
+                subst,
+            });
+        }
+
+        let callee = HirExpr::new(
+            HirExprKind::Variable(mangled),
+            HirType::Function {
+                params: param_tys,
+                ret: Box::new(ret.clone()),
+            },
+            span,
+        );
+        Ok(HirExpr::new(
+            HirExprKind::Call {
+                callee: Box::new(callee),
+                args: lowered_args,
+            },
+            ret,
+            span,
+        ))
     }
 
     /// Lower `instance.method(args)`: a struct method (or the `.clone()` builtin on a

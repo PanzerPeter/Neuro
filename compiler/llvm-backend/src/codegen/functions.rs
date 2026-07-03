@@ -102,7 +102,24 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(call_result.try_as_basic_value().basic())
     }
 
-    /// Generate LLVM functions for all supported methods in an `impl` block.
+    /// Declare the LLVM signatures of every supported method in an `impl` block.
+    pub(crate) fn declare_impl(
+        &mut self,
+        impl_def: &HirImpl,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        let struct_name = impl_def.type_name.clone();
+        for method in &impl_def.methods {
+            if matches!(method.self_param, Some(HirSelfParam::Owned)) {
+                continue;
+            }
+            self.declare_method(method, &struct_name, func_types)?;
+        }
+        Ok(())
+    }
+
+    /// Generate LLVM function bodies for all supported methods in an `impl` block.
+    /// Signatures must already be declared (see [`Self::declare_impl`]).
     pub(crate) fn codegen_impl(
         &mut self,
         impl_def: &HirImpl,
@@ -125,7 +142,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// The method is lowered to a free function under its mangled name
     /// (`StructName__methodName`). For `&self` methods the struct is the first
     /// parameter, named `self`, passed by value.
-    pub(crate) fn codegen_method(
+    pub(crate) fn declare_method(
         &mut self,
         method: &HirMethod,
         struct_name: &str,
@@ -176,6 +193,38 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let function = self.module.add_function(&mangled, llvm_ret_type, None);
         self.functions.insert(mangled.clone(), function);
+        Ok(())
+    }
+
+    /// Generate code for a method body. Its signature must already be declared
+    /// (see [`Self::declare_method`]).
+    pub(crate) fn codegen_method(
+        &mut self,
+        method: &HirMethod,
+        struct_name: &str,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        let mangled = format!("{}__{}", struct_name, method.name);
+
+        let func_type_info = func_types
+            .get(&mangled)
+            .ok_or_else(|| CodegenError::UndefinedFunction(mangled.clone()))?;
+
+        let (param_types, return_type) = match func_type_info {
+            Type::Function { params, ret } => (params, &**ret),
+            _ => {
+                return Err(CodegenError::InternalError(
+                    "method type information is not a function type".to_string(),
+                ))
+            }
+        };
+
+        let self_by_pointer = matches!(method.self_param, Some(HirSelfParam::RefMut));
+
+        let function = *self
+            .functions
+            .get(&mangled)
+            .ok_or_else(|| CodegenError::UndefinedFunction(mangled.clone()))?;
 
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
@@ -258,8 +307,12 @@ impl<'ctx> CodegenContext<'ctx> {
         self.codegen_body(&method.body, return_type)
     }
 
-    /// Generate code for a function definition
-    pub(crate) fn codegen_function(
+    /// Declare a function's LLVM signature (no body) and record it so call sites can
+    /// resolve it. Run in a pre-pass over every item before any body is generated, so
+    /// that a call resolves regardless of definition order — required because a
+    /// monomorphized generic instance (§3.8) may be called by, or call, items that
+    /// appear before it in the program.
+    pub(crate) fn declare_function(
         &mut self,
         func_def: &HirFunction,
         func_types: &HashMap<String, Type>,
@@ -293,9 +346,34 @@ impl<'ctx> CodegenContext<'ctx> {
         let function = self
             .module
             .add_function(&func_def.name, llvm_ret_type, None);
-
-        // Record the function so later call sites can resolve it.
         self.functions.insert(func_def.name.clone(), function);
+        Ok(())
+    }
+
+    /// Generate code for a function definition. Its signature must already be declared
+    /// (see [`Self::declare_function`]).
+    pub(crate) fn codegen_function(
+        &mut self,
+        func_def: &HirFunction,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        let func_type_info = func_types
+            .get(&func_def.name)
+            .ok_or_else(|| CodegenError::UndefinedFunction(func_def.name.clone()))?;
+
+        let (param_types, return_type) = match func_type_info {
+            Type::Function { params, ret } => (params, &**ret),
+            _ => {
+                return Err(CodegenError::InternalError(
+                    "function type information is not a function type".to_string(),
+                ))
+            }
+        };
+
+        let function = *self
+            .functions
+            .get(&func_def.name)
+            .ok_or_else(|| CodegenError::UndefinedFunction(func_def.name.clone()))?;
 
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);

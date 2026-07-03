@@ -79,6 +79,11 @@ Key design goals:
 - Typed parameters and return types
 - Explicit `return` and implicit trailing-expression returns
 - Recursion and forward references
+- **Generic functions** (1F, §3.8): type parameters `func identity<T>(x: T) -> T`,
+  multiple parameters `<T, U>`, monomorphized (one specialized copy per concrete
+  type argument, zero runtime cost); type arguments inferred from the value
+  arguments. Bounds parse but are not yet enforced (await traits); type arguments
+  restricted to `Copy` this phase
 
 ### Control Flow
 
@@ -165,7 +170,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 806 tests passing across all components
+- 822 tests passing across all components
 
 ## Compilation Pipeline
 

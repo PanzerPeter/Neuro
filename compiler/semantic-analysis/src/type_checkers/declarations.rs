@@ -31,8 +31,26 @@ const DROP_TRAIT: &str = "Drop";
 const DROP_METHOD: &str = "drop";
 
 impl TypeChecker {
-    /// Check a function definition
+    /// Check a function definition.
+    ///
+    /// A generic function (§3.8, non-empty `func.generics`) is a template: its type
+    /// parameters are put in scope so the signature and body type-check with
+    /// [`Type::Generic`] placeholders, and its signature is recorded in `generic_funcs`
+    /// rather than `functions`. Concrete instantiation happens per call site.
     pub(crate) fn check_function(&mut self, func: &FunctionDef) -> Option<()> {
+        // Put the generic type parameters in scope for signature + body resolution.
+        // A parameter may not shadow a built-in type name.
+        self.generic_scope.clear();
+        for gp in &func.generics {
+            if is_builtin_type_name(&gp.name.name) {
+                self.record_error(TypeError::GenericParamShadowsBuiltin {
+                    name: gp.name.name.clone(),
+                    span: gp.name.span,
+                });
+            }
+            self.generic_scope.insert(gp.name.name.clone());
+        }
+
         // Check for duplicate parameter names
         use std::collections::HashSet;
         let mut param_names = HashSet::new();
@@ -63,21 +81,51 @@ impl TypeChecker {
             Type::Void
         };
 
-        // Register function signature
-        let func_ty = Type::Function {
-            params: param_types.clone(),
-            ret: Box::new(return_type.clone()),
-        };
-
-        if self.functions.contains_key(&func.name.name) {
+        // Register function signature.
+        if self.functions.contains_key(&func.name.name)
+            || self.generic_funcs.contains_key(&func.name.name)
+        {
             self.record_error(TypeError::FunctionAlreadyDefined {
                 name: func.name.name.clone(),
                 span: func.name.span,
             });
+            self.generic_scope.clear();
             return None;
         }
 
-        self.functions.insert(func.name.name.clone(), func_ty);
+        if func.generics.is_empty() {
+            self.functions.insert(
+                func.name.name.clone(),
+                Type::Function {
+                    params: param_types.clone(),
+                    ret: Box::new(return_type.clone()),
+                },
+            );
+        } else {
+            // Every type parameter must appear in a value parameter so it can be
+            // inferred from the call arguments — turbofish is a later item (§3.8).
+            for gp in &func.generics {
+                if !param_types
+                    .iter()
+                    .any(|t| type_mentions_generic(t, &gp.name.name))
+                {
+                    self.record_error(TypeError::GenericParamNotInferable {
+                        name: gp.name.name.clone(),
+                        span: gp.name.span,
+                    });
+                }
+            }
+            // A generic template is registered separately; its signature carries the
+            // `Type::Generic` placeholders and is instantiated at each call site.
+            self.generic_funcs.insert(
+                func.name.name.clone(),
+                super::GenericFnSig {
+                    param_names: func.generics.iter().map(|g| g.name.name.clone()).collect(),
+                    params: param_types.clone(),
+                    ret: return_type.clone(),
+                },
+            );
+        }
 
         // Enter function scope
         self.symbols.push_scope();
@@ -145,6 +193,7 @@ impl TypeChecker {
         self.symbols.pop_scope();
         self.current_function_return_type = None;
         self.current_fn_outliving.clear();
+        self.generic_scope.clear();
 
         Some(())
     }
@@ -703,5 +752,93 @@ impl TypeChecker {
             self.current_function_return_type = None;
             self.current_fn_outliving.clear();
         }
+    }
+}
+
+/// Unify a (possibly generic) parameter type against a concrete argument type,
+/// recording each type parameter's binding in `subst` (§3.8). Returns `false` when the
+/// structures do not align or a previously-bound parameter is contradicted, so the
+/// caller can report a type mismatch. A concrete leaf must match by the usual rules.
+pub(crate) fn unify_generic(param: &Type, arg: &Type, subst: &mut HashMap<String, Type>) -> bool {
+    match (param, arg) {
+        (Type::Generic(name), _) => match subst.get(name) {
+            Some(bound) => bound.is_compatible_with(arg),
+            None => {
+                subst.insert(name.clone(), arg.clone());
+                true
+            }
+        },
+        (
+            Type::Reference {
+                inner: pi,
+                mutable: pm,
+            },
+            Type::Reference {
+                inner: ai,
+                mutable: am,
+            },
+        ) => pm == am && unify_generic(pi, ai, subst),
+        (
+            Type::Array {
+                element: pe,
+                size: ps,
+            },
+            Type::Array {
+                element: ae,
+                size: asz,
+            },
+        ) => ps == asz && unify_generic(pe, ae, subst),
+        (Type::Tuple(pe), Type::Tuple(ae)) => {
+            pe.len() == ae.len() && pe.iter().zip(ae).all(|(p, a)| unify_generic(p, a, subst))
+        }
+        // A concrete (non-generic) parameter position: fall back to ordinary compatibility.
+        _ => param.is_compatible_with(arg),
+    }
+}
+
+/// Substitute every generic parameter in `ty` with its inferred concrete type from
+/// `subst` (§3.8). An unbound parameter is left as-is (the caller reports the failure).
+pub(crate) fn substitute_generic(ty: &Type, subst: &HashMap<String, Type>) -> Type {
+    match ty {
+        Type::Generic(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
+        Type::Reference { inner, mutable } => Type::Reference {
+            inner: Box::new(substitute_generic(inner, subst)),
+            mutable: *mutable,
+        },
+        Type::Array { element, size } => Type::Array {
+            element: Box::new(substitute_generic(element, subst)),
+            size: *size,
+        },
+        Type::Tuple(elements) => Type::Tuple(
+            elements
+                .iter()
+                .map(|e| substitute_generic(e, subst))
+                .collect(),
+        ),
+        Type::Function { params, ret } => Type::Function {
+            params: params
+                .iter()
+                .map(|p| substitute_generic(p, subst))
+                .collect(),
+            ret: Box::new(substitute_generic(ret, subst)),
+        },
+        other => other.clone(),
+    }
+}
+
+/// Whether the resolved type `ty` mentions the generic parameter named `name`
+/// anywhere in its structure — used to confirm a type parameter is inferable from
+/// the call arguments (§3.8).
+pub(crate) fn type_mentions_generic(ty: &Type, name: &str) -> bool {
+    match ty {
+        Type::Generic(n) => n == name,
+        Type::Reference { inner, .. } => type_mentions_generic(inner, name),
+        Type::Array { element, .. } => type_mentions_generic(element, name),
+        Type::Tuple(elements) => elements.iter().any(|e| type_mentions_generic(e, name)),
+        Type::Function { params, ret } => {
+            params.iter().any(|p| type_mentions_generic(p, name))
+                || type_mentions_generic(ret, name)
+        }
+        _ => false,
     }
 }

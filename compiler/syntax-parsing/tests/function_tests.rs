@@ -21,6 +21,39 @@ fn test_parse_empty_function() {
 }
 
 #[test]
+fn test_parse_generic_function_params() {
+    // `<T, U: Bound + Other>`: two type parameters, the second with two bounds (§3.8).
+    let source = "func pick<T, U: Ord + Eq>(a: T, b: U) -> T { a }";
+    let result = parse(source);
+    assert!(result.is_ok(), "Parse error: {:?}", result.err());
+    let items = result.unwrap();
+    match &items[0] {
+        Item::Function(func) => {
+            assert_eq!(func.generics.len(), 2);
+            assert_eq!(func.generics[0].name.name, "T");
+            assert!(func.generics[0].bounds.is_empty());
+            assert_eq!(func.generics[1].name.name, "U");
+            let bound_names: Vec<&str> = func.generics[1]
+                .bounds
+                .iter()
+                .map(|b| b.name.as_str())
+                .collect();
+            assert_eq!(bound_names, vec!["Ord", "Eq"]);
+        }
+        _ => panic!("expected function item"),
+    }
+}
+
+#[test]
+fn test_non_generic_function_has_empty_generics() {
+    let items = parse("func f(x: i32) -> i32 { x }").expect("should parse");
+    match &items[0] {
+        Item::Function(func) => assert!(func.generics.is_empty()),
+        _ => panic!("expected function item"),
+    }
+}
+
+#[test]
 fn test_parse_function_with_return_type() {
     let source = "func get_number() -> i32 { return 42 }";
     let result = parse(source);

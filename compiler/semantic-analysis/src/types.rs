@@ -62,6 +62,13 @@ pub enum Type {
     /// aggregate. Two tuple types are compatible only when they have the same arity
     /// and each element type matches. Always has at least two elements.
     Tuple(Vec<Type>),
+    /// An unresolved generic type parameter `T` inside a generic function body (§3.8).
+    /// It is nominal — `Generic("T")` is compatible only with itself — and supports no
+    /// concrete operations (arithmetic, field access, …), which is exactly what a
+    /// type parameter with no trait bounds soundly permits. It never escapes a generic
+    /// template: monomorphization substitutes each `Generic` with a concrete type, so a
+    /// `Generic` never reaches the HIR.
+    Generic(std::string::String),
     Unknown,
 }
 
@@ -116,6 +123,10 @@ impl Type {
             (Type::Struct(a), Type::Struct(b)) => a == b,
             (Type::Enum(a), Type::Enum(b)) => a == b,
             (Type::Newtype(a), Type::Newtype(b)) => a == b,
+
+            // A generic type parameter matches only the same parameter by name (§3.8).
+            // Two distinct parameters `T` and `U` are never interchangeable.
+            (Type::Generic(a), Type::Generic(b)) => a == b,
 
             // References match when their referents match and their mutability
             // agrees (§2.4, §2.5). There is no implicit `&mut T` → `&T` coercion —
@@ -304,6 +315,7 @@ impl fmt::Display for Type {
             Type::Struct(name) => write!(f, "{}", name),
             Type::Enum(name) => write!(f, "{}", name),
             Type::Newtype(name) => write!(f, "{}", name),
+            Type::Generic(name) => write!(f, "{}", name),
             Type::Reference { inner, mutable } => {
                 if *mutable {
                     write!(f, "&mut {}", inner)

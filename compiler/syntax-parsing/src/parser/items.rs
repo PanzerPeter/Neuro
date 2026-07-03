@@ -2,8 +2,9 @@ use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
 use crate::ast::{
-    Attribute, ConstDef, EnumDef, EnumVariant, Expr, FieldDef, FieldInit, FunctionDef, ImplDef,
-    Item, MethodDef, NewtypeDef, Parameter, SelfParam, StructDef, VariantPayload,
+    Attribute, ConstDef, EnumDef, EnumVariant, Expr, FieldDef, FieldInit, FunctionDef,
+    GenericParam, ImplDef, Item, MethodDef, NewtypeDef, Parameter, SelfParam, StructDef,
+    VariantPayload,
 };
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
@@ -237,6 +238,9 @@ impl Parser {
             });
         };
 
+        // Optional generic parameter list `<T, U: Bound + Bound>` (§3.8).
+        let generics = self.parse_generic_params()?;
+
         self.consume(TokenKind::LeftParen, "'('")?;
         self.skip_newlines();
 
@@ -315,12 +319,97 @@ impl Parser {
 
         Ok(FunctionDef {
             name,
+            generics,
             params,
             return_type,
             body,
             attributes,
             span: start.span.merge(end_span),
         })
+    }
+
+    /// Parse an optional generic parameter list `<T, U: Bound + Bound>` (§3.8).
+    ///
+    /// Returns an empty vector when no `<` follows. Each parameter is a type-parameter
+    /// name with optional trait bounds; bounds are recorded but not enforced this
+    /// phase (the trait system does not exist yet). An empty `<>` is rejected.
+    fn parse_generic_params(&mut self) -> ParseResult<Vec<GenericParam>> {
+        if !self.check(&TokenKind::Less) {
+            return Ok(Vec::new());
+        }
+        self.consume(TokenKind::Less, "'<'")?;
+        self.skip_newlines();
+
+        let mut generics: Vec<GenericParam> = Vec::new();
+        loop {
+            let name_token =
+                self.consume(TokenKind::Identifier(String::new()), "type parameter name")?;
+            let name = if let TokenKind::Identifier(n) = name_token.kind {
+                Identifier {
+                    name: n,
+                    span: name_token.span,
+                }
+            } else {
+                return Err(ParseError::UnexpectedToken {
+                    found: name_token.kind,
+                    expected: "type parameter name".to_string(),
+                    span: name_token.span,
+                });
+            };
+
+            // Optional trait bounds: `T: A + B`. Parsed for forward compatibility; the
+            // bound names are stored but not enforced until the trait system lands (§3.9).
+            let mut bounds: Vec<Identifier> = Vec::new();
+            let mut end_span = name.span;
+            if self.check(&TokenKind::Colon) {
+                self.advance(); // ':'
+                self.skip_newlines();
+                loop {
+                    let bound_token =
+                        self.consume(TokenKind::Identifier(String::new()), "trait bound name")?;
+                    if let TokenKind::Identifier(n) = bound_token.kind {
+                        end_span = bound_token.span;
+                        bounds.push(Identifier {
+                            name: n,
+                            span: bound_token.span,
+                        });
+                    }
+                    if !self.check(&TokenKind::Plus) {
+                        break;
+                    }
+                    self.advance(); // '+'
+                    self.skip_newlines();
+                }
+            }
+
+            for existing in &generics {
+                if existing.name.name == name.name {
+                    return Err(ParseError::DuplicateParameter {
+                        name: name.name.clone(),
+                        span: name.span,
+                    });
+                }
+            }
+
+            generics.push(GenericParam {
+                name: name.clone(),
+                bounds,
+                span: name.span.merge(end_span),
+            });
+
+            self.skip_newlines();
+            if !self.check(&TokenKind::Comma) {
+                break;
+            }
+            self.advance(); // ','
+            self.skip_newlines();
+        }
+
+        // An empty `<>` is impossible here: the first `consume` above already requires
+        // a type-parameter name, so reaching this point means at least one was parsed.
+        self.consume(TokenKind::Greater, "'>'")?;
+
+        Ok(generics)
     }
 
     /// Parse a struct definition: `struct Name { field: Type, ... }`,

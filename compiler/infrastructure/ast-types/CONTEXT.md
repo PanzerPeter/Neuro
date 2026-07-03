@@ -28,6 +28,12 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-07-03: Generic functions §3.8. Added `GenericParam { name, bounds, span }` and
+  `FunctionDef.generics: Vec<GenericParam>` (empty for a non-generic function). A generic
+  function is a template; a type-parameter reference in an annotation is a plain `Type::Named`
+  (resolved against the generics in scope by later passes). `bounds` records trait names for
+  forward compatibility but is not enforced (no trait system yet). Interpreted by
+  semantic-analysis (inference/monomorphization checking) and hir-lowering (monomorphization).
 - 2026-07-02: Newtype declarations §3.15. Added `NewtypeDef { name, inner, span }` and
   `Item::Newtype(NewtypeDef)`. Unlike a `type` alias (expanded at parse time), a newtype survives as
   its own item; a newtype *type* annotation is a plain `Type::Named`, construction reuses

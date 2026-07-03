@@ -5,10 +5,29 @@ use shared_types::{Identifier, Span};
 use super::statements::Stmt;
 use super::types::Type;
 
-/// Function definition
+/// A single generic type parameter in a `<...>` list (§3.8): `T`, or `T: Bound + Bound`.
+///
+/// `bounds` records the trait names syntactically, but they are **not enforced** in
+/// this phase — the trait system (§3.9) does not exist yet, so a bound is parsed for
+/// forward compatibility and ignored by later passes (mirroring how an unknown
+/// `impl Trait for T` trait name is accepted today). Const (value) parameters and
+/// `where` clauses are separate, later roadmap items and are not represented here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericParam {
+    pub name: Identifier,
+    pub bounds: Vec<Identifier>,
+    pub span: Span,
+}
+
+/// Function definition.
+///
+/// `generics` is the `<T, U>` type-parameter list (§3.8); it is empty for an ordinary
+/// (non-generic) function. A generic function is a *template* — later passes
+/// monomorphize it into one concrete function per distinct set of type arguments.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDef {
     pub name: Identifier,
+    pub generics: Vec<GenericParam>,
     pub params: Vec<Parameter>,
     pub return_type: Option<Type>,
     pub body: Vec<Stmt>,

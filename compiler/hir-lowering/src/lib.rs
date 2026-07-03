@@ -111,6 +111,30 @@ struct Lowerer {
     loop_stack: Vec<LoopCtx>,
     /// The current function/method's resolved return type (for `return` typing).
     current_return: HirType,
+    /// Generic free-function templates (§3.8), keyed by name. A generic function is
+    /// never lowered as-is; each distinct set of type arguments produces one
+    /// monomorphized concrete function instead.
+    generic_templates: HashMap<String, ast_types::FunctionDef>,
+    /// Active type-parameter substitution while a monomorphized instance body is being
+    /// lowered: parameter name → concrete type. Empty outside instance lowering; a
+    /// `Named` annotation matching an entry resolves to the concrete type.
+    type_subst: HashMap<String, HirType>,
+    /// Monomorphization worklist: instances discovered but not yet lowered.
+    mono_pending: Vec<MonoInstance>,
+    /// Mangled names already queued or emitted, so each instance is produced once.
+    mono_seen: HashSet<String>,
+    /// Concrete instance functions produced by monomorphization, appended to the
+    /// program after the ordinary items.
+    mono_items: Vec<neuro_hir::HirItem>,
+}
+
+/// One pending monomorphization: the generic template `fn_name`, the concrete type
+/// arguments (in the template's type-parameter order), and the mangled instance name
+/// the call site refers to.
+struct MonoInstance {
+    mangled: String,
+    fn_name: String,
+    subst: HashMap<String, HirType>,
 }
 
 /// Lower a type-checked program to typed HIR.
@@ -142,6 +166,11 @@ impl Lowerer {
             scopes: Vec::new(),
             loop_stack: Vec::new(),
             current_return: HirType::Void,
+            generic_templates: HashMap::new(),
+            type_subst: HashMap::new(),
+            mono_pending: Vec::new(),
+            mono_seen: HashSet::new(),
+            mono_items: Vec::new(),
         }
     }
 
@@ -199,4 +228,95 @@ fn is_full_float(t: &HirType) -> bool {
 /// the string-concatenation form of `+` (§2.7).
 fn peels_to_string(t: &HirType) -> bool {
     matches!(t.referent(), HirType::String)
+}
+
+/// Unify a generic template's parameter annotation against a concrete argument type,
+/// recording each type parameter's binding in `subst` (§3.8). The program is already
+/// well-typed, so the structures always align; positions that mention no type
+/// parameter contribute no binding.
+fn unify_ast_hir(
+    param: &ast_types::Type,
+    arg: &HirType,
+    gnames: &HashSet<String>,
+    subst: &mut HashMap<String, HirType>,
+) {
+    match (param, arg) {
+        (ast_types::Type::Named(ident), _) if gnames.contains(&ident.name) => {
+            subst
+                .entry(ident.name.clone())
+                .or_insert_with(|| arg.clone());
+        }
+        (ast_types::Type::Reference { inner: pi, .. }, HirType::Reference { inner: ai, .. }) => {
+            unify_ast_hir(pi, ai, gnames, subst)
+        }
+        (ast_types::Type::Array { element: pe, .. }, HirType::Array { element: ae, .. }) => {
+            unify_ast_hir(pe, ae, gnames, subst)
+        }
+        (ast_types::Type::Tuple { elements: pe, .. }, HirType::Tuple(ae))
+            if pe.len() == ae.len() =>
+        {
+            for (p, a) in pe.iter().zip(ae) {
+                unify_ast_hir(p, a, gnames, subst);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The mangled symbol name of a monomorphized instance (§3.8): the template name, the
+/// `__g_` instance marker, and each type argument's mangled form in declaration order.
+/// The result is a valid symbol (alphanumerics and `_` only).
+fn mangle_instance(
+    name: &str,
+    generics: &[ast_types::GenericParam],
+    subst: &HashMap<String, HirType>,
+) -> String {
+    let mut out = format!("{}__g", name);
+    for gp in generics {
+        let arg = subst
+            .get(&gp.name.name)
+            .map(mangle_type)
+            .unwrap_or_else(|| "unresolved".to_string());
+        out.push('_');
+        out.push_str(&arg);
+    }
+    out
+}
+
+/// A symbol-safe token for a concrete type, used to build monomorphized instance names.
+fn mangle_type(ty: &HirType) -> String {
+    match ty {
+        HirType::I8 => "i8".to_string(),
+        HirType::I16 => "i16".to_string(),
+        HirType::I32 => "i32".to_string(),
+        HirType::I64 => "i64".to_string(),
+        HirType::U8 => "u8".to_string(),
+        HirType::U16 => "u16".to_string(),
+        HirType::U32 => "u32".to_string(),
+        HirType::U64 => "u64".to_string(),
+        HirType::F16 => "f16".to_string(),
+        HirType::BF16 => "bf16".to_string(),
+        HirType::F32 => "f32".to_string(),
+        HirType::F64 => "f64".to_string(),
+        HirType::Bool => "bool".to_string(),
+        HirType::Char => "char".to_string(),
+        HirType::String => "string".to_string(),
+        HirType::Void => "void".to_string(),
+        HirType::Struct(n) => n.clone(),
+        HirType::Enum(n) => n.clone(),
+        HirType::Newtype { name, .. } => name.clone(),
+        HirType::Reference { inner, mutable } => {
+            format!(
+                "{}ref_{}",
+                if *mutable { "mut" } else { "" },
+                mangle_type(inner)
+            )
+        }
+        HirType::Array { element, size } => format!("arr{}_{}", size, mangle_type(element)),
+        HirType::Tuple(elements) => {
+            let parts: Vec<String> = elements.iter().map(mangle_type).collect();
+            format!("tup{}_{}", elements.len(), parts.join("_"))
+        }
+        HirType::Function { .. } => "fn".to_string(),
+    }
 }

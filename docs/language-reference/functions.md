@@ -668,6 +668,56 @@ func parse_digit(c: i32) -> i32 {
 A user-defined function whose name is `panic`, `assert`, or `unreachable` shadows the builtin
 within the program.
 
+## Generic Functions
+
+A function may declare **type parameters** in angle brackets after its name. Each type
+parameter stands for a type supplied at the call site; the compiler generates one specialized
+copy of the function per distinct set of concrete type arguments (**monomorphization**), so a
+type parameter carries **zero runtime cost**.
+
+```neuro
+// A single template, instantiated at each concrete type it is called with.
+func identity<T>(x: T) -> T {
+    x
+}
+
+// Multiple type parameters.
+func second<T, U>(a: T, b: U) -> U {
+    b
+}
+
+func main() -> i32 {
+    val a = identity(41)     // identity<i32>
+    val f = identity(2.5)    // identity<f64> — a separate specialized copy
+    val s = second(1.5, 7)   // second<f64, i32> -> 7
+    return a + s             // 41 + 7 = 48
+}
+```
+
+**Type-argument inference.** Type arguments are inferred from the call's value arguments — you do
+not write them explicitly. Every type parameter must therefore appear in at least one parameter
+so it can be inferred (a parameter used only in return position needs explicit type arguments,
+which are not yet supported).
+
+**What a generic body may do.** Because trait bounds are not yet enforced (the trait system is a
+separate, later feature), the body of a generic function may use only operations valid for *any*
+type: binding a value, returning it, passing it to another function, and building or observing
+tuples. Operations that need a known concrete type — arithmetic, comparison, field access, method
+calls — are rejected on a bare type parameter:
+
+```neuro
+func bad<T>(a: T, b: T) -> T {
+    a + b   // error: `+` is not defined on the unbounded type parameter T
+}
+```
+
+**Bounds.** A bound may be written (`func f<T: Ord + Eq>(...)`) and parses for forward
+compatibility, but it is **not enforced** yet.
+
+**Restrictions (this phase).** Type arguments are restricted to `Copy` types. Generic structs and
+`impl` blocks, const (value) parameters, `where` clauses, and explicit turbofish type arguments
+are planned follow-on work.
+
 ## References
 
 - [Types](types.md) - Function types and type checking
