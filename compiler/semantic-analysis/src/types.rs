@@ -254,7 +254,7 @@ impl Type {
     /// Deliberately excludes `f16`/`bf16`: half-precision has a narrow scalar
     /// contract (no arithmetic), so it must not flow through the arithmetic and
     /// contextual-inference paths gated on this predicate (§1.2). Use
-    /// [`Type::is_half_float`] for the half-precision-only checks.
+    /// `Type::is_half_float` for the half-precision-only checks.
     pub fn is_float(&self) -> bool {
         matches!(self, Type::F32 | Type::F64)
     }

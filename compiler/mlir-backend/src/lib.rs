@@ -10,8 +10,8 @@
 //! The MLIR path is gated behind the off-by-default `mlir` feature so the
 //! workspace still builds and tests on a stock LLVM 20 install without an MLIR
 //! toolchain. With the feature disabled this crate is an empty placeholder; with
-//! it enabled it pulls in `melior` and exposes [`lower_program`] (the HIR → MLIR
-//! scaffold) plus [`emit_smoke_module`] (the pure-`melior` wiring check).
+//! it enabled it pulls in `melior` and exposes `lower_program` (the HIR → MLIR
+//! scaffold) plus `emit_smoke_module` (the pure-`melior` wiring check).
 
 #[cfg(feature = "mlir")]
 mod errors;

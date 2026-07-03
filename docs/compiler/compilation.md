@@ -128,7 +128,7 @@ RUST_LOG=debug neurc compile examples/hello.nr   # debug logging
 End-to-end coverage lives in `compiler/neurc/tests/` — e.g. `hir_lowering.rs` exercises the
 AST → HIR step, and per-feature suites (`arrays.rs`, `drop_destructors.rs`, `string_concat.rs`,
 `string_slice.rs`, …) compile and run real programs, asserting exit codes and output. The full
-`cargo test --workspace` suite is green at 746 tests (the `mlir`-feature tests are additional and
+`cargo test --workspace` suite is green at 806 tests (the `mlir`-feature tests are additional and
 feature-gated).
 
 ## Known Limitations

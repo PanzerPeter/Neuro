@@ -15,13 +15,13 @@ For full architecture rules, coding standards, and contribution workflows, refer
 - New feature slices must depend *only* on `infrastructure/` crates. Never depend on other feature slices.
 - The CLI driver (`neurc`) is the *only* crate permitted to orchestrate and depend on all slices.
 - Keep every slice's `CONTEXT.md` up-to-date when entry points, public surfaces, or dependencies change.
-- Strictly no business logic in infrastructure crates (`shared-types`, `diagnostics`, `ast-types`, `source-location`, `project-config`).
+- Strictly no business logic in infrastructure crates (`shared-types`, `diagnostics`, `ast-types`, `source-location`, `project-config`, `neuro-hir`).
 
 ---
 
 ## `@compiler-dev` — Compiler Engineer
 
-**Scope:** Feature implementation inside `lexical-analysis`, `syntax-parsing`, `semantic-analysis`, and `llvm-backend`.
+**Scope:** Feature implementation inside `lexical-analysis`, `syntax-parsing`, `semantic-analysis`, `hir-lowering`, `llvm-backend`, and `mlir-backend`.
 
 **Rules:**
 - No `unwrap()` or `expect()` in production code paths — propagate errors using `Result<T, E>`.

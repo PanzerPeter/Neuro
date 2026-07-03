@@ -433,17 +433,21 @@ Neuro follows **Vertical Slice Architecture (VSA)** — organized by language fe
 
 ```
 compiler/
-├── infrastructure/          # Shared types, diagnostics, AST definitions
-│   ├── ast-types/
-│   ├── diagnostics/
-│   ├── shared-types/
-│   └── ...
+├── infrastructure/          # Shared, zero-business-logic crates
+│   ├── ast-types/           #   AST node definitions
+│   ├── diagnostics/         #   Error / warning types + rendering
+│   ├── project-config/      #   Project / manifest configuration
+│   ├── shared-types/        #   Primitives shared across slices
+│   ├── source-location/     #   Spans, positions, source files
+│   └── neuro-hir/           #   Typed High-Level IR (frontend ↔ backend contract)
 ├── lexical-analysis/        # Tokenizer (logos, Unicode XID)
 ├── syntax-parsing/          # Pratt + statement parser → AST
 ├── semantic-analysis/       # Type checker, scope analysis
 ├── control-flow/            # CFG builder (not yet active)
-├── llvm-backend/            # inkwell 0.9 / LLVM 20 codegen
-└── neurc/                   # CLI compiler driver
+├── hir-lowering/            # Type-checked AST → typed HIR
+├── llvm-backend/            # HIR → object code (inkwell 0.9 / LLVM 20)
+├── mlir-backend/            # HIR → MLIR scaffold (off-by-default `mlir` feature)
+└── neurc/                   # CLI compiler driver (pipeline orchestration)
 ```
 
 ### Compilation Pipeline
@@ -454,13 +458,14 @@ Source (.nr)
   → Lexical Analysis   (tokens)
   → Syntax Parsing     (AST)
   → Semantic Analysis  (type-checked AST)
+  → HIR Lowering       (typed High-Level IR — neuro-hir)
   → LLVM Backend       (object code via inkwell / LLVM 20)
   → System Linker      (native executable)
 ```
 
 **Planned extension (Phase 2+):**
 ```
-Tensor/AI path: AST → Neuro High-Level IR
+Tensor/AI path: typed High-Level IR (neuro-hir)
   → MLIR (linalg/tensor/func/arith, LLVM 20 / MLIR 20)
   → Enzyme MLIR AD pass (@grad)
   → GPU dialects (nvgpu/rocdl/Triton) or llvm dialect
