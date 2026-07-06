@@ -93,7 +93,19 @@ impl Parser {
         match token.kind {
             TokenKind::Identifier(name) => {
                 let span = token.span;
-                Ok(Type::Named(Identifier { name, span }))
+                let ident = Identifier { name, span };
+                // Generic type application `Name<T1, T2, ...>` (§3.8). Without a
+                // following `<`, this is a plain named type.
+                if self.check(&TokenKind::Less) {
+                    let args = self.parse_optional_type_args()?;
+                    let end = args.last().map(|a| a.span()).unwrap_or(span);
+                    return Ok(Type::Generic {
+                        name: ident,
+                        args,
+                        span: span.merge(end),
+                    });
+                }
+                Ok(Type::Named(ident))
             }
             _ => Err(ParseError::UnexpectedToken {
                 found: token.kind,

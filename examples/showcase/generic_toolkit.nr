@@ -1,17 +1,37 @@
-// Showcase — generic functions working together with prior features.
+// Showcase — generic structs, impls, and functions working together with prior features.
 //
 // Cumulative integration example combining:
-//   generic functions with monomorphization (§3.8)
+//   generic structs + generic inherent impls with monomorphization (§3.8)
+//   · generic functions with monomorphization (§3.8)
 //   · enums with associated data + pattern matching (§3.5, §3.6)
 //   · tuples as generic type arguments (§3.2)
 //   · if-expressions and implicit returns
 //
-// Each generic function below is a single template; the compiler emits one
-// specialized copy per concrete type argument, so `T` costs nothing at runtime.
+// Each generic template below (function, struct, or impl) is emitted once per
+// concrete type argument, so `T` costs nothing at runtime.
 
 enum Shape {
     Circle(i32),
     Rect(i32, i32),
+}
+
+// A generic struct: a heterogeneous pair. The type arguments are inferred from the
+// field values at the literal, then monomorphized into a concrete struct.
+struct Pair<T, U> {
+    first: T,
+    second: U,
+}
+
+// A generic struct with a generic inherent impl. `Cell<T>::get` is specialized per
+// element type; here it is used at both i32 and bool.
+struct Cell<T> {
+    value: T,
+}
+
+impl<T> Cell<T> {
+    func get(&self) -> T {
+        self.value
+    }
 }
 
 // The classic identity template — reused here at i32 and at a tuple type.
@@ -44,6 +64,12 @@ func main() -> i32 {
     val t = identity((3, 5))         // identity<(i32, i32)>    -> (3, 5)
     val a = area(Shape::Rect(2, 6))  // enum + match            -> 12
 
-    // 10 + 10 + 4 + 3 + 5 + 12 = 44
-    return pick + base + k + t.0 + t.1 + a
+    val p = Pair { first: 6, second: 9 }   // Pair<i32, i32> (inferred)
+    val cell = Cell { value: 7 }           // Cell<i32>
+    val flag = Cell { value: true }        // Cell<bool> — distinct instance
+    val cv = cell.get()                    // generic impl method     -> 7
+    val bonus = if flag.get() { p.first } else { 0 }   // -> 6
+
+    // 10 + 10 + 4 + 3 + 5 + 12 + 7 + 6 = 57
+    return pick + base + k + t.0 + t.1 + a + cv + bonus
 }

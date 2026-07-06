@@ -276,6 +276,49 @@ func main() -> i32 {
 }
 ```
 
+## Generic Structs and Impls
+
+A struct may declare type parameters in `<...>` after its name; each distinct set of
+concrete type arguments is monomorphized into its own specialized struct at zero runtime
+cost (§3.8). Type arguments are **inferred** from the field values at a struct literal, or
+written explicitly in a type annotation (`Pair<i32, f64>`).
+
+```neuro
+struct Pair<T, U> {
+    first: T,
+    second: U
+}
+
+// A generic inherent impl: `impl<T> Wrapper<T>` specializes its methods per instance.
+struct Wrapper<T> {
+    value: T
+}
+
+impl<T> Wrapper<T> {
+    func get(&self) -> T {
+        self.value
+    }
+}
+
+func first_of(p: &Pair<i32, i32>) -> i32 {
+    p.first
+}
+
+func main() -> i32 {
+    val p = Pair { first: 40, second: 2 }   // Pair<i32, i32> inferred
+    val w = Wrapper { value: 30 }           // Wrapper<i32>
+    val flag = Wrapper { value: true }      // Wrapper<bool> — distinct instance
+    return first_of(&p) + w.get()           // 40 + 30 = 70
+}
+```
+
+**Restrictions (this phase).** Type arguments are restricted to `Copy` types (a bare type
+parameter has no move semantics yet). A generic struct is usable only *with* type arguments
+— its bare name is rejected. A generic instantiated with an enclosing type parameter (a
+`Wrapper<T>` field inside another generic struct) is a documented limitation, deferred with
+broader generic support. Const (value) parameters, `where` clauses, and turbofish are
+separate, later features.
+
 ## Unsupported (Phase 1+)
 
 The following are not yet implemented and will be rejected at compile time:
@@ -283,7 +326,6 @@ The following are not yet implemented and will be rejected at compile time:
 - `self` (consuming) — needs the by-value struct ABI
 - Struct return types from free functions (backend limitation; associated functions and methods may return structs)
 - Nested structs as field types
-- Generics on structs
 
 ```neuro
 // Consuming `self` is still rejected with a clear error:

@@ -42,6 +42,18 @@ pub(crate) struct TypeChecker {
     /// NOT placed in `functions` — calls to it route through generic inference, which
     /// substitutes concrete type arguments per call site (monomorphization).
     generic_funcs: HashMap<String, GenericFnSig>,
+    /// Generic struct templates (§3.8), keyed by name. A generic struct is NOT a
+    /// usable type on its own; each distinct set of type arguments is monomorphized
+    /// into a distinct nominal struct registered in `struct_defs` on demand. The
+    /// template's field types (carrying [`Type::Generic`] placeholders) are also kept
+    /// in `struct_defs` under the base name so generic method bodies type-check.
+    generic_structs: HashMap<String, ast_types::StructDef>,
+    /// Generic `impl` templates keyed by base struct name (§3.8): `impl<T> Wrapper<T>`.
+    /// Instantiating a generic struct also instantiates each matching impl's methods.
+    generic_impls: HashMap<String, Vec<ast_types::ImplDef>>,
+    /// Mangled names of generic-struct instantiations already materialized into
+    /// `struct_defs` / `impl_methods`, so each instance is built exactly once.
+    instantiated_structs: HashSet<String>,
     /// Type-parameter names in scope while checking a generic function's signature and
     /// body. A `Named` annotation matching one resolves to [`Type::Generic`] instead of
     /// erroring as an unknown type. Empty outside a generic function.
@@ -131,6 +143,9 @@ impl TypeChecker {
             impl_methods: HashMap::new(),
             mut_self_methods: HashSet::new(),
             generic_funcs: HashMap::new(),
+            generic_structs: HashMap::new(),
+            generic_impls: HashMap::new(),
+            instantiated_structs: HashSet::new(),
             generic_scope: HashSet::new(),
             constants: HashMap::new(),
             errors: Vec::new(),
@@ -253,7 +268,11 @@ impl TypeChecker {
         // This also records each struct's Copy/Clone derivation intent.
         for item in items {
             if let Item::Struct(def) = item {
-                let _ = self.register_struct(def);
+                if def.generics.is_empty() {
+                    let _ = self.register_struct(def);
+                } else {
+                    self.register_generic_struct(def);
+                }
             }
         }
 
@@ -275,7 +294,11 @@ impl TypeChecker {
         // Pass 2: register impl method signatures (uses struct_defs from pass 1).
         for item in items {
             if let Item::Impl(def) = item {
-                let _ = self.register_impl(def);
+                if def.generics.is_empty() && def.type_args.is_empty() {
+                    let _ = self.register_impl(def);
+                } else {
+                    self.register_generic_impl(def);
+                }
             }
         }
 
@@ -293,7 +316,13 @@ impl TypeChecker {
                 Item::Function(func) => {
                     let _ = self.check_function(func);
                 }
-                Item::Impl(def) => self.check_impl(def),
+                Item::Impl(def) => {
+                    if def.generics.is_empty() && def.type_args.is_empty() {
+                        self.check_impl(def);
+                    } else {
+                        self.check_generic_impl(def);
+                    }
+                }
                 Item::Const(def) => {
                     let _ = self.check_const_item(def);
                 }

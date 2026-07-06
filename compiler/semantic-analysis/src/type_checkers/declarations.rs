@@ -456,6 +456,199 @@ impl TypeChecker {
         }
     }
 
+    /// Register a generic struct template (§3.8).
+    ///
+    /// A generic struct is not itself a usable type — each distinct set of type
+    /// arguments is monomorphized into a distinct nominal struct on demand. The
+    /// template's field types (carrying [`Type::Generic`] placeholders) are also
+    /// stored in `struct_defs` under the base name so generic `impl` method bodies
+    /// resolve `self.field` while being checked abstractly, mirroring how a generic
+    /// function body checks once with placeholders.
+    pub(crate) fn register_generic_struct(&mut self, def: &StructDef) {
+        if self.struct_defs.contains_key(&def.name.name)
+            || self.generic_structs.contains_key(&def.name.name)
+        {
+            self.record_error(TypeError::StructAlreadyDefined {
+                name: def.name.name.clone(),
+                span: def.name.span,
+            });
+            return;
+        }
+
+        self.generic_scope.clear();
+        for gp in &def.generics {
+            if is_builtin_type_name(&gp.name.name) {
+                self.record_error(TypeError::GenericParamShadowsBuiltin {
+                    name: gp.name.name.clone(),
+                    span: gp.name.span,
+                });
+            }
+            self.generic_scope.insert(gp.name.name.clone());
+        }
+        let mut fields: Vec<(String, Type)> = Vec::new();
+        for field in &def.fields {
+            if let Some(ty) = self.resolve_type(&field.ty) {
+                fields.push((field.name.name.clone(), ty));
+            }
+        }
+        self.generic_scope.clear();
+
+        self.struct_defs.insert(def.name.name.clone(), fields);
+        self.record_derive_intent(def);
+        self.generic_structs
+            .insert(def.name.name.clone(), def.clone());
+    }
+
+    /// Register a generic `impl` template (§3.8), e.g. `impl<T> Wrapper<T>`.
+    ///
+    /// The method signatures are registered under the base struct name (with the
+    /// impl's type parameters in scope, so `T` resolves to a placeholder) by reusing
+    /// the ordinary impl-registration path; the block is also stored so instantiating
+    /// the struct can materialize each method for a concrete instance.
+    pub(crate) fn register_generic_impl(&mut self, def: &ImplDef) {
+        let base = def.type_name.name.clone();
+        if !self.generic_structs.contains_key(&base) {
+            self.record_error(TypeError::UnknownStruct {
+                name: base.clone(),
+                span: def.type_name.span,
+            });
+            return;
+        }
+        self.generic_scope.clear();
+        for gp in &def.generics {
+            self.generic_scope.insert(gp.name.name.clone());
+        }
+        let _ = self.register_impl(def);
+        self.generic_scope.clear();
+        self.generic_impls
+            .entry(base)
+            .or_default()
+            .push(def.clone());
+    }
+
+    /// Type-check a generic `impl` block's method bodies once, abstractly (§3.8):
+    /// the impl's type parameters are in scope, so a field typed `T` resolves to a
+    /// placeholder — exactly the soundness contract of a bounds-free type parameter.
+    pub(crate) fn check_generic_impl(&mut self, def: &ImplDef) {
+        self.generic_scope.clear();
+        for gp in &def.generics {
+            self.generic_scope.insert(gp.name.name.clone());
+        }
+        self.check_impl(def);
+        self.generic_scope.clear();
+    }
+
+    /// Materialize a monomorphized instance of a generic struct with concrete type
+    /// arguments (§3.8), registering its concrete fields and impl methods on demand,
+    /// and return its distinct nominal [`Type::Struct`]. Idempotent per instance.
+    ///
+    /// Type arguments are restricted to `Copy` this phase, mirroring generic
+    /// functions: a bare type parameter has no move semantics, so a non-Copy argument
+    /// is rejected.
+    pub(crate) fn instantiate_generic_struct(
+        &mut self,
+        base: &str,
+        args: &[Type],
+        span: Span,
+    ) -> Type {
+        let template = match self.generic_structs.get(base) {
+            Some(t) => t.clone(),
+            None => {
+                self.record_error(TypeError::NotAGenericType {
+                    name: base.to_string(),
+                    span,
+                });
+                return Type::Unknown;
+            }
+        };
+        if args.len() != template.generics.len() {
+            self.record_error(TypeError::GenericArgCountMismatch {
+                name: base.to_string(),
+                expected: template.generics.len(),
+                found: args.len(),
+                span,
+            });
+            return Type::Unknown;
+        }
+
+        let mangled = mangle_struct_instance(base, args);
+        if self.instantiated_structs.insert(mangled.clone()) {
+            let mut subst: HashMap<String, Type> = HashMap::new();
+            for (gp, arg) in template.generics.iter().zip(args.iter()) {
+                if !self.is_type_copy(arg) {
+                    self.record_error(TypeError::GenericArgumentNotCopy {
+                        param: gp.name.name.clone(),
+                        ty: arg.clone(),
+                        span,
+                    });
+                }
+                subst.insert(gp.name.name.clone(), arg.clone());
+            }
+
+            let template_fields = self.struct_defs.get(base).cloned().unwrap_or_default();
+            let concrete_fields: Vec<(String, Type)> = template_fields
+                .iter()
+                .map(|(n, t)| (n.clone(), substitute_generic(t, &subst)))
+                .collect();
+            self.struct_defs.insert(mangled.clone(), concrete_fields);
+
+            if self.copy_structs.contains(base) {
+                self.copy_structs.insert(mangled.clone());
+            }
+            if self.clone_structs.contains(base) {
+                self.clone_structs.insert(mangled.clone());
+            }
+
+            self.instantiate_impls_for(base, &mangled, args);
+        }
+
+        Type::Struct(mangled)
+    }
+
+    /// Register the methods of every generic `impl` of `base` for the concrete
+    /// instance `mangled`, substituting the impl's type parameters (mapped positionally
+    /// from the impl's type arguments to the struct's concrete arguments) into each
+    /// method signature and rewriting the receiver's `Struct(base)` to `Struct(mangled)`.
+    fn instantiate_impls_for(&mut self, base: &str, mangled: &str, args: &[Type]) {
+        let impls = match self.generic_impls.get(base) {
+            Some(v) => v.clone(),
+            None => return,
+        };
+        for imp in &impls {
+            let mut impl_subst: HashMap<String, Type> = HashMap::new();
+            for (ta, arg) in imp.type_args.iter().zip(args.iter()) {
+                if let ast_types::Type::Named(id) = ta {
+                    if imp.generics.iter().any(|g| g.name.name == id.name) {
+                        impl_subst.insert(id.name.clone(), arg.clone());
+                    }
+                }
+            }
+            for method in &imp.methods {
+                if matches!(method.self_param, Some(SelfParam::Owned)) {
+                    continue;
+                }
+                let base_key = format!("{}__{}", base, method.name.name);
+                let inst_key = format!("{}__{}", mangled, method.name.name);
+                if self.functions.contains_key(&inst_key) {
+                    continue;
+                }
+                let sig = match self.functions.get(&base_key).cloned() {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let inst_sig = remap_method_type(&sig, &impl_subst, base, mangled);
+                self.functions.insert(inst_key.clone(), inst_sig);
+                if self.mut_self_methods.contains(&base_key) {
+                    self.mut_self_methods.insert(inst_key.clone());
+                }
+                self.impl_methods
+                    .entry(mangled.to_string())
+                    .or_default()
+                    .insert(method.name.name.clone(), inst_key);
+            }
+        }
+    }
+
     /// Register all method signatures from an `impl` block into the global
     /// function table under mangled names (`StructName__methodName`).
     ///
@@ -822,6 +1015,53 @@ pub(crate) fn substitute_generic(ty: &Type, subst: &HashMap<String, Type>) -> Ty
                 .collect(),
             ret: Box::new(substitute_generic(ret, subst)),
         },
+        other => other.clone(),
+    }
+}
+
+/// The distinct nominal name of a monomorphized generic-struct instance (§3.8),
+/// e.g. `Pair<i32, f64>`. This name is internal to the checker (it never reaches a
+/// backend), so it is chosen for readable diagnostics rather than symbol safety.
+fn mangle_struct_instance(base: &str, args: &[Type]) -> String {
+    let parts: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+    format!("{}<{}>", base, parts.join(", "))
+}
+
+/// Rewrite a monomorphized method's signature: substitute the impl's type parameters
+/// and rename the receiver's `Struct(base)` to the concrete `Struct(mangled)` (§3.8).
+fn remap_method_type(ty: &Type, subst: &HashMap<String, Type>, base: &str, mangled: &str) -> Type {
+    match ty {
+        Type::Function { params, ret } => Type::Function {
+            params: params
+                .iter()
+                .map(|p| remap_type(p, subst, base, mangled))
+                .collect(),
+            ret: Box::new(remap_type(ret, subst, base, mangled)),
+        },
+        other => remap_type(other, subst, base, mangled),
+    }
+}
+
+/// Substitute type parameters and rename the base struct to its concrete instance
+/// within a single type, recursing through references, arrays, and tuples (§3.8).
+fn remap_type(ty: &Type, subst: &HashMap<String, Type>, base: &str, mangled: &str) -> Type {
+    match ty {
+        Type::Generic(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
+        Type::Struct(name) if name == base => Type::Struct(mangled.to_string()),
+        Type::Reference { inner, mutable } => Type::Reference {
+            inner: Box::new(remap_type(inner, subst, base, mangled)),
+            mutable: *mutable,
+        },
+        Type::Array { element, size } => Type::Array {
+            element: Box::new(remap_type(element, subst, base, mangled)),
+            size: *size,
+        },
+        Type::Tuple(elements) => Type::Tuple(
+            elements
+                .iter()
+                .map(|e| remap_type(e, subst, base, mangled))
+                .collect(),
+        ),
         other => other.clone(),
     }
 }

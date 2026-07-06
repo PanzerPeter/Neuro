@@ -35,12 +35,23 @@ impl Lowerer {
         }
         for item in items {
             if let Item::Struct(def) = item {
-                self.register_struct(def)?;
+                if def.generics.is_empty() {
+                    self.register_struct(def)?;
+                } else {
+                    self.register_generic_struct(def);
+                }
             }
         }
         for item in items {
             if let Item::Impl(def) = item {
-                self.register_impl(def)?;
+                if def.generics.is_empty() && def.type_args.is_empty() {
+                    self.register_impl(def)?;
+                } else {
+                    self.generic_impls
+                        .entry(def.type_name.name.clone())
+                        .or_default()
+                        .push(def.clone());
+                }
             }
         }
         for item in items {
@@ -76,6 +87,192 @@ impl Lowerer {
         // `Copy` implies `Clone` (§2.3): a Copy type is trivially cloneable.
         if copy || clone {
             self.clone_structs.insert(def.name.name.clone());
+        }
+        Ok(())
+    }
+
+    /// Register a generic struct template (§3.8). Only the template is recorded; each
+    /// distinct set of type arguments is monomorphized on demand. Clone/Copy intent is
+    /// recorded under the base name so instances can inherit `.clone()` support.
+    fn register_generic_struct(&mut self, def: &StructDef) {
+        let mut clone = false;
+        for attr in &def.attributes {
+            if attr.name.name != DERIVE_ATTRIBUTE {
+                continue;
+            }
+            for arg in &attr.args {
+                if matches!(arg.name.as_str(), COPY_TRAIT | CLONE_TRAIT) {
+                    clone = true;
+                }
+            }
+        }
+        if clone {
+            self.clone_structs.insert(def.name.name.clone());
+        }
+        self.generic_structs
+            .insert(def.name.name.clone(), def.clone());
+    }
+
+    /// Materialize a monomorphized generic-struct instance (§3.8): register its
+    /// concrete fields and impl-method signatures, queue its HIR items for emission,
+    /// and return the mangled instance name. Idempotent per instance.
+    pub(crate) fn instantiate_generic_struct(
+        &mut self,
+        base: &str,
+        args: &[HirType],
+    ) -> Result<String, LoweringError> {
+        let template = match self.generic_structs.get(base) {
+            Some(t) => t.clone(),
+            None => {
+                return Err(LoweringError::UnresolvedType {
+                    name: base.to_string(),
+                })
+            }
+        };
+        let mangled = crate::mangle_struct_instance(base, args);
+        if self.instantiated_structs.insert(mangled.clone()) {
+            let mut subst: std::collections::HashMap<String, HirType> =
+                std::collections::HashMap::new();
+            for (gp, arg) in template.generics.iter().zip(args) {
+                subst.insert(gp.name.name.clone(), arg.clone());
+            }
+
+            let saved = std::mem::replace(&mut self.type_subst, subst.clone());
+            let mut fields = Vec::with_capacity(template.fields.len());
+            for field in &template.fields {
+                fields.push((field.name.name.clone(), self.resolve_type(&field.ty)?));
+            }
+            self.type_subst = saved;
+            self.structs.insert(mangled.clone(), fields);
+
+            if self.clone_structs.contains(base) {
+                self.clone_structs.insert(mangled.clone());
+            }
+
+            self.register_instance_methods(base, &mangled, args)?;
+            self.mono_struct_pending.push(crate::MonoStruct {
+                base: base.to_string(),
+                mangled: mangled.clone(),
+                args: args.to_vec(),
+                subst,
+            });
+        }
+        Ok(mangled)
+    }
+
+    /// Map an impl's type parameters to the struct instance's concrete arguments by
+    /// matching the impl's type arguments positionally (§3.8): `impl<T> Wrapper<T>`
+    /// with instance `Wrapper<i32>` binds `T` → `i32`.
+    fn build_impl_subst(
+        &self,
+        imp: &ImplDef,
+        args: &[HirType],
+    ) -> std::collections::HashMap<String, HirType> {
+        let mut subst = std::collections::HashMap::new();
+        for (ta, arg) in imp.type_args.iter().zip(args) {
+            if let ast_types::Type::Named(id) = ta {
+                if imp.generics.iter().any(|g| g.name.name == id.name) {
+                    subst.insert(id.name.clone(), arg.clone());
+                }
+            }
+        }
+        subst
+    }
+
+    /// Register the signature of every method of each generic `impl` of `base` for the
+    /// concrete instance `mangled`, so calls on the instance resolve (§3.8).
+    fn register_instance_methods(
+        &mut self,
+        base: &str,
+        mangled: &str,
+        args: &[HirType],
+    ) -> Result<(), LoweringError> {
+        let impls = self.generic_impls.get(base).cloned().unwrap_or_default();
+        for imp in &impls {
+            let impl_subst = self.build_impl_subst(imp, args);
+            for method in &imp.methods {
+                if matches!(method.self_param, Some(SelfParam::Owned)) {
+                    continue;
+                }
+                let inst_key = format!("{}__{}", mangled, method.name.name);
+                if self.functions.contains_key(&inst_key) {
+                    continue;
+                }
+                let saved = std::mem::replace(&mut self.type_subst, impl_subst.clone());
+                let mut params = Vec::new();
+                if method.self_param.is_some() {
+                    params.push(HirType::Struct(mangled.to_string()));
+                }
+                for param in &method.params {
+                    params.push(self.resolve_type(&param.ty)?);
+                }
+                let ret = match &method.return_type {
+                    Some(t) => self.resolve_type(t)?,
+                    None => HirType::Void,
+                };
+                self.type_subst = saved;
+                self.functions.insert(inst_key.clone(), (params, ret));
+                self.impl_methods
+                    .entry(mangled.to_string())
+                    .or_default()
+                    .insert(method.name.name.clone(), inst_key);
+            }
+        }
+        Ok(())
+    }
+
+    /// Emit the HIR items for one monomorphized struct instance (§3.8): an ordinary
+    /// `HirItem::Struct` plus one `HirItem::Impl` per generic impl, with method bodies
+    /// lowered under the impl's concrete type-parameter substitution.
+    fn emit_mono_struct(&mut self, ms: &crate::MonoStruct) -> Result<(), LoweringError> {
+        let template = match self.generic_structs.get(&ms.base) {
+            Some(t) => t.clone(),
+            None => {
+                return Err(LoweringError::UnresolvedType {
+                    name: ms.base.clone(),
+                })
+            }
+        };
+
+        let saved = std::mem::replace(&mut self.type_subst, ms.subst.clone());
+        let mut hir_fields = Vec::with_capacity(template.fields.len());
+        for field in &template.fields {
+            hir_fields.push(HirField {
+                name: field.name.name.clone(),
+                ty: self.resolve_type(&field.ty)?,
+                span: field.span,
+            });
+        }
+        self.type_subst = saved;
+        self.mono_items.push(HirItem::Struct(HirStruct {
+            name: ms.mangled.clone(),
+            fields: hir_fields,
+            span: template.span,
+        }));
+
+        let impls = self
+            .generic_impls
+            .get(&ms.base)
+            .cloned()
+            .unwrap_or_default();
+        for imp in &impls {
+            let impl_subst = self.build_impl_subst(imp, &ms.args);
+            let mut methods = Vec::new();
+            for method in &imp.methods {
+                if matches!(method.self_param, Some(SelfParam::Owned)) {
+                    continue;
+                }
+                let saved = std::mem::replace(&mut self.type_subst, impl_subst.clone());
+                let lowered = self.lower_method(&ms.mangled, method);
+                self.type_subst = saved;
+                methods.push(lowered?);
+            }
+            self.mono_items.push(HirItem::Impl(HirImpl {
+                type_name: ms.mangled.clone(),
+                trait_name: imp.trait_name.as_ref().map(|t| t.name.clone()),
+                methods,
+                span: imp.span,
+            }));
         }
         Ok(())
     }
@@ -133,7 +330,7 @@ impl Lowerer {
     /// The full signature of a method: the implicit `self` (the struct type) leads
     /// the parameter list for an instance method, then the declared parameters.
     fn method_signature(
-        &self,
+        &mut self,
         struct_name: &str,
         method: &MethodDef,
     ) -> Result<(Vec<HirType>, HirType), LoweringError> {
@@ -189,6 +386,10 @@ impl Lowerer {
                 Item::Function(func) => {
                     hir_items.push(HirItem::Function(self.lower_function(func)?))
                 }
+                // Generic struct / impl templates are likewise never lowered directly;
+                // each concrete instance is emitted from the monomorphization worklist.
+                Item::Struct(def) if !def.generics.is_empty() => {}
+                Item::Impl(def) if !def.generics.is_empty() || !def.type_args.is_empty() => {}
                 Item::Struct(def) => hir_items.push(HirItem::Struct(self.lower_struct(def)?)),
                 Item::Enum(def) => hir_items.push(HirItem::Enum(self.lower_enum(def)?)),
                 Item::Impl(def) => hir_items.push(HirItem::Impl(self.lower_impl(def)?)),
@@ -199,12 +400,22 @@ impl Lowerer {
             }
         }
 
-        // Drain the monomorphization worklist: lowering the ordinary items above (and
-        // each instance below) enqueues every generic instantiation it calls, so this
-        // loop runs until the transitive closure of instances is emitted (§3.8).
-        while let Some(instance) = self.mono_pending.pop() {
-            let hir_fn = self.lower_mono_instance(&instance)?;
-            self.mono_items.push(HirItem::Function(hir_fn));
+        // Drain the monomorphization worklists: lowering the ordinary items above (and
+        // each instance below) enqueues every generic function and struct instantiation
+        // it references, so this runs until the transitive closure is emitted (§3.8).
+        // Struct instances are drained first because emitting their method bodies can in
+        // turn enqueue generic-function instances.
+        loop {
+            if let Some(ms) = self.mono_struct_pending.pop() {
+                self.emit_mono_struct(&ms)?;
+                continue;
+            }
+            if let Some(instance) = self.mono_pending.pop() {
+                let hir_fn = self.lower_mono_instance(&instance)?;
+                self.mono_items.push(HirItem::Function(hir_fn));
+                continue;
+            }
+            break;
         }
         hir_items.append(&mut self.mono_items);
 
@@ -260,7 +471,7 @@ impl Lowerer {
         })
     }
 
-    fn lower_struct(&self, def: &StructDef) -> Result<HirStruct, LoweringError> {
+    fn lower_struct(&mut self, def: &StructDef) -> Result<HirStruct, LoweringError> {
         let mut fields = Vec::with_capacity(def.fields.len());
         for field in &def.fields {
             fields.push(HirField {
@@ -276,7 +487,7 @@ impl Lowerer {
         })
     }
 
-    fn lower_enum(&self, def: &EnumDef) -> Result<HirEnum, LoweringError> {
+    fn lower_enum(&mut self, def: &EnumDef) -> Result<HirEnum, LoweringError> {
         let mut variants = Vec::with_capacity(def.variants.len());
         for variant in &def.variants {
             let fields = match &variant.payload {

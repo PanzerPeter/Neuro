@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.57.0] - 2026-07-06
+
+### Added
+- `parser`/`semantic`/`codegen`: **generic structs and generic impls** with
+  monomorphization. A struct may declare type parameters —
+  `struct Pair<T, U> { first: T, second: U }` — and an inherent `impl` block may be
+  generic — `impl<T> Wrapper<T> { func get(&self) -> T { self.value } }`. Each distinct
+  set of concrete type arguments produces its own specialized struct and methods, so
+  type parameters carry zero runtime cost. Type arguments are inferred from the field
+  values at a struct literal (`Pair { first: 1, second: 2.0 }`) or written explicitly
+  in a type annotation (`Pair<i32, f64>`). A generic struct is usable only with type
+  arguments; its bare name is rejected. Type arguments are restricted to `Copy` types
+  this phase, matching generic functions.
+
+---
+
 ## [1.56.0] - 2026-07-03
 
 ### Added

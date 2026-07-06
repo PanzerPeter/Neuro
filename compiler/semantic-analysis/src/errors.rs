@@ -30,6 +30,25 @@ pub enum TypeError {
     #[error("type argument '{ty}' for generic parameter '{param}' at {span:?} is not Copy; generic type arguments are restricted to Copy types in this phase")]
     GenericArgumentNotCopy { param: String, ty: Type, span: Span },
 
+    #[error("generic struct '{name}' at {span:?} requires type arguments, e.g. `{name}<...>`")]
+    GenericStructNeedsArgs { name: String, span: Span },
+
+    #[error(
+        "generic struct '{name}' at {span:?} expects {expected} type argument(s), found {found}"
+    )]
+    GenericArgCountMismatch {
+        name: String,
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    #[error("type argument list applied to non-generic type '{name}' at {span:?}")]
+    NotAGenericType { name: String, span: Span },
+
+    #[error("nested generic type argument at {span:?} is not yet supported: a generic type may not be instantiated with an enclosing type parameter in this phase")]
+    NestedGenericTypeArg { span: Span },
+
     #[error("variable '{name}' already defined in this scope at {span:?}")]
     VariableAlreadyDefined { name: String, span: Span },
 

@@ -357,6 +357,82 @@ fn function_names(program: &HirProgram) -> Vec<String> {
         .collect()
 }
 
+/// Names of every struct in the lowered program (monomorphized instances included;
+/// generic templates are erased).
+fn struct_names(program: &HirProgram) -> Vec<String> {
+    program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            HirItem::Struct(s) => Some(s.name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn generic_struct_monomorphizes_per_type_argument() {
+    // `Pair<T, U>` used at two distinct argument sets yields two concrete structs,
+    // and the generic template does not survive into the HIR (§3.8).
+    let program = lower(
+        "struct Pair<T, U> { first: T, second: U }\n\
+         func main() -> i32 { val a = Pair { first: 1, second: 2.0 }\n\
+         val b = Pair { first: true, second: 3 }\n 0 }",
+    );
+    let names = struct_names(&program);
+    assert!(
+        !names.iter().any(|n| n == "Pair"),
+        "the generic template must not survive into the HIR: {names:?}"
+    );
+    let instances = names.iter().filter(|n| n.starts_with("Pair_g")).count();
+    assert_eq!(
+        instances, 2,
+        "one struct instance per distinct type-argument set: {names:?}"
+    );
+    // A monomorphized struct name must never contain `__`, which codegen uses to split
+    // a method symbol back into its receiver struct name.
+    assert!(
+        names.iter().all(|n| !n.contains("__")),
+        "instance names must avoid `__`: {names:?}"
+    );
+}
+
+#[test]
+fn generic_struct_literal_type_is_the_concrete_instance() {
+    let program = lower(
+        "struct Wrapper<T> { value: T }\n\
+         func main() -> i32 { val w = Wrapper { value: 9 }\n 0 }",
+    );
+    let body = function_body(&program, "main");
+    let init = binding_init(body, "w");
+    let HirType::Struct(name) = &init.ty else {
+        panic!("expected a struct type, got {:?}", init.ty);
+    };
+    assert!(
+        name.starts_with("Wrapper_g") && name.contains("i32"),
+        "literal should carry the monomorphized instance type, got {name}"
+    );
+}
+
+#[test]
+fn generic_impl_emits_one_impl_per_instance() {
+    // Two instances of `Cell<T>` each get their own emitted impl with a `get` method.
+    let program = lower(
+        "struct Cell<T> { value: T }\n\
+         impl<T> Cell<T> { func get(&self) -> T { self.value } }\n\
+         func main() -> i32 { val a = Cell { value: 1 }\n val b = Cell { value: true }\n a.get() }",
+    );
+    let impl_count = program
+        .items
+        .iter()
+        .filter(|i| matches!(i, HirItem::Impl(_)))
+        .count();
+    assert_eq!(
+        impl_count, 2,
+        "one impl block per monomorphized struct instance"
+    );
+}
+
 #[test]
 fn generic_function_monomorphizes_per_type_argument() {
     // `identity<T>` used at i32 and f64 produces two concrete instances and no

@@ -32,6 +32,17 @@ pub enum Type {
     /// concern not yet produced here.
     Tuple { elements: Vec<Type>, span: Span },
 
+    /// Generic type application `Name<T1, T2, ...>` (§3.8): a nominal type
+    /// constructor applied to type arguments, e.g. `Pair<i32, f64>`. Each argument
+    /// is itself a type (and may name an in-scope type parameter inside a generic
+    /// definition). `span` covers the name through the closing `>`. Monomorphization
+    /// substitutes the arguments to produce a distinct concrete type.
+    Generic {
+        name: Identifier,
+        args: Vec<Type>,
+        span: Span,
+    },
+
     /// Tensor type for multi-dimensional arrays.
     ///
     /// This variant is reserved for future language support and is not yet
@@ -52,6 +63,7 @@ impl Type {
             Type::Reference { span, .. } => *span,
             Type::Array { span, .. } => *span,
             Type::Tuple { span, .. } => *span,
+            Type::Generic { span, .. } => *span,
             Type::Tensor { span, .. } => *span,
         }
     }

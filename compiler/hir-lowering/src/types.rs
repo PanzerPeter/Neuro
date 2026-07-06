@@ -7,9 +7,11 @@ use crate::{Lowerer, LoweringError};
 
 impl Lowerer {
     /// Resolve a surface type annotation to its HIR type. Mirrors the checker's
-    /// `resolve_type`; a struct name resolves to [`HirType::Struct`]. Copy-element
-    /// validation is the checker's job and is not repeated here.
-    pub(crate) fn resolve_type(&self, ty: &ast_types::Type) -> Result<HirType, LoweringError> {
+    /// `resolve_type`; a struct name resolves to [`HirType::Struct`], and a generic
+    /// application `Name<...>` monomorphizes on demand (§3.8). Copy-element validation
+    /// is the checker's job and is not repeated here. Takes `&mut self` because
+    /// resolving a generic application may materialize a new struct instance.
+    pub(crate) fn resolve_type(&mut self, ty: &ast_types::Type) -> Result<HirType, LoweringError> {
         match ty {
             // Inside a monomorphized instance body, a type-parameter name resolves to
             // its concrete substitution (§3.8) — checked before the built-in names so a
@@ -66,6 +68,18 @@ impl Lowerer {
                     resolved.push(self.resolve_type(element)?);
                 }
                 Ok(HirType::Tuple(resolved))
+            }
+            // Generic application `Name<...>` (§3.8): resolve the arguments and
+            // monomorphize the generic struct into a distinct concrete instance. The
+            // arguments resolve under any active type-parameter substitution, so a
+            // `Wrapper<T>` inside a monomorphized body sees `T` already concrete.
+            ast_types::Type::Generic { name, args, .. } => {
+                let mut resolved = Vec::with_capacity(args.len());
+                for arg in args {
+                    resolved.push(self.resolve_type(arg)?);
+                }
+                let mangled = self.instantiate_generic_struct(&name.name, &resolved)?;
+                Ok(HirType::Struct(mangled))
             }
             ast_types::Type::Tensor { .. } => Err(LoweringError::UnresolvedType {
                 name: "Tensor".to_string(),

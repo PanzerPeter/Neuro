@@ -127,6 +127,19 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-07-06: Generic structs & impls §3.8. Generic structs are monomorphized by name-mangling:
+  a generic `StructDef` is stored in `generic_structs` and its placeholder-typed fields are also
+  kept in `struct_defs` under the base name so generic-`impl` method bodies check abstractly
+  (like a generic function body); the bare name is rejected via `GenericStructNeedsArgs`. A generic
+  `impl` (`impl<T> Wrapper<T>`) is stored in `generic_impls`; its method signatures register under
+  the base. `instantiate_generic_struct` (called from `resolve_type` for a `Type::Generic`
+  annotation and from `check_generic_struct_literal` after inferring the arguments from field
+  values) materializes a distinct nominal `Type::Struct("Base<args>")` — concrete fields
+  (`substitute_generic`) and per-instance methods (`remap_method_type`, renaming `Struct(base)` →
+  the instance) registered on demand — so downstream field access / method dispatch reuse the
+  ordinary struct machinery. Type arguments are `Copy`-restricted. New errors:
+  `GenericStructNeedsArgs`, `GenericArgCountMismatch`, `NotAGenericType`, `NestedGenericTypeArg`
+  (a generic instantiated with an enclosing type parameter is deferred).
 - 2026-07-03: Generic functions §3.8. New `Type::Generic(String)` (a nominal type-parameter
   placeholder, compatible only with itself). A generic `FunctionDef` is registered in a
   `generic_funcs` table (signature carrying `Generic` placeholders + the ordered parameter names),

@@ -715,8 +715,9 @@ func bad<T>(a: T, b: T) -> T {
 compatibility, but it is **not enforced** yet.
 
 **Restrictions (this phase).** Type arguments are restricted to `Copy` types. Generic structs and
-`impl` blocks, const (value) parameters, `where` clauses, and explicit turbofish type arguments
-are planned follow-on work.
+`impl` blocks are supported too (see [Structs](structs.md#generic-structs-and-impls)); const
+(value) parameters, `where` clauses, and explicit turbofish type arguments are planned follow-on
+work.
 
 ## References
 
