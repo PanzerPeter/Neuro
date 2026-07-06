@@ -436,6 +436,9 @@ impl Parser {
         };
 
         self.skip_newlines();
+        // Optional generic parameter list `<T, U: Bound>` (§3.8).
+        let generics = self.parse_generic_params()?;
+        self.skip_newlines();
         self.consume(TokenKind::LeftBrace, "'{'")?;
         self.skip_newlines();
 
@@ -482,6 +485,7 @@ impl Parser {
 
         Ok(StructDef {
             name,
+            generics,
             fields,
             attributes,
             span: start.span.merge(close.span),
@@ -716,6 +720,8 @@ impl Parser {
     /// Parse an `impl TypeName { … }` block
     pub(crate) fn parse_impl_def(&mut self) -> ParseResult<ImplDef> {
         let start = self.consume(TokenKind::Impl, "'impl'")?;
+        // Optional impl-level generic parameters `impl<T, U> ...` (§3.8).
+        let generics = self.parse_generic_params()?;
         self.skip_newlines();
 
         // The first identifier is the struct name for an inherent `impl T`, or the
@@ -735,8 +741,12 @@ impl Parser {
             });
         };
 
+        // Optional type arguments on the first name (`impl<T> Wrapper<T>` or the
+        // trait side of a trait impl). Parsed to know the type constructor's args.
+        let first_args = self.parse_optional_type_args()?;
+
         self.skip_newlines();
-        let (trait_name, type_name) = if self.check(&TokenKind::For) {
+        let (trait_name, type_name, type_args) = if self.check(&TokenKind::For) {
             self.advance(); // consume `for`
             self.skip_newlines();
             let ty_token = self.consume(TokenKind::Identifier(String::new()), "struct name")?;
@@ -752,9 +762,10 @@ impl Parser {
                     span: ty_token.span,
                 });
             };
-            (Some(first_ident), ty)
+            let ty_args = self.parse_optional_type_args()?;
+            (Some(first_ident), ty, ty_args)
         } else {
-            (None, first_ident)
+            (None, first_ident, first_args)
         };
 
         self.skip_newlines();
@@ -774,9 +785,34 @@ impl Parser {
         Ok(ImplDef {
             trait_name,
             type_name,
+            generics,
+            type_args,
             methods,
             span: start.span.merge(close.span),
         })
+    }
+
+    /// Parse an optional `<T1, T2, ...>` type-argument list applied to a type name
+    /// (§3.8), e.g. the `<T>` in `impl<T> Wrapper<T>`. Returns an empty vector when no
+    /// `<` follows. Shares the delimiter grammar with [`Parser::parse_type`].
+    pub(crate) fn parse_optional_type_args(&mut self) -> ParseResult<Vec<crate::ast::Type>> {
+        if !self.check(&TokenKind::Less) {
+            return Ok(Vec::new());
+        }
+        self.consume(TokenKind::Less, "'<'")?;
+        self.skip_newlines();
+        let mut args = Vec::new();
+        loop {
+            args.push(self.parse_type()?);
+            self.skip_newlines();
+            if !self.check(&TokenKind::Comma) {
+                break;
+            }
+            self.advance(); // consume ','
+            self.skip_newlines();
+        }
+        self.consume(TokenKind::Greater, "'>' to close type arguments")?;
+        Ok(args)
     }
 
     /// Parse a single method definition inside an `impl` block.

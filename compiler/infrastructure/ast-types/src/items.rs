@@ -68,6 +68,10 @@ pub struct FieldDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructDef {
     pub name: Identifier,
+    /// `generics` is the `<T, U>` type-parameter list (§3.8); empty for a
+    /// non-generic struct. A generic struct is a *template* — later passes
+    /// monomorphize it into one concrete struct per distinct set of type arguments.
+    pub generics: Vec<GenericParam>,
     pub fields: Vec<FieldDef>,
     /// `@derive(...)` attributes attached to the struct (e.g. `@derive(Copy, Clone)`).
     /// Interpreted by semantic analysis to determine Copy/Clone-ness (§2.3).
@@ -117,6 +121,14 @@ pub struct MethodDef {
 pub struct ImplDef {
     pub trait_name: Option<Identifier>,
     pub type_name: Identifier,
+    /// `generics` is the impl-level `<T, U>` type-parameter list (§3.8), as in
+    /// `impl<T> Wrapper<T>`; empty for a non-generic impl.
+    pub generics: Vec<GenericParam>,
+    /// Type arguments applied to `type_name`, as in the `<T>` of `impl<T> Wrapper<T>`.
+    /// Empty for a plain `impl Name` block. Each argument typically names an impl
+    /// generic parameter; monomorphization maps them positionally to the struct's
+    /// concrete type arguments.
+    pub type_args: Vec<Type>,
     pub methods: Vec<MethodDef>,
     pub span: Span,
 }

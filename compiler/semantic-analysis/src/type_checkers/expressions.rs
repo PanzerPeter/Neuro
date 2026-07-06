@@ -665,6 +665,109 @@ impl TypeChecker {
         Type::Newtype(name.to_string())
     }
 
+    /// Type-check a generic struct literal (§3.8): infer each type parameter by
+    /// unifying the template's field types against the provided field values, then
+    /// monomorphize into a concrete instance. Type arguments are Copy-restricted
+    /// (enforced by [`Self::instantiate_generic_struct`]).
+    fn check_generic_struct_literal(
+        &mut self,
+        name: &shared_types::Identifier,
+        fields: &[ast_types::FieldInit],
+        base: &Option<Box<ast_types::Expr>>,
+        span: shared_types::Span,
+    ) -> Type {
+        let template_fields = self
+            .struct_defs
+            .get(&name.name)
+            .cloned()
+            .unwrap_or_default();
+        let generics: Vec<String> = self
+            .generic_structs
+            .get(&name.name)
+            .map(|d| d.generics.iter().map(|g| g.name.name.clone()).collect())
+            .unwrap_or_default();
+
+        let mut subst: HashMap<String, Type> = HashMap::new();
+        let mut seen: HashMap<String, Span> = HashMap::new();
+        for ast_types::FieldInit {
+            name: fname,
+            value,
+            span: fspan,
+        } in fields
+        {
+            if seen.insert(fname.name.clone(), *fspan).is_some() {
+                self.record_error(TypeError::DuplicateStructField {
+                    field_name: fname.name.clone(),
+                    span: *fspan,
+                });
+                continue;
+            }
+            match template_fields.iter().find(|(n, _)| n == &fname.name) {
+                Some((_, expected)) => {
+                    let expected = expected.clone();
+                    let actual = self.check_expr(value, None).unwrap_or(Type::Unknown);
+                    if !matches!(actual, Type::Unknown)
+                        && !super::declarations::unify_generic(&expected, &actual, &mut subst)
+                    {
+                        self.record_error(TypeError::Mismatch {
+                            expected: super::declarations::substitute_generic(&expected, &subst),
+                            found: actual,
+                            span: value.span(),
+                        });
+                    }
+                    self.record_move(value);
+                }
+                None => {
+                    self.record_error(TypeError::UnknownField {
+                        struct_name: name.name.clone(),
+                        field_name: fname.name.clone(),
+                        span: *fspan,
+                    });
+                    let _ = self.check_expr(value, None);
+                }
+            }
+        }
+
+        // Without a `..base` source every field must be provided.
+        if base.is_none() {
+            for (field_name, _) in &template_fields {
+                if !seen.contains_key(field_name) {
+                    self.record_error(TypeError::MissingStructField {
+                        struct_name: name.name.clone(),
+                        field_name: field_name.clone(),
+                        span,
+                    });
+                }
+            }
+        }
+
+        // Every type parameter must have been inferred from a field value.
+        let mut args = Vec::with_capacity(generics.len());
+        for g in &generics {
+            match subst.get(g) {
+                Some(t) => args.push(t.clone()),
+                None => return Type::Unknown,
+            }
+        }
+
+        let inst = self.instantiate_generic_struct(&name.name, &args, span);
+
+        // A `..base` source, when present, must be the same monomorphized instance.
+        if let Some(base_expr) = base {
+            if let Some(base_ty) = self.check_expr(base_expr, Some(&inst)) {
+                if !base_ty.is_compatible_with(&inst) {
+                    self.record_error(TypeError::Mismatch {
+                        expected: inst.clone(),
+                        found: base_ty,
+                        span: base_expr.span(),
+                    });
+                }
+            }
+        }
+
+        inst
+    }
+
     /// Check an expression and return its type.
     /// Returns None if there was an error (which has been recorded).
     /// Use this for better error recovery - checking can continue with Unknown type.
@@ -1242,6 +1345,12 @@ impl TypeChecker {
                 base,
                 span,
             } => {
+                // A generic struct literal `Pair { first: 1, second: 2.0 }` infers its
+                // type arguments from the field values and monomorphizes (§3.8).
+                if self.is_generic_struct(&name.name) {
+                    return Some(self.check_generic_struct_literal(name, fields, base, *span));
+                }
+
                 let def = if let Some(d) = self.struct_defs.get(&name.name).cloned() {
                     d
                 } else {

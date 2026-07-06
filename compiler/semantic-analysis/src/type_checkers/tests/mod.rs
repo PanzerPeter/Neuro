@@ -1238,3 +1238,91 @@ func main() -> i32 { return pair(1) }
         "a wrong-arity generic call must be reported; got {errors:?}"
     );
 }
+
+#[test]
+fn generic_struct_literal_infers_and_field_access_types() {
+    // A generic struct literal infers its type arguments; a field read yields the
+    // concrete field type, so `p.first + 1` type-checks as i32 arithmetic (§3.8).
+    let errors = semantic_errors(
+        r#"
+struct Pair<T, U> { first: T, second: U }
+func main() -> i32 {
+    val p = Pair { first: 10, second: 2.5 }
+    return p.first + 1
+}
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+#[test]
+fn generic_impl_method_dispatches_on_instance() {
+    // A generic inherent impl's method returns the concrete element type.
+    let errors = semantic_errors(
+        r#"
+struct Wrapper<T> { value: T }
+impl<T> Wrapper<T> { func get(&self) -> T { self.value } }
+func main() -> i32 {
+    val w = Wrapper { value: 7 }
+    return w.get()
+}
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+#[test]
+fn bare_generic_struct_without_arguments_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+struct Box<T> { v: T }
+func take(b: Box) -> i32 { 0 }
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::GenericStructNeedsArgs { .. })),
+        "a generic struct used without type arguments must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn non_copy_generic_struct_argument_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+struct Box<T> { v: T }
+func main() -> i32 {
+    val b = Box { v: "hi" }
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::GenericArgumentNotCopy { .. })),
+        "a non-Copy struct type argument must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn generic_struct_field_type_mismatch_is_rejected() {
+    // Once a type parameter is bound by one field, another field's value must agree.
+    let errors = semantic_errors(
+        r#"
+struct Same<T> { a: T, b: T }
+func main() -> i32 {
+    val s = Same { a: 1, b: true }
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })),
+        "conflicting inferred type arguments must be rejected; got {errors:?}"
+    );
+}

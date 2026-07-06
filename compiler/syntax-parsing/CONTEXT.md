@@ -51,6 +51,12 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-07-06: Generic structs & impls §3.8. `parse_struct_def` parses an optional generic
+  parameter list after the struct name (`StructDef.generics`); `parse_impl_def` parses impl-level
+  generics after `impl` and optional type arguments on the type name (`ImplDef.generics` /
+  `type_args`, via the new `parse_optional_type_args`). `parse_type` now builds a
+  `Type::Generic { name, args, span }` when a `<` follows a type name, so `Pair<i32, f64>`
+  annotations parse. `>` closes the list (nested `Foo<Bar<T>>` lexes as two `>` tokens, no `>>`).
 - 2026-07-03: Generic functions §3.8. `parse_function` now parses an optional generic parameter
   list `<T, U: Bound + Other>` (new `parse_generic_params`) between the function name and its
   parameter list, filling `FunctionDef.generics`. Bounds after `:` are `+`-separated trait names,

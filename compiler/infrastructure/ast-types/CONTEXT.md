@@ -28,6 +28,11 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-07-06: Generic structs & impls §3.8. Added `StructDef.generics: Vec<GenericParam>`
+  (empty for a non-generic struct), `ImplDef.generics: Vec<GenericParam>` + `ImplDef.type_args:
+  Vec<Type>` (the `<T>` of `impl<T> Wrapper<T>`), and a new `Type::Generic { name, args, span }`
+  variant for a generic type application `Name<T1, ...>`. A bare type-parameter reference stays a
+  plain `Type::Named`. Interpreted by semantic-analysis and hir-lowering (monomorphization).
 - 2026-07-03: Generic functions §3.8. Added `GenericParam { name, bounds, span }` and
   `FunctionDef.generics: Vec<GenericParam>` (empty for a non-generic function). A generic
   function is a template; a type-parameter reference in an annotation is a plain `Type::Named`

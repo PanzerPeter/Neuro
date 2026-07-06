@@ -163,6 +163,11 @@ fn rewrite_type(ty: &mut Type, resolved: &HashMap<String, Type>) {
                 rewrite_type(element, resolved);
             }
         }
+        Type::Generic { args, .. } => {
+            for arg in args {
+                rewrite_type(arg, resolved);
+            }
+        }
         Type::Tensor { element_type, .. } => rewrite_type(element_type, resolved),
     }
 }
@@ -421,6 +426,7 @@ mod tests {
             Type::Reference { .. } => "<reference>",
             Type::Array { .. } => "<array>",
             Type::Tuple { .. } => "<tuple>",
+            Type::Generic { .. } => "<generic>",
             Type::Tensor { .. } => "<tensor>",
         }
     }

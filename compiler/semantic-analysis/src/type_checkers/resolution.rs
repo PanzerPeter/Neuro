@@ -33,6 +33,15 @@ impl TypeChecker {
                     // generic placeholder rather than erroring as unknown (§3.8).
                     if self.generic_scope.contains(name) {
                         Some(Type::Generic(name.to_string()))
+                    } else if self.is_generic_struct(name) {
+                        // A generic struct is only usable with type arguments (§3.8);
+                        // its bare name (also kept in `struct_defs` as the placeholder
+                        // template) must not resolve to a concrete type.
+                        self.record_error(TypeError::GenericStructNeedsArgs {
+                            name: name.to_string(),
+                            span: ident.span,
+                        });
+                        None
                     } else if self.struct_defs.contains_key(name) {
                         Some(Type::Struct(name.to_string()))
                     } else if self.enum_defs.contains_key(name) {
@@ -96,6 +105,31 @@ impl TypeChecker {
                 }
                 Some(Type::Tuple(resolved))
             }
+            // Generic type application `Name<T1, ...>` (§3.8): resolve the arguments
+            // and monomorphize the generic struct into a distinct nominal instance.
+            ast_types::Type::Generic { name, args, span } => {
+                let mut resolved = Vec::with_capacity(args.len());
+                for arg in args {
+                    resolved.push(self.resolve_type(arg)?);
+                }
+                if !self.is_generic_struct(&name.name) {
+                    self.record_error(TypeError::NotAGenericType {
+                        name: name.name.clone(),
+                        span: *span,
+                    });
+                    return None;
+                }
+                // A type argument that is itself an unresolved type parameter means a
+                // nested generic instantiated with the enclosing parameter (e.g. a
+                // `Wrapper<T>` field inside a generic struct). Monomorphizing the outer
+                // type cannot substitute into an opaque nested instance, so this is a
+                // documented limitation deferred with broader generic support.
+                if resolved.iter().any(|t| matches!(t, Type::Generic(_))) {
+                    self.record_error(TypeError::NestedGenericTypeArg { span: *span });
+                    return None;
+                }
+                Some(self.instantiate_generic_struct(&name.name, &resolved, *span))
+            }
             ast_types::Type::Tensor { span, .. } => {
                 // Tensor types are Phase 3, not supported in Phase 1
                 self.record_error(TypeError::UnknownTypeName {
@@ -105,5 +139,11 @@ impl TypeChecker {
                 None
             }
         }
+    }
+
+    /// Whether `name` is a registered generic struct template (§3.8) — a type that is
+    /// usable only with type arguments.
+    pub(crate) fn is_generic_struct(&self, name: &str) -> bool {
+        self.generic_structs.contains_key(name)
     }
 }

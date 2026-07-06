@@ -115,6 +115,18 @@ struct Lowerer {
     /// never lowered as-is; each distinct set of type arguments produces one
     /// monomorphized concrete function instead.
     generic_templates: HashMap<String, ast_types::FunctionDef>,
+    /// Generic struct templates (§3.8), keyed by name. Each distinct set of type
+    /// arguments produces one monomorphized concrete struct emitted as an ordinary
+    /// [`neuro_hir::HirItem::Struct`], so backends need no generic awareness.
+    generic_structs: HashMap<String, ast_types::StructDef>,
+    /// Generic `impl` templates keyed by base struct name (§3.8). Instantiating a
+    /// generic struct also emits each matching impl's methods for the instance.
+    generic_impls: HashMap<String, Vec<ast_types::ImplDef>>,
+    /// Mangled names of generic-struct instances already materialized (registered in
+    /// [`Self::structs`] and queued for emission), so each is produced exactly once.
+    instantiated_structs: HashSet<String>,
+    /// Generic-struct instances discovered but whose HIR items are not yet emitted.
+    mono_struct_pending: Vec<MonoStruct>,
     /// Active type-parameter substitution while a monomorphized instance body is being
     /// lowered: parameter name → concrete type. Empty outside instance lowering; a
     /// `Named` annotation matching an entry resolves to the concrete type.
@@ -134,6 +146,17 @@ struct Lowerer {
 struct MonoInstance {
     mangled: String,
     fn_name: String,
+    subst: HashMap<String, HirType>,
+}
+
+/// One pending generic-struct instantiation (§3.8): the base template name, the
+/// mangled instance name, the concrete type arguments (in declaration order), and the
+/// type-parameter substitution. Emission produces one `HirItem::Struct` plus one
+/// `HirItem::Impl` per matching generic impl.
+struct MonoStruct {
+    base: String,
+    mangled: String,
+    args: Vec<HirType>,
     subst: HashMap<String, HirType>,
 }
 
@@ -167,6 +190,10 @@ impl Lowerer {
             loop_stack: Vec::new(),
             current_return: HirType::Void,
             generic_templates: HashMap::new(),
+            generic_structs: HashMap::new(),
+            generic_impls: HashMap::new(),
+            instantiated_structs: HashSet::new(),
+            mono_struct_pending: Vec::new(),
             type_subst: HashMap::new(),
             mono_pending: Vec::new(),
             mono_seen: HashSet::new(),
@@ -319,4 +346,15 @@ fn mangle_type(ty: &HirType) -> String {
         }
         HirType::Function { .. } => "fn".to_string(),
     }
+}
+
+/// The mangled symbol name of a monomorphized generic-struct instance (§3.8): the base
+/// name, a `_g_` marker, and each type argument's mangled form.
+///
+/// Unlike [`mangle_instance`] (which uses `__g` for free functions), this never
+/// contains `__`: codegen recovers a method's receiver struct by splitting the method
+/// symbol on `__`, so a struct name with `__` in it would corrupt that recovery.
+fn mangle_struct_instance(base: &str, args: &[HirType]) -> String {
+    let parts: Vec<String> = args.iter().map(mangle_type).collect();
+    format!("{}_g_{}", base, parts.join("_"))
 }
