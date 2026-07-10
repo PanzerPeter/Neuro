@@ -26,3 +26,14 @@ updates:
       cargo:
         patterns:
           - "*"
+    # These two are pinned deliberately (see the rationale comments in the root
+    # Cargo.toml) and must not be auto-bumped:
+    #   * logos 0.16 is a lexer-engine rewrite (source attr removed, changed
+    #     regex semantics, MSRV 1.80) — needs a hand-migrated + retested lexer.
+    #   * melior 0.26+ targets MLIR 21/22; this compiler is built against
+    #     LLVM/MLIR 20, so newer melior fails to link.
+    ignore:
+      - dependency-name: "logos"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "melior"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]

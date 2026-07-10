@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.58.1] - 2026-07-10
+
+### Changed
+- `build`: bump patch-level dependencies `log` 0.4.32→0.4.33,
+  `env_logger` 0.11.10→0.11.11, `clap_complete` 4.6.5→4.6.7, and
+  `cc` 1.2.63→1.2.66 (lockfile only; all within existing version requirements).
+- `ci`: pin Dependabot away from auto-bumping `logos` and `melior`, which are
+  held back deliberately (logos 0.16 is a breaking lexer-engine rewrite; melior
+  0.26+ targets MLIR 21/22 while the compiler is built against LLVM/MLIR 20).
+
+---
+
 ## [1.58.0] - 2026-07-10
 
 ### Added
