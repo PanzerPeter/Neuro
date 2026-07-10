@@ -1,6 +1,6 @@
 use super::{TypeChecker, VariantForm};
 use crate::errors::TypeError;
-use crate::types::Type;
+use crate::types::{ArrayLen, Type};
 use ast_types::FieldInit;
 use ast_types::{BinaryOp, Expr, UnaryOp};
 use shared_types::{Identifier, Literal, Span};
@@ -499,13 +499,23 @@ impl TypeChecker {
     pub(crate) fn check_plain_call(
         &mut self,
         func_name: &str,
+        type_args: &[ast_types::GenericArg],
         args: &[ast_types::Expr],
         span: shared_types::Span,
     ) -> Option<Type> {
-        // A call to a generic function (§3.8): infer its type arguments from the call
-        // arguments and yield the substituted return type.
+        // A call to a generic function (§3.8): unify its parameters against the call
+        // arguments (and any explicit turbofish), then yield the substituted return type.
         if self.generic_funcs.contains_key(func_name) {
-            return Some(self.check_generic_call(func_name, args, span));
+            return Some(self.check_generic_call(func_name, type_args, args, span));
+        }
+        // A turbofish on a non-generic callee has nothing to bind.
+        if !type_args.is_empty() {
+            self.record_error(TypeError::TurbofishCountMismatch {
+                name: func_name.to_string(),
+                expected: 0,
+                found: type_args.len(),
+                span,
+            });
         }
 
         // Newtype construction `Name(value)` (§3.15): a call whose callee names a
@@ -576,6 +586,7 @@ impl TypeChecker {
     fn check_generic_call(
         &mut self,
         func_name: &str,
+        type_args: &[ast_types::GenericArg],
         args: &[ast_types::Expr],
         span: shared_types::Span,
     ) -> Type {
@@ -592,7 +603,17 @@ impl TypeChecker {
             });
         }
 
+        // Seed the substitution with explicit turbofish arguments (§3.8), then infer the
+        // rest from the call arguments. A const parameter binds to `Type::ConstValue`.
         let mut subst: std::collections::HashMap<String, Type> = std::collections::HashMap::new();
+        self.seed_turbofish(
+            &sig.param_names,
+            &sig.const_types,
+            type_args,
+            &mut subst,
+            span,
+        );
+
         for (arg, param) in args.iter().zip(sig.params.iter()) {
             let arg_ty = self.check_expr(arg, None).unwrap_or(Type::Unknown);
             if !matches!(arg_ty, Type::Unknown)
@@ -608,10 +629,12 @@ impl TypeChecker {
             self.record_move(arg);
         }
 
-        // Every type parameter must have been inferred, and each argument type must be
-        // Copy (the abstract-body soundness condition).
+        // Every parameter must be bound (by inference or turbofish); a type argument must
+        // be Copy (the abstract-body soundness condition). A const parameter binds to a
+        // `ConstValue`, which is exempt from the Copy check.
         for pname in &sig.param_names {
             match subst.get(pname) {
+                Some(Type::ConstValue(_)) => {}
                 Some(ty) if !self.is_type_copy(ty) => {
                     self.record_error(TypeError::GenericArgumentNotCopy {
                         param: pname.clone(),
@@ -621,14 +644,81 @@ impl TypeChecker {
                 }
                 Some(_) => {}
                 None => {
-                    // Unresolved parameter — a well-formed inferable call always binds
-                    // every parameter, so this only fires alongside an earlier arity or
-                    // argument error; the substituted return keeps `Generic` visible.
+                    self.record_error(TypeError::GenericParamNotInferable {
+                        name: pname.clone(),
+                        span,
+                    });
                 }
             }
         }
 
+        // Value predicates (`where N > 0`) are checked against the concrete const values.
+        self.check_where_predicates(&sig.where_predicates, &subst);
+
         super::declarations::substitute_generic(&sig.ret, &subst)
+    }
+
+    /// Bind explicit turbofish generic arguments into `subst` (§3.8), positionally against
+    /// the callee's declared parameters. A const parameter takes a const argument (bound
+    /// to [`Type::ConstValue`]); a type parameter takes a type argument. Kind or count
+    /// mismatches are reported.
+    fn seed_turbofish(
+        &mut self,
+        param_names: &[String],
+        const_types: &std::collections::HashMap<String, Type>,
+        type_args: &[ast_types::GenericArg],
+        subst: &mut std::collections::HashMap<String, Type>,
+        span: shared_types::Span,
+    ) {
+        if type_args.is_empty() {
+            return;
+        }
+        if type_args.len() != param_names.len() {
+            self.record_error(TypeError::TurbofishCountMismatch {
+                name: param_names.first().cloned().unwrap_or_default(),
+                expected: param_names.len(),
+                found: type_args.len(),
+                span,
+            });
+            return;
+        }
+        for (pname, arg) in param_names.iter().zip(type_args.iter()) {
+            let is_const = const_types.contains_key(pname);
+            match arg {
+                ast_types::GenericArg::Const { value, .. } if is_const => {
+                    subst.insert(pname.clone(), Type::ConstValue(*value as u64));
+                }
+                ast_types::GenericArg::Type(ty) if !is_const => {
+                    if let Some(resolved) = self.resolve_type(ty) {
+                        subst.insert(pname.clone(), resolved);
+                    }
+                }
+                _ => {
+                    let expected = if is_const { "const" } else { "type" };
+                    self.record_error(TypeError::TurbofishKindMismatch {
+                        param: pname.clone(),
+                        expected: expected.to_string(),
+                        span,
+                    });
+                }
+            }
+        }
+    }
+
+    /// Evaluate every value predicate from a `where` clause (§3.8) against the concrete
+    /// const values in `subst`. A predicate that resolves to `false` is an error; one that
+    /// cannot be fully evaluated (still symbolic) is skipped — it is re-checked at the
+    /// concrete instantiation.
+    pub(crate) fn check_where_predicates(
+        &mut self,
+        predicates: &[ast_types::Expr],
+        subst: &std::collections::HashMap<String, Type>,
+    ) {
+        for pred in predicates {
+            if let Some(false) = eval_const_predicate(pred, subst) {
+                self.record_error(TypeError::ConstPredicateViolated { span: pred.span() });
+            }
+        }
     }
 
     /// Type-check a newtype construction `Name(value)` (§3.15): exactly one argument,
@@ -705,7 +795,18 @@ impl TypeChecker {
             match template_fields.iter().find(|(n, _)| n == &fname.name) {
                 Some((_, expected)) => {
                     let expected = expected.clone();
-                    let actual = self.check_expr(value, None).unwrap_or(Type::Unknown);
+                    // A field whose type is fully concrete (mentions no type/const
+                    // parameter) gives the value its contextual type so a bare literal
+                    // infers correctly; a parameterized field is checked with no
+                    // expectation so it drives inference instead (§3.8).
+                    let expected_ctx = if mentions_type_parameter(&expected) {
+                        None
+                    } else {
+                        Some(&expected)
+                    };
+                    let actual = self
+                        .check_expr(value, expected_ctx)
+                        .unwrap_or(Type::Unknown);
                     if !matches!(actual, Type::Unknown)
                         && !super::declarations::unify_generic(&expected, &actual, &mut subst)
                     {
@@ -811,6 +912,10 @@ impl TypeChecker {
                     Some(ty)
                 } else if let Some(const_ty) = self.constants.get(&ident.name).cloned() {
                     Some(const_ty)
+                } else if let Some(const_param_ty) = self.const_scope.get(&ident.name).cloned() {
+                    // A const generic parameter used as a value in a generic body (§3.8)
+                    // has its declared integer type.
+                    Some(const_param_ty)
                 } else {
                     self.record_error(TypeError::UndefinedVariable {
                         name: ident.name.clone(),
@@ -1108,9 +1213,16 @@ impl TypeChecker {
                 }
             }
 
-            Expr::Call { func, args, span } => {
+            Expr::Call {
+                func,
+                type_args,
+                args,
+                span,
+            } => {
                 match &**func {
-                    Expr::Identifier(ident) => self.check_plain_call(&ident.name, args, *span),
+                    Expr::Identifier(ident) => {
+                        self.check_plain_call(&ident.name, type_args, args, *span)
+                    }
 
                     // Method call: `instance.method(args)`
                     // The object type determines which struct's methods to search.
@@ -1692,16 +1804,18 @@ impl TypeChecker {
                 if elements.is_empty() {
                     return match expected {
                         Some(Type::Array { element, size }) => {
-                            if *size != 0 {
-                                self.record_error(TypeError::ArrayLengthMismatch {
-                                    expected: *size,
-                                    found: 0,
-                                    span: *span,
-                                });
+                            if let ArrayLen::Fixed(n) = size {
+                                if *n != 0 {
+                                    self.record_error(TypeError::ArrayLengthMismatch {
+                                        expected: *n,
+                                        found: 0,
+                                        span: *span,
+                                    });
+                                }
                             }
                             Some(Type::Array {
                                 element: element.clone(),
-                                size: 0,
+                                size: ArrayLen::Fixed(0),
                             })
                         }
                         _ => {
@@ -1744,7 +1858,7 @@ impl TypeChecker {
 
                 let size = elements.len();
                 if let Some(Type::Array {
-                    size: expected_size,
+                    size: ArrayLen::Fixed(expected_size),
                     ..
                 }) = expected
                 {
@@ -1759,7 +1873,7 @@ impl TypeChecker {
 
                 Some(Type::Array {
                     element: Box::new(element_ty),
-                    size,
+                    size: ArrayLen::Fixed(size),
                 })
             }
 
@@ -1812,8 +1926,11 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
                 match arr_ty.referent() {
-                    Type::Array { element, size } => {
-                        let n = *size;
+                    Type::Array {
+                        element,
+                        size: ArrayLen::Fixed(n),
+                    } => {
+                        let n = *n;
                         let mismatch = if *exact { n != *start } else { *start > n };
                         if mismatch {
                             self.record_error(TypeError::ArrayPatternLengthMismatch {
@@ -1825,9 +1942,13 @@ impl TypeChecker {
                         }
                         Some(Type::Array {
                             element: element.clone(),
-                            size: n - *start,
+                            size: ArrayLen::Fixed(n - *start),
                         })
                     }
+                    // A rest pattern over a const-generic-sized array `[T; N]` cannot be
+                    // split at compile time inside the template; it is resolved once
+                    // monomorphized. Not supported as a template-body pattern this phase.
+                    Type::Array { .. } => Some(Type::Unknown),
                     other => {
                         self.record_error(TypeError::NotIndexable {
                             found: other.clone(),
@@ -1937,5 +2058,91 @@ impl TypeChecker {
         }
         self.symbols.pop_scope();
         result
+    }
+}
+
+/// Evaluate a `where`-clause value predicate (§3.8) to a boolean, given the const
+/// parameter values in `subst`. Returns `None` when the predicate is not a fully
+/// resolved boolean over const values (it is then deferred to the concrete instance).
+pub(crate) fn eval_const_predicate(expr: &Expr, subst: &HashMap<String, Type>) -> Option<bool> {
+    match expr {
+        Expr::Literal(Literal::Boolean(b), _) => Some(*b),
+        Expr::Paren(inner, _) => eval_const_predicate(inner, subst),
+        Expr::Binary {
+            left, op, right, ..
+        } => match op {
+            BinaryOp::And => {
+                Some(eval_const_predicate(left, subst)? && eval_const_predicate(right, subst)?)
+            }
+            BinaryOp::Or => {
+                Some(eval_const_predicate(left, subst)? || eval_const_predicate(right, subst)?)
+            }
+            BinaryOp::Less
+            | BinaryOp::Greater
+            | BinaryOp::LessEqual
+            | BinaryOp::GreaterEqual
+            | BinaryOp::Equal
+            | BinaryOp::NotEqual => {
+                let l = eval_const_int(left, subst)?;
+                let r = eval_const_int(right, subst)?;
+                Some(match op {
+                    BinaryOp::Less => l < r,
+                    BinaryOp::Greater => l > r,
+                    BinaryOp::LessEqual => l <= r,
+                    BinaryOp::GreaterEqual => l >= r,
+                    BinaryOp::Equal => l == r,
+                    BinaryOp::NotEqual => l != r,
+                    _ => unreachable!(),
+                })
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Evaluate a const-integer expression (§3.8): an integer literal, a const parameter
+/// looked up in `subst`, or an arithmetic combination of these. `None` when it is not a
+/// fully resolved const integer.
+fn eval_const_int(expr: &Expr, subst: &HashMap<String, Type>) -> Option<i128> {
+    match expr {
+        Expr::Literal(Literal::Integer(v, _), _) => Some(*v as i128),
+        Expr::Paren(inner, _) => eval_const_int(inner, subst),
+        Expr::Identifier(id) => match subst.get(&id.name) {
+            Some(Type::ConstValue(v)) => Some(*v as i128),
+            _ => None,
+        },
+        Expr::Binary {
+            left, op, right, ..
+        } => {
+            let l = eval_const_int(left, subst)?;
+            let r = eval_const_int(right, subst)?;
+            match op {
+                BinaryOp::Add => Some(l + r),
+                BinaryOp::Subtract => Some(l - r),
+                BinaryOp::Multiply => Some(l * r),
+                BinaryOp::Divide if r != 0 => Some(l / r),
+                BinaryOp::Modulo if r != 0 => Some(l % r),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Whether a resolved type still mentions a generic type parameter, a const-parameter
+/// array length, or an unresolved const value (§3.8) — i.e. it is not fully concrete.
+fn mentions_type_parameter(ty: &Type) -> bool {
+    match ty {
+        Type::Generic(_) | Type::ConstValue(_) => true,
+        Type::Reference { inner, .. } => mentions_type_parameter(inner),
+        Type::Array { element, size } => {
+            matches!(size, ArrayLen::Param(_)) || mentions_type_parameter(element)
+        }
+        Type::Tuple(elements) => elements.iter().any(mentions_type_parameter),
+        Type::Function { params, ret } => {
+            params.iter().any(mentions_type_parameter) || mentions_type_parameter(ret)
+        }
+        _ => false,
     }
 }

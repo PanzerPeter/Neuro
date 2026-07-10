@@ -499,3 +499,81 @@ fn newtype_inner_access_lowers_to_inner_type() {
         access.kind
     );
 }
+
+#[test]
+fn const_generic_function_monomorphizes_by_value() {
+    // Two calls with different array lengths produce two distinct instances, each
+    // named by its concrete const value (mangled `..._cN`).
+    let program = lower(
+        "func first<const N: u32>(a: [i32; N]) -> i32 { a[0] }\n\
+         func main() -> i32 {\n\
+             val two: [i32; 2] = [1, 2]\n\
+             val three: [i32; 3] = [1, 2, 3]\n\
+             first(two) + first(three)\n\
+         }",
+    );
+    let names: Vec<&str> = program
+        .items
+        .iter()
+        .filter_map(|it| match it {
+            HirItem::Function(f) => Some(f.name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(names
+        .iter()
+        .any(|n| n.contains("first") && n.contains("c2")));
+    assert!(names
+        .iter()
+        .any(|n| n.contains("first") && n.contains("c3")));
+}
+
+#[test]
+fn const_generic_struct_field_has_concrete_size() {
+    // The `[T; CAP]` field is lowered to a concrete `[i32; 4]` in the instance.
+    let program = lower(
+        "struct Buffer<T, const CAP: u32> { data: [T; CAP] }\n\
+         func main() -> i32 {\n\
+             val b = Buffer { data: [1, 2, 3, 4] }\n\
+             b.data[0]\n\
+         }",
+    );
+    let has_sized_field = program.items.iter().any(|it| match it {
+        HirItem::Struct(s) => s.fields.iter().any(|f| {
+            matches!(&f.ty, HirType::Array { element, size }
+                if **element == HirType::I32 && *size == 4)
+        }),
+        _ => false,
+    });
+    assert!(
+        has_sized_field,
+        "expected a monomorphized struct with a concrete [i32; 4] field"
+    );
+}
+
+#[test]
+fn const_param_value_reference_lowers_to_literal() {
+    // A const parameter used as a value lowers to its concrete integer literal.
+    let program = lower(
+        "func cap<const N: u32>(a: [i32; N]) -> u32 { N }\n\
+         func main() -> i32 {\n\
+             val xs: [i32; 4] = [1, 2, 3, 4]\n\
+             cap(xs) as i32\n\
+         }",
+    );
+    let instance = program.items.iter().find_map(|it| match it {
+        HirItem::Function(f) if f.name.contains("cap") && f.name.contains("c4") => Some(f),
+        _ => None,
+    });
+    let instance = instance.expect("cap<4> instance should exist");
+    // The body's trailing expression is the integer literal 4, typed u32.
+    let last = instance.body.last().expect("non-empty body");
+    let HirStmt::Expr(e) = last else {
+        panic!("expected a trailing expression")
+    };
+    assert!(matches!(
+        &e.kind,
+        HirExprKind::Literal(shared_types::Literal::Integer(4, _))
+    ));
+    assert_eq!(e.ty, HirType::U32);
+}

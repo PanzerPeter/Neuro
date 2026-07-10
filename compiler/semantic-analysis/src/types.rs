@@ -2,6 +2,29 @@
 
 use std::fmt;
 
+/// The length of a fixed-size array `[T; N]` (§3.1, §3.8).
+///
+/// Concrete arrays carry a [`ArrayLen::Fixed`] length. Inside a generic definition an
+/// array may instead be sized by a `const` parameter ([`ArrayLen::Param`], `[T; CAP]`);
+/// monomorphization substitutes each `Param` with the instantiation's concrete value,
+/// so a `Param` never survives into the HIR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArrayLen {
+    /// A concrete compile-time length.
+    Fixed(usize),
+    /// A `const` generic parameter used as the length, identified by name.
+    Param(std::string::String),
+}
+
+impl fmt::Display for ArrayLen {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ArrayLen::Fixed(n) => write!(f, "{}", n),
+            ArrayLen::Param(name) => write!(f, "{}", name),
+        }
+    }
+}
+
 /// Type representation for semantic analysis
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -56,8 +79,13 @@ pub enum Type {
     /// are equal — length is part of the type.
     Array {
         element: Box<Type>,
-        size: usize,
+        size: ArrayLen,
     },
+    /// A monomorphization-internal const generic *argument* value (§3.8): the concrete
+    /// value bound to a `const N: T` parameter, used only inside the type-argument
+    /// substitution and instance mangling. Never appears in a real value/annotation
+    /// position and never reaches the HIR (the backend re-derives lengths from the AST).
+    ConstValue(u64),
     /// Anonymous tuple `(T1, T2, ...)` (§3.2): a positionally-indexed, heterogeneous
     /// aggregate. Two tuple types are compatible only when they have the same arity
     /// and each element type matches. Always has at least two elements.
@@ -127,6 +155,10 @@ impl Type {
             // A generic type parameter matches only the same parameter by name (§3.8).
             // Two distinct parameters `T` and `U` are never interchangeable.
             (Type::Generic(a), Type::Generic(b)) => a == b,
+
+            // A const generic argument value matches only the same value (§3.8). This is
+            // a monomorphization-internal marker; it never appears in ordinary positions.
+            (Type::ConstValue(a), Type::ConstValue(b)) => a == b,
 
             // References match when their referents match and their mutability
             // agrees (§2.4, §2.5). There is no implicit `&mut T` → `&T` coercion —
@@ -324,6 +356,7 @@ impl fmt::Display for Type {
                 }
             }
             Type::Array { element, size } => write!(f, "[{}; {}]", element, size),
+            Type::ConstValue(v) => write!(f, "{}", v),
             Type::Tuple(elements) => {
                 write!(f, "(")?;
                 for (i, el) in elements.iter().enumerate() {

@@ -178,6 +178,7 @@ fn string_len_resolves_to_u64() {
             field: make_ident("len"),
             span: Span::new(0, 11),
         }),
+        type_args: Vec::new(),
         args: vec![],
         span: Span::new(0, 13),
     };
@@ -205,6 +206,7 @@ fn string_len_with_argument_rejected() {
             field: make_ident("len"),
             span: Span::new(0, 11),
         }),
+        type_args: Vec::new(),
         args: vec![Expr::Literal(Literal::Integer(1, None), Span::new(12, 13))],
         span: Span::new(0, 14),
     };
@@ -235,6 +237,7 @@ fn string_clone_resolves_to_string() {
             field: make_ident("clone"),
             span: Span::new(0, 13),
         }),
+        type_args: Vec::new(),
         args: vec![],
         span: Span::new(0, 15),
     };
@@ -262,6 +265,7 @@ fn string_clone_with_argument_rejected() {
             field: make_ident("clone"),
             span: Span::new(0, 13),
         }),
+        type_args: Vec::new(),
         args: vec![Expr::Literal(Literal::Integer(1, None), Span::new(14, 15))],
         span: Span::new(0, 16),
     };
@@ -292,6 +296,7 @@ fn string_slice_resolves_to_string_reference() {
             field: make_ident("slice"),
             span: Span::new(0, 13),
         }),
+        type_args: Vec::new(),
         args: vec![Expr::Range {
             start: Box::new(Expr::Literal(Literal::Integer(0, None), Span::new(14, 15))),
             end: Box::new(Expr::Literal(Literal::Integer(3, None), Span::new(17, 18))),
@@ -330,6 +335,7 @@ fn string_slice_without_range_is_rejected() {
             field: make_ident("slice"),
             span: Span::new(0, 13),
         }),
+        type_args: Vec::new(),
         args: vec![Expr::Literal(Literal::Integer(3, None), Span::new(14, 15))],
         span: Span::new(0, 16),
     };
@@ -382,6 +388,7 @@ fn unknown_builtin_method_reports_method_not_found() {
             field: make_ident("foo"),
             span: Span::new(0, 11),
         }),
+        type_args: Vec::new(),
         args: vec![],
         span: Span::new(0, 13),
     };
@@ -409,6 +416,7 @@ fn int_intrinsic_call(method: &str, recv: i64, arg: i64) -> Expr {
             field: make_ident(method),
             span: Span::new(0, 20),
         }),
+        type_args: Vec::new(),
         args: vec![Expr::Literal(
             Literal::Integer(arg, Some(shared_types::IntSuffix::U8)),
             Span::new(21, 26),
@@ -453,6 +461,7 @@ fn integer_intrinsic_wrong_arity_rejected() {
             field: make_ident("wrapping_add"),
             span: Span::new(0, 20),
         }),
+        type_args: Vec::new(),
         args: vec![],
         span: Span::new(0, 22),
     };
@@ -483,6 +492,7 @@ fn integer_intrinsic_mismatched_arg_type_rejected() {
             field: make_ident("wrapping_add"),
             span: Span::new(0, 20),
         }),
+        type_args: Vec::new(),
         args: vec![Expr::Literal(
             Literal::Integer(5, Some(shared_types::IntSuffix::I64)),
             Span::new(21, 25),
@@ -513,6 +523,7 @@ fn integer_intrinsic_on_float_reports_method_not_found() {
             field: make_ident("wrapping_add"),
             span: Span::new(0, 20),
         }),
+        type_args: Vec::new(),
         args: vec![Expr::Literal(Literal::Float(2.0, None), Span::new(21, 24))],
         span: Span::new(0, 26),
     };
@@ -562,6 +573,7 @@ fn panic_builtin_accepts_string_argument() {
 
     let call = Expr::Call {
         func: Box::new(Expr::Identifier(make_ident("panic"))),
+        type_args: Vec::new(),
         args: vec![Expr::Literal(
             Literal::String("boom".to_string()),
             Span::new(6, 12),
@@ -581,6 +593,7 @@ fn assert_builtin_rejects_non_bool_argument() {
 
     let call = Expr::Call {
         func: Box::new(Expr::Identifier(make_ident("assert"))),
+        type_args: Vec::new(),
         args: vec![Expr::Literal(Literal::Integer(1, None), Span::new(7, 8))],
         span: Span::new(0, 9),
     };
@@ -600,6 +613,7 @@ fn unreachable_builtin_rejects_arguments() {
 
     let call = Expr::Call {
         func: Box::new(Expr::Identifier(make_ident("unreachable"))),
+        type_args: Vec::new(),
         args: vec![Expr::Literal(Literal::Integer(1, None), Span::new(12, 13))],
         span: Span::new(0, 14),
     };
@@ -632,6 +646,7 @@ fn user_function_shadows_panic_builtin() {
 
     let call = Expr::Call {
         func: Box::new(Expr::Identifier(make_ident("panic"))),
+        type_args: Vec::new(),
         args: vec![Expr::Literal(Literal::Integer(7, None), Span::new(6, 7))],
         span: Span::new(0, 8),
     };

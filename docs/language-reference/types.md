@@ -1084,7 +1084,9 @@ this feature.
 
 A fixed-size array `[T; N]` holds exactly `N` values of element type `T`, with
 `N` fixed at compile time and part of the type — `[i32; 3]` and `[i32; 4]` are
-distinct types.
+distinct types. `N` is an integer literal, or — inside a generic definition — a
+`const` generic parameter (`[T; CAP]`, §3.8), resolved to a concrete length by
+monomorphization.
 
 ```neuro
 val a: [i32; 4] = [10, 20, 30, 40]   // explicit type

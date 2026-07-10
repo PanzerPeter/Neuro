@@ -47,8 +47,10 @@ isolation:
 - [`showcase/generic_toolkit.nr`](showcase/generic_toolkit.nr) — generic structs and
   generic inherent impls (§3.8), monomorphized per instance (`Pair<T, U>` inferred at
   a literal, `Cell<T>::get` used at `i32` and `bool`), working together with generic
-  functions (`identity<T>`, `choose<T>`, `second<T, U>`), an enum + pattern matching,
-  and a tuple used as a generic type argument. Exit `57`.
+  functions (`identity<T>`, `choose<T>`, `second<T, U>`), **const generic parameters**
+  (`Buffer<T, const CAP>` and `sum_all<const N>` with a `where N > 0` predicate),
+  **turbofish** (`identity::<i32>(8)`), a fixed-size array + `for`-in loop, an enum +
+  pattern matching, and a tuple used as a generic type argument. Exit `85`.
 
 ## Compiling and running
 

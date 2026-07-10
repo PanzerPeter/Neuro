@@ -36,6 +36,21 @@ impl Lowerer {
                 Ok(HirExpr::new(HirExprKind::Literal(lit.clone()), ty, *span))
             }
 
+            // A const generic parameter used as a value inside a monomorphized body (§3.8)
+            // lowers to its concrete integer literal, typed by its declared int type.
+            Expr::Identifier(ident) if self.const_subst.contains_key(&ident.name) => {
+                let value = self.const_subst[&ident.name];
+                let ty = self
+                    .const_types
+                    .get(&ident.name)
+                    .cloned()
+                    .unwrap_or(HirType::U64);
+                Ok(HirExpr::new(
+                    HirExprKind::Literal(Literal::Integer(value as i64, None)),
+                    ty,
+                    ident.span,
+                ))
+            }
             Expr::Identifier(ident) => match self.lookup(&ident.name) {
                 Some(ty) => Ok(HirExpr::new(
                     HirExprKind::Variable(ident.name.clone()),
@@ -104,7 +119,12 @@ impl Lowerer {
                 ))
             }
 
-            Expr::Call { func, args, span } => self.lower_call(func, args, expected, *span),
+            Expr::Call {
+                func,
+                type_args,
+                args,
+                span,
+            } => self.lower_call(func, type_args, args, expected, *span),
 
             // A bare path is a unit-variant enum construction `E::V` (§3.5) when the
             // type names an enum, else an associated-function reference.
@@ -571,6 +591,7 @@ impl Lowerer {
     fn lower_call(
         &mut self,
         func: &Expr,
+        type_args: &[ast_types::GenericArg],
         args: &[Expr],
         expected: Option<&HirType>,
         span: shared_types::Span,
@@ -581,7 +602,9 @@ impl Lowerer {
             Expr::Identifier(ident) if self.newtypes.contains_key(&ident.name) => {
                 self.lower_newtype_construct(&ident.name, args, span)
             }
-            Expr::Identifier(ident) => self.lower_ident_call(&ident.name, args, expected, span),
+            Expr::Identifier(ident) => {
+                self.lower_ident_call(&ident.name, type_args, args, expected, span)
+            }
             Expr::FieldAccess { object, field, .. } => {
                 self.lower_method_call(object, &field.name, args, span)
             }
@@ -644,6 +667,7 @@ impl Lowerer {
     fn lower_ident_call(
         &mut self,
         name: &str,
+        type_args: &[ast_types::GenericArg],
         args: &[Expr],
         expected: Option<&HirType>,
         span: shared_types::Span,
@@ -651,7 +675,7 @@ impl Lowerer {
         // A call to a generic function (§3.8): infer its type arguments, queue the
         // matching monomorphized instance, and emit a call to that instance's name.
         if self.generic_templates.contains_key(name) {
-            return self.lower_generic_call(name, args, span);
+            return self.lower_generic_call(name, type_args, args, span);
         }
 
         if let Some((params, ret)) = self.functions.get(name).cloned() {
@@ -713,6 +737,7 @@ impl Lowerer {
     fn lower_generic_call(
         &mut self,
         name: &str,
+        type_args: &[ast_types::GenericArg],
         args: &[Expr],
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
@@ -720,23 +745,51 @@ impl Lowerer {
         let gnames: std::collections::HashSet<String> = template
             .generics
             .iter()
+            .filter(|g| matches!(g.kind, ast_types::GenericParamKind::Type))
             .map(|g| g.name.name.clone())
             .collect();
+        let cnames: std::collections::HashSet<String> = template
+            .generics
+            .iter()
+            .filter(|g| matches!(g.kind, ast_types::GenericParamKind::Const(_)))
+            .map(|g| g.name.name.clone())
+            .collect();
+
+        let mut subst: std::collections::HashMap<String, HirType> =
+            std::collections::HashMap::new();
+        let mut const_subst: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
+        // Seed explicit turbofish arguments before inference (§3.8), positionally.
+        for (gp, arg) in template.generics.iter().zip(type_args.iter()) {
+            match arg {
+                ast_types::GenericArg::Const { value, .. } => {
+                    const_subst.insert(gp.name.name.clone(), *value as u64);
+                }
+                ast_types::GenericArg::Type(ty) => {
+                    subst.insert(gp.name.name.clone(), self.resolve_type(ty)?);
+                }
+            }
+        }
 
         // Arguments drive inference, so lower them with no expected type first.
         let mut lowered_args = Vec::with_capacity(args.len());
         for arg in args {
             lowered_args.push(self.lower_expr(arg, None)?);
         }
-
-        let mut subst: std::collections::HashMap<String, HirType> =
-            std::collections::HashMap::new();
         for (param, larg) in template.params.iter().zip(lowered_args.iter()) {
-            crate::unify_ast_hir(&param.ty, &larg.ty, &gnames, &mut subst);
+            crate::unify_ast_hir(
+                &param.ty,
+                &larg.ty,
+                &gnames,
+                &cnames,
+                &mut subst,
+                &mut const_subst,
+            );
         }
 
         // Resolve the concrete parameter and return types under the inferred bindings.
-        let saved = std::mem::replace(&mut self.type_subst, subst.clone());
+        let saved_ty = std::mem::replace(&mut self.type_subst, subst.clone());
+        let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
         let mut param_tys = Vec::with_capacity(template.params.len());
         for param in &template.params {
             param_tys.push(self.resolve_type(&param.ty)?);
@@ -745,15 +798,17 @@ impl Lowerer {
             Some(t) => self.resolve_type(t)?,
             None => HirType::Void,
         };
-        self.type_subst = saved;
+        self.type_subst = saved_ty;
+        self.const_subst = saved_c;
 
-        let mangled = crate::mangle_instance(name, &template.generics, &subst);
+        let mangled = crate::mangle_instance(name, &template.generics, &subst, &const_subst);
         if !self.mono_seen.contains(&mangled) {
             self.mono_seen.insert(mangled.clone());
             self.mono_pending.push(crate::MonoInstance {
                 mangled: mangled.clone(),
                 fn_name: name.to_string(),
                 subst,
+                const_subst,
             });
         }
 
@@ -1107,10 +1162,19 @@ impl Lowerer {
         let gnames: std::collections::HashSet<String> = template
             .generics
             .iter()
+            .filter(|g| matches!(g.kind, ast_types::GenericParamKind::Type))
+            .map(|g| g.name.name.clone())
+            .collect();
+        let cnames: std::collections::HashSet<String> = template
+            .generics
+            .iter()
+            .filter(|g| matches!(g.kind, ast_types::GenericParamKind::Const(_)))
             .map(|g| g.name.name.clone())
             .collect();
 
         let mut subst: std::collections::HashMap<String, HirType> =
+            std::collections::HashMap::new();
+        let mut const_subst: std::collections::HashMap<String, u64> =
             std::collections::HashMap::new();
         let mut lowered_fields = Vec::with_capacity(fields.len());
         for FieldInit {
@@ -1126,7 +1190,14 @@ impl Lowerer {
                 .map(|f| f.ty.clone());
             let lowered = self.lower_expr(value, None)?;
             if let Some(ft) = &field_ast_ty {
-                crate::unify_ast_hir(ft, &lowered.ty, &gnames, &mut subst);
+                crate::unify_ast_hir(
+                    ft,
+                    &lowered.ty,
+                    &gnames,
+                    &cnames,
+                    &mut subst,
+                    &mut const_subst,
+                );
             }
             lowered_fields.push(HirFieldInit {
                 name: fname.name.clone(),
@@ -1137,7 +1208,14 @@ impl Lowerer {
 
         let mut args = Vec::with_capacity(template.generics.len());
         for gp in &template.generics {
-            args.push(subst.get(&gp.name.name).cloned().unwrap_or(HirType::Void));
+            match &gp.kind {
+                ast_types::GenericParamKind::Const(_) => args.push(crate::MonoArg::Const(
+                    const_subst.get(&gp.name.name).copied().unwrap_or(0),
+                )),
+                ast_types::GenericParamKind::Type => args.push(crate::MonoArg::Type(
+                    subst.get(&gp.name.name).cloned().unwrap_or(HirType::Void),
+                )),
+            }
         }
         let mangled = self.instantiate_generic_struct(&name.name, &args)?;
         let struct_ty = HirType::Struct(mangled.clone());

@@ -2,19 +2,36 @@
 
 use shared_types::{Identifier, Span};
 
+use super::expressions::Expr;
 use super::statements::Stmt;
 use super::types::Type;
 
-/// A single generic type parameter in a `<...>` list (§3.8): `T`, or `T: Bound + Bound`.
+/// What a generic parameter binds (§3.8).
 ///
-/// `bounds` records the trait names syntactically, but they are **not enforced** in
-/// this phase — the trait system (§3.9) does not exist yet, so a bound is parsed for
-/// forward compatibility and ignored by later passes (mirroring how an unknown
-/// `impl Trait for T` trait name is accepted today). Const (value) parameters and
-/// `where` clauses are separate, later roadmap items and are not represented here.
+/// A `Type` parameter (`T`) is substituted with a concrete type at each instantiation.
+/// A `Const` parameter (`const N: u32`) is a compile-time *value* of the carried
+/// integer type, usable in value position and as an array length; each distinct
+/// value produces a distinct monomorphized instance.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GenericParamKind {
+    /// A type parameter `T`.
+    Type,
+    /// A const (value) parameter `const N: T`, carrying its declared integer type.
+    Const(Type),
+}
+
+/// A single generic parameter in a `<...>` list (§3.8): `T`, `T: Bound + Bound`, or
+/// `const N: u32`.
+///
+/// `bounds` records the trait names syntactically (from either the inline `T: Bound`
+/// form or a `where` clause), but they are **not enforced** in this phase — the trait
+/// system (§3.9) does not exist yet, so a bound is parsed for forward compatibility and
+/// ignored by later passes. `kind` distinguishes a type parameter from a const (value)
+/// parameter.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GenericParam {
     pub name: Identifier,
+    pub kind: GenericParamKind,
     pub bounds: Vec<Identifier>,
     pub span: Span,
 }
@@ -28,6 +45,12 @@ pub struct GenericParam {
 pub struct FunctionDef {
     pub name: Identifier,
     pub generics: Vec<GenericParam>,
+    /// Value predicates from a `where` clause (§3.8), e.g. `where N > 0`. Each is a
+    /// boolean expression over the function's const parameters, evaluated at every
+    /// instantiation against the concrete values; a violated predicate is an error at
+    /// the offending call. Trait bounds in a `where` clause are folded into the
+    /// matching parameter's `bounds` instead (they are unenforced this phase).
+    pub where_predicates: Vec<Expr>,
     pub params: Vec<Parameter>,
     pub return_type: Option<Type>,
     pub body: Vec<Stmt>,
@@ -72,6 +95,9 @@ pub struct StructDef {
     /// non-generic struct. A generic struct is a *template* — later passes
     /// monomorphize it into one concrete struct per distinct set of type arguments.
     pub generics: Vec<GenericParam>,
+    /// Value predicates from a `where` clause (§3.8) over the struct's const
+    /// parameters, checked at each instantiation (see [`FunctionDef::where_predicates`]).
+    pub where_predicates: Vec<Expr>,
     pub fields: Vec<FieldDef>,
     /// `@derive(...)` attributes attached to the struct (e.g. `@derive(Copy, Clone)`).
     /// Interpreted by semantic analysis to determine Copy/Clone-ness (§2.3).
@@ -129,6 +155,9 @@ pub struct ImplDef {
     /// generic parameter; monomorphization maps them positionally to the struct's
     /// concrete type arguments.
     pub type_args: Vec<Type>,
+    /// Value predicates from an impl-level `where` clause (§3.8), checked at each
+    /// instantiation (see [`FunctionDef::where_predicates`]).
+    pub where_predicates: Vec<Expr>,
     pub methods: Vec<MethodDef>,
     pub span: Span,
 }

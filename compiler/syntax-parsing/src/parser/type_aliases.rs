@@ -165,7 +165,9 @@ fn rewrite_type(ty: &mut Type, resolved: &HashMap<String, Type>) {
         }
         Type::Generic { args, .. } => {
             for arg in args {
-                rewrite_type(arg, resolved);
+                if let crate::ast::GenericArg::Type(inner) = arg {
+                    rewrite_type(inner, resolved);
+                }
             }
         }
         Type::Tensor { element_type, .. } => rewrite_type(element_type, resolved),

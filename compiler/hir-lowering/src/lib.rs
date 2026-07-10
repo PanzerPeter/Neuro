@@ -131,6 +131,14 @@ struct Lowerer {
     /// lowered: parameter name → concrete type. Empty outside instance lowering; a
     /// `Named` annotation matching an entry resolves to the concrete type.
     type_subst: HashMap<String, HirType>,
+    /// Active const-parameter substitution while a monomorphized instance body is being
+    /// lowered (§3.8): const parameter name → concrete value. An array length or value
+    /// reference naming an entry resolves to that value. Empty outside instance lowering.
+    const_subst: HashMap<String, u64>,
+    /// The declared integer type of each active const parameter (§3.8), so a value
+    /// reference to one lowers to a correctly-typed integer literal. Parallel to
+    /// [`Self::const_subst`].
+    const_types: HashMap<String, HirType>,
     /// Monomorphization worklist: instances discovered but not yet lowered.
     mono_pending: Vec<MonoInstance>,
     /// Mangled names already queued or emitted, so each instance is produced once.
@@ -147,6 +155,16 @@ struct MonoInstance {
     mangled: String,
     fn_name: String,
     subst: HashMap<String, HirType>,
+    const_subst: HashMap<String, u64>,
+}
+
+/// One concrete generic argument in a monomorphized instance (§3.8): either a type (for
+/// a type parameter) or an integer value (for a const parameter). Positional against the
+/// template's generic parameters in declaration order.
+#[derive(Clone)]
+enum MonoArg {
+    Type(HirType),
+    Const(u64),
 }
 
 /// One pending generic-struct instantiation (§3.8): the base template name, the
@@ -156,8 +174,8 @@ struct MonoInstance {
 struct MonoStruct {
     base: String,
     mangled: String,
-    args: Vec<HirType>,
     subst: HashMap<String, HirType>,
+    const_subst: HashMap<String, u64>,
 }
 
 /// Lower a type-checked program to typed HIR.
@@ -195,6 +213,8 @@ impl Lowerer {
             instantiated_structs: HashSet::new(),
             mono_struct_pending: Vec::new(),
             type_subst: HashMap::new(),
+            const_subst: HashMap::new(),
+            const_types: HashMap::new(),
             mono_pending: Vec::new(),
             mono_seen: HashSet::new(),
             mono_items: Vec::new(),
@@ -265,7 +285,9 @@ fn unify_ast_hir(
     param: &ast_types::Type,
     arg: &HirType,
     gnames: &HashSet<String>,
+    cnames: &HashSet<String>,
     subst: &mut HashMap<String, HirType>,
+    const_subst: &mut HashMap<String, u64>,
 ) {
     match (param, arg) {
         (ast_types::Type::Named(ident), _) if gnames.contains(&ident.name) => {
@@ -274,19 +296,53 @@ fn unify_ast_hir(
                 .or_insert_with(|| arg.clone());
         }
         (ast_types::Type::Reference { inner: pi, .. }, HirType::Reference { inner: ai, .. }) => {
-            unify_ast_hir(pi, ai, gnames, subst)
+            unify_ast_hir(pi, ai, gnames, cnames, subst, const_subst)
         }
-        (ast_types::Type::Array { element: pe, .. }, HirType::Array { element: ae, .. }) => {
-            unify_ast_hir(pe, ae, gnames, subst)
+        (
+            ast_types::Type::Array {
+                element: pe,
+                size: psize,
+                ..
+            },
+            HirType::Array {
+                element: ae,
+                size: asize,
+            },
+        ) => {
+            // A const-parameter length binds that parameter to the argument's length.
+            if let ast_types::ArraySize::Const(id) = psize {
+                if cnames.contains(&id.name) {
+                    const_subst.entry(id.name.clone()).or_insert(*asize as u64);
+                }
+            }
+            unify_ast_hir(pe, ae, gnames, cnames, subst, const_subst)
         }
         (ast_types::Type::Tuple { elements: pe, .. }, HirType::Tuple(ae))
             if pe.len() == ae.len() =>
         {
             for (p, a) in pe.iter().zip(ae) {
-                unify_ast_hir(p, a, gnames, subst);
+                unify_ast_hir(p, a, gnames, cnames, subst, const_subst);
             }
         }
         _ => {}
+    }
+}
+
+/// Resolve a fixed-size array length annotation (§3.1, §3.8) to a concrete value. A
+/// literal is taken as-is; a `const`-parameter length is looked up in `const_subst`
+/// (populated while a monomorphized instance body is lowered).
+fn resolve_array_size(
+    size: &ast_types::ArraySize,
+    const_subst: &HashMap<String, u64>,
+) -> Result<usize, LoweringError> {
+    match size {
+        ast_types::ArraySize::Literal(n) => Ok(*n as usize),
+        ast_types::ArraySize::Const(id) => const_subst
+            .get(&id.name)
+            .map(|v| *v as usize)
+            .ok_or_else(|| LoweringError::UnresolvedType {
+                name: format!("const array length '{}'", id.name),
+            }),
     }
 }
 
@@ -297,13 +353,20 @@ fn mangle_instance(
     name: &str,
     generics: &[ast_types::GenericParam],
     subst: &HashMap<String, HirType>,
+    const_subst: &HashMap<String, u64>,
 ) -> String {
     let mut out = format!("{}__g", name);
     for gp in generics {
-        let arg = subst
-            .get(&gp.name.name)
-            .map(mangle_type)
-            .unwrap_or_else(|| "unresolved".to_string());
+        let arg = match &gp.kind {
+            ast_types::GenericParamKind::Const(_) => const_subst
+                .get(&gp.name.name)
+                .map(|v| format!("c{}", v))
+                .unwrap_or_else(|| "unresolved".to_string()),
+            ast_types::GenericParamKind::Type => subst
+                .get(&gp.name.name)
+                .map(mangle_type)
+                .unwrap_or_else(|| "unresolved".to_string()),
+        };
         out.push('_');
         out.push_str(&arg);
     }
@@ -354,7 +417,13 @@ fn mangle_type(ty: &HirType) -> String {
 /// Unlike [`mangle_instance`] (which uses `__g` for free functions), this never
 /// contains `__`: codegen recovers a method's receiver struct by splitting the method
 /// symbol on `__`, so a struct name with `__` in it would corrupt that recovery.
-fn mangle_struct_instance(base: &str, args: &[HirType]) -> String {
-    let parts: Vec<String> = args.iter().map(mangle_type).collect();
+fn mangle_struct_instance(base: &str, args: &[MonoArg]) -> String {
+    let parts: Vec<String> = args
+        .iter()
+        .map(|a| match a {
+            MonoArg::Type(t) => mangle_type(t),
+            MonoArg::Const(v) => format!("c{}", v),
+        })
+        .collect();
     format!("{}_g_{}", base, parts.join("_"))
 }

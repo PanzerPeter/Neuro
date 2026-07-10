@@ -310,3 +310,12 @@ expression context.
 - 2026-04-16: Const declarations §1.3 — `constants` map, `register_const_item`, `check_const_item`,
   `is_const_expr`, `Stmt::Const` arm, identifier fallback. New: `ConstAlreadyDefined`, `InvalidConstExpr`.
 - 2026-04-04: `Stmt::ForRange` `inclusive` flag destructured; no integer validation change.
+- 2026-07-10: Const generics, `where` clauses & turbofish (§3.8). `const_scope` holds const params
+  (name → int type); `enter/exit_generic_scope` sets both scopes. `Type::Array.size` is now `ArrayLen`
+  (`Fixed`/`Param`); a `Type::ConstValue` marker carries a const argument through monomorphization.
+  `check_generic_call` seeds turbofish args, infers const params from array-argument lengths
+  (`unify_array_len`), enforces every param is bound, and checks `where` predicates
+  (`eval_const_predicate`). `GenericFnSig` gains `const_types` + `where_predicates`; generic-struct
+  instantiation infers const params from field values and checks its predicates. New errors:
+  `UnknownArrayLength`, `ConstPredicateViolated`, `TurbofishCountMismatch`, `TurbofishKindMismatch`,
+  `ConstParamNotInteger`; `GenericParamNotInferable` now fires at the call site (turbofish exists).

@@ -119,7 +119,7 @@ impl Lowerer {
     pub(crate) fn instantiate_generic_struct(
         &mut self,
         base: &str,
-        args: &[HirType],
+        args: &[crate::MonoArg],
     ) -> Result<String, LoweringError> {
         let template = match self.generic_structs.get(base) {
             Some(t) => t.clone(),
@@ -131,52 +131,54 @@ impl Lowerer {
         };
         let mangled = crate::mangle_struct_instance(base, args);
         if self.instantiated_structs.insert(mangled.clone()) {
-            let mut subst: std::collections::HashMap<String, HirType> =
-                std::collections::HashMap::new();
-            for (gp, arg) in template.generics.iter().zip(args) {
-                subst.insert(gp.name.name.clone(), arg.clone());
-            }
+            let (subst, const_subst) = split_mono_args(&template.generics, args);
 
-            let saved = std::mem::replace(&mut self.type_subst, subst.clone());
+            let saved_ty = std::mem::replace(&mut self.type_subst, subst.clone());
+            let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
             let mut fields = Vec::with_capacity(template.fields.len());
             for field in &template.fields {
                 fields.push((field.name.name.clone(), self.resolve_type(&field.ty)?));
             }
-            self.type_subst = saved;
+            self.type_subst = saved_ty;
+            self.const_subst = saved_c;
             self.structs.insert(mangled.clone(), fields);
 
             if self.clone_structs.contains(base) {
                 self.clone_structs.insert(mangled.clone());
             }
 
-            self.register_instance_methods(base, &mangled, args)?;
+            self.register_instance_methods(base, &mangled, &subst, &const_subst)?;
             self.mono_struct_pending.push(crate::MonoStruct {
                 base: base.to_string(),
                 mangled: mangled.clone(),
-                args: args.to_vec(),
                 subst,
+                const_subst,
             });
         }
         Ok(mangled)
     }
 
-    /// Map an impl's type parameters to the struct instance's concrete arguments by
-    /// matching the impl's type arguments positionally (§3.8): `impl<T> Wrapper<T>`
-    /// with instance `Wrapper<i32>` binds `T` → `i32`.
+    /// Map an impl's type parameters to the struct instance's concrete types (§3.8):
+    /// `impl<T> Wrapper<T>` with instance `Wrapper<i32>` binds `T` → `i32`. The impl's
+    /// positional type arguments correspond to the struct's generic parameters, whose
+    /// concrete types are read from `subst`. Const parameters carry no impl type binding.
     fn build_impl_subst(
         &self,
         imp: &ImplDef,
-        args: &[HirType],
+        base_generics: &[ast_types::GenericParam],
+        subst: &std::collections::HashMap<String, HirType>,
     ) -> std::collections::HashMap<String, HirType> {
-        let mut subst = std::collections::HashMap::new();
-        for (ta, arg) in imp.type_args.iter().zip(args) {
+        let mut result = std::collections::HashMap::new();
+        for (ta, gp) in imp.type_args.iter().zip(base_generics) {
             if let ast_types::Type::Named(id) = ta {
                 if imp.generics.iter().any(|g| g.name.name == id.name) {
-                    subst.insert(id.name.clone(), arg.clone());
+                    if let Some(concrete) = subst.get(&gp.name.name) {
+                        result.insert(id.name.clone(), concrete.clone());
+                    }
                 }
             }
         }
-        subst
+        result
     }
 
     /// Register the signature of every method of each generic `impl` of `base` for the
@@ -185,11 +187,17 @@ impl Lowerer {
         &mut self,
         base: &str,
         mangled: &str,
-        args: &[HirType],
+        subst: &std::collections::HashMap<String, HirType>,
+        const_subst: &std::collections::HashMap<String, u64>,
     ) -> Result<(), LoweringError> {
         let impls = self.generic_impls.get(base).cloned().unwrap_or_default();
+        let base_generics = self
+            .generic_structs
+            .get(base)
+            .map(|s| s.generics.clone())
+            .unwrap_or_default();
         for imp in &impls {
-            let impl_subst = self.build_impl_subst(imp, args);
+            let impl_subst = self.build_impl_subst(imp, &base_generics, subst);
             for method in &imp.methods {
                 if matches!(method.self_param, Some(SelfParam::Owned)) {
                     continue;
@@ -198,7 +206,8 @@ impl Lowerer {
                 if self.functions.contains_key(&inst_key) {
                     continue;
                 }
-                let saved = std::mem::replace(&mut self.type_subst, impl_subst.clone());
+                let saved_ty = std::mem::replace(&mut self.type_subst, impl_subst.clone());
+                let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
                 let mut params = Vec::new();
                 if method.self_param.is_some() {
                     params.push(HirType::Struct(mangled.to_string()));
@@ -210,7 +219,8 @@ impl Lowerer {
                     Some(t) => self.resolve_type(t)?,
                     None => HirType::Void,
                 };
-                self.type_subst = saved;
+                self.type_subst = saved_ty;
+                self.const_subst = saved_c;
                 self.functions.insert(inst_key.clone(), (params, ret));
                 self.impl_methods
                     .entry(mangled.to_string())
@@ -219,6 +229,21 @@ impl Lowerer {
             }
         }
         Ok(())
+    }
+
+    /// Resolve each const generic parameter's declared integer type (§3.8), so a value
+    /// reference to one in a monomorphized body lowers to a correctly-typed literal.
+    fn const_param_types(
+        &mut self,
+        generics: &[ast_types::GenericParam],
+    ) -> Result<std::collections::HashMap<String, HirType>, LoweringError> {
+        let mut out = std::collections::HashMap::new();
+        for gp in generics {
+            if let ast_types::GenericParamKind::Const(ty) = &gp.kind {
+                out.insert(gp.name.name.clone(), self.resolve_type(ty)?);
+            }
+        }
+        Ok(out)
     }
 
     /// Emit the HIR items for one monomorphized struct instance (§3.8): an ordinary
@@ -234,7 +259,8 @@ impl Lowerer {
             }
         };
 
-        let saved = std::mem::replace(&mut self.type_subst, ms.subst.clone());
+        let saved_ty = std::mem::replace(&mut self.type_subst, ms.subst.clone());
+        let saved_c = std::mem::replace(&mut self.const_subst, ms.const_subst.clone());
         let mut hir_fields = Vec::with_capacity(template.fields.len());
         for field in &template.fields {
             hir_fields.push(HirField {
@@ -243,7 +269,8 @@ impl Lowerer {
                 span: field.span,
             });
         }
-        self.type_subst = saved;
+        self.type_subst = saved_ty;
+        self.const_subst = saved_c;
         self.mono_items.push(HirItem::Struct(HirStruct {
             name: ms.mangled.clone(),
             fields: hir_fields,
@@ -256,15 +283,20 @@ impl Lowerer {
             .cloned()
             .unwrap_or_default();
         for imp in &impls {
-            let impl_subst = self.build_impl_subst(imp, &ms.args);
+            let impl_subst = self.build_impl_subst(imp, &template.generics, &ms.subst);
             let mut methods = Vec::new();
             for method in &imp.methods {
                 if matches!(method.self_param, Some(SelfParam::Owned)) {
                     continue;
                 }
-                let saved = std::mem::replace(&mut self.type_subst, impl_subst.clone());
+                let const_types = self.const_param_types(&template.generics)?;
+                let saved_ty = std::mem::replace(&mut self.type_subst, impl_subst.clone());
+                let saved_c = std::mem::replace(&mut self.const_subst, ms.const_subst.clone());
+                let saved_ct = std::mem::replace(&mut self.const_types, const_types);
                 let lowered = self.lower_method(&ms.mangled, method);
-                self.type_subst = saved;
+                self.type_subst = saved_ty;
+                self.const_subst = saved_c;
+                self.const_types = saved_ct;
                 methods.push(lowered?);
             }
             self.mono_items.push(HirItem::Impl(HirImpl {
@@ -438,7 +470,10 @@ impl Lowerer {
             }
         };
 
-        let saved = std::mem::replace(&mut self.type_subst, instance.subst.clone());
+        let const_types = self.const_param_types(&template.generics)?;
+        let saved_ty = std::mem::replace(&mut self.type_subst, instance.subst.clone());
+        let saved_c = std::mem::replace(&mut self.const_subst, instance.const_subst.clone());
+        let saved_ct = std::mem::replace(&mut self.const_types, const_types);
 
         let mut params = Vec::with_capacity(template.params.len());
         for param in &template.params {
@@ -460,7 +495,9 @@ impl Lowerer {
         let body = self.lower_body(&template.body, &return_type)?;
         self.pop_scope();
 
-        self.type_subst = saved;
+        self.type_subst = saved_ty;
+        self.const_subst = saved_c;
+        self.const_types = saved_ct;
 
         Ok(HirFunction {
             name: instance.mangled.clone(),
@@ -655,4 +692,28 @@ fn lower_self_param(sp: &SelfParam) -> HirSelfParam {
         SelfParam::RefMut => HirSelfParam::RefMut,
         SelfParam::Owned => HirSelfParam::Owned,
     }
+}
+
+/// Split a monomorphized instance's positional arguments into a type substitution and a
+/// const substitution, keyed by the template's generic parameter names in order (§3.8).
+fn split_mono_args(
+    generics: &[ast_types::GenericParam],
+    args: &[crate::MonoArg],
+) -> (
+    std::collections::HashMap<String, HirType>,
+    std::collections::HashMap<String, u64>,
+) {
+    let mut type_subst = std::collections::HashMap::new();
+    let mut const_subst = std::collections::HashMap::new();
+    for (gp, arg) in generics.iter().zip(args) {
+        match arg {
+            crate::MonoArg::Type(t) => {
+                type_subst.insert(gp.name.name.clone(), t.clone());
+            }
+            crate::MonoArg::Const(v) => {
+                const_subst.insert(gp.name.name.clone(), *v);
+            }
+        }
+    }
+    (type_subst, const_subst)
 }

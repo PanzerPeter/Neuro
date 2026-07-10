@@ -25,6 +25,7 @@ fn make_function(
     FunctionDef {
         name: make_ident(name),
         generics: Vec::new(),
+        where_predicates: Vec::new(),
         params: params
             .into_iter()
             .map(|(pname, pty)| Parameter {
@@ -82,6 +83,7 @@ fn test_integer_literal_infers_from_function_parameter() {
     // Call with literal
     let call_expr = Expr::Call {
         func: Box::new(Expr::Identifier(make_ident("foo"))),
+        type_args: Vec::new(),
         args: vec![Expr::Literal(Literal::Integer(42, None), Span::new(0, 2))],
         span: Span::new(0, 10),
     };
@@ -1196,13 +1198,34 @@ fn generic_body_operation_without_bound_is_rejected() {
 }
 
 #[test]
-fn generic_param_not_used_in_a_parameter_is_rejected() {
+fn returning_concrete_value_as_type_parameter_is_rejected() {
+    // Returning a concrete `string` where the type parameter `T` is expected is a
+    // mismatch. (A parameter used only in return position is now permitted at the
+    // declaration — turbofish may supply it — and is instead reported at the call
+    // site when it cannot be inferred; see the const-generics test suite.)
     let errors = semantic_errors("func p<T>(s: string) -> T { s }");
     assert!(
         errors
             .iter()
+            .any(|e| matches!(e, TypeError::ReturnTypeMismatch { .. })),
+        "returning a concrete value as `T` must be reported; got {errors:?}"
+    );
+}
+
+#[test]
+fn non_inferable_generic_param_is_rejected_at_call_site() {
+    // `U` appears in no parameter, so an un-turbofished call cannot bind it.
+    let errors = semantic_errors(
+        r#"
+func firstof<T, U>(x: T) -> T { x }
+func main() -> i32 { firstof(5) }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
             .any(|e| matches!(e, TypeError::GenericParamNotInferable { .. })),
-        "a non-inferable type parameter must be reported; got {errors:?}"
+        "a call that cannot bind a type parameter must be reported; got {errors:?}"
     );
 }
 

@@ -24,8 +24,32 @@ pub enum TypeError {
     #[error("generic type parameter '{name}' at {span:?} shadows a built-in type name")]
     GenericParamShadowsBuiltin { name: String, span: Span },
 
-    #[error("generic type parameter '{name}' at {span:?} is never used in a parameter, so it cannot be inferred; explicit type arguments (turbofish) are not yet supported")]
+    #[error("generic parameter '{name}' at {span:?} cannot be inferred from the call arguments; supply it explicitly with a turbofish, e.g. `f::<...>(...)`")]
     GenericParamNotInferable { name: String, span: Span },
+
+    #[error("array length '{name}' at {span:?} is not a known constant; use an integer literal or an in-scope `const` generic parameter")]
+    UnknownArrayLength { name: String, span: Span },
+
+    #[error("const generic parameter '{name}' at {span:?} has non-integer type '{ty}'; const parameters must be an integer type")]
+    ConstParamNotInteger { name: String, ty: Type, span: Span },
+
+    #[error("`where` predicate at {span:?} is not satisfied for this instantiation")]
+    ConstPredicateViolated { span: Span },
+
+    #[error("turbofish at {span:?} supplies {found} generic argument(s), but '{name}' declares {expected}")]
+    TurbofishCountMismatch {
+        name: String,
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    #[error("turbofish argument for parameter '{param}' at {span:?} has the wrong kind: a {expected} argument was expected")]
+    TurbofishKindMismatch {
+        param: String,
+        expected: String,
+        span: Span,
+    },
 
     #[error("type argument '{ty}' for generic parameter '{param}' at {span:?} is not Copy; generic type arguments are restricted to Copy types in this phase")]
     GenericArgumentNotCopy { param: String, ty: Type, span: Span },

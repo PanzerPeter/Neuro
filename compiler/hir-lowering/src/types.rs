@@ -60,7 +60,7 @@ impl Lowerer {
             }),
             ast_types::Type::Array { element, size, .. } => Ok(HirType::Array {
                 element: Box::new(self.resolve_type(element)?),
-                size: *size,
+                size: crate::resolve_array_size(size, &self.const_subst)?,
             }),
             ast_types::Type::Tuple { elements, .. } => {
                 let mut resolved = Vec::with_capacity(elements.len());
@@ -76,7 +76,14 @@ impl Lowerer {
             ast_types::Type::Generic { name, args, .. } => {
                 let mut resolved = Vec::with_capacity(args.len());
                 for arg in args {
-                    resolved.push(self.resolve_type(arg)?);
+                    match arg {
+                        ast_types::GenericArg::Const { value, .. } => {
+                            resolved.push(crate::MonoArg::Const(*value as u64));
+                        }
+                        ast_types::GenericArg::Type(ty) => {
+                            resolved.push(crate::MonoArg::Type(self.resolve_type(ty)?));
+                        }
+                    }
                 }
                 let mangled = self.instantiate_generic_struct(&name.name, &resolved)?;
                 Ok(HirType::Struct(mangled))

@@ -293,15 +293,15 @@ prerequisites are already done. Coordinate on an issue before starting a large i
       v1.55.0 (Copy-inner only; backends erase the wrapper). Completes 1E.
 
 **Open now — 1F (Generics, Traits & Dispatch):** generic *functions* (§3.8) landed
-in v1.56.0 and generic *structs & impls* in v1.57.0 (both monomorphized, type
-arguments inferred from value/field arguments or written explicitly, bounds
-parsed-but-unenforced, `Copy` arguments only). The topmost open items are const
-parameters / `where` clauses / turbofish, then explicit lifetimes, then the trait
-system.
+in v1.56.0, generic *structs & impls* in v1.57.0, and *const parameters, `where`
+clauses & turbofish* in v1.58.0 (all monomorphized, type arguments inferred from
+value/field arguments or written explicitly, bounds parsed-but-unenforced, `Copy`
+arguments only; const parameters inferred from array lengths / field values or
+supplied by turbofish, `where` value predicates checked per instantiation). The
+topmost open items are explicit lifetimes, then the trait system.
 
-**Next, in dependency order:** 1F (const params & where
-clauses → explicit lifetimes → trait declarations → operator traits →
-static/dynamic dispatch → closures) → 1G (error
+**Next, in dependency order:** 1F (explicit lifetimes → trait declarations →
+operator traits → static/dynamic dispatch → closures) → 1G (error
 handling, collections, modules, prelude) → 1H (string interpolation, triple-quoted
 strings, nested comments, named arguments). See the [Quick Roadmap](README.md#quick-roadmap).
 

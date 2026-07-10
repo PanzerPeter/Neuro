@@ -11,6 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.58.0] - 2026-07-10
+
+### Added
+- `parser`/`semantic`/`codegen`: **const generic parameters, `where` clauses, and
+  turbofish**. A generic parameter list may now declare a compile-time *value*
+  parameter — `func sum<const N: u32>(a: [i32; N]) -> i32` and
+  `struct Buffer<T, const CAP: u32> { data: [T; CAP] }` — usable as an array length and
+  as a value in the body. Each distinct value is monomorphized into its own specialized
+  code, so a const parameter carries zero runtime cost. Const parameters are inferred
+  from array-argument lengths (or a struct literal's field values) and may also be
+  supplied explicitly by a **turbofish** — `identity::<i32>(x)`, `zeros::<4>()` — the
+  only call-site form for explicit generic arguments, useful when inference cannot reach
+  a parameter. A **`where` clause** keeps complex signatures readable: it carries trait
+  bounds (parsed, still unenforced until traits land) and **value predicates** over const
+  parameters (`where N > 0`), which are checked at every instantiation and reported at the
+  offending call. Const parameter types must be an integer type; type arguments remain
+  restricted to `Copy` this phase.
+
+### Changed
+- `semantic`: a generic type parameter that cannot be inferred from a call's arguments is
+  now reported at the **call site** (supply it with a turbofish) rather than at the
+  function declaration.
+
+---
+
 ## [1.57.0] - 2026-07-06
 
 ### Added

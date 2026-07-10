@@ -1,14 +1,17 @@
-// Showcase — generic structs, impls, and functions working together with prior features.
+// Showcase — generics, const generics, turbofish, and where-clauses working together
+// with prior features.
 //
 // Cumulative integration example combining:
 //   generic structs + generic inherent impls with monomorphization (§3.8)
 //   · generic functions with monomorphization (§3.8)
+//   · const generic parameters + turbofish + `where` value predicates (§3.8)
+//   · fixed-size arrays (§3.1)
 //   · enums with associated data + pattern matching (§3.5, §3.6)
 //   · tuples as generic type arguments (§3.2)
 //   · if-expressions and implicit returns
 //
 // Each generic template below (function, struct, or impl) is emitted once per
-// concrete type argument, so `T` costs nothing at runtime.
+// concrete type or const argument, so `T` and `N` cost nothing at runtime.
 
 enum Shape {
     Circle(i32),
@@ -34,6 +37,13 @@ impl<T> Cell<T> {
     }
 }
 
+// A const-generic struct: `CAP` is a compile-time value, inferred from the field
+// array's length, so `[T; CAP]` is sized concretely per instance.
+struct Buffer<T, const CAP: u32> {
+    data: [T; CAP],
+    count: u32,
+}
+
 // The classic identity template — reused here at i32 and at a tuple type.
 func identity<T>(x: T) -> T {
     x
@@ -47,6 +57,16 @@ func choose<T>(cond: bool, a: T, b: T) -> T {
 // Two type parameters: returns only its second argument.
 func second<T, U>(a: T, b: U) -> U {
     b
+}
+
+// A const-generic function: `N` is inferred from the array argument's length, and the
+// `where` predicate guarantees the array is non-empty at every instantiation.
+func sum_all<const N: u32>(a: [i32; N]) -> i32 where N > 0 {
+    mut total: i32 = 0
+    for x in a {
+        total = total + x
+    }
+    total
 }
 
 // Non-generic helper: deconstructs an enum via pattern matching.
@@ -70,6 +90,14 @@ func main() -> i32 {
     val cv = cell.get()                    // generic impl method     -> 7
     val bonus = if flag.get() { p.first } else { 0 }   // -> 6
 
-    // 10 + 10 + 4 + 3 + 5 + 12 + 7 + 6 = 57
-    return pick + base + k + t.0 + t.1 + a + cv + bonus
+    val id2 = identity::<i32>(8)           // turbofish            -> 8
+    val nums: [i32; 3] = [4, 5, 6]
+    val s = sum_all(nums)                  // const generic + where -> 15
+
+    val buf = Buffer { data: [1, 2, 3, 0], count: 3 }  // Buffer<i32, 4> (CAP inferred)
+    val c = buf.count as i32               // -> 3
+    val d = buf.data[1]                    // -> 2
+
+    // 10 + 10 + 4 + 3 + 5 + 12 + 7 + 6 + 8 + 15 + 3 + 2 = 85
+    return pick + base + k + t.0 + t.1 + a + cv + bonus + id2 + s + c + d
 }

@@ -164,3 +164,10 @@ only (var/const/param/return/field/cast); alias as value constructor or path nam
 - 2026-04-16: `parse_const_def` (module-level) + `parse_const_stmt` (body); `parse_program`/`parse_stmt`
   dispatch on `TokenKind::Const`.
 - 2026-04-04: Parse `..=` for inclusive `for` ranges.
+- 2026-07-10: Const generics, `where` clauses & turbofish (§3.8). `parse_generic_params` accepts
+  `const N: T` (sets `GenericParamKind::Const`); `parse_where_clause` folds trait bounds into the
+  matching param and collects value predicates (`FunctionDef`/`StructDef`/`ImplDef.where_predicates`);
+  array-type sizes accept a const-param identifier (`ArraySize::Const`); a turbofish `f::<T, N>(x)`
+  parses in `parse_infix` (`ColonColon` at `Precedence::Call`, prefix `::` skips a following `<`) into
+  `Expr::Call.type_args`; `Type::Generic.args` is now `Vec<GenericArg>` (types or const values, e.g.
+  `Ring<i32, 4>`). New public re-exports: `ArraySize`, `GenericArg`, `GenericParamKind`.

@@ -1,7 +1,7 @@
 use lexical_analysis::{Token, TokenKind};
 use shared_types::{Identifier, Literal, Span};
 
-use crate::ast::{BinaryOp, Expr, Stmt, UnaryOp};
+use crate::ast::{BinaryOp, Expr, GenericArg, Stmt, UnaryOp};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 
@@ -103,7 +103,10 @@ impl Parser {
                         return self.parse_labeled_loop_expr(ident, token.span);
                     }
                 }
-                if self.check(&TokenKind::ColonColon) {
+                // `::<` is a turbofish (`f::<T>(x)`, §3.8), not a path member: leave it
+                // for `parse_infix` to attach to the following call. Only `::member`
+                // is a path here.
+                if self.check(&TokenKind::ColonColon) && !self.colon_colon_opens_turbofish() {
                     self.advance(); // consume '::'
                     let member_token = self.consume(
                         TokenKind::Identifier(String::new()),
@@ -430,6 +433,37 @@ impl Parser {
 
                 Ok(Expr::Call {
                     func: Box::new(left),
+                    type_args: Vec::new(),
+                    args,
+                    span,
+                })
+            }
+
+            // Turbofish `callee::<T, N>(args)` (§3.8): explicit generic arguments before a
+            // call. Only valid immediately before a call, so a `(` argument list must
+            // follow the `>`.
+            TokenKind::ColonColon => {
+                self.advance(); // consume '::'
+                let type_args = self.parse_turbofish_args()?;
+                self.consume(TokenKind::LeftParen, "'(' after turbofish `::<...>`")?;
+                let mut args = Vec::new();
+                self.skip_newlines();
+                if !self.check(&TokenKind::RightParen) {
+                    loop {
+                        args.push(self.parse_expr(Precedence::Lowest)?);
+                        self.skip_newlines();
+                        if !self.check(&TokenKind::Comma) {
+                            break;
+                        }
+                        self.advance(); // consume ','
+                        self.skip_newlines();
+                    }
+                }
+                let close = self.consume(TokenKind::RightParen, "')'")?;
+                let span = left.span().merge(close.span);
+                Ok(Expr::Call {
+                    func: Box::new(left),
+                    type_args,
                     args,
                     span,
                 })
@@ -639,8 +673,59 @@ impl Parser {
             TokenKind::As => Precedence::Cast,
             TokenKind::LeftParen => Precedence::Call,
             TokenKind::LeftBracket => Precedence::Call,
+            // A turbofish `::<...>` binds like a call — it only ever precedes one.
+            TokenKind::ColonColon => Precedence::Call,
             TokenKind::Dot => Precedence::FieldAccess,
             _ => Precedence::Lowest,
         }
+    }
+
+    /// Whether the current `::` is immediately followed by `<`, opening a turbofish
+    /// `::<...>` (§3.8) rather than a path member `::name`.
+    fn colon_colon_opens_turbofish(&self) -> bool {
+        matches!(
+            self.tokens.get(self.current + 1).map(|t| &t.kind),
+            Some(TokenKind::Less)
+        )
+    }
+
+    /// Parse turbofish generic arguments `<T, N, ...>` (§3.8), positioned just after the
+    /// `::`. Each argument is a type or a non-negative integer const value.
+    fn parse_turbofish_args(&mut self) -> ParseResult<Vec<GenericArg>> {
+        self.consume(TokenKind::Less, "'<' after '::' in a turbofish")?;
+        self.skip_newlines();
+        let mut args = Vec::new();
+        loop {
+            if let Some(TokenKind::Integer(n)) = self.peek_kind() {
+                let value = *n;
+                let span = self
+                    .advance()
+                    .map(|t| t.span)
+                    .ok_or(ParseError::UnexpectedEof {
+                        expected: "const argument".to_string(),
+                    })?;
+                if value < 0 {
+                    return Err(ParseError::UnexpectedToken {
+                        found: TokenKind::Integer(value),
+                        expected: "a non-negative const argument".to_string(),
+                        span,
+                    });
+                }
+                args.push(GenericArg::Const {
+                    value: value as i128,
+                    span,
+                });
+            } else {
+                args.push(GenericArg::Type(self.parse_type()?));
+            }
+            self.skip_newlines();
+            if !self.check(&TokenKind::Comma) {
+                break;
+            }
+            self.advance(); // consume ','
+            self.skip_newlines();
+        }
+        self.consume(TokenKind::Greater, "'>' to close turbofish arguments")?;
+        Ok(args)
     }
 }
