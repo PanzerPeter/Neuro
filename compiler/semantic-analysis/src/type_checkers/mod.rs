@@ -58,6 +58,11 @@ pub(crate) struct TypeChecker {
     /// body. A `Named` annotation matching one resolves to [`Type::Generic`] instead of
     /// erroring as an unknown type. Empty outside a generic function.
     pub(crate) generic_scope: HashSet<String>,
+    /// Const (value) generic parameters in scope while checking a generic definition's
+    /// signature and body (§3.8), mapping each name to its declared integer type. A value
+    /// reference to one resolves to that type; an array length naming one becomes an
+    /// [`crate::types::ArrayLen::Param`]. Empty outside a generic definition.
+    pub(crate) const_scope: HashMap<String, Type>,
     /// Compile-time constant names and their declared types (module and function scope).
     pub(crate) constants: HashMap<String, Type>,
     /// Collected type errors
@@ -88,12 +93,17 @@ pub(crate) enum VariantForm {
 
 /// A generic free-function template's resolved signature (§3.8). Parameter and
 /// return types carry [`Type::Generic`] placeholders for the type parameters named
-/// in `param_names` (declaration order, which is also the monomorphization order).
+/// in `param_names` (declaration order, which is also the monomorphization and
+/// turbofish order). A name present in `const_types` is a const (value) parameter of
+/// that integer type; the rest are type parameters. `where_predicates` are value
+/// predicates checked at each call against the concrete const values.
 #[derive(Clone)]
 pub(crate) struct GenericFnSig {
     pub(crate) param_names: Vec<String>,
+    pub(crate) const_types: HashMap<String, Type>,
     pub(crate) params: Vec<Type>,
     pub(crate) ret: Type,
+    pub(crate) where_predicates: Vec<ast_types::Expr>,
 }
 
 /// A resolved enum variant: its name, construction form, and ordered payload
@@ -147,6 +157,7 @@ impl TypeChecker {
             generic_impls: HashMap::new(),
             instantiated_structs: HashSet::new(),
             generic_scope: HashSet::new(),
+            const_scope: HashMap::new(),
             constants: HashMap::new(),
             errors: Vec::new(),
             warnings: Vec::new(),

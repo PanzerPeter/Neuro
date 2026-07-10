@@ -76,7 +76,7 @@ structs/struct_update.nr  14
 
 # --- showcase (multiple features working together) ------------------------
 showcase/enum_records.nr    46
-showcase/generic_toolkit.nr 57
+showcase/generic_toolkit.nr 85
 showcase/mutable_borrows.nr 47
 showcase/num_algorithms.nr  32
 showcase/perceptron.nr      8

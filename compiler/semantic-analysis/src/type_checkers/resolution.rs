@@ -1,6 +1,8 @@
+use ast_types::{ArraySize, GenericArg};
+
 use super::TypeChecker;
 use crate::errors::TypeError;
-use crate::types::Type;
+use crate::types::{ArrayLen, Type};
 
 impl TypeChecker {
     /// Convert syntax-parsing type to semantic type.
@@ -81,9 +83,10 @@ impl TypeChecker {
                     });
                     return None;
                 }
+                let len = self.resolve_array_size(size, *span)?;
                 Some(Type::Array {
                     element: Box::new(element_ty),
-                    size: *size,
+                    size: len,
                 })
             }
             // Tuple `(T1, T2, ...)` (§3.2). Each element must be `Copy` in this phase
@@ -110,7 +113,14 @@ impl TypeChecker {
             ast_types::Type::Generic { name, args, span } => {
                 let mut resolved = Vec::with_capacity(args.len());
                 for arg in args {
-                    resolved.push(self.resolve_type(arg)?);
+                    match arg {
+                        // A const (value) argument `Ring<i32, 4>` becomes an internal
+                        // `ConstValue` marker consumed by monomorphization (§3.8).
+                        GenericArg::Const { value, .. } => {
+                            resolved.push(Type::ConstValue(*value as u64));
+                        }
+                        GenericArg::Type(ty) => resolved.push(self.resolve_type(ty)?),
+                    }
                 }
                 if !self.is_generic_struct(&name.name) {
                     self.record_error(TypeError::NotAGenericType {
@@ -137,6 +147,30 @@ impl TypeChecker {
                     span: *span,
                 });
                 None
+            }
+        }
+    }
+
+    /// Resolve an array length annotation (§3.1, §3.8) to a semantic [`ArrayLen`]. A
+    /// literal becomes `Fixed`; a name is accepted only when it is an in-scope const
+    /// generic parameter (becoming `Param`), else it is an unknown length.
+    fn resolve_array_size(
+        &mut self,
+        size: &ArraySize,
+        span: shared_types::Span,
+    ) -> Option<ArrayLen> {
+        match size {
+            ArraySize::Literal(n) => Some(ArrayLen::Fixed(*n as usize)),
+            ArraySize::Const(ident) => {
+                if self.const_scope.contains_key(&ident.name) {
+                    Some(ArrayLen::Param(ident.name.clone()))
+                } else {
+                    self.record_error(TypeError::UnknownArrayLength {
+                        name: ident.name.clone(),
+                        span,
+                    });
+                    None
+                }
             }
         }
     }

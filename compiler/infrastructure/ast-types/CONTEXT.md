@@ -110,3 +110,7 @@ the callee of associated-function calls (`Point::new(args)`).
 - 2026-04-28: Added `Expr::If { condition, then_block, else_if_blocks, else_block, span }` and
   `Expr::Block { stmts, span }` for value-producing if-expressions and block expressions (§1.8).
   `expressions.rs` now `use super::statements::Stmt` for the block payload types.
+- 2026-07-10: Const generics / `where` / turbofish (§3.8). New public types `ArraySize`
+  (`Literal`/`Const`), `GenericArg` (`Type`/`Const`), `GenericParamKind` (`Type`/`Const`). `GenericParam`
+  gains `kind`; `Type::Array.size` is `ArraySize`; `Type::Generic.args` is `Vec<GenericArg>`;
+  `Expr::Call` gains `type_args`; `FunctionDef`/`StructDef`/`ImplDef` gain `where_predicates`.

@@ -1,7 +1,7 @@
 use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
-use crate::ast::Type;
+use crate::ast::{ArraySize, GenericArg, Type};
 use crate::errors::{ParseError, ParseResult};
 
 use super::Parser;
@@ -9,8 +9,9 @@ use super::Parser;
 impl Parser {
     /// Parse a type annotation
     pub(crate) fn parse_type(&mut self) -> ParseResult<Type> {
-        // Fixed-size array type `[T; N]` (§3.1): element type, `;`, then a non-negative
-        // integer length literal, closed by `]`.
+        // Fixed-size array type `[T; N]` (§3.1, §3.8): element type, `;`, then either a
+        // non-negative integer length literal or a `const` generic parameter name
+        // (`[T; CAP]`), closed by `]`.
         if self.check(&TokenKind::LeftBracket) {
             let open = self.advance().ok_or(ParseError::UnexpectedEof {
                 expected: "'['".to_string(),
@@ -21,11 +22,16 @@ impl Parser {
                 expected: "array length".to_string(),
             })?;
             let size = match size_token.kind {
-                TokenKind::Integer(n) if n >= 0 => n as usize,
+                TokenKind::Integer(n) if n >= 0 => ArraySize::Literal(n as u64),
+                TokenKind::Identifier(name) => ArraySize::Const(Identifier {
+                    name,
+                    span: size_token.span,
+                }),
                 other => {
                     return Err(ParseError::UnexpectedToken {
                         found: other,
-                        expected: "non-negative integer array length".to_string(),
+                        expected: "non-negative integer array length or const parameter name"
+                            .to_string(),
                         span: size_token.span,
                     })
                 }
@@ -95,9 +101,10 @@ impl Parser {
                 let span = token.span;
                 let ident = Identifier { name, span };
                 // Generic type application `Name<T1, T2, ...>` (§3.8). Without a
-                // following `<`, this is a plain named type.
+                // following `<`, this is a plain named type. Arguments may be types or
+                // const (integer) values, as in `Ring<i32, 4>`.
                 if self.check(&TokenKind::Less) {
-                    let args = self.parse_optional_type_args()?;
+                    let args = self.parse_generic_type_args()?;
                     let end = args.last().map(|a| a.span()).unwrap_or(span);
                     return Ok(Type::Generic {
                         name: ident,
@@ -113,5 +120,45 @@ impl Parser {
                 span: token.span,
             }),
         }
+    }
+
+    /// Parse a `<T1, N, ...>` generic-argument list in a type application (§3.8). Each
+    /// argument is a type or a non-negative integer const value (`Ring<i32, 4>`).
+    fn parse_generic_type_args(&mut self) -> ParseResult<Vec<GenericArg>> {
+        self.consume(TokenKind::Less, "'<'")?;
+        self.skip_newlines();
+        let mut args = Vec::new();
+        loop {
+            if let Some(TokenKind::Integer(n)) = self.peek_kind() {
+                let value = *n;
+                let span = self
+                    .advance()
+                    .map(|t| t.span)
+                    .ok_or(ParseError::UnexpectedEof {
+                        expected: "const argument".to_string(),
+                    })?;
+                if value < 0 {
+                    return Err(ParseError::UnexpectedToken {
+                        found: TokenKind::Integer(value),
+                        expected: "a non-negative const argument".to_string(),
+                        span,
+                    });
+                }
+                args.push(GenericArg::Const {
+                    value: value as i128,
+                    span,
+                });
+            } else {
+                args.push(GenericArg::Type(self.parse_type()?));
+            }
+            self.skip_newlines();
+            if !self.check(&TokenKind::Comma) {
+                break;
+            }
+            self.advance(); // consume ','
+            self.skip_newlines();
+        }
+        self.consume(TokenKind::Greater, "'>' to close type arguments")?;
+        Ok(args)
     }
 }

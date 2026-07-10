@@ -3,8 +3,8 @@ use shared_types::Identifier;
 
 use crate::ast::{
     Attribute, ConstDef, EnumDef, EnumVariant, Expr, FieldDef, FieldInit, FunctionDef,
-    GenericParam, ImplDef, Item, MethodDef, NewtypeDef, Parameter, SelfParam, StructDef,
-    VariantPayload,
+    GenericParam, GenericParamKind, ImplDef, Item, MethodDef, NewtypeDef, Parameter, SelfParam,
+    StructDef, VariantPayload,
 };
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
@@ -239,7 +239,7 @@ impl Parser {
         };
 
         // Optional generic parameter list `<T, U: Bound + Bound>` (§3.8).
-        let generics = self.parse_generic_params()?;
+        let mut generics = self.parse_generic_params()?;
 
         self.consume(TokenKind::LeftParen, "'('")?;
         self.skip_newlines();
@@ -313,6 +313,11 @@ impl Parser {
 
         self.skip_newlines();
 
+        // Optional `where` clause (§3.8): trait bounds fold into `generics`, value
+        // predicates are collected for per-instantiation checking.
+        let where_predicates = self.parse_where_clause(&mut generics)?;
+        self.skip_newlines();
+
         let body = self.parse_block()?;
 
         let end_span = body.last().map(stmt_span).unwrap_or(start.span);
@@ -320,6 +325,7 @@ impl Parser {
         Ok(FunctionDef {
             name,
             generics,
+            where_predicates,
             params,
             return_type,
             body,
@@ -342,6 +348,14 @@ impl Parser {
 
         let mut generics: Vec<GenericParam> = Vec::new();
         loop {
+            // A const (value) parameter is introduced by the `const` keyword: `const N: u32`
+            // (§3.8). Its declared type follows a mandatory `:`.
+            let is_const = self.check(&TokenKind::Const);
+            if is_const {
+                self.advance(); // 'const'
+                self.skip_newlines();
+            }
+
             let name_token =
                 self.consume(TokenKind::Identifier(String::new()), "type parameter name")?;
             let name = if let TokenKind::Identifier(n) = name_token.kind {
@@ -357,30 +371,44 @@ impl Parser {
                 });
             };
 
-            // Optional trait bounds: `T: A + B`. Parsed for forward compatibility; the
-            // bound names are stored but not enforced until the trait system lands (§3.9).
             let mut bounds: Vec<Identifier> = Vec::new();
             let mut end_span = name.span;
-            if self.check(&TokenKind::Colon) {
-                self.advance(); // ':'
+            let kind = if is_const {
+                // `const N: T` — the declared integer type is mandatory.
+                self.consume(
+                    TokenKind::Colon,
+                    "':' and a type after a const parameter name",
+                )?;
                 self.skip_newlines();
-                loop {
-                    let bound_token =
-                        self.consume(TokenKind::Identifier(String::new()), "trait bound name")?;
-                    if let TokenKind::Identifier(n) = bound_token.kind {
-                        end_span = bound_token.span;
-                        bounds.push(Identifier {
-                            name: n,
-                            span: bound_token.span,
-                        });
-                    }
-                    if !self.check(&TokenKind::Plus) {
-                        break;
-                    }
-                    self.advance(); // '+'
+                let ty = self.parse_type()?;
+                end_span = ty.span();
+                GenericParamKind::Const(ty)
+            } else {
+                // Optional trait bounds on a type parameter: `T: A + B`. Parsed for forward
+                // compatibility; the bound names are stored but not enforced until the trait
+                // system lands (§3.9).
+                if self.check(&TokenKind::Colon) {
+                    self.advance(); // ':'
                     self.skip_newlines();
+                    loop {
+                        let bound_token =
+                            self.consume(TokenKind::Identifier(String::new()), "trait bound name")?;
+                        if let TokenKind::Identifier(n) = bound_token.kind {
+                            end_span = bound_token.span;
+                            bounds.push(Identifier {
+                                name: n,
+                                span: bound_token.span,
+                            });
+                        }
+                        if !self.check(&TokenKind::Plus) {
+                            break;
+                        }
+                        self.advance(); // '+'
+                        self.skip_newlines();
+                    }
                 }
-            }
+                GenericParamKind::Type
+            };
 
             for existing in &generics {
                 if existing.name.name == name.name {
@@ -393,6 +421,7 @@ impl Parser {
 
             generics.push(GenericParam {
                 name: name.clone(),
+                kind,
                 bounds,
                 span: name.span.merge(end_span),
             });
@@ -410,6 +439,92 @@ impl Parser {
         self.consume(TokenKind::Greater, "'>'")?;
 
         Ok(generics)
+    }
+
+    /// Parse an optional `where` clause (§3.8), terminated by the following `{`.
+    ///
+    /// Each comma-separated item is either a **trait bound** (`T: A + B`, folded into the
+    /// matching generic parameter's `bounds` and left unenforced this phase) or a **value
+    /// predicate** — a boolean expression over const parameters (`N > 0`) returned for
+    /// per-instantiation checking. Returns an empty vector when no `where` follows.
+    fn parse_where_clause(&mut self, generics: &mut [GenericParam]) -> ParseResult<Vec<Expr>> {
+        if !self.check(&TokenKind::Where) {
+            return Ok(Vec::new());
+        }
+        self.advance(); // 'where'
+        self.skip_newlines();
+
+        let mut predicates: Vec<Expr> = Vec::new();
+        loop {
+            if self.check(&TokenKind::LeftBrace) {
+                break;
+            }
+            if self.where_item_is_trait_bound() {
+                let name_token =
+                    self.consume(TokenKind::Identifier(String::new()), "type parameter name")?;
+                let TokenKind::Identifier(name) = name_token.kind else {
+                    unreachable!("guarded by where_item_is_trait_bound")
+                };
+                self.consume(TokenKind::Colon, "':'")?;
+                self.skip_newlines();
+                let mut bounds: Vec<Identifier> = Vec::new();
+                loop {
+                    let bound_token =
+                        self.consume(TokenKind::Identifier(String::new()), "trait bound name")?;
+                    if let TokenKind::Identifier(n) = bound_token.kind {
+                        bounds.push(Identifier {
+                            name: n,
+                            span: bound_token.span,
+                        });
+                    }
+                    if !self.check(&TokenKind::Plus) {
+                        break;
+                    }
+                    self.advance(); // '+'
+                    self.skip_newlines();
+                }
+                // Fold the bounds onto the matching type parameter; a bound naming an
+                // unknown parameter is accepted and ignored (bounds are unenforced).
+                if let Some(gp) = generics.iter_mut().find(|g| g.name.name == name) {
+                    gp.bounds.extend(bounds);
+                }
+            } else {
+                // A value predicate is a boolean expression over const parameters. Struct
+                // literals cannot appear in a predicate, and the trailing `{` opens the
+                // body/fields, so suppress struct-literal parsing while reading it.
+                let saved = self.no_struct_lit;
+                self.no_struct_lit = true;
+                let pred = self.parse_expr(Precedence::Lowest);
+                self.no_struct_lit = saved;
+                predicates.push(pred?);
+            }
+
+            self.skip_newlines();
+            if !self.check(&TokenKind::Comma) {
+                break;
+            }
+            self.advance(); // ','
+            self.skip_newlines();
+        }
+
+        Ok(predicates)
+    }
+
+    /// Whether the upcoming `where`-clause item is a trait bound (`Ident : ...`) rather
+    /// than a value predicate. True exactly when the current token is an identifier whose
+    /// next non-newline token is `:`.
+    fn where_item_is_trait_bound(&self) -> bool {
+        if !matches!(self.peek_kind(), Some(TokenKind::Identifier(_))) {
+            return false;
+        }
+        let mut i = self.current + 1;
+        while matches!(
+            self.tokens.get(i).map(|t| &t.kind),
+            Some(TokenKind::Newline)
+        ) {
+            i += 1;
+        }
+        matches!(self.tokens.get(i).map(|t| &t.kind), Some(TokenKind::Colon))
     }
 
     /// Parse a struct definition: `struct Name { field: Type, ... }`,
@@ -437,7 +552,10 @@ impl Parser {
 
         self.skip_newlines();
         // Optional generic parameter list `<T, U: Bound>` (§3.8).
-        let generics = self.parse_generic_params()?;
+        let mut generics = self.parse_generic_params()?;
+        self.skip_newlines();
+        // Optional `where` clause (§3.8) before the field block.
+        let where_predicates = self.parse_where_clause(&mut generics)?;
         self.skip_newlines();
         self.consume(TokenKind::LeftBrace, "'{'")?;
         self.skip_newlines();
@@ -486,6 +604,7 @@ impl Parser {
         Ok(StructDef {
             name,
             generics,
+            where_predicates,
             fields,
             attributes,
             span: start.span.merge(close.span),
@@ -721,7 +840,7 @@ impl Parser {
     pub(crate) fn parse_impl_def(&mut self) -> ParseResult<ImplDef> {
         let start = self.consume(TokenKind::Impl, "'impl'")?;
         // Optional impl-level generic parameters `impl<T, U> ...` (§3.8).
-        let generics = self.parse_generic_params()?;
+        let mut generics = self.parse_generic_params()?;
         self.skip_newlines();
 
         // The first identifier is the struct name for an inherent `impl T`, or the
@@ -769,6 +888,9 @@ impl Parser {
         };
 
         self.skip_newlines();
+        // Optional impl-level `where` clause (§3.8) before the method block.
+        let where_predicates = self.parse_where_clause(&mut generics)?;
+        self.skip_newlines();
         self.consume(TokenKind::LeftBrace, "'{'")?;
         self.skip_newlines();
 
@@ -787,6 +909,7 @@ impl Parser {
             type_name,
             generics,
             type_args,
+            where_predicates,
             methods,
             span: start.span.merge(close.span),
         })

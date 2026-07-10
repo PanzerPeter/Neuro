@@ -715,9 +715,50 @@ func bad<T>(a: T, b: T) -> T {
 compatibility, but it is **not enforced** yet.
 
 **Restrictions (this phase).** Type arguments are restricted to `Copy` types. Generic structs and
-`impl` blocks are supported too (see [Structs](structs.md#generic-structs-and-impls)); const
-(value) parameters, `where` clauses, and explicit turbofish type arguments are planned follow-on
-work.
+`impl` blocks are supported too (see [Structs](structs.md#generic-structs-and-impls)).
+
+### Const (value) parameters
+
+A generic parameter list may also declare a **const parameter** — a compile-time *value* (of an
+integer type), written `const NAME: T`. A const parameter is usable as an array length and as a
+value in the body, and each distinct value is monomorphized into its own specialized code (zero
+runtime cost). Const parameters are inferred from array-argument lengths:
+
+```neuro
+func sum<const N: u32>(a: [i32; N]) -> i32 {
+    mut total: i32 = 0
+    for x in a {
+        total = total + x
+    }
+    total          // N is inferred from the array's length
+}
+
+val xs: [i32; 3] = [10, 20, 12]
+val s = sum(xs)    // sum<3>  ->  42
+```
+
+### `where` clauses
+
+For a readable signature, constraints may move into a `where` clause after the return type. A
+`where` clause carries trait bounds (parsed, still unenforced) and **value predicates** over const
+parameters — a boolean expression checked at every instantiation and reported at the offending call:
+
+```neuro
+func head<const N: u32>(a: [i32; N]) -> i32 where N > 0 {
+    a[0]           // guaranteed non-empty by `where N > 0`
+}
+```
+
+### Turbofish — explicit generic arguments
+
+When inference cannot reach a parameter (or you want to be explicit), supply the arguments at the
+call with a **turbofish** `::<...>`. This is the only call-site form for explicit generic arguments;
+arguments may be types or const values:
+
+```neuro
+val a = identity::<i32>(5)   // explicit type argument
+val b = zeros::<4>()         // explicit const argument
+```
 
 ## References
 

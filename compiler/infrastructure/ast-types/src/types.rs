@@ -2,6 +2,42 @@
 
 use shared_types::{Identifier, Span};
 
+/// One generic argument in a type application `Name<...>` or a call-site turbofish
+/// `f::<...>(x)` (§3.8). An argument is either a type (for a type parameter) or an
+/// integer value (for a const parameter). Positional: matched to the callee's or
+/// constructor's generic parameters in declaration order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GenericArg {
+    /// A type argument, e.g. the `i32` in `Pair<i32, f64>` or `parse::<i32>("42")`.
+    Type(Type),
+    /// A const (value) argument, e.g. the `4` in `Ring<i32, 4>` or `zeros::<4>()`.
+    Const { value: i128, span: Span },
+}
+
+impl GenericArg {
+    /// The source span of this generic argument.
+    pub fn span(&self) -> Span {
+        match self {
+            GenericArg::Type(ty) => ty.span(),
+            GenericArg::Const { span, .. } => *span,
+        }
+    }
+}
+
+/// The length of a fixed-size array type `[T; N]` (§3.1, §3.8).
+///
+/// Ordinarily a compile-time integer literal. Inside a generic definition it may
+/// instead name a `const` generic parameter (`[T; CAP]`); the symbolic form is
+/// resolved to a concrete length by monomorphization before any backend sees it,
+/// so it never escapes the frontend.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArraySize {
+    /// A concrete compile-time length, e.g. the `3` in `[i32; 3]`.
+    Literal(u64),
+    /// A `const` generic parameter used as the length, e.g. the `CAP` in `[T; CAP]`.
+    Const(Identifier),
+}
+
 /// Type AST nodes
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -21,7 +57,7 @@ pub enum Type {
     /// known at compile time. `span` covers the leading `[` through the closing `]`.
     Array {
         element: Box<Type>,
-        size: usize,
+        size: ArraySize,
         span: Span,
     },
 
@@ -39,7 +75,7 @@ pub enum Type {
     /// substitutes the arguments to produce a distinct concrete type.
     Generic {
         name: Identifier,
-        args: Vec<Type>,
+        args: Vec<GenericArg>,
         span: Span,
     },
 

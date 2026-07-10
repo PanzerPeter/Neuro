@@ -316,8 +316,28 @@ func main() -> i32 {
 parameter has no move semantics yet). A generic struct is usable only *with* type arguments
 — its bare name is rejected. A generic instantiated with an enclosing type parameter (a
 `Wrapper<T>` field inside another generic struct) is a documented limitation, deferred with
-broader generic support. Const (value) parameters, `where` clauses, and turbofish are
-separate, later features.
+broader generic support.
+
+### Const (value) parameters
+
+A generic struct may also declare a **const parameter** — a compile-time value used as an array
+length, so `[T; CAP]` is sized concretely per instance:
+
+```neuro
+struct Buffer<T, const CAP: u32> {
+    data: [T; CAP],
+    count: u32
+}
+
+// CAP is inferred from the field array's length (Buffer<i32, 4>):
+val buf = Buffer { data: [1, 2, 3, 4], count: 4 }
+
+// or written explicitly in a type annotation:
+val other: Buffer<i32, 4> = Buffer { data: [5, 6, 7, 8], count: 4 }
+```
+
+Each distinct `CAP` produces its own monomorphized struct at zero runtime cost. A generic `impl`
+over a struct's const parameter is a documented limitation deferred to broader generic support.
 
 ## Unsupported (Phase 1+)
 

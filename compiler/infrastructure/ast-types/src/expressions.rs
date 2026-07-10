@@ -3,6 +3,7 @@ use std::fmt;
 use shared_types::{Identifier, Literal, Span};
 
 use super::statements::Stmt;
+use super::types::GenericArg;
 
 /// A single field initializer in a struct literal: `field_name: expr`
 #[derive(Debug, Clone, PartialEq)]
@@ -25,6 +26,10 @@ pub enum Expr {
     },
     Call {
         func: Box<Expr>,
+        /// Explicit turbofish generic arguments `f::<T, N>(...)` (§3.8). Empty when the
+        /// call supplies none (arguments are then inferred). Positional against the
+        /// callee's generic parameter list.
+        type_args: Vec<GenericArg>,
         args: Vec<Expr>,
         span: Span,
     },

@@ -1,6 +1,6 @@
 use super::{EnumVariantInfo, TypeChecker, VariantForm};
 use crate::errors::TypeError;
-use crate::types::Type;
+use crate::types::{ArrayLen, Type};
 use ast_types::{
     ConstDef, EnumDef, Expr, FunctionDef, ImplDef, NewtypeDef, SelfParam, Stmt, StructDef,
     VariantPayload,
@@ -38,18 +38,9 @@ impl TypeChecker {
     /// [`Type::Generic`] placeholders, and its signature is recorded in `generic_funcs`
     /// rather than `functions`. Concrete instantiation happens per call site.
     pub(crate) fn check_function(&mut self, func: &FunctionDef) -> Option<()> {
-        // Put the generic type parameters in scope for signature + body resolution.
-        // A parameter may not shadow a built-in type name.
-        self.generic_scope.clear();
-        for gp in &func.generics {
-            if is_builtin_type_name(&gp.name.name) {
-                self.record_error(TypeError::GenericParamShadowsBuiltin {
-                    name: gp.name.name.clone(),
-                    span: gp.name.span,
-                });
-            }
-            self.generic_scope.insert(gp.name.name.clone());
-        }
+        // Put the generic type + const parameters in scope for signature + body
+        // resolution. A parameter may not shadow a built-in type name.
+        self.enter_generic_scope(&func.generics);
 
         // Check for duplicate parameter names
         use std::collections::HashSet;
@@ -89,7 +80,7 @@ impl TypeChecker {
                 name: func.name.name.clone(),
                 span: func.name.span,
             });
-            self.generic_scope.clear();
+            self.exit_generic_scope();
             return None;
         }
 
@@ -102,27 +93,32 @@ impl TypeChecker {
                 },
             );
         } else {
-            // Every type parameter must appear in a value parameter so it can be
-            // inferred from the call arguments — turbofish is a later item (§3.8).
-            for gp in &func.generics {
-                if !param_types
-                    .iter()
-                    .any(|t| type_mentions_generic(t, &gp.name.name))
-                {
-                    self.record_error(TypeError::GenericParamNotInferable {
-                        name: gp.name.name.clone(),
-                        span: gp.name.span,
-                    });
-                }
-            }
             // A generic template is registered separately; its signature carries the
-            // `Type::Generic` placeholders and is instantiated at each call site.
+            // `Type::Generic` placeholders and is instantiated at each call site. A
+            // parameter that cannot be inferred from the arguments must be supplied by a
+            // turbofish at the call — enforced per call, not here (§3.8).
+            let const_types: HashMap<String, Type> = func
+                .generics
+                .iter()
+                .filter_map(|g| match &g.kind {
+                    ast_types::GenericParamKind::Const(_) => Some((
+                        g.name.name.clone(),
+                        self.const_scope
+                            .get(&g.name.name)
+                            .cloned()
+                            .unwrap_or(Type::Unknown),
+                    )),
+                    ast_types::GenericParamKind::Type => None,
+                })
+                .collect();
             self.generic_funcs.insert(
                 func.name.name.clone(),
                 super::GenericFnSig {
                     param_names: func.generics.iter().map(|g| g.name.name.clone()).collect(),
+                    const_types,
                     params: param_types.clone(),
                     ret: return_type.clone(),
+                    where_predicates: func.where_predicates.clone(),
                 },
             );
         }
@@ -193,9 +189,47 @@ impl TypeChecker {
         self.symbols.pop_scope();
         self.current_function_return_type = None;
         self.current_fn_outliving.clear();
-        self.generic_scope.clear();
+        self.exit_generic_scope();
 
         Some(())
+    }
+
+    /// Put a definition's generic parameters in scope for signature and body resolution
+    /// (§3.8): type parameters as [`Type::Generic`] placeholders, const parameters as
+    /// in-scope values of their declared integer type. Replaces any previous scope.
+    fn enter_generic_scope(&mut self, generics: &[ast_types::GenericParam]) {
+        self.generic_scope.clear();
+        self.const_scope.clear();
+        for gp in generics {
+            if is_builtin_type_name(&gp.name.name) {
+                self.record_error(TypeError::GenericParamShadowsBuiltin {
+                    name: gp.name.name.clone(),
+                    span: gp.name.span,
+                });
+            }
+            match &gp.kind {
+                ast_types::GenericParamKind::Type => {
+                    self.generic_scope.insert(gp.name.name.clone());
+                }
+                ast_types::GenericParamKind::Const(ty) => {
+                    let ity = self.resolve_type(ty).unwrap_or(Type::Unknown);
+                    if !matches!(ity, Type::Unknown) && !ity.is_integer() {
+                        self.record_error(TypeError::ConstParamNotInteger {
+                            name: gp.name.name.clone(),
+                            ty: ity.clone(),
+                            span: gp.name.span,
+                        });
+                    }
+                    self.const_scope.insert(gp.name.name.clone(), ity);
+                }
+            }
+        }
+    }
+
+    /// Clear the generic type + const parameter scopes on leaving a generic definition.
+    fn exit_generic_scope(&mut self) {
+        self.generic_scope.clear();
+        self.const_scope.clear();
     }
 
     /// Register an enum definition: its variants, their construction form, and each
@@ -475,23 +509,14 @@ impl TypeChecker {
             return;
         }
 
-        self.generic_scope.clear();
-        for gp in &def.generics {
-            if is_builtin_type_name(&gp.name.name) {
-                self.record_error(TypeError::GenericParamShadowsBuiltin {
-                    name: gp.name.name.clone(),
-                    span: gp.name.span,
-                });
-            }
-            self.generic_scope.insert(gp.name.name.clone());
-        }
+        self.enter_generic_scope(&def.generics);
         let mut fields: Vec<(String, Type)> = Vec::new();
         for field in &def.fields {
             if let Some(ty) = self.resolve_type(&field.ty) {
                 fields.push((field.name.name.clone(), ty));
             }
         }
-        self.generic_scope.clear();
+        self.exit_generic_scope();
 
         self.struct_defs.insert(def.name.name.clone(), fields);
         self.record_derive_intent(def);
@@ -514,12 +539,9 @@ impl TypeChecker {
             });
             return;
         }
-        self.generic_scope.clear();
-        for gp in &def.generics {
-            self.generic_scope.insert(gp.name.name.clone());
-        }
+        self.enter_generic_scope(&def.generics);
         let _ = self.register_impl(def);
-        self.generic_scope.clear();
+        self.exit_generic_scope();
         self.generic_impls
             .entry(base)
             .or_default()
@@ -530,12 +552,9 @@ impl TypeChecker {
     /// the impl's type parameters are in scope, so a field typed `T` resolves to a
     /// placeholder — exactly the soundness contract of a bounds-free type parameter.
     pub(crate) fn check_generic_impl(&mut self, def: &ImplDef) {
-        self.generic_scope.clear();
-        for gp in &def.generics {
-            self.generic_scope.insert(gp.name.name.clone());
-        }
+        self.enter_generic_scope(&def.generics);
         self.check_impl(def);
-        self.generic_scope.clear();
+        self.exit_generic_scope();
     }
 
     /// Materialize a monomorphized instance of a generic struct with concrete type
@@ -575,15 +594,36 @@ impl TypeChecker {
         if self.instantiated_structs.insert(mangled.clone()) {
             let mut subst: HashMap<String, Type> = HashMap::new();
             for (gp, arg) in template.generics.iter().zip(args.iter()) {
-                if !self.is_type_copy(arg) {
-                    self.record_error(TypeError::GenericArgumentNotCopy {
+                // Validate each argument's kind: a const parameter takes a `ConstValue`,
+                // a type parameter takes a type. A type argument must be Copy (the
+                // abstract-body soundness condition); a const value is exempt.
+                let is_const = matches!(gp.kind, ast_types::GenericParamKind::Const(_));
+                match arg {
+                    Type::ConstValue(_) if is_const => {}
+                    Type::ConstValue(_) => self.record_error(TypeError::TurbofishKindMismatch {
                         param: gp.name.name.clone(),
-                        ty: arg.clone(),
+                        expected: "type".to_string(),
                         span,
-                    });
+                    }),
+                    _ if is_const => self.record_error(TypeError::TurbofishKindMismatch {
+                        param: gp.name.name.clone(),
+                        expected: "const".to_string(),
+                        span,
+                    }),
+                    _ if !self.is_type_copy(arg) => {
+                        self.record_error(TypeError::GenericArgumentNotCopy {
+                            param: gp.name.name.clone(),
+                            ty: arg.clone(),
+                            span,
+                        })
+                    }
+                    _ => {}
                 }
                 subst.insert(gp.name.name.clone(), arg.clone());
             }
+
+            // Value predicates (`where N > 0`) hold against the concrete const values.
+            self.check_where_predicates(&template.where_predicates.clone(), &subst);
 
             let template_fields = self.struct_defs.get(base).cloned().unwrap_or_default();
             let concrete_fields: Vec<(String, Type)> = template_fields
@@ -980,7 +1020,7 @@ pub(crate) fn unify_generic(param: &Type, arg: &Type, subst: &mut HashMap<String
                 element: ae,
                 size: asz,
             },
-        ) => ps == asz && unify_generic(pe, ae, subst),
+        ) => unify_array_len(ps, asz, subst) && unify_generic(pe, ae, subst),
         (Type::Tuple(pe), Type::Tuple(ae)) => {
             pe.len() == ae.len() && pe.iter().zip(ae).all(|(p, a)| unify_generic(p, a, subst))
         }
@@ -1000,7 +1040,7 @@ pub(crate) fn substitute_generic(ty: &Type, subst: &HashMap<String, Type>) -> Ty
         },
         Type::Array { element, size } => Type::Array {
             element: Box::new(substitute_generic(element, subst)),
-            size: *size,
+            size: substitute_array_len(size, subst),
         },
         Type::Tuple(elements) => Type::Tuple(
             elements
@@ -1054,7 +1094,7 @@ fn remap_type(ty: &Type, subst: &HashMap<String, Type>, base: &str, mangled: &st
         },
         Type::Array { element, size } => Type::Array {
             element: Box::new(remap_type(element, subst, base, mangled)),
-            size: *size,
+            size: substitute_array_len(size, subst),
         },
         Type::Tuple(elements) => Type::Tuple(
             elements
@@ -1066,19 +1106,35 @@ fn remap_type(ty: &Type, subst: &HashMap<String, Type>, base: &str, mangled: &st
     }
 }
 
-/// Whether the resolved type `ty` mentions the generic parameter named `name`
-/// anywhere in its structure — used to confirm a type parameter is inferable from
-/// the call arguments (§3.8).
-pub(crate) fn type_mentions_generic(ty: &Type, name: &str) -> bool {
-    match ty {
-        Type::Generic(n) => n == name,
-        Type::Reference { inner, .. } => type_mentions_generic(inner, name),
-        Type::Array { element, .. } => type_mentions_generic(element, name),
-        Type::Tuple(elements) => elements.iter().any(|e| type_mentions_generic(e, name)),
-        Type::Function { params, ret } => {
-            params.iter().any(|p| type_mentions_generic(p, name))
-                || type_mentions_generic(ret, name)
-        }
+/// Unify a template array length against an argument's (§3.8). A const-parameter length
+/// binds that parameter to the argument's concrete value (recorded as a [`Type::ConstValue`]
+/// in `subst`); two fixed lengths must be equal; a fixed template length against a symbolic
+/// argument (only inside another template) matches structurally by name.
+fn unify_array_len(param: &ArrayLen, arg: &ArrayLen, subst: &mut HashMap<String, Type>) -> bool {
+    match (param, arg) {
+        (ArrayLen::Fixed(a), ArrayLen::Fixed(b)) => a == b,
+        (ArrayLen::Param(name), ArrayLen::Fixed(v)) => match subst.get(name) {
+            Some(Type::ConstValue(existing)) => *existing as usize == *v,
+            Some(_) => false,
+            None => {
+                subst.insert(name.clone(), Type::ConstValue(*v as u64));
+                true
+            }
+        },
+        (ArrayLen::Param(a), ArrayLen::Param(b)) => a == b,
         _ => false,
+    }
+}
+
+/// Substitute a template array length using an inferred substitution (§3.8): a const
+/// parameter bound to a [`Type::ConstValue`] becomes a concrete `Fixed` length; anything
+/// else is left as-is.
+fn substitute_array_len(size: &ArrayLen, subst: &HashMap<String, Type>) -> ArrayLen {
+    match size {
+        ArrayLen::Param(name) => match subst.get(name) {
+            Some(Type::ConstValue(v)) => ArrayLen::Fixed(*v as usize),
+            _ => size.clone(),
+        },
+        ArrayLen::Fixed(_) => size.clone(),
     }
 }

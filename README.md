@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-839%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-864%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 (Core Language) in progress · sub-phases 1A–1E complete (MVP, syntax & semantics, ownership/borrow checker, HIR & MLIR plumbing, type system) · 1F (generics, traits & dispatch) active · → v2.0.0 when Phase 1 completes
 
@@ -88,13 +88,14 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 (Core Language) sub-phases 1A–1E are complete; 1F (generics, traits & dispatch) is active — generic functions, structs, and impls have landed. The following features are fully implemented and tested (**839 Tests Passing**):
+Phase 1 (Core Language) sub-phases 1A–1E are complete; 1F (generics, traits & dispatch) is active — generic functions, structs, and impls have landed, plus const generics, `where` clauses, and turbofish. The following features are fully implemented and tested (**864 Tests Passing**):
 
 | Feature | Details |
 |---|---|
 | **Static Typing + Inference** | All integer types (i8–u64), f16/bf16/f32/f64, bool, char, string; explicit `as` casting; contextual literal inference; literal type suffixes (`42i64`, `1.5f32`) and digit separators (`1_000_000`) |
 | **Functions** | Parameters, explicit and expression-based implicit returns, recursion, forward references |
 | **Generics** | Generic functions `func identity<T>(x: T) -> T`, generic structs `struct Pair<T, U>`, and generic inherent impls `impl<T> Wrapper<T>` (§3.8); monomorphized (one specialized copy per concrete type-argument set, zero runtime cost). Type arguments are inferred from value/field arguments or written explicitly (`Pair<i32, f64>`). Bounds parse but are not yet enforced (await traits); type arguments restricted to `Copy` this phase |
+| **Const generics, `where` & turbofish** | Compile-time value parameters `func sum<const N: u32>(a: [i32; N])` / `struct Buffer<T, const CAP: u32> { data: [T; CAP] }` (§3.8), usable as array lengths and values, monomorphized per distinct value (zero cost). Inferred from array-argument lengths / struct field values or supplied by a turbofish `identity::<i32>(x)` / `zeros::<4>()`. `where` clauses carry value predicates checked per instantiation (`where N > 0`) plus (still-unenforced) trait bounds |
 | **Control Flow** | if/else/elif, `while`, `loop` (incl. as a value expression), range-for (`0..n`, `0..=n`), `break`/`continue` with value-carrying breaks and loop labels |
 | **Variables & Constants** | `val` (immutable) / `mut` (mutable) with type-safe reassignment; module- and function-scope `const` emitted as LLVM globals |
 | **Structs & Methods** | Definition, instantiation, field-init shorthand, functional update (`..base`), field read/mutation; `impl` blocks with `&self` / `&mut self` instance methods and `TypeName::func` associated functions |
