@@ -238,8 +238,8 @@ impl Parser {
             });
         };
 
-        // Optional generic parameter list `<T, U: Bound + Bound>` (§3.8).
-        let mut generics = self.parse_generic_params()?;
+        // Optional generic parameter list `<'a, T, U: Bound + Bound>` (§3.8, §2.6).
+        let (mut generics, lifetimes) = self.parse_generic_params()?;
 
         self.consume(TokenKind::LeftParen, "'('")?;
         self.skip_newlines();
@@ -325,6 +325,7 @@ impl Parser {
         Ok(FunctionDef {
             name,
             generics,
+            lifetimes,
             where_predicates,
             params,
             return_type,
@@ -334,20 +335,50 @@ impl Parser {
         })
     }
 
-    /// Parse an optional generic parameter list `<T, U: Bound + Bound>` (§3.8).
+    /// Parse an optional generic parameter list `<'a, T, U: Bound + Bound, const N: u32>`
+    /// (§3.8, §2.6).
     ///
-    /// Returns an empty vector when no `<` follows. Each parameter is a type-parameter
-    /// name with optional trait bounds; bounds are recorded but not enforced this
-    /// phase (the trait system does not exist yet). An empty `<>` is rejected.
-    fn parse_generic_params(&mut self) -> ParseResult<Vec<GenericParam>> {
+    /// Returns two lists: the type/const parameters (which drive monomorphization) and
+    /// the explicit lifetime names (`'a`, §2.6), kept separate because a lifetime is a
+    /// distinct namespace and does not monomorphize. Both are empty when no `<` follows.
+    /// Type-parameter bounds are recorded but not enforced this phase (no trait system);
+    /// lifetime parameters carry no bounds. An empty `<>` is rejected.
+    fn parse_generic_params(&mut self) -> ParseResult<(Vec<GenericParam>, Vec<Identifier>)> {
         if !self.check(&TokenKind::Less) {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         }
         self.consume(TokenKind::Less, "'<'")?;
         self.skip_newlines();
 
         let mut generics: Vec<GenericParam> = Vec::new();
+        let mut lifetimes: Vec<Identifier> = Vec::new();
         loop {
+            // A lifetime parameter `'a` (§2.6) is a leading-quote name lexed as a single
+            // `Lifetime` token. Lifetimes are collected apart from type/const parameters.
+            if let Some(TokenKind::Lifetime(lt_name)) = self.peek().map(|t| t.kind.clone()) {
+                let lt_token = self.advance().ok_or(ParseError::UnexpectedEof {
+                    expected: "lifetime".to_string(),
+                })?;
+                let lt = Identifier {
+                    name: lt_name,
+                    span: lt_token.span,
+                };
+                if lifetimes.iter().any(|existing| existing.name == lt.name) {
+                    return Err(ParseError::DuplicateParameter {
+                        name: format!("'{}", lt.name),
+                        span: lt.span,
+                    });
+                }
+                lifetimes.push(lt);
+                self.skip_newlines();
+                if !self.check(&TokenKind::Comma) {
+                    break;
+                }
+                self.advance(); // ','
+                self.skip_newlines();
+                continue;
+            }
+
             // A const (value) parameter is introduced by the `const` keyword: `const N: u32`
             // (§3.8). Its declared type follows a mandatory `:`.
             let is_const = self.check(&TokenKind::Const);
@@ -438,7 +469,7 @@ impl Parser {
         // a type-parameter name, so reaching this point means at least one was parsed.
         self.consume(TokenKind::Greater, "'>'")?;
 
-        Ok(generics)
+        Ok((generics, lifetimes))
     }
 
     /// Parse an optional `where` clause (§3.8), terminated by the following `{`.
@@ -551,8 +582,8 @@ impl Parser {
         };
 
         self.skip_newlines();
-        // Optional generic parameter list `<T, U: Bound>` (§3.8).
-        let mut generics = self.parse_generic_params()?;
+        // Optional generic parameter list `<'a, T, U: Bound>` (§3.8, §2.6).
+        let (mut generics, lifetimes) = self.parse_generic_params()?;
         self.skip_newlines();
         // Optional `where` clause (§3.8) before the field block.
         let where_predicates = self.parse_where_clause(&mut generics)?;
@@ -604,6 +635,7 @@ impl Parser {
         Ok(StructDef {
             name,
             generics,
+            lifetimes,
             where_predicates,
             fields,
             attributes,
@@ -839,8 +871,8 @@ impl Parser {
     /// Parse an `impl TypeName { … }` block
     pub(crate) fn parse_impl_def(&mut self) -> ParseResult<ImplDef> {
         let start = self.consume(TokenKind::Impl, "'impl'")?;
-        // Optional impl-level generic parameters `impl<T, U> ...` (§3.8).
-        let mut generics = self.parse_generic_params()?;
+        // Optional impl-level generic parameters `impl<'a, T, U> ...` (§3.8, §2.6).
+        let (mut generics, lifetimes) = self.parse_generic_params()?;
         self.skip_newlines();
 
         // The first identifier is the struct name for an inherent `impl T`, or the
@@ -908,6 +940,7 @@ impl Parser {
             trait_name,
             type_name,
             generics,
+            lifetimes,
             type_args,
             where_predicates,
             methods,

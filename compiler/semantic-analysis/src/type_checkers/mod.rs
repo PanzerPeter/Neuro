@@ -63,6 +63,11 @@ pub(crate) struct TypeChecker {
     /// reference to one resolves to that type; an array length naming one becomes an
     /// [`crate::types::ArrayLen::Param`]. Empty outside a generic definition.
     pub(crate) const_scope: HashMap<String, Type>,
+    /// Explicit lifetime parameter names in scope while checking a definition's signature
+    /// and body (§2.6), e.g. `'a` from `func f<'a>(...)` (stored without the leading `'`).
+    /// A reference annotation `&'a T` is well-formed only if `a` is present here. Empty
+    /// outside a definition that declares lifetimes.
+    pub(crate) lifetime_scope: HashSet<String>,
     /// Compile-time constant names and their declared types (module and function scope).
     pub(crate) constants: HashMap<String, Type>,
     /// Collected type errors
@@ -158,6 +163,7 @@ impl TypeChecker {
             instantiated_structs: HashSet::new(),
             generic_scope: HashSet::new(),
             const_scope: HashMap::new(),
+            lifetime_scope: HashSet::new(),
             constants: HashMap::new(),
             errors: Vec::new(),
             warnings: Vec::new(),

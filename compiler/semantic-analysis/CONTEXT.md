@@ -127,6 +127,14 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-07-13: Explicit lifetime annotations §2.6. New `lifetime_scope: HashSet<String>` on the
+  `TypeChecker`, populated by `enter_generic_scope` (now takes a `lifetimes: &[Identifier]`
+  argument) from each definition's `lifetimes` field and cleared by `exit_generic_scope`. In
+  `resolve_type`, a `Type::Reference` carrying an explicit lifetime is validated against
+  `lifetime_scope`; an unknown name records the new `TypeError::UndeclaredLifetime`. The lifetime
+  is then erased — the semantic `Type::Reference` is unchanged, so `&'a T` and `&T` are the same
+  type. No new outlives logic: the returned-reference check (v1.40.0) already accepts returning a
+  borrowed parameter, which is exactly the `longest<'a>` case.
 - 2026-07-06: Generic structs & impls §3.8. Generic structs are monomorphized by name-mangling:
   a generic `StructDef` is stored in `generic_structs` and its placeholder-typed fields are also
   kept in `struct_defs` under the base name so generic-`impl` method bodies check abstractly

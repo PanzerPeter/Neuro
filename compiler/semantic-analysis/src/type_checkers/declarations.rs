@@ -40,7 +40,7 @@ impl TypeChecker {
     pub(crate) fn check_function(&mut self, func: &FunctionDef) -> Option<()> {
         // Put the generic type + const parameters in scope for signature + body
         // resolution. A parameter may not shadow a built-in type name.
-        self.enter_generic_scope(&func.generics);
+        self.enter_generic_scope(&func.generics, &func.lifetimes);
 
         // Check for duplicate parameter names
         use std::collections::HashSet;
@@ -197,9 +197,17 @@ impl TypeChecker {
     /// Put a definition's generic parameters in scope for signature and body resolution
     /// (§3.8): type parameters as [`Type::Generic`] placeholders, const parameters as
     /// in-scope values of their declared integer type. Replaces any previous scope.
-    fn enter_generic_scope(&mut self, generics: &[ast_types::GenericParam]) {
+    fn enter_generic_scope(
+        &mut self,
+        generics: &[ast_types::GenericParam],
+        lifetimes: &[shared_types::Identifier],
+    ) {
         self.generic_scope.clear();
         self.const_scope.clear();
+        self.lifetime_scope.clear();
+        for lt in lifetimes {
+            self.lifetime_scope.insert(lt.name.clone());
+        }
         for gp in generics {
             if is_builtin_type_name(&gp.name.name) {
                 self.record_error(TypeError::GenericParamShadowsBuiltin {
@@ -230,6 +238,7 @@ impl TypeChecker {
     fn exit_generic_scope(&mut self) {
         self.generic_scope.clear();
         self.const_scope.clear();
+        self.lifetime_scope.clear();
     }
 
     /// Register an enum definition: its variants, their construction form, and each
@@ -509,7 +518,7 @@ impl TypeChecker {
             return;
         }
 
-        self.enter_generic_scope(&def.generics);
+        self.enter_generic_scope(&def.generics, &def.lifetimes);
         let mut fields: Vec<(String, Type)> = Vec::new();
         for field in &def.fields {
             if let Some(ty) = self.resolve_type(&field.ty) {
@@ -539,7 +548,7 @@ impl TypeChecker {
             });
             return;
         }
-        self.enter_generic_scope(&def.generics);
+        self.enter_generic_scope(&def.generics, &def.lifetimes);
         let _ = self.register_impl(def);
         self.exit_generic_scope();
         self.generic_impls
@@ -552,7 +561,7 @@ impl TypeChecker {
     /// the impl's type parameters are in scope, so a field typed `T` resolves to a
     /// placeholder — exactly the soundness contract of a bounds-free type parameter.
     pub(crate) fn check_generic_impl(&mut self, def: &ImplDef) {
-        self.enter_generic_scope(&def.generics);
+        self.enter_generic_scope(&def.generics, &def.lifetimes);
         self.check_impl(def);
         self.exit_generic_scope();
     }

@@ -51,6 +51,12 @@ isolation:
   (`Buffer<T, const CAP>` and `sum_all<const N>` with a `where N > 0` predicate),
   **turbofish** (`identity::<i32>(8)`), a fixed-size array + `for`-in loop, an enum +
   pattern matching, and a tuple used as a generic type argument. Exit `85`.
+- [`showcase/borrowed_text.nr`](showcase/borrowed_text.nr) — **explicit lifetime
+  annotations** `<'a>` (§2.6) on the classic `longest<'a>(a: &'a string, b: &'a string)
+  -> &'a string`, working together with immutable string borrows (§2.4), zero-copy
+  `.slice(range)` / `.len()` (§2.7), an if-expression, and a lifetime mixed with a type
+  parameter (`tagged_len<'a, T>`) that monomorphizes on `T` only. The lifetime is
+  validated then erased — zero runtime cost. Exit `18`.
 
 ## Compiling and running
 

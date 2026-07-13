@@ -28,6 +28,12 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-07-13: Explicit lifetime annotations §2.6. Added a `lifetimes: Vec<Identifier>` field to
+  `FunctionDef`, `StructDef`, and `ImplDef` — the `'a` names from a `<...>` list, kept separate
+  from `generics` because lifetimes are a distinct namespace and do not drive monomorphization
+  (a lifetime-only function is an ordinary concrete function). Added `lifetime: Option<Identifier>`
+  to `Type::Reference` — the `'a` in `&'a T`, `None` when elided. Both are validated then erased by
+  semantic analysis; a reference type's identity does not depend on its lifetime.
 - 2026-07-06: Generic structs & impls §3.8. Added `StructDef.generics: Vec<GenericParam>`
   (empty for a non-generic struct), `ImplDef.generics: Vec<GenericParam>` + `ImplDef.type_args:
   Vec<Type>` (the `<T>` of `impl<T> Wrapper<T>`), and a new `Type::Generic { name, args, span }`

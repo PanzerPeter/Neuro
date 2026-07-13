@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-864%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-879%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 (Core Language) in progress · sub-phases 1A–1E complete (MVP, syntax & semantics, ownership/borrow checker, HIR & MLIR plumbing, type system) · 1F (generics, traits & dispatch) active · → v2.0.0 when Phase 1 completes
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 (Core Language) sub-phases 1A–1E are complete; 1F (generics, traits & dispatch) is active — generic functions, structs, and impls have landed, plus const generics, `where` clauses, and turbofish. The following features are fully implemented and tested (**864 Tests Passing**):
+Phase 1 (Core Language) sub-phases 1A–1E are complete; 1F (generics, traits & dispatch) is active — generic functions, structs, and impls have landed, plus const generics, `where` clauses, turbofish, and explicit lifetime annotations. The following features are fully implemented and tested (**879 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -108,7 +108,7 @@ Phase 1 (Core Language) sub-phases 1A–1E are complete; 1F (generics, traits & 
 | **Move Semantics** | Move-by-default for non-`Copy` values; use-after-move is a compile error; `.clone()` opts out; `@derive(Copy, Clone)` on structs |
 | **Deterministic `Drop`** | `impl Drop for T { func drop(&mut self) }` runs a destructor at scope exit, in reverse declaration order, on normal exit only (never during a panic); a moved-out value is dropped exactly once; a `Copy` type may not implement `Drop` |
 | **Borrows** | Immutable `&T` and mutable `&mut T` references with the `*` deref operator; flow-sensitive borrow exclusivity (shared XOR mutable) enforced at compile time |
-| **Lifetimes (elision)** | Returned-reference lifetime elision; returning a borrow of a local or by-value parameter is rejected as it would dangle |
+| **Lifetimes** | Returned-reference lifetime elision (returning a borrow of a local or by-value parameter is rejected as it would dangle), plus **explicit lifetime annotations** `func longest<'a>(a: &'a string, b: &'a string) -> &'a string` (§2.6): declared in the generic list, validated for well-formedness, then erased — `&'a T` is the same type as `&T`, zero runtime cost |
 | **Strings** | Fat-pointer `string` with full escape support; `&string` borrowed slices; byte-level `==`/`!=`; `+` concatenation (heap-allocated new string); builtin `.len()` / `.clone()` / `.slice(a..b)` (zero-copy sub-slice, panics on out-of-bounds or mid-codepoint boundary) |
 | **Panic Runtime** | `panic(msg)`, `assert(cond)`, `unreachable()` — print a located diagnostic to stderr and abort (no unwinding) |
 | **LLVM Backend + CLI** | Native executable generation via inkwell 0.9.0 (LLVM 20); `neurc check` (type-check) and `neurc compile` (native binary) |

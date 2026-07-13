@@ -60,8 +60,23 @@ impl TypeChecker {
                 }
             },
             // Borrow `&T` (§2.4) / `&mut T` (§2.5): resolve the referent recursively,
-            // preserving mutability.
-            ast_types::Type::Reference { inner, mutable, .. } => {
+            // preserving mutability. An explicit lifetime `&'a T` (§2.6) is validated for
+            // well-formedness against the in-scope lifetime parameters, then erased — a
+            // reference type's identity does not depend on its lifetime.
+            ast_types::Type::Reference {
+                inner,
+                mutable,
+                lifetime,
+                ..
+            } => {
+                if let Some(lt) = lifetime {
+                    if !self.lifetime_scope.contains(&lt.name) {
+                        self.record_error(TypeError::UndeclaredLifetime {
+                            name: lt.name.clone(),
+                            span: lt.span,
+                        });
+                    }
+                }
                 self.resolve_type(inner).map(|t| Type::Reference {
                     inner: Box::new(t),
                     mutable: *mutable,

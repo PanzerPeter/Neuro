@@ -589,10 +589,28 @@ fn tokenize_char_literals() {
 #[test]
 fn empty_and_multi_char_literals_are_rejected() {
     // Neither `''` nor `'ab'` matches the single-scalar char-literal regex, so
-    // both surface as lex errors rather than tokenizing.
+    // both surface as lex errors rather than tokenizing. `'ab'` lexes its `'ab`
+    // prefix as a lifetime, then the trailing stray `'` is the lex error.
     assert!(tokenize("''").is_err());
     assert!(tokenize("'ab'").is_err());
-    assert!(tokenize("'a").is_err());
+}
+
+#[test]
+fn tokenize_lifetimes() {
+    // A quote-less `'ident` is a lifetime (§2.6). The stored name drops the `'`.
+    let result = tokenize("<'a, 'lt>").unwrap();
+    assert!(matches!(result[0].kind, TokenKind::Less));
+    assert!(matches!(&result[1].kind, TokenKind::Lifetime(n) if n == "a"));
+    assert!(matches!(&result[3].kind, TokenKind::Lifetime(n) if n == "lt"));
+    assert!(matches!(result[4].kind, TokenKind::Greater));
+}
+
+#[test]
+fn char_literal_wins_over_lifetime() {
+    // `'a'` carries a closing quote, so it is a strictly longer match than the
+    // lifetime `'a`; logos' longest-match rule keeps it a char literal.
+    let result = tokenize("'a'").unwrap();
+    assert!(matches!(result[0].kind, TokenKind::Char('a')));
 }
 
 #[test]

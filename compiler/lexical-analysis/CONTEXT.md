@@ -39,6 +39,7 @@ a `\u{...}` unicode escape, or a `\xNN` byte escape — so `''`, `'ab'`, and an 
 `\u{...}` scalar range, emitting `LexError::InvalidCharLiteral` on an out-of-range code point.
 
 ## Recent Updates
+- 2026-07-13: Added `TokenKind::Lifetime(String)` for explicit lifetime names (§2.6), e.g. `'a` in `func longest<'a>(...)`. Regex `'[_\p{XID_Start}]\p{XID_Continue}*`; the callback strips the leading `'` so the stored name is the bare identifier. A char literal `'a'` carries a closing quote and is a strictly longer match, so logos' longest-match rule keeps char literals winning — only the quote-less form lexes as a lifetime. Sits directly after `Char` in declaration order.
 - 2026-07-02: Added `TokenKind::Newtype` keyword token for `newtype Name = T` declarations (§3.15). Reserves the word so it cannot be an identifier. Sits directly after `Type` in declaration order.
 - 2026-07-02: Added `TokenKind::FatArrow` (`=>`) for `match` arms (§3.6). Sits after `Arrow` in declaration order; logos longest-match keeps `=>` a single token distinct from `=` then `>`.
 - 2026-06-09: Added `TokenKind::Loop` keyword token for the `loop { ... }` infinite-loop statement (§3.7). Reserves the word so it cannot be an identifier. Sits directly after `While` in declaration order.

@@ -51,6 +51,14 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-07-13: Explicit lifetime annotations §2.6. `parse_generic_params` now returns
+  `(Vec<GenericParam>, Vec<Identifier>)` — a leading `Lifetime` token in a `<...>` list is
+  collected into a separate `lifetimes` vector (kept apart from type/const generics because a
+  lifetime does not monomorphize), with a duplicate-lifetime check. `FunctionDef`, `StructDef`,
+  and `ImplDef` gained a `lifetimes` field, populated at their three call sites. `parse_type`'s
+  reference branch parses an optional lifetime after `&` (before `mut`), setting
+  `Type::Reference.lifetime`: `&'a T` / `&'a mut T`. Purely a parse surface — lifetimes are
+  validated then erased in semantic analysis.
 - 2026-07-06: Generic structs & impls §3.8. `parse_struct_def` parses an optional generic
   parameter list after the struct name (`StructDef.generics`); `parse_impl_def` parses impl-level
   generics after `impl` and optional type arguments on the type name (`ImplDef.generics` /
