@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.59.0] - 2026-07-13
+
+### Added
+- `parser`: explicit lifetime annotations. A lifetime parameter is declared in the
+  generic-parameter list as `'a` and used on reference types as `&'a T` / `&'a mut T`,
+  as in the canonical `func longest<'a>(a: &'a string, b: &'a string) -> &'a string`.
+  Lifetimes may be mixed with type and const parameters (`func f<'a, T>(...)`); only the
+  type/const parameters drive monomorphization.
+- `semantic`: lifetime well-formedness checking. Every lifetime used on a reference must
+  be declared in the enclosing generic-parameter list; an undeclared lifetime is a compile
+  error. Annotations are then erased — `&'a T` and `&T` are the same type, so a lifetime
+  carries zero runtime cost and never changes which values a signature accepts. The
+  existing returned-reference outlives analysis does the real borrow checking.
+
+---
+
 ## [1.58.1] - 2026-07-10
 
 ### Changed

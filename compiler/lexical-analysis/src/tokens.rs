@@ -167,6 +167,14 @@ pub enum TokenKind {
     )]
     Char(char),
 
+    // Lifetime name (§2.6): a leading `'` followed by an identifier, with NO closing
+    // quote — e.g. `'a` in `func longest<'a>(...)`. The callback strips the `'`, so the
+    // stored name is the bare identifier. A char literal `'a'` is a strictly longer match
+    // (it carries the closing quote), so logos' longest-match rule keeps char literals
+    // winning; only the quote-less form reaches here.
+    #[regex(r"'[_\p{XID_Start}]\p{XID_Continue}*", |lex| lex.slice()[1..].to_string())]
+    Lifetime(String),
+
     // Arithmetic operators
     #[token("+")]
     Plus,
@@ -333,6 +341,7 @@ impl Token {
             TokenKind::FloatSuffix(_) => "<float>",
             TokenKind::String(_) => "<string>",
             TokenKind::Char(_) => "<char>",
+            TokenKind::Lifetime(_) => "<lifetime>",
             TokenKind::Plus => "+",
             TokenKind::Minus => "-",
             TokenKind::Star => "*",

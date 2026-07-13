@@ -47,9 +47,13 @@ pub enum Type {
     /// Borrow (reference) type (§2.4, §2.5): a non-owning reference to a value of
     /// type `inner`. `span` covers the leading `&` through the referent type.
     /// `mutable` distinguishes `&mut T` (write access) from `&T` (read-only).
+    /// `lifetime` is the optional explicit annotation (§2.6), the `'a` in `&'a T`;
+    /// `None` when elided. It is validated for well-formedness then erased — a
+    /// reference type's identity does not depend on it.
     Reference {
         inner: Box<Type>,
         mutable: bool,
+        lifetime: Option<Identifier>,
         span: Span,
     },
 

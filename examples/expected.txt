@@ -75,6 +75,7 @@ structs/structs.nr  50
 structs/struct_update.nr  14
 
 # --- showcase (multiple features working together) ------------------------
+showcase/borrowed_text.nr   18
 showcase/enum_records.nr    46
 showcase/generic_toolkit.nr 85
 showcase/mutable_borrows.nr 47

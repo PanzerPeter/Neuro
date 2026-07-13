@@ -45,6 +45,12 @@ pub struct GenericParam {
 pub struct FunctionDef {
     pub name: Identifier,
     pub generics: Vec<GenericParam>,
+    /// Explicit lifetime parameters (§2.6), the `'a` names in `func f<'a>(...)`.
+    /// Kept separate from `generics` because lifetimes are a distinct namespace and,
+    /// unlike type/const parameters, do NOT drive monomorphization — a function with
+    /// only lifetime parameters is an ordinary concrete function. Erased after
+    /// borrow-check; the elision-based outlives analysis (§2.6) does the real work.
+    pub lifetimes: Vec<Identifier>,
     /// Value predicates from a `where` clause (§3.8), e.g. `where N > 0`. Each is a
     /// boolean expression over the function's const parameters, evaluated at every
     /// instantiation against the concrete values; a violated predicate is an error at
@@ -95,6 +101,10 @@ pub struct StructDef {
     /// non-generic struct. A generic struct is a *template* — later passes
     /// monomorphize it into one concrete struct per distinct set of type arguments.
     pub generics: Vec<GenericParam>,
+    /// Explicit lifetime parameters (§2.6), the `'a` names in `struct S<'a> { ... }`.
+    /// Distinct from `generics` (see [`FunctionDef::lifetimes`]); erased after
+    /// borrow-check.
+    pub lifetimes: Vec<Identifier>,
     /// Value predicates from a `where` clause (§3.8) over the struct's const
     /// parameters, checked at each instantiation (see [`FunctionDef::where_predicates`]).
     pub where_predicates: Vec<Expr>,
@@ -150,6 +160,10 @@ pub struct ImplDef {
     /// `generics` is the impl-level `<T, U>` type-parameter list (§3.8), as in
     /// `impl<T> Wrapper<T>`; empty for a non-generic impl.
     pub generics: Vec<GenericParam>,
+    /// Explicit lifetime parameters (§2.6), the `'a` names in `impl<'a> S<'a>`.
+    /// Distinct from `generics` (see [`FunctionDef::lifetimes`]); erased after
+    /// borrow-check.
+    pub lifetimes: Vec<Identifier>,
     /// Type arguments applied to `type_name`, as in the `<T>` of `impl<T> Wrapper<T>`.
     /// Empty for a plain `impl Name` block. Each argument typically names an impl
     /// generic parameter; monomorphization maps them positionally to the struct's

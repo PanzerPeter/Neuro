@@ -293,14 +293,16 @@ prerequisites are already done. Coordinate on an issue before starting a large i
       v1.55.0 (Copy-inner only; backends erase the wrapper). Completes 1E.
 
 **Open now — 1F (Generics, Traits & Dispatch):** generic *functions* (§3.8) landed
-in v1.56.0, generic *structs & impls* in v1.57.0, and *const parameters, `where`
+in v1.56.0, generic *structs & impls* in v1.57.0, *const parameters, `where`
 clauses & turbofish* in v1.58.0 (all monomorphized, type arguments inferred from
 value/field arguments or written explicitly, bounds parsed-but-unenforced, `Copy`
 arguments only; const parameters inferred from array lengths / field values or
-supplied by turbofish, `where` value predicates checked per instantiation). The
-topmost open items are explicit lifetimes, then the trait system.
+supplied by turbofish, `where` value predicates checked per instantiation), and
+*explicit lifetime annotations* `<'a>` in v1.59.0 (a well-formedness surface —
+declared in the generic list, validated, then erased; `&'a T` == `&T`). The
+topmost open item is now the trait system.
 
-**Next, in dependency order:** 1F (explicit lifetimes → trait declarations →
+**Next, in dependency order:** 1F (trait declarations →
 operator traits → static/dynamic dispatch → closures) → 1G (error
 handling, collections, modules, prelude) → 1H (string interpolation, triple-quoted
 strings, nested comments, named arguments). See the [Quick Roadmap](README.md#quick-roadmap).
@@ -332,9 +334,12 @@ capabilities table for full behavior.
 Recommendation pending sign-off: relocate to **1G** alongside the heap-backed
 collections. It does not block 1E onward.
 
-Explicit lifetime annotations `<'a>` are scheduled in **1F** — they need the
-generic-parameter list + `'a` lifetime tokens, the parse surface that lands with
-generics. Lifetime *elision* (v1.40.0, landed above) covers the common cases.
+Explicit lifetime annotations `<'a>` landed in **1F** (v1.59.0): a `'a` lifetime
+token, a `lifetimes` list on function/struct/impl definitions kept separate from
+monomorphizable generics, and `&'a T` / `&'a mut T` reference annotations. They are
+validated against the in-scope lifetime parameters (`UndeclaredLifetime`) then erased
+— `&'a T` is the same type as `&T`. Lifetime *elision* (v1.40.0) still covers the
+common cases and does the real outlives checking.
 
 ### Non-Code Contributions
 

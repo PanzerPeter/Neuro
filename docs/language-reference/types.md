@@ -664,7 +664,7 @@ The diagnostics are `cannot borrow '<name>' as mutable` (a `&mut` while any borr
 
 ### Lifetimes — Returned References (§2.6)
 
-Lifetimes are **inferred** — there is no annotation syntax yet. The elision rules match Rust: a
+Lifetimes are **inferred** in the vast majority of cases. The elision rules match Rust: a
 single input reference lifetime is applied to the outputs, and the `&self` lifetime is applied to
 a method's outputs. In practice this means a function or method that **returns a reference** may
 borrow one of its reference parameters (or, in a method, `&self`); the returned borrow then lives
@@ -691,10 +691,25 @@ The check follows a returned reference through a local reference binding (`val r
 also rejected) and into the arms of a returned `if`/`else`. The diagnostic is
 `cannot return a reference to '<name>'`.
 
-> **Deferred:** this is elision only. Explicit lifetime annotations (`func longest<'a>(a: &'a string,
-> b: &'a string) -> &'a string`) need a generic-parameter parse surface and land with **generics**
-> (1F); until then an ambiguous multi-reference signature is accepted as long as the returned
-> borrow targets a parameter.
+#### Explicit lifetime annotations
+
+For the advanced patterns elision cannot express, a lifetime parameter is declared in the
+generic-parameter list as `'a` and used on reference types as `&'a T` / `&'a mut T`:
+
+```neuro
+func longest<'a>(a: &'a string, b: &'a string) -> &'a string {
+    if a.len() > b.len() { a } else { b }
+}
+```
+
+An annotation is a **well-formedness surface only**: every lifetime used on a reference must be
+declared in the enclosing `<...>` list (an undeclared `'b` is the `undeclared lifetime` error), and
+the annotation is then **erased** — `&'a T` and `&T` are the same type, so a lifetime costs nothing
+at runtime and never changes which values a signature accepts. The elision rules above still do the
+real outlives checking; explicit lifetimes do not tighten or relax it. Lifetime parameters may be
+mixed with type and const parameters (`func f<'a, T>(...)`); only the type/const parameters drive
+monomorphization. Lifetime **bounds** (`'a: 'b`) and struct-field references are not part of this
+surface yet.
 
 ### String Slices (`&string`)
 

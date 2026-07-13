@@ -72,13 +72,26 @@ impl Parser {
             let span = open.span.merge(close.span);
             return Ok(Type::Tuple { elements, span });
         }
-        // Borrow type `&T` (§2.4) / `&mut T` (§2.5). The referent is parsed
-        // recursively, so the `&` distributes over whatever type follows. A `mut`
-        // keyword immediately after `&` marks a mutable borrow.
+        // Borrow type `&T` (§2.4) / `&mut T` (§2.5), with an optional explicit lifetime
+        // `&'a T` / `&'a mut T` (§2.6). The referent is parsed recursively, so the `&`
+        // distributes over whatever type follows. Order after `&`: an optional lifetime,
+        // then an optional `mut` keyword marking a mutable borrow.
         if self.check(&TokenKind::Amp) {
             let amp = self.advance().ok_or(ParseError::UnexpectedEof {
                 expected: "'&'".to_string(),
             })?;
+            let lifetime =
+                if let Some(TokenKind::Lifetime(name)) = self.peek().map(|t| t.kind.clone()) {
+                    let lt_token = self.advance().ok_or(ParseError::UnexpectedEof {
+                        expected: "lifetime".to_string(),
+                    })?;
+                    Some(Identifier {
+                        name,
+                        span: lt_token.span,
+                    })
+                } else {
+                    None
+                };
             let mutable = self.check(&TokenKind::Mut);
             if mutable {
                 self.advance(); // consume 'mut'
@@ -88,6 +101,7 @@ impl Parser {
             return Ok(Type::Reference {
                 inner: Box::new(inner),
                 mutable,
+                lifetime,
                 span,
             });
         }

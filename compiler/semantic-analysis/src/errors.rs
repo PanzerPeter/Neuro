@@ -30,6 +30,9 @@ pub enum TypeError {
     #[error("array length '{name}' at {span:?} is not a known constant; use an integer literal or an in-scope `const` generic parameter")]
     UnknownArrayLength { name: String, span: Span },
 
+    #[error("undeclared lifetime `'{name}` at {span:?}; declare it in the generic parameter list, e.g. `func f<'{name}>(...)`")]
+    UndeclaredLifetime { name: String, span: Span },
+
     #[error("const generic parameter '{name}' at {span:?} has non-integer type '{ty}'; const parameters must be an integer type")]
     ConstParamNotInteger { name: String, ty: Type, span: Span },
 

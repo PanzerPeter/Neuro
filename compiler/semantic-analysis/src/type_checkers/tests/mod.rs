@@ -25,6 +25,7 @@ fn make_function(
     FunctionDef {
         name: make_ident(name),
         generics: Vec::new(),
+        lifetimes: Vec::new(),
         where_predicates: Vec::new(),
         params: params
             .into_iter()
@@ -1347,5 +1348,60 @@ func main() -> i32 {
             .iter()
             .any(|e| matches!(e, TypeError::Mismatch { .. })),
         "conflicting inferred type arguments must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn declared_lifetime_annotation_is_accepted() {
+    // The canonical §2.6 example: an explicit lifetime declared in `<'a>` and used on
+    // reference parameters and the return type type-checks (returning a borrowed
+    // parameter is already permitted by elision).
+    let errors = semantic_errors(
+        r#"
+func longest<'a>(a: &'a string, b: &'a string) -> &'a string {
+    if a.len() > b.len() { a } else { b }
+}
+func main() -> i32 { return 0 }
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "declared lifetime should type-check; got {errors:?}"
+    );
+}
+
+#[test]
+fn undeclared_lifetime_is_rejected() {
+    // `'b` is used but never declared in the parameter list — a well-formedness error.
+    let errors = semantic_errors(
+        r#"
+func f<'a>(a: &'b string) -> i32 { 0 }
+func main() -> i32 { return 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UndeclaredLifetime { name, .. } if name == "b")),
+        "an undeclared lifetime must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn lifetime_annotation_does_not_change_reference_type() {
+    // `&'a string` is the same type as `&string`: passing an unannotated borrow to a
+    // parameter typed with an explicit lifetime type-checks.
+    let errors = semantic_errors(
+        r#"
+func take<'a>(s: &'a string) -> i32 { s.len() as i32 }
+func main() -> i32 {
+    val msg = "hi"
+    return take(&msg)
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "an explicit lifetime must not change the reference type; got {errors:?}"
     );
 }
