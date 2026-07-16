@@ -57,6 +57,13 @@ isolation:
   `.slice(range)` / `.len()` (§2.7), an if-expression, and a lifetime mixed with a type
   parameter (`tagged_len<'a, T>`) that monomorphizes on `T` only. The lifetime is
   validated then erased — zero runtime cost. Exit `18`.
+- [`showcase/shape_traits.nr`](showcase/shape_traits.nr) — **trait declarations** (§3.9):
+  a `Shape` trait with a required `area` and a **default** `is_big` method, implemented
+  for two structs (`Square` inherits the default, `Rect` overrides it), dispatched
+  through a **trait-bounded generic** `scaled_area<T: Shape>` monomorphized per shape,
+  and combined with `&self` methods, `@derive(Copy)` structs, a fixed-size array +
+  `for`-in loop, and if-expressions. Traits are fully erased — zero runtime cost. Exit
+  `7`.
 
 ## Compiling and running
 

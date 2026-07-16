@@ -28,6 +28,13 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-07-16: Trait declarations §3.9. Added `Item::Trait(TraitDef)`; `TraitDef { name, methods,
+  span }` and `TraitMethod { name, self_param, params, return_type, default_body, span }`. A
+  `default_body` of `None` is a required method, `Some(body)` a default (provided) method. Traits
+  are fully erased: the parser injects each omitted default into the matching `impl Trait for Type`
+  block, so `ImplDef` is unchanged and downstream passes treat trait methods as ordinary methods.
+  Interpreted by semantic-analysis (conformance + generic trait-bound enforcement); hir-lowering and
+  the backends skip the trait item entirely.
 - 2026-07-13: Explicit lifetime annotations §2.6. Added a `lifetimes: Vec<Identifier>` field to
   `FunctionDef`, `StructDef`, and `ImplDef` — the `'a` names from a `<...>` list, kept separate
   from `generics` because lifetimes are a distinct namespace and do not drive monomorphization

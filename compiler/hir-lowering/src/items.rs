@@ -429,6 +429,10 @@ impl Lowerer {
                 // A newtype is transparent at runtime and produces no HIR item; it
                 // survives only as the `HirType::Newtype` its annotations resolve to.
                 Item::Newtype(_) => {}
+                // A trait declaration is fully erased (§3.9): it emits no code, and each
+                // `impl Trait for Type` lowers via the ordinary impl path above (the
+                // parser already injected any omitted default methods).
+                Item::Trait(_) => {}
             }
         }
 

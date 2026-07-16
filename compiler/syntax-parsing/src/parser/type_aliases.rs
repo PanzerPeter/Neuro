@@ -222,6 +222,19 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
             rewrite_type(&mut def.ty, resolved);
             rewrite_expr(&mut def.value, resolved);
         }
+        // A trait's method signatures may reference aliased types (§3.9); default
+        // bodies are expanded when the defaults are injected into impls, which run
+        // after this pass — so only the signatures are rewritten here.
+        Item::Trait(def) => {
+            for method in &mut def.methods {
+                for param in &mut method.params {
+                    rewrite_type(&mut param.ty, resolved);
+                }
+                if let Some(ret) = &mut method.return_type {
+                    rewrite_type(ret, resolved);
+                }
+            }
+        }
         // A newtype's inner may itself be written via a `type` alias, so expand it.
         Item::Newtype(def) => rewrite_type(&mut def.inner, resolved),
     }

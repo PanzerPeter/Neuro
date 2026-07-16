@@ -339,6 +339,57 @@ val other: Buffer<i32, 4> = Buffer { data: [5, 6, 7, 8], count: 4 }
 Each distinct `CAP` produces its own monomorphized struct at zero runtime cost. A generic `impl`
 over a struct's const parameter is a documented limitation deferred to broader generic support.
 
+## Traits (§3.9)
+
+A `trait` defines shared behaviour that many types can implement. Traits are Neuro's
+mechanism for bounded polymorphism. A trait method is either **required** (a signature
+with no body — implementors must provide one) or a **default** method (a signature with a
+body that implementors inherit unless they override it).
+
+```neuro
+trait Shape {
+    // Required: every implementor must define this.
+    func area(&self) -> i32
+
+    // Default (provided): inherited unless the implementor writes its own.
+    func is_big(&self) -> i32 {
+        if self.area() > 20 { 1 } else { 0 }
+    }
+}
+```
+
+Implement a trait for a type with `impl Trait for Type`:
+
+```neuro
+struct Square { side: i32 }
+
+impl Shape for Square {
+    func area(&self) -> i32 { self.side * self.side }
+    // `is_big` is not written, so Square inherits the trait's default.
+}
+```
+
+The compiler checks each trait impl for **conformance**: every required method must be
+present, each method's signature must match the trait's, and an impl may only contain
+methods the trait declares.
+
+### Trait bounds on generics
+
+A generic parameter may be bounded by a trait (`<T: Shape>`). Inside the body, the trait's
+methods may be called on the bounded parameter; at the call site the concrete type
+argument must implement the trait:
+
+```neuro
+func scaled_area<T: Shape>(s: &T, factor: i32) -> i32 {
+    s.area() * factor          // dispatched through the `Shape` bound
+}
+```
+
+Traits are **fully monomorphized and erased**: each `impl` lowers to ordinary methods and
+each trait-bounded generic is specialized per concrete type, so there is no vtable and no
+runtime cost. Supertraits, associated types, dynamic dispatch (`dyn`), and the operator
+traits land later in sub-phase 1F.
+
 ## Unsupported (Phase 1+)
 
 The following are not yet implemented and will be rejected at compile time:
@@ -370,6 +421,11 @@ Neuro uses nominal typing for structs: two struct types are compatible only if t
 | `AssignToImmutableField` | Mutating a field on a `val` binding |
 | `MethodNotFound` | Calling a method that doesn't exist on the type |
 | `UnsupportedSelfParam` | Using consuming `self` (by value) in a method |
+| `UnknownTrait` | Implementing a trait that was never declared |
+| `MissingTraitMethod` | A trait impl omits a required method |
+| `NotATraitMethod` | A trait impl defines a method the trait does not declare |
+| `TraitMethodSignatureMismatch` | An impl method's signature differs from the trait's |
+| `TraitBoundNotSatisfied` | A generic argument does not implement a required trait |
 
 ## References
 

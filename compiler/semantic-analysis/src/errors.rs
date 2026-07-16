@@ -110,6 +110,46 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error(
+        "unknown trait '{trait_name}' at {span:?}: no `trait {trait_name}` is declared (§3.9)"
+    )]
+    UnknownTrait { trait_name: String, span: Span },
+
+    #[error("trait '{trait_name}' is already defined at {span:?}")]
+    TraitAlreadyDefined { trait_name: String, span: Span },
+
+    #[error("`impl {trait_name} for {type_name}` at {span:?} is missing required method '{method}' (§3.9)")]
+    MissingTraitMethod {
+        trait_name: String,
+        type_name: String,
+        method: String,
+        span: Span,
+    },
+
+    #[error("method '{method}' at {span:?} is not a member of trait '{trait_name}' (§3.9)")]
+    NotATraitMethod {
+        trait_name: String,
+        method: String,
+        span: Span,
+    },
+
+    #[error("method '{method}' in `impl {trait_name} for {type_name}` at {span:?} does not match the trait signature: {detail} (§3.9)")]
+    TraitMethodSignatureMismatch {
+        trait_name: String,
+        type_name: String,
+        method: String,
+        detail: String,
+        span: Span,
+    },
+
+    #[error("type argument `{ty}` for '{param}' does not implement required trait '{trait_name}' at {span:?} (§3.9)")]
+    TraitBoundNotSatisfied {
+        param: String,
+        ty: Type,
+        trait_name: String,
+        span: Span,
+    },
+
     #[error("cannot apply binary operator {op} to types {left} and {right} at {span:?}")]
     InvalidBinaryOperator {
         op: String,

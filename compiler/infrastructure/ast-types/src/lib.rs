@@ -13,7 +13,7 @@ pub use expressions::{
 pub use items::{
     Attribute, ConstDef, EnumDef, EnumVariant, FieldDef, FunctionDef, GenericParam,
     GenericParamKind, ImplDef, Item, MethodDef, NewtypeDef, Parameter, SelfParam, StructDef,
-    VariantPayload,
+    TraitDef, TraitMethod, VariantPayload,
 };
 pub use statements::Stmt;
 pub use types::{ArraySize, GenericArg, Type};

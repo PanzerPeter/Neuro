@@ -1405,3 +1405,130 @@ func main() -> i32 {
         "an explicit lifetime must not change the reference type; got {errors:?}"
     );
 }
+
+#[test]
+fn trait_impl_and_default_method_type_check() {
+    // A trait with a required and a default method; the impl provides only the
+    // required one and inherits the default. Dispatching both must type-check (§3.9).
+    let errors = semantic_errors(
+        r#"
+trait Describable {
+    func value(&self) -> i32
+    func doubled(&self) -> i32 { self.value() * 2 }
+}
+
+struct Widget { id: i32 }
+
+impl Describable for Widget {
+    func value(&self) -> i32 { self.id }
+}
+
+func main() -> i32 {
+    val w = Widget { id: 21 }
+    w.doubled()
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "a conforming trait impl with an inherited default must type-check; got {errors:?}"
+    );
+}
+
+#[test]
+fn missing_required_trait_method_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+trait Shape { func area(&self) -> i32 }
+struct S { x: i32 }
+impl Shape for S { }
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::MissingTraitMethod { .. })),
+        "an impl omitting a required method must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn unknown_trait_in_impl_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+struct S { x: i32 }
+impl Bogus for S { func f(&self) -> i32 { self.x } }
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UnknownTrait { .. })),
+        "implementing an undeclared trait must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn trait_method_signature_mismatch_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+trait Shape { func area(&self) -> i32 }
+struct S { x: i32 }
+impl Shape for S { func area(&self) -> i64 { 0i64 } }
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TraitMethodSignatureMismatch { .. })),
+        "a mismatched trait-method signature must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn generic_trait_bound_dispatch_type_checks() {
+    // A generic function bounded by a trait may call the trait's methods on the
+    // type parameter, and the call site satisfies the bound (§3.9).
+    let errors = semantic_errors(
+        r#"
+trait Shape { func area(&self) -> i32 }
+@derive(Copy)
+struct Square { side: i32 }
+impl Shape for Square { func area(&self) -> i32 { self.side * self.side } }
+func total<T: Shape>(s: &T) -> i32 { s.area() }
+func main() -> i32 {
+    val sq = Square { side: 5 }
+    total(&sq)
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "a satisfied trait bound with in-body dispatch must type-check; got {errors:?}"
+    );
+}
+
+#[test]
+fn unsatisfied_trait_bound_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+trait Shape { func area(&self) -> i32 }
+@derive(Copy)
+struct Plain { x: i32 }
+func total<T: Shape>(s: &T) -> i32 { s.area() }
+func main() -> i32 {
+    val p = Plain { x: 1 }
+    total(&p)
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TraitBoundNotSatisfied { .. })),
+        "calling a bounded generic with a non-implementing type must be rejected; got {errors:?}"
+    );
+}

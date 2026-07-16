@@ -51,6 +51,11 @@ Generics (§3.8): this slice performs **monomorphization** — the HIR has no ge
 
 Generic structs & impls (§3.8): monomorphized the same way. A generic `StructDef` is stored in `generic_structs` (not `structs`) and a generic `impl` in `generic_impls` (keyed by base name); neither is lowered directly. `instantiate_generic_struct(base, args)` — called from `resolve_type` for a `Type::Generic` annotation and from `lower_generic_struct_literal` after inferring the arguments from the field values via `unify_ast_hir` — mangles a per-instance name, registers the instance's concrete fields + impl-method signatures, and enqueues a `MonoStruct` if unseen. The struct-instance mangle (`mangle_struct_instance` → `Base_g_<type…>`) deliberately avoids `__`, because the backend recovers a method's receiver struct by splitting the method symbol on `__`. The struct worklist drains alongside the function worklist, emitting one `HirItem::Struct` plus one `HirItem::Impl` per generic impl (method bodies lowered under the impl's `type_subst` with `self` bound to the instance). Since these are ordinary struct/impl HIR items, the backend needs no generic awareness.
 
+- 2026-07-16: Trait declarations (§3.9). Traits are fully erased in this slice: an `Item::Trait`
+  produces no HIR and needs no registration, because the parser has already injected each trait's
+  default methods into the matching `impl Trait for Type` blocks — so trait impls (and their
+  inherited defaults) lower through the ordinary inherent-impl path, and a trait-bounded generic
+  monomorphizes to concrete dispatch on the substituted type with no trait awareness here.
 - 2026-07-10: Const generics, `where` clauses & turbofish (§3.8). Monomorphization now keys on const
   *values* as well as types: a `const_subst` (name → value) and `const_types` (name → int type) are
   active while an instance body lowers, parallel to `type_subst`. `MonoArg` (Type|Const) is the

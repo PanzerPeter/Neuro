@@ -51,6 +51,14 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-07-16: Trait declarations §3.9. `parse_program` dispatches `TokenKind::Trait` →
+  `parse_trait_def`, which reads method signatures via `parse_trait_method_def` (a `{` after the
+  return type opens a default-method body; otherwise the method is required and ends at the
+  newline). After parsing, the whole-program `inject_trait_defaults` pass copies each trait's
+  default methods into the `impl Trait for Type` blocks that omit them — a parse-time desugar
+  (like type-alias expansion) run *before* `expand_type_aliases` so the injected bodies are
+  alias-expanded. A method the implementor wrote explicitly is never replaced. Downstream passes
+  therefore see trait methods as ordinary inherent methods.
 - 2026-07-13: Explicit lifetime annotations §2.6. `parse_generic_params` now returns
   `(Vec<GenericParam>, Vec<Identifier>)` — a leading `Lifetime` token in a `<...>` list is
   collected into a separate `lifetimes` vector (kept apart from type/const generics because a

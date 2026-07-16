@@ -149,10 +149,10 @@ pub struct MethodDef {
 
 /// An `impl` block associating methods with a named struct type.
 ///
-/// `trait_name` is `Some` for a trait implementation (`impl Drop for T`) and
-/// `None` for a plain inherent block (`impl T`). Today the only recognized
-/// trait is the compiler-known `Drop` lang-item (§2.1); other trait names parse
-/// but are validated against the unknown-trait set in semantic analysis.
+/// `trait_name` is `Some` for a trait implementation (`impl Drawable for T`) and
+/// `None` for a plain inherent block (`impl T`). `Drop` is a compiler-known lang-item
+/// (§2.1); any other trait name must resolve to a user `trait` declaration (§3.9),
+/// against which semantic analysis checks the impl for conformance.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImplDef {
     pub trait_name: Option<Identifier>,
@@ -234,12 +234,43 @@ pub struct NewtypeDef {
     pub span: Span,
 }
 
+/// A single method declaration inside a `trait` block (§3.9).
+///
+/// A `default_body` of `None` is a **required** method — implementors must provide
+/// one. `Some(body)` is a **provided** (default) method whose body is copied into any
+/// implementor that omits it. The signature mirrors [`MethodDef`] minus `attributes`
+/// (traits carry no per-method attributes this phase).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitMethod {
+    pub name: Identifier,
+    pub self_param: Option<SelfParam>,
+    pub params: Vec<Parameter>,
+    pub return_type: Option<Type>,
+    /// `None` for a required method, `Some(body)` for a default method.
+    pub default_body: Option<Vec<Stmt>>,
+    pub span: Span,
+}
+
+/// A `trait` declaration (§3.9): a set of method signatures defining shared behavior.
+///
+/// Traits are fully monomorphized and erased — there is no vtable and no runtime trait
+/// object this phase (`dyn` dispatch is §3.17). A trait produces no code on its own;
+/// each `impl Trait for Type` block lowers to ordinary inherent methods, and any default
+/// method the implementor omits is copied in as a concrete method.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitDef {
+    pub name: Identifier,
+    pub methods: Vec<TraitMethod>,
+    pub span: Span,
+}
+
 /// Top-level AST item
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     Function(FunctionDef),
     Struct(StructDef),
     Enum(EnumDef),
+    Trait(TraitDef),
     Impl(ImplDef),
     Const(ConstDef),
     Newtype(NewtypeDef),

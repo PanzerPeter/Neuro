@@ -577,3 +577,73 @@ fn const_param_value_reference_lowers_to_literal() {
     ));
     assert_eq!(e.ty, HirType::U32);
 }
+
+/// The method names of the first impl on `type_name` in the lowered program.
+fn impl_method_names(program: &HirProgram, type_name: &str) -> Vec<String> {
+    for item in &program.items {
+        if let HirItem::Impl(imp) = item {
+            if imp.type_name == type_name {
+                return imp.methods.iter().map(|m| m.name.clone()).collect();
+            }
+        }
+    }
+    panic!("impl for '{}' not found", type_name);
+}
+
+#[test]
+fn trait_default_method_lowers_as_concrete_method() {
+    // A trait impl that omits a default method still lowers with that method present —
+    // the parser injects it, so codegen sees an ordinary inherent method (§3.9).
+    let program = lower(
+        r#"
+trait Describable {
+    func value(&self) -> i32
+    func doubled(&self) -> i32 { self.value() * 2 }
+}
+
+struct Widget { id: i32 }
+
+impl Describable for Widget {
+    func value(&self) -> i32 { self.id }
+}
+
+func main() -> i32 {
+    val w = Widget { id: 21 }
+    w.doubled()
+}
+"#,
+    );
+    let names = impl_method_names(&program, "Widget");
+    assert!(names.contains(&"value".to_string()), "explicit: {names:?}");
+    assert!(
+        names.contains(&"doubled".to_string()),
+        "injected default: {names:?}"
+    );
+}
+
+#[test]
+fn generic_trait_bound_monomorphizes_to_concrete_dispatch() {
+    // `total<T: Shape>` monomorphizes to a concrete instance whose `s.area()` dispatches
+    // to `Square`'s impl method — traits carry no runtime cost (§3.9).
+    let program = lower(
+        r#"
+trait Shape { func area(&self) -> i32 }
+@derive(Copy)
+struct Square { side: i32 }
+impl Shape for Square { func area(&self) -> i32 { self.side * self.side } }
+func total<T: Shape>(s: &T) -> i32 { s.area() }
+func main() -> i32 {
+    val sq = Square { side: 5 }
+    total(&sq)
+}
+"#,
+    );
+    // A monomorphized instance of `total` is emitted (the generic template is erased).
+    assert!(
+        function_names(&program)
+            .iter()
+            .any(|n| n.starts_with("total")),
+        "a concrete `total` instance must be emitted: {:?}",
+        function_names(&program)
+    );
+}
