@@ -83,8 +83,13 @@ Key design goals:
   structs `struct Pair<T, U>`, and generic inherent impls `impl<T> Wrapper<T>`,
   monomorphized (one specialized copy per concrete type-argument set, zero runtime
   cost); type arguments inferred from value/field arguments or written explicitly
-  (`Pair<i32, f64>`). Bounds parse but are not yet enforced (await traits); type
-  arguments restricted to `Copy` this phase
+  (`Pair<i32, f64>`); trait bounds `<T: Trait>` are enforced (§3.9); type arguments
+  restricted to `Copy` this phase
+- **Traits** (1F, §3.9): `trait` declarations with required and default (provided)
+  methods; `impl Trait for Type` checked for conformance; trait-bounded generics
+  `func f<T: Shape>(x: &T)` dispatch trait methods on the type parameter, checked at the
+  call site. Fully monomorphized and erased — no vtable, zero runtime cost. Supertraits,
+  associated types, `dyn`, and operator traits land later in 1F
 
 ### Control Flow
 
@@ -171,7 +176,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 879 tests passing across all components
+- 894 tests passing across all components
 
 ## Compilation Pipeline
 

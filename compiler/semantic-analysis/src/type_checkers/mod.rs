@@ -51,6 +51,17 @@ pub(crate) struct TypeChecker {
     /// Generic `impl` templates keyed by base struct name (§3.8): `impl<T> Wrapper<T>`.
     /// Instantiating a generic struct also instantiates each matching impl's methods.
     generic_impls: HashMap<String, Vec<ast_types::ImplDef>>,
+    /// User-declared traits keyed by name (§3.9): each carries its method signatures so
+    /// `impl Trait for Type` conformance and generic-body trait-method dispatch resolve.
+    traits: HashMap<String, TraitInfo>,
+    /// Concrete `(trait name, implementing type name)` pairs that have an
+    /// `impl Trait for Type` block (§3.9). A generic bound `T: Trait` is satisfied at a
+    /// call site exactly when the concrete type argument appears here.
+    trait_impls: HashSet<(String, String)>,
+    /// Trait bounds of the type parameters in scope while a generic definition is checked
+    /// (§3.8, §3.9): parameter name → declared trait names. Lets a generic body dispatch
+    /// a trait method on a bounded type parameter. Empty outside a generic definition.
+    pub(crate) generic_bounds: HashMap<String, Vec<String>>,
     /// Mangled names of generic-struct instantiations already materialized into
     /// `struct_defs` / `impl_methods`, so each instance is built exactly once.
     instantiated_structs: HashSet<String>,
@@ -109,6 +120,27 @@ pub(crate) struct GenericFnSig {
     pub(crate) params: Vec<Type>,
     pub(crate) ret: Type,
     pub(crate) where_predicates: Vec<ast_types::Expr>,
+    /// Trait bounds per type parameter (§3.9), e.g. `T: Drawable`. Checked at each call
+    /// site against the inferred concrete type argument.
+    pub(crate) bounds: HashMap<String, Vec<String>>,
+}
+
+/// A user-declared trait's resolved method signatures (§3.9), keyed by method name.
+#[derive(Clone)]
+pub(crate) struct TraitInfo {
+    pub(crate) methods: HashMap<String, TraitMethodSig>,
+}
+
+/// One resolved trait-method signature (§3.9). `params` excludes the implicit `self`.
+/// `required` is true when the trait gave no default body — an implementor must provide
+/// one. Types are resolved in the trait's (non-generic) scope, so `Self`-typed and
+/// associated-type positions are not supported this phase.
+#[derive(Clone)]
+pub(crate) struct TraitMethodSig {
+    pub(crate) self_param: Option<ast_types::SelfParam>,
+    pub(crate) params: Vec<Type>,
+    pub(crate) ret: Type,
+    pub(crate) required: bool,
 }
 
 /// A resolved enum variant: its name, construction form, and ordered payload
@@ -160,6 +192,9 @@ impl TypeChecker {
             generic_funcs: HashMap::new(),
             generic_structs: HashMap::new(),
             generic_impls: HashMap::new(),
+            traits: HashMap::new(),
+            trait_impls: HashSet::new(),
+            generic_bounds: HashMap::new(),
             instantiated_structs: HashSet::new(),
             generic_scope: HashSet::new(),
             const_scope: HashMap::new(),
@@ -308,6 +343,14 @@ impl TypeChecker {
             }
         }
 
+        // Pass 1d: register trait declarations (§3.9) before impls so `impl Trait for T`
+        // conformance and generic trait bounds can resolve the trait's method signatures.
+        for item in items {
+            if let Item::Trait(def) = item {
+                self.register_trait(def);
+            }
+        }
+
         // Pass 2: register impl method signatures (uses struct_defs from pass 1).
         for item in items {
             if let Item::Impl(def) = item {
@@ -343,8 +386,10 @@ impl TypeChecker {
                 Item::Const(def) => {
                     let _ = self.check_const_item(def);
                 }
-                // Enums and newtypes carry no bodies; they are validated at registration.
-                Item::Struct(_) | Item::Enum(_) | Item::Newtype(_) => {}
+                // Enums, newtypes, and traits carry no directly-checked bodies. Trait
+                // default-method bodies are checked through the impl copies the parser
+                // injects (§3.9); the trait declaration itself is validated at registration.
+                Item::Struct(_) | Item::Enum(_) | Item::Newtype(_) | Item::Trait(_) => {}
             }
         }
 
@@ -380,7 +425,11 @@ impl TypeChecker {
                         self.lint_method(method, suppress_while_true);
                     }
                 }
-                Item::Struct(_) | Item::Const(_) | Item::Enum(_) | Item::Newtype(_) => {}
+                Item::Struct(_)
+                | Item::Const(_)
+                | Item::Enum(_)
+                | Item::Newtype(_)
+                | Item::Trait(_) => {}
             }
         }
     }

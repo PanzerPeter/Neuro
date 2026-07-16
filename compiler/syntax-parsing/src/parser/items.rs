@@ -4,7 +4,7 @@ use shared_types::Identifier;
 use crate::ast::{
     Attribute, ConstDef, EnumDef, EnumVariant, Expr, FieldDef, FieldInit, FunctionDef,
     GenericParam, GenericParamKind, ImplDef, Item, MethodDef, NewtypeDef, Parameter, SelfParam,
-    StructDef, VariantPayload,
+    StructDef, TraitDef, TraitMethod, VariantPayload,
 };
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
@@ -49,6 +49,9 @@ impl Parser {
             } else if self.check(&TokenKind::Enum) {
                 let e = self.parse_enum_def()?;
                 items.push(Item::Enum(e));
+            } else if self.check(&TokenKind::Trait) {
+                let trait_def = self.parse_trait_def()?;
+                items.push(Item::Trait(trait_def));
             } else if self.check(&TokenKind::Impl) {
                 let impl_def = self.parse_impl_def()?;
                 items.push(Item::Impl(impl_def));
@@ -75,6 +78,9 @@ impl Parser {
             self.skip_newlines();
         }
 
+        // Inject trait default methods before alias expansion so the copied bodies are
+        // alias-expanded along with the rest of each impl (§3.9, §3.14).
+        inject_trait_defaults(&mut items);
         expand_type_aliases(&mut items, alias_decls)?;
         Ok(items)
     }
@@ -971,6 +977,117 @@ impl Parser {
         Ok(args)
     }
 
+    /// Parse a `trait` declaration (§3.9): `trait Name { <method signatures> }`.
+    ///
+    /// Each method is either **required** (signature terminated by a newline, no body)
+    /// or a **default** method (signature followed by a `{ ... }` block). Traits carry
+    /// no generic parameters, supertraits, or associated types this phase — those land
+    /// with the operator traits and dispatch work (§3.10, §3.17).
+    pub(crate) fn parse_trait_def(&mut self) -> ParseResult<TraitDef> {
+        let start = self.consume(TokenKind::Trait, "'trait'")?;
+        self.skip_newlines();
+        let name = self.consume_identifier("trait name")?;
+        self.skip_newlines();
+        self.consume(TokenKind::LeftBrace, "'{'")?;
+        self.skip_newlines();
+
+        let mut methods = Vec::new();
+        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            methods.push(self.parse_trait_method_def()?);
+            self.skip_newlines();
+        }
+
+        let close = self.consume(TokenKind::RightBrace, "'}'")?;
+        Ok(TraitDef {
+            name,
+            methods,
+            span: start.span.merge(close.span),
+        })
+    }
+
+    /// Parse one method signature inside a `trait` block (§3.9).
+    ///
+    /// A `{` immediately after the return type opens a default-method body; otherwise the
+    /// method is required and the signature ends at the newline.
+    fn parse_trait_method_def(&mut self) -> ParseResult<TraitMethod> {
+        let start = self.consume(TokenKind::Func, "'func'")?;
+        self.skip_newlines();
+        let name = self.consume_identifier("method name")?;
+
+        self.consume(TokenKind::LeftParen, "'('")?;
+        self.skip_newlines();
+        let self_param = self.try_parse_self_param()?;
+        if self_param.is_some() {
+            self.skip_newlines();
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+
+        let mut params: Vec<Parameter> = Vec::new();
+        if !self.check(&TokenKind::RightParen) {
+            loop {
+                let param_start = self
+                    .peek()
+                    .ok_or(ParseError::UnexpectedEof {
+                        expected: "parameter".to_string(),
+                    })?
+                    .span;
+                let param_name = self.consume_identifier("parameter name")?;
+                self.skip_newlines();
+                self.consume(TokenKind::Colon, "':'")?;
+                self.skip_newlines();
+                let param_ty = self.parse_type()?;
+                let param_span = param_start.merge(param_ty.span());
+                params.push(Parameter {
+                    name: param_name,
+                    ty: param_ty,
+                    span: param_span,
+                });
+                self.skip_newlines();
+                if !self.check(&TokenKind::Comma) {
+                    break;
+                }
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+        self.consume(TokenKind::RightParen, "')'")?;
+
+        let return_type = if self.check(&TokenKind::Arrow) {
+            self.advance();
+            self.skip_newlines();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        // A brace on the same logical line begins a default-method body; anything else
+        // (newline, next `func`, or `}`) means this is a required method with no body.
+        let default_body = if matches!(self.peek_next_nonnewline_kind(), Some(TokenKind::LeftBrace))
+        {
+            self.skip_newlines();
+            Some(self.parse_block()?)
+        } else {
+            None
+        };
+
+        let end_span = default_body
+            .as_ref()
+            .and_then(|b| b.last())
+            .map(stmt_span)
+            .unwrap_or(start.span);
+        Ok(TraitMethod {
+            name,
+            self_param,
+            params,
+            return_type,
+            default_body,
+            span: start.span.merge(end_span),
+        })
+    }
+
     /// Parse a single method definition inside an `impl` block.
     ///
     /// Handles three self-parameter forms:
@@ -1125,6 +1242,61 @@ impl Parser {
                 }
             }
             _ => Ok(None),
+        }
+    }
+}
+
+/// Inject each trait's default methods into the `impl Trait for Type` blocks that
+/// omit them (§3.9), a whole-program parse-time desugar (like type-alias expansion).
+///
+/// After this pass every trait impl carries a concrete method for each trait method it
+/// is expected to provide, so semantic analysis and HIR lowering treat trait methods as
+/// ordinary inherent methods — traits are fully erased. A method the implementor writes
+/// explicitly is left untouched (it overrides the default).
+fn inject_trait_defaults(items: &mut [Item]) {
+    use std::collections::HashMap;
+
+    // Map trait name -> its default (bodied) methods.
+    let mut defaults: HashMap<String, Vec<TraitMethod>> = HashMap::new();
+    for item in items.iter() {
+        if let Item::Trait(def) = item {
+            let bodied: Vec<TraitMethod> = def
+                .methods
+                .iter()
+                .filter(|m| m.default_body.is_some())
+                .cloned()
+                .collect();
+            defaults.insert(def.name.name.clone(), bodied);
+        }
+    }
+    if defaults.is_empty() {
+        return;
+    }
+
+    for item in items.iter_mut() {
+        let Item::Impl(imp) = item else { continue };
+        let Some(trait_name) = &imp.trait_name else {
+            continue;
+        };
+        let Some(trait_defaults) = defaults.get(&trait_name.name) else {
+            continue;
+        };
+        for method in trait_defaults {
+            if imp.methods.iter().any(|m| m.name.name == method.name.name) {
+                continue;
+            }
+            let Some(body) = &method.default_body else {
+                continue;
+            };
+            imp.methods.push(MethodDef {
+                name: method.name.clone(),
+                self_param: method.self_param.clone(),
+                params: method.params.clone(),
+                return_type: method.return_type.clone(),
+                body: body.clone(),
+                attributes: Vec::new(),
+                span: method.span,
+            });
         }
     }
 }

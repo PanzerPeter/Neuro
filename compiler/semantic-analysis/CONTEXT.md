@@ -127,6 +127,17 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-07-16: Trait declarations §3.9. New `TypeChecker` state: `traits` (name → `TraitInfo` of
+  resolved method signatures), `trait_impls` (set of `(trait, type)` pairs with an impl), and
+  `generic_bounds` (type-parameter → bound trait names, live inside a generic definition). A new
+  pass 1d (`register_trait`) runs before impl registration. `register_impl` calls
+  `check_trait_conformance` for any non-`Drop` trait impl: every required method present
+  (`MissingTraitMethod`), each impl method a trait member (`NotATraitMethod`) with a matching
+  signature (`TraitMethodSignatureMismatch`), or `UnknownTrait` for an undeclared trait. Method
+  dispatch (`check_expr`) resolves `obj.m()` on a bounded type parameter via
+  `resolve_generic_trait_method`; generic call sites enforce bounds via `check_trait_bounds`
+  (`TraitBoundNotSatisfied`), keyed off `GenericFnSig.bounds`. Traits are fully erased — the parser
+  injects default methods into impls, so they check as ordinary methods.
 - 2026-07-13: Explicit lifetime annotations §2.6. New `lifetime_scope: HashSet<String>` on the
   `TypeChecker`, populated by `enter_generic_scope` (now takes a `lifetimes: &[Identifier]`
   argument) from each definition's `lifetimes` field and cleared by `exit_generic_scope`. In

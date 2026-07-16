@@ -575,6 +575,93 @@ impl TypeChecker {
         Some(return_type)
     }
 
+    /// Resolve a method call on a bounded type parameter to a trait method signature
+    /// (§3.9), returning the visible (non-`self`) parameter types and the return type.
+    ///
+    /// Searches every trait named in the parameter's bounds; the first trait declaring a
+    /// method of this name wins. Returns `None` when no bound trait declares it.
+    fn resolve_generic_trait_method(&self, param: &str, method: &str) -> Option<(Vec<Type>, Type)> {
+        let bounds = self.generic_bounds.get(param)?;
+        for trait_name in bounds {
+            if let Some(sig) = self
+                .traits
+                .get(trait_name)
+                .and_then(|info| info.methods.get(method))
+            {
+                return Some((sig.params.clone(), sig.ret.clone()));
+            }
+        }
+        None
+    }
+
+    /// Validate a call's arguments against the callee's visible parameter types: arity,
+    /// per-argument compatibility, and by-value move recording. Shared by the trait
+    /// method-dispatch path (§3.9).
+    fn check_call_args(&mut self, args: &[ast_types::Expr], visible_params: &[Type], span: Span) {
+        if args.len() != visible_params.len() {
+            self.record_error(TypeError::ArgumentCountMismatch {
+                expected: visible_params.len(),
+                found: args.len(),
+                span,
+            });
+        }
+        for (arg, expected_ty) in args.iter().zip(visible_params.iter()) {
+            if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
+                if !arg_ty.is_compatible_with(expected_ty) {
+                    self.record_error(TypeError::Mismatch {
+                        expected: expected_ty.clone(),
+                        found: arg_ty,
+                        span: arg.span(),
+                    });
+                }
+            }
+            self.record_move(arg);
+        }
+    }
+
+    /// Verify each bounded type parameter's concrete argument implements every required
+    /// trait (§3.9). A concrete struct satisfies `T: Tr` when an `impl Tr for Struct`
+    /// exists; a type parameter passed through from an enclosing generic satisfies it
+    /// when that parameter carries the same bound. Any other type (e.g. a primitive) has
+    /// no user-trait impl and therefore fails the bound.
+    fn check_trait_bounds(
+        &mut self,
+        bounds: &HashMap<String, Vec<String>>,
+        subst: &HashMap<String, Type>,
+        span: Span,
+    ) {
+        for (param, traits) in bounds {
+            let Some(concrete) = subst.get(param) else {
+                continue;
+            };
+            for trait_name in traits {
+                // A bound naming an unknown trait is reported once at the impl/decl site;
+                // skip it here so the same typo is not echoed at every call.
+                if !self.traits.contains_key(trait_name) {
+                    continue;
+                }
+                let satisfied = match concrete {
+                    Type::Struct(name) => self
+                        .trait_impls
+                        .contains(&(trait_name.clone(), name.clone())),
+                    Type::Generic(name) => self
+                        .generic_bounds
+                        .get(name)
+                        .is_some_and(|b| b.contains(trait_name)),
+                    _ => false,
+                };
+                if !satisfied {
+                    self.record_error(TypeError::TraitBoundNotSatisfied {
+                        param: param.clone(),
+                        ty: concrete.clone(),
+                        trait_name: trait_name.clone(),
+                        span,
+                    });
+                }
+            }
+        }
+    }
+
     /// Type-check a call to a generic function (§3.8): infer each type parameter from
     /// the corresponding argument, validate arity and per-argument compatibility, and
     /// return the substituted return type.
@@ -651,6 +738,10 @@ impl TypeChecker {
                 }
             }
         }
+
+        // Trait bounds (`T: Drawable`) are satisfied when the inferred concrete type
+        // argument has a matching `impl Trait for T` (§3.9).
+        self.check_trait_bounds(&sig.bounds, &subst, span);
 
         // Value predicates (`where N > 0`) are checked against the concrete const values.
         self.check_where_predicates(&sig.where_predicates, &subst);
@@ -1239,6 +1330,24 @@ impl TypeChecker {
                         // `r: &Struct` dispatches on `Struct` (§2.4). The borrow is never moved.
                         let struct_name = match obj_ty.referent() {
                             Type::Struct(n) => n.clone(),
+                            // Trait-method dispatch on a bounded type parameter inside a
+                            // generic body (§3.9): `T: Drawable` lets `obj.draw()` resolve
+                            // to the trait's declared signature. Monomorphization later
+                            // rebinds it to the concrete type's impl method.
+                            Type::Generic(param) => {
+                                if let Some((visible_params, ret)) =
+                                    self.resolve_generic_trait_method(param, &field.name)
+                                {
+                                    self.check_call_args(args, &visible_params, *span);
+                                    return Some(ret);
+                                }
+                                self.record_error(TypeError::MethodNotFound {
+                                    struct_name: param.clone(),
+                                    method_name: field.name.clone(),
+                                    span: *fa_span,
+                                });
+                                return Some(Type::Unknown);
+                            }
                             _ => {
                                 // Builtin (non-struct) receivers dispatch a fixed,
                                 // compiler-known set of intrinsic methods (§2.7). The original

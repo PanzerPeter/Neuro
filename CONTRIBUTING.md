@@ -299,11 +299,14 @@ value/field arguments or written explicitly, bounds parsed-but-unenforced, `Copy
 arguments only; const parameters inferred from array lengths / field values or
 supplied by turbofish, `where` value predicates checked per instantiation), and
 *explicit lifetime annotations* `<'a>` in v1.59.0 (a well-formedness surface —
-declared in the generic list, validated, then erased; `&'a T` == `&T`). The
-topmost open item is now the trait system.
+declared in the generic list, validated, then erased; `&'a T` == `&T`), and
+*trait declarations* (§3.9) in v1.60.0 (required + default methods,
+`impl Trait for Type` conformance checking, and enforced trait bounds on
+generics — all fully monomorphized and erased, so trait bounds that were merely
+parsed before are now checked). The topmost open item is now operator traits.
 
-**Next, in dependency order:** 1F (trait declarations →
-operator traits → static/dynamic dispatch → closures) → 1G (error
+**Next, in dependency order:** 1F (operator traits → static/dynamic dispatch →
+closures) → 1G (error
 handling, collections, modules, prelude) → 1H (string interpolation, triple-quoted
 strings, nested comments, named arguments). See the [Quick Roadmap](README.md#quick-roadmap).
 

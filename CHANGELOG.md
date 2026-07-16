@@ -11,6 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.60.0] - 2026-07-16
+
+### Added
+- `parser`: trait declarations. A `trait` groups method signatures that types can
+  implement — either **required** methods (a signature with no body) or **default**
+  methods (a signature with a body that implementors inherit). Implement one with
+  `impl Trait for Type`. An omitted default method is inherited automatically; writing it
+  explicitly overrides the default.
+- `semantic`: trait-impl conformance checking. A trait implementation must provide every
+  required method, may only contain methods the trait declares, and each method's
+  signature must match the trait's — otherwise the compiler reports a precise error
+  (missing method, non-member method, signature mismatch, or unknown trait).
+- `semantic`: trait bounds on generics are now enforced. A generic parameter bounded by a
+  trait (`func f<T: Shape>(x: &T)`) may call the trait's methods on the parameter, and the
+  call site is checked to ensure the concrete type argument implements the trait.
+- `codegen`: traits carry no runtime cost. Each implementation lowers to ordinary methods
+  and each trait-bounded generic is specialized per concrete type — there is no vtable and
+  no pointer indirection. (Supertraits, associated types, dynamic dispatch, and the
+  operator traits are planned follow-ups.)
+
+---
+
 ## [1.59.0] - 2026-07-13
 
 ### Added
