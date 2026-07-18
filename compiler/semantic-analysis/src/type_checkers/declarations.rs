@@ -1,3 +1,4 @@
+use super::operator_traits::{is_operator_trait, operator_trait_spec};
 use super::{EnumVariantInfo, TraitInfo, TraitMethodSig, TypeChecker, VariantForm};
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, Type};
@@ -749,10 +750,15 @@ impl TypeChecker {
         // all mutable borrows of `self` for type resolution are finished.
         let mut method_entries: Vec<(String, String)> = Vec::new();
 
+        let struct_is_copy = self.copy_structs.contains(&struct_name);
+
         for method in &def.methods {
-            // Consuming `self` still needs the by-value struct ABI, so reject it.
-            // `&mut self` is supported (§2.5) and recorded below.
-            if matches!(method.self_param, Some(SelfParam::Owned)) {
+            // Consuming `self` still needs the by-value struct ABI for non-`Copy` types,
+            // so reject it there. A `Copy` struct is duplicated by value (§2.3), which is
+            // ABI-identical to `&self`, so an owned `self` is accepted — this is what lets
+            // an operator-trait method `func add(self, ...)` run on the scalar path
+            // (§3.10). `&mut self` is supported (§2.5) and recorded below.
+            if matches!(method.self_param, Some(SelfParam::Owned)) && !struct_is_copy {
                 self.errors.push(TypeError::UnsupportedSelfParam {
                     type_name: struct_name.clone(),
                     self_param: "self".to_string(),
@@ -804,20 +810,147 @@ impl TypeChecker {
         }
 
         // Insert collected entries now that all borrows of `self` are released.
-        let method_map = self.impl_methods.entry(struct_name).or_default();
+        let method_map = self.impl_methods.entry(struct_name.clone()).or_default();
         for (name, mangled) in method_entries {
             method_map.insert(name, mangled);
         }
 
         // A trait impl (other than the `Drop` lang-item) must conform to the trait's
-        // declaration (§3.9); `Drop` is validated separately above.
+        // declaration (§3.9); `Drop` is validated separately above. An operator trait
+        // (§3.10) is a compiler-known lang-item like `Drop`, so it is validated and its
+        // operator dispatch recorded separately rather than against `self.traits`.
         if let Some(t) = &def.trait_name {
-            if t.name != DROP_TRAIT {
+            if t.name == DROP_TRAIT {
+                // handled above
+            } else if is_operator_trait(&t.name) {
+                self.register_operator_impl(def, &struct_name, &t.name.clone(), struct_is_copy);
+            } else {
                 self.check_trait_conformance(def, &def.type_name.name.clone(), &t.name.clone());
             }
         }
 
         Some(())
+    }
+
+    /// Validate an operator-trait impl (§3.10) and record its operator dispatch.
+    ///
+    /// Operator traits (`Add`, `Sub`, …, `PartialEq`, `Comparable`) are compiler-known
+    /// lang-items — the user writes only the `impl`, never a `trait` declaration. Each
+    /// impl method whose name matches one the trait provides wires its operator to that
+    /// method's return type. The scalar path requires the receiver to be `Copy`; an
+    /// `Output` associated type, when present, must equal the method's return type; and a
+    /// trait with a supertrait (`Comparable: PartialEq`) requires that impl to exist too.
+    fn register_operator_impl(
+        &mut self,
+        def: &ImplDef,
+        struct_name: &str,
+        trait_name: &str,
+        struct_is_copy: bool,
+    ) {
+        let Some(spec) = operator_trait_spec(trait_name) else {
+            return;
+        };
+
+        // The scalar operator path (§3.10) is defined for `Copy` receivers only.
+        if !struct_is_copy {
+            self.record_error(TypeError::OperatorTraitRequiresCopy {
+                trait_name: trait_name.to_string(),
+                type_name: struct_name.to_string(),
+                span: def.type_name.span,
+            });
+            return;
+        }
+
+        // The `Output` binding, if the impl declares one, must match the method return.
+        let declared_output = def
+            .assoc_types
+            .iter()
+            .find(|(n, _)| n.name == "Output")
+            .and_then(|(_, ty)| self.resolve_type(ty));
+
+        for method in &def.methods {
+            let bin = spec.binary.iter().find(|(m, _)| *m == method.name.name);
+            let un = spec.unary.iter().find(|(m, _)| *m == method.name.name);
+            if bin.is_none() && un.is_none() {
+                self.record_error(TypeError::NotATraitMethod {
+                    trait_name: trait_name.to_string(),
+                    method: method.name.name.clone(),
+                    span: method.name.span,
+                });
+                continue;
+            }
+
+            let ret = method
+                .return_type
+                .as_ref()
+                .and_then(|t| self.resolve_type(t))
+                .unwrap_or(Type::Void);
+
+            let result = if spec.has_output {
+                if let Some(out) = &declared_output {
+                    if !out.is_compatible_with(&ret) {
+                        self.record_error(TypeError::AssociatedTypeMismatch {
+                            trait_name: trait_name.to_string(),
+                            expected: out.clone(),
+                            found: ret.clone(),
+                            span: method.name.span,
+                        });
+                    }
+                }
+                ret
+            } else {
+                Type::Bool
+            };
+
+            if let Some((_, op)) = bin {
+                // A comparison method takes `rhs: &Rhs`; the operand is borrowed at the
+                // call, so record the referent as the operand's expected value type.
+                let rhs = method
+                    .params
+                    .first()
+                    .and_then(|p| self.resolve_type(&p.ty))
+                    .map(|t| t.referent().clone())
+                    .unwrap_or(Type::Unknown);
+                self.operator_binary_impls.insert(
+                    (struct_name.to_string(), *op),
+                    crate::type_checkers::OperatorDispatch { rhs, result },
+                );
+            } else if let Some((_, op)) = un {
+                self.operator_unary_impls
+                    .insert((struct_name.to_string(), *op), result);
+            }
+        }
+
+        self.trait_impls
+            .insert((trait_name.to_string(), struct_name.to_string()));
+    }
+
+    /// Verify each operator-trait impl also provides any required supertrait impl
+    /// (§3.10: `Comparable: PartialEq`). Runs after every impl is registered so the check
+    /// is independent of source order.
+    pub(crate) fn check_operator_supertraits(&mut self, items: &[ast_types::Item]) {
+        for item in items {
+            let ast_types::Item::Impl(def) = item else {
+                continue;
+            };
+            let Some(t) = &def.trait_name else { continue };
+            let Some(spec) = operator_trait_spec(&t.name) else {
+                continue;
+            };
+            if let Some(sup) = spec.supertrait {
+                let has_super = self
+                    .trait_impls
+                    .contains(&(sup.to_string(), def.type_name.name.clone()));
+                if !has_super {
+                    self.record_error(TypeError::MissingSupertraitImpl {
+                        trait_name: t.name.clone(),
+                        supertrait: sup.to_string(),
+                        type_name: def.type_name.name.clone(),
+                        span: t.span,
+                    });
+                }
+            }
+        }
     }
 
     /// Validate and record an `impl Drop for T` block (§2.1).
@@ -1082,13 +1215,11 @@ impl TypeChecker {
         let struct_name = def.type_name.name.clone();
 
         for method in &def.methods {
-            // Skip consuming `self` methods, which were rejected during registration.
-            if matches!(method.self_param, Some(SelfParam::Owned)) {
-                continue;
-            }
-
             let mangled = format!("{}__{}", struct_name, method.name.name);
 
+            // An owned `self` on a non-`Copy` struct was rejected during registration and
+            // never entered `functions`; skip it here. A `Copy` receiver's owned `self` is
+            // registered (§3.10) and checked exactly like `&self`.
             let func_ty = match self.functions.get(&mangled).cloned() {
                 Some(ty) => ty,
                 None => continue,

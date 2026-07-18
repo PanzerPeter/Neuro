@@ -83,3 +83,30 @@ impl Describable for Widget {
         .count();
     assert_eq!(doubled_count, 1, "no duplicate `doubled` method injected");
 }
+
+#[test]
+fn parses_operator_impl_with_associated_output_type() {
+    // An operator-trait impl declares `type Output = T` alongside its method (§3.10).
+    let source = r#"
+@derive(Copy, Clone)
+struct Vec2 { x: i32, y: i32 }
+impl Add for Vec2 {
+    type Output = Vec2
+    func add(self, rhs: Vec2) -> Vec2 { Vec2 { x: self.x + rhs.x, y: self.y + rhs.y } }
+}
+"#;
+    let items = parse(source).expect("operator impl should parse");
+    let imp = items
+        .iter()
+        .find_map(|item| match item {
+            Item::Impl(def) if def.trait_name.as_ref().map(|t| t.name.as_str()) == Some("Add") => {
+                Some(def)
+            }
+            _ => None,
+        })
+        .expect("Add impl present");
+    assert_eq!(imp.assoc_types.len(), 1);
+    assert_eq!(imp.assoc_types[0].0.name, "Output");
+    assert_eq!(imp.methods.len(), 1);
+    assert_eq!(imp.methods[0].name.name, "add");
+}

@@ -28,6 +28,12 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-07-18: Operator traits — scalar path §3.10. `ImplDef` gains
+  `assoc_types: Vec<(Identifier, Type)>` for associated-type bindings (`type Output = T`) inside a
+  block. `BinaryOp` and `UnaryOp` now derive `Hash` so the checker/lowering can key operator-dispatch
+  maps on `(struct, operator)`. Interpreted by semantic-analysis (operator lang-item recognition) and
+  hir-lowering (operator desugaring); no new AST variants — an overloaded operator stays an ordinary
+  `Expr::Binary` / `Expr::Unary` and is desugared to a method call downstream.
 - 2026-07-16: Trait declarations §3.9. Added `Item::Trait(TraitDef)`; `TraitDef { name, methods,
   span }` and `TraitMethod { name, self_param, params, return_type, default_body, span }`. A
   `default_body` of `None` is a required method, `Some(body)` a default (provided) method. Traits

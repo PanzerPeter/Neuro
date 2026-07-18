@@ -1044,6 +1044,29 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
 
+                // Operator-trait dispatch on a user type (§3.10): when the left operand is
+                // a struct that implements the operator's trait, the operator lowers to
+                // that impl's method and takes its result type. Checked before the
+                // built-in numeric/bitwise/comparison paths, which reject struct operands.
+                if let Type::Struct(name) = left_ty.referent() {
+                    if let Some(dispatch) = self
+                        .operator_binary_impls
+                        .get(&(name.clone(), *op))
+                        .cloned()
+                    {
+                        if !right_ty.referent().is_compatible_with(&dispatch.rhs) {
+                            self.record_error(TypeError::InvalidBinaryOperator {
+                                op: op.to_string(),
+                                left: left_ty.clone(),
+                                right: right_ty,
+                                span: *span,
+                            });
+                            return Some(Type::Unknown);
+                        }
+                        return Some(dispatch.result);
+                    }
+                }
+
                 match op {
                     // Arithmetic operators: require numeric types, return same type
                     BinaryOp::Add
@@ -1238,6 +1261,16 @@ impl TypeChecker {
 
                 if matches!(operand_ty, Type::Unknown) {
                     return Some(Type::Unknown);
+                }
+
+                // Operator-trait dispatch on a user type (§3.10): `-a` via `Neg`, `~a` via
+                // `Not`. The boolean `!a` (`UnaryOp::Not`) is never overloadable.
+                if let Type::Struct(name) = operand_ty.referent() {
+                    if let Some(result) =
+                        self.operator_unary_impls.get(&(name.clone(), *op)).cloned()
+                    {
+                        return Some(result);
+                    }
                 }
 
                 match op {

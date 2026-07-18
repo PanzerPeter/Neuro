@@ -11,6 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.61.0] - 2026-07-18
+
+### Added
+- `parser`: operator overloading. Operators on a custom type are now sugar for method
+  calls. A `Copy` struct can implement `Add`, `Sub`, `Mul`, `Div`, `Rem`, `Neg`, `Not`,
+  `BitAnd`, `BitOr`, `BitXor`, `Shl`, `PartialEq`, and `Comparable` to get `+`, `-`, `*`,
+  `/`, `%`, unary `-`, `~`, `&`, `|`, `^`, `<<`, `==`/`!=`, and `<`/`<=`/`>`/`>=`. The impl
+  declares its result with `type Output = T`; the user writes only the `impl` (these are
+  built-in traits, no declaration needed).
+- `semantic`: operator-trait checking. The receiver must be `Copy`; a `type Output` must
+  match the method's return type; and `Comparable` requires `PartialEq` on the same type.
+  Using an operator on a type without the matching impl is still a clear error.
+- `codegen`: operator overloading carries no runtime cost. Each operator lowers to the
+  ordinary method call it stands for and is monomorphized to a plain call — no vtable.
+- `docs`: new `operators/operator_overloading.nr` example and `showcase/vector_physics.nr`
+  showcase (a `Vec2` with `+`/`-`/unary `-`/`==` driving a small physics step loop).
+
+### Notes
+- Compound assignment on a custom type (`v += w`) works through the by-value operator (it
+  desugars to `v = v + w`). The dedicated in-place `*Assign` traits, matrix-multiply `@`,
+  and auto-derived comparison default methods are tracked for later phases.
+
+---
+
 ## [1.60.0] - 2026-07-16
 
 ### Added

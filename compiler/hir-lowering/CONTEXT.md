@@ -51,6 +51,16 @@ Generics (§3.8): this slice performs **monomorphization** — the HIR has no ge
 
 Generic structs & impls (§3.8): monomorphized the same way. A generic `StructDef` is stored in `generic_structs` (not `structs`) and a generic `impl` in `generic_impls` (keyed by base name); neither is lowered directly. `instantiate_generic_struct(base, args)` — called from `resolve_type` for a `Type::Generic` annotation and from `lower_generic_struct_literal` after inferring the arguments from the field values via `unify_ast_hir` — mangles a per-instance name, registers the instance's concrete fields + impl-method signatures, and enqueues a `MonoStruct` if unseen. The struct-instance mangle (`mangle_struct_instance` → `Base_g_<type…>`) deliberately avoids `__`, because the backend recovers a method's receiver struct by splitting the method symbol on `__`. The struct worklist drains alongside the function worklist, emitting one `HirItem::Struct` plus one `HirItem::Impl` per generic impl (method bodies lowered under the impl's `type_subst` with `self` bound to the instance). Since these are ordinary struct/impl HIR items, the backend needs no generic awareness.
 
+- 2026-07-18: Operator traits — scalar path (§3.10). Operator overloading is desugared here: an
+  operator trait (`Add`, `Sub`, …, `PartialEq`, `Comparable`; table in `operator_traits.rs`) impl
+  populates `operator_binary_impls` / `operator_unary_impls` during `register_impl`. In `lower_expr`,
+  a `Binary` / `Unary` whose (peeled) left/operand type is a struct with a matching entry desugars to
+  the method call `a.op(b)` via `build_operator_call` / `build_unary_operator_call` — a `Call` with a
+  `FieldAccess` callee, identical to an ordinary method call, so the backend needs no operator
+  awareness. A comparison method's `rhs: &Rhs` parameter means the argument is wrapped in a
+  `Reference`. Owned `self` methods are no longer skipped in `register_impl` / `lower_impl` (valid on
+  a `Copy` receiver; the checker rejected any non-`Copy` case). Generic-impl paths still skip owned
+  `self` (operator traits on generic structs are out of scope this phase).
 - 2026-07-16: Trait declarations (§3.9). Traits are fully erased in this slice: an `Item::Trait`
   produces no HIR and needs no registration, because the parser has already injected each trait's
   default methods into the matching `impl Trait for Type` blocks — so trait impls (and their

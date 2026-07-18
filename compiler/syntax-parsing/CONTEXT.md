@@ -51,6 +51,11 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-07-18: Operator traits — scalar path §3.10. `parse_impl_def`'s body loop now accepts an
+  associated-type binding `type Name = Type` (via `parse_assoc_type_binding`) alongside methods,
+  collected into the new `ImplDef.assoc_types`. This lets an operator-trait impl declare its
+  `type Output = T`. No new keyword — reuses `TokenKind::Type`. Trait declarations themselves are
+  unchanged (operator traits are compiler-known lang-items, so the user writes only the `impl`).
 - 2026-07-16: Trait declarations §3.9. `parse_program` dispatches `TokenKind::Trait` →
   `parse_trait_def`, which reads method signatures via `parse_trait_method_def` (a `{` after the
   return type opens a default-method body; otherwise the method is required and ends at the

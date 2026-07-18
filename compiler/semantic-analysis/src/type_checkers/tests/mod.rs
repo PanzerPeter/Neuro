@@ -1532,3 +1532,111 @@ func main() -> i32 {
         "calling a bounded generic with a non-implementing type must be rejected; got {errors:?}"
     );
 }
+
+// ---- Operator traits (§3.10) ----
+
+/// A `Vec2` with the arithmetic, unary, and comparison operator impls used below.
+const VEC2_OPS: &str = r#"
+@derive(Copy, Clone)
+struct Vec2 { x: i32, y: i32 }
+impl Add for Vec2 { type Output = Vec2
+    func add(self, rhs: Vec2) -> Vec2 { Vec2 { x: self.x + rhs.x, y: self.y + rhs.y } } }
+impl Neg for Vec2 { type Output = Vec2
+    func neg(self) -> Vec2 { Vec2 { x: -self.x, y: -self.y } } }
+impl PartialEq for Vec2 {
+    func eq(&self, rhs: &Vec2) -> bool { self.x == rhs.x && self.y == rhs.y }
+    func ne(&self, rhs: &Vec2) -> bool { self.x != rhs.x || self.y != rhs.y } }
+"#;
+
+#[test]
+fn operator_traits_dispatch_on_user_type() {
+    let src = format!(
+        "{VEC2_OPS}\nfunc main() -> i32 {{\n  val a = Vec2 {{ x: 1, y: 2 }}\n  val b = Vec2 {{ x: 3, y: 4 }}\n  val c = a + b\n  val d = -c\n  if a == b {{ return 1 }}\n  if a != b {{ return c.x + d.x }}\n  0\n}}"
+    );
+    assert!(
+        semantic_errors(&src).is_empty(),
+        "operator-trait dispatch on a Copy struct must type-check: {:?}",
+        semantic_errors(&src)
+    );
+}
+
+#[test]
+fn operator_trait_impl_on_non_copy_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+struct NC { v: i32 }
+impl Add for NC { type Output = NC
+    func add(self, rhs: NC) -> NC { NC { v: self.v + rhs.v } } }
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::OperatorTraitRequiresCopy { .. })),
+        "an operator impl on a non-Copy struct must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn comparable_without_partialeq_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+@derive(Copy, Clone)
+struct M { v: i32 }
+impl Comparable for M {
+    func lt(&self, rhs: &M) -> bool { self.v < rhs.v }
+    func le(&self, rhs: &M) -> bool { self.v <= rhs.v }
+    func gt(&self, rhs: &M) -> bool { self.v > rhs.v }
+    func ge(&self, rhs: &M) -> bool { self.v >= rhs.v } }
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::MissingSupertraitImpl { .. })),
+        "Comparable without PartialEq must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn associated_output_mismatch_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+@derive(Copy, Clone)
+struct V { v: i32 }
+impl Add for V { type Output = bool
+    func add(self, rhs: V) -> V { V { v: self.v + rhs.v } } }
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::AssociatedTypeMismatch { .. })),
+        "a `type Output` not matching the method return must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn operator_without_impl_is_still_rejected() {
+    let errors = semantic_errors(
+        r#"
+@derive(Copy, Clone)
+struct P { v: i32 }
+func main() -> i32 {
+    val a = P { v: 1 }
+    val b = P { v: 2 }
+    val c = a + b
+    0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::InvalidBinaryOperator { .. })),
+        "using `+` on a struct without an Add impl must be rejected; got {errors:?}"
+    );
+}

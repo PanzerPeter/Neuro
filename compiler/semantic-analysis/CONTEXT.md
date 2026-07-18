@@ -127,6 +127,23 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-07-18: Operator traits — scalar path §3.10. Operator traits (`Add`, `Sub`, `Mul`, `Div`,
+  `Rem`, `Neg`, `Not`, `BitAnd`, `BitOr`, `BitXor`, `Shl`, `PartialEq`, `Comparable`) are
+  compiler-known lang-items (like `Drop`) defined in `type_checkers/operator_traits.rs`; the user
+  writes only the `impl`. New `TypeChecker` state: `operator_binary_impls` (`(struct, BinaryOp)` →
+  `OperatorDispatch { rhs, result }`) and `operator_unary_impls` (`(struct, UnaryOp)` → result type).
+  `register_impl` routes an operator-trait impl to `register_operator_impl` (instead of
+  `check_trait_conformance`): the receiver must be `Copy` (`OperatorTraitRequiresCopy`), a declared
+  `type Output` must equal the method return (`AssociatedTypeMismatch`), and each operator's method
+  wires its result type. Owned `self` is now accepted on a `Copy` struct (ABI-identical to `&self`);
+  it stays rejected on a non-`Copy` type. A new pass 2b (`check_operator_supertraits`) enforces
+  `Comparable: PartialEq` order-independently (`MissingSupertraitImpl`). In `check_expr`, a binary /
+  unary operator whose (peeled) left/operand type is a struct with a matching entry takes the impl's
+  result type before the built-in numeric/comparison paths (which still reject other struct operands
+  with `InvalidBinaryOperator`). Fully erased — HIR desugars each operator to the method call. Not
+  yet: the dedicated in-place `*Assign` traits (compound assignment goes through the parse-desugar to
+  the by-value operator), `MatMul`/`@`, and auto-derived trait default methods (each operator needs
+  its own impl method).
 - 2026-07-16: Trait declarations §3.9. New `TypeChecker` state: `traits` (name → `TraitInfo` of
   resolved method signatures), `trait_impls` (set of `(trait, type)` pairs with an impl), and
   `generic_bounds` (type-parameter → bound trait names, live inside a generic definition). A new
