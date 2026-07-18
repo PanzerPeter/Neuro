@@ -458,6 +458,75 @@ val flag: bool = true
 if flag { }             // Better
 ```
 
+## Operator Overloading
+
+Operators on a custom type are sugar for method calls. Implement the corresponding
+**operator trait** to make an operator work on your type. The operator traits are
+built into the compiler — you write only the `impl`, never a `trait` declaration.
+
+An arithmetic, bitwise, or unary operator trait declares its result type with
+`type Output = T`:
+
+```neuro
+@derive(Copy, Clone)
+struct Vec2 { x: i32, y: i32 }
+
+impl Add for Vec2 {
+    type Output = Vec2
+    func add(self, rhs: Vec2) -> Vec2 {
+        Vec2 { x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+
+impl Neg for Vec2 {
+    type Output = Vec2
+    func neg(self) -> Vec2 { Vec2 { x: -self.x, y: -self.y } }
+}
+
+val c = Vec2 { x: 1, y: 2 } + Vec2 { x: 3, y: 4 }   // (4, 6), via Add::add
+val d = -c                                          // (-4, -6), via Neg::neg
+```
+
+Comparison uses `PartialEq` (equality) and `Comparable` (ordering); their methods take
+`&self` and `rhs: &Self` and return `bool`. `Comparable` requires `PartialEq` on the
+same type:
+
+```neuro
+impl PartialEq for Vec2 {
+    func eq(&self, rhs: &Vec2) -> bool { self.x == rhs.x && self.y == rhs.y }
+    func ne(&self, rhs: &Vec2) -> bool { self.x != rhs.x || self.y != rhs.y }
+}
+
+if Vec2 { x: 1, y: 2 } == Vec2 { x: 1, y: 2 } { }   // via PartialEq::eq
+```
+
+**Operator → trait → method:**
+
+| Operator(s) | Trait | Method(s) |
+|---|---|---|
+| `+` | `Add` | `add` |
+| `-` (binary) | `Sub` | `sub` |
+| `*` | `Mul` | `mul` |
+| `/` | `Div` | `div` |
+| `%` | `Rem` | `rem` |
+| `-a` | `Neg` | `neg` |
+| `~a` | `Not` | `not` |
+| `&` `\|` `^` `<<` | `BitAnd` `BitOr` `BitXor` `Shl` | `bitand` `bitor` `bitxor` `shl` |
+| `==` `!=` | `PartialEq` | `eq` `ne` |
+| `<` `<=` `>` `>=` | `Comparable` | `lt` `le` `gt` `ge` |
+
+Rules and limits (§3.10):
+
+- The receiver type must be `Copy` (the scalar path). Each operator dispatches to its own
+  method — implement the method for every operator you use.
+- A declared `type Output` must match the method's return type.
+- The logical `!a` (boolean NOT) is **not** overloadable — it is always boolean negation.
+- Compound assignment (`v += w`) works when the type implements the matching by-value
+  operator: it desugars to `v = v + w`. Dedicated in-place `*Assign` traits, matrix
+  multiply `@`, and auto-derived comparison defaults are planned for later phases.
+- Operator overloading is fully monomorphized and erased — each operator becomes the
+  method call it stands for, with no vtable and no runtime cost.
+
 ## References
 
 - [Types](types.md) - Type requirements for operators

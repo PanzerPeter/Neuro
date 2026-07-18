@@ -933,7 +933,16 @@ impl Parser {
         self.skip_newlines();
 
         let mut methods = Vec::new();
+        let mut assoc_types = Vec::new();
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            // An associated-type binding `type Name = Type` (§3.10, e.g. `type Output =
+            // Vec2` in an operator-trait impl). Distinct from a method, so handled before
+            // the attribute/method path.
+            if self.check(&TokenKind::Type) {
+                assoc_types.push(self.parse_assoc_type_binding()?);
+                self.skip_newlines();
+                continue;
+            }
             let attributes = self.parse_attributes()?;
             self.skip_newlines();
             methods.push(self.parse_method_def(attributes)?);
@@ -949,6 +958,7 @@ impl Parser {
             lifetimes,
             type_args,
             where_predicates,
+            assoc_types,
             methods,
             span: start.span.merge(close.span),
         })
@@ -975,6 +985,19 @@ impl Parser {
         }
         self.consume(TokenKind::Greater, "'>' to close type arguments")?;
         Ok(args)
+    }
+
+    /// Parse an associated-type binding inside an `impl` block: `type Name = Type`
+    /// (§3.10). Used by operator-trait impls to declare their `Output`.
+    fn parse_assoc_type_binding(&mut self) -> ParseResult<(Identifier, crate::ast::Type)> {
+        self.consume(TokenKind::Type, "'type'")?;
+        self.skip_newlines();
+        let name = self.consume_identifier("associated type name")?;
+        self.skip_newlines();
+        self.consume(TokenKind::Equal, "'=' in associated type binding")?;
+        self.skip_newlines();
+        let ty = self.parse_type()?;
+        Ok((name, ty))
     }
 
     /// Parse a `trait` declaration (§3.9): `trait Name { <method signatures> }`.

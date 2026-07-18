@@ -344,10 +344,9 @@ impl Lowerer {
     fn register_impl(&mut self, def: &ImplDef) -> Result<(), LoweringError> {
         let struct_name = def.type_name.name.clone();
         for method in &def.methods {
-            // Consuming `self` is rejected by the checker and never reaches lowering.
-            if matches!(method.self_param, Some(SelfParam::Owned)) {
-                continue;
-            }
+            // An owned `self` on a `Copy` receiver is valid for operator-trait methods
+            // (§3.10); the checker already rejected it on any non-`Copy` type, so every
+            // owned-`self` method reaching lowering is sound and is registered normally.
             let mangled = format!("{}__{}", struct_name, method.name.name);
             let (params, ret) = self.method_signature(&struct_name, method)?;
             self.functions.insert(mangled.clone(), (params, ret));
@@ -355,6 +354,49 @@ impl Lowerer {
                 .entry(struct_name.clone())
                 .or_default()
                 .insert(method.name.name.clone(), mangled);
+        }
+        self.register_operator_impl(def, &struct_name)?;
+        Ok(())
+    }
+
+    /// Record the operator dispatch for an operator-trait impl (§3.10), mirroring the
+    /// checker so this slice resolves operators on user types independently.
+    fn register_operator_impl(
+        &mut self,
+        def: &ImplDef,
+        struct_name: &str,
+    ) -> Result<(), LoweringError> {
+        let Some(trait_name) = def.trait_name.as_ref().map(|t| &t.name) else {
+            return Ok(());
+        };
+        let Some(spec) = crate::operator_traits::operator_trait_spec(trait_name) else {
+            return Ok(());
+        };
+        for method in &def.methods {
+            let ret = match &method.return_type {
+                Some(t) => self.resolve_type(t)?,
+                None => HirType::Void,
+            };
+            let result = if spec.has_output { ret } else { HirType::Bool };
+            if let Some((_, op)) = spec.binary.iter().find(|(m, _)| *m == method.name.name) {
+                let rhs_param = match method.params.first() {
+                    Some(p) => self.resolve_type(&p.ty)?,
+                    None => HirType::Void,
+                };
+                self.operator_binary_impls.insert(
+                    (struct_name.to_string(), *op),
+                    crate::OpDispatch {
+                        method: method.name.name.clone(),
+                        rhs_param,
+                        result,
+                    },
+                );
+            } else if let Some((_, op)) = spec.unary.iter().find(|(m, _)| *m == method.name.name) {
+                self.operator_unary_impls.insert(
+                    (struct_name.to_string(), *op),
+                    (method.name.name.clone(), result),
+                );
+            }
         }
         Ok(())
     }
@@ -612,9 +654,9 @@ impl Lowerer {
         let struct_name = def.type_name.name.clone();
         let mut methods = Vec::new();
         for method in &def.methods {
-            if matches!(method.self_param, Some(SelfParam::Owned)) {
-                continue;
-            }
+            // Owned `self` on a `Copy` receiver is a valid operator-trait method (§3.10);
+            // the checker rejected it on any non-`Copy` type, so it is lowered like any
+            // other method (an owned `Copy` receiver is ABI-identical to `&self`).
             methods.push(self.lower_method(&struct_name, method)?);
         }
         Ok(HirImpl {

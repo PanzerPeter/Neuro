@@ -69,6 +69,20 @@ impl Lowerer {
                 span,
             } => {
                 let left = self.lower_expr(left, None)?;
+                // Operator-trait dispatch on a user type (§3.10): desugar `a OP b` into the
+                // impl method call `a.op(b)`. The checker validated the impl, so a lookup
+                // hit means the call resolves.
+                if let HirType::Struct(name) = left.ty.referent() {
+                    if let Some(dispatch) = self.operator_binary_impls.get(&(name.clone(), *op)) {
+                        let dispatch = crate::OpDispatch {
+                            method: dispatch.method.clone(),
+                            rhs_param: dispatch.rhs_param.clone(),
+                            result: dispatch.result.clone(),
+                        };
+                        let right = self.lower_expr(right, None)?;
+                        return self.build_operator_call(left, right, dispatch, *span);
+                    }
+                }
                 let right = self.lower_expr(right, Some(&left.ty))?;
                 let ty = binary_result_type(*op, &left.ty, &right.ty)?;
                 Ok(HirExpr::new(
@@ -89,6 +103,15 @@ impl Lowerer {
                     UnaryOp::BitNot => expected.filter(|t| is_integer(t)),
                 };
                 let operand = self.lower_expr(operand, operand_expected)?;
+                // Operator-trait dispatch: `-a` → `a.neg()`, `~a` → `a.not()` (§3.10).
+                if let HirType::Struct(name) = operand.ty.referent() {
+                    if let Some((method, result)) =
+                        self.operator_unary_impls.get(&(name.clone(), *op))
+                    {
+                        let (method, result) = (method.clone(), result.clone());
+                        return Ok(self.build_unary_operator_call(operand, method, result, *span));
+                    }
+                }
                 let ty = match op {
                     UnaryOp::Negate | UnaryOp::BitNot => operand.ty.clone(),
                     UnaryOp::Not => HirType::Bool,
@@ -828,6 +851,78 @@ impl Lowerer {
             ret,
             span,
         ))
+    }
+
+    /// Build the method call an overloaded binary operator desugars to (§3.10):
+    /// `a OP b` → `a.op(b)`. When the method's right parameter is a reference
+    /// (`rhs: &Rhs`, the comparison traits), the argument is borrowed.
+    fn build_operator_call(
+        &mut self,
+        object: HirExpr,
+        rhs: HirExpr,
+        dispatch: crate::OpDispatch,
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let arg = if let HirType::Reference { mutable, .. } = &dispatch.rhs_param {
+            let mutable = *mutable;
+            let ty = HirType::Reference {
+                inner: Box::new(rhs.ty.clone()),
+                mutable,
+            };
+            HirExpr::new(
+                HirExprKind::Reference {
+                    operand: Box::new(rhs),
+                    mutable,
+                },
+                ty,
+                span,
+            )
+        } else {
+            rhs
+        };
+        let callee = HirExpr::new(
+            HirExprKind::FieldAccess {
+                object: Box::new(object),
+                field: dispatch.method,
+            },
+            dispatch.result.clone(),
+            span,
+        );
+        Ok(HirExpr::new(
+            HirExprKind::Call {
+                callee: Box::new(callee),
+                args: vec![arg],
+            },
+            dispatch.result,
+            span,
+        ))
+    }
+
+    /// Build the method call an overloaded unary operator desugars to (§3.10):
+    /// `-a` → `a.neg()`, `~a` → `a.not()`.
+    fn build_unary_operator_call(
+        &mut self,
+        operand: HirExpr,
+        method: String,
+        result: HirType,
+        span: shared_types::Span,
+    ) -> HirExpr {
+        let callee = HirExpr::new(
+            HirExprKind::FieldAccess {
+                object: Box::new(operand),
+                field: method,
+            },
+            result.clone(),
+            span,
+        );
+        HirExpr::new(
+            HirExprKind::Call {
+                callee: Box::new(callee),
+                args: Vec::new(),
+            },
+            result,
+            span,
+        )
     }
 
     /// Lower `instance.method(args)`: a struct method (or the `.clone()` builtin on a

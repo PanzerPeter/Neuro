@@ -158,6 +158,29 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("operator trait '{trait_name}' can only be implemented for a `Copy` type; '{type_name}' at {span:?} is not `Copy` (§3.10)")]
+    OperatorTraitRequiresCopy {
+        trait_name: String,
+        type_name: String,
+        span: Span,
+    },
+
+    #[error("in `impl {trait_name}`, `type Output = {expected}` does not match method return type {found} at {span:?} (§3.10)")]
+    AssociatedTypeMismatch {
+        trait_name: String,
+        expected: Type,
+        found: Type,
+        span: Span,
+    },
+
+    #[error("`impl {trait_name} for {type_name}` at {span:?} requires `impl {supertrait} for {type_name}` (§3.10)")]
+    MissingSupertraitImpl {
+        trait_name: String,
+        supertrait: String,
+        type_name: String,
+        span: Span,
+    },
+
     #[error("arithmetic operator {op} is not defined on half-precision type {ty} at {span:?}: compute in f32, e.g. `(a as f32 {op} b as f32)`")]
     HalfFloatArithmetic { op: String, ty: Type, span: Span },
 

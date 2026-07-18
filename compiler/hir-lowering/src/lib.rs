@@ -30,6 +30,7 @@ use neuro_hir::{HirProgram, HirType};
 
 mod expressions;
 mod items;
+mod operator_traits;
 mod statements;
 mod types;
 
@@ -103,6 +104,12 @@ struct Lowerer {
     clone_structs: HashSet<String>,
     /// Struct name → method name → mangled key into [`Self::functions`].
     impl_methods: HashMap<String, HashMap<String, String>>,
+    /// Operator-trait dispatch (§3.10): `(struct name, binary operator)` → how the
+    /// operator desugars to a method call. Present when the struct has an operator impl.
+    operator_binary_impls: HashMap<(String, ast_types::BinaryOp), OpDispatch>,
+    /// Operator-trait dispatch for unary operators: `(struct name, operator)` →
+    /// `(method name, result type)`.
+    operator_unary_impls: HashMap<(String, ast_types::UnaryOp), (String, HirType)>,
     /// Module- and function-scope constant names → resolved type.
     constants: HashMap<String, HirType>,
     /// Lexical scope stack of `binding name → type`, innermost last.
@@ -146,6 +153,17 @@ struct Lowerer {
     /// Concrete instance functions produced by monomorphization, appended to the
     /// program after the ordinary items.
     mono_items: Vec<neuro_hir::HirItem>,
+}
+
+/// How a binary operator desugars to an operator-trait method call (§3.10).
+struct OpDispatch {
+    /// The backing method name (`add`, `eq`, `lt`, …).
+    method: String,
+    /// The method's declared right-hand parameter type. A `Reference` means the operand
+    /// is borrowed at the call (the comparison traits take `rhs: &Rhs`).
+    rhs_param: HirType,
+    /// The operator's result type: the impl's `Output`, or `bool` for comparisons.
+    result: HirType,
 }
 
 /// One pending monomorphization: the generic template `fn_name`, the concrete type
@@ -203,6 +221,8 @@ impl Lowerer {
             newtypes: HashMap::new(),
             clone_structs: HashSet::new(),
             impl_methods: HashMap::new(),
+            operator_binary_impls: HashMap::new(),
+            operator_unary_impls: HashMap::new(),
             constants: HashMap::new(),
             scopes: Vec::new(),
             loop_stack: Vec::new(),

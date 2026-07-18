@@ -647,3 +647,74 @@ func main() -> i32 {
         function_names(&program)
     );
 }
+
+#[test]
+fn binary_operator_desugars_to_method_call() {
+    // `a + b` on a struct with `impl Add` lowers to the method call `a.add(b)`, not a
+    // `Binary` node (§3.10).
+    let program = lower(
+        r#"
+@derive(Copy, Clone)
+struct Vec2 { x: i32, y: i32 }
+impl Add for Vec2 { type Output = Vec2
+    func add(self, rhs: Vec2) -> Vec2 { Vec2 { x: self.x + rhs.x, y: self.y + rhs.y } } }
+func main() -> i32 {
+    val a = Vec2 { x: 1, y: 2 }
+    val b = Vec2 { x: 3, y: 4 }
+    val c = a + b
+    0
+}
+"#,
+    );
+    let body = function_body(&program, "main");
+    let c = binding_init(body, "c");
+    assert_eq!(c.ty, HirType::Struct("Vec2".to_string()));
+    match &c.kind {
+        HirExprKind::Call { callee, args } => {
+            assert_eq!(args.len(), 1, "add takes one explicit argument");
+            match &callee.kind {
+                HirExprKind::FieldAccess { field, .. } => assert_eq!(field, "add"),
+                other => {
+                    panic!("operator call callee must be a method field access, got {other:?}")
+                }
+            }
+        }
+        other => panic!("`a + b` must desugar to a Call, got {other:?}"),
+    }
+}
+
+#[test]
+fn comparison_operator_desugars_and_yields_bool() {
+    // `a == b` lowers to `a.eq(&b)` returning bool; the argument is borrowed (§3.10).
+    let program = lower(
+        r#"
+@derive(Copy, Clone)
+struct P { v: i32 }
+impl PartialEq for P {
+    func eq(&self, rhs: &P) -> bool { self.v == rhs.v }
+    func ne(&self, rhs: &P) -> bool { self.v != rhs.v } }
+func main() -> i32 {
+    val a = P { v: 1 }
+    val b = P { v: 2 }
+    val e = a == b
+    0
+}
+"#,
+    );
+    let body = function_body(&program, "main");
+    let e = binding_init(body, "e");
+    assert_eq!(e.ty, HirType::Bool);
+    match &e.kind {
+        HirExprKind::Call { callee, args } => {
+            assert!(
+                matches!(args[0].ty, HirType::Reference { .. }),
+                "comparison method takes the rhs by reference"
+            );
+            match &callee.kind {
+                HirExprKind::FieldAccess { field, .. } => assert_eq!(field, "eq"),
+                other => panic!("callee must be `eq`, got {other:?}"),
+            }
+        }
+        other => panic!("`a == b` must desugar to a Call, got {other:?}"),
+    }
+}

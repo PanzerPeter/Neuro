@@ -12,7 +12,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | ---------------- | ---------------------------------------------------------------------- |
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference |
 | `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`) |
-| `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods            |
+| `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`) |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable` |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
 | `showcase/`      | **Bigger programs that combine many features at once** — incl. mutable borrows `&mut T` + `*` deref (`mutable_borrows.nr`) |
@@ -64,6 +64,11 @@ isolation:
   and combined with `&self` methods, `@derive(Copy)` structs, a fixed-size array +
   `for`-in loop, and if-expressions. Traits are fully erased — zero runtime cost. Exit
   `7`.
+- [`showcase/vector_physics.nr`](showcase/vector_physics.nr) — **operator traits** (§3.10):
+  a `Copy` `Vec2` implementing `Add` / `Sub` / `Neg` / `PartialEq`, so `+` / `-` / unary
+  `-` / `==` dispatch to the impl methods, combined with an `&self` method, compound
+  assignment (`+=` desugaring through `Add`), a `while` loop, and if-expressions. The
+  operators are monomorphized to plain calls — no vtable. Exit `35`.
 
 ## Compiling and running
 

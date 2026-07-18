@@ -110,9 +110,6 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<()> {
         let struct_name = impl_def.type_name.clone();
         for method in &impl_def.methods {
-            if matches!(method.self_param, Some(HirSelfParam::Owned)) {
-                continue;
-            }
             self.declare_method(method, &struct_name, func_types)?;
         }
         Ok(())
@@ -127,11 +124,8 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<()> {
         let struct_name = &impl_def.type_name;
         for method in &impl_def.methods {
-            // Consuming `self` is rejected in semantic analysis; everything else
-            // (`&self`, `&mut self`, associated functions) is lowered.
-            if matches!(method.self_param, Some(HirSelfParam::Owned)) {
-                continue;
-            }
+            // An owned `self` reaches codegen only on a `Copy` receiver (operator-trait
+            // methods, §3.10); it is emitted like `&self` — the struct is passed by value.
             self.codegen_method(method, struct_name, func_types)?;
         }
         Ok(())

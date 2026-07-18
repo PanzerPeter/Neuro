@@ -172,6 +172,10 @@ pub struct ImplDef {
     /// Value predicates from an impl-level `where` clause (§3.8), checked at each
     /// instantiation (see [`FunctionDef::where_predicates`]).
     pub where_predicates: Vec<Expr>,
+    /// Associated-type bindings declared inside the block, e.g. the `type Output = Vec2`
+    /// of an operator-trait impl (§3.10). Each entry is `(name, bound type)`. Empty for
+    /// blocks with no `type` items.
+    pub assoc_types: Vec<(Identifier, Type)>,
     pub methods: Vec<MethodDef>,
     pub span: Span,
 }

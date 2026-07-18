@@ -58,6 +58,12 @@ pub(crate) struct TypeChecker {
     /// `impl Trait for Type` block (§3.9). A generic bound `T: Trait` is satisfied at a
     /// call site exactly when the concrete type argument appears here.
     trait_impls: HashSet<(String, String)>,
+    /// Operator-trait dispatch (§3.10): `(struct name, binary operator)` → the value
+    /// type of the right operand and the operator's result type. Present exactly when
+    /// the struct has an operator-trait impl providing that operator.
+    operator_binary_impls: HashMap<(String, ast_types::BinaryOp), OperatorDispatch>,
+    /// Operator-trait dispatch for unary operators (`-a` via `Neg`, `~a` via `Not`).
+    operator_unary_impls: HashMap<(String, ast_types::UnaryOp), Type>,
     /// Trait bounds of the type parameters in scope while a generic definition is checked
     /// (§3.8, §3.9): parameter name → declared trait names. Lets a generic body dispatch
     /// a trait method on a bounded type parameter. Empty outside a generic definition.
@@ -131,6 +137,17 @@ pub(crate) struct TraitInfo {
     pub(crate) methods: HashMap<String, TraitMethodSig>,
 }
 
+/// How a binary operator dispatches to an operator-trait method (§3.10).
+#[derive(Clone)]
+pub(crate) struct OperatorDispatch {
+    /// The value type the right operand must have. For a by-reference method parameter
+    /// (`rhs: &Rhs`) this is the referent, since the operand is borrowed at the call.
+    pub(crate) rhs: Type,
+    /// The operator's result type: the method's `Output` for arithmetic/bitwise traits,
+    /// or `bool` for the comparison traits.
+    pub(crate) result: Type,
+}
+
 /// One resolved trait-method signature (§3.9). `params` excludes the implicit `self`.
 /// `required` is true when the trait gave no default body — an implementor must provide
 /// one. Types are resolved in the trait's (non-generic) scope, so `Self`-typed and
@@ -171,6 +188,7 @@ mod expressions;
 mod literals;
 mod matches;
 mod moves;
+pub(crate) mod operator_traits;
 mod resolution;
 mod statements;
 
@@ -194,6 +212,8 @@ impl TypeChecker {
             generic_impls: HashMap::new(),
             traits: HashMap::new(),
             trait_impls: HashSet::new(),
+            operator_binary_impls: HashMap::new(),
+            operator_unary_impls: HashMap::new(),
             generic_bounds: HashMap::new(),
             instantiated_structs: HashSet::new(),
             generic_scope: HashSet::new(),
@@ -361,6 +381,10 @@ impl TypeChecker {
                 }
             }
         }
+
+        // Pass 2b: operator-trait supertrait check (§3.10), after all impls are
+        // registered so `Comparable: PartialEq` is order-independent.
+        self.check_operator_supertraits(items);
 
         // Pass 3: register module-level constants so they are visible in function bodies
         // regardless of source order.

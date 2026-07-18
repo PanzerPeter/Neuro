@@ -11,7 +11,7 @@ pub use errors::{CodegenError, CodegenResult};
 
 use inkwell::context::Context as LLVMContext;
 use inkwell::OptimizationLevel as LlvmOptimizationLevel;
-use neuro_hir::{HirItem, HirProgram, HirSelfParam};
+use neuro_hir::{HirItem, HirProgram};
 use std::collections::HashMap;
 use types::Type;
 
@@ -129,13 +129,9 @@ pub fn compile(
             HirItem::Impl(impl_def) => {
                 let struct_name = &impl_def.type_name;
                 for method in &impl_def.methods {
-                    // Consuming `self` was rejected by semantic analysis and must not
-                    // reach codegen; `&self`, `&mut self`, and associated functions
-                    // all need a registered signature.
-                    if matches!(method.self_param, Some(HirSelfParam::Owned)) {
-                        continue;
-                    }
-
+                    // An owned `self` reaches codegen only on a `Copy` receiver
+                    // (operator-trait methods, §3.10); it needs a registered signature
+                    // like `&self`. Non-`Copy` owned `self` was rejected by the checker.
                     let mangled = format!("{}__{}", struct_name, method.name);
                     let mut param_types: Vec<Type> = Vec::new();
 

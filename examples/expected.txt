@@ -53,6 +53,7 @@ types/underscore_separators.nr      0
 operators/bitwise_ops.nr          1
 operators/compound_assignment.nr  21
 operators/integer_methods.nr      0
+operators/operator_overloading.nr 24
 
 # --- control flow ---------------------------------------------------------
 control_flow/control_flow.nr          31
@@ -85,3 +86,4 @@ showcase/running_stats.nr   5
 showcase/shape_traits.nr    7
 showcase/simulation.nr      2
 showcase/unit_types.nr      94
+showcase/vector_physics.nr  35

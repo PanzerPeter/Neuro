@@ -239,6 +239,12 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-07-18: Operator traits — scalar path §3.10. No new codegen: an overloaded operator is
+  desugared to an ordinary method call in hir-lowering, so the backend emits a plain
+  `StructName__op` call. The only change is that owned `self` (`HirSelfParam::Owned`) methods are no
+  longer skipped in the func-type collection, `declare_impl`, and `codegen_impl` — such a method
+  reaches codegen only on a `Copy` receiver (the checker rejects it otherwise) and is lowered exactly
+  like `&self` (the struct is passed by value; only `&mut self` is by pointer).
 - 2026-07-03: Generic functions §3.8 (backend support). No generics reach the backend — hir-lowering
   monomorphizes them into concrete functions — but their call graph is no longer definition-ordered
   (a monomorphized instance may be called by, or call, items before it). `compile` now runs a
