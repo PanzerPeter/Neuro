@@ -3,10 +3,10 @@ use super::{EnumVariantInfo, TraitInfo, TraitMethodSig, TypeChecker, VariantForm
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, Type};
 use ast_types::{
-    ConstDef, EnumDef, Expr, FunctionDef, ImplDef, NewtypeDef, SelfParam, Stmt, StructDef,
+    ConstDef, EnumDef, Expr, FunctionDef, ImplDef, Item, NewtypeDef, SelfParam, Stmt, StructDef,
     TraitDef, VariantPayload,
 };
-use shared_types::Span;
+use shared_types::{Identifier, Span};
 use std::collections::{HashMap, HashSet};
 
 /// Built-in type names a newtype may not shadow.
@@ -32,6 +32,67 @@ const DROP_TRAIT: &str = "Drop";
 const DROP_METHOD: &str = "drop";
 
 impl TypeChecker {
+    /// Reject any declared name containing the reserved `__` separator.
+    ///
+    /// `__` joins a receiver to its method (`Point__translate`) in the flat function
+    /// table, and the LLVM backend recovers the receiver by splitting a method symbol on
+    /// it. Compiler-generated names are built to hold exactly one `__` — monomorphized
+    /// instances use a single-underscore `_g_` marker for that reason — but a user name
+    /// carrying its own `__` would break the property from the other side: a method
+    /// `a__b` on struct `S` and a method `b` on a struct named `S__a` produce the same
+    /// symbol. Reserving the separator closes the collision instead of ranking one
+    /// meaning over the other, and keeps generic methods on generic structs unambiguous
+    /// as that work lands.
+    pub(crate) fn check_reserved_names(&mut self, items: &[Item]) {
+        for item in items {
+            match item {
+                Item::Function(def) => {
+                    self.reject_reserved(&def.name);
+                    for param in &def.params {
+                        self.reject_reserved(&param.name);
+                    }
+                }
+                Item::Struct(def) => {
+                    self.reject_reserved(&def.name);
+                    for field in &def.fields {
+                        self.reject_reserved(&field.name);
+                    }
+                }
+                Item::Enum(def) => {
+                    self.reject_reserved(&def.name);
+                    for variant in &def.variants {
+                        self.reject_reserved(&variant.name);
+                    }
+                }
+                Item::Trait(def) => {
+                    self.reject_reserved(&def.name);
+                    for method in &def.methods {
+                        self.reject_reserved(&method.name);
+                    }
+                }
+                Item::Impl(def) => {
+                    // `type_name` is checked at its own declaration; only the method
+                    // names are introduced here.
+                    for method in &def.methods {
+                        self.reject_reserved(&method.name);
+                    }
+                }
+                Item::Const(def) => self.reject_reserved(&def.name),
+                Item::Newtype(def) => self.reject_reserved(&def.name),
+            }
+        }
+    }
+
+    /// Record a [`TypeError::ReservedNameSeparator`] if `ident` contains `__`.
+    fn reject_reserved(&mut self, ident: &Identifier) {
+        if ident.name.contains("__") {
+            self.record_error(TypeError::ReservedNameSeparator {
+                name: ident.name.clone(),
+                span: ident.span,
+            });
+        }
+    }
+
     /// Check a function definition.
     ///
     /// A generic function (non-empty `func.generics`) is a template: its type

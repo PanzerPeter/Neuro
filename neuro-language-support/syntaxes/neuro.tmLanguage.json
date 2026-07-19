@@ -94,7 +94,7 @@
       "patterns": [
         {
           "name": "constant.numeric.float.neuro",
-          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?(f32|f64)?\\b"
+          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?(bf16|f16|f32|f64)?\\b"
         },
         {
           "name": "constant.numeric.hex.neuro",
@@ -110,7 +110,7 @@
         },
         {
           "name": "constant.numeric.integer.neuro",
-          "match": "\\b[0-9][0-9_]*(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64)?\\b"
+          "match": "\\b[0-9][0-9_]*(i8|i16|i32|i64|u8|u16|u32|u64|bf16|f16|f32|f64)?\\b"
         }
       ]
     },
@@ -134,7 +134,7 @@
         },
         {
           "name": "keyword.special.neuro",
-          "match": "\\b(self|Self|where|as|move|unsafe|async|await|spawn|defer|pool)\\b"
+          "match": "\\b(self|Self|where|as|dyn|move|unsafe|async|await|spawn|defer|pool)\\b"
         },
         {
           "name": "keyword.operator.error-propagation.neuro",
@@ -146,7 +146,7 @@
       "patterns": [
         {
           "name": "storage.type.primitive.neuro",
-          "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|string|char)\\b"
+          "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|bf16|f16|f32|f64|bool|string|char)\\b"
         },
         {
           "name": "storage.type.tensor.neuro",
@@ -363,7 +363,7 @@
     "function_calls": {
       "patterns": [
         {
-          "match": "\\b(?!if|else|while|for|in|break|continue|return|match|loop|val|mut|const|func|struct|enum|impl|trait|import|export|module|type|newtype|self|Self|where|as|move|unsafe|async|await|spawn|defer|pool\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+          "match": "\\b(?!if|else|while|for|in|break|continue|return|match|loop|val|mut|const|func|struct|enum|impl|trait|import|export|module|type|newtype|self|Self|where|as|dyn|move|unsafe|async|await|spawn|defer|pool\\b)([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
           "captures": {
             "1": { "name": "entity.name.function.call.neuro" }
           }

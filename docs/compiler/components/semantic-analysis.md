@@ -336,38 +336,48 @@ if condition {
 
 ## Type Checking Algorithm
 
-### Three-Pass Algorithm
+### Multi-Pass Algorithm
 
-**Pass 1: Register struct definitions**
-```rust
-for item in items {
-    if let Item::Struct(def) = item {
-        self.register_struct(def);
-    }
-}
-```
+`check_program` walks the item list several times. Each pass registers only what the
+next one needs, which is what makes declaration order irrelevant. Passes are lettered
+where a later requirement was slotted between two existing ones.
 
-**Pass 2: Register impl method signatures** (uses struct types from Pass 1)
-```rust
-for item in items {
-    if let Item::Impl(def) = item {
-        self.register_impl(def); // Mangles names as StructName__methodName
-    }
-}
-```
+| Pass | What it does | Why it sits here |
+|---|---|---|
+| 0a | Pre-register newtype *names* (`predeclare_newtype`) | a newtype may appear as a struct field, enum payload, or another newtype's inner before its own declaration |
+| 0 | Register enum definitions | an enum may be a struct field type, and vice versa |
+| 1 | Register struct definitions (generic ones via `register_generic_struct`); record `Copy`/`Clone` derive intent | type names must resolve in method signatures |
+| 1c | Resolve and validate newtype inner types | every nominal name is known by now; enforces the `Copy`-inner rule and rejects cycles |
+| 1b | Validate `@derive(Copy)` — every field of a `Copy` struct is itself `Copy` | runs after 1c so a newtype field reports its real `Copy`-ness |
+| 1d | Register trait declarations | `impl Trait for T` conformance and generic trait bounds need the trait's method signatures |
+| 2 | Register `impl` method signatures (generic ones via `register_generic_impl`) | uses the struct types from pass 1 |
+| 2b | Operator-trait supertrait check (`check_operator_supertraits`) | all impls are registered, so `Comparable: PartialEq` is order-independent |
+| 3 | Register module-level constants | they must be visible in every function body |
+| 4 | Check function, method, and const **bodies** | every signature is known, so forward references and mutual recursion resolve |
+| 5 | Lints (`run_lints`) | run independently of type errors so style guidance always reaches the developer |
 
-**Pass 3: Type-check function and method bodies**
-```rust
-for item in items {
-    match item {
-        Item::Function(func) => self.check_function(func),
-        Item::Impl(def) => self.check_impl(def),
-        Item::Struct(_) => {}
-    }
-}
-```
+Pass 2 registers each method under a mangled key — see
+[Method Name Mangling](#method-name-mangling) below.
 
-This order guarantees: all struct types are known before method signatures are parsed (Pass 2), and all function/method signatures are known before any body is checked (Pass 3), enabling forward references, mutual recursion, and definition-order independence.
+The ordering guarantees that all type names are known before any signature is read, and
+all signatures are known before any body is checked, which is what enables forward
+references, mutual recursion, and definition-order independence.
+
+### Method Name Mangling
+
+Methods live in the same flat function table as free functions, keyed by
+`StructName__methodName`. `__` is reserved as the compiler's symbol separator: the
+backend recovers a method's receiver struct by splitting its symbol on `__`, so no
+generated name may introduce a second `__`.
+
+Two consequences:
+
+- Monomorphized instance names use a single-underscore marker — `_g_` for a generic
+  struct instance (`Pair_g_i32_f64`) and for a generic function instance
+  (`identity_g_i32`) — never `__`.
+- User-declared identifiers may not contain `__`. A declaration that does is rejected
+  with `TypeError::ReservedNameSeparator`, which keeps a user method from ever colliding
+  with a generated instance or vtable-thunk symbol.
 
 ### Expression Type Checking
 
@@ -496,7 +506,8 @@ func bad_example() -> i32 {
 
 - **Type checking speed**: <1ms for small programs
 - **Memory**: O(n) for symbol table
-- **Single-pass**: Type checks in one traversal (after signature collection)
+- **Body checking**: one traversal per body, after the registration passes; the
+  registration passes themselves are linear scans over the item list
 
 ## References
 

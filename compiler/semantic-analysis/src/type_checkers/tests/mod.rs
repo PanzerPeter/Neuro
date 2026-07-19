@@ -1,3 +1,6 @@
+mod decl_tests;
+mod expr_tests;
+
 use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::Type;

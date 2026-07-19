@@ -448,14 +448,17 @@ fn generic_function_monomorphizes_per_type_argument() {
         "the generic template must not survive into the HIR: {:?}",
         names
     );
-    let instances = names
-        .iter()
-        .filter(|n| n.starts_with("identity__g"))
-        .count();
+    let instances = names.iter().filter(|n| n.starts_with("identity_g")).count();
     assert_eq!(
         instances, 2,
         "one instance per distinct type argument: {:?}",
         names
+    );
+    // A monomorphized function name must never contain `__`: that separator is reserved
+    // for `Receiver__method`, and codegen splits on it to recover the receiver struct.
+    assert!(
+        names.iter().all(|n| !n.contains("__")),
+        "instance names must avoid `__`: {names:?}"
     );
 }
 
@@ -468,7 +471,7 @@ fn repeated_instantiation_is_emitted_once() {
     );
     let instances = function_names(&program)
         .iter()
-        .filter(|n| n.starts_with("identity__g"))
+        .filter(|n| n.starts_with("identity_g"))
         .count();
     assert_eq!(instances, 1);
 }

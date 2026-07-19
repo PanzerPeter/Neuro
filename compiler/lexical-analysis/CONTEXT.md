@@ -38,7 +38,16 @@ a `\u{...}` unicode escape, or a `\xNN` byte escape — so `''`, `'ab'`, and an 
 `'a` never match and become lex errors. `parse_char` decodes the escape and validates the
 `\u{...}` scalar range, emitting `LexError::InvalidCharLiteral` on an out-of-range code point.
 
+### Editor grammar sync
+`neuro-language-support/syntaxes/neuro.tmLanguage.json` re-describes this lexer as TextMate
+regexes for editor highlighting. Nothing in the build links the two, so `tests/tmlanguage_sync.rs`
+is the link: it scans this crate's own `tokens.rs` for `#[token("…")]` literals and fails when a
+keyword is missing from the grammar. It covers keyword *words* only — grammar rules with no
+one-to-one token counterpart (string bodies and escapes above all) still need updating by hand, which
+matters for the planned stateful-lexer rewrite behind string interpolation.
+
 ## Recent Updates
+- 2026-07-19: Added `tests/tmlanguage_sync.rs`, asserting every `#[token("…")]` keyword appears in the editor's TextMate grammar. It caught real drift on introduction: `dyn` was missing from the grammar's keyword pattern, and `f16`/`bf16` from its primitive-type and numeric-suffix patterns.
 - 2026-07-19: Added `TokenKind::Dyn` keyword token for `dyn Trait` trait objects. Reserves the word so it cannot be an identifier. Sits directly after `Trait` in declaration order. `impl` needed no new token — the existing `TokenKind::Impl` serves both `impl` blocks and the `impl Trait` bound.
 - 2026-07-13: Added `TokenKind::Lifetime(String)` for explicit lifetime names, e.g. `'a` in `func longest<'a>(...)`. Regex `'[_\p{XID_Start}]\p{XID_Continue}*`; the callback strips the leading `'` so the stored name is the bare identifier. A char literal `'a'` carries a closing quote and is a strictly longer match, so logos' longest-match rule keeps char literals winning — only the quote-less form lexes as a lifetime. Sits directly after `Char` in declaration order.
 - 2026-07-02: Added `TokenKind::Newtype` keyword token for `newtype Name = T` declarations. Reserves the word so it cannot be an identifier. Sits directly after `Type` in declaration order.

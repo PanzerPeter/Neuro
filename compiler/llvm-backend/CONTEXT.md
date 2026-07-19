@@ -75,8 +75,11 @@ function params/returns (a later sub-phase; type mapper errors there). Layout in
 `get_struct_llvm_type` rebuilds the type on demand (LLVM dedups by structure).
 
 ## Method ABI
-`impl` methods lower to LLVM free functions mangled `StructName__methodName` (double underscore;
-the identifier grammar forbids `__` in user names).
+`impl` methods lower to LLVM free functions mangled `StructName__methodName` (double underscore).
+`codegen_method_call` recovers the receiver struct by splitting the symbol on `__`, so the
+separator must appear exactly once. Two rules hold that: semantic analysis rejects a declared name
+containing `__` (`TypeError::ReservedNameSeparator`), and every monomorphized instance name uses a
+single-underscore `_g_` marker (`identity_g_i32`, `Pair_g_i32_f64`).
 
 `&self` methods take the struct **by value** as `param[0]` (named `self` in the alloca map) —
 correct for read-only access; callers load their stack var and pass the value. `&mut self` methods
