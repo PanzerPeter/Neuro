@@ -11,6 +11,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.62.3] - 2026-07-19
+
+### Fixed
+- `semantic`: `__` is now reserved for compiler-generated symbols. Methods live in the flat
+  function table as `Receiver__method` and the backend recovers a method's receiver by
+  splitting that symbol on `__`, so the separator has to appear exactly once. Two things
+  could break the property: a monomorphized *function* instance carried its own `__` marker
+  (`identity__g_i32`), and a user-declared name was free to contain one. The instance marker
+  is now the single-underscore `_g_` already used for generic-struct instances
+  (`identity_g_i32`), and any declared name containing `__` is rejected with
+  `ReservedNameSeparator`. Without this, a generic method on a generic struct — the next
+  combination on the way — could mint a symbol already spoken for.
+- `tests`: `type_checkers/tests/{decl,expr,stmt}_tests.rs` were never declared as modules, so
+  ~40 type-checker tests had not run since they were written. Declared them (all pass) and
+  deleted the empty `stmt_tests.rs` stub.
+- `lexer`: added `dyn` to the editor grammar's keyword pattern, and `f16`/`bf16` to its
+  primitive-type and numeric-suffix patterns — all three were in the lexer but unhighlighted.
+
+### Added
+- `tests`: `lexical-analysis/tests/tmlanguage_sync.rs` links the lexer to the editor's
+  TextMate grammar, which nothing in the build referenced before. It scans `tokens.rs` for
+  `#[token("…")]` literals and fails when a keyword is absent from the grammar, so a new
+  keyword can no longer land silently unhighlighted. Keyword words only — string-body and
+  escape rules still need hand-updating, which is what the coming stateful-lexer rewrite for
+  string interpolation will touch.
+
+### Changed
+- `docs`: `docs/compiler/components/semantic-analysis.md` described a three-pass type checker
+  and separately claimed single-pass checking; `check_program` has run many more passes than
+  that for several sub-phases. Replaced with the real pass table (including the lettered
+  sub-passes) plus a section on method-name mangling. `docs/README.md` gave three different
+  answers about the active sub-phase; all now read 1F.
+
+---
+
 ## [1.62.2] - 2026-07-19
 
 ### Changed

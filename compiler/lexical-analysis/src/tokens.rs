@@ -1,4 +1,10 @@
 // Token type definitions
+//
+// The editor's TextMate grammar (`neuro-language-support/syntaxes/neuro.tmLanguage.json`)
+// re-describes these tokens as regexes and has no build-time link to this file.
+// `tests/tmlanguage_sync.rs` scans the `#[token("…")]` literals below and fails when a
+// keyword is missing there; rules with no one-to-one token (string bodies, escapes) are
+// not covered and must be updated by hand.
 
 use logos::Logos;
 use shared_types::{FloatSuffix, IntSuffix, Span};

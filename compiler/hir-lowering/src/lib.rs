@@ -380,16 +380,21 @@ fn resolve_array_size(
     }
 }
 
-/// The mangled symbol name of a monomorphized instance: the template name, the
-/// `__g_` instance marker, and each type argument's mangled form in declaration order.
+/// The mangled symbol name of a monomorphized function instance: the template name, the
+/// `_g_` instance marker, and each type argument's mangled form in declaration order.
 /// The result is a valid symbol (alphanumerics and `_` only).
+///
+/// The marker deliberately avoids `__`, which is reserved workspace-wide as the
+/// receiver/method separator — codegen recovers a method's receiver struct by splitting
+/// its symbol on `__`, so an instance name containing one would be misread as a method
+/// of a struct that does not exist. [`mangle_struct_instance`] uses the same marker.
 fn mangle_instance(
     name: &str,
     generics: &[ast_types::GenericParam],
     subst: &HashMap<String, HirType>,
     const_subst: &HashMap<String, u64>,
 ) -> String {
-    let mut out = format!("{}__g", name);
+    let mut out = format!("{}_g", name);
     for gp in generics {
         let arg = match &gp.kind {
             ast_types::GenericParamKind::Const(_) => const_subst
@@ -449,9 +454,11 @@ fn mangle_type(ty: &HirType) -> String {
 /// The mangled symbol name of a monomorphized generic-struct instance: the base
 /// name, a `_g_` marker, and each type argument's mangled form.
 ///
-/// Unlike [`mangle_instance`] (which uses `__g` for free functions), this never
-/// contains `__`: codegen recovers a method's receiver struct by splitting the method
-/// symbol on `__`, so a struct name with `__` in it would corrupt that recovery.
+/// Like [`mangle_instance`], this never contains `__`: codegen recovers a method's
+/// receiver struct by splitting the method symbol on `__`, so a struct name with `__`
+/// in it would corrupt that recovery. Once 1F puts generic methods on generic structs,
+/// a method of this instance is keyed `<instance>__<method>` — exactly one `__`, which
+/// only holds because neither half can introduce another.
 fn mangle_struct_instance(base: &str, args: &[MonoArg]) -> String {
     let parts: Vec<String> = args
         .iter()

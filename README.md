@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-929%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-971%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 (Core Language) in progress · sub-phases 1A–1E complete (MVP, syntax & semantics, ownership/borrow checker, HIR & MLIR plumbing, type system) · 1F (generics, traits & dispatch) active · → v2.0.0 when Phase 1 completes
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 (Core Language) sub-phases 1A–1E are complete; 1F (generics, traits & dispatch) is active — generic functions, structs, and impls have landed, plus const generics, `where` clauses, turbofish, explicit lifetime annotations, **trait declarations**, **operator overloading**, and **static & dynamic dispatch** (`impl Trait` / `dyn Trait`). The following features are fully implemented and tested (**929 Tests Passing**):
+Phase 1 (Core Language) sub-phases 1A–1E are complete; 1F (generics, traits & dispatch) is active — generic functions, structs, and impls have landed, plus const generics, `where` clauses, turbofish, explicit lifetime annotations, **trait declarations**, **operator overloading**, and **static & dynamic dispatch** (`impl Trait` / `dyn Trait`). The following features are fully implemented and tested (**971 Tests Passing**):
 
 | Feature | Details |
 |---|---|

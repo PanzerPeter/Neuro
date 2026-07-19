@@ -21,7 +21,15 @@ Validate type correctness and scope rules of a parsed Neuro program before code 
 Fail-slow: all type errors collected in one pass so the developer sees the complete set per
 compilation. `syntax-parsing` is `[dev-dependencies]` only (integration tests), not production.
 
-Five-pass `check_program`:
+Multi-pass `check_program` — numbered passes below, with lettered sub-passes slotted between them
+(0z/0a/0/1b/1c/1d/2b) as later requirements landed; see the pass table in
+`docs/compiler/components/semantic-analysis.md` for the full ordering and its rationale.
+
+0z. `check_reserved_names` rejects any declared name (function, param, struct, field, enum,
+   variant, trait, method, const, newtype) containing `__` with `ReservedNameSeparator`. `__` is
+   the receiver/method separator in the flat function table and the backend splits method symbols
+   on it, so a user name carrying its own `__` could forge another item's symbol. Runs first, before
+   anything mangles.
 1. Pre-register all `Item::Struct` into `struct_defs` (and `@derive` Copy/Clone intent into
    `copy_structs`/`clone_structs`). Pass 1b runs `validate_copy_derive` per struct once all are
    registered (so a Copy field that is another struct resolves regardless of order).

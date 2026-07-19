@@ -247,6 +247,9 @@ pub enum TypeError {
     #[error("for-range bound must be an integer type, found {found} at {span:?}")]
     InvalidForRangeType { found: Type, span: Span },
 
+    #[error("name '{name}' at {span:?} contains '__', which is reserved for compiler-generated symbols; use a single underscore")]
+    ReservedNameSeparator { name: String, span: Span },
+
     #[error("struct '{name}' already defined at {span:?}")]
     StructAlreadyDefined { name: String, span: Span },
 

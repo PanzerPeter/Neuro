@@ -120,6 +120,7 @@ site/
 site_output/
 CLAUDE.md
 .claude/
+graphify-out/
 
 # ---------------------------
 # Test / Benchmark / Coverage

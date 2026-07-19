@@ -318,6 +318,11 @@ impl TypeChecker {
 
     /// Check a complete program
     pub(crate) fn check_program(&mut self, items: &[Item]) -> Result<(), ()> {
+        // Pass 0z: reject declared names containing the reserved `__` separator before
+        // anything mangles with it, so a collision surfaces as a diagnostic on the
+        // declaration rather than as a duplicate symbol in the backend.
+        self.check_reserved_names(items);
+
         // Pass 0a: pre-register newtype NAMES so a newtype used as a struct
         // field, enum payload, or another newtype's inner resolves regardless of
         // source order. Inner types are resolved and validated in pass 1c, once every
