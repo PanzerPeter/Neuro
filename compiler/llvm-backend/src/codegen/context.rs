@@ -184,6 +184,15 @@ pub(crate) struct CodegenContext<'ctx> {
     /// `Drop`-typed bindings declared in it, in declaration order; on normal scope
     /// exit they are dropped in reverse (LIFO). Empty unless `drop_types` is non-empty.
     pub(crate) drop_scopes: Vec<Vec<DropEntry<'ctx>>>,
+
+    /// Declared traits → their method names in declaration order (§3.17). The index of a
+    /// name in this list is its vtable slot, shared by every implementor of the trait.
+    /// Empty for programs that declare no traits.
+    pub(crate) trait_methods: HashMap<String, Vec<String>>,
+
+    /// Emitted vtables, keyed by `(trait name, concrete type name)` (§3.17). Each is a
+    /// private global array of pointers to that type's thunks, in trait method order.
+    pub(crate) vtables: HashMap<(String, String), inkwell::values::GlobalValue<'ctx>>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -207,12 +216,19 @@ impl<'ctx> CodegenContext<'ctx> {
             const_values: HashMap::new(),
             overflow_checks: false,
             source: None,
+            trait_methods: HashMap::new(),
+            vtables: HashMap::new(),
             drop_types: std::collections::HashSet::new(),
             drop_scopes: Vec::new(),
         }
     }
 
     /// Record the set of structs implementing `Drop` (§2.1) before code generation.
+    /// Record each declared trait's method order, fixing the vtable slot layout (§3.17).
+    pub(crate) fn set_trait_methods(&mut self, trait_methods: HashMap<String, Vec<String>>) {
+        self.trait_methods = trait_methods;
+    }
+
     pub(crate) fn set_drop_types(&mut self, drop_types: std::collections::HashSet<String>) {
         self.drop_types = drop_types;
     }

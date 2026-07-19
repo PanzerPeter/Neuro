@@ -11,7 +11,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | Directory        | What it covers                                                         |
 | ---------------- | ---------------------------------------------------------------------- |
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference |
-| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`) |
+| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`) |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`) |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable` |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
@@ -62,8 +62,11 @@ isolation:
   for two structs (`Square` inherits the default, `Rect` overrides it), dispatched
   through a **trait-bounded generic** `scaled_area<T: Shape>` monomorphized per shape,
   and combined with `&self` methods, `@derive(Copy)` structs, a fixed-size array +
-  `for`-in loop, and if-expressions. Traits are fully erased — zero runtime cost. Exit
-  `7`.
+  `for`-in loop, and if-expressions. Also demonstrates **both dispatch forms**:
+  `describe(&impl Shape)` (static, monomorphized like the bound generic) and
+  `dyn_area` / `dyn_flag` taking `&dyn Shape` (dynamic, one body serving both shapes
+  through a vtable, reaching Square's inherited default and Rect's override). Exit
+  `161`.
 - [`showcase/vector_physics.nr`](showcase/vector_physics.nr) — **operator traits** (§3.10):
   a `Copy` `Vec2` implementing `Add` / `Sub` / `Neg` / `PartialEq`, so `+` / `-` / unary
   `-` / `==` dispatch to the impl methods, combined with an `&self` method, compound

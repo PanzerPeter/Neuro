@@ -275,7 +275,7 @@ impl TypeChecker {
                 let final_ty = match (declared_ty, init_ty) {
                     (Some(decl), Some(init)) => {
                         // Both declared and initialized: types must match
-                        if !init.is_compatible_with(&decl) {
+                        if !self.assignable(&init, &decl) {
                             self.record_error(TypeError::Mismatch {
                                 expected: decl.clone(),
                                 found: init,
@@ -404,9 +404,9 @@ impl TypeChecker {
                 };
 
                 // Check against expected return type (skip if return type is unknown)
-                if let Some(expected) = &self.current_function_return_type {
+                if let Some(expected) = self.current_function_return_type.clone() {
                     if !matches!(return_ty, Type::Unknown)
-                        && !return_ty.is_compatible_with(expected)
+                        && !self.assignable(&return_ty, &expected)
                     {
                         self.record_error(TypeError::ReturnTypeMismatch {
                             expected: expected.clone(),

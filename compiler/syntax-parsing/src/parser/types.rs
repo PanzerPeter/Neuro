@@ -106,6 +106,28 @@ impl Parser {
             });
         }
 
+        // Static-dispatch bound `impl Trait` (§3.17): the `impl` keyword followed by a
+        // trait name. In argument position `parse_function` later rewrites it into a
+        // trait-bounded generic parameter; in return position it survives to semantic.
+        if self.check(&TokenKind::Impl) {
+            let kw = self.advance().ok_or(ParseError::UnexpectedEof {
+                expected: "'impl'".to_string(),
+            })?;
+            let trait_name = self.parse_trait_ref_name("trait name after `impl`")?;
+            let span = kw.span.merge(trait_name.span);
+            return Ok(Type::ImplTrait { trait_name, span });
+        }
+        // Dynamic-dispatch trait object `dyn Trait` (§3.17): the `dyn` keyword followed
+        // by a trait name. Valid only behind a reference; semantic rejects a bare `dyn`.
+        if self.check(&TokenKind::Dyn) {
+            let kw = self.advance().ok_or(ParseError::UnexpectedEof {
+                expected: "'dyn'".to_string(),
+            })?;
+            let trait_name = self.parse_trait_ref_name("trait name after `dyn`")?;
+            let span = kw.span.merge(trait_name.span);
+            return Ok(Type::DynTrait { trait_name, span });
+        }
+
         let token = self.advance().ok_or(ParseError::UnexpectedEof {
             expected: "type".to_string(),
         })?;
@@ -131,6 +153,26 @@ impl Parser {
             _ => Err(ParseError::UnexpectedToken {
                 found: token.kind,
                 expected: "type name".to_string(),
+                span: token.span,
+            }),
+        }
+    }
+
+    /// Parse the trait-name identifier following an `impl` / `dyn` keyword (§3.17).
+    fn parse_trait_ref_name(&mut self, context: &str) -> ParseResult<Identifier> {
+        let token = self
+            .consume(TokenKind::Identifier(String::new()), context)
+            .map_err(|_| ParseError::UnexpectedEof {
+                expected: context.to_string(),
+            })?;
+        match token.kind {
+            TokenKind::Identifier(name) => Ok(Identifier {
+                name,
+                span: token.span,
+            }),
+            other => Err(ParseError::UnexpectedToken {
+                found: other,
+                expected: context.to_string(),
                 span: token.span,
             }),
         }

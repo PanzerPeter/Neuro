@@ -47,6 +47,10 @@ pub enum HirType {
         name: String,
         inner: Box<HirType>,
     },
+    /// A dynamic-dispatch trait object `dyn Trait` (§3.17), identified by trait name.
+    /// Unsized: it appears only as the referent of a [`HirType::Reference`], which
+    /// backends lower to a `(data pointer, vtable pointer)` fat pointer.
+    DynObject(String),
     /// Borrow `&T` (§2.4) / `&mut T` (§2.5). `mutable` distinguishes a
     /// write-capable `&mut T` from a read-only `&T`.
     Reference {
@@ -106,6 +110,7 @@ impl fmt::Display for HirType {
             HirType::Struct(name) => write!(f, "{}", name),
             HirType::Enum(name) => write!(f, "{}", name),
             HirType::Newtype { name, .. } => write!(f, "{}", name),
+            HirType::DynObject(name) => write!(f, "dyn {}", name),
             HirType::Reference { inner, mutable } => {
                 if *mutable {
                     write!(f, "&mut {}", inner)

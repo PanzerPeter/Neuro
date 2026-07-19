@@ -116,6 +116,12 @@ impl<'ctx> CodegenContext<'ctx> {
             // its address is exactly the pointer already held in `variables`. Mutability
             // is a compile-time-only distinction — both lower to the same pointer.
             HirExprKind::Reference { operand, .. } => self.codegen_reference(operand),
+            // Unsizing coercion `&T` → `&dyn Trait` (§3.17): build the fat pointer that
+            // pairs the concrete reference with that type's vtable for the trait.
+            HirExprKind::DynCoerce { value } => {
+                let target_ty = Type::from_hir(&expr.ty);
+                self.codegen_dyn_coerce(value, &target_ty)
+            }
 
             // Dereference `*operand` (§2.5): load the referent through the reference.
             // The result type `T` is exactly this expression's type.
@@ -200,6 +206,19 @@ impl<'ctx> CodegenContext<'ctx> {
             // Method call: `instance.method(args)` — pass self as first arg.
             HirExprKind::FieldAccess { object, field } => {
                 let recv_ty = Type::from_hir(&object.ty);
+                // A trait-object receiver dispatches dynamically through its vtable
+                // (§3.17); the concrete implementation is unknown until runtime.
+                if let Type::DynObject(trait_name) = recv_ty.referent() {
+                    let trait_name = trait_name.clone();
+                    let result_ty = Type::from_hir(&callee.ty);
+                    return self.codegen_dyn_method_call(
+                        &trait_name,
+                        field,
+                        object,
+                        args,
+                        &result_ty,
+                    );
+                }
                 if let Type::Struct(struct_name) = recv_ty.referent() {
                     let mangled = format!("{}__{}", struct_name, field);
                     // `struct.clone()` (§2.3) is a builtin deep copy when no user method

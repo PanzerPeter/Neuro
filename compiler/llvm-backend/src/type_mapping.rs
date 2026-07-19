@@ -49,6 +49,15 @@ impl<'ctx> TypeMapper<'ctx> {
             .struct_type(&[tag_ty.into(), payload_ty.into()], false))
     }
 
+    /// The LLVM layout of a trait-object reference `&dyn Trait` (§3.17):
+    /// `{ ptr data, ptr vtable }`. The data pointer addresses the concrete value's
+    /// storage; the vtable pointer addresses that concrete type's method table for the
+    /// trait, so a call indexes a fixed slot regardless of which type is behind it.
+    pub(crate) fn dyn_ref_type(&self) -> inkwell::types::StructType<'ctx> {
+        let ptr = self.context.ptr_type(inkwell::AddressSpace::default());
+        self.context.struct_type(&[ptr.into(), ptr.into()], false)
+    }
+
     /// Convert a Neuro semantic type to an LLVM type
     pub(crate) fn map_type(&self, ty: &Type) -> CodegenResult<BasicTypeEnum<'ctx>> {
         match ty {
@@ -82,12 +91,23 @@ impl<'ctx> TypeMapper<'ctx> {
                     .struct_type(&[ptr_type.into(), len_type.into()], false)
                     .into())
             }
+            // A reference to a trait object is a fat pointer `{ data ptr, vtable ptr }`
+            // (§3.17): `dyn Trait` is unsized, so the reference must additionally carry
+            // the method table that selects the concrete implementation at runtime.
+            Type::Reference(inner) if matches!(**inner, Type::DynObject(_)) => {
+                Ok(self.dyn_ref_type().into())
+            }
             // An immutable borrow `&T` is an opaque pointer to the referent's storage (§2.4).
             // LLVM 20 pointers are untyped, so every reference maps to the same `ptr`.
             Type::Reference(_) => Ok(self
                 .context
                 .ptr_type(inkwell::AddressSpace::default())
                 .into()),
+            // A bare `dyn Trait` has no size; only `&dyn Trait` is representable (§3.17).
+            Type::DynObject(name) => Err(CodegenError::UnsupportedType(format!(
+                "`dyn {}` is unsized and must be used behind a reference",
+                name
+            ))),
             // Fixed-size array `[T; N]` → LLVM `[N x T]` aggregate (§3.1).
             Type::Array { element, size } => {
                 let elem_llvm = self.map_type(element)?;

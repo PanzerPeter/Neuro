@@ -118,6 +118,31 @@ pub enum TypeError {
     #[error("trait '{trait_name}' is already defined at {span:?}")]
     TraitAlreadyDefined { trait_name: String, span: Span },
 
+    #[error("`dyn {trait_name}` at {span:?} is unsized and must appear behind a reference — write `&dyn {trait_name}` or `&mut dyn {trait_name}` (§3.17)")]
+    DynTraitNotBehindReference { trait_name: String, span: Span },
+
+    #[error("trait '{trait_name}' is not object-safe and cannot be used as `dyn {trait_name}` at {span:?}: {reason} (§3.17)")]
+    TraitNotObjectSafe {
+        trait_name: String,
+        reason: String,
+        span: Span,
+    },
+
+    #[error(
+        "`impl Trait` at {span:?} is only allowed in a function parameter or return type (§3.17)"
+    )]
+    ImplTraitNotAllowedHere { span: Span },
+
+    #[error("cannot infer the concrete type of the `impl {trait_name}` return at {span:?}: return a direct constructor (a struct literal or enum value); other forms await closures/iterators (§3.17)")]
+    ImplReturnNotInferable { trait_name: String, span: Span },
+
+    #[error("the `impl {trait_name}` return type at {span:?} resolves to `{ty}`, which does not implement '{trait_name}' (§3.17)")]
+    ImplReturnDoesNotImplement {
+        trait_name: String,
+        ty: Type,
+        span: Span,
+    },
+
     #[error("`impl {trait_name} for {type_name}` at {span:?} is missing required method '{method}' (§3.9)")]
     MissingTraitMethod {
         trait_name: String,

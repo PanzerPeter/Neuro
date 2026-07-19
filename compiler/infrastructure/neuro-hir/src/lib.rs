@@ -34,7 +34,7 @@ pub use expressions::{
 };
 pub use items::{
     HirConst, HirEnum, HirEnumField, HirEnumVariant, HirField, HirFunction, HirImpl, HirItem,
-    HirMethod, HirParam, HirProgram, HirSelfParam, HirStruct,
+    HirMethod, HirParam, HirProgram, HirSelfParam, HirStruct, HirTrait,
 };
 pub use statements::HirStmt;
 pub use types::HirType;

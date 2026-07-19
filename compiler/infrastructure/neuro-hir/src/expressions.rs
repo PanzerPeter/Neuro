@@ -108,6 +108,13 @@ pub enum HirExprKind {
     Deref {
         operand: Box<HirExpr>,
     },
+    /// Unsizing coercion `&T` → `&dyn Trait` (§3.17): builds a trait object from a
+    /// concrete reference. `value` is the `&T` (its `ty` names the concrete type, which
+    /// selects the vtable); this expression's `ty` is the `&dyn Trait` being produced.
+    /// Backends lower it to a `(data pointer, vtable pointer)` fat pointer.
+    DynCoerce {
+        value: Box<HirExpr>,
+    },
     /// Range `start..end` / `start..=end`. Only valid as a `string.slice`
     /// argument (§2.7); never produced for `for`-range loops.
     Range {

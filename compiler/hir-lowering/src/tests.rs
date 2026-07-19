@@ -718,3 +718,134 @@ func main() -> i32 {
         other => panic!("`a == b` must desugar to a Call, got {other:?}"),
     }
 }
+
+/// A trait declaration lowers to a vtable-layout item carrying its methods in
+/// declaration order — the slot order every implementor shares (§3.17).
+#[test]
+fn trait_lowers_to_its_vtable_method_order() {
+    let program = lower(
+        r#"
+trait Shape {
+    func area(&self) -> i32
+    func sides(&self) -> i32 { 0 }
+}
+func main() -> i32 { 0 }
+"#,
+    );
+    let trait_item = program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            HirItem::Trait(t) if t.name == "Shape" => Some(t),
+            _ => None,
+        })
+        .expect("trait item should be lowered");
+    assert_eq!(
+        trait_item.methods,
+        vec!["area".to_string(), "sides".to_string()]
+    );
+}
+
+/// Passing `&Concrete` where `&dyn Trait` is expected inserts the unsizing coercion, so
+/// the backend has an explicit node at which to build the fat pointer (§3.17).
+#[test]
+fn concrete_reference_coerces_to_a_trait_object_at_a_call() {
+    let program = lower(
+        r#"
+trait Shape {
+    func area(&self) -> i32
+}
+@derive(Copy, Clone)
+struct Square { side: i32 }
+impl Shape for Square {
+    func area(&self) -> i32 { self.side * self.side }
+}
+func measure(s: &dyn Shape) -> i32 { s.area() }
+func main() -> i32 {
+    val sq = Square { side: 2 }
+    measure(&sq)
+}
+"#,
+    );
+    let body = function_body(&program, "main");
+    let call = body
+        .iter()
+        .find_map(|stmt| match stmt {
+            HirStmt::Expr(e) => Some(e),
+            _ => None,
+        })
+        .expect("main should end in the call expression");
+    let HirExprKind::Call { args, .. } = &call.kind else {
+        panic!("expected a call, got {:?}", call.kind);
+    };
+    assert!(
+        matches!(args[0].kind, HirExprKind::DynCoerce { .. }),
+        "the `&Square` argument must be wrapped in a trait-object coercion"
+    );
+    assert_eq!(
+        args[0].ty,
+        HirType::Reference {
+            inner: Box::new(HirType::DynObject("Shape".to_string())),
+            mutable: false,
+        }
+    );
+}
+
+/// A `&dyn Trait` value already is a trait object, so forwarding it must not re-coerce.
+#[test]
+fn an_existing_trait_object_is_not_re_coerced() {
+    let program = lower(
+        r#"
+trait Shape {
+    func area(&self) -> i32
+}
+func inner(s: &dyn Shape) -> i32 { s.area() }
+func outer(s: &dyn Shape) -> i32 { inner(s) }
+func main() -> i32 { 0 }
+"#,
+    );
+    let body = function_body(&program, "outer");
+    let call = body
+        .iter()
+        .find_map(|stmt| match stmt {
+            HirStmt::Expr(e) => Some(e),
+            _ => None,
+        })
+        .expect("outer should forward the trait object");
+    let HirExprKind::Call { args, .. } = &call.kind else {
+        panic!("expected a call, got {:?}", call.kind);
+    };
+    assert!(
+        matches!(args[0].kind, HirExprKind::Variable(_)),
+        "forwarding a trait object must not insert a second coercion"
+    );
+}
+
+/// Return-position `impl Trait` is static dispatch, so it resolves transparently to the
+/// single concrete type the body constructs (§3.17).
+#[test]
+fn impl_trait_return_resolves_to_the_concrete_type() {
+    let program = lower(
+        r#"
+trait Shape {
+    func area(&self) -> i32
+}
+@derive(Copy, Clone)
+struct Square { side: i32 }
+impl Shape for Square {
+    func area(&self) -> i32 { self.side * self.side }
+}
+func make() -> impl Shape { Square { side: 3 } }
+func main() -> i32 { 0 }
+"#,
+    );
+    let make = program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            HirItem::Function(f) if f.name == "make" => Some(f),
+            _ => None,
+        })
+        .expect("make should be lowered");
+    assert_eq!(make.return_type, HirType::Struct("Square".to_string()));
+}

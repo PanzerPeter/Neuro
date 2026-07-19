@@ -69,6 +69,8 @@ pub enum TokenKind {
     Impl,
     #[token("trait")]
     Trait,
+    #[token("dyn")]
+    Dyn,
     #[token("import")]
     Import,
     #[token("export")]
@@ -324,6 +326,7 @@ impl Token {
             TokenKind::Enum => "enum",
             TokenKind::Impl => "impl",
             TokenKind::Trait => "trait",
+            TokenKind::Dyn => "dyn",
             TokenKind::Import => "import",
             TokenKind::Export => "export",
             TokenKind::Module => "module",

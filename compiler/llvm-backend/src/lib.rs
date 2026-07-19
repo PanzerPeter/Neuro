@@ -154,7 +154,17 @@ pub fn compile(
                 }
             }
 
-            HirItem::Struct(_) | HirItem::Const(_) | HirItem::Enum(_) => {}
+            HirItem::Struct(_) | HirItem::Const(_) | HirItem::Enum(_) | HirItem::Trait(_) => {}
+        }
+    }
+
+    // Collect each declared trait's method order (§3.17). The position of a method in
+    // this list is its vtable slot, so every implementor lays out its table identically
+    // and a virtual call can index a fixed offset.
+    let mut trait_methods: HashMap<String, Vec<String>> = HashMap::new();
+    for item in items {
+        if let HirItem::Trait(def) = item {
+            trait_methods.insert(def.name.clone(), def.methods.clone());
         }
     }
 
@@ -176,6 +186,7 @@ pub fn compile(
     codegen_ctx.set_struct_defs(struct_defs);
     codegen_ctx.set_enum_words(enum_words);
     codegen_ctx.set_drop_types(drop_types);
+    codegen_ctx.set_trait_methods(trait_methods);
 
     // Supply source so panic-family builtins can render `file:line:col` in their
     // runtime diagnostics (§1.2).
@@ -207,9 +218,14 @@ pub fn compile(
             HirItem::Impl(impl_def) => {
                 codegen_ctx.declare_impl(impl_def, &func_types)?;
             }
-            HirItem::Const(_) | HirItem::Struct(_) | HirItem::Enum(_) => {}
+            HirItem::Const(_) | HirItem::Struct(_) | HirItem::Enum(_) | HirItem::Trait(_) => {}
         }
     }
+
+    // Emit each `(trait, type)` method table once every method signature is declared but
+    // before any body is generated, so a trait object built anywhere in the module finds
+    // its vtable already present regardless of item order (§3.17).
+    codegen_ctx.emit_vtables(items)?;
 
     // Generate code for each function and impl method
     for item in items {
@@ -220,7 +236,7 @@ pub fn compile(
             HirItem::Impl(impl_def) => {
                 codegen_ctx.codegen_impl(impl_def, &func_types)?;
             }
-            HirItem::Const(_) | HirItem::Struct(_) | HirItem::Enum(_) => {}
+            HirItem::Const(_) | HirItem::Struct(_) | HirItem::Enum(_) | HirItem::Trait(_) => {}
         }
     }
 

@@ -23,6 +23,23 @@ pub enum HirItem {
     Enum(HirEnum),
     Impl(HirImpl),
     Const(HirConst),
+    /// A trait's vtable layout (§3.17). Static-dispatch traits are fully erased, so
+    /// this item exists solely to give dynamic dispatch a stable method ordering.
+    Trait(HirTrait),
+}
+
+/// The vtable contract of a declared trait (§3.17).
+///
+/// Trait declarations are otherwise erased — an `impl Trait for T` lowers to ordinary
+/// inherent methods. What dynamic dispatch additionally needs is a *canonical method
+/// order*, shared by every implementor, so a vtable slot index is meaningful. That
+/// order is the trait's declaration order, recorded here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HirTrait {
+    pub name: String,
+    /// Method names in declaration order — the vtable slot order.
+    pub methods: Vec<String>,
+    pub span: Span,
 }
 
 /// An enum definition (§3.5): an ordered list of variants. The order is the

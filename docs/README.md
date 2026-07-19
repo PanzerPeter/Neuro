@@ -88,8 +88,15 @@ Key design goals:
 - **Traits** (1F, §3.9): `trait` declarations with required and default (provided)
   methods; `impl Trait for Type` checked for conformance; trait-bounded generics
   `func f<T: Shape>(x: &T)` dispatch trait methods on the type parameter, checked at the
-  call site. Fully monomorphized and erased — no vtable, zero runtime cost. Supertraits,
-  associated types, `dyn`, and operator traits land later in 1F
+  call site. Fully monomorphized and erased — no vtable, zero runtime cost. Associated
+  types land later in 1F
+- **Static & dynamic dispatch** (1F, §3.17): `impl Trait` in argument position
+  (`func train(m: &impl Model)`) and return position (`func make() -> impl Shape`) is
+  anonymous-generic sugar — monomorphized, zero cost; each `impl Trait` parameter is its
+  own anonymous type parameter. `dyn Trait` is a runtime trait object behind
+  `&dyn Trait` / `&mut dyn Trait`, dispatched through a per-(trait, type) vtable, so one
+  function body serves every implementor. Object safety is enforced: every method of a
+  `dyn`-usable trait must take `&self` or `&mut self`
 
 ### Control Flow
 
@@ -176,7 +183,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 906 tests passing across all components
+- 929 tests passing across all components
 
 ## Compilation Pipeline
 

@@ -760,6 +760,81 @@ val a = identity::<i32>(5)   // explicit type argument
 val b = zeros::<4>()         // explicit const argument
 ```
 
+## Static and Dynamic Dispatch
+
+A trait bound can be satisfied two ways, and the keyword chooses which.
+
+### `impl Trait` — static dispatch
+
+`impl Trait` is anonymous-generic sugar. Each concrete type flowing through it produces a
+specialized copy of the function, exactly as a named type parameter does, so it carries
+**zero runtime cost** and no pointer indirection.
+
+```neuro
+// These two signatures compile to the same code:
+func train(model: &impl Model) -> i32 { model.step() }
+func train<T: Model>(model: &T) -> i32 { model.step() }
+```
+
+Each `impl Trait` parameter is its *own* anonymous parameter, so one call may bind two
+different concrete types — unlike a single shared `<T>`:
+
+```neuro
+func total(a: &impl Shape, b: &impl Shape) -> i32 { a.area() + b.area() }
+total(&square, &rect)   // valid: two different types
+```
+
+In **return** position, `impl Trait` names the one concrete type the body produces. It
+resolves transparently to that type, and the compiler verifies the type implements the
+trait:
+
+```neuro
+func make() -> impl Shape { Square { side: 3 } }
+```
+
+The body's result must be a direct constructor (a struct literal or enum value) for the
+concrete type to be inferable; richer forms arrive with closures and iterators.
+
+### `dyn Trait` — dynamic dispatch
+
+`dyn Trait` is a single *runtime* type that can hold any implementor. Method calls go
+through a **vtable**: the reference carries a pointer to the value plus a pointer to that
+concrete type's method table, and the call jumps through a fixed slot.
+
+A trait object is **unsized**, so it only appears behind a reference — `&dyn Trait` or
+`&mut dyn Trait`. A bare `dyn Trait` is a compile error.
+
+```neuro
+// One function body serves every implementor.
+func measure(s: &dyn Shape) -> i32 { s.area() }
+
+measure(&square)   // &Square coerces to &dyn Shape
+measure(&rect)     // &Rect   coerces to &dyn Shape
+```
+
+Use `dyn` when values of *different* concrete types must be handled behind one
+interface; use `impl Trait` (or a named bound) when each call site has one concrete type.
+
+| Form         | Dispatch | Cost                   | Use when                                       |
+| ------------ | -------- | ---------------------- | ---------------------------------------------- |
+| `impl Trait` | static   | zero (monomorphized)   | one concrete type per call site                |
+| `&dyn Trait` | dynamic  | one vtable indirection | a heterogeneous set behind a uniform interface |
+
+### Object safety
+
+A trait is usable as `dyn` only if it is **object-safe**: every method must dispatch on a
+`&self` or `&mut self` receiver, so the vtable has a fixed layout. A method that consumes
+`self` by value, or one with no receiver at all, makes the trait unusable as a trait
+object (it remains fully usable through `impl Trait` and named bounds).
+
+```neuro
+trait Consume { func take(self) -> i32 }   // not object-safe: consumes self
+trait Maker   { func build() -> i32 }      // not object-safe: no receiver
+```
+
+A `&mut self` method requires a `&mut dyn Trait` receiver; mutations through it are
+visible to the caller.
+
 ## References
 
 - [Types](types.md) - Function types and type checking

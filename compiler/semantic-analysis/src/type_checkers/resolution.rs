@@ -8,7 +8,48 @@ impl TypeChecker {
     /// Convert syntax-parsing type to semantic type.
     /// Returns None if the type is unknown (error is recorded).
     pub(crate) fn resolve_type(&mut self, ty: &ast_types::Type) -> Option<Type> {
+        self.resolve_type_ctx(ty, false)
+    }
+
+    /// Resolve a type annotation, tracking whether it appears directly behind a
+    /// reference (`behind_ref`). The flag is consulted only for `dyn Trait` (§3.17),
+    /// which is unsized and therefore valid solely as a reference referent.
+    fn resolve_type_ctx(&mut self, ty: &ast_types::Type, behind_ref: bool) -> Option<Type> {
         match ty {
+            // Dynamic-dispatch trait object `dyn Trait` (§3.17): valid only behind a
+            // reference, and only for an object-safe, declared trait.
+            ast_types::Type::DynTrait { trait_name, span } => {
+                if !behind_ref {
+                    self.record_error(TypeError::DynTraitNotBehindReference {
+                        trait_name: trait_name.name.clone(),
+                        span: *span,
+                    });
+                    return None;
+                }
+                if !self.traits.contains_key(&trait_name.name) {
+                    self.record_error(TypeError::UnknownTrait {
+                        trait_name: trait_name.name.clone(),
+                        span: *span,
+                    });
+                    return None;
+                }
+                if let Err(reason) = self.trait_object_safety(&trait_name.name) {
+                    self.record_error(TypeError::TraitNotObjectSafe {
+                        trait_name: trait_name.name.clone(),
+                        reason,
+                        span: *span,
+                    });
+                    return None;
+                }
+                Some(Type::DynObject(trait_name.name.clone()))
+            }
+            // `impl Trait` reaching resolution is always in a disallowed position:
+            // argument position was rewritten to a generic by the parser, and return
+            // position is intercepted before resolution (§3.17).
+            ast_types::Type::ImplTrait { span, .. } => {
+                self.record_error(TypeError::ImplTraitNotAllowedHere { span: *span });
+                None
+            }
             ast_types::Type::Named(ident) => match ident.name.as_str() {
                 // Signed integers
                 "i8" => Some(Type::I8),
@@ -77,7 +118,7 @@ impl TypeChecker {
                         });
                     }
                 }
-                self.resolve_type(inner).map(|t| Type::Reference {
+                self.resolve_type_ctx(inner, true).map(|t| Type::Reference {
                     inner: Box::new(t),
                     mutable: *mutable,
                 })
@@ -194,5 +235,75 @@ impl TypeChecker {
     /// usable only with type arguments.
     pub(crate) fn is_generic_struct(&self, name: &str) -> bool {
         self.generic_structs.contains_key(name)
+    }
+
+    /// Whether a trait is object-safe (§3.17): every method must dispatch on a `&self`
+    /// or `&mut self` receiver. A method with no receiver (associated function) or one
+    /// that consumes `self` by value cannot be placed behind a fixed-layout vtable.
+    /// Returns `Ok(())` when safe, or `Err(reason)` naming the first offending method.
+    pub(crate) fn trait_object_safety(&self, trait_name: &str) -> Result<(), String> {
+        let Some(info) = self.traits.get(trait_name) else {
+            return Ok(());
+        };
+        for (name, sig) in &info.methods {
+            match sig.self_param {
+                Some(ast_types::SelfParam::Ref) | Some(ast_types::SelfParam::RefMut) => {}
+                Some(ast_types::SelfParam::Owned) => {
+                    return Err(format!("method '{}' takes `self` by value", name));
+                }
+                None => {
+                    return Err(format!("method '{}' has no `self` receiver", name));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether a value of type `found` may be supplied where `expected` is required.
+    ///
+    /// This is ordinary type compatibility plus the one implicit conversion the language
+    /// has: the unsizing coercion `&T` → `&dyn Trait` (§3.17), permitted when `T`
+    /// implements `Trait` and the reference mutabilities agree. There is no `&mut T` →
+    /// `&T` weakening, so the mutability match is exact.
+    pub(crate) fn assignable(&self, found: &Type, expected: &Type) -> bool {
+        if found.is_compatible_with(expected) {
+            return true;
+        }
+        let (
+            Type::Reference {
+                inner: found_inner,
+                mutable: found_mut,
+            },
+            Type::Reference {
+                inner: expected_inner,
+                mutable: expected_mut,
+            },
+        ) = (found, expected)
+        else {
+            return false;
+        };
+        let Type::DynObject(trait_name) = expected_inner.as_ref() else {
+            return false;
+        };
+        found_mut == expected_mut && self.type_implements_trait(found_inner, trait_name)
+    }
+
+    /// Whether a concrete type satisfies a trait bound (§3.9, §3.17): a nominal type
+    /// (struct / enum / newtype) satisfies `Trait` when an `impl Trait for T` exists; a
+    /// generic parameter satisfies it when it carries the bound. Used for `impl Trait`
+    /// return conformance and `&T` → `&dyn Trait` coercion.
+    pub(crate) fn type_implements_trait(&self, ty: &Type, trait_name: &str) -> bool {
+        let name = match ty {
+            Type::Struct(n) | Type::Enum(n) | Type::Newtype(n) => n,
+            Type::Generic(p) => {
+                return self
+                    .generic_bounds
+                    .get(p)
+                    .is_some_and(|b| b.iter().any(|t| t == trait_name));
+            }
+            _ => return false,
+        };
+        self.trait_impls
+            .contains(&(trait_name.to_string(), name.clone()))
     }
 }

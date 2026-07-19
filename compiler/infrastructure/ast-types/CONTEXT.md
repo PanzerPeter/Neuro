@@ -28,6 +28,7 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-07-19: Static & dynamic dispatch (§3.17). Added `Type::ImplTrait { trait_name, span }` and `Type::DynTrait { trait_name, span }`. `ImplTrait` survives parsing only in RETURN position — in argument position the parser rewrites it into a fresh trait-bounded `GenericParam`, so downstream slices see an ordinary generic. `DynTrait` always survives; semantic-analysis resolves it to a trait-object type and rejects it outside a reference.
 - 2026-07-18: Operator traits — scalar path §3.10. `ImplDef` gains
   `assoc_types: Vec<(Identifier, Type)>` for associated-type bindings (`type Output = T`) inside a
   block. `BinaryOp` and `UnaryOp` now derive `Hash` so the checker/lowering can key operator-dispatch

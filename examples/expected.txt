@@ -26,6 +26,7 @@ types/borrow_exclusivity.nr         31
 types/char.nr                       65
 types/constants.nr                  51
 types/copy_clone.nr                 14
+types/dispatch.nr                   44
 types/drop.nr                       3
 types/extended_types.nr             0
 types/extended_types_arithmetic.nr  0
@@ -83,7 +84,7 @@ showcase/mutable_borrows.nr 47
 showcase/num_algorithms.nr  32
 showcase/perceptron.nr      8
 showcase/running_stats.nr   5
-showcase/shape_traits.nr    7
+showcase/shape_traits.nr    161
 showcase/simulation.nr      2
 showcase/unit_types.nr      94
 showcase/vector_physics.nr  35

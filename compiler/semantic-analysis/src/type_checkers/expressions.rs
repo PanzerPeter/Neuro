@@ -560,7 +560,7 @@ impl TypeChecker {
 
         for (arg, expected_ty) in args.iter().zip(param_types.iter()) {
             if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
-                if !arg_ty.is_compatible_with(expected_ty) {
+                if !self.assignable(&arg_ty, expected_ty) {
                     self.record_error(TypeError::Mismatch {
                         expected: expected_ty.clone(),
                         found: arg_ty,
@@ -1380,6 +1380,36 @@ impl TypeChecker {
                                     span: *fa_span,
                                 });
                                 return Some(Type::Unknown);
+                            }
+                            // Dynamic dispatch through a trait object (§3.17): the call
+                            // resolves against the trait's declared signature, and the
+                            // concrete implementation is selected at runtime via the
+                            // vtable. A `&mut self` method needs a `&mut dyn Trait`.
+                            Type::DynObject(trait_name) => {
+                                let trait_name = trait_name.clone();
+                                let Some(sig) = self
+                                    .traits
+                                    .get(&trait_name)
+                                    .and_then(|t| t.methods.get(&field.name))
+                                    .cloned()
+                                else {
+                                    self.record_error(TypeError::MethodNotFound {
+                                        struct_name: format!("dyn {}", trait_name),
+                                        method_name: field.name.clone(),
+                                        span: *fa_span,
+                                    });
+                                    return Some(Type::Unknown);
+                                };
+                                if matches!(sig.self_param, Some(ast_types::SelfParam::RefMut))
+                                    && !matches!(obj_ty, Type::Reference { mutable: true, .. })
+                                {
+                                    self.record_error(TypeError::CannotBorrowMutably {
+                                        name: format!("dyn {}", trait_name),
+                                        span: *fa_span,
+                                    });
+                                }
+                                self.check_call_args(args, &sig.params, *span);
+                                return Some(sig.ret.clone());
                             }
                             _ => {
                                 // Builtin (non-struct) receivers dispatch a fixed,

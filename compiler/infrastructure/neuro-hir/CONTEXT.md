@@ -30,6 +30,7 @@ differences that make it the *typed* contract:
    span lives on the enclosing node.
 
 ## Recent Updates
+- 2026-07-19: Static & dynamic dispatch (§3.17). Added `HirType::DynObject(String)` (a trait object, valid only as a `HirType::Reference` referent; backends lower `&dyn T` to a `{ data ptr, vtable ptr }` fat pointer), `HirExprKind::DynCoerce { value }` (the `&T` -> `&dyn Trait` unsizing coercion — `value.ty` names the concrete type that selects the vtable, the node's `ty` is the trait-object reference), and `HirItem::Trait(HirTrait { name, methods, span })`. `HirTrait` exists ONLY to give dynamic dispatch a canonical vtable slot order (the trait's declaration order); static-dispatch traits remain fully erased. Re-exported `HirTrait` from the crate root.
 - 2026-07-02: Newtype declarations §3.15. Added `HirType::Newtype { name, inner }` (a nominal wrapper
   that carries its resolved inner type so backends can erase it) and the transparent expression kinds
   `HirExprKind::NewtypeConstruct { name, value }` (`Name(value)`) and `HirExprKind::NewtypeAccess {

@@ -171,6 +171,9 @@ fn rewrite_type(ty: &mut Type, resolved: &HashMap<String, Type>) {
             }
         }
         Type::Tensor { element_type, .. } => rewrite_type(element_type, resolved),
+        // `impl Trait` / `dyn Trait` (§3.17) name a trait, not a type alias, so a type
+        // alias never substitutes into them.
+        Type::ImplTrait { .. } | Type::DynTrait { .. } => {}
     }
 }
 
@@ -443,6 +446,8 @@ mod tests {
             Type::Tuple { .. } => "<tuple>",
             Type::Generic { .. } => "<generic>",
             Type::Tensor { .. } => "<tensor>",
+            Type::ImplTrait { .. } => "<impl trait>",
+            Type::DynTrait { .. } => "<dyn trait>",
         }
     }
 

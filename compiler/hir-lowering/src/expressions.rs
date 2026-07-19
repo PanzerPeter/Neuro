@@ -27,6 +27,19 @@ impl Lowerer {
         expr: &Expr,
         expected: Option<&HirType>,
     ) -> Result<HirExpr, LoweringError> {
+        let lowered = self.lower_expr_uncoerced(expr, expected)?;
+        Ok(apply_dyn_coercion(lowered, expected))
+    }
+
+    /// Lower an expression without applying the trait-object coercion. Every contextual
+    /// typing rule lives here; [`Lowerer::lower_expr`] wraps the result so the single
+    /// `&T` → `&dyn Trait` unsizing site (§3.17) is applied uniformly wherever an
+    /// expected type is supplied — call arguments, returns, and annotated bindings.
+    fn lower_expr_uncoerced(
+        &mut self,
+        expr: &Expr,
+        expected: Option<&HirType>,
+    ) -> Result<HirExpr, LoweringError> {
         match expr {
             // Grouping is encoded by tree structure in the HIR; drop the node.
             Expr::Paren(inner, _) => self.lower_expr(inner, expected),
@@ -964,6 +977,20 @@ impl Lowerer {
                     target: format!("{}.{}", struct_name, method),
                 });
             }
+        } else if let HirType::DynObject(trait_name) = recv.referent() {
+            // Dynamic dispatch (§3.17): the call is typed from the trait's declaration —
+            // no implementor is named here, since the concrete method is selected at
+            // runtime through the vtable. The backend keys off the receiver's type.
+            let trait_name = trait_name.clone();
+            let sig = self
+                .traits
+                .get(&trait_name)
+                .and_then(|ms| ms.iter().find(|m| m.name == method))
+                .ok_or_else(|| LoweringError::UnresolvedCall {
+                    target: format!("dyn {}.{}", trait_name, method),
+                })?;
+            let (params, ret) = (sig.params.clone(), sig.ret.clone());
+            (self.lower_args(args, &params)?, ret)
         } else {
             self.lower_builtin_method(&recv, method, args)?
         };
@@ -1482,6 +1509,44 @@ impl Lowerer {
             .get(&mangled)
             .cloned()
             .ok_or(LoweringError::UnresolvedCall { target: mangled })
+    }
+}
+
+/// Wrap a concrete reference in the unsizing coercion `&T` → `&dyn Trait` (§3.17) when
+/// the context calls for a trait object and the value is not already one.
+///
+/// This is the sole implicit conversion in the language, so it is applied at exactly one
+/// place: every context that supplies an expected type routes through here. The checker
+/// has already verified that `T` implements the trait, so no impl lookup is repeated.
+fn apply_dyn_coercion(expr: HirExpr, expected: Option<&HirType>) -> HirExpr {
+    let Some(HirType::Reference {
+        inner: expected_inner,
+        mutable,
+    }) = expected
+    else {
+        return expr;
+    };
+    if !matches!(expected_inner.as_ref(), HirType::DynObject(_)) {
+        return expr;
+    }
+    // A value that is already a trait object needs no coercion; anything else must be a
+    // concrete `&T` for the checker to have accepted it here.
+    match &expr.ty {
+        HirType::Reference { inner, .. } if matches!(inner.as_ref(), HirType::DynObject(_)) => expr,
+        HirType::Reference { .. } => {
+            let span = expr.span;
+            HirExpr::new(
+                HirExprKind::DynCoerce {
+                    value: Box::new(expr),
+                },
+                HirType::Reference {
+                    inner: expected_inner.clone(),
+                    mutable: *mutable,
+                },
+                span,
+            )
+        }
+        _ => expr,
     }
 }
 
