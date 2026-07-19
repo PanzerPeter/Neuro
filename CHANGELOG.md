@@ -11,6 +11,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.62.0] - 2026-07-19
+
+### Added
+- `parser`: static and dynamic dispatch. A trait bound can now be satisfied two ways, and
+  the keyword chooses. `impl Trait` works in argument position
+  (`func train(m: &impl Model)`) and return position (`func make() -> impl Shape`); the
+  new `dyn` keyword introduces a trait object, written `&dyn Trait` or `&mut dyn Trait`.
+- `parser`: each `impl Trait` parameter is its own anonymous type parameter, so a single
+  call may bind two different concrete types — unlike one shared `<T>`.
+- `semantic`: `impl Trait` is static dispatch and costs nothing at runtime. In argument
+  position it is shorthand for a trait-bounded type parameter and is monomorphized like
+  one. In return position it resolves to the single concrete type the body constructs,
+  which is checked to implement the trait, so the caller receives that type directly.
+- `semantic`: object safety is enforced for trait objects. Every method of a trait used
+  as `dyn` must take `&self` or `&mut self`, so the method table has a fixed layout; a
+  method that consumes `self` or takes no receiver is reported with the offending method
+  named. A bare `dyn Trait` is rejected as unsized, with the `&dyn Trait` form suggested.
+- `codegen`: dynamic dispatch through a method table. `&dyn Trait` is a two-word value
+  carrying a pointer to the data and a pointer to the implementing type's method table,
+  so one function body can serve values of different concrete types, including reaching
+  an inherited default method on one type and an override on another. Passing `&T` where
+  `&dyn Trait` is expected converts automatically.
+- `docs`: new `types/dispatch.nr` example contrasting the two dispatch forms, an extended
+  `showcase/shape_traits.nr` combining both with traits, generics, structs, and arrays,
+  and a "Static and Dynamic Dispatch" section in the function reference.
+
+---
+
 ## [1.61.0] - 2026-07-18
 
 ### Added

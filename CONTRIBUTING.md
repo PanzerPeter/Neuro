@@ -303,10 +303,14 @@ declared in the generic list, validated, then erased; `&'a T` == `&T`), and
 *trait declarations* (§3.9) in v1.60.0 (required + default methods,
 `impl Trait for Type` conformance checking, and enforced trait bounds on
 generics — all fully monomorphized and erased, so trait bounds that were merely
-parsed before are now checked). The topmost open item is now operator traits.
+parsed before are now checked), *operator traits* (§3.10) in v1.61.0 (the built-in
+`Add`/`Sub`/`Neg`/`PartialEq`/`Comparable` family on `Copy` structs, desugared to
+method calls), and *static & dynamic dispatch* (§3.17) in v1.62.0 (`impl Trait` in
+argument and return position, monomorphized; `&dyn Trait` / `&mut dyn Trait` trait
+objects dispatched through a per-(trait, type) vtable, with object safety enforced).
+The topmost open item is now closures and lambdas (§3.12).
 
-**Next, in dependency order:** 1F (operator traits → static/dynamic dispatch →
-closures) → 1G (error
+**Next, in dependency order:** 1F (closures) → 1G (error
 handling, collections, modules, prelude) → 1H (string interpolation, triple-quoted
 strings, nested comments, named arguments). See the [Quick Roadmap](README.md#quick-roadmap).
 

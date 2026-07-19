@@ -66,11 +66,15 @@ impl TypeChecker {
             }
         }
 
-        // Resolve return type (default to Void if not specified)
-        let return_type = if let Some(ret_ty) = &func.return_type {
-            self.resolve_type(ret_ty).unwrap_or(Type::Void)
-        } else {
-            Type::Void
+        // Resolve return type (default to Void if not specified). Return-position
+        // `impl Trait` (§3.17) is static dispatch: it resolves transparently to the one
+        // concrete type the body constructs, so callers see that type directly.
+        let return_type = match &func.return_type {
+            Some(ast_types::Type::ImplTrait { trait_name, span }) => {
+                self.resolve_impl_return(&trait_name.name, &func.body, *span)
+            }
+            Some(ret_ty) => self.resolve_type(ret_ty).unwrap_or(Type::Void),
+            None => Type::Void,
         };
 
         // Register function signature.
@@ -180,7 +184,7 @@ impl TypeChecker {
         if !matches!(return_type, Type::Void) && !func.body.is_empty() {
             if let Some(Stmt::Expr(expr)) = func.body.last() {
                 if let Some(expr_type) = self.check_expr(expr, Some(&return_type)) {
-                    if !expr_type.is_compatible_with(&return_type) {
+                    if !self.assignable(&expr_type, &return_type) {
                         self.record_error(TypeError::ReturnTypeMismatch {
                             expected: return_type.clone(),
                             found: expr_type,
@@ -205,6 +209,95 @@ impl TypeChecker {
         self.exit_generic_scope();
 
         Some(())
+    }
+
+    /// Resolve a return-position `impl Trait` (§3.17) to the single concrete type the
+    /// body produces, and verify that type implements the named trait.
+    ///
+    /// `impl Trait` in return position is static dispatch: exactly one concrete type
+    /// flows out of the function, so it is resolved transparently rather than kept
+    /// opaque — the caller receives that concrete type at zero runtime cost. The
+    /// concrete type is read structurally from the body's result expression, which this
+    /// phase restricts to a direct constructor (struct literal or enum value); richer
+    /// forms await closures and iterators (§3.12).
+    fn resolve_impl_return(&mut self, trait_name: &str, body: &[Stmt], span: Span) -> Type {
+        if !self.traits.contains_key(trait_name) {
+            self.record_error(TypeError::UnknownTrait {
+                trait_name: trait_name.to_string(),
+                span,
+            });
+            return Type::Unknown;
+        }
+        let Some(concrete) = Self::body_result_expr(body).and_then(|e| self.shallow_result_type(e))
+        else {
+            self.record_error(TypeError::ImplReturnNotInferable {
+                trait_name: trait_name.to_string(),
+                span,
+            });
+            return Type::Unknown;
+        };
+        if !self.type_implements_trait(&concrete, trait_name) {
+            self.record_error(TypeError::ImplReturnDoesNotImplement {
+                trait_name: trait_name.to_string(),
+                ty: concrete.clone(),
+                span,
+            });
+        }
+        concrete
+    }
+
+    /// The expression a function body evaluates to: its trailing expression, or the
+    /// operand of a trailing `return`. Used only for return-position `impl Trait`
+    /// resolution (§3.17).
+    fn body_result_expr(body: &[Stmt]) -> Option<&Expr> {
+        match body.last()? {
+            Stmt::Expr(expr) => Some(expr),
+            Stmt::Return { value, .. } => value.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// The concrete type of a directly-constructed expression, read structurally without
+    /// full type checking (§3.17). Only the forms whose nominal type is evident from the
+    /// syntax are recognized — a struct literal, an enum value, or a newtype
+    /// construction — plus the tail of a block or `if`. Any other shape yields `None`,
+    /// which surfaces as `ImplReturnNotInferable`.
+    fn shallow_result_type(&self, expr: &Expr) -> Option<Type> {
+        match expr {
+            Expr::Paren(inner, _) => self.shallow_result_type(inner),
+            Expr::StructLiteral { name, .. } => self
+                .struct_defs
+                .contains_key(&name.name)
+                .then(|| Type::Struct(name.name.clone())),
+            Expr::EnumStructLiteral { enum_name, .. } => self
+                .enum_defs
+                .contains_key(&enum_name.name)
+                .then(|| Type::Enum(enum_name.name.clone())),
+            // A unit (`E::V`) or tuple (`E::V(..)`) enum value; a same-shaped path that
+            // does not name an enum is an associated-function call and is not inferable.
+            Expr::Path { type_name, .. } => self
+                .enum_defs
+                .contains_key(&type_name.name)
+                .then(|| Type::Enum(type_name.name.clone())),
+            Expr::Call { func, .. } => match func.as_ref() {
+                Expr::Path { type_name, .. } => self
+                    .enum_defs
+                    .contains_key(&type_name.name)
+                    .then(|| Type::Enum(type_name.name.clone())),
+                Expr::Identifier(ident) => self
+                    .newtype_defs
+                    .contains_key(&ident.name)
+                    .then(|| Type::Newtype(ident.name.clone())),
+                _ => None,
+            },
+            Expr::Block { stmts, .. } => {
+                Self::body_result_expr(stmts).and_then(|e| self.shallow_result_type(e))
+            }
+            Expr::If { then_block, .. } => {
+                Self::body_result_expr(then_block).and_then(|e| self.shallow_result_type(e))
+            }
+            _ => None,
+        }
     }
 
     /// Put a definition's generic parameters in scope for signature and body resolution

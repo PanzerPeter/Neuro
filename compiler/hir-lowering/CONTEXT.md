@@ -18,6 +18,20 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
 - thiserror — `LoweringError` derivation
 
 ## Notes
+- 2026-07-19: Static & dynamic dispatch (§3.17). Traits are no longer fully erased here: a new
+  `traits` table (name → methods in declaration order, with their visible parameter and return
+  types) is registered before impls, and each `Item::Trait` now lowers to a `HirItem::Trait`
+  carrying that method order — the canonical vtable slot layout backends need. `resolve_type`
+  delegates to `resolve_type_ctx(ty, behind_ref)` so `&dyn Trait` resolves to
+  `Reference(DynObject)` while a bare `dyn` is an internal error (the checker rejects it first).
+  `lower_expr` is now a thin wrapper that lowers via `lower_expr_uncoerced` and then applies
+  `apply_dyn_coercion`: this is the single site where `&T` -> `&dyn Trait` unsizing is inserted, so
+  every context that supplies an expected type (call arguments, returns, annotated bindings) gets
+  the coercion uniformly and an existing trait object is never re-coerced. A method call on a
+  `DynObject` receiver types from the trait declaration, naming no implementor. Return-position
+  `impl Trait` resolves to its concrete type through `declared_return_type` / `shallow_result_type`,
+  mirroring the checker (duplicated, not shared — separate type tables per VSA).
+
 `syntax-parsing` is a `[dev-dependencies]` entry only (tests build ASTs through the parser); it is never a production cross-slice dependency.
 
 Lowering **re-derives** each expression's type rather than importing the checker's `Type`, which would couple two feature slices (VSA: duplicate over couple). It assumes well-typedness — a shape the checker should have rejected surfaces as a `LoweringError`, never a panic.

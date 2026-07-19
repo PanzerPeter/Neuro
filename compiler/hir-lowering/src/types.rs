@@ -12,7 +12,32 @@ impl Lowerer {
     /// is the checker's job and is not repeated here. Takes `&mut self` because
     /// resolving a generic application may materialize a new struct instance.
     pub(crate) fn resolve_type(&mut self, ty: &ast_types::Type) -> Result<HirType, LoweringError> {
+        self.resolve_type_ctx(ty, false)
+    }
+
+    /// Resolve a type annotation, tracking whether it sits directly behind a reference.
+    /// The flag matters only for `dyn Trait` (§3.17), which is unsized and valid solely
+    /// as a reference referent — the checker has already rejected any other placement,
+    /// so an unreferenced `dyn` here is an internal inconsistency.
+    fn resolve_type_ctx(
+        &mut self,
+        ty: &ast_types::Type,
+        behind_ref: bool,
+    ) -> Result<HirType, LoweringError> {
         match ty {
+            ast_types::Type::DynTrait { trait_name, .. } if behind_ref => {
+                Ok(HirType::DynObject(trait_name.name.clone()))
+            }
+            ast_types::Type::DynTrait { trait_name, .. } => Err(LoweringError::UnresolvedType {
+                name: format!("dyn {}", trait_name.name),
+            }),
+            // Argument-position `impl Trait` was rewritten to a generic parameter by the
+            // parser and return-position `impl Trait` is resolved to its concrete type
+            // before lowering, so reaching here means the checker let through a position
+            // it should have rejected.
+            ast_types::Type::ImplTrait { trait_name, .. } => Err(LoweringError::UnresolvedType {
+                name: format!("impl {}", trait_name.name),
+            }),
             // Inside a monomorphized instance body, a type-parameter name resolves to
             // its concrete substitution (§3.8) — checked before the built-in names so a
             // parameter can never be a built-in name (the checker rejects that shadowing).
@@ -55,7 +80,7 @@ impl Lowerer {
                 }
             }),
             ast_types::Type::Reference { inner, mutable, .. } => Ok(HirType::Reference {
-                inner: Box::new(self.resolve_type(inner)?),
+                inner: Box::new(self.resolve_type_ctx(inner, true)?),
                 mutable: *mutable,
             }),
             ast_types::Type::Array { element, size, .. } => Ok(HirType::Array {

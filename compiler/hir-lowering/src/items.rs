@@ -42,6 +42,13 @@ impl Lowerer {
                 }
             }
         }
+        // Traits before impls: an `impl Trait for T` and a `&dyn Trait` annotation both
+        // resolve against the trait's declaration-ordered method list (§3.17).
+        for item in items {
+            if let Item::Trait(def) = item {
+                self.register_trait(def)?;
+            }
+        }
         for item in items {
             if let Item::Impl(def) = item {
                 if def.generics.is_empty() && def.type_args.is_empty() {
@@ -341,6 +348,30 @@ impl Lowerer {
         Ok(())
     }
 
+    /// Record a trait's methods in declaration order (§3.17). That order is the vtable
+    /// slot order every implementor shares, and the signatures let a call through a
+    /// `&dyn Trait` receiver be typed without naming a concrete implementor.
+    fn register_trait(&mut self, def: &ast_types::TraitDef) -> Result<(), LoweringError> {
+        let mut methods = Vec::with_capacity(def.methods.len());
+        for method in &def.methods {
+            let mut params = Vec::with_capacity(method.params.len());
+            for param in &method.params {
+                params.push(self.resolve_type(&param.ty)?);
+            }
+            let ret = match &method.return_type {
+                Some(t) => self.resolve_type(t)?,
+                None => HirType::Void,
+            };
+            methods.push(crate::TraitMethodInfo {
+                name: method.name.name.clone(),
+                params,
+                ret,
+            });
+        }
+        self.traits.insert(def.name.name.clone(), methods);
+        Ok(())
+    }
+
     fn register_impl(&mut self, def: &ImplDef) -> Result<(), LoweringError> {
         let struct_name = def.type_name.name.clone();
         for method in &def.methods {
@@ -435,12 +466,79 @@ impl Lowerer {
         for param in &func.params {
             params.push(self.resolve_type(&param.ty)?);
         }
-        let ret = match &func.return_type {
-            Some(t) => self.resolve_type(t)?,
-            None => HirType::Void,
-        };
+        let ret = self.declared_return_type(&func.return_type, &func.body)?;
         self.functions.insert(func.name.name.clone(), (params, ret));
         Ok(())
+    }
+
+    /// The resolved return type of a function, resolving return-position `impl Trait`
+    /// (§3.17) to the concrete type the body constructs.
+    ///
+    /// `impl Trait` in return position is static dispatch — exactly one concrete type
+    /// leaves the function — so it is transparent here, exactly as the checker resolved
+    /// it. The concrete type is read structurally from the body's result expression; the
+    /// checker has already verified it exists and implements the trait.
+    pub(crate) fn declared_return_type(
+        &mut self,
+        return_type: &Option<ast_types::Type>,
+        body: &[ast_types::Stmt],
+    ) -> Result<HirType, LoweringError> {
+        match return_type {
+            Some(ast_types::Type::ImplTrait { trait_name, .. }) => {
+                match body_result_expr(body).and_then(|e| self.shallow_result_type(e)) {
+                    Some(ty) => Ok(ty),
+                    None => Err(LoweringError::UnresolvedType {
+                        name: format!("impl {}", trait_name.name),
+                    }),
+                }
+            }
+            Some(t) => self.resolve_type(t),
+            None => Ok(HirType::Void),
+        }
+    }
+
+    /// The concrete type of a directly-constructed expression, read structurally
+    /// (§3.17). Mirrors the checker's inference for return-position `impl Trait`;
+    /// duplicated rather than shared because the two slices own separate type tables.
+    fn shallow_result_type(&mut self, expr: &ast_types::Expr) -> Option<HirType> {
+        use ast_types::Expr;
+        match expr {
+            Expr::Paren(inner, _) => self.shallow_result_type(inner),
+            Expr::StructLiteral { name, .. } => self
+                .structs
+                .contains_key(&name.name)
+                .then(|| HirType::Struct(name.name.clone())),
+            Expr::EnumStructLiteral { enum_name, .. } => self
+                .enums
+                .contains_key(&enum_name.name)
+                .then(|| HirType::Enum(enum_name.name.clone())),
+            Expr::Path { type_name, .. } => self
+                .enums
+                .contains_key(&type_name.name)
+                .then(|| HirType::Enum(type_name.name.clone())),
+            Expr::Call { func, .. } => match func.as_ref() {
+                Expr::Path { type_name, .. } => self
+                    .enums
+                    .contains_key(&type_name.name)
+                    .then(|| HirType::Enum(type_name.name.clone())),
+                Expr::Identifier(ident) => {
+                    let inner_ast = self.newtypes.get(&ident.name)?.clone();
+                    let inner = self.resolve_type(&inner_ast).ok()?;
+                    Some(HirType::Newtype {
+                        name: ident.name.clone(),
+                        inner: Box::new(inner),
+                    })
+                }
+                _ => None,
+            },
+            Expr::Block { stmts, .. } => {
+                body_result_expr(stmts).and_then(|e| self.shallow_result_type(e))
+            }
+            Expr::If { then_block, .. } => {
+                body_result_expr(then_block).and_then(|e| self.shallow_result_type(e))
+            }
+            _ => None,
+        }
     }
 
     fn register_const(&mut self, def: &ConstDef) -> Result<(), LoweringError> {
@@ -471,10 +569,16 @@ impl Lowerer {
                 // A newtype is transparent at runtime and produces no HIR item; it
                 // survives only as the `HirType::Newtype` its annotations resolve to.
                 Item::Newtype(_) => {}
-                // A trait declaration is fully erased (§3.9): it emits no code, and each
-                // `impl Trait for Type` lowers via the ordinary impl path above (the
-                // parser already injected any omitted default methods).
-                Item::Trait(_) => {}
+                // A trait emits no code of its own (§3.9): each `impl Trait for Type`
+                // lowers via the ordinary impl path above, with any omitted default
+                // method already injected by the parser. The item carries only the
+                // declaration-ordered method list backends need to lay out vtables for
+                // dynamic dispatch (§3.17).
+                Item::Trait(def) => hir_items.push(HirItem::Trait(neuro_hir::HirTrait {
+                    name: def.name.name.clone(),
+                    methods: def.methods.iter().map(|m| m.name.name.clone()).collect(),
+                    span: def.span,
+                })),
             }
         }
 
@@ -629,10 +733,7 @@ impl Lowerer {
                 span: param.span,
             });
         }
-        let return_type = match &func.return_type {
-            Some(t) => self.resolve_type(t)?,
-            None => HirType::Void,
-        };
+        let return_type = self.declared_return_type(&func.return_type, &func.body)?;
 
         self.push_scope();
         for param in &params {
@@ -728,6 +829,16 @@ impl Lowerer {
             out.push(self.lower_stmt(stmt)?);
         }
         Ok(out)
+    }
+}
+
+/// The expression a body evaluates to: its trailing expression, or the operand of a
+/// trailing `return`. Used for return-position `impl Trait` resolution (§3.17).
+fn body_result_expr(body: &[ast_types::Stmt]) -> Option<&ast_types::Expr> {
+    match body.last()? {
+        ast_types::Stmt::Expr(expr) => Some(expr),
+        ast_types::Stmt::Return { value, .. } => value.as_ref(),
+        _ => None,
     }
 }
 

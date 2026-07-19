@@ -51,6 +51,7 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-07-19: Static & dynamic dispatch (§3.17). `parse_type` now accepts `impl Trait` and `dyn Trait`, producing `Type::ImplTrait` / `Type::DynTrait` via the new `parse_trait_ref_name` helper. `parse_function` then desugars ARGUMENT-position `impl Trait` (including nested under `&`/`&mut`, arrays, and tuples) into fresh anonymous generic parameters `__implN: Trait` appended to the function's `generics`, replacing each occurrence with a plain `Type::Named` — so static dispatch reuses the existing monomorphized-generic machinery unchanged and each `impl Trait` parameter is independently inferred. Return-position `impl Trait` is deliberately NOT desugared (it is one concrete type chosen by the body, not a caller-inferred parameter) and is resolved by semantic-analysis instead.
 - 2026-07-18: Operator traits — scalar path §3.10. `parse_impl_def`'s body loop now accepts an
   associated-type binding `type Name = Type` (via `parse_assoc_type_binding`) alongside methods,
   collected into the new `ImplDef.assoc_types`. This lets an operator-trait impl declare its

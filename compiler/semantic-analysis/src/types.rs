@@ -90,6 +90,12 @@ pub enum Type {
     /// aggregate. Two tuple types are compatible only when they have the same arity
     /// and each element type matches. Always has at least two elements.
     Tuple(Vec<Type>),
+    /// A dynamic-dispatch trait object `dyn Trait` (§3.17), identified by trait name.
+    /// It is **unsized**, so it only ever appears as the referent of a [`Type::Reference`]
+    /// (`&dyn Trait` / `&mut dyn Trait`); a bare `dyn Trait` is rejected during type
+    /// resolution. The trait must be object-safe. Two trait objects are compatible only
+    /// when they name the same trait (nominal).
+    DynObject(std::string::String),
     /// An unresolved generic type parameter `T` inside a generic function body (§3.8).
     /// It is nominal — `Generic("T")` is compatible only with itself — and supports no
     /// concrete operations (arithmetic, field access, …), which is exactly what a
@@ -155,6 +161,11 @@ impl Type {
             // A generic type parameter matches only the same parameter by name (§3.8).
             // Two distinct parameters `T` and `U` are never interchangeable.
             (Type::Generic(a), Type::Generic(b)) => a == b,
+
+            // Trait objects match by trait name (nominal, §3.17). A `&T` → `&dyn Trait`
+            // coercion is NOT expressed here (it depends on the impl table); it is
+            // handled explicitly at argument/return/binding sites by the checker.
+            (Type::DynObject(a), Type::DynObject(b)) => a == b,
 
             // A const generic argument value matches only the same value (§3.8). This is
             // a monomorphization-internal marker; it never appears in ordinary positions.
@@ -348,6 +359,7 @@ impl fmt::Display for Type {
             Type::Enum(name) => write!(f, "{}", name),
             Type::Newtype(name) => write!(f, "{}", name),
             Type::Generic(name) => write!(f, "{}", name),
+            Type::DynObject(name) => write!(f, "dyn {}", name),
             Type::Reference { inner, mutable } => {
                 if *mutable {
                     write!(f, "&mut {}", inner)

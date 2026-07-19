@@ -104,6 +104,11 @@ struct Lowerer {
     clone_structs: HashSet<String>,
     /// Struct name → method name → mangled key into [`Self::functions`].
     impl_methods: HashMap<String, HashMap<String, String>>,
+    /// Declared traits (§3.9, §3.17) → their methods in declaration order. The order is
+    /// the vtable slot order for dynamic dispatch; each entry carries the method's
+    /// visible (non-`self`) parameter types and return type so a call through a
+    /// `&dyn Trait` receiver types without consulting any implementor.
+    traits: HashMap<String, Vec<TraitMethodInfo>>,
     /// Operator-trait dispatch (§3.10): `(struct name, binary operator)` → how the
     /// operator desugars to a method call. Present when the struct has an operator impl.
     operator_binary_impls: HashMap<(String, ast_types::BinaryOp), OpDispatch>,
@@ -153,6 +158,14 @@ struct Lowerer {
     /// Concrete instance functions produced by monomorphization, appended to the
     /// program after the ordinary items.
     mono_items: Vec<neuro_hir::HirItem>,
+}
+
+/// One trait method's lowering-visible signature (§3.17), in declaration order.
+struct TraitMethodInfo {
+    name: String,
+    /// Parameter types excluding the implicit `self`.
+    params: Vec<HirType>,
+    ret: HirType,
 }
 
 /// How a binary operator desugars to an operator-trait method call (§3.10).
@@ -221,6 +234,7 @@ impl Lowerer {
             newtypes: HashMap::new(),
             clone_structs: HashSet::new(),
             impl_methods: HashMap::new(),
+            traits: HashMap::new(),
             operator_binary_impls: HashMap::new(),
             operator_unary_impls: HashMap::new(),
             constants: HashMap::new(),
@@ -427,6 +441,7 @@ fn mangle_type(ty: &HirType) -> String {
             let parts: Vec<String> = elements.iter().map(mangle_type).collect();
             format!("tup{}_{}", elements.len(), parts.join("_"))
         }
+        HirType::DynObject(name) => format!("dyn_{}", name),
         HirType::Function { .. } => "fn".to_string(),
     }
 }

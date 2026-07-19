@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-906%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-929%20passing-success.svg)](#)
 
 **Status:** Alpha — Phase 1 (Core Language) in progress · sub-phases 1A–1E complete (MVP, syntax & semantics, ownership/borrow checker, HIR & MLIR plumbing, type system) · 1F (generics, traits & dispatch) active · → v2.0.0 when Phase 1 completes
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 (Core Language) sub-phases 1A–1E are complete; 1F (generics, traits & dispatch) is active — generic functions, structs, and impls have landed, plus const generics, `where` clauses, turbofish, explicit lifetime annotations, **trait declarations**, and **operator overloading**. The following features are fully implemented and tested (**906 Tests Passing**):
+Phase 1 (Core Language) sub-phases 1A–1E are complete; 1F (generics, traits & dispatch) is active — generic functions, structs, and impls have landed, plus const generics, `where` clauses, turbofish, explicit lifetime annotations, **trait declarations**, **operator overloading**, and **static & dynamic dispatch** (`impl Trait` / `dyn Trait`). The following features are fully implemented and tested (**929 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -96,7 +96,8 @@ Phase 1 (Core Language) sub-phases 1A–1E are complete; 1F (generics, traits & 
 | **Functions** | Parameters, explicit and expression-based implicit returns, recursion, forward references |
 | **Generics** | Generic functions `func identity<T>(x: T) -> T`, generic structs `struct Pair<T, U>`, and generic inherent impls `impl<T> Wrapper<T>` (§3.8); monomorphized (one specialized copy per concrete type-argument set, zero runtime cost). Type arguments are inferred from value/field arguments or written explicitly (`Pair<i32, f64>`). Trait bounds `<T: Trait>` are enforced (§3.9); type arguments restricted to `Copy` this phase |
 | **Const generics, `where` & turbofish** | Compile-time value parameters `func sum<const N: u32>(a: [i32; N])` / `struct Buffer<T, const CAP: u32> { data: [T; CAP] }` (§3.8), usable as array lengths and values, monomorphized per distinct value (zero cost). Inferred from array-argument lengths / struct field values or supplied by a turbofish `identity::<i32>(x)` / `zeros::<4>()`. `where` clauses carry value predicates checked per instantiation (`where N > 0`) plus trait bounds, now enforced (§3.9) |
-| **Traits** | `trait Shape { func area(&self) -> i32; func is_big(&self) -> i32 { ... } }` (§3.9) with required and default (provided) methods; `impl Trait for Type` checked for conformance (missing / mismatched / non-member methods rejected); an omitted default method is inherited, an explicit one overrides it. Trait-bounded generics `func f<T: Shape>(x: &T)` dispatch trait methods on the type parameter and are checked at the call site. Fully monomorphized and erased — no vtable, zero runtime cost. Associated types and `dyn` land later in 1F |
+| **Traits** | `trait Shape { func area(&self) -> i32; func is_big(&self) -> i32 { ... } }` (§3.9) with required and default (provided) methods; `impl Trait for Type` checked for conformance (missing / mismatched / non-member methods rejected); an omitted default method is inherited, an explicit one overrides it. Trait-bounded generics `func f<T: Shape>(x: &T)` dispatch trait methods on the type parameter and are checked at the call site. Fully monomorphized and erased — no vtable, zero runtime cost. Associated types land later in 1F |
+| **Static & Dynamic Dispatch** | Two ways to satisfy a trait bound (§3.17). `impl Trait` is anonymous-generic sugar in argument position (`func train(m: &impl Model)`) and return position (`func make() -> impl Shape`) — monomorphized, zero runtime cost; each `impl Trait` parameter is its own anonymous type parameter, so one call may bind two different types. `dyn Trait` is a runtime trait object behind `&dyn Trait` / `&mut dyn Trait`: one function body serves every implementor, dispatching through a per-(trait, type) **vtable**. Object safety is enforced — every method must take `&self`/`&mut self` |
 | **Operator Overloading** | Operators on a `Copy` struct are sugar for method calls (§3.10): implement the built-in `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Neg`/`Not`/`BitAnd`/`BitOr`/`BitXor`/`Shl` (declaring `type Output = T`) or `PartialEq`/`Comparable` (supertrait: `Comparable` requires `PartialEq`) to get `+ - * / % -a ~a & \| ^ <<` and `== != < <= > >=`. The user writes only the `impl` (these are compiler-known traits); each operator desugars to its method and is monomorphized to a plain call — no vtable. Compound assignment (`v += w`) flows through the by-value operator |
 | **Control Flow** | if/else/elif, `while`, `loop` (incl. as a value expression), range-for (`0..n`, `0..=n`), `break`/`continue` with value-carrying breaks and loop labels |
 | **Variables & Constants** | `val` (immutable) / `mut` (mutable) with type-safe reassignment; module- and function-scope `const` emitted as LLVM globals |

@@ -33,8 +33,13 @@ pub(crate) enum Type {
     /// the `TypeMapper` holds, so the type need not carry the layout itself.
     Enum(std::string::String),
     /// Immutable borrow `&T` (§2.4). Lowered to an opaque LLVM pointer; the
-    /// referent type drives auto-deref of method/field receivers.
+    /// referent type drives auto-deref of method/field receivers. The one exception
+    /// is a reference to a [`Type::DynObject`], which is a two-word fat pointer.
     Reference(Box<Type>),
+    /// A dynamic-dispatch trait object `dyn Trait` (§3.17), identified by trait name.
+    /// Unsized on its own: it is lowered only as the referent of a [`Type::Reference`],
+    /// which becomes a `{ data pointer, vtable pointer }` fat pointer.
+    DynObject(std::string::String),
     /// Fixed-size array `[T; N]` (§3.1). Lowered to an LLVM `[N x T]` aggregate.
     Array {
         element: Box<Type>,
@@ -72,6 +77,7 @@ impl Type {
             // A newtype is transparent at runtime (§3.15): erase it to its inner type
             // so codegen never needs to know a newtype exists.
             HirType::Newtype { inner, .. } => Type::from_hir(inner),
+            HirType::DynObject(name) => Type::DynObject(name.clone()),
             HirType::Reference { inner, .. } => Type::Reference(Box::new(Type::from_hir(inner))),
             HirType::Array { element, size } => Type::Array {
                 element: Box::new(Type::from_hir(element)),

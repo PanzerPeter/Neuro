@@ -4,7 +4,7 @@ use shared_types::Identifier;
 use crate::ast::{
     Attribute, ConstDef, EnumDef, EnumVariant, Expr, FieldDef, FieldInit, FunctionDef,
     GenericParam, GenericParamKind, ImplDef, Item, MethodDef, NewtypeDef, Parameter, SelfParam,
-    StructDef, TraitDef, TraitMethod, VariantPayload,
+    StructDef, TraitDef, TraitMethod, Type, VariantPayload,
 };
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
@@ -323,6 +323,16 @@ impl Parser {
         // predicates are collected for per-instantiation checking.
         let where_predicates = self.parse_where_clause(&mut generics)?;
         self.skip_newlines();
+
+        // Argument-position `impl Trait` (§3.17) is anonymous-generic sugar: rewrite each
+        // occurrence in a parameter type into a fresh trait-bounded generic parameter, so
+        // the rest of the pipeline reuses the ordinary monomorphized-generic machinery.
+        // Return-position `impl Trait` is left intact for the transparent semantic
+        // resolution and is therefore not visited here.
+        let mut impl_counter = 0usize;
+        for param in &mut params {
+            param.ty = desugar_impl_trait_params(&param.ty, &mut impl_counter, &mut generics);
+        }
 
         let body = self.parse_block()?;
 
@@ -1321,5 +1331,60 @@ fn inject_trait_defaults(items: &mut [Item]) {
                 span: method.span,
             });
         }
+    }
+}
+
+/// Rewrite argument-position `impl Trait` (§3.17) into fresh trait-bounded generic
+/// parameters. Each `impl Trait` occurrence — including one nested inside a reference,
+/// array, tuple, or generic application — becomes a distinct anonymous type parameter
+/// `__implN: Trait` appended to `generics`, and the annotation is replaced by a plain
+/// named reference to it. This desugar lets static dispatch reuse the ordinary
+/// monomorphized-generic machinery unchanged.
+fn desugar_impl_trait_params(
+    ty: &Type,
+    counter: &mut usize,
+    generics: &mut Vec<GenericParam>,
+) -> Type {
+    match ty {
+        Type::ImplTrait { trait_name, span } => {
+            let name = format!("__impl{}", *counter);
+            *counter += 1;
+            let ident = Identifier { name, span: *span };
+            generics.push(GenericParam {
+                name: ident.clone(),
+                kind: GenericParamKind::Type,
+                bounds: vec![trait_name.clone()],
+                span: *span,
+            });
+            Type::Named(ident)
+        }
+        Type::Reference {
+            inner,
+            mutable,
+            lifetime,
+            span,
+        } => Type::Reference {
+            inner: Box::new(desugar_impl_trait_params(inner, counter, generics)),
+            mutable: *mutable,
+            lifetime: lifetime.clone(),
+            span: *span,
+        },
+        Type::Array {
+            element,
+            size,
+            span,
+        } => Type::Array {
+            element: Box::new(desugar_impl_trait_params(element, counter, generics)),
+            size: size.clone(),
+            span: *span,
+        },
+        Type::Tuple { elements, span } => Type::Tuple {
+            elements: elements
+                .iter()
+                .map(|e| desugar_impl_trait_params(e, counter, generics))
+                .collect(),
+            span: *span,
+        },
+        other => other.clone(),
     }
 }

@@ -83,6 +83,18 @@ pub enum Type {
         span: Span,
     },
 
+    /// Static-dispatch trait bound `impl Trait` (§3.17): anonymous-generic sugar.
+    /// In argument position the parser rewrites it into a fresh trait-bounded generic
+    /// parameter (so this node never reaches semantic there); in return position it
+    /// survives and is resolved transparently to the concrete type the body produces.
+    ImplTrait { trait_name: Identifier, span: Span },
+
+    /// Dynamic-dispatch trait object `dyn Trait` (§3.17): an unsized runtime type that
+    /// only ever appears behind a reference (`&dyn Trait` / `&mut dyn Trait`). Method
+    /// calls go through a vtable. Semantic analysis rejects a bare (unreferenced) `dyn`
+    /// and any non-object-safe trait.
+    DynTrait { trait_name: Identifier, span: Span },
+
     /// Tensor type for multi-dimensional arrays.
     ///
     /// This variant is reserved for future language support and is not yet
@@ -104,6 +116,8 @@ impl Type {
             Type::Array { span, .. } => *span,
             Type::Tuple { span, .. } => *span,
             Type::Generic { span, .. } => *span,
+            Type::ImplTrait { span, .. } => *span,
+            Type::DynTrait { span, .. } => *span,
             Type::Tensor { span, .. } => *span,
         }
     }
