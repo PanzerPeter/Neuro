@@ -1,4 +1,4 @@
-// Integration tests for float literal type suffixes (§1.2, §1.4)
+// Integration tests for float literal type suffixes
 mod common;
 use common::CompileTest;
 

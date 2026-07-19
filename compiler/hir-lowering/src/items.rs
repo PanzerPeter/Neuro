@@ -21,7 +21,7 @@ impl Lowerer {
     /// checker's registration passes.
     pub(crate) fn register_items(&mut self, items: &[Item]) -> Result<(), LoweringError> {
         // Newtype names first so they resolve as struct fields, enum payloads, or
-        // other newtypes' inners regardless of source order (§3.15).
+        // other newtypes' inners regardless of source order.
         for item in items {
             if let Item::Newtype(def) = item {
                 self.newtypes
@@ -43,7 +43,7 @@ impl Lowerer {
             }
         }
         // Traits before impls: an `impl Trait for T` and a `&dyn Trait` annotation both
-        // resolve against the trait's declaration-ordered method list (§3.17).
+        // resolve against the trait's declaration-ordered method list.
         for item in items {
             if let Item::Trait(def) = item {
                 self.register_trait(def)?;
@@ -91,14 +91,14 @@ impl Lowerer {
                 }
             }
         }
-        // `Copy` implies `Clone` (§2.3): a Copy type is trivially cloneable.
+        // `Copy` implies `Clone`: a Copy type is trivially cloneable.
         if copy || clone {
             self.clone_structs.insert(def.name.name.clone());
         }
         Ok(())
     }
 
-    /// Register a generic struct template (§3.8). Only the template is recorded; each
+    /// Register a generic struct template. Only the template is recorded; each
     /// distinct set of type arguments is monomorphized on demand. Clone/Copy intent is
     /// recorded under the base name so instances can inherit `.clone()` support.
     fn register_generic_struct(&mut self, def: &StructDef) {
@@ -120,7 +120,7 @@ impl Lowerer {
             .insert(def.name.name.clone(), def.clone());
     }
 
-    /// Materialize a monomorphized generic-struct instance (§3.8): register its
+    /// Materialize a monomorphized generic-struct instance: register its
     /// concrete fields and impl-method signatures, queue its HIR items for emission,
     /// and return the mangled instance name. Idempotent per instance.
     pub(crate) fn instantiate_generic_struct(
@@ -165,7 +165,7 @@ impl Lowerer {
         Ok(mangled)
     }
 
-    /// Map an impl's type parameters to the struct instance's concrete types (§3.8):
+    /// Map an impl's type parameters to the struct instance's concrete types:
     /// `impl<T> Wrapper<T>` with instance `Wrapper<i32>` binds `T` → `i32`. The impl's
     /// positional type arguments correspond to the struct's generic parameters, whose
     /// concrete types are read from `subst`. Const parameters carry no impl type binding.
@@ -189,7 +189,7 @@ impl Lowerer {
     }
 
     /// Register the signature of every method of each generic `impl` of `base` for the
-    /// concrete instance `mangled`, so calls on the instance resolve (§3.8).
+    /// concrete instance `mangled`, so calls on the instance resolve.
     fn register_instance_methods(
         &mut self,
         base: &str,
@@ -238,7 +238,7 @@ impl Lowerer {
         Ok(())
     }
 
-    /// Resolve each const generic parameter's declared integer type (§3.8), so a value
+    /// Resolve each const generic parameter's declared integer type, so a value
     /// reference to one in a monomorphized body lowers to a correctly-typed literal.
     fn const_param_types(
         &mut self,
@@ -253,7 +253,7 @@ impl Lowerer {
         Ok(out)
     }
 
-    /// Emit the HIR items for one monomorphized struct instance (§3.8): an ordinary
+    /// Emit the HIR items for one monomorphized struct instance: an ordinary
     /// `HirItem::Struct` plus one `HirItem::Impl` per generic impl, with method bodies
     /// lowered under the impl's concrete type-parameter substitution.
     fn emit_mono_struct(&mut self, ms: &crate::MonoStruct) -> Result<(), LoweringError> {
@@ -317,7 +317,7 @@ impl Lowerer {
     }
 
     /// Resolve an enum's variants and payload field types into the lowering table
-    /// (§3.5). Mirrors the checker's registration; payload-type Copy/scalar
+    /// Mirrors the checker's registration; payload-type Copy/scalar
     /// validation is the checker's job and not repeated here.
     fn register_enum(&mut self, def: &EnumDef) -> Result<(), LoweringError> {
         let mut variants = Vec::with_capacity(def.variants.len());
@@ -348,7 +348,7 @@ impl Lowerer {
         Ok(())
     }
 
-    /// Record a trait's methods in declaration order (§3.17). That order is the vtable
+    /// Record a trait's methods in declaration order. That order is the vtable
     /// slot order every implementor shares, and the signatures let a call through a
     /// `&dyn Trait` receiver be typed without naming a concrete implementor.
     fn register_trait(&mut self, def: &ast_types::TraitDef) -> Result<(), LoweringError> {
@@ -376,7 +376,7 @@ impl Lowerer {
         let struct_name = def.type_name.name.clone();
         for method in &def.methods {
             // An owned `self` on a `Copy` receiver is valid for operator-trait methods
-            // (§3.10); the checker already rejected it on any non-`Copy` type, so every
+            // The checker already rejected it on any non-`Copy` type, so every
             // owned-`self` method reaching lowering is sound and is registered normally.
             let mangled = format!("{}__{}", struct_name, method.name.name);
             let (params, ret) = self.method_signature(&struct_name, method)?;
@@ -390,7 +390,7 @@ impl Lowerer {
         Ok(())
     }
 
-    /// Record the operator dispatch for an operator-trait impl (§3.10), mirroring the
+    /// Record the operator dispatch for an operator-trait impl, mirroring the
     /// checker so this slice resolves operators on user types independently.
     fn register_operator_impl(
         &mut self,
@@ -454,7 +454,7 @@ impl Lowerer {
     }
 
     fn register_function(&mut self, func: &FunctionDef) -> Result<(), LoweringError> {
-        // A generic function (§3.8) is a template, not a callable signature: record it
+        // A generic function is a template, not a callable signature: record it
         // for monomorphization and skip the concrete-signature registration below.
         if !func.generics.is_empty() {
             self.generic_templates
@@ -472,7 +472,7 @@ impl Lowerer {
     }
 
     /// The resolved return type of a function, resolving return-position `impl Trait`
-    /// (§3.17) to the concrete type the body constructs.
+    /// to the concrete type the body constructs.
     ///
     /// `impl Trait` in return position is static dispatch — exactly one concrete type
     /// leaves the function — so it is transparent here, exactly as the checker resolved
@@ -498,7 +498,7 @@ impl Lowerer {
     }
 
     /// The concrete type of a directly-constructed expression, read structurally
-    /// (§3.17). Mirrors the checker's inference for return-position `impl Trait`;
+    /// Mirrors the checker's inference for return-position `impl Trait`;
     /// duplicated rather than shared because the two slices own separate type tables.
     fn shallow_result_type(&mut self, expr: &ast_types::Expr) -> Option<HirType> {
         use ast_types::Expr;
@@ -552,7 +552,7 @@ impl Lowerer {
         let mut hir_items = Vec::with_capacity(items.len());
         for item in items {
             match item {
-                // A generic template is not lowered directly (§3.8); only its concrete
+                // A generic template is not lowered directly; only its concrete
                 // instantiations, discovered at call sites, reach the HIR.
                 Item::Function(func) if !func.generics.is_empty() => {}
                 Item::Function(func) => {
@@ -569,11 +569,11 @@ impl Lowerer {
                 // A newtype is transparent at runtime and produces no HIR item; it
                 // survives only as the `HirType::Newtype` its annotations resolve to.
                 Item::Newtype(_) => {}
-                // A trait emits no code of its own (§3.9): each `impl Trait for Type`
+                // A trait emits no code of its own: each `impl Trait for Type`
                 // lowers via the ordinary impl path above, with any omitted default
                 // method already injected by the parser. The item carries only the
                 // declaration-ordered method list backends need to lay out vtables for
-                // dynamic dispatch (§3.17).
+                // dynamic dispatch.
                 Item::Trait(def) => hir_items.push(HirItem::Trait(neuro_hir::HirTrait {
                     name: def.name.name.clone(),
                     methods: def.methods.iter().map(|m| m.name.name.clone()).collect(),
@@ -584,7 +584,7 @@ impl Lowerer {
 
         // Drain the monomorphization worklists: lowering the ordinary items above (and
         // each instance below) enqueues every generic function and struct instantiation
-        // it references, so this runs until the transitive closure is emitted (§3.8).
+        // it references, so this runs until the transitive closure is emitted.
         // Struct instances are drained first because emitting their method bodies can in
         // turn enqueue generic-function instances.
         loop {
@@ -606,7 +606,7 @@ impl Lowerer {
 
     /// Lower one monomorphized instance of a generic template: substitute its type
     /// parameters (via [`Lowerer::type_subst`]) and emit a concrete function named by
-    /// the instance's mangled name (§3.8).
+    /// the instance's mangled name.
     fn lower_mono_instance(
         &mut self,
         instance: &MonoInstance,
@@ -755,7 +755,7 @@ impl Lowerer {
         let struct_name = def.type_name.name.clone();
         let mut methods = Vec::new();
         for method in &def.methods {
-            // Owned `self` on a `Copy` receiver is a valid operator-trait method (§3.10);
+            // Owned `self` on a `Copy` receiver is a valid operator-trait method;
             // the checker rejected it on any non-`Copy` type, so it is lowered like any
             // other method (an owned `Copy` receiver is ABI-identical to `&self`).
             methods.push(self.lower_method(&struct_name, method)?);
@@ -809,7 +809,7 @@ impl Lowerer {
 
     /// Lower a function/method body. The trailing expression of a non-`void` body is
     /// an implicit return, so it is typed against the declared return type — exactly
-    /// the contextual hint the checker applies (§1.8); every other statement lowers
+    /// the contextual hint the checker applies; every other statement lowers
     /// with no expected type.
     pub(crate) fn lower_body(
         &mut self,
@@ -833,7 +833,7 @@ impl Lowerer {
 }
 
 /// The expression a body evaluates to: its trailing expression, or the operand of a
-/// trailing `return`. Used for return-position `impl Trait` resolution (§3.17).
+/// trailing `return`. Used for return-position `impl Trait` resolution.
 fn body_result_expr(body: &[ast_types::Stmt]) -> Option<&ast_types::Expr> {
     match body.last()? {
         ast_types::Stmt::Expr(expr) => Some(expr),
@@ -852,7 +852,7 @@ fn lower_self_param(sp: &SelfParam) -> HirSelfParam {
 }
 
 /// Split a monomorphized instance's positional arguments into a type substitution and a
-/// const substitution, keyed by the template's generic parameter names in order (§3.8).
+/// const substitution, keyed by the template's generic parameter names in order.
 fn split_mono_args(
     generics: &[ast_types::GenericParam],
     args: &[crate::MonoArg],

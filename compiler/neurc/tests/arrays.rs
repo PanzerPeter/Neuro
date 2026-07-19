@@ -1,4 +1,4 @@
-// End-to-end tests for fixed-size arrays `[T; N]` (§3.1): literals, indexing,
+// End-to-end tests for fixed-size arrays `[T; N]`: literals, indexing,
 // element assignment, `.len()`, `for x in arr` / `for x in &arr` iteration, and
 // the debug-build out-of-bounds panic.
 mod common;
@@ -131,7 +131,7 @@ func main() -> i32 {
 
 #[test]
 fn out_of_bounds_index_panics_in_debug_build() {
-    // §1.2/§3.1 — a debug build (`-O0`) bounds-checks every index and aborts with
+    // A debug build (`-O0`) bounds-checks every index and aborts with
     // a located diagnostic on an out-of-range access.
     let dir = std::env::temp_dir();
     let src = dir.join("neuro_array_oob.nr");

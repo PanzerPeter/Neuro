@@ -38,26 +38,26 @@ isolation:
   Bitwise `<<`/`|`/`&`/`^`, `.shr(n)`, struct state, `&self` predicate +
   popcount methods, `while` with `break`. Exit `2`.
 - [`showcase/enum_records.nr`](showcase/enum_records.nr) — pattern matching
-  (§3.6) deconstructing enums with associated data (§3.5, all three variant
+  deconstructing enums with associated data (all three variant
   forms) alongside a struct with an enum field, `impl` methods, a fixed-size
   array + `for`-in loop, plus value/or/range/guard patterns. Exit `46`.
 - [`showcase/unit_types.nr`](showcase/unit_types.nr) — newtype units of measure
-  (§3.15) flowing through a struct with newtype fields, `impl` methods, an enum
+  flowing through a struct with newtype fields, `impl` methods, an enum
   + `match`, and a fixed-size array + `for`-in loop. Exit `94`.
 - [`showcase/generic_toolkit.nr`](showcase/generic_toolkit.nr) — generic structs and
-  generic inherent impls (§3.8), monomorphized per instance (`Pair<T, U>` inferred at
+  generic inherent impls, monomorphized per instance (`Pair<T, U>` inferred at
   a literal, `Cell<T>::get` used at `i32` and `bool`), working together with generic
   functions (`identity<T>`, `choose<T>`, `second<T, U>`), **const generic parameters**
   (`Buffer<T, const CAP>` and `sum_all<const N>` with a `where N > 0` predicate),
   **turbofish** (`identity::<i32>(8)`), a fixed-size array + `for`-in loop, an enum +
   pattern matching, and a tuple used as a generic type argument. Exit `85`.
 - [`showcase/borrowed_text.nr`](showcase/borrowed_text.nr) — **explicit lifetime
-  annotations** `<'a>` (§2.6) on the classic `longest<'a>(a: &'a string, b: &'a string)
-  -> &'a string`, working together with immutable string borrows (§2.4), zero-copy
-  `.slice(range)` / `.len()` (§2.7), an if-expression, and a lifetime mixed with a type
+  annotations** `<'a>` on the classic `longest<'a>(a: &'a string, b: &'a string)
+  -> &'a string`, working together with immutable string borrows, zero-copy
+  `.slice(range)` / `.len()`, an if-expression, and a lifetime mixed with a type
   parameter (`tagged_len<'a, T>`) that monomorphizes on `T` only. The lifetime is
   validated then erased — zero runtime cost. Exit `18`.
-- [`showcase/shape_traits.nr`](showcase/shape_traits.nr) — **trait declarations** (§3.9):
+- [`showcase/shape_traits.nr`](showcase/shape_traits.nr) — **trait declarations**:
   a `Shape` trait with a required `area` and a **default** `is_big` method, implemented
   for two structs (`Square` inherits the default, `Rect` overrides it), dispatched
   through a **trait-bounded generic** `scaled_area<T: Shape>` monomorphized per shape,
@@ -67,7 +67,7 @@ isolation:
   `dyn_area` / `dyn_flag` taking `&dyn Shape` (dynamic, one body serving both shapes
   through a vtable, reaching Square's inherited default and Rect's override). Exit
   `161`.
-- [`showcase/vector_physics.nr`](showcase/vector_physics.nr) — **operator traits** (§3.10):
+- [`showcase/vector_physics.nr`](showcase/vector_physics.nr) — **operator traits**:
   a `Copy` `Vec2` implementing `Add` / `Sub` / `Neg` / `PartialEq`, so `+` / `-` / unary
   `-` / `==` dispatch to the impl methods, combined with an `&self` method, compound
   assignment (`+=` desugaring through `Add`), a `while` loop, and if-expressions. The
@@ -127,7 +127,7 @@ No Rust edits are needed — discovery is automatic.
 - Newtypes are supported (`types/newtype.nr`): `newtype Meters = i32` creates a
   distinct nominal type wrapping an inner type, constructed `Meters(30)` and read
   back with `.0`. Unlike a `type` alias, a newtype is *not* interchangeable with
-  its inner type. The inner type is limited to `Copy` types for now (§3.15).
+  its inner type. The inner type is limited to `Copy` types for now.
 - Struct and array destructuring patterns are supported (`types/destructuring.nr`):
   `val Point { x, y } = p` binds each field by name; `val [a, b, c] = arr` binds
   array elements positionally; `val [first, ..rest] = arr` captures the remainder as

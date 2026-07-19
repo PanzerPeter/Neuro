@@ -1,4 +1,4 @@
-// End-to-end tests for enums with associated data (§3.5): declaration, the three
+// End-to-end tests for enums with associated data: declaration, the three
 // construction forms (unit / tuple / struct), and enums flowing across functions
 // and into struct fields. Pattern matching (payload extraction) is a separate
 // roadmap item, so these assert construction + round-trip, not deconstruction.

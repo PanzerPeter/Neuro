@@ -656,7 +656,7 @@ fn user_function_shadows_panic_builtin() {
     assert!(!checker.has_errors(), "got: {:?}", checker.into_errors());
 }
 
-/// `string + string` type-checks to `string` (§2.7 concatenation), distinct from
+/// `string + string` type-checks to `string` (concatenation), distinct from
 /// the numeric arithmetic path.
 #[test]
 fn string_concat_yields_string() {
@@ -731,7 +731,7 @@ fn string_plus_integer_is_rejected() {
 
 #[test]
 fn enum_construction_forms_type_check() {
-    // §3.5 — all three variant forms construct, and an enum flows as a binding,
+    // All three variant forms construct, and an enum flows as a binding,
     // a function parameter/return, and a struct field.
     let errors = semantic_errors(
         r#"
@@ -836,7 +836,7 @@ func main() -> i32 {
 
 #[test]
 fn non_scalar_enum_payload_is_rejected() {
-    // §3.5 (Phase 1E) — payloads are scalar Copy primitives; a string payload is rejected.
+    // Phase 1E — payloads are scalar Copy primitives; a string payload is rejected.
     let errors = semantic_errors(
         r#"
 enum Bad { Holds(string) }
@@ -853,7 +853,7 @@ func main() -> i32 { 0 }
 
 #[test]
 fn match_all_pattern_forms_type_check() {
-    // §3.6 — enum unit/tuple/struct variants, literal, or-pattern, range, guard,
+    // Enum unit/tuple/struct variants, literal, or-pattern, range, guard,
     // and wildcard patterns all type-check in one exhaustive match.
     let errors = semantic_errors(
         r#"

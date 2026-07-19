@@ -281,18 +281,18 @@ prerequisites are already done. Coordinate on an issue before starting a large i
 
 **Recently completed — 1E (Type System):**
 
-- [x] **Enums with associated data** (§3.5). Tagged-union codegen:
+- [x] **Enums with associated data**. Tagged-union codegen:
       `enum Foo { Bar, Baz(i32), Qux { x: f64 } }`. Prerequisite for pattern matching.
       Landed v1.53.0 (unit/tuple/struct variants, scalar payloads; `match` is next).
-- [x] **Pattern matching** (§3.6). `match` with exhaustiveness checking + guards;
+- [x] **Pattern matching**. `match` with exhaustiveness checking + guards;
       required for `Option`/`Result` ergonomics in 1G. Landed v1.54.0 (enum
       deconstruction, value/or/range/wildcard patterns, guards; scrutinee is
       enum/integer/`char`/`bool`).
-- [x] **Newtype declarations** (§3.15). `newtype Meters = f64` — distinct nominal
+- [x] **Newtype declarations**. `newtype Meters = f64` — distinct nominal
       type, zero overhead; construction `Meters(3.5)`, inner access `.0`. Landed
       v1.55.0 (Copy-inner only; backends erase the wrapper). Completes 1E.
 
-**Open now — 1F (Generics, Traits & Dispatch):** generic *functions* (§3.8) landed
+**Open now — 1F (Generics, Traits & Dispatch):** generic *functions* landed
 in v1.56.0, generic *structs & impls* in v1.57.0, *const parameters, `where`
 clauses & turbofish* in v1.58.0 (all monomorphized, type arguments inferred from
 value/field arguments or written explicitly, bounds parsed-but-unenforced, `Copy`
@@ -300,15 +300,15 @@ arguments only; const parameters inferred from array lengths / field values or
 supplied by turbofish, `where` value predicates checked per instantiation), and
 *explicit lifetime annotations* `<'a>` in v1.59.0 (a well-formedness surface —
 declared in the generic list, validated, then erased; `&'a T` == `&T`), and
-*trait declarations* (§3.9) in v1.60.0 (required + default methods,
+*trait declarations* in v1.60.0 (required + default methods,
 `impl Trait for Type` conformance checking, and enforced trait bounds on
 generics — all fully monomorphized and erased, so trait bounds that were merely
-parsed before are now checked), *operator traits* (§3.10) in v1.61.0 (the built-in
+parsed before are now checked), *operator traits* in v1.61.0 (the built-in
 `Add`/`Sub`/`Neg`/`PartialEq`/`Comparable` family on `Copy` structs, desugared to
-method calls), and *static & dynamic dispatch* (§3.17) in v1.62.0 (`impl Trait` in
+method calls), and *static & dynamic dispatch* in v1.62.0 (`impl Trait` in
 argument and return position, monomorphized; `&dyn Trait` / `&mut dyn Trait` trait
 objects dispatched through a per-(trait, type) vtable, with object safety enforced).
-The topmost open item is now closures and lambdas (§3.12).
+The topmost open item is now closures and lambdas.
 
 **Next, in dependency order:** 1F (closures) → 1G (error
 handling, collections, modules, prelude) → 1H (string interpolation, triple-quoted
@@ -319,19 +319,19 @@ capabilities table for full behavior.
 
 **Recently landed (sub-phase 1C — Ownership & Borrow Checker):**
 
-- [x] Move semantics by default (§2.2, v1.29.0) — `.clone()` opts out.
-- [x] `.clone()` builtin on `string` (§2.7, v1.27.0).
-- [x] `Copy` trait + `@derive(Copy, Clone)` on structs (§2.3, v1.30.0).
-- [x] Immutable borrows `&T` (§2.4, v1.31.0).
-- [x] Mutable borrows `&mut T` + `*` deref operator (§2.5, v1.33.0).
-- [x] Flow-sensitive borrow exclusivity — shared XOR mutable (§2.4/§2.5, v1.39.0).
-- [x] Lifetime elision + returned-reference outlives check (§2.6, v1.40.0).
-- [x] `&mut self` methods — in-place receiver mutation (§2.5, v1.41.0).
-- [x] Panic runtime — `panic`/`assert`/`unreachable`, abort, no unwinding (§1.2).
-- [x] `unsafe { }` block infrastructure — inert outside `@kernel` (§3).
-- [x] `&string` slice type — borrowed `(ptr, len)` UTF-8 view; byte-level `==`/`!=` (§2.7, v1.32.0).
+- [x] Move semantics by default (v1.29.0) — `.clone()` opts out.
+- [x] `.clone()` builtin on `string` (v1.27.0).
+- [x] `Copy` trait + `@derive(Copy, Clone)` on structs (v1.30.0).
+- [x] Immutable borrows `&T` (v1.31.0).
+- [x] Mutable borrows `&mut T` + `*` deref operator (v1.33.0).
+- [x] Flow-sensitive borrow exclusivity — shared XOR mutable (v1.39.0).
+- [x] Lifetime elision + returned-reference outlives check (v1.40.0).
+- [x] `&mut self` methods — in-place receiver mutation (v1.41.0).
+- [x] Panic runtime — `panic`/`assert`/`unreachable`, abort, no unwinding.
+- [x] `unsafe { }` block infrastructure — inert outside `@kernel`.
+- [x] `&string` slice type — borrowed `(ptr, len)` UTF-8 view; byte-level `==`/`!=` (v1.32.0).
 - [x] Remove ARC — audit: no reference-counting plumbing ever existed (v1.41.6).
-- [x] String concatenation `+` — `malloc`+`memcpy` → new owned immutable `string` (§2.7, v1.42.0).
+- [x] String concatenation `+` — `malloc`+`memcpy` → new owned immutable `string` (v1.42.0).
 
 - [x] **`Drop` trait + deterministic destruction** (v1.44.0). Runs at scope exit (normal exit only, never on panic); a compiler-known lang-item like `Copy`/`Clone` (no general trait system needed), dropping a moved-out value exactly once. Deferred: reassignment does not drop the prior value; struct `Drop` fields are not auto-dropped.
 - [x] **String `.slice(range)`** (v1.43.0). Borrowed `&string` sub-slice (zero copy); panics on an out-of-bounds range or a mid-codepoint boundary in both builds.

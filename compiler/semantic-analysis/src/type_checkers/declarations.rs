@@ -9,7 +9,7 @@ use ast_types::{
 use shared_types::Span;
 use std::collections::{HashMap, HashSet};
 
-/// Built-in type names a newtype may not shadow (§3.15).
+/// Built-in type names a newtype may not shadow.
 const BUILTIN_TYPE_NAMES: &[&str] = &[
     "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "bf16", "f32", "f64", "bool",
     "char", "string", "void",
@@ -26,7 +26,7 @@ const DERIVE_ATTRIBUTE: &str = "derive";
 const COPY_TRAIT: &str = "Copy";
 /// Derive argument requesting the `Clone` trait.
 const CLONE_TRAIT: &str = "Clone";
-/// The compiler-known `Drop` lang-item trait name (§2.1).
+/// The compiler-known `Drop` lang-item trait name.
 const DROP_TRAIT: &str = "Drop";
 /// The destructor method name required inside an `impl Drop` block.
 const DROP_METHOD: &str = "drop";
@@ -34,7 +34,7 @@ const DROP_METHOD: &str = "drop";
 impl TypeChecker {
     /// Check a function definition.
     ///
-    /// A generic function (§3.8, non-empty `func.generics`) is a template: its type
+    /// A generic function (non-empty `func.generics`) is a template: its type
     /// parameters are put in scope so the signature and body type-check with
     /// [`Type::Generic`] placeholders, and its signature is recorded in `generic_funcs`
     /// rather than `functions`. Concrete instantiation happens per call site.
@@ -67,7 +67,7 @@ impl TypeChecker {
         }
 
         // Resolve return type (default to Void if not specified). Return-position
-        // `impl Trait` (§3.17) is static dispatch: it resolves transparently to the one
+        // `impl Trait` is static dispatch: it resolves transparently to the one
         // concrete type the body constructs, so callers see that type directly.
         let return_type = match &func.return_type {
             Some(ast_types::Type::ImplTrait { trait_name, span }) => {
@@ -101,7 +101,7 @@ impl TypeChecker {
             // A generic template is registered separately; its signature carries the
             // `Type::Generic` placeholders and is instantiated at each call site. A
             // parameter that cannot be inferred from the arguments must be supplied by a
-            // turbofish at the call — enforced per call, not here (§3.8).
+            // turbofish at the call — enforced per call, not here.
             let const_types: HashMap<String, Type> = func
                 .generics
                 .iter()
@@ -145,7 +145,7 @@ impl TypeChecker {
         self.current_function_return_type = Some(return_type.clone());
 
         // Reference-typed parameters outlive the call, so a returned reference may
-        // safely borrow one (single-input-reference elision, §2.6). Owned
+        // safely borrow one (single-input-reference elision). Owned
         // parameters and body locals do not outlive the call.
         self.current_fn_outliving = func
             .params
@@ -193,7 +193,7 @@ impl TypeChecker {
                     }
                 }
                 // A trailing reference expression is an implicit return; verify it
-                // does not borrow a function-local place (§2.6).
+                // does not borrow a function-local place.
                 if matches!(return_type, Type::Reference { .. }) {
                     self.check_returned_reference(expr);
                 }
@@ -211,7 +211,7 @@ impl TypeChecker {
         Some(())
     }
 
-    /// Resolve a return-position `impl Trait` (§3.17) to the single concrete type the
+    /// Resolve a return-position `impl Trait` to the single concrete type the
     /// body produces, and verify that type implements the named trait.
     ///
     /// `impl Trait` in return position is static dispatch: exactly one concrete type
@@ -219,7 +219,7 @@ impl TypeChecker {
     /// opaque — the caller receives that concrete type at zero runtime cost. The
     /// concrete type is read structurally from the body's result expression, which this
     /// phase restricts to a direct constructor (struct literal or enum value); richer
-    /// forms await closures and iterators (§3.12).
+    /// forms await closures and iterators.
     fn resolve_impl_return(&mut self, trait_name: &str, body: &[Stmt], span: Span) -> Type {
         if !self.traits.contains_key(trait_name) {
             self.record_error(TypeError::UnknownTrait {
@@ -248,7 +248,7 @@ impl TypeChecker {
 
     /// The expression a function body evaluates to: its trailing expression, or the
     /// operand of a trailing `return`. Used only for return-position `impl Trait`
-    /// resolution (§3.17).
+    /// resolution.
     fn body_result_expr(body: &[Stmt]) -> Option<&Expr> {
         match body.last()? {
             Stmt::Expr(expr) => Some(expr),
@@ -258,7 +258,7 @@ impl TypeChecker {
     }
 
     /// The concrete type of a directly-constructed expression, read structurally without
-    /// full type checking (§3.17). Only the forms whose nominal type is evident from the
+    /// full type checking. Only the forms whose nominal type is evident from the
     /// syntax are recognized — a struct literal, an enum value, or a newtype
     /// construction — plus the tail of a block or `if`. Any other shape yields `None`,
     /// which surfaces as `ImplReturnNotInferable`.
@@ -301,7 +301,7 @@ impl TypeChecker {
     }
 
     /// Put a definition's generic parameters in scope for signature and body resolution
-    /// (§3.8): type parameters as [`Type::Generic`] placeholders, const parameters as
+    /// Type parameters as [`Type::Generic`] placeholders, const parameters as
     /// in-scope values of their declared integer type. Replaces any previous scope.
     fn enter_generic_scope(
         &mut self,
@@ -356,7 +356,7 @@ impl TypeChecker {
     }
 
     /// Register an enum definition: its variants, their construction form, and each
-    /// payload field's resolved type (§3.5).
+    /// payload field's resolved type.
     ///
     /// Payload types are restricted to scalar `Copy` primitives in this phase
     /// (integers, floats, `bool`, `char`); a non-scalar payload (string, struct,
@@ -431,7 +431,7 @@ impl TypeChecker {
             || matches!(ty, Type::Bool | Type::Char)
     }
 
-    /// Pre-register a newtype's NAME (§3.15) with a placeholder inner type, so the
+    /// Pre-register a newtype's NAME with a placeholder inner type, so the
     /// name resolves everywhere before its inner type is resolved in
     /// [`Self::resolve_newtype_inners`]. Rejects a name that collides with a builtin,
     /// struct, enum, or another newtype.
@@ -452,7 +452,7 @@ impl TypeChecker {
     }
 
     /// Resolve each newtype's inner type now that every nominal name is registered,
-    /// then reject cyclic newtypes and non-Copy inner types (§3.15).
+    /// then reject cyclic newtypes and non-Copy inner types.
     pub(crate) fn resolve_newtype_inners(&mut self, items: &[ast_types::Item]) {
         // Phase 1: resolve every accepted newtype's inner type. A duplicate/rejected
         // declaration (still absent or already resolved) is skipped so it cannot
@@ -499,7 +499,7 @@ impl TypeChecker {
         }
     }
 
-    /// Whether newtype `name` reaches itself through its inner type chain (§3.15),
+    /// Whether newtype `name` reaches itself through its inner type chain,
     /// following newtype wrappers and the Copy-recursing aggregates (arrays, tuples,
     /// references). `seen` is the current DFS path; a revisit is a back-edge.
     fn newtype_cycles(&self, name: &str, seen: &mut HashSet<String>) -> bool {
@@ -555,7 +555,7 @@ impl TypeChecker {
     ///
     /// Only `Copy` and `Clone` are acted upon; any other derive argument (e.g. `Debug`)
     /// is accepted and ignored so the surface stays forward compatible. `Copy` implies
-    /// `Clone` (a Copy type is trivially cloneable), matching §2.3 and Rust.
+    /// `Clone` (a Copy type is trivially cloneable), matching Rust.
     fn record_derive_intent(&mut self, def: &StructDef) {
         let mut derives_copy = false;
         let mut derives_clone = false;
@@ -579,7 +579,7 @@ impl TypeChecker {
         }
     }
 
-    /// Validate that a struct deriving `Copy` has only `Copy` fields (§2.3).
+    /// Validate that a struct deriving `Copy` has only `Copy` fields.
     ///
     /// Emits a `CopyDeriveNonCopyField` error for each offending field. Run after all
     /// structs are registered so a field whose type is another struct resolves regardless
@@ -613,7 +613,7 @@ impl TypeChecker {
         }
     }
 
-    /// Register a generic struct template (§3.8).
+    /// Register a generic struct template.
     ///
     /// A generic struct is not itself a usable type — each distinct set of type
     /// arguments is monomorphized into a distinct nominal struct on demand. The
@@ -647,7 +647,7 @@ impl TypeChecker {
             .insert(def.name.name.clone(), def.clone());
     }
 
-    /// Register a generic `impl` template (§3.8), e.g. `impl<T> Wrapper<T>`.
+    /// Register a generic `impl` template, e.g. `impl<T> Wrapper<T>`.
     ///
     /// The method signatures are registered under the base struct name (with the
     /// impl's type parameters in scope, so `T` resolves to a placeholder) by reusing
@@ -671,7 +671,7 @@ impl TypeChecker {
             .push(def.clone());
     }
 
-    /// Type-check a generic `impl` block's method bodies once, abstractly (§3.8):
+    /// Type-check a generic `impl` block's method bodies once, abstractly:
     /// the impl's type parameters are in scope, so a field typed `T` resolves to a
     /// placeholder — exactly the soundness contract of a bounds-free type parameter.
     pub(crate) fn check_generic_impl(&mut self, def: &ImplDef) {
@@ -681,7 +681,7 @@ impl TypeChecker {
     }
 
     /// Materialize a monomorphized instance of a generic struct with concrete type
-    /// arguments (§3.8), registering its concrete fields and impl methods on demand,
+    /// arguments, registering its concrete fields and impl methods on demand,
     /// and return its distinct nominal [`Type::Struct`]. Idempotent per instance.
     ///
     /// Type arguments are restricted to `Copy` this phase, mirroring generic
@@ -817,7 +817,7 @@ impl TypeChecker {
     ///
     /// Consuming `self` is rejected here so it never reaches codegen; `&mut self`
     /// is recorded in `mut_self_methods` so call sites can enforce its exclusive
-    /// borrow of the receiver (§2.5).
+    /// borrow of the receiver.
     pub(crate) fn register_impl(&mut self, def: &ImplDef) -> Option<()> {
         if !self.struct_defs.contains_key(&def.type_name.name) {
             self.record_error(TypeError::UnknownStruct {
@@ -829,7 +829,7 @@ impl TypeChecker {
 
         let struct_name = def.type_name.name.clone();
 
-        // Recognize the compiler-known `Drop` lang-item (§2.1). It is matched by name
+        // Recognize the compiler-known `Drop` lang-item. It is matched by name
         // here exactly like `Copy`/`Clone` derives, without the general trait system.
         if def
             .trait_name
@@ -847,10 +847,10 @@ impl TypeChecker {
 
         for method in &def.methods {
             // Consuming `self` still needs the by-value struct ABI for non-`Copy` types,
-            // so reject it there. A `Copy` struct is duplicated by value (§2.3), which is
+            // so reject it there. A `Copy` struct is duplicated by value, which is
             // ABI-identical to `&self`, so an owned `self` is accepted — this is what lets
             // an operator-trait method `func add(self, ...)` run on the scalar path
-            // (§3.10). `&mut self` is supported (§2.5) and recorded below.
+            // `&mut self` is supported and recorded below.
             if matches!(method.self_param, Some(SelfParam::Owned)) && !struct_is_copy {
                 self.errors.push(TypeError::UnsupportedSelfParam {
                     type_name: struct_name.clone(),
@@ -909,8 +909,8 @@ impl TypeChecker {
         }
 
         // A trait impl (other than the `Drop` lang-item) must conform to the trait's
-        // declaration (§3.9); `Drop` is validated separately above. An operator trait
-        // (§3.10) is a compiler-known lang-item like `Drop`, so it is validated and its
+        // declaration; `Drop` is validated separately above. An operator trait
+        // is a compiler-known lang-item like `Drop`, so it is validated and its
         // operator dispatch recorded separately rather than against `self.traits`.
         if let Some(t) = &def.trait_name {
             if t.name == DROP_TRAIT {
@@ -925,7 +925,7 @@ impl TypeChecker {
         Some(())
     }
 
-    /// Validate an operator-trait impl (§3.10) and record its operator dispatch.
+    /// Validate an operator-trait impl and record its operator dispatch.
     ///
     /// Operator traits (`Add`, `Sub`, …, `PartialEq`, `Comparable`) are compiler-known
     /// lang-items — the user writes only the `impl`, never a `trait` declaration. Each
@@ -944,7 +944,7 @@ impl TypeChecker {
             return;
         };
 
-        // The scalar operator path (§3.10) is defined for `Copy` receivers only.
+        // The scalar operator path is defined for `Copy` receivers only.
         if !struct_is_copy {
             self.record_error(TypeError::OperatorTraitRequiresCopy {
                 trait_name: trait_name.to_string(),
@@ -1019,7 +1019,7 @@ impl TypeChecker {
     }
 
     /// Verify each operator-trait impl also provides any required supertrait impl
-    /// (§3.10: `Comparable: PartialEq`). Runs after every impl is registered so the check
+    /// (`Comparable: PartialEq`). Runs after every impl is registered so the check
     /// is independent of source order.
     pub(crate) fn check_operator_supertraits(&mut self, items: &[ast_types::Item]) {
         for item in items {
@@ -1046,11 +1046,11 @@ impl TypeChecker {
         }
     }
 
-    /// Validate and record an `impl Drop for T` block (§2.1).
+    /// Validate and record an `impl Drop for T` block.
     ///
     /// A Drop type must contain exactly the destructor `drop(&mut self)` — no
     /// parameters, no return — and must not also be `Copy` (a type with a
-    /// destructor is moved, never duplicated, §2.3). The method itself is
+    /// destructor is moved, never duplicated). The method itself is
     /// registered by the normal `impl` path under `T__drop`; this only enforces the
     /// lang-item shape and records `T` as a Drop type for scope-exit insertion.
     fn register_drop_impl(&mut self, def: &ImplDef, struct_name: &str) {
@@ -1090,11 +1090,11 @@ impl TypeChecker {
         }
     }
 
-    /// Register a trait declaration's method signatures (§3.9).
+    /// Register a trait declaration's method signatures.
     ///
     /// Each signature is resolved in the trait's (non-generic) scope; `Self`-typed and
     /// associated-type positions are not supported this phase (they land with operator
-    /// traits and dispatch, §3.10/§3.17). A duplicate trait name or method is rejected.
+    /// traits and dispatch). A duplicate trait name or method is rejected.
     pub(crate) fn register_trait(&mut self, def: &TraitDef) {
         if self.traits.contains_key(&def.name.name) || is_builtin_type_name(&def.name.name) {
             self.record_error(TypeError::TraitAlreadyDefined {
@@ -1138,7 +1138,7 @@ impl TypeChecker {
             .insert(def.name.name.clone(), TraitInfo { methods });
     }
 
-    /// Validate an `impl Trait for Type` block against the trait's declaration (§3.9) and
+    /// Validate an `impl Trait for Type` block against the trait's declaration and
     /// record the `(trait, type)` pair so generic bounds on `Type` are satisfied.
     ///
     /// Runs after the impl's methods are registered as ordinary inherent methods (the
@@ -1203,7 +1203,7 @@ impl TypeChecker {
     }
 
     /// Compare one impl method's signature against its trait declaration, returning a
-    /// human-readable reason when they differ (§3.9). Parameter and return types are
+    /// human-readable reason when they differ. Parameter and return types are
     /// resolved in the (non-generic) impl scope, matching the trait's resolution.
     fn trait_signature_mismatch(
         &mut self,
@@ -1312,7 +1312,7 @@ impl TypeChecker {
 
             // An owned `self` on a non-`Copy` struct was rejected during registration and
             // never entered `functions`; skip it here. A `Copy` receiver's owned `self` is
-            // registered (§3.10) and checked exactly like `&self`.
+            // registered and checked exactly like `&self`.
             let func_ty = match self.functions.get(&mangled).cloned() {
                 Some(ty) => ty,
                 None => continue,
@@ -1327,7 +1327,7 @@ impl TypeChecker {
             self.current_function_return_type = Some(return_type.clone());
 
             // Bind `self` as a variable of the struct type. A `&mut self` receiver
-            // is mutable so the body may assign to `self.field` (§2.5); `&self` is
+            // is mutable so the body may assign to `self.field`; `&self` is
             // immutable.
             if method.self_param.is_some() {
                 let self_ty = Type::Struct(struct_name.clone());
@@ -1346,7 +1346,7 @@ impl TypeChecker {
 
             // `self` (`&self` or `&mut self`) and reference parameters outlive the
             // call, so a returned reference may borrow them (the receiver lifetime
-            // is applied to method outputs, §2.6).
+            // is applied to method outputs).
             self.current_fn_outliving = method
                 .params
                 .iter()
@@ -1403,7 +1403,7 @@ impl TypeChecker {
 }
 
 /// Unify a (possibly generic) parameter type against a concrete argument type,
-/// recording each type parameter's binding in `subst` (§3.8). Returns `false` when the
+/// recording each type parameter's binding in `subst`. Returns `false` when the
 /// structures do not align or a previously-bound parameter is contradicted, so the
 /// caller can report a type mismatch. A concrete leaf must match by the usual rules.
 pub(crate) fn unify_generic(param: &Type, arg: &Type, subst: &mut HashMap<String, Type>) -> bool {
@@ -1444,7 +1444,7 @@ pub(crate) fn unify_generic(param: &Type, arg: &Type, subst: &mut HashMap<String
 }
 
 /// Substitute every generic parameter in `ty` with its inferred concrete type from
-/// `subst` (§3.8). An unbound parameter is left as-is (the caller reports the failure).
+/// `subst`. An unbound parameter is left as-is (the caller reports the failure).
 pub(crate) fn substitute_generic(ty: &Type, subst: &HashMap<String, Type>) -> Type {
     match ty {
         Type::Generic(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
@@ -1473,7 +1473,7 @@ pub(crate) fn substitute_generic(ty: &Type, subst: &HashMap<String, Type>) -> Ty
     }
 }
 
-/// The distinct nominal name of a monomorphized generic-struct instance (§3.8),
+/// The distinct nominal name of a monomorphized generic-struct instance,
 /// e.g. `Pair<i32, f64>`. This name is internal to the checker (it never reaches a
 /// backend), so it is chosen for readable diagnostics rather than symbol safety.
 fn mangle_struct_instance(base: &str, args: &[Type]) -> String {
@@ -1482,7 +1482,7 @@ fn mangle_struct_instance(base: &str, args: &[Type]) -> String {
 }
 
 /// Rewrite a monomorphized method's signature: substitute the impl's type parameters
-/// and rename the receiver's `Struct(base)` to the concrete `Struct(mangled)` (§3.8).
+/// and rename the receiver's `Struct(base)` to the concrete `Struct(mangled)`.
 fn remap_method_type(ty: &Type, subst: &HashMap<String, Type>, base: &str, mangled: &str) -> Type {
     match ty {
         Type::Function { params, ret } => Type::Function {
@@ -1497,7 +1497,7 @@ fn remap_method_type(ty: &Type, subst: &HashMap<String, Type>, base: &str, mangl
 }
 
 /// Substitute type parameters and rename the base struct to its concrete instance
-/// within a single type, recursing through references, arrays, and tuples (§3.8).
+/// within a single type, recursing through references, arrays, and tuples.
 fn remap_type(ty: &Type, subst: &HashMap<String, Type>, base: &str, mangled: &str) -> Type {
     match ty {
         Type::Generic(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
@@ -1520,7 +1520,7 @@ fn remap_type(ty: &Type, subst: &HashMap<String, Type>, base: &str, mangled: &st
     }
 }
 
-/// Unify a template array length against an argument's (§3.8). A const-parameter length
+/// Unify a template array length against an argument's. A const-parameter length
 /// binds that parameter to the argument's concrete value (recorded as a [`Type::ConstValue`]
 /// in `subst`); two fixed lengths must be equal; a fixed template length against a symbolic
 /// argument (only inside another template) matches structurally by name.
@@ -1540,7 +1540,7 @@ fn unify_array_len(param: &ArrayLen, arg: &ArrayLen, subst: &mut HashMap<String,
     }
 }
 
-/// Substitute a template array length using an inferred substitution (§3.8): a const
+/// Substitute a template array length using an inferred substitution: a const
 /// parameter bound to a [`Type::ConstValue`] becomes a concrete `Fixed` length; anything
 /// else is left as-is.
 fn substitute_array_len(size: &ArrayLen, subst: &HashMap<String, Type>) -> ArrayLen {

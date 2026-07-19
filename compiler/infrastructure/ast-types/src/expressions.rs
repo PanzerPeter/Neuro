@@ -26,7 +26,7 @@ pub enum Expr {
     },
     Call {
         func: Box<Expr>,
-        /// Explicit turbofish generic arguments `f::<T, N>(...)` (§3.8). Empty when the
+        /// Explicit turbofish generic arguments `f::<T, N>(...)`. Empty when the
         /// call supplies none (arguments are then inferred). Positional against the
         /// callee's generic parameter list.
         type_args: Vec<GenericArg>,
@@ -56,7 +56,7 @@ pub enum Expr {
         field: Identifier,
         span: Span,
     },
-    /// Struct-variant enum construction: `Shape::Circle { radius: 5.0 }` (§3.5).
+    /// Struct-variant enum construction: `Shape::Circle { radius: 5.0 }`.
     ///
     /// Distinct from [`Expr::StructLiteral`] (a struct name) and [`Expr::Path`] (a
     /// unit/tuple variant or associated function): only a `Type::variant { ... }`
@@ -95,7 +95,7 @@ pub enum Expr {
         stmts: Vec<Stmt>,
         span: Span,
     },
-    /// Infinite loop in value position: `loop { ... break v }` (§3.7).
+    /// Infinite loop in value position: `loop { ... break v }`.
     ///
     /// Distinct from [`Stmt::Loop`]: only `loop` can yield a non-unit value
     /// (it has no fall-through exit, so it leaves solely via `break`). The loop
@@ -118,7 +118,7 @@ pub enum Expr {
         stmts: Vec<Stmt>,
         span: Span,
     },
-    /// Borrow expression `&place` / `&mut place` (§2.4, §2.5): takes a non-owning
+    /// Borrow expression `&place` / `&mut place`: takes a non-owning
     /// reference to `operand` without moving it. The operand is a place expression
     /// (an identifier); the result has type `&T` (or `&mut T` when `mutable`).
     Reference {
@@ -126,7 +126,7 @@ pub enum Expr {
         mutable: bool,
         span: Span,
     },
-    /// Dereference expression `*operand` (§2.5): reads the value the reference
+    /// Dereference expression `*operand`: reads the value the reference
     /// `operand` points at. The operand must have a reference type `&T`/`&mut T`;
     /// the result has type `T`.
     Deref {
@@ -136,7 +136,7 @@ pub enum Expr {
     /// Range expression `start..end` (exclusive) or `start..=end` (inclusive).
     ///
     /// Ranges are not a first-class value type: this node is only valid as the
-    /// argument to `string.slice` (§2.7). `for`-range loops carry their bounds
+    /// argument to `string.slice`. `for`-range loops carry their bounds
     /// directly on [`Stmt::ForRange`] and never produce this node.
     Range {
         start: Box<Expr>,
@@ -144,27 +144,27 @@ pub enum Expr {
         inclusive: bool,
         span: Span,
     },
-    /// Array literal `[e0, e1, ...]` (§3.1). All elements must share one type; the
+    /// Array literal `[e0, e1, ...]`. All elements must share one type; the
     /// array's length is the element count.
     ArrayLiteral {
         elements: Vec<Expr>,
         span: Span,
     },
-    /// Array indexing `object[index]` (§3.1). `object` evaluates to an array (or a
+    /// Array indexing `object[index]`. `object` evaluates to an array (or a
     /// borrow of one); `index` is an integer. Out-of-bounds access panics in debug
-    /// builds (§1.2).
+    /// builds.
     Index {
         object: Box<Expr>,
         index: Box<Expr>,
         span: Span,
     },
-    /// Tuple literal `(e0, e1, ...)` (§3.2). Always has at least two elements; a
+    /// Tuple literal `(e0, e1, ...)`. Always has at least two elements; a
     /// single parenthesized expression is [`Expr::Paren`] grouping instead.
     TupleLiteral {
         elements: Vec<Expr>,
         span: Span,
     },
-    /// Tuple element access `object.N` (§3.2), where `N` is a constant
+    /// Tuple element access `object.N`, where `N` is a constant
     /// non-negative index. Distinct from [`Expr::FieldAccess`], which names a
     /// struct field by identifier.
     TupleIndex {
@@ -172,7 +172,7 @@ pub enum Expr {
         index: usize,
         span: Span,
     },
-    /// The trailing remainder of an array destructuring pattern (§3.2): the
+    /// The trailing remainder of an array destructuring pattern: the
     /// `..rest` sub-slice produced when desugaring `val [a, b, ..rest] = arr`.
     ///
     /// Compiler-internal — never written in source. `array` is the source array
@@ -187,7 +187,7 @@ pub enum Expr {
         exact: bool,
         span: Span,
     },
-    /// Pattern-matching expression `match scrutinee { arm, ... }` (§3.6). Exhaustively
+    /// Pattern-matching expression `match scrutinee { arm, ... }`. Exhaustively
     /// deconstructs `scrutinee` against each arm's pattern(s) in order; the first arm
     /// whose pattern matches (and whose guard, if any, holds) supplies the value.
     Match {
@@ -197,19 +197,19 @@ pub enum Expr {
     },
 }
 
-/// One arm of a `match` expression (§3.6): one or more `|`-separated patterns, an
+/// One arm of a `match` expression: one or more `|`-separated patterns, an
 /// optional `if` guard, and a body expression. The arm fires when any pattern matches
 /// and the guard (if present) evaluates `true`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchArm {
-    /// `|`-separated alternative patterns. Alternatives may not bind (§3.6 scope).
+    /// `|`-separated alternative patterns. Alternatives may not bind.
     pub patterns: Vec<Pattern>,
     pub guard: Option<Box<Expr>>,
     pub body: Box<Expr>,
     pub span: Span,
 }
 
-/// A `match` arm pattern (§3.6).
+/// A `match` arm pattern.
 ///
 /// Payload sub-patterns of an enum variant are restricted to bindings and wildcards
 /// (a documented Phase-1E limit, mirroring enums' scalar-only payloads); a literal in
@@ -239,7 +239,7 @@ pub enum Pattern {
     },
 }
 
-/// The payload sub-patterns of an enum-variant pattern (§3.6), matching the variant's
+/// The payload sub-patterns of an enum-variant pattern, matching the variant's
 /// construction form.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EnumPatternPayload {
@@ -252,7 +252,7 @@ pub enum EnumPatternPayload {
     Struct(Vec<FieldPattern>),
 }
 
-/// One `field: sub_pattern` (or shorthand `field`) entry of a struct-variant pattern (§3.6).
+/// One `field: sub_pattern` (or shorthand `field`) entry of a struct-variant pattern.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldPattern {
     pub field: Identifier,

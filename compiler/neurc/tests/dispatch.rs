@@ -1,4 +1,4 @@
-// End-to-end static and dynamic dispatch (§3.17).
+// End-to-end static and dynamic dispatch.
 //
 // `impl Trait` is anonymous-generic sugar and is monomorphized away; `dyn Trait` is a
 // runtime trait object dispatched through a vtable. Each program compiles to a native
@@ -253,7 +253,7 @@ func main() -> i32 { 0 }
 }
 
 /// Object safety: a method consuming `self` by value cannot go behind a trait object —
-/// the spec's `Add`-style case (§3.17).
+/// the spec's `Add`-style case.
 #[test]
 fn trait_consuming_self_is_not_object_safe() {
     let test = CompileTest::new();

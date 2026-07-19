@@ -1,4 +1,4 @@
-// Neuro Programming Language - String slices `&string` (Phase 1.7 §2.7)
+// Neuro Programming Language - String slices `&string` (Phase 1.7)
 //
 // `&string` is a borrowed, non-owning view into UTF-8 data — a string slice.
 // There is no separate slice type: `&string` is both "borrow of an owned

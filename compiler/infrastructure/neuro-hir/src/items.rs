@@ -23,12 +23,12 @@ pub enum HirItem {
     Enum(HirEnum),
     Impl(HirImpl),
     Const(HirConst),
-    /// A trait's vtable layout (§3.17). Static-dispatch traits are fully erased, so
+    /// A trait's vtable layout. Static-dispatch traits are fully erased, so
     /// this item exists solely to give dynamic dispatch a stable method ordering.
     Trait(HirTrait),
 }
 
-/// The vtable contract of a declared trait (§3.17).
+/// The vtable contract of a declared trait.
 ///
 /// Trait declarations are otherwise erased — an `impl Trait for T` lowers to ordinary
 /// inherent methods. What dynamic dispatch additionally needs is a *canonical method
@@ -42,7 +42,7 @@ pub struct HirTrait {
     pub span: Span,
 }
 
-/// An enum definition (§3.5): an ordered list of variants. The order is the
+/// An enum definition: an ordered list of variants. The order is the
 /// declaration order, which backends use as the discriminant (tag) order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirEnum {
@@ -104,7 +104,7 @@ pub struct HirField {
 }
 
 /// An `impl` block. `trait_name` is `Some` for a trait implementation
-/// (`impl Drop for T`, §2.1) and `None` for an inherent block.
+/// (`impl Drop for T`) and `None` for an inherent block.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirImpl {
     pub type_name: String,
@@ -113,7 +113,7 @@ pub struct HirImpl {
     pub span: Span,
 }
 
-/// The `self` receiver of a method (§2.5). `None` on a [`HirMethod`] marks an
+/// The `self` receiver of a method. `None` on a [`HirMethod`] marks an
 /// associated function.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HirSelfParam {
@@ -137,7 +137,7 @@ pub struct HirMethod {
     pub span: Span,
 }
 
-/// A module-level compile-time constant (§1.3).
+/// A module-level compile-time constant.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirConst {
     pub name: String,

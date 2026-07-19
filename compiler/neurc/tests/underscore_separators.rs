@@ -1,4 +1,4 @@
-// Integration tests for underscore digit separators in numeric literals (§1.2)
+// Integration tests for underscore digit separators in numeric literals
 // Underscores are readability-only and are stripped by the lexer before parsing,
 // so a program using them must compile and produce the same value as without.
 mod common;

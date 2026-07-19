@@ -8,7 +8,7 @@ use crate::types::Type;
 
 /// A borrow held by a reference binding: the place it points at and whether the
 /// borrow is exclusive (`&mut`). Lets the borrow be released when the holding
-/// binding leaves scope (§2.4, §2.5).
+/// binding leaves scope.
 #[derive(Debug, Clone, PartialEq)]
 struct BorrowProvenance {
     place: String,
@@ -21,7 +21,7 @@ pub(crate) struct SymbolInfo {
     pub(crate) ty: Type,
     pub(crate) mutable: bool,
     /// The span at which this binding's value was moved out, or `None` while the
-    /// binding still owns its value. Drives use-after-move detection (§2.2).
+    /// binding still owns its value. Drives use-after-move detection.
     pub(crate) moved_at: Option<Span>,
     /// Borrows taken against this binding's place that outlive a single statement —
     /// each one held by a reference binding (`val r = &x`) until it leaves scope.
@@ -74,7 +74,7 @@ impl SymbolTable {
     /// Exit the current scope, releasing every borrow held by a binding that
     /// dies with it. A reference binding (`val r = &x`) holds a borrow against an
     /// outer place; once `r` is gone the borrow is over, so the outer place's
-    /// persistent borrow count is decremented (§2.4, §2.5). Borrows targeting a
+    /// persistent borrow count is decremented. Borrows targeting a
     /// place that lived in the same dying scope need no release — the place is
     /// gone too — so a target absent from the surviving scopes is simply skipped.
     pub(crate) fn pop_scope(&mut self) {
@@ -125,7 +125,7 @@ impl SymbolTable {
 
     /// Total borrows currently active against `place` — persistent plus
     /// transient — as `(shared, exclusive)`. `None` when the name is not a live
-    /// binding (e.g. a constant or an undefined name). Drives the §2.4/§2.5
+    /// binding (e.g. a constant or an undefined name). Drives the
     /// coexistence checks at each borrow site.
     pub(crate) fn borrow_counts(&self, place: &str) -> Option<(u32, u32)> {
         let info = self.lookup(place)?;
@@ -176,7 +176,7 @@ impl SymbolTable {
     /// The place `holder` borrows, if `holder` is a reference binding created by a
     /// direct `&place` initializer (`val holder = &place`). Lets the
     /// returned-reference check trace a returned local reference back to the place
-    /// it points into and reject it when that place is itself function-local (§2.6).
+    /// it points into and reject it when that place is itself function-local.
     pub(crate) fn borrow_provenance(&self, holder: &str) -> Option<String> {
         self.lookup(holder)
             .and_then(|info| info.borrows.as_ref().map(|prov| prov.place.clone()))
@@ -204,7 +204,7 @@ impl SymbolTable {
 
     /// Drop every transient borrow. Called at the end of each statement: a borrow
     /// passed to a call or used in a condition lives only for that statement, so
-    /// it must not block a later borrow of the same place (§2.4, §2.5). Persistent
+    /// it must not block a later borrow of the same place. Persistent
     /// borrows (held by live reference bindings) are untouched.
     pub(crate) fn clear_transient_borrows(&mut self) {
         for scope in &mut self.scopes {

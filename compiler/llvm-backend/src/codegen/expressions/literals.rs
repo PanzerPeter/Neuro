@@ -102,7 +102,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .bool_type()
                 .const_int(*val as u64, false)
                 .into()),
-            // §1.2 — a `char` is its 32-bit Unicode scalar value held in an i32.
+            // A `char` is its 32-bit Unicode scalar value held in an i32.
             shared_types::Literal::Char(c) => {
                 Ok(self.context.i32_type().const_int(*c as u64, false).into())
             }
@@ -433,7 +433,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             // Float to Float. Direction is chosen by bit width, not a fixed
-            // F32/F64 pair, so f16/bf16 widen and narrow correctly (§1.2):
+            // F32/F64 pair, so f16/bf16 widen and narrow correctly:
             // widening uses `fpext`, narrowing `fptrunc`. f16<->bf16 share a width
             // but differ in format — LLVM has no direct conversion, so route
             // through f32 (widen then narrow).
@@ -468,7 +468,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         .into())
                 }
             }
-            // Int to Int, including casts to/from `char` (a 32-bit code point) (§1.2).
+            // Int to Int, including casts to/from `char` (a 32-bit code point).
             // `is_int_like` covers integers plus `char`; widening uses zero-extension
             // for unsigned and `char`, sign-extension otherwise.
             (t1, t2) if t1.is_int_like() && t2.is_int_like() => {

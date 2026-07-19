@@ -1,7 +1,7 @@
-// Codegen for fixed-size arrays `[T; N]` (§3.1): literals, indexing, element
+// Codegen for fixed-size arrays `[T; N]`: literals, indexing, element
 // assignment, and `for x in arr` iteration. Arrays lower to LLVM `[N x T]`
 // aggregates stored in an alloca; indexing is a `getelementptr` + load/store with
-// a debug-build bounds guard routed through the panic runtime (§1.2).
+// a debug-build bounds guard routed through the panic runtime.
 
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
@@ -13,7 +13,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// Lower an array literal `[e0, e1, ...]` to an `[N x T]` aggregate value (§3.1).
+    /// Lower an array literal `[e0, e1, ...]` to an `[N x T]` aggregate value.
     /// Each element is built at the array's element type recorded by the type pass;
     /// a surrounding `val a: [T; N] = ...` retargets the element width via
     /// `coerce_if_needed`, mirroring the scalar initializer path.
@@ -46,7 +46,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(agg.into())
     }
 
-    /// Lower an array rest remainder `..rest` (§3.2): build a fresh `[T; N - start]`
+    /// Lower an array rest remainder `..rest`: build a fresh `[T; N - start]`
     /// aggregate holding elements `start..N` of the source array. `rest_ty` is the
     /// already-sized remainder type carried by the HIR node. Emitted from the
     /// `val [a, b, ..rest] = arr` desugar; arity was validated upstream.
@@ -97,7 +97,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(agg.into())
     }
 
-    /// Lower an array index read `object[index]` (§3.1): bounds-check (debug), then
+    /// Lower an array index read `object[index]`: bounds-check (debug), then
     /// `getelementptr` + load of the element.
     pub(crate) fn codegen_index(
         &mut self,
@@ -114,7 +114,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(format!("failed to load array element: {}", e)))
     }
 
-    /// Lower an array element assignment `target[index] = value` (§3.1): bounds-check
+    /// Lower an array element assignment `target[index] = value`: bounds-check
     /// (debug), then `getelementptr` + store.
     pub(crate) fn codegen_index_assignment(
         &mut self,
@@ -154,7 +154,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// Lower `for x in arr` / `for x in &arr` (§3.1): a counted loop over the array
+    /// Lower `for x in arr` / `for x in &arr`: a counted loop over the array
     /// storage, binding `iterator` to a copy of each element in turn. Mirrors
     /// `codegen_for_range` minus the user-visible bound expressions.
     pub(crate) fn codegen_for_each(
@@ -313,7 +313,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Resolve the storage pointer to an array place plus its element type and length.
     ///
     /// An owned-array identifier uses its alloca directly; a borrow of an array
-    /// (`&[T; N]`) evaluates the operand to the array's address (§2.4); any other
+    /// (`&[T; N]`) evaluates the operand to the array's address; any other
     /// array-valued expression is materialised into a fresh temporary.
     fn array_place_ptr(
         &mut self,
@@ -356,7 +356,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Compute the address of element `index` within an array at `base_ptr`, emitting
     /// a debug-build bounds guard (`index < size`, unsigned) that panics on violation
-    /// (§1.2). `offset` keys the panic diagnostic's source location.
+    /// `offset` keys the panic diagnostic's source location.
     fn array_element_ptr(
         &mut self,
         base_ptr: PointerValue<'ctx>,
@@ -371,7 +371,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let idx64 = self.widen_index_to_i64(idx_val, &idx_sem)?;
 
         // Debug builds trap an out-of-bounds access; release builds omit the check
-        // (matching the integer-overflow policy, §1.2). A negative signed index
+        // (matching the integer-overflow policy). A negative signed index
         // sign-extends to a large unsigned value and so fails the `< size` test.
         if self.overflow_checks {
             let size_c = i64t.const_int(size as u64, false);

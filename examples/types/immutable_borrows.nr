@@ -1,4 +1,4 @@
-// Neuro Programming Language - Immutable borrows (Phase 1.7 §2.4)
+// Neuro Programming Language - Immutable borrows (Phase 1.7)
 //
 // An immutable borrow `&T` is a non-owning reference to a value. It lets a
 // function read a value without taking ownership, so the caller keeps using

@@ -56,7 +56,7 @@ impl OptimizationLevelSetting {
 ///
 /// * `optimization` - Optimization level (also selects overflow trapping at -O0)
 /// * `source` / `source_path` - Original module text and path, used only to render
-///   `file:line:col` in panic-family runtime diagnostics (§1.2)
+///   `file:line:col` in panic-family runtime diagnostics
 ///
 /// # Examples
 ///
@@ -92,7 +92,7 @@ pub fn compile(
         }
     }
 
-    // Collect each enum's payload word count `W` (§3.5): the widest variant's field
+    // Collect each enum's payload word count `W`: the widest variant's field
     // count, so every value of the enum maps to one `{ i32, [W x i64] }` aggregate.
     let mut enum_words: HashMap<String, u32> = HashMap::new();
     for item in items {
@@ -130,7 +130,7 @@ pub fn compile(
                 let struct_name = &impl_def.type_name;
                 for method in &impl_def.methods {
                     // An owned `self` reaches codegen only on a `Copy` receiver
-                    // (operator-trait methods, §3.10); it needs a registered signature
+                    // (operator-trait methods); it needs a registered signature
                     // like `&self`. Non-`Copy` owned `self` was rejected by the checker.
                     let mangled = format!("{}__{}", struct_name, method.name);
                     let mut param_types: Vec<Type> = Vec::new();
@@ -158,7 +158,7 @@ pub fn compile(
         }
     }
 
-    // Collect each declared trait's method order (§3.17). The position of a method in
+    // Collect each declared trait's method order. The position of a method in
     // this list is its vtable slot, so every implementor lays out its table identically
     // and a virtual call can index a fixed offset.
     let mut trait_methods: HashMap<String, Vec<String>> = HashMap::new();
@@ -168,7 +168,7 @@ pub fn compile(
         }
     }
 
-    // Collect the structs implementing `Drop` (§2.1) so codegen can insert their
+    // Collect the structs implementing `Drop` so codegen can insert their
     // scope-exit destructor calls. Semantic analysis has already validated the
     // `impl Drop for T { func drop(&mut self) }` shape and the no-Copy rule.
     let mut drop_types: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -189,13 +189,13 @@ pub fn compile(
     codegen_ctx.set_trait_methods(trait_methods);
 
     // Supply source so panic-family builtins can render `file:line:col` in their
-    // runtime diagnostics (§1.2).
+    // runtime diagnostics.
     codegen_ctx.set_source(source_location::SourceFile::new(
         source_path.to_string(),
         source.to_string(),
     ));
 
-    // Debug builds (-O0) trap on integer overflow; release builds wrap (§1.2).
+    // Debug builds (-O0) trap on integer overflow; release builds wrap.
     codegen_ctx.set_overflow_checks(optimization == OptimizationLevelSetting::O0);
 
     // Emit module-level constants as LLVM global constants before any function.
@@ -208,7 +208,7 @@ pub fn compile(
 
     // Pre-declare every function/method signature before generating any body, so a
     // call resolves regardless of definition order. Monomorphized generic instances
-    // (§3.8) may be called by — or call — items appearing before them, so lazy
+    // may be called by — or call — items appearing before them, so lazy
     // per-item declaration is not sufficient.
     for item in items {
         match item {
@@ -224,7 +224,7 @@ pub fn compile(
 
     // Emit each `(trait, type)` method table once every method signature is declared but
     // before any body is generated, so a trait object built anywhere in the module finds
-    // its vtable already present regardless of item order (§3.17).
+    // its vtable already present regardless of item order.
     codegen_ctx.emit_vtables(items)?;
 
     // Generate code for each function and impl method

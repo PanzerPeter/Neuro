@@ -1,4 +1,4 @@
-// Integer primitive methods — wrapping_* / saturating_* / .shr(n) (Phase 1.5 §1.2, §1.4)
+// Integer primitive methods — wrapping_* / saturating_* / .shr(n) (Phase 1.5)
 // End-to-end coverage: these dispatch through the builtin-method intrinsic path and lower
 // to LLVM arithmetic / saturating intrinsics. Tests compile in the default (debug) profile,
 // so the wrapping cases also prove they never trap on overflow.

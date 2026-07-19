@@ -12,7 +12,7 @@ use crate::types::Type;
 pub(crate) struct TypeMapper<'ctx> {
     context: &'ctx LLVMContext,
     /// Enum name → payload word count `W`: the number of 64-bit slots a value of
-    /// that enum reserves for variant data, sized to its largest variant (§3.5).
+    /// that enum reserves for variant data, sized to its largest variant.
     /// Populated before code generation so every enum type maps to a single,
     /// consistent `{ i32, [W x i64] }` aggregate.
     enum_words: HashMap<String, u32>,
@@ -32,7 +32,7 @@ impl<'ctx> TypeMapper<'ctx> {
     }
 
     /// The LLVM tagged-union type for a named enum: `{ i32 tag, [W x i64] payload }`
-    /// (§3.5). The tag is the variant discriminant; the payload reserves `W` 64-bit
+    /// The tag is the variant discriminant; the payload reserves `W` 64-bit
     /// slots — one per field of the widest variant — into which scalar payload
     /// values are packed. `W == 0` (an all-unit enum) yields a zero-length array.
     pub(crate) fn enum_struct_type(
@@ -49,7 +49,7 @@ impl<'ctx> TypeMapper<'ctx> {
             .struct_type(&[tag_ty.into(), payload_ty.into()], false))
     }
 
-    /// The LLVM layout of a trait-object reference `&dyn Trait` (§3.17):
+    /// The LLVM layout of a trait-object reference `&dyn Trait`:
     /// `{ ptr data, ptr vtable }`. The data pointer addresses the concrete value's
     /// storage; the vtable pointer addresses that concrete type's method table for the
     /// trait, so a call indexes a fixed slot regardless of which type is behind it.
@@ -71,14 +71,14 @@ impl<'ctx> TypeMapper<'ctx> {
             Type::U16 => Ok(self.context.i16_type().into()),
             Type::U32 => Ok(self.context.i32_type().into()),
             Type::U64 => Ok(self.context.i64_type().into()),
-            // Floating point. `f16`/`bf16` lower to LLVM `half` / `bfloat` (§1.2).
+            // Floating point. `f16`/`bf16` lower to LLVM `half` / `bfloat`.
             Type::F16 => Ok(self.context.f16_type().into()),
             Type::BF16 => Ok(self.context.bf16_type().into()),
             Type::F32 => Ok(self.context.f32_type().into()),
             Type::F64 => Ok(self.context.f64_type().into()),
             // Other types
             Type::Bool => Ok(self.context.bool_type().into()),
-            // `char` is a 32-bit Unicode scalar value (§1.2).
+            // `char` is a 32-bit Unicode scalar value.
             Type::Char => Ok(self.context.i32_type().into()),
             // String fat pointer: { ptr, i64 } where ptr points to null-terminated UTF-8
             // bytes in read-only memory and i64 holds the byte count excluding the null.
@@ -92,28 +92,28 @@ impl<'ctx> TypeMapper<'ctx> {
                     .into())
             }
             // A reference to a trait object is a fat pointer `{ data ptr, vtable ptr }`
-            // (§3.17): `dyn Trait` is unsized, so the reference must additionally carry
+            // `dyn Trait` is unsized, so the reference must additionally carry
             // the method table that selects the concrete implementation at runtime.
             Type::Reference(inner) if matches!(**inner, Type::DynObject(_)) => {
                 Ok(self.dyn_ref_type().into())
             }
-            // An immutable borrow `&T` is an opaque pointer to the referent's storage (§2.4).
+            // An immutable borrow `&T` is an opaque pointer to the referent's storage.
             // LLVM 20 pointers are untyped, so every reference maps to the same `ptr`.
             Type::Reference(_) => Ok(self
                 .context
                 .ptr_type(inkwell::AddressSpace::default())
                 .into()),
-            // A bare `dyn Trait` has no size; only `&dyn Trait` is representable (§3.17).
+            // A bare `dyn Trait` has no size; only `&dyn Trait` is representable.
             Type::DynObject(name) => Err(CodegenError::UnsupportedType(format!(
                 "`dyn {}` is unsized and must be used behind a reference",
                 name
             ))),
-            // Fixed-size array `[T; N]` → LLVM `[N x T]` aggregate (§3.1).
+            // Fixed-size array `[T; N]` → LLVM `[N x T]` aggregate.
             Type::Array { element, size } => {
                 let elem_llvm = self.map_type(element)?;
                 Ok(elem_llvm.array_type(*size as u32).into())
             }
-            // Tuple `(T1, T2, ...)` → anonymous LLVM struct `{ T1, T2, ... }` (§3.2).
+            // Tuple `(T1, T2, ...)` → anonymous LLVM struct `{ T1, T2, ... }`.
             // Elements are restricted to Copy non-struct types at resolution, so each
             // maps directly here (a struct element would need field definitions and is
             // not yet permitted — same restriction as arrays).
@@ -137,7 +137,7 @@ impl<'ctx> TypeMapper<'ctx> {
                 "struct '{}' as a function parameter or return type is not yet supported",
                 name
             ))),
-            // Enum `{ i32 tag, [W x i64] payload }` (§3.5). Unlike structs, the enum
+            // Enum `{ i32 tag, [W x i64] payload }`. Unlike structs, the enum
             // layout is self-contained (the word count comes from `enum_words`), so an
             // enum maps directly here and works as a parameter, return, or field type.
             Type::Enum(name) => Ok(self.enum_struct_type(name)?.into()),

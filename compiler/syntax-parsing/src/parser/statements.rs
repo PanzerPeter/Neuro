@@ -7,7 +7,7 @@ use crate::precedence::Precedence;
 
 use super::Parser;
 
-/// A binding pattern on the left of a destructuring `val`/`mut` (§3.2). Lives only
+/// A binding pattern on the left of a destructuring `val`/`mut`. Lives only
 /// during parsing — it is expanded to ordinary variable declarations and never
 /// reaches the AST.
 enum DestructurePattern {
@@ -26,7 +26,7 @@ enum DestructurePattern {
     Array(Vec<ArrayPatternElem>),
 }
 
-/// One element of an array destructuring pattern (§3.2).
+/// One element of an array destructuring pattern.
 enum ArrayPatternElem {
     /// A positional sub-pattern.
     Pattern(DestructurePattern),
@@ -290,7 +290,7 @@ impl Parser {
         })
     }
 
-    /// Parse a while statement, optionally prefixed with a loop `label` (§3.7).
+    /// Parse a while statement, optionally prefixed with a loop `label`.
     pub(crate) fn parse_while_stmt(
         &mut self,
         start_span: Span,
@@ -315,7 +315,7 @@ impl Parser {
         })
     }
 
-    /// Parse a loop statement: `loop { ... }` (§3.7), optionally `label`ed.
+    /// Parse a loop statement: `loop { ... }`, optionally `label`ed.
     pub(crate) fn parse_loop_stmt(
         &mut self,
         start_span: Span,
@@ -336,7 +336,7 @@ impl Parser {
 
     /// Parse a loop body, tracking `label` as in-scope for the duration so a
     /// `break label` inside is recognised as a labeled break rather than a
-    /// value-carrying `break label` (§3.7). An unlabeled loop parses normally.
+    /// value-carrying `break label`. An unlabeled loop parses normally.
     fn parse_labeled_block(&mut self, label: Option<&Identifier>) -> ParseResult<Vec<Stmt>> {
         match label {
             Some(label) => {
@@ -350,7 +350,7 @@ impl Parser {
     }
 
     /// Parse a for-range statement: `for <ident> in <expr>..<expr> { ... }`,
-    /// optionally prefixed with a loop `label` (§3.7).
+    /// optionally prefixed with a loop `label`.
     pub(crate) fn parse_for_stmt(
         &mut self,
         start_span: Span,
@@ -378,8 +378,8 @@ impl Parser {
 
         // The iterable expression must not be a struct literal or `{` would be
         // consumed. Parse it at `Range` precedence so a `..` / `..=` separator is
-        // not swallowed as a range expression (§1.6, §2.7); the operator (if any)
-        // then distinguishes a numeric range from an array iterable (§3.1).
+        // not swallowed as a range expression; the operator (if any)
+        // then distinguishes a numeric range from an array iterable.
         self.no_struct_lit = true;
         let start = self.parse_expr(Precedence::Range)?;
         self.skip_newlines();
@@ -391,7 +391,7 @@ impl Parser {
             self.advance();
             false
         } else {
-            // No range operator: iterate the parsed expression as an array (§3.1).
+            // No range operator: iterate the parsed expression as an array.
             self.no_struct_lit = false;
             let body = self.parse_labeled_block(label.as_ref())?;
             let end_span = body.last().map(stmt_span).unwrap_or(start.span());
@@ -426,7 +426,7 @@ impl Parser {
     }
 
     /// Parse a `break` statement after its keyword: an optional in-scope loop
-    /// `label`, then an optional value-producing expression `break v` (§3.7).
+    /// `label`, then an optional value-producing expression `break v`.
     ///
     /// `break label` and `break value` collide syntactically (both a bare token
     /// after `break`), so a leading identifier is consumed as a label only when it
@@ -471,7 +471,7 @@ impl Parser {
         })
     }
 
-    /// Parse a trailing loop label on `break` / `continue` (`break outer`, §3.7).
+    /// Parse a trailing loop label on `break` / `continue` (`break outer`).
     ///
     /// The label, when present, sits on the same logical line as the keyword, so
     /// the immediately following token is inspected without skipping newlines —
@@ -487,7 +487,7 @@ impl Parser {
     }
 
     /// Parse a labeled loop when the statement begins with `ident : <loop-keyword>`
-    /// (`outer: for ...`, §3.7). Returns `None` (consuming nothing) when the
+    /// (`outer: for ...`). Returns `None` (consuming nothing) when the
     /// identifier does not introduce a loop label, so the caller falls through to
     /// its normal identifier-statement handling.
     fn try_parse_labeled_loop(&mut self) -> ParseResult<Option<Stmt>> {
@@ -608,7 +608,7 @@ impl Parser {
                 Ok(Stmt::Continue { label, span })
             }
             TokenKind::Identifier(_) => {
-                // A loop label (`outer: for ...`, §3.7) is the only statement form
+                // A loop label (`outer: for ...`) is the only statement form
                 // where an identifier is immediately followed by a colon, so it is
                 // unambiguous to dispatch on `ident : <loop-keyword>` here.
                 if let Some(stmt) = self.try_parse_labeled_loop()? {
@@ -651,7 +651,7 @@ impl Parser {
                 }
 
                 let expr = self.parse_expr(Precedence::Lowest)?;
-                // Array element assignment `arr[i] = v` (§3.1): the parsed expression
+                // Array element assignment `arr[i] = v`: the parsed expression
                 // is an index whose object is a bare binding, followed by `=`.
                 if let Expr::Index { object, index, .. } = &expr {
                     if matches!(object.as_ref(), Expr::Identifier(_))
@@ -697,7 +697,7 @@ impl Parser {
                 Ok(Stmt::Expr(expr))
             }
             // A leading `*` is a dereference: either an assignment through a
-            // mutable reference (`*r = value`, §2.5) or a deref expression statement.
+            // mutable reference (`*r = value`) or a deref expression statement.
             TokenKind::Star => {
                 let start_span = token.span;
                 let expr = self.parse_expr(Precedence::Lowest)?;
@@ -728,7 +728,7 @@ impl Parser {
 
     /// Parse one source statement and append the resulting AST statement(s) to
     /// `out`. Most statements append exactly one node, but a tuple-destructuring
-    /// bind `val (a, b) = e` (§3.2) desugars to several — a temp binding plus one
+    /// bind `val (a, b) = e` desugars to several — a temp binding plus one
     /// projection per leaf — so it is spliced in here rather than forcing the
     /// single-`Stmt` shape of [`Parser::parse_stmt`].
     pub(crate) fn parse_stmt_into(&mut self, out: &mut Vec<Stmt>) -> ParseResult<()> {
@@ -736,7 +736,7 @@ impl Parser {
         if matches!(self.peek_kind(), Some(TokenKind::Val | TokenKind::Mut)) {
             let mutable = matches!(self.peek_kind(), Some(TokenKind::Mut));
             // A tuple `(`, array `[`, or struct `Name {` pattern after the keyword is a
-            // destructuring bind (§3.2); anything else is an ordinary variable
+            // destructuring bind; anything else is an ordinary variable
             // declaration (`val name`, `val name: T`).
             if self.starts_destructure_pattern() {
                 let kw = self.advance().ok_or(ParseError::UnexpectedEof {
@@ -784,7 +784,7 @@ impl Parser {
         (first, second)
     }
 
-    /// Desugar a destructuring bind `val PATTERN = expr` (§3.2), where `PATTERN` is a
+    /// Desugar a destructuring bind `val PATTERN = expr`, where `PATTERN` is a
     /// tuple, array, or struct pattern. The cursor sits on the pattern's opening
     /// token. The right-hand side is bound once to a fresh immutable temporary, then
     /// each pattern leaf is bound to a projection of that temporary — so the only new
@@ -876,7 +876,7 @@ impl Parser {
         Ok(DestructurePattern::Tuple(subs))
     }
 
-    /// Parse a struct pattern `Name { field, field, ... }` (§3.2). Each field is a
+    /// Parse a struct pattern `Name { field, field, ... }`. Each field is a
     /// shorthand binding: `Point { x, y }` binds `x` and `y` to the matching fields.
     /// The cursor sits on the type-name identifier.
     fn parse_struct_pattern(&mut self) -> ParseResult<DestructurePattern> {
@@ -925,7 +925,7 @@ impl Parser {
         Ok(DestructurePattern::Struct { fields })
     }
 
-    /// Parse an array pattern `[p0, p1, ..rest]` (§3.2). Elements bind positionally;
+    /// Parse an array pattern `[p0, p1, ..rest]`. Elements bind positionally;
     /// an optional trailing rest `..` discards or `..name` captures the remainder. At
     /// most one rest is allowed and it must come last. The cursor sits on the `[`.
     fn parse_array_pattern(&mut self) -> ParseResult<DestructurePattern> {

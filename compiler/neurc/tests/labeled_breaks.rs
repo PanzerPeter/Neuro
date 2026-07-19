@@ -1,4 +1,4 @@
-// Labeled break / continue tests (§3.7): `outer: for ... { break outer }`.
+// Labeled break / continue tests: `outer: for ... { break outer }`.
 mod common;
 use common::CompileTest;
 

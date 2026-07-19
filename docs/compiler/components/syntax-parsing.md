@@ -67,7 +67,7 @@ pub struct MethodDef {
 
 pub enum SelfParam {
     Ref,    // &self — supported (by value, read-only)
-    RefMut, // &mut self — supported (by pointer, mutates in place, §2.5)
+    RefMut, // &mut self — supported (by pointer, mutates in place)
     Owned,  // self — rejected (needs the by-value struct ABI)
 }
 ```

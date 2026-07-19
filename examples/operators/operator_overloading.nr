@@ -1,4 +1,4 @@
-// Operator overloading via operator traits (§3.10).
+// Operator overloading via operator traits.
 //
 // Operators on a user type are sugar for trait method calls. A `Copy` struct that
 // implements `Add` / `Sub` / `Neg` / `PartialEq` gets `+`, `-`, unary `-`, and

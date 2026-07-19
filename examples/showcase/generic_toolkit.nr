@@ -2,12 +2,12 @@
 // with prior features.
 //
 // Cumulative integration example combining:
-//   generic structs + generic inherent impls with monomorphization (§3.8)
-//   · generic functions with monomorphization (§3.8)
-//   · const generic parameters + turbofish + `where` value predicates (§3.8)
-//   · fixed-size arrays (§3.1)
-//   · enums with associated data + pattern matching (§3.5, §3.6)
-//   · tuples as generic type arguments (§3.2)
+//   generic structs + generic inherent impls with monomorphization
+//   · generic functions with monomorphization
+//   · const generic parameters + turbofish + `where` value predicates
+//   · fixed-size arrays
+//   · enums with associated data + pattern matching
+//   · tuples as generic type arguments
 //   · if-expressions and implicit returns
 //
 // Each generic template below (function, struct, or impl) is emitted once per

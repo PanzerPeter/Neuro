@@ -1,4 +1,4 @@
-// End-to-end tests for struct and array destructuring patterns (§3.2): struct
+// End-to-end tests for struct and array destructuring patterns: struct
 // field binds `val Point { x, y } = p`, positional array binds `val [a, b] = arr`,
 // the trailing rest `val [first, ..rest] = arr`, nested patterns, and the arity
 // rules. Tuple destructuring is covered separately in `tuples.rs`.

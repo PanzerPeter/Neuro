@@ -14,7 +14,7 @@ val total: f64 = 3.14 + 2.86  // 6.00
 **Types**: Works with numeric types (integers and floats), and with `string` (concatenation)
 **Requirement**: Both operands must be the same type
 
-On two strings, `+` is **concatenation** (§2.7): it allocates a new owned, immutable `string`
+On two strings, `+` is **concatenation**: it allocates a new owned, immutable `string`
 holding the left operand's bytes followed by the right operand's. A `&string` slice may stand in
 for either side. Operands are read, not consumed, so they remain usable afterward.
 
@@ -515,7 +515,7 @@ if Vec2 { x: 1, y: 2 } == Vec2 { x: 1, y: 2 } { }   // via PartialEq::eq
 | `==` `!=` | `PartialEq` | `eq` `ne` |
 | `<` `<=` `>` `>=` | `Comparable` | `lt` `le` `gt` `ge` |
 
-Rules and limits (§3.10):
+Rules and limits:
 
 - The receiver type must be `Copy` (the scalar path). Each operator dispatches to its own
   method — implement the method for every operator you use.

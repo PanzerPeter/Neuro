@@ -1,4 +1,4 @@
-// End-to-end tests for the `char` primitive type (§1.2).
+// End-to-end tests for the `char` primitive type.
 
 mod common;
 use common::CompileTest;
@@ -100,7 +100,7 @@ func main() -> i32 {
 
 #[test]
 fn char_arithmetic_is_rejected() {
-    // §1.2: `char` has no arithmetic — compute on the integer code point instead.
+    // `char` has no arithmetic — compute on the integer code point instead.
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {

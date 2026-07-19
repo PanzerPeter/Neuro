@@ -1,4 +1,4 @@
-// Neuro Programming Language - Move semantics by default (Phase 1.7 §2.2)
+// Neuro Programming Language - Move semantics by default (Phase 1.7)
 //
 // Non-Copy owned values (today: `string`) are MOVED when bound, assigned,
 // returned, or passed by value. After a move the source binding is invalid;

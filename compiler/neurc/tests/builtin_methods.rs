@@ -1,4 +1,4 @@
-// Builtin method dispatch on primitive & string types (Phase 1.5 §2, §2.7)
+// Builtin method dispatch on primitive & string types (Phase 1.5)
 // End-to-end coverage for the first intrinsic: `string.len()`.
 mod common;
 use common::CompileTest;
@@ -59,7 +59,7 @@ func main() -> i32 {
 fn string_len_counts_utf8_bytes_not_codepoints() {
     let test = CompileTest::new();
     // "héllo": h(1) é(2, U+00E9) l(1) l(1) o(1) = 6 UTF-8 bytes, 5 codepoints.
-    // `.len()` is a byte count (§2.7), so it must report 6, not 5.
+    // `.len()` is a byte count, so it must report 6, not 5.
     let source = r#"
 func main() -> i32 {
     val n: u64 = "héllo".len()
@@ -78,7 +78,7 @@ fn string_len_includes_interior_nul_byte() {
     let test = CompileTest::new();
     // "a\0b" has three content bytes; a consumer that stopped at the NUL terminator
     // would see length 1. `.len()` is authoritative and must report 3, proving that
-    // string consumers must not rely on null termination (§2.7 literal/runtime guarantee).
+    // string consumers must not rely on null termination (literal/runtime guarantee).
     let source = r#"
 func main() -> i32 {
     val s: string = "a\0b"

@@ -1,4 +1,4 @@
-// Struct shorthand + functional-update syntax (§3.3, Phase 2A)
+// Struct shorthand + functional-update syntax (Phase 2A)
 // `Point { x, y }` shorthand and `Point { x: 1.0, ..p }` update syntax.
 mod common;
 use common::CompileTest;

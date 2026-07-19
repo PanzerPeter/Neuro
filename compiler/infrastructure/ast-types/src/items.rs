@@ -6,7 +6,7 @@ use super::expressions::Expr;
 use super::statements::Stmt;
 use super::types::Type;
 
-/// What a generic parameter binds (§3.8).
+/// What a generic parameter binds.
 ///
 /// A `Type` parameter (`T`) is substituted with a concrete type at each instantiation.
 /// A `Const` parameter (`const N: u32`) is a compile-time *value* of the carried
@@ -20,12 +20,12 @@ pub enum GenericParamKind {
     Const(Type),
 }
 
-/// A single generic parameter in a `<...>` list (§3.8): `T`, `T: Bound + Bound`, or
+/// A single generic parameter in a `<...>` list: `T`, `T: Bound + Bound`, or
 /// `const N: u32`.
 ///
 /// `bounds` records the trait names syntactically (from either the inline `T: Bound`
 /// form or a `where` clause), but they are **not enforced** in this phase — the trait
-/// system (§3.9) does not exist yet, so a bound is parsed for forward compatibility and
+/// system does not exist yet, so a bound is parsed for forward compatibility and
 /// ignored by later passes. `kind` distinguishes a type parameter from a const (value)
 /// parameter.
 #[derive(Debug, Clone, PartialEq)]
@@ -38,20 +38,20 @@ pub struct GenericParam {
 
 /// Function definition.
 ///
-/// `generics` is the `<T, U>` type-parameter list (§3.8); it is empty for an ordinary
+/// `generics` is the `<T, U>` type-parameter list; it is empty for an ordinary
 /// (non-generic) function. A generic function is a *template* — later passes
 /// monomorphize it into one concrete function per distinct set of type arguments.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDef {
     pub name: Identifier,
     pub generics: Vec<GenericParam>,
-    /// Explicit lifetime parameters (§2.6), the `'a` names in `func f<'a>(...)`.
+    /// Explicit lifetime parameters, the `'a` names in `func f<'a>(...)`.
     /// Kept separate from `generics` because lifetimes are a distinct namespace and,
     /// unlike type/const parameters, do NOT drive monomorphization — a function with
     /// only lifetime parameters is an ordinary concrete function. Erased after
-    /// borrow-check; the elision-based outlives analysis (§2.6) does the real work.
+    /// borrow-check; the elision-based outlives analysis does the real work.
     pub lifetimes: Vec<Identifier>,
-    /// Value predicates from a `where` clause (§3.8), e.g. `where N > 0`. Each is a
+    /// Value predicates from a `where` clause, e.g. `where N > 0`. Each is a
     /// boolean expression over the function's const parameters, evaluated at every
     /// instantiation against the concrete values; a violated predicate is an error at
     /// the offending call. Trait bounds in a `where` clause are folded into the
@@ -97,20 +97,20 @@ pub struct FieldDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructDef {
     pub name: Identifier,
-    /// `generics` is the `<T, U>` type-parameter list (§3.8); empty for a
+    /// `generics` is the `<T, U>` type-parameter list; empty for a
     /// non-generic struct. A generic struct is a *template* — later passes
     /// monomorphize it into one concrete struct per distinct set of type arguments.
     pub generics: Vec<GenericParam>,
-    /// Explicit lifetime parameters (§2.6), the `'a` names in `struct S<'a> { ... }`.
+    /// Explicit lifetime parameters, the `'a` names in `struct S<'a> { ... }`.
     /// Distinct from `generics` (see [`FunctionDef::lifetimes`]); erased after
     /// borrow-check.
     pub lifetimes: Vec<Identifier>,
-    /// Value predicates from a `where` clause (§3.8) over the struct's const
+    /// Value predicates from a `where` clause over the struct's const
     /// parameters, checked at each instantiation (see [`FunctionDef::where_predicates`]).
     pub where_predicates: Vec<Expr>,
     pub fields: Vec<FieldDef>,
     /// `@derive(...)` attributes attached to the struct (e.g. `@derive(Copy, Clone)`).
-    /// Interpreted by semantic analysis to determine Copy/Clone-ness (§2.3).
+    /// Interpreted by semantic analysis to determine Copy/Clone-ness.
     pub attributes: Vec<Attribute>,
     pub span: Span,
 }
@@ -118,13 +118,13 @@ pub struct StructDef {
 /// The `self` parameter kind in a method signature.
 ///
 /// `Owned` (consuming `self`) is parsed but rejected by semantic analysis until
-/// the by-value struct ABI lands; `&self` and `&mut self` are supported (§2.5).
+/// the by-value struct ABI lands; `&self` and `&mut self` are supported.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SelfParam {
     /// `&self` — immutable borrow; lowered to pass-by-value in codegen.
     Ref,
     /// `&mut self` — mutable borrow; lowered to pass-by-pointer so field writes
-    /// in the method body propagate to the caller's value (§2.5).
+    /// in the method body propagate to the caller's value.
     RefMut,
     /// `self` — consuming; not yet supported (needs the by-value struct ABI).
     Owned,
@@ -151,16 +151,16 @@ pub struct MethodDef {
 ///
 /// `trait_name` is `Some` for a trait implementation (`impl Drawable for T`) and
 /// `None` for a plain inherent block (`impl T`). `Drop` is a compiler-known lang-item
-/// (§2.1); any other trait name must resolve to a user `trait` declaration (§3.9),
+/// Any other trait name must resolve to a user `trait` declaration,
 /// against which semantic analysis checks the impl for conformance.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImplDef {
     pub trait_name: Option<Identifier>,
     pub type_name: Identifier,
-    /// `generics` is the impl-level `<T, U>` type-parameter list (§3.8), as in
+    /// `generics` is the impl-level `<T, U>` type-parameter list, as in
     /// `impl<T> Wrapper<T>`; empty for a non-generic impl.
     pub generics: Vec<GenericParam>,
-    /// Explicit lifetime parameters (§2.6), the `'a` names in `impl<'a> S<'a>`.
+    /// Explicit lifetime parameters, the `'a` names in `impl<'a> S<'a>`.
     /// Distinct from `generics` (see [`FunctionDef::lifetimes`]); erased after
     /// borrow-check.
     pub lifetimes: Vec<Identifier>,
@@ -169,11 +169,11 @@ pub struct ImplDef {
     /// generic parameter; monomorphization maps them positionally to the struct's
     /// concrete type arguments.
     pub type_args: Vec<Type>,
-    /// Value predicates from an impl-level `where` clause (§3.8), checked at each
+    /// Value predicates from an impl-level `where` clause, checked at each
     /// instantiation (see [`FunctionDef::where_predicates`]).
     pub where_predicates: Vec<Expr>,
     /// Associated-type bindings declared inside the block, e.g. the `type Output = Vec2`
-    /// of an operator-trait impl (§3.10). Each entry is `(name, bound type)`. Empty for
+    /// of an operator-trait impl. Each entry is `(name, bound type)`. Empty for
     /// blocks with no `type` items.
     pub assoc_types: Vec<(Identifier, Type)>,
     pub methods: Vec<MethodDef>,
@@ -191,7 +191,7 @@ pub struct ConstDef {
     pub span: Span,
 }
 
-/// The data a single enum variant carries (§3.5).
+/// The data a single enum variant carries.
 ///
 /// A variant is one of three shapes: a bare tag, a positional tuple of payload
 /// types, or a set of named fields. The payload types are restricted to scalar
@@ -207,7 +207,7 @@ pub enum VariantPayload {
     Struct(Vec<FieldDef>),
 }
 
-/// A single variant in an enum definition (§3.5).
+/// A single variant in an enum definition.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumVariant {
     pub name: Identifier,
@@ -215,7 +215,7 @@ pub struct EnumVariant {
     pub span: Span,
 }
 
-/// Enum definition (§3.5): a tagged union of named variants, each optionally
+/// Enum definition: a tagged union of named variants, each optionally
 /// carrying associated data. Non-generic in Phase 1E — generic enums (`Option<T>`)
 /// arrive with the generics system (1F).
 #[derive(Debug, Clone, PartialEq)]
@@ -225,7 +225,7 @@ pub struct EnumDef {
     pub span: Span,
 }
 
-/// A `newtype` declaration (§3.15): a distinct nominal type wrapping `inner`.
+/// A `newtype` declaration: a distinct nominal type wrapping `inner`.
 ///
 /// Unlike a transparent `type` alias (which is expanded away at parse time), a
 /// newtype survives to semantic analysis as its own type — the wrapper and the
@@ -238,7 +238,7 @@ pub struct NewtypeDef {
     pub span: Span,
 }
 
-/// A single method declaration inside a `trait` block (§3.9).
+/// A single method declaration inside a `trait` block.
 ///
 /// A `default_body` of `None` is a **required** method — implementors must provide
 /// one. `Some(body)` is a **provided** (default) method whose body is copied into any
@@ -255,10 +255,10 @@ pub struct TraitMethod {
     pub span: Span,
 }
 
-/// A `trait` declaration (§3.9): a set of method signatures defining shared behavior.
+/// A `trait` declaration: a set of method signatures defining shared behavior.
 ///
 /// Traits are fully monomorphized and erased — there is no vtable and no runtime trait
-/// object this phase (`dyn` dispatch is §3.17). A trait produces no code on its own;
+/// object this phase (`dyn` dispatch is). A trait produces no code on its own;
 /// each `impl Trait for Type` block lowers to ordinary inherent methods, and any default
 /// method the implementor omits is copied in as a concrete method.
 #[derive(Debug, Clone, PartialEq)]

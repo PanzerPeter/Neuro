@@ -1,4 +1,4 @@
-// Drop trait + deterministic destruction tests (Phase 1.7 §2.1).
+// Drop trait + deterministic destruction tests (Phase 1.7).
 //
 // Each Drop type below holds a `&mut i32` "sink" and increments it in `drop`, so
 // the number of destructor calls is observable through the program's exit code
@@ -94,7 +94,7 @@ func main() -> i32 {{
 
 #[test]
 fn moved_value_is_not_double_dropped() {
-    // `val q = p` moves `p`; only the new owner `q` is dropped (§2.2). Without the
+    // `val q = p` moves `p`; only the new owner `q` is dropped. Without the
     // drop flag this would run the destructor twice.
     let test = CompileTest::new();
     let source = format!(

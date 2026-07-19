@@ -1,4 +1,4 @@
-// Tuples and destructuring (§3.2).
+// Tuples and destructuring.
 //
 // A tuple `(T1, T2, ...)` is an anonymous, fixed-size, heterogeneous aggregate.
 // Elements are read by constant index (`t.0`, `t.1`) and bound by destructuring.

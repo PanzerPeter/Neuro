@@ -33,7 +33,7 @@ fn borrow_target_of(expr: &Expr) -> Option<(String, bool)> {
 
 /// The trailing value expression of a block — the last statement when it is a
 /// bare expression. Used to follow a returned reference into the tail of an
-/// `if`/`else` arm or a bare block (§2.6).
+/// `if`/`else` arm or a bare block.
 fn tail_expr(stmts: &[Stmt]) -> Option<&Expr> {
     match stmts.last() {
         Some(Stmt::Expr(expr)) => Some(expr),
@@ -56,7 +56,7 @@ fn root_place_name(expr: &Expr) -> Option<String> {
 
 impl TypeChecker {
     /// Whether `name` is a binding local to the current function — present in the
-    /// symbol table but not in the set of places that outlive the call (§2.6).
+    /// symbol table but not in the set of places that outlive the call.
     /// Function locals and by-value parameters are local; reference parameters and
     /// `self` outlive. A name absent from the table (a constant, an out-of-scope
     /// place) is conservatively treated as non-local so a valid program is never
@@ -65,7 +65,7 @@ impl TypeChecker {
         self.symbols.lookup(name).is_some() && !self.current_fn_outliving.contains(name)
     }
 
-    /// Verify a returned reference does not borrow a function-local place (§2.6).
+    /// Verify a returned reference does not borrow a function-local place.
     ///
     /// Called only when the current function's declared return type is a reference.
     /// A `&place` return dangles when `place` is local; returning an existing
@@ -118,7 +118,7 @@ impl TypeChecker {
                     self.check_returned_reference(tail);
                 }
             }
-            // Each arm body can produce the returned reference (§3.6).
+            // Each arm body can produce the returned reference.
             Expr::Match { arms, .. } => {
                 for arm in arms {
                     self.check_returned_reference(&arm.body);
@@ -128,7 +128,7 @@ impl TypeChecker {
         }
     }
 
-    /// Validate a `break` / `continue` against the active loop stack (§3.7).
+    /// Validate a `break` / `continue` against the active loop stack.
     ///
     /// An unlabeled control statement requires any enclosing loop; a labeled one
     /// requires an enclosing loop carrying that exact label. `is_break`
@@ -167,7 +167,7 @@ impl TypeChecker {
     /// value-break type accumulated inside (`None` when no value-carrying `break`
     /// targeted this loop). Loop bodies run any number of times, so a move inside
     /// is not a straight-line move; the move state is snapshotted and restored on
-    /// exit (§2.2). `is_value_loop` is true only for `loop` — the sole construct
+    /// exit. `is_value_loop` is true only for `loop` — the sole construct
     /// that can yield a value.
     pub(crate) fn check_loop_body(
         &mut self,
@@ -191,7 +191,7 @@ impl TypeChecker {
         ctx.and_then(|c| c.break_value_ty)
     }
 
-    /// Record a value-carrying `break v` (§3.7) against its target loop: the
+    /// Record a value-carrying `break v` against its target loop: the
     /// innermost loop, or the loop named by `label`. Reports an error if the
     /// target is a `while`/`for` (unit-only) or if `value_ty` disagrees with an
     /// earlier value-break for the same loop.
@@ -235,7 +235,7 @@ impl TypeChecker {
     /// Check a statement, then drop any transient borrows it took.
     ///
     /// A borrow passed to a call, used in a condition, or returned lives only for
-    /// the statement that created it (§2.4, §2.5). Clearing transient borrows here
+    /// the statement that created it. Clearing transient borrows here
     /// — after the statement and its nested sub-statements are fully checked —
     /// frees the place for a later borrow without leaking the borrow forward.
     /// Persistent borrows held by reference bindings are untouched; they are
@@ -318,13 +318,13 @@ impl TypeChecker {
                     return None;
                 }
 
-                // Binding the initializer moves it out of its source (§2.2).
+                // Binding the initializer moves it out of its source.
                 if let Some(init_expr) = init {
                     self.record_move(init_expr);
 
                     // A direct `&place` / `&mut place` initializer makes this
                     // binding hold a persistent borrow of that place, live until
-                    // the binding leaves scope (§2.4, §2.5).
+                    // the binding leaves scope.
                     if let Some((place, exclusive)) = borrow_target_of(init_expr) {
                         self.symbols.attach_borrow(&name.name, &place, exclusive);
                     }
@@ -344,7 +344,7 @@ impl TypeChecker {
                 // If the target was a reference binding, its previous borrow ends
                 // here — release it before the new value is checked so that
                 // re-borrowing the same place (`r = &mut x`) is not a false
-                // conflict against the borrow being overwritten (§2.4, §2.5).
+                // conflict against the borrow being overwritten.
                 self.symbols.release_borrow_of(&target.name);
 
                 let value_ty = self
@@ -352,12 +352,12 @@ impl TypeChecker {
                     .unwrap_or(Type::Unknown);
 
                 // The RHS is moved into the target, and the target now owns a
-                // fresh value — clearing any prior moved-out state on it (§2.2).
+                // fresh value — clearing any prior moved-out state on it.
                 self.record_move(value);
                 self.symbols.clear_moved(&target.name);
 
                 // A direct `&place` / `&mut place` RHS makes the target hold a new
-                // persistent borrow of that place (§2.4, §2.5).
+                // persistent borrow of that place.
                 if let Some((place, exclusive)) = borrow_target_of(value) {
                     self.symbols.attach_borrow(&target.name, &place, exclusive);
                 }
@@ -416,12 +416,12 @@ impl TypeChecker {
                     }
                 }
 
-                // Returning a value moves it out of the function (§2.2).
+                // Returning a value moves it out of the function.
                 if let Some(expr) = value {
                     self.record_move(expr);
 
                     // A returned reference must outlive the call: reject a borrow of
-                    // a function-local place (§2.6).
+                    // a function-local place.
                     if matches!(expected_return, Some(Type::Reference { .. })) {
                         self.check_returned_reference(expr);
                     }
@@ -450,7 +450,7 @@ impl TypeChecker {
 
                 // A move inside one arm must not invalidate the binding on paths
                 // that never ran that arm. Restore the move state after each arm
-                // so only unconditional (straight-line) moves persist (§2.2).
+                // so only unconditional (straight-line) moves persist.
                 let move_snapshot = self.symbols.snapshot_moves();
 
                 self.symbols.push_scope();
@@ -518,7 +518,7 @@ impl TypeChecker {
                 body,
                 span: _,
             } => {
-                // A `loop` is value-capable (§3.7); in statement position the value
+                // A `loop` is value-capable; in statement position the value
                 // is simply discarded, but value-breaks are still type-checked.
                 let _ = self.check_loop_body(label.as_ref(), true, body);
 
@@ -564,7 +564,7 @@ impl TypeChecker {
                 }
 
                 // As with `while`, body moves are not guaranteed straight-line;
-                // restore the move state after the loop (§2.2). A `for` yields unit,
+                // restore the move state after the loop. A `for` yields unit,
                 // so it is not a value loop.
                 let move_snapshot = self.symbols.snapshot_moves();
                 self.loop_stack.push(LoopContext {
@@ -596,7 +596,7 @@ impl TypeChecker {
                 Some(())
             }
 
-            // `for x in arr` over an array value (§3.1). The iterable must be an array
+            // `for x in arr` over an array value. The iterable must be an array
             // (or a borrow of one); `x` binds each element. Lowered as a counted loop.
             Stmt::ForEach {
                 label,
@@ -619,7 +619,7 @@ impl TypeChecker {
                 };
 
                 // Body moves are not guaranteed straight-line; restore move state after
-                // the loop (§2.2). A `for` yields unit, so it is not a value loop.
+                // the loop. A `for` yields unit, so it is not a value loop.
                 let move_snapshot = self.symbols.snapshot_moves();
                 self.loop_stack.push(LoopContext {
                     label: label.as_ref().map(|l| l.name.clone()),
@@ -651,7 +651,7 @@ impl TypeChecker {
                 Some(())
             }
 
-            // Array element assignment `arr[i] = v` (§3.1). The target must be a mutable
+            // Array element assignment `arr[i] = v`. The target must be a mutable
             // array binding; the index an integer; the value the element type.
             Stmt::IndexAssignment {
                 target,
@@ -794,13 +794,13 @@ impl TypeChecker {
                     return None;
                 }
 
-                // Storing the value into a field moves it out of its source (§2.2).
+                // Storing the value into a field moves it out of its source.
                 self.record_move(value);
 
                 Some(())
             }
 
-            // Assignment through a mutable reference `*pointer = value` (§2.5). The
+            // Assignment through a mutable reference `*pointer = value`. The
             // pointer must have a `&mut T` type; the value is checked against `T`.
             Stmt::DerefAssignment {
                 pointer,
@@ -836,7 +836,7 @@ impl TypeChecker {
                 let value_ty = self
                     .check_expr(value, Some(&inner_ty))
                     .unwrap_or(Type::Unknown);
-                // The stored value is moved into the location the reference points at (§2.2).
+                // The stored value is moved into the location the reference points at.
                 self.record_move(value);
 
                 if !matches!(value_ty, Type::Unknown) && !value_ty.is_compatible_with(&inner_ty) {

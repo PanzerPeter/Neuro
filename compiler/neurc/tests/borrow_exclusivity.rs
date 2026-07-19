@@ -1,4 +1,4 @@
-// Borrow exclusivity tests (Phase 1.7 §2.4 / §2.5)
+// Borrow exclusivity tests (Phase 1.7)
 //
 // Verifies the flow-sensitive aliasing rules enforced by the borrow checker:
 // at most one `&mut` borrow of a place may be live at a time, and no `&` borrow

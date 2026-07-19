@@ -17,7 +17,7 @@ fn error_undefined_variable() {
 
 #[test]
 fn error_array_destructure_length_mismatch() {
-    // §3.2: a rest-less array pattern must bind every element. Binding two from a
+    // A rest-less array pattern must bind every element. Binding two from a
     // four-element array is an arity error.
     let source = r#"func test() -> i32 {
         val arr: [i32; 4] = [1, 2, 3, 4]

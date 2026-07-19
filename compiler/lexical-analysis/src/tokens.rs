@@ -105,7 +105,7 @@ pub enum TokenKind {
     // longest-match picks `1.5f32` as a single FloatSuffix token rather than
     // Float(1.5) + Identifier("f32"). Two patterns mirror the fractional and
     // exponent-only forms of the Float regex. `f16`/`bf16` are the half-precision
-    // suffixes (§1.2); `bf16` precedes the others in the alternation only for
+    // suffixes; `bf16` precedes the others in the alternation only for
     // readability — logos matches the whole literal greedily regardless.
     #[regex(
         r"[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?(bf16|f16|f32|f64)",
@@ -158,7 +158,7 @@ pub enum TokenKind {
     #[regex(r#""([^"\\]|\\.)*""#, parse_string_catch_all, priority = 1)]
     String(String),
 
-    // Character literals (§1.2): a single Unicode scalar value between single
+    // Character literals: a single Unicode scalar value between single
     // quotes, e.g. `'a'`, `'\n'`, `'\u{1F44D}'`. The regex admits exactly one
     // content unit — a non-quote/backslash/newline char, a recognized escape, a
     // `\u{...}` unicode escape, or a `\xNN` byte escape — so `''`, `'ab'`, and an
@@ -169,7 +169,7 @@ pub enum TokenKind {
     )]
     Char(char),
 
-    // Lifetime name (§2.6): a leading `'` followed by an identifier, with NO closing
+    // Lifetime name: a leading `'` followed by an identifier, with NO closing
     // quote — e.g. `'a` in `func longest<'a>(...)`. The callback strips the `'`, so the
     // stored name is the bare identifier. A char literal `'a'` is a strictly longer match
     // (it carries the closing quote), so logos' longest-match rule keeps char literals
@@ -534,7 +534,7 @@ fn parse_string_catch_all(lex: &mut logos::Lexer<TokenKind>) -> Result<String, L
     parse_string(lex)
 }
 
-/// Parse a character literal into its single Unicode scalar value (§1.2). The
+/// Parse a character literal into its single Unicode scalar value. The
 /// regex guarantees exactly one content unit between the quotes; this decodes a
 /// recognized escape (`\n`, `\u{...}`, `\xNN`, …) or returns the lone character.
 /// A `\u{...}` payload outside the valid scalar range (e.g. a surrogate) is the

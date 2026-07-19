@@ -1,4 +1,4 @@
-// End-to-end tests for the `f16` / `bf16` half-precision primitives (§1.2).
+// End-to-end tests for the `f16` / `bf16` half-precision primitives.
 //
 // The scalar contract is deliberately narrow: binding, copy, `==`/`!=`, and
 // `as`-cast to/from any numeric type — but no arithmetic (compute in `f32`).
@@ -114,7 +114,7 @@ func main() -> i32 {
 
 #[test]
 fn half_precision_arithmetic_is_rejected() {
-    // §1.2: half-precision scalars have no arithmetic operators.
+    // Half-precision scalars have no arithmetic operators.
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {

@@ -1,4 +1,4 @@
-// Mutable borrow tests (Phase 1.7 §2.5)
+// Mutable borrow tests (Phase 1.7)
 // Verifies `&mut T` reference types, `&mut place` borrow expressions, the `*`
 // dereference operator (read and write), and the borrow rules: `&mut` requires a
 // `mut` binding, `*` applies only to references, and writing through `*` requires
@@ -56,7 +56,7 @@ fn run_expecting(source: &str, expected: i32) {
 
 #[test]
 fn mutate_through_a_mutable_reference() {
-    // The canonical §2.5 example: a void function mutates its `&mut i32` argument
+    // The canonical example: a void function mutates its `&mut i32` argument
     // in place; the change is visible at the caller's `mut` binding.
     let source = r#"
 func increment(n: &mut i32) {
@@ -104,7 +104,7 @@ func main() -> i32 {
 
 #[test]
 fn mutably_borrowing_an_immutable_binding_is_rejected() {
-    // §2.5: `&mut` demands a `mut` binding.
+    // `&mut` demands a `mut` binding.
     let source = r#"
 func main() -> i32 {
     val x: i32 = 5
@@ -157,7 +157,7 @@ func main() -> i32 {
 
 #[test]
 fn mutable_and_immutable_reference_types_are_distinct() {
-    // §2.5: there is no implicit `&mut T` -> `&T` coercion; passing a `&mut i32`
+    // There is no implicit `&mut T` -> `&T` coercion; passing a `&mut i32`
     // where a `&i32` is expected is a type mismatch.
     let source = r#"
 func read(r: &i32) -> i32 { *r }

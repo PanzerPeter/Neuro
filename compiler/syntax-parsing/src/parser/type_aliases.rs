@@ -1,4 +1,4 @@
-// Type-alias declarations (§3.14): `type Name = TargetType`.
+// Type-alias declarations: `type Name = TargetType`.
 //
 // A `type` alias is *transparent* — the alias and its target are interchangeable
 // and no new nominal type is introduced. We therefore resolve aliases entirely at
@@ -171,7 +171,7 @@ fn rewrite_type(ty: &mut Type, resolved: &HashMap<String, Type>) {
             }
         }
         Type::Tensor { element_type, .. } => rewrite_type(element_type, resolved),
-        // `impl Trait` / `dyn Trait` (§3.17) name a trait, not a type alias, so a type
+        // `impl Trait` / `dyn Trait` name a trait, not a type alias, so a type
         // alias never substitutes into them.
         Type::ImplTrait { .. } | Type::DynTrait { .. } => {}
     }
@@ -225,7 +225,7 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
             rewrite_type(&mut def.ty, resolved);
             rewrite_expr(&mut def.value, resolved);
         }
-        // A trait's method signatures may reference aliased types (§3.9); default
+        // A trait's method signatures may reference aliased types; default
         // bodies are expanded when the defaults are injected into impls, which run
         // after this pass — so only the signatures are rewritten here.
         Item::Trait(def) => {

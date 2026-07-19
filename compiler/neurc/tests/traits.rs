@@ -1,4 +1,4 @@
-// End-to-end trait declarations (§3.9): default methods, trait-impl dispatch, and
+// End-to-end trait declarations: default methods, trait-impl dispatch, and
 // trait-bounded generics. Each program compiles to a native binary and runs; the exit
 // code encodes the computed result.
 

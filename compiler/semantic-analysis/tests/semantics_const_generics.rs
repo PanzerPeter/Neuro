@@ -1,4 +1,4 @@
-// Semantic tests: const generic parameters, `where` clauses, and turbofish (§3.8).
+// Semantic tests: const generic parameters, `where` clauses, and turbofish.
 
 use semantic_analysis::{type_check, TypeError};
 

@@ -1,4 +1,4 @@
-// Move-by-default ownership tests (Phase 1.7 §2.2)
+// Move-by-default ownership tests (Phase 1.7)
 // Verifies use-after-move is rejected at `neurc check`, and that valid
 // straight-line and `.clone()` programs still compile and run end-to-end.
 mod common;

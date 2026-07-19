@@ -74,9 +74,11 @@ pub fn lower_program(program: &HirProgram) -> Result<String, MlirError> {
                     module.body().append_operation(op);
                 }
             }
-            // Structs, enums, and constants carry no callable surface; the scaffold
+            // Structs, enums, constants, and traits carry no callable surface; a
+            // trait item is only a vtable slot order, and its methods reach
+            // the module through the implementors' `impl` blocks. The scaffold
             // module is a set of function declarations only.
-            HirItem::Struct(_) | HirItem::Enum(_) | HirItem::Const(_) => {}
+            HirItem::Struct(_) | HirItem::Enum(_) | HirItem::Const(_) | HirItem::Trait(_) => {}
         }
     }
 
@@ -157,7 +159,7 @@ fn map_type<'c>(context: &'c Context, ty: &HirType) -> Result<Type<'c>, MlirErro
         HirType::BF16 => Type::bfloat16(context),
         HirType::F32 => Type::float32(context),
         HirType::F64 => Type::float64(context),
-        // A newtype is transparent (§3.15): map it to its inner type.
+        // A newtype is transparent: map it to its inner type.
         HirType::Newtype { inner, .. } => map_type(context, inner)?,
         HirType::String
         | HirType::Struct(_)
@@ -171,6 +173,13 @@ fn map_type<'c>(context: &'c Context, ty: &HirType) -> Result<Type<'c>, MlirErro
             return Err(MlirError::UnsupportedType(
                 "void cannot appear in value position".to_string(),
             ))
+        }
+        // `dyn Trait` is unsized: it is only ever the referent of a
+        // reference, which the arm above already maps to a pointer.
+        HirType::DynObject(name) => {
+            return Err(MlirError::UnsupportedType(format!(
+                "unsized `dyn {name}` cannot appear in value position"
+            )))
         }
     };
     Ok(mapped)

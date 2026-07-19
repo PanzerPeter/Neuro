@@ -1,4 +1,4 @@
-// `loop` as a value expression (§3.7): `val x = loop { ... break v }`.
+// `loop` as a value expression: `val x = loop { ... break v }`.
 mod common;
 use common::CompileTest;
 

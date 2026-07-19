@@ -1,4 +1,4 @@
-// Dynamic dispatch: vtable emission, trait-object construction, and virtual calls (§3.17).
+// Dynamic dispatch: vtable emission, trait-object construction, and virtual calls.
 //
 // Static dispatch (`impl Trait`) needs nothing here — it is monomorphized away before the
 // HIR reaches this backend. Dynamic dispatch is the one place the compiler emits a runtime
@@ -91,8 +91,8 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Emit the thunk that adapts one concrete method to the uniform vtable calling
     /// convention `(ptr self, args...) -> ret`.
     ///
-    /// The adaptation is needed because a `&self` method receives its struct *by value*
-    /// (§2.5), while a trait object only ever holds a pointer to the receiver. The thunk
+    /// The adaptation is needed because a `&self` method receives its struct *by value*,
+    /// while a trait object only ever holds a pointer to the receiver. The thunk
     /// loads the receiver in that case and forwards; a `&mut self` method already takes a
     /// pointer, so its thunk forwards the pointer unchanged.
     fn emit_vtable_thunk(
@@ -188,7 +188,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(thunk)
     }
 
-    /// Lower the unsizing coercion `&T` → `&dyn Trait` (§3.17): pair the concrete
+    /// Lower the unsizing coercion `&T` → `&dyn Trait`: pair the concrete
     /// reference with the `(trait, T)` vtable to form the `{ data, vtable }` fat pointer.
     pub(crate) fn codegen_dyn_coerce(
         &mut self,
@@ -248,7 +248,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(fat.into())
     }
 
-    /// Lower a method call through a trait object (§3.17): load the method pointer from
+    /// Lower a method call through a trait object: load the method pointer from
     /// the receiver's vtable slot and call it indirectly, passing the data pointer as
     /// `self`. The slot index is the method's position in the trait's declaration order,
     /// identical across every implementor.

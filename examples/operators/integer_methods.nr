@@ -1,4 +1,4 @@
-// Neuro Programming Language - Integer Primitive Methods (Phase 1.5 §1.2, §1.4)
+// Neuro Programming Language - Integer Primitive Methods (Phase 1.5)
 // Demonstrates the wrapping / saturating arithmetic intrinsics and the right-shift
 // method on builtin integer types. All dispatch through the builtin-method path:
 // they are compiler-known intrinsics, not user-defined impl methods.

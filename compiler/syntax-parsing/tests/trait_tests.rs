@@ -1,4 +1,4 @@
-// Trait declaration parsing and default-method injection (§3.9).
+// Trait declaration parsing and default-method injection.
 
 use syntax_parsing::{parse, Item};
 
@@ -86,7 +86,7 @@ impl Describable for Widget {
 
 #[test]
 fn parses_operator_impl_with_associated_output_type() {
-    // An operator-trait impl declares `type Output = T` alongside its method (§3.10).
+    // An operator-trait impl declares `type Output = T` alongside its method.
     let source = r#"
 @derive(Copy, Clone)
 struct Vec2 { x: i32, y: i32 }

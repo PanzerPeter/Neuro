@@ -8,7 +8,7 @@ use crate::{Lowerer, LoweringError};
 impl Lowerer {
     /// Resolve a surface type annotation to its HIR type. Mirrors the checker's
     /// `resolve_type`; a struct name resolves to [`HirType::Struct`], and a generic
-    /// application `Name<...>` monomorphizes on demand (§3.8). Copy-element validation
+    /// application `Name<...>` monomorphizes on demand. Copy-element validation
     /// is the checker's job and is not repeated here. Takes `&mut self` because
     /// resolving a generic application may materialize a new struct instance.
     pub(crate) fn resolve_type(&mut self, ty: &ast_types::Type) -> Result<HirType, LoweringError> {
@@ -16,7 +16,7 @@ impl Lowerer {
     }
 
     /// Resolve a type annotation, tracking whether it sits directly behind a reference.
-    /// The flag matters only for `dyn Trait` (§3.17), which is unsized and valid solely
+    /// The flag matters only for `dyn Trait`, which is unsized and valid solely
     /// as a reference referent — the checker has already rejected any other placement,
     /// so an unreferenced `dyn` here is an internal inconsistency.
     fn resolve_type_ctx(
@@ -39,7 +39,7 @@ impl Lowerer {
                 name: format!("impl {}", trait_name.name),
             }),
             // Inside a monomorphized instance body, a type-parameter name resolves to
-            // its concrete substitution (§3.8) — checked before the built-in names so a
+            // its concrete substitution — checked before the built-in names so a
             // parameter can never be a built-in name (the checker rejects that shadowing).
             ast_types::Type::Named(ident) if self.type_subst.contains_key(&ident.name) => {
                 Ok(self.type_subst[&ident.name].clone())
@@ -64,7 +64,7 @@ impl Lowerer {
                 name if self.structs.contains_key(name) => HirType::Struct(name.to_string()),
                 name if self.enums.contains_key(name) => HirType::Enum(name.to_string()),
                 // A newtype resolves to its nominal wrapper carrying the resolved
-                // inner type (§3.15). Cycles were rejected by the checker, so this
+                // inner type. Cycles were rejected by the checker, so this
                 // recursion terminates.
                 name if self.newtypes.contains_key(name) => {
                     let inner_ast = self.newtypes[name].clone();
@@ -94,7 +94,7 @@ impl Lowerer {
                 }
                 Ok(HirType::Tuple(resolved))
             }
-            // Generic application `Name<...>` (§3.8): resolve the arguments and
+            // Generic application `Name<...>`: resolve the arguments and
             // monomorphize the generic struct into a distinct concrete instance. The
             // arguments resolve under any active type-parameter substitution, so a
             // `Wrapper<T>` inside a monomorphized body sees `T` already concrete.

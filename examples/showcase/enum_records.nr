@@ -2,10 +2,10 @@
 // and loops.
 //
 // Integration example combining several Phase-1E features:
-//   pattern matching (§3.6, enum deconstruction + payload binding, value/or/range
-//   patterns, guards, wildcard) · enums with associated data (§3.5, all three
+//   pattern matching (enum deconstruction + payload binding, value/or/range
+//   patterns, guards, wildcard) · enums with associated data (all three
 //   variant forms) · structs with an enum field · impl methods (&self) ·
-//   fixed-size arrays + for-in iteration (§3.1) · compound assignment.
+//   fixed-size arrays + for-in iteration · compound assignment.
 //
 // Enums are constructed and then deconstructed with `match`; the numeric result is
 // composed from the struct, array, and matched enum data.
@@ -27,7 +27,7 @@ impl Worker {
     }
 }
 
-// All three §3.5 variant shapes in one enum.
+// All three variant shapes in one enum.
 enum Signal {
     Stop,
     Go(i32),

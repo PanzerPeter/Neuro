@@ -1,4 +1,4 @@
-// Compile-time constants (§1.3)
+// Compile-time constants
 // Demonstrates module-level and function-body const declarations.
 
 const MAX_RETRIES: i32 = 3

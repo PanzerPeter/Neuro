@@ -1,4 +1,4 @@
-// Parsing of the two dispatch forms (§3.17): `impl Trait` static-dispatch sugar and
+// Parsing of the two dispatch forms: `impl Trait` static-dispatch sugar and
 // `dyn Trait` trait objects.
 
 use syntax_parsing::{parse, GenericParamKind, Item, Type};

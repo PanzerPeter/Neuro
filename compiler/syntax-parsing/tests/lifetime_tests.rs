@@ -1,4 +1,4 @@
-// Explicit lifetime annotation parsing tests (§2.6)
+// Explicit lifetime annotation parsing tests
 
 use syntax_parsing::{parse, Item, Type};
 

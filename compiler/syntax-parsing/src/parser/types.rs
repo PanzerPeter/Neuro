@@ -9,7 +9,7 @@ use super::Parser;
 impl Parser {
     /// Parse a type annotation
     pub(crate) fn parse_type(&mut self) -> ParseResult<Type> {
-        // Fixed-size array type `[T; N]` (§3.1, §3.8): element type, `;`, then either a
+        // Fixed-size array type `[T; N]`: element type, `;`, then either a
         // non-negative integer length literal or a `const` generic parameter name
         // (`[T; CAP]`), closed by `]`.
         if self.check(&TokenKind::LeftBracket) {
@@ -44,7 +44,7 @@ impl Parser {
                 span,
             });
         }
-        // Tuple type `(T1, T2, ...)` (§3.2): two or more element types separated by
+        // Tuple type `(T1, T2, ...)`: two or more element types separated by
         // commas. A single parenthesized type is grouping, not a tuple, and the empty
         // `()` unit type is not yet produced — both are rejected here.
         if self.check(&TokenKind::LeftParen) {
@@ -72,8 +72,8 @@ impl Parser {
             let span = open.span.merge(close.span);
             return Ok(Type::Tuple { elements, span });
         }
-        // Borrow type `&T` (§2.4) / `&mut T` (§2.5), with an optional explicit lifetime
-        // `&'a T` / `&'a mut T` (§2.6). The referent is parsed recursively, so the `&`
+        // Borrow type `&T` / `&mut T`, with an optional explicit lifetime
+        // `&'a T` / `&'a mut T`. The referent is parsed recursively, so the `&`
         // distributes over whatever type follows. Order after `&`: an optional lifetime,
         // then an optional `mut` keyword marking a mutable borrow.
         if self.check(&TokenKind::Amp) {
@@ -106,7 +106,7 @@ impl Parser {
             });
         }
 
-        // Static-dispatch bound `impl Trait` (§3.17): the `impl` keyword followed by a
+        // Static-dispatch bound `impl Trait`: the `impl` keyword followed by a
         // trait name. In argument position `parse_function` later rewrites it into a
         // trait-bounded generic parameter; in return position it survives to semantic.
         if self.check(&TokenKind::Impl) {
@@ -117,7 +117,7 @@ impl Parser {
             let span = kw.span.merge(trait_name.span);
             return Ok(Type::ImplTrait { trait_name, span });
         }
-        // Dynamic-dispatch trait object `dyn Trait` (§3.17): the `dyn` keyword followed
+        // Dynamic-dispatch trait object `dyn Trait`: the `dyn` keyword followed
         // by a trait name. Valid only behind a reference; semantic rejects a bare `dyn`.
         if self.check(&TokenKind::Dyn) {
             let kw = self.advance().ok_or(ParseError::UnexpectedEof {
@@ -136,7 +136,7 @@ impl Parser {
             TokenKind::Identifier(name) => {
                 let span = token.span;
                 let ident = Identifier { name, span };
-                // Generic type application `Name<T1, T2, ...>` (§3.8). Without a
+                // Generic type application `Name<T1, T2, ...>`. Without a
                 // following `<`, this is a plain named type. Arguments may be types or
                 // const (integer) values, as in `Ring<i32, 4>`.
                 if self.check(&TokenKind::Less) {
@@ -158,7 +158,7 @@ impl Parser {
         }
     }
 
-    /// Parse the trait-name identifier following an `impl` / `dyn` keyword (§3.17).
+    /// Parse the trait-name identifier following an `impl` / `dyn` keyword.
     fn parse_trait_ref_name(&mut self, context: &str) -> ParseResult<Identifier> {
         let token = self
             .consume(TokenKind::Identifier(String::new()), context)
@@ -178,7 +178,7 @@ impl Parser {
         }
     }
 
-    /// Parse a `<T1, N, ...>` generic-argument list in a type application (§3.8). Each
+    /// Parse a `<T1, N, ...>` generic-argument list in a type application. Each
     /// argument is a type or a non-negative integer const value (`Ring<i32, 4>`).
     fn parse_generic_type_args(&mut self) -> ParseResult<Vec<GenericArg>> {
         self.consume(TokenKind::Less, "'<'")?;

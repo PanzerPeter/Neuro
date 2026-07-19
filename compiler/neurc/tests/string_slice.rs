@@ -1,4 +1,4 @@
-// String-slice tests (Phase 1.7 §2.7)
+// String-slice tests (Phase 1.7)
 // `&string` is a borrowed string slice. Equality (`==` / `!=`) compares the
 // underlying UTF-8 bytes for any combination of owned `string` and `&string`,
 // auto-dereferencing a borrowed operand. Reference-peeling is limited to string,
@@ -166,7 +166,7 @@ func main() -> i32 {
     );
 }
 
-// --- string.slice(range) (§2.7) ------------------------------------------
+// --- string.slice(range) ------------------------------------------
 
 /// Compile + run, asserting the process did NOT exit cleanly (a panic aborts via
 /// SIGABRT, so `status.code()` is `None`, surfaced as a non-zero/`-1` code).
@@ -230,7 +230,7 @@ func main() -> i32 {
 
 #[test]
 fn slice_of_a_borrowed_string_argument() {
-    // `.slice` auto-derefs a `&string` receiver (§2.4) and the result re-borrows it.
+    // `.slice` auto-derefs a `&string` receiver and the result re-borrows it.
     let source = r#"
 func first_two(s: &string) -> bool {
     s.slice(0..2) == "ne"

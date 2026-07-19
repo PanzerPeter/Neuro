@@ -68,14 +68,14 @@ pub enum LoweringError {
 /// A resolved enum variant for lowering: its name and ordered payload fields. The
 /// optional name distinguishes a struct variant's field from a tuple variant's
 /// positional element; reordering struct-literal fields into this declared order is
-/// how the single [`neuro_hir::HirExprKind::EnumConstruct`] payload is built (§3.5).
+/// how the single [`neuro_hir::HirExprKind::EnumConstruct`] payload is built.
 struct EnumVariantData {
     name: String,
     fields: Vec<(Option<String>, HirType)>,
 }
 
 /// Per-active-loop state used to resolve `break`/`continue` targets and to type a
-/// `loop` used as a value expression (§3.7), mirroring the checker's loop stack.
+/// `loop` used as a value expression, mirroring the checker's loop stack.
 struct LoopCtx {
     /// The loop's label (`outer:`), or `None` when unlabeled.
     label: Option<String>,
@@ -97,19 +97,19 @@ struct Lowerer {
     /// Enum name → ordered variants. Each variant carries its name and ordered
     /// payload fields `(optional field name, type)`; the index doubles as the tag.
     enums: HashMap<String, Vec<EnumVariantData>>,
-    /// Newtype name → its inner surface type (§3.15). Kept as the AST type so a
+    /// Newtype name → its inner surface type. Kept as the AST type so a
     /// newtype annotation resolves recursively (a newtype may wrap another newtype).
     newtypes: HashMap<String, ast_types::Type>,
     /// Structs that support `.clone()` (derive `Clone`, or `Copy` which implies it).
     clone_structs: HashSet<String>,
     /// Struct name → method name → mangled key into [`Self::functions`].
     impl_methods: HashMap<String, HashMap<String, String>>,
-    /// Declared traits (§3.9, §3.17) → their methods in declaration order. The order is
+    /// Declared traits → their methods in declaration order. The order is
     /// the vtable slot order for dynamic dispatch; each entry carries the method's
     /// visible (non-`self`) parameter types and return type so a call through a
     /// `&dyn Trait` receiver types without consulting any implementor.
     traits: HashMap<String, Vec<TraitMethodInfo>>,
-    /// Operator-trait dispatch (§3.10): `(struct name, binary operator)` → how the
+    /// Operator-trait dispatch: `(struct name, binary operator)` → how the
     /// operator desugars to a method call. Present when the struct has an operator impl.
     operator_binary_impls: HashMap<(String, ast_types::BinaryOp), OpDispatch>,
     /// Operator-trait dispatch for unary operators: `(struct name, operator)` →
@@ -123,15 +123,15 @@ struct Lowerer {
     loop_stack: Vec<LoopCtx>,
     /// The current function/method's resolved return type (for `return` typing).
     current_return: HirType,
-    /// Generic free-function templates (§3.8), keyed by name. A generic function is
+    /// Generic free-function templates, keyed by name. A generic function is
     /// never lowered as-is; each distinct set of type arguments produces one
     /// monomorphized concrete function instead.
     generic_templates: HashMap<String, ast_types::FunctionDef>,
-    /// Generic struct templates (§3.8), keyed by name. Each distinct set of type
+    /// Generic struct templates, keyed by name. Each distinct set of type
     /// arguments produces one monomorphized concrete struct emitted as an ordinary
     /// [`neuro_hir::HirItem::Struct`], so backends need no generic awareness.
     generic_structs: HashMap<String, ast_types::StructDef>,
-    /// Generic `impl` templates keyed by base struct name (§3.8). Instantiating a
+    /// Generic `impl` templates keyed by base struct name. Instantiating a
     /// generic struct also emits each matching impl's methods for the instance.
     generic_impls: HashMap<String, Vec<ast_types::ImplDef>>,
     /// Mangled names of generic-struct instances already materialized (registered in
@@ -144,10 +144,10 @@ struct Lowerer {
     /// `Named` annotation matching an entry resolves to the concrete type.
     type_subst: HashMap<String, HirType>,
     /// Active const-parameter substitution while a monomorphized instance body is being
-    /// lowered (§3.8): const parameter name → concrete value. An array length or value
+    /// lowered: const parameter name → concrete value. An array length or value
     /// reference naming an entry resolves to that value. Empty outside instance lowering.
     const_subst: HashMap<String, u64>,
-    /// The declared integer type of each active const parameter (§3.8), so a value
+    /// The declared integer type of each active const parameter, so a value
     /// reference to one lowers to a correctly-typed integer literal. Parallel to
     /// [`Self::const_subst`].
     const_types: HashMap<String, HirType>,
@@ -160,7 +160,7 @@ struct Lowerer {
     mono_items: Vec<neuro_hir::HirItem>,
 }
 
-/// One trait method's lowering-visible signature (§3.17), in declaration order.
+/// One trait method's lowering-visible signature, in declaration order.
 struct TraitMethodInfo {
     name: String,
     /// Parameter types excluding the implicit `self`.
@@ -168,7 +168,7 @@ struct TraitMethodInfo {
     ret: HirType,
 }
 
-/// How a binary operator desugars to an operator-trait method call (§3.10).
+/// How a binary operator desugars to an operator-trait method call.
 struct OpDispatch {
     /// The backing method name (`add`, `eq`, `lt`, …).
     method: String,
@@ -189,7 +189,7 @@ struct MonoInstance {
     const_subst: HashMap<String, u64>,
 }
 
-/// One concrete generic argument in a monomorphized instance (§3.8): either a type (for
+/// One concrete generic argument in a monomorphized instance: either a type (for
 /// a type parameter) or an integer value (for a const parameter). Positional against the
 /// template's generic parameters in declaration order.
 #[derive(Clone)]
@@ -198,7 +198,7 @@ enum MonoArg {
     Const(u64),
 }
 
-/// One pending generic-struct instantiation (§3.8): the base template name, the
+/// One pending generic-struct instantiation: the base template name, the
 /// mangled instance name, the concrete type arguments (in declaration order), and the
 /// type-parameter substitution. Emission produces one `HirItem::Struct` plus one
 /// `HirItem::Impl` per matching generic impl.
@@ -300,19 +300,19 @@ fn is_integer(t: &HirType) -> bool {
 }
 
 /// Whether `t` is a full-precision float (`f32`/`f64`). Half-precision is excluded,
-/// matching the checker's contextual-inference predicate (§1.2).
+/// matching the checker's contextual-inference predicate.
 fn is_full_float(t: &HirType) -> bool {
     matches!(t, HirType::F32 | HirType::F64)
 }
 
 /// Whether `t` is `string` or a borrow of `string` (`&string` slice). Used to detect
-/// the string-concatenation form of `+` (§2.7).
+/// the string-concatenation form of `+`.
 fn peels_to_string(t: &HirType) -> bool {
     matches!(t.referent(), HirType::String)
 }
 
 /// Unify a generic template's parameter annotation against a concrete argument type,
-/// recording each type parameter's binding in `subst` (§3.8). The program is already
+/// recording each type parameter's binding in `subst`. The program is already
 /// well-typed, so the structures always align; positions that mention no type
 /// parameter contribute no binding.
 fn unify_ast_hir(
@@ -362,7 +362,7 @@ fn unify_ast_hir(
     }
 }
 
-/// Resolve a fixed-size array length annotation (§3.1, §3.8) to a concrete value. A
+/// Resolve a fixed-size array length annotation to a concrete value. A
 /// literal is taken as-is; a `const`-parameter length is looked up in `const_subst`
 /// (populated while a monomorphized instance body is lowered).
 fn resolve_array_size(
@@ -380,7 +380,7 @@ fn resolve_array_size(
     }
 }
 
-/// The mangled symbol name of a monomorphized instance (§3.8): the template name, the
+/// The mangled symbol name of a monomorphized instance: the template name, the
 /// `__g_` instance marker, and each type argument's mangled form in declaration order.
 /// The result is a valid symbol (alphanumerics and `_` only).
 fn mangle_instance(
@@ -446,7 +446,7 @@ fn mangle_type(ty: &HirType) -> String {
     }
 }
 
-/// The mangled symbol name of a monomorphized generic-struct instance (§3.8): the base
+/// The mangled symbol name of a monomorphized generic-struct instance: the base
 /// name, a `_g_` marker, and each type argument's mangled form.
 ///
 /// Unlike [`mangle_instance`] (which uses `__g` for free functions), this never

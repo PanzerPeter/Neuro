@@ -16,7 +16,7 @@ fn test_parse_integer_literal() {
 
 #[test]
 fn test_parse_tuple_literal() {
-    // §3.2: a comma after the first element makes `( ... )` a tuple literal.
+    // A comma after the first element makes `( ... )` a tuple literal.
     let expr = parse_expr("(1, 2, 3)").expect("tuple literal should parse");
     match expr {
         Expr::TupleLiteral { elements, .. } => assert_eq!(elements.len(), 3),
@@ -26,7 +26,7 @@ fn test_parse_tuple_literal() {
 
 #[test]
 fn test_single_paren_is_grouping_not_tuple() {
-    // §3.2: `(x)` with no comma is grouping, not a one-element tuple.
+    // `(x)` with no comma is grouping, not a one-element tuple.
     let expr = parse_expr("(7)").expect("grouping should parse");
     assert!(
         matches!(expr, Expr::Paren(_, _)),
@@ -37,7 +37,7 @@ fn test_single_paren_is_grouping_not_tuple() {
 
 #[test]
 fn test_parse_tuple_index() {
-    // §3.2: a numeric token after `.` is a constant tuple index.
+    // A numeric token after `.` is a constant tuple index.
     let expr = parse_expr("pair.1").expect("tuple index should parse");
     match expr {
         Expr::TupleIndex { index, .. } => assert_eq!(index, 1),
@@ -608,7 +608,7 @@ fn test_parse_struct_update_only_base() {
 
 #[test]
 fn test_parse_exclusive_range() {
-    // `a..b` parses to a Range expression (§2.7) — only valid as a slice argument.
+    // `a..b` parses to a Range expression — only valid as a slice argument.
     let expr = parse_expr("0..5").expect("range should parse");
     match expr {
         Expr::Range {

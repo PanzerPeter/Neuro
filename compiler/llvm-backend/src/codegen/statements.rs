@@ -22,7 +22,7 @@ impl<'ctx> CodegenContext<'ctx> {
         init: Option<&HirExpr>,
     ) -> CodegenResult<()> {
         // Resolve whether this binding owns a `Drop` value before the initializer is
-        // consumed, so its destructor can be scheduled for scope exit (§2.1).
+        // consumed, so its destructor can be scheduled for scope exit.
         let drop_name = self.drop_struct_name(ty);
 
         let init_val = if let Some(expr) = init {
@@ -51,7 +51,7 @@ impl<'ctx> CodegenContext<'ctx> {
             self.type_env.insert(name.to_string(), target_sem);
 
             // Binding a place into a new owner moves it (`val b = a`): clear the source's
-            // drop flag so it is not also dropped (§2.2). Then register the new binding.
+            // drop flag so it is not also dropped. Then register the new binding.
             if let Some(expr) = init {
                 self.mark_moved_for_drop(expr);
             }
@@ -106,7 +106,7 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             (BasicValueEnum::FloatValue(fv), BasicTypeEnum::FloatType(ft)) => {
                 // Choose ext vs trunc by bit width so half-precision targets coerce
-                // correctly (§1.2); equal-width never reaches here (guarded above).
+                // correctly; equal-width never reaches here (guarded above).
                 if ft.get_bit_width() > fv.get_type().get_bit_width() {
                     Ok(self
                         .builder
@@ -121,7 +121,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         .into())
                 }
             }
-            // Element-wise array coercion (§3.1): rebuild an `[N x T]` aggregate at the
+            // Element-wise array coercion: rebuild an `[N x T]` aggregate at the
             // target element width so an untyped `[1, 2, 3]` literal (default i32) fits a
             // declared `[i64; N]`. Mirrors the scalar arms, applied per element.
             (BasicValueEnum::ArrayValue(av), BasicTypeEnum::ArrayType(at)) => {
@@ -162,7 +162,7 @@ impl<'ctx> CodegenContext<'ctx> {
             CodegenError::LlvmError(format!("failed to store value in assignment: {}", e))
         })?;
 
-        // Assigning a place moves it into the target (§2.2). The prior value held by a
+        // Assigning a place moves it into the target. The prior value held by a
         // reassigned `Drop` binding is not dropped here (a known limitation); the target
         // is still dropped once at scope exit.
         self.mark_moved_for_drop(value);
@@ -170,7 +170,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// Generate code for `*pointer = value` — a store through a mutable reference (§2.5).
+    /// Generate code for `*pointer = value` — a store through a mutable reference.
     /// `pointer` evaluates to the referent's address; the value is stored there.
     pub(crate) fn codegen_deref_assignment(
         &mut self,
@@ -197,7 +197,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 return Ok(());
             }
             // Returning a place moves it out, so it must not be dropped; every other
-            // live `Drop` binding in the function is destroyed before control leaves (§2.1).
+            // live `Drop` binding in the function is destroyed before control leaves.
             self.mark_moved_for_drop(expr);
             self.emit_drops_through(0)?;
             self.builder
@@ -237,7 +237,7 @@ impl<'ctx> CodegenContext<'ctx> {
             })?;
 
         // Generate then block in its own drop scope so locals declared in the branch
-        // are destroyed at the branch's end (§2.1).
+        // are destroyed at the branch's end.
         self.builder.position_at_end(then_bb);
         self.push_drop_scope();
         for stmt in then_block {
@@ -394,13 +394,13 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// Generate code for an infinite `loop { ... }` (§3.7), returning the loop's
+    /// Generate code for an infinite `loop { ... }`, returning the loop's
     /// value when it is used as an expression and yields one via `break v`.
     ///
     /// Unlike `while`, there is no condition block: control branches
     /// unconditionally into the body and back to its top, so the only way out is a
     /// `break`. `continue` re-enters the body from the top. `result_ty` is the loop
-    /// expression's type (§3.7): when it is not `Void`, a result slot is allocated,
+    /// expression's type: when it is not `Void`, a result slot is allocated,
     /// value-carrying `break`s store into it, and the loaded value is returned.
     /// `Stmt::Loop` passes `Void` (the value is discarded); `Expr::Loop` passes its
     /// resolved type.
@@ -692,7 +692,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let break_slot = target.break_slot;
                 let drop_depth = target.drop_scope_depth;
 
-                // A value-carrying `break v` (§3.7) stores `v` into the loop's result
+                // A value-carrying `break v` stores `v` into the loop's result
                 // slot before exiting; semantic analysis guarantees the slot exists.
                 if let Some(value_expr) = value {
                     let val = self.codegen_expr(value_expr)?;
@@ -708,7 +708,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
 
                 // Destroy every binding from here down to the loop's body scope before
-                // leaving the loop (§2.1).
+                // leaving the loop.
                 self.emit_drops_through(drop_depth)?;
 
                 if let Some(current_bb) = self.builder.get_insert_block() {
@@ -732,7 +732,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let drop_depth = target.drop_scope_depth;
 
                 // Re-entering the loop ends this iteration's body scope, so its bindings
-                // are destroyed before the back-edge (§2.1).
+                // are destroyed before the back-edge.
                 self.emit_drops_through(drop_depth)?;
 
                 if let Some(current_bb) = self.builder.get_insert_block() {

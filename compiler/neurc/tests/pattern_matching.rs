@@ -1,4 +1,4 @@
-// End-to-end tests for pattern matching (§3.6): enum deconstruction with payload
+// End-to-end tests for pattern matching: enum deconstruction with payload
 // binding, value/or/range/guard/wildcard patterns, `match` as a value expression,
 // and combination with prior features (structs via enum struct variants, functions,
 // arithmetic).

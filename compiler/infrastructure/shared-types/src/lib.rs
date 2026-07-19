@@ -106,7 +106,7 @@ pub enum IntSuffix {
 
 /// Type suffix on a float literal (e.g., the `f32` in `1.5f32`).
 ///
-/// `F16`/`BF16` are the half-precision suffixes (`1.5f16`, `0.02bf16`, §1.2). The
+/// `F16`/`BF16` are the half-precision suffixes (`1.5f16`, `0.02bf16`). The
 /// suffix is the only way to write a half-precision literal — they have no
 /// contextual default — because half-precision scalars carry a deliberately narrow
 /// contract (storage, copy, equality, and `as`-cast only; no arithmetic).
@@ -135,7 +135,7 @@ pub enum Literal {
     String(String),
     /// Boolean literal (`true` or `false`)
     Boolean(bool),
-    /// Character literal — a single Unicode scalar value (e.g. `'a'`, `'\n'`) (§1.2)
+    /// Character literal — a single Unicode scalar value (e.g. `'a'`, `'\n'`)
     Char(char),
 }
 

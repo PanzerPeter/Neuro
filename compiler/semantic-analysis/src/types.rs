@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-/// The length of a fixed-size array `[T; N]` (§3.1, §3.8).
+/// The length of a fixed-size array `[T; N]`.
 ///
 /// Concrete arrays carry a [`ArrayLen::Fixed`] length. Inside a generic definition an
 /// array may instead be sized by a `const` parameter ([`ArrayLen::Param`], `[T; CAP]`);
@@ -38,7 +38,7 @@ pub enum Type {
     U16,
     U32,
     U64,
-    // Half-precision floating point (§1.2). Narrow scalar contract: binding,
+    // Half-precision floating point. Narrow scalar contract: binding,
     // move/copy, `==`/`!=`, and `as`-cast only — no scalar arithmetic or ordering.
     F16,
     BF16,
@@ -47,7 +47,7 @@ pub enum Type {
     F64,
     // Other types
     Bool,
-    /// A single Unicode scalar value (§1.2). 32-bit, `Copy`, ordered, and
+    /// A single Unicode scalar value. 32-bit, `Copy`, ordered, and
     /// `as`-castable to/from integer types. Does not participate in arithmetic.
     Char,
     String,
@@ -58,45 +58,45 @@ pub enum Type {
     },
     /// User-defined struct type, identified by name (nominal typing).
     Struct(std::string::String),
-    /// User-defined enum type, identified by name (nominal typing, §3.5). A tagged
+    /// User-defined enum type, identified by name (nominal typing). A tagged
     /// union of variants; in Phase 1E its payloads are scalar `Copy` primitives, so
     /// an enum is `Copy`.
     Enum(std::string::String),
-    /// User-defined newtype, identified by name (nominal typing, §3.15). A distinct
+    /// User-defined newtype, identified by name (nominal typing). A distinct
     /// wrapper over an inner type — not interchangeable with it. In Phase 1E the
     /// inner type is restricted to `Copy` types, so a newtype is `Copy`; the inner
     /// type is looked up in the checker's newtype table rather than embedded here.
     Newtype(std::string::String),
-    /// Borrow `&T` (§2.4) / `&mut T` (§2.5): a non-owning reference to `inner`.
+    /// Borrow `&T` / `&mut T`: a non-owning reference to `inner`.
     /// References are `Copy` and never move the borrowed value. `mutable`
     /// distinguishes a write-capable `&mut T` from a read-only `&T`.
     Reference {
         inner: Box<Type>,
         mutable: bool,
     },
-    /// Fixed-size array `[T; N]` (§3.1): `size` elements of `element`. Two array
+    /// Fixed-size array `[T; N]`: `size` elements of `element`. Two array
     /// types are compatible only when their element types match and their sizes
     /// are equal — length is part of the type.
     Array {
         element: Box<Type>,
         size: ArrayLen,
     },
-    /// A monomorphization-internal const generic *argument* value (§3.8): the concrete
+    /// A monomorphization-internal const generic *argument* value: the concrete
     /// value bound to a `const N: T` parameter, used only inside the type-argument
     /// substitution and instance mangling. Never appears in a real value/annotation
     /// position and never reaches the HIR (the backend re-derives lengths from the AST).
     ConstValue(u64),
-    /// Anonymous tuple `(T1, T2, ...)` (§3.2): a positionally-indexed, heterogeneous
+    /// Anonymous tuple `(T1, T2, ...)`: a positionally-indexed, heterogeneous
     /// aggregate. Two tuple types are compatible only when they have the same arity
     /// and each element type matches. Always has at least two elements.
     Tuple(Vec<Type>),
-    /// A dynamic-dispatch trait object `dyn Trait` (§3.17), identified by trait name.
+    /// A dynamic-dispatch trait object `dyn Trait`, identified by trait name.
     /// It is **unsized**, so it only ever appears as the referent of a [`Type::Reference`]
     /// (`&dyn Trait` / `&mut dyn Trait`); a bare `dyn Trait` is rejected during type
     /// resolution. The trait must be object-safe. Two trait objects are compatible only
     /// when they name the same trait (nominal).
     DynObject(std::string::String),
-    /// An unresolved generic type parameter `T` inside a generic function body (§3.8).
+    /// An unresolved generic type parameter `T` inside a generic function body.
     /// It is nominal — `Generic("T")` is compatible only with itself — and supports no
     /// concrete operations (arithmetic, field access, …), which is exactly what a
     /// type parameter with no trait bounds soundly permits. It never escapes a generic
@@ -153,27 +153,27 @@ impl Type {
             }
 
             // Struct, enum, and newtype types match by name (nominal typing). A
-            // newtype is deliberately NOT compatible with its inner type (§3.15).
+            // newtype is deliberately NOT compatible with its inner type.
             (Type::Struct(a), Type::Struct(b)) => a == b,
             (Type::Enum(a), Type::Enum(b)) => a == b,
             (Type::Newtype(a), Type::Newtype(b)) => a == b,
 
-            // A generic type parameter matches only the same parameter by name (§3.8).
+            // A generic type parameter matches only the same parameter by name.
             // Two distinct parameters `T` and `U` are never interchangeable.
             (Type::Generic(a), Type::Generic(b)) => a == b,
 
-            // Trait objects match by trait name (nominal, §3.17). A `&T` → `&dyn Trait`
+            // Trait objects match by trait name (nominal). A `&T` → `&dyn Trait`
             // coercion is NOT expressed here (it depends on the impl table); it is
             // handled explicitly at argument/return/binding sites by the checker.
             (Type::DynObject(a), Type::DynObject(b)) => a == b,
 
-            // A const generic argument value matches only the same value (§3.8). This is
+            // A const generic argument value matches only the same value. This is
             // a monomorphization-internal marker; it never appears in ordinary positions.
             (Type::ConstValue(a), Type::ConstValue(b)) => a == b,
 
             // References match when their referents match and their mutability
-            // agrees (§2.4, §2.5). There is no implicit `&mut T` → `&T` coercion —
-            // the language is explicit over implicit (§Design Principles).
+            // agrees. There is no implicit `&mut T` → `&T` coercion —
+            // the language is explicit over implicit.
             (
                 Type::Reference {
                     inner: a,
@@ -186,7 +186,7 @@ impl Type {
             ) => am == bm && a.is_compatible_with(b),
 
             // Arrays match when their element types match and their lengths are equal
-            // (§3.1) — `[i32; 3]` and `[i32; 4]` are distinct types.
+            // `[i32; 3]` and `[i32; 4]` are distinct types.
             (
                 Type::Array {
                     element: a,
@@ -198,7 +198,7 @@ impl Type {
                 },
             ) => an == bn && a.is_compatible_with(b),
 
-            // Tuples match when they have the same arity and each element matches (§3.2).
+            // Tuples match when they have the same arity and each element matches.
             (Type::Tuple(a), Type::Tuple(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.is_compatible_with(y))
             }
@@ -211,7 +211,7 @@ impl Type {
     }
 
     /// The referent of a reference type, or the type itself when it is not a reference.
-    /// Used to auto-deref `&T` receivers in method/field resolution (§2.4).
+    /// Used to auto-deref `&T` receivers in method/field resolution.
     pub(crate) fn referent(&self) -> &Type {
         match self {
             Type::Reference { inner, .. } => inner,
@@ -220,7 +220,7 @@ impl Type {
     }
 
     /// Normalize a string operand for equality: a `&string` slice and an owned
-    /// `string` compare the same UTF-8 bytes (§2.7), so a single string reference
+    /// `string` compare the same UTF-8 bytes, so a single string reference
     /// is peeled to `string`. Other `&T` are left intact — reading them through
     /// `==` needs the deref operator (`*`).
     pub(crate) fn peel_string_ref(&self) -> Type {
@@ -265,12 +265,12 @@ impl Type {
             }
             // Bool to integer
             (Type::Bool, t2) if t2.is_integer() => true,
-            // char to/from integer, and char to char (§1.2). char is not castable
+            // char to/from integer, and char to char. char is not castable
             // to/from float or bool — the only conversions are integer-valued.
             (Type::Char, t2) if t2.is_integer() => true,
             (t1, Type::Char) if t1.is_integer() => true,
             (Type::Char, Type::Char) => true,
-            // f16/bf16 half-precision (§1.2): `as`-cast to/from any numeric type
+            // f16/bf16 half-precision: `as`-cast to/from any numeric type
             // and to/from each other / themselves. No bool/char/string conversions.
             (t1, t2) if t1.is_half_float() && (t2.is_numeric() || t2.is_half_float()) => true,
             (t1, t2) if t2.is_half_float() && (t1.is_numeric() || t1.is_half_float()) => true,
@@ -307,13 +307,13 @@ impl Type {
     ///
     /// Deliberately excludes `f16`/`bf16`: half-precision has a narrow scalar
     /// contract (no arithmetic), so it must not flow through the arithmetic and
-    /// contextual-inference paths gated on this predicate (§1.2). Use
+    /// contextual-inference paths gated on this predicate. Use
     /// `Type::is_half_float` for the half-precision-only checks.
     pub fn is_float(&self) -> bool {
         matches!(self, Type::F32 | Type::F64)
     }
 
-    /// Check if this is a half-precision floating-point type (`f16`/`bf16`, §1.2).
+    /// Check if this is a half-precision floating-point type (`f16`/`bf16`).
     pub(crate) fn is_half_float(&self) -> bool {
         matches!(self, Type::F16 | Type::BF16)
     }
@@ -323,7 +323,7 @@ impl Type {
         matches!(self, Type::Bool)
     }
 
-    /// Check if this is the `char` type (§1.2).
+    /// Check if this is the `char` type.
     pub(crate) fn is_char(&self) -> bool {
         matches!(self, Type::Char)
     }
@@ -569,7 +569,7 @@ mod tests {
         let ref_str2 = ref_to(Type::String);
         let ref_i32 = ref_to(Type::I32);
 
-        // References match iff their referents match (§2.4).
+        // References match iff their referents match.
         assert!(ref_str.is_compatible_with(&ref_str2));
         assert!(!ref_str.is_compatible_with(&ref_i32));
         // A reference is not compatible with the bare referent type.
@@ -585,7 +585,7 @@ mod tests {
 
     #[test]
     fn mutable_and_immutable_references_are_distinct() {
-        // §2.5: `&mut T` and `&T` are distinct types — no implicit coercion.
+        // `&mut T` and `&T` are distinct types — no implicit coercion.
         let mut_ref = mut_ref_to(Type::I32);
         let imm_ref = ref_to(Type::I32);
         assert!(!mut_ref.is_compatible_with(&imm_ref));
@@ -596,7 +596,7 @@ mod tests {
 
     #[test]
     fn peel_string_ref_normalizes_string_slice_only() {
-        // §2.7: `&string` (a string slice) and owned `string` are equality-comparable.
+        // `&string` (a string slice) and owned `string` are equality-comparable.
         let ref_str = ref_to(Type::String);
         assert_eq!(ref_str.peel_string_ref(), Type::String);
         assert_eq!(Type::String.peel_string_ref(), Type::String);
@@ -616,7 +616,7 @@ mod tests {
 
     #[test]
     fn char_type_compatibility_cast_and_display() {
-        // §1.2: char is its own type, Copy, ordered, and castable to/from integers only.
+        // `char` is its own type, Copy, ordered, and castable to/from integers only.
         assert!(Type::Char.is_compatible_with(&Type::Char));
         assert!(!Type::Char.is_compatible_with(&Type::I32));
         assert!(!Type::Char.is_compatible_with(&Type::String));
@@ -644,7 +644,7 @@ mod tests {
 
     #[test]
     fn half_float_type_compatibility_cast_and_display() {
-        // §1.2: f16/bf16 are their own distinct types, Copy, with a narrow contract.
+        // `f16`/`bf16` are their own distinct types, Copy, with a narrow contract.
         assert!(Type::F16.is_compatible_with(&Type::F16));
         assert!(Type::BF16.is_compatible_with(&Type::BF16));
         // f16 and bf16 are distinct, and neither is compatible with f32/f64.
@@ -679,7 +679,7 @@ mod tests {
 
     #[test]
     fn tuple_type_compatibility_and_display() {
-        // §3.2: tuples match on equal arity with each element matching.
+        // Tuples match on equal arity with each element matching.
         let a = Type::Tuple(vec![Type::I32, Type::Bool]);
         let b = Type::Tuple(vec![Type::I32, Type::Bool]);
         let diff_elem = Type::Tuple(vec![Type::I32, Type::I32]);

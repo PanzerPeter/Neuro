@@ -1,4 +1,4 @@
-// Pattern matching (§3.6): `match` as an exhaustive expression over enums and
+// Pattern matching: `match` as an exhaustive expression over enums and
 // scalar values — variant deconstruction with payload binding, literal / or /
 // range patterns, guard clauses, and the `_` wildcard.
 

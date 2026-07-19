@@ -1,4 +1,4 @@
-// Integration tests for integer literal type suffixes (§1.4)
+// Integration tests for integer literal type suffixes
 mod common;
 use common::CompileTest;
 

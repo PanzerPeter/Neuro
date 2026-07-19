@@ -1,4 +1,4 @@
-// Type checking for `match` expressions (§3.6): pattern/scrutinee typing, arm-body
+// Type checking for `match` expressions: pattern/scrutinee typing, arm-body
 // unification, binding introduction, and exhaustiveness.
 
 use ast_types::{EnumPatternPayload, Expr, MatchArm, Pattern};
@@ -21,7 +21,7 @@ enum Coverage {
 }
 
 impl TypeChecker {
-    /// Type-check a `match` expression (§3.6) and return its result type.
+    /// Type-check a `match` expression and return its result type.
     pub(crate) fn check_match(
         &mut self,
         scrutinee: &Expr,
@@ -45,7 +45,7 @@ impl TypeChecker {
             });
         }
 
-        // Each arm runs on its own path (§2.2), so snapshot the move state after the
+        // Each arm runs on its own path, so snapshot the move state after the
         // scrutinee and restore it between arms — mirroring `if`.
         let move_snapshot = self.symbols.snapshot_moves();
 
@@ -90,7 +90,7 @@ impl TypeChecker {
     fn check_arm(&mut self, arm: &MatchArm, scrut_ty: &Type, expected: Option<&Type>) -> Type {
         self.symbols.push_scope();
 
-        // Or-patterns (`a | b`) may not bind (§3.6): only a single pattern arm binds.
+        // Or-patterns (`a | b`) may not bind: only a single pattern arm binds.
         let binds_allowed = arm.patterns.len() == 1;
         let mut bindings: Vec<(String, Type, Span)> = Vec::new();
         for pattern in &arm.patterns {
@@ -184,7 +184,7 @@ impl TypeChecker {
         span: Span,
         bindings: &mut Vec<(String, Type, Span)>,
     ) {
-        // The scrutinee must be exactly this enum (nominal typing, §3.5).
+        // The scrutinee must be exactly this enum (nominal typing).
         match scrut_ty {
             Type::Unknown => {}
             Type::Enum(name) if name == enum_name => {}
@@ -256,7 +256,7 @@ impl TypeChecker {
     }
 
     /// Bind one enum-payload sub-pattern. Sub-patterns are restricted to a binding or
-    /// `_` (§3.6 scope); a refutable sub-pattern (literal, range, nested variant) is an
+    /// `_`; a refutable sub-pattern (literal, range, nested variant) is an
     /// error directing the user to a guard.
     fn bind_payload_sub(
         &mut self,
@@ -295,7 +295,7 @@ impl TypeChecker {
         }
     }
 
-    /// Verify the arms cover every possible scrutinee value (§3.6).
+    /// Verify the arms cover every possible scrutinee value.
     fn check_exhaustive(&mut self, arms: &[MatchArm], scrut_ty: &Type, span: Span) {
         let mut has_catch_all = false;
         let mut covered_variants: Vec<String> = Vec::new();

@@ -1,4 +1,4 @@
-// Parsing for `match` expressions and their patterns (§3.6).
+// Parsing for `match` expressions and their patterns.
 
 use syntax_parsing::{parse_expr, EnumPatternPayload, Expr, Pattern};
 

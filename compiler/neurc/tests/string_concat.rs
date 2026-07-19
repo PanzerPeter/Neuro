@@ -1,4 +1,4 @@
-// String concatenation tests (Phase 1.7, §2.7)
+// String concatenation tests (Phase 1.7)
 // `string + string` allocates a new owned, immutable string on the heap.
 // Correctness is verified at runtime through the existing byte-level `==`.
 mod common;

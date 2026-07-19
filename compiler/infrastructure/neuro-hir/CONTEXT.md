@@ -24,32 +24,32 @@ differences that make it the *typed* contract:
 1. **Every expression carries its resolved type.** `HirExpr` is `{ kind, ty, span }`; `ty` is a
    fully resolved `HirType`. `HirType` has **no `Unknown` variant** — reaching the HIR implies the
    program type-checked. Its variant set mirrors the resolved types the semantic analyzer produces
-   today (§1.2); no tensor/generic variants until the language gains them (No Speculative Generality).
+   today; no tensor/generic variants until the language gains them (No Speculative Generality).
 2. **Syntactic noise is normalized away.** The AST's `Expr::Paren` grouping node is dropped — tree
    structure already encodes grouping. Identifiers are resolved to their `String` name; the source
    span lives on the enclosing node.
 
 ## Recent Updates
-- 2026-07-19: Static & dynamic dispatch (§3.17). Added `HirType::DynObject(String)` (a trait object, valid only as a `HirType::Reference` referent; backends lower `&dyn T` to a `{ data ptr, vtable ptr }` fat pointer), `HirExprKind::DynCoerce { value }` (the `&T` -> `&dyn Trait` unsizing coercion — `value.ty` names the concrete type that selects the vtable, the node's `ty` is the trait-object reference), and `HirItem::Trait(HirTrait { name, methods, span })`. `HirTrait` exists ONLY to give dynamic dispatch a canonical vtable slot order (the trait's declaration order); static-dispatch traits remain fully erased. Re-exported `HirTrait` from the crate root.
-- 2026-07-02: Newtype declarations §3.15. Added `HirType::Newtype { name, inner }` (a nominal wrapper
+- 2026-07-19: Static & dynamic dispatch. Added `HirType::DynObject(String)` (a trait object, valid only as a `HirType::Reference` referent; backends lower `&dyn T` to a `{ data ptr, vtable ptr }` fat pointer), `HirExprKind::DynCoerce { value }` (the `&T` -> `&dyn Trait` unsizing coercion — `value.ty` names the concrete type that selects the vtable, the node's `ty` is the trait-object reference), and `HirItem::Trait(HirTrait { name, methods, span })`. `HirTrait` exists ONLY to give dynamic dispatch a canonical vtable slot order (the trait's declaration order); static-dispatch traits remain fully erased. Re-exported `HirTrait` from the crate root.
+- 2026-07-02: Newtype declarations. Added `HirType::Newtype { name, inner }` (a nominal wrapper
   that carries its resolved inner type so backends can erase it) and the transparent expression kinds
   `HirExprKind::NewtypeConstruct { name, value }` (`Name(value)`) and `HirExprKind::NewtypeAccess {
   object }` (`.0`). A newtype produces no `HirItem` — it dissolves into these types/nodes, which both
   backends lower straight through to the inner value.
-- 2026-07-02: Pattern matching §3.6. Added `HirExprKind::Match { scrutinee, arms }` with the fully
+- 2026-07-02: Pattern matching. Added `HirExprKind::Match { scrutinee, arms }` with the fully
   resolved `HirMatchArm { tests, bindings, guard, body }`. `HirMatchTest::{Wildcard, Tag, IntEq,
   IntRange}` are the refutable tests (an exclusive `a..b` is pre-normalized to `a..=b-1`);
   `HirMatchBinding { name, ty, source }` with `HirBindingSource::{Scrutinee, EnumPayload { slot }}`
   describes each binding so the backend needs no pattern/exhaustiveness logic.
-- 2026-06-30: Enums with associated data §3.5. Added `HirType::Enum(String)` (nominal), `HirItem::Enum`
+- 2026-06-30: Enums with associated data. Added `HirType::Enum(String)` (nominal), `HirItem::Enum`
   with `HirEnum { name, variants }` / `HirEnumVariant { name, fields }` / `HirEnumField { name:
   Option<String>, ty }`, and `HirExprKind::EnumConstruct { enum_name, variant, tag, payload }` — the
   single node all three surface construction forms normalize to (payload in declared field order; `tag`
   is the variant's declaration index). Consumed by both backends.
-- 2026-06-29: Struct + array destructuring §3.2. Added `HirExprKind::ArrayRest { array, start }`, the
+- 2026-06-29: Struct + array destructuring. Added `HirExprKind::ArrayRest { array, start }`, the
   typed mirror of the AST's array-rest node; its `ty` carries the resolved `[T; N - start]` remainder
   type. Struct destructuring carries no HIR node (the parser desugars it to field accesses).
-- 2026-06-28: Tuples §3.2. Added `HirType::Tuple(Vec<HirType>)` (with `(T1, T2, ...)` Display) and the
+- 2026-06-28: Tuples. Added `HirType::Tuple(Vec<HirType>)` (with `(T1, T2, ...)` Display) and the
   `HirExprKind::TupleLiteral { elements }` / `HirExprKind::TupleIndex { object, index }` expression
   kinds — the typed mirror of the AST's tuple nodes. Destructuring carries no HIR node (the parser
   desugars it before lowering).

@@ -705,7 +705,7 @@ func dangle() -> &i32 {
     );
     assert!(
         returns_ref_to_local(&errors),
-        "borrowing a body-local and returning it dangles (§2.6); got {errors:?}"
+        "borrowing a body-local and returning it dangles; got {errors:?}"
     );
 }
 
@@ -720,7 +720,7 @@ func dangle(n: i32) -> &i32 {
     );
     assert!(
         returns_ref_to_local(&errors),
-        "a by-value parameter does not outlive the call (§2.6); got {errors:?}"
+        "a by-value parameter does not outlive the call; got {errors:?}"
     );
 }
 
@@ -735,7 +735,7 @@ func identity(r: &i32) -> &i32 {
     );
     assert!(
         !returns_ref_to_local(&errors),
-        "a reference parameter outlives the call (single-input elision, §2.6); got {errors:?}"
+        "a reference parameter outlives the call (single-input elision); got {errors:?}"
     );
 }
 
@@ -752,7 +752,7 @@ func leak() -> &i32 {
     );
     assert!(
         returns_ref_to_local(&errors),
-        "a local reference binding that borrows a local dangles transitively (§2.6); got {errors:?}"
+        "a local reference binding that borrows a local dangles transitively; got {errors:?}"
     );
 }
 
@@ -772,14 +772,14 @@ func pick(cond: bool, r: &i32) -> &i32 {
     );
     assert!(
         returns_ref_to_local(&errors),
-        "the dangling `else` arm must be caught even when another arm is sound (§2.6); got {errors:?}"
+        "the dangling `else` arm must be caught even when another arm is sound; got {errors:?}"
     );
 }
 
 #[test]
 fn returning_a_borrow_of_self_is_accepted() {
     // `&self` outlives the call, so a method may return a borrow of `self` (the
-    // `&self` lifetime is applied to method outputs, §2.6). Without `self` in the
+    // `&self` lifetime is applied to method outputs). Without `self` in the
     // outliving set this would be wrongly flagged as a local.
     let errors = semantic_errors(
         r#"
@@ -794,13 +794,13 @@ impl Wrapper {
     );
     assert!(
         !returns_ref_to_local(&errors),
-        "a borrow of `&self` outlives the call (§2.6); got {errors:?}"
+        "a borrow of `&self` outlives the call; got {errors:?}"
     );
 }
 
 #[test]
 fn valid_drop_impl_is_accepted() {
-    // `impl Drop for T { func drop(&mut self) }` is the recognized lang-item shape (§2.1).
+    // `impl Drop for T { func drop(&mut self) }` is the recognized lang-item shape.
     let errors = semantic_errors(
         r#"
 struct Handle { id: i32 }
@@ -836,7 +836,7 @@ func main() -> i32 { 0 }
         errors
             .iter()
             .any(|e| matches!(e, TypeError::DropTypeCannotBeCopy { .. })),
-        "a Copy type may not implement Drop (§2.1/§2.3); got {errors:?}"
+        "a Copy type may not implement Drop; got {errors:?}"
     );
 }
 
@@ -886,7 +886,7 @@ func main() -> i32 { 0 }
 
 #[test]
 fn array_literal_index_len_and_iteration_type_check() {
-    // §3.1 — a typed array literal, index read/write, `.len()`, and `for x in arr`
+    // A typed array literal, index read/write, `.len()`, and `for x in arr`
     // / `for x in &arr` all type-check in one program.
     let errors = semantic_errors(
         r#"
@@ -986,7 +986,7 @@ func main() -> i32 {
 
 #[test]
 fn array_of_non_copy_element_is_rejected() {
-    // §3.1 — string elements need per-element move tracking, not yet supported.
+    // String elements need per-element move tracking, not yet supported.
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
@@ -1022,7 +1022,7 @@ func main() -> i32 {
     );
 }
 
-// --- Newtype declarations (§3.15) ---------------------------------------------
+// --- Newtype declarations ---------------------------------------------
 
 #[test]
 fn newtype_construction_and_inner_access_type_check() {
@@ -1045,7 +1045,7 @@ func main() -> i32 {
 #[test]
 fn newtype_is_not_interchangeable_with_inner() {
     // Assigning a `Meters` where an `i32` is expected is a type error — a newtype is
-    // a DISTINCT nominal type, unlike a transparent `type` alias (§3.15).
+    // a DISTINCT nominal type, unlike a transparent `type` alias.
     let errors = semantic_errors(
         r#"
 newtype Meters = i32
@@ -1171,7 +1171,7 @@ func main() -> i32 {
     );
 }
 
-// --- Generics (§3.8) ---
+// --- Generics ---
 
 #[test]
 fn generic_call_type_checks_and_infers_return_type() {
@@ -1266,7 +1266,7 @@ func main() -> i32 { return pair(1) }
 #[test]
 fn generic_struct_literal_infers_and_field_access_types() {
     // A generic struct literal infers its type arguments; a field read yields the
-    // concrete field type, so `p.first + 1` type-checks as i32 arithmetic (§3.8).
+    // concrete field type, so `p.first + 1` type-checks as i32 arithmetic.
     let errors = semantic_errors(
         r#"
 struct Pair<T, U> { first: T, second: U }
@@ -1353,7 +1353,7 @@ func main() -> i32 {
 
 #[test]
 fn declared_lifetime_annotation_is_accepted() {
-    // The canonical §2.6 example: an explicit lifetime declared in `<'a>` and used on
+    // The canonical example: an explicit lifetime declared in `<'a>` and used on
     // reference parameters and the return type type-checks (returning a borrowed
     // parameter is already permitted by elision).
     let errors = semantic_errors(
@@ -1409,7 +1409,7 @@ func main() -> i32 {
 #[test]
 fn trait_impl_and_default_method_type_check() {
     // A trait with a required and a default method; the impl provides only the
-    // required one and inherits the default. Dispatching both must type-check (§3.9).
+    // required one and inherits the default. Dispatching both must type-check.
     let errors = semantic_errors(
         r#"
 trait Describable {
@@ -1491,7 +1491,7 @@ func main() -> i32 { 0 }
 #[test]
 fn generic_trait_bound_dispatch_type_checks() {
     // A generic function bounded by a trait may call the trait's methods on the
-    // type parameter, and the call site satisfies the bound (§3.9).
+    // type parameter, and the call site satisfies the bound.
     let errors = semantic_errors(
         r#"
 trait Shape { func area(&self) -> i32 }
@@ -1533,7 +1533,7 @@ func main() -> i32 {
     );
 }
 
-// ---- Operator traits (§3.10) ----
+// ---- Operator traits ----
 
 /// A `Vec2` with the arithmetic, unary, and comparison operator impls used below.
 const VEC2_OPS: &str = r#"

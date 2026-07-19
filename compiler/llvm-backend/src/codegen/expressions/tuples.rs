@@ -1,4 +1,4 @@
-// Codegen for tuples `(T1, T2, ...)` (§3.2): literals build an anonymous LLVM
+// Codegen for tuples `(T1, T2, ...)`: literals build an anonymous LLVM
 // struct value; element access `t.N` is an `extractvalue` by constant index.
 
 use inkwell::values::BasicValueEnum;
@@ -9,7 +9,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// Lower a tuple literal `(e0, e1, ...)` (§3.2) to an anonymous struct value.
+    /// Lower a tuple literal `(e0, e1, ...)` to an anonymous struct value.
     /// Each element is built at its own type; a default-typed integer/float literal
     /// is retargeted to the annotated element width via `coerce_if_needed`, mirroring
     /// the array-literal path.
@@ -46,7 +46,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(agg.into())
     }
 
-    /// Lower a tuple element access `object.N` (§3.2): build the tuple value and
+    /// Lower a tuple element access `object.N`: build the tuple value and
     /// `extractvalue` the N-th field.
     pub(crate) fn codegen_tuple_index(
         &mut self,

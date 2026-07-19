@@ -1,4 +1,4 @@
-//! Compiler-known operator traits (§3.10).
+//! Compiler-known operator traits.
 //!
 //! Operators on user types are sugar for trait method calls. Like `Drop` / `Copy` /
 //! `Clone`, the operator traits are lang-items recognized by name (there is no prelude
@@ -9,7 +9,7 @@ use ast_types::{BinaryOp, UnaryOp};
 
 /// The static description of one operator trait: which operators it provides, whether
 /// its methods return `Self::Output` (arithmetic/bitwise) or a fixed `bool`
-/// (comparison), and any required supertrait (§3.10: `Comparable: PartialEq`).
+/// (comparison), and any required supertrait (`Comparable: PartialEq`).
 pub(crate) struct OpTraitSpec {
     /// Binary operators provided by this trait: `(method name, operator)`.
     pub binary: &'static [(&'static str, BinaryOp)],
@@ -23,7 +23,7 @@ pub(crate) struct OpTraitSpec {
 }
 
 /// Return the lang-item description of an operator trait, or `None` if `name` is not an
-/// operator trait (§3.10).
+/// operator trait.
 pub(crate) fn operator_trait_spec(name: &str) -> Option<OpTraitSpec> {
     let spec = match name {
         "Add" => OpTraitSpec {
@@ -86,7 +86,7 @@ pub(crate) fn operator_trait_spec(name: &str) -> Option<OpTraitSpec> {
             has_output: true,
             supertrait: None,
         },
-        // `Not` maps to the bitwise complement `~a`, not the boolean `!a` (§3.10).
+        // `Not` maps to the bitwise complement `~a`, not the boolean `!a`.
         "Not" => OpTraitSpec {
             binary: &[],
             unary: &[("not", UnaryOp::BitNot)],
@@ -115,7 +115,7 @@ pub(crate) fn operator_trait_spec(name: &str) -> Option<OpTraitSpec> {
     Some(spec)
 }
 
-/// Whether `name` is a compiler-known operator trait (§3.10).
+/// Whether `name` is a compiler-known operator trait.
 pub(crate) fn is_operator_trait(name: &str) -> bool {
     operator_trait_spec(name).is_some()
 }

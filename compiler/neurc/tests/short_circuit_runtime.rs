@@ -1,4 +1,4 @@
-// End-to-end tests for short-circuiting `&&` / `||` with comparison operands (§1.4).
+// End-to-end tests for short-circuiting `&&` / `||` with comparison operands.
 //
 // Regression coverage for a span-keyed type-map collision: a binary expression and its
 // leftmost descendant share the same `span.start`, so the parent's left-operand-type slot

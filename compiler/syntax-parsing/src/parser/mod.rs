@@ -19,13 +19,13 @@ pub(crate) struct Parser {
     /// When true, an identifier followed by `{` is NOT parsed as a struct literal.
     /// Set to true inside if/while/for conditions to prevent consuming the block's `{`.
     pub(super) no_struct_lit: bool,
-    /// Loop labels in scope at the current parse position, innermost last (§3.7).
+    /// Loop labels in scope at the current parse position, innermost last.
     /// `break`/`continue` labels and value-carrying `break v` share bare-identifier
     /// syntax, so an identifier after `break` is read as a label only when it names
     /// an in-scope loop; otherwise it begins the break value expression.
     pub(super) active_labels: Vec<String>,
     /// Monotonic counter for the synthetic temporaries a tuple-destructuring bind
-    /// (`val (a, b) = e`, §3.2) desugars to. Each `__destructure_N` name is unique
+    /// (`val (a, b) = e`) desugars to. Each `__destructure_N` name is unique
     /// within a parse so nested or repeated destructures never collide.
     pub(super) destructure_counter: usize,
 }

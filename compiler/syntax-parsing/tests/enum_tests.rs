@@ -1,4 +1,4 @@
-// Enum declaration and struct-variant literal parsing (§3.5).
+// Enum declaration and struct-variant literal parsing.
 
 use syntax_parsing::{parse, Expr, Item, Stmt, VariantPayload};
 

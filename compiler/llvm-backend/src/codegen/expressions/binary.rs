@@ -90,13 +90,13 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))
     }
 
-    /// Concatenate two string fat-pointers into a new owned `string` (§2.7).
+    /// Concatenate two string fat-pointers into a new owned `string`.
     ///
     /// Allocates `len1 + len2` bytes via `malloc` and copies both operands' bytes
     /// in with `memcpy`, returning a fresh `{ ptr, len }`. The result is a new,
     /// immutable, heap-backed string; the operands are read, not consumed. The
     /// buffer has no null terminator (consistent with the fat-pointer `len`
-    /// contract, §1.5) and is not yet freed — runtime heap strings leak until
+    /// contract) and is not yet freed — runtime heap strings leak until
     /// `Drop` lands (Phase 1.7); see the alpha memory warning in the README.
     pub(crate) fn codegen_string_concat(
         &self,
@@ -174,7 +174,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Normalize a string operand to its `{ ptr, len }` fat-pointer struct value,
-    /// auto-dereferencing a `&string` slice (§2.7) — a borrow lowers to a pointer
+    /// auto-dereferencing a `&string` slice — a borrow lowers to a pointer
     /// to the fat pointer, so it is loaded; an owned `string` is already the struct.
     fn load_string_fatptr(
         &self,
@@ -191,7 +191,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// Emit a short-circuiting logical `&&` or `||` (§1.4).
+    /// Emit a short-circuiting logical `&&` or `||`.
     ///
     /// Operands are guaranteed `bool` (i1) by semantic analysis. The LHS is
     /// evaluated first; the RHS is only evaluated on the branch where the result
@@ -275,7 +275,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// In debug builds (`-O0`, `overflow_checks` enabled) the operation uses the
     /// LLVM `{s,u}{add,sub,mul}.with.overflow` intrinsic and aborts via `llvm.trap`
-    /// when the result overflows, matching the §1.2 rule that debug arithmetic
+    /// when the result overflows, matching the overflow rule that debug arithmetic
     /// panics on overflow. In release builds the plain wrapping instruction is
     /// emitted, giving two's-complement wraparound.
     fn codegen_int_arith(
@@ -396,7 +396,7 @@ impl<'ctx> CodegenContext<'ctx> {
         right: &HirExpr,
         left_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        // `&&` and `||` short-circuit (§1.4): the RHS must only be evaluated when
+        // `&&` and `||` short-circuit: the RHS must only be evaluated when
         // the LHS does not already decide the result. This requires branching, so
         // it is handled before the eager operand evaluation below.
         if matches!(op, BinaryOp::And | BinaryOp::Or) {
@@ -406,7 +406,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let lhs = self.codegen_expr(left)?;
         let rhs = self.codegen_expr(right)?;
 
-        // String equality (§2.7) compares UTF-8 bytes. Either operand may be an
+        // String equality compares UTF-8 bytes. Either operand may be an
         // owned `string` (a `{ ptr, len }` struct value) or a `&string` slice (a
         // pointer to one); each is normalized to the fat-pointer struct before the
         // byte compare. Handled before the numeric coercion below, which assumes a
@@ -427,7 +427,7 @@ impl<'ctx> CodegenContext<'ctx> {
             };
         }
 
-        // String concatenation (§2.7): `string + string` allocates a fresh heap
+        // String concatenation: `string + string` allocates a fresh heap
         // buffer and copies both operands' bytes in. Either operand may be owned or
         // a `&string` slice, so each is normalized to its fat pointer first. Handled
         // before the numeric coercion below, which assumes scalar operands.

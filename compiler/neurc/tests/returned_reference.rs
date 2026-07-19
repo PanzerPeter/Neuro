@@ -1,4 +1,4 @@
-// Returned-reference outlives / lifetime elision tests (Phase 1.7 §2.6).
+// Returned-reference outlives / lifetime elision tests (Phase 1.7).
 //
 // A function or method whose return type is a reference may only return a
 // reference that outlives the call. Under lifetime elision a single input

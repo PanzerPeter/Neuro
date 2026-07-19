@@ -1,4 +1,4 @@
-//! Compiler-known operator traits (§3.10), duplicated from the checker per VSA (feature
+//! Compiler-known operator traits, duplicated from the checker per VSA (feature
 //! slices share only infrastructure crates, so the small lang-item table is duplicated
 //! rather than coupled). Maps each operator trait to the operator(s) it provides.
 
@@ -12,7 +12,7 @@ pub(crate) struct OpTraitSpec {
     pub has_output: bool,
 }
 
-/// Return the operator trait's description, or `None` if `name` is not one (§3.10).
+/// Return the operator trait's description, or `None` if `name` is not one.
 pub(crate) fn operator_trait_spec(name: &str) -> Option<OpTraitSpec> {
     let spec = match name {
         "Add" => OpTraitSpec {

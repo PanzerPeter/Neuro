@@ -1,4 +1,4 @@
-// Struct and array destructuring patterns (§3.2).
+// Struct and array destructuring patterns.
 //
 // A destructuring `val`/`mut` binds the parts of an aggregate in one step. It is a
 // binding form, not a new value: the compiler desugars it to ordinary bindings.

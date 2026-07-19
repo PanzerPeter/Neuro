@@ -17,15 +17,15 @@ pub(crate) struct TypeChecker {
     functions: HashMap<String, Type>,
     /// Struct definitions: name → ordered list of (field_name, field_type)
     struct_defs: HashMap<String, Vec<(String, Type)>>,
-    /// Enum definitions: name → ordered list of variants (§3.5). The order is the
+    /// Enum definitions: name → ordered list of variants. The order is the
     /// declaration order, which is also the discriminant order used by codegen.
     enum_defs: HashMap<String, Vec<EnumVariantInfo>>,
-    /// Newtype definitions: name → resolved inner type (§3.15). A newtype is a
+    /// Newtype definitions: name → resolved inner type. A newtype is a
     /// distinct nominal type wrapping this inner type; construction is `Name(value)`
     /// and the inner value is read via `.0`.
     newtype_defs: HashMap<String, Type>,
     /// Names of structs that derive `Copy` (`@derive(Copy)`). A Copy struct is
-    /// duplicated on assignment instead of moved (§2.3).
+    /// duplicated on assignment instead of moved.
     copy_structs: HashSet<String>,
     /// Names of structs that derive `Clone` — either explicitly via `@derive(Clone)`
     /// or implicitly because they derive `Copy`. A Clone struct supports `.clone()`.
@@ -34,38 +34,38 @@ pub(crate) struct TypeChecker {
     ///
     /// The mangled key follows the convention `StructName__methodName`.
     impl_methods: HashMap<String, HashMap<String, String>>,
-    /// Mangled keys of `&mut self` methods (§2.5). Calling one takes an exclusive
+    /// Mangled keys of `&mut self` methods. Calling one takes an exclusive
     /// borrow of the receiver, so the receiver must be a mutable place and must not
     /// already be borrowed — checked at the call site like a `&mut place` borrow.
     mut_self_methods: HashSet<String>,
-    /// Generic free-function templates (§3.8), keyed by name. A generic function is
+    /// Generic free-function templates, keyed by name. A generic function is
     /// NOT placed in `functions` — calls to it route through generic inference, which
     /// substitutes concrete type arguments per call site (monomorphization).
     generic_funcs: HashMap<String, GenericFnSig>,
-    /// Generic struct templates (§3.8), keyed by name. A generic struct is NOT a
+    /// Generic struct templates, keyed by name. A generic struct is NOT a
     /// usable type on its own; each distinct set of type arguments is monomorphized
     /// into a distinct nominal struct registered in `struct_defs` on demand. The
     /// template's field types (carrying [`Type::Generic`] placeholders) are also kept
     /// in `struct_defs` under the base name so generic method bodies type-check.
     generic_structs: HashMap<String, ast_types::StructDef>,
-    /// Generic `impl` templates keyed by base struct name (§3.8): `impl<T> Wrapper<T>`.
+    /// Generic `impl` templates keyed by base struct name: `impl<T> Wrapper<T>`.
     /// Instantiating a generic struct also instantiates each matching impl's methods.
     generic_impls: HashMap<String, Vec<ast_types::ImplDef>>,
-    /// User-declared traits keyed by name (§3.9): each carries its method signatures so
+    /// User-declared traits keyed by name: each carries its method signatures so
     /// `impl Trait for Type` conformance and generic-body trait-method dispatch resolve.
     traits: HashMap<String, TraitInfo>,
     /// Concrete `(trait name, implementing type name)` pairs that have an
-    /// `impl Trait for Type` block (§3.9). A generic bound `T: Trait` is satisfied at a
+    /// `impl Trait for Type` block. A generic bound `T: Trait` is satisfied at a
     /// call site exactly when the concrete type argument appears here.
     trait_impls: HashSet<(String, String)>,
-    /// Operator-trait dispatch (§3.10): `(struct name, binary operator)` → the value
+    /// Operator-trait dispatch: `(struct name, binary operator)` → the value
     /// type of the right operand and the operator's result type. Present exactly when
     /// the struct has an operator-trait impl providing that operator.
     operator_binary_impls: HashMap<(String, ast_types::BinaryOp), OperatorDispatch>,
     /// Operator-trait dispatch for unary operators (`-a` via `Neg`, `~a` via `Not`).
     operator_unary_impls: HashMap<(String, ast_types::UnaryOp), Type>,
     /// Trait bounds of the type parameters in scope while a generic definition is checked
-    /// (§3.8, §3.9): parameter name → declared trait names. Lets a generic body dispatch
+    /// Parameter name → declared trait names. Lets a generic body dispatch
     /// a trait method on a bounded type parameter. Empty outside a generic definition.
     pub(crate) generic_bounds: HashMap<String, Vec<String>>,
     /// Mangled names of generic-struct instantiations already materialized into
@@ -76,12 +76,12 @@ pub(crate) struct TypeChecker {
     /// erroring as an unknown type. Empty outside a generic function.
     pub(crate) generic_scope: HashSet<String>,
     /// Const (value) generic parameters in scope while checking a generic definition's
-    /// signature and body (§3.8), mapping each name to its declared integer type. A value
+    /// signature and body, mapping each name to its declared integer type. A value
     /// reference to one resolves to that type; an array length naming one becomes an
     /// [`crate::types::ArrayLen::Param`]. Empty outside a generic definition.
     pub(crate) const_scope: HashMap<String, Type>,
     /// Explicit lifetime parameter names in scope while checking a definition's signature
-    /// and body (§2.6), e.g. `'a` from `func f<'a>(...)` (stored without the leading `'`).
+    /// and body, e.g. `'a` from `func f<'a>(...)` (stored without the leading `'`).
     /// A reference annotation `&'a T` is well-formed only if `a` is present here. Empty
     /// outside a definition that declares lifetimes.
     pub(crate) lifetime_scope: HashSet<String>,
@@ -96,15 +96,15 @@ pub(crate) struct TypeChecker {
     /// Names of bindings in the current function whose storage outlives the call:
     /// reference-typed parameters and the `self` receiver of an instance method.
     /// A returned reference is only safe when it ultimately borrows one of these —
-    /// borrowing any other (function-local) place dangles (§2.6).
+    /// borrowing any other (function-local) place dangles.
     current_fn_outliving: HashSet<String>,
-    /// Currently active loops, innermost last (§3.7). Stack depth doubles as the
+    /// Currently active loops, innermost last. Stack depth doubles as the
     /// loop-nesting count used to reject `break` / `continue` outside any loop;
     /// each entry carries its label and value-break typing state.
     loop_stack: Vec<LoopContext>,
 }
 
-/// The construction form of an enum variant (§3.5), determining how it is built:
+/// The construction form of an enum variant, determining how it is built:
 /// `Color::Red`, `Move(1, 2)`, or `Circle { radius: 5.0 }`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VariantForm {
@@ -113,7 +113,7 @@ pub(crate) enum VariantForm {
     Struct,
 }
 
-/// A generic free-function template's resolved signature (§3.8). Parameter and
+/// A generic free-function template's resolved signature. Parameter and
 /// return types carry [`Type::Generic`] placeholders for the type parameters named
 /// in `param_names` (declaration order, which is also the monomorphization and
 /// turbofish order). A name present in `const_types` is a const (value) parameter of
@@ -126,18 +126,18 @@ pub(crate) struct GenericFnSig {
     pub(crate) params: Vec<Type>,
     pub(crate) ret: Type,
     pub(crate) where_predicates: Vec<ast_types::Expr>,
-    /// Trait bounds per type parameter (§3.9), e.g. `T: Drawable`. Checked at each call
+    /// Trait bounds per type parameter, e.g. `T: Drawable`. Checked at each call
     /// site against the inferred concrete type argument.
     pub(crate) bounds: HashMap<String, Vec<String>>,
 }
 
-/// A user-declared trait's resolved method signatures (§3.9), keyed by method name.
+/// A user-declared trait's resolved method signatures, keyed by method name.
 #[derive(Clone)]
 pub(crate) struct TraitInfo {
     pub(crate) methods: HashMap<String, TraitMethodSig>,
 }
 
-/// How a binary operator dispatches to an operator-trait method (§3.10).
+/// How a binary operator dispatches to an operator-trait method.
 #[derive(Clone)]
 pub(crate) struct OperatorDispatch {
     /// The value type the right operand must have. For a by-reference method parameter
@@ -148,7 +148,7 @@ pub(crate) struct OperatorDispatch {
     pub(crate) result: Type,
 }
 
-/// One resolved trait-method signature (§3.9). `params` excludes the implicit `self`.
+/// One resolved trait-method signature. `params` excludes the implicit `self`.
 /// `required` is true when the trait gave no default body — an implementor must provide
 /// one. Types are resolved in the trait's (non-generic) scope, so `Self`-typed and
 /// associated-type positions are not supported this phase.
@@ -170,7 +170,7 @@ pub(crate) struct EnumVariantInfo {
 }
 
 /// Per-active-loop tracking for `break`/`continue` resolution and value-break
-/// typing (§3.7).
+/// typing.
 struct LoopContext {
     /// Loop label (`outer:`), or `None` for an unlabeled loop.
     label: Option<String>,
@@ -248,7 +248,7 @@ impl TypeChecker {
         !self.errors.is_empty()
     }
 
-    /// Whether a value of `ty` is `Copy` — duplicated on assignment rather than moved (§2.3).
+    /// Whether a value of `ty` is `Copy` — duplicated on assignment rather than moved.
     ///
     /// Primitive scalars are always Copy; `string` never is; a struct is Copy only when it
     /// derives `Copy`. Other type forms (functions, void, unknown) are not Copy receivers
@@ -257,7 +257,7 @@ impl TypeChecker {
         match ty {
             Type::String | Type::Void | Type::Function { .. } | Type::Unknown => false,
             Type::Struct(name) => self.copy_structs.contains(name),
-            // A newtype forwards `Copy` from its inner type (§3.15). Cycles are
+            // A newtype forwards `Copy` from its inner type. Cycles are
             // rejected at registration, so this recursion terminates.
             Type::Newtype(name) => self
                 .newtype_defs
@@ -265,15 +265,15 @@ impl TypeChecker {
                 .map(|inner| self.is_type_copy(inner))
                 .unwrap_or(false),
             // A borrow `&T` / `&mut T` is `Copy` — copying the reference is sound
-            // because it never moves the borrowed value (§2.4, §2.5). Note: aliasing
+            // because it never moves the borrowed value. Note: aliasing
             // exclusivity for `&mut T` is enforced by the borrow checker, not here.
             Type::Reference { .. } => true,
-            // An array is `Copy` exactly when its element type is `Copy` (§2.3, §3.1).
+            // An array is `Copy` exactly when its element type is `Copy`.
             // The element is currently restricted to Copy scalars at resolution time,
             // so this recursion is always true in practice; it keeps the rule honest
             // if the restriction is later relaxed.
             Type::Array { element, .. } => self.is_type_copy(element),
-            // A tuple is `Copy` exactly when every element is `Copy` (§3.2, §490).
+            // A tuple is `Copy` exactly when every element is `Copy`.
             // Element Copy-ness is enforced at resolution, so this is always true in
             // practice; it keeps the rule honest if that restriction is relaxed.
             Type::Tuple(elements) => elements.iter().all(|e| self.is_type_copy(e)),
@@ -281,7 +281,7 @@ impl TypeChecker {
         }
     }
 
-    /// Whether values of `ty` participate in move-by-default ownership (§2.2).
+    /// Whether values of `ty` participate in move-by-default ownership.
     ///
     /// `string` is always tracked. A struct is tracked unless it derives `Copy`, mirroring
     /// the spec rule that user types are move-by-default and opt into copying via `@derive`.
@@ -299,12 +299,12 @@ impl TypeChecker {
         self.clone_structs.contains(name)
     }
 
-    /// Look up a newtype's resolved inner type by name (§3.15).
+    /// Look up a newtype's resolved inner type by name.
     pub(crate) fn lookup_newtype_inner(&self, name: &str) -> Option<&Type> {
         self.newtype_defs.get(name)
     }
 
-    /// Look up a variant of an enum by name, returning its resolved info (§3.5).
+    /// Look up a variant of an enum by name, returning its resolved info.
     pub(crate) fn lookup_enum_variant(
         &self,
         enum_name: &str,
@@ -318,7 +318,7 @@ impl TypeChecker {
 
     /// Check a complete program
     pub(crate) fn check_program(&mut self, items: &[Item]) -> Result<(), ()> {
-        // Pass 0a: pre-register newtype NAMES (§3.15) so a newtype used as a struct
+        // Pass 0a: pre-register newtype NAMES so a newtype used as a struct
         // field, enum payload, or another newtype's inner resolves regardless of
         // source order. Inner types are resolved and validated in pass 1c, once every
         // nominal name is known.
@@ -350,12 +350,12 @@ impl TypeChecker {
 
         // Pass 1c: resolve and validate newtype inner types now that every nominal
         // name is registered — enforces the Copy-inner restriction and rejects cycles
-        // (§3.15). Runs before Copy-derive validation so a struct with a newtype field
+        // Runs before Copy-derive validation so a struct with a newtype field
         // sees the newtype's real Copy-ness.
         self.resolve_newtype_inners(items);
 
         // Pass 1b: validate `@derive(Copy)` — every field of a Copy struct must itself
-        // be Copy (§2.3). Runs after all structs are registered so a Copy field that is
+        // be Copy. Runs after all structs are registered so a Copy field that is
         // another struct resolves regardless of source order.
         for item in items {
             if let Item::Struct(def) = item {
@@ -363,7 +363,7 @@ impl TypeChecker {
             }
         }
 
-        // Pass 1d: register trait declarations (§3.9) before impls so `impl Trait for T`
+        // Pass 1d: register trait declarations before impls so `impl Trait for T`
         // conformance and generic trait bounds can resolve the trait's method signatures.
         for item in items {
             if let Item::Trait(def) = item {
@@ -382,7 +382,7 @@ impl TypeChecker {
             }
         }
 
-        // Pass 2b: operator-trait supertrait check (§3.10), after all impls are
+        // Pass 2b: operator-trait supertrait check, after all impls are
         // registered so `Comparable: PartialEq` is order-independent.
         self.check_operator_supertraits(items);
 
@@ -412,7 +412,7 @@ impl TypeChecker {
                 }
                 // Enums, newtypes, and traits carry no directly-checked bodies. Trait
                 // default-method bodies are checked through the impl copies the parser
-                // injects (§3.9); the trait declaration itself is validated at registration.
+                // injects; the trait declaration itself is validated at registration.
                 Item::Struct(_) | Item::Enum(_) | Item::Newtype(_) | Item::Trait(_) => {}
             }
         }
@@ -430,7 +430,7 @@ impl TypeChecker {
 
     /// Walk every function and method body emitting lint warnings.
     ///
-    /// Currently implements `prefer-loop-over-while-true` (§3.7): a
+    /// Currently implements `prefer-loop-over-while-true`: a
     /// `while true { ... }` statement is replaced by `loop { ... }` for
     /// stylistic reasons; the warning is suppressed when the enclosing
     /// function carries `@allow(prefer_loop_over_while_true)`.

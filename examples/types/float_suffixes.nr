@@ -1,4 +1,4 @@
-// Demonstrates float literal type suffixes (§1.2, §1.4).
+// Demonstrates float literal type suffixes.
 // Suffixes pin the type of a float literal without a variable annotation.
 
 func scale_f32(x: f32, k: f32) -> f32 {

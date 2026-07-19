@@ -1,4 +1,4 @@
-// Neuro Programming Language - String concatenation (Phase 1.7 §2.7)
+// Neuro Programming Language - String concatenation (Phase 1.7)
 // Demonstrates the `+` operator joining two strings into a new owned string.
 //
 // `string + string` allocates a fresh heap buffer and copies both operands'

@@ -62,7 +62,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     ))
                 })?;
             let val = self.codegen_expr(&field_init.value)?;
-            // A place stored into a struct field is moved into the aggregate (§2.2),
+            // A place stored into a struct field is moved into the aggregate,
             // so it must not also be dropped at the surrounding scope's exit.
             self.mark_moved_for_drop(&field_init.value);
             agg = self

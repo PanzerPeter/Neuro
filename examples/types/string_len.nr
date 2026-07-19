@@ -1,4 +1,4 @@
-// Neuro Programming Language - Builtin Method Dispatch (Phase 1.5 §2, §2.7)
+// Neuro Programming Language - Builtin Method Dispatch (Phase 1.5)
 // Demonstrates the first intrinsic method on a builtin type: string.len()
 //
 // `.len()` reads the byte length stored in the string fat pointer (ptr, len).

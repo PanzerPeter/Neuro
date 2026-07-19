@@ -1,4 +1,4 @@
-// End-to-end tests for operator traits (§3.10): operators on user types are sugar for
+// End-to-end tests for operator traits: operators on user types are sugar for
 // trait method calls. A `Copy` struct that implements `Add`/`Sub`/…/`Neg`/`Not`/
 // `PartialEq`/`Comparable` gets the matching operator, dispatched to its impl method and
 // monomorphized to a plain call — no vtable. These exercise the full pipeline:
@@ -91,7 +91,7 @@ func main() -> i32 {
 
 #[test]
 fn compound_assignment_uses_operator_trait() {
-    // `x += y` desugars to `x = x + y`, which dispatches through the `Add` impl (§3.10).
+    // `x += y` desugars to `x = x + y`, which dispatches through the `Add` impl.
     let test = CompileTest::new();
     let source = r#"
 @derive(Copy, Clone)
