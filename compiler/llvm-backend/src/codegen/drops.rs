@@ -1,10 +1,10 @@
-// Deterministic destruction (`Drop`, §2.1): scope-exit destructor insertion.
+// Deterministic destruction (`Drop`): scope-exit destructor insertion.
 //
 // A binding of a `Drop` type runs its `{struct}__drop(&mut self)` destructor when
 // its lexical scope ends on a *normal* exit — fall-through, `return`, `break`, or
-// `continue` (§1.2: a panic aborts without running destructors). Each owned
+// `continue` (a panic aborts without running destructors). Each owned
 // binding carries an `i1` drop flag, set `false` when the value is moved out, so a
-// moved value is not dropped twice (§2.2). Every helper here is inert when the
+// moved value is not dropped twice. Every helper here is inert when the
 // program declares no `Drop` types: the scope stack stays empty and nothing is
 // emitted.
 
@@ -43,7 +43,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// Record an owned `Drop`-typed binding for destruction at scope exit (§2.1).
+    /// Record an owned `Drop`-typed binding for destruction at scope exit.
     ///
     /// Allocates the binding's `i1` drop flag (initialized `true`) and pushes a
     /// [`DropEntry`] onto the innermost scope. The caller must have verified the
@@ -75,7 +75,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Clear the drop flag of the place named by `expr` if it is a tracked `Drop`
-    /// binding being moved out of (§2.2). A non-identifier, or a binding that is not
+    /// binding being moved out of. A non-identifier, or a binding that is not
     /// Drop-tracked, is a no-op. Mirrors the move sites the type checker validates.
     pub(crate) fn mark_moved_for_drop(&mut self, expr: &HirExpr) {
         if self.drop_scopes.is_empty() {

@@ -1,4 +1,4 @@
-// End-to-end tests for generic structs and generic inherent impls (§3.8).
+// End-to-end tests for generic structs and generic inherent impls.
 //
 // A generic struct / impl is a template: each distinct set of concrete type arguments
 // produces its own specialized struct and methods, monomorphized before codegen at

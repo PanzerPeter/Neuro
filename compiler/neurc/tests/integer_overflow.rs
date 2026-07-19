@@ -1,4 +1,4 @@
-// End-to-end tests for integer overflow semantics (§1.2).
+// End-to-end tests for integer overflow semantics.
 //
 // Debug builds (`-O0`) trap on `+`/`-`/`*` overflow; release builds (`-O1..-O3`)
 // wrap (two's complement). These tests compile the same overflowing program at

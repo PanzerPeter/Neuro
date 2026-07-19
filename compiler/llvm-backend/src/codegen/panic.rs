@@ -1,6 +1,6 @@
-// Codegen for the panic-family builtins: `panic`, `assert`, `unreachable` (§1.2).
+// Codegen for the panic-family builtins: `panic`, `assert`, `unreachable`.
 //
-// The §1.2 panic contract is *abort, no unwinding*: a panic prints a diagnostic
+// The panic contract is *abort, no unwinding*: a panic prints a diagnostic
 // (message + source location) to stderr and terminates via `abort()` (SIGABRT).
 // No landing pads are emitted, so the happy path stays zero-cost and `Drop` / `defer`
 // fire only on normal scope exit. Diagnostics are written with the POSIX `write`
@@ -17,7 +17,7 @@ use crate::errors::{CodegenError, CodegenResult};
 const STDERR_FD: u64 = 2;
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// True when `name` is a compiler-known panic-family builtin (§1.2).
+    /// True when `name` is a compiler-known panic-family builtin.
     /// Mirrors the resolver in `semantic-analysis`; the duplication keeps the backend
     /// independent of the type-checker slice.
     pub(crate) fn is_panic_builtin(name: &str) -> bool {
@@ -75,9 +75,9 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Emit a runtime guard: continue when `ok` (an `i1`) is true, otherwise print
-    /// `panic: <message>` with the source location for `offset` and abort (§1.2). The
+    /// `panic: <message>` with the source location for `offset` and abort. The
     /// builder is left positioned at the continuation block. Shared by the bounds and
-    /// UTF-8 codepoint-boundary checks of `string.slice` (§2.7).
+    /// UTF-8 codepoint-boundary checks of `string.slice`.
     pub(crate) fn codegen_guard_or_panic(
         &mut self,
         ok: inkwell::values::IntValue<'ctx>,

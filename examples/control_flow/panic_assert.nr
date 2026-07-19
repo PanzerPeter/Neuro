@@ -1,4 +1,4 @@
-// Panic-family builtins (§1.2): panic / assert / unreachable.
+// Panic-family builtins: panic / assert / unreachable.
 //
 // All guards in this program hold, so it runs to completion and exits with code 7.
 // Flip any condition (e.g. divide by zero, or `assert(false)`) and the matching

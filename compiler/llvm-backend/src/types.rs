@@ -10,14 +10,14 @@ pub(crate) enum Type {
     U16,
     U32,
     U64,
-    /// Half-precision floats (§1.2), lowered to LLVM `half` / `bfloat`. Scalar
+    /// Half-precision floats, lowered to LLVM `half` / `bfloat`. Scalar
     /// contract is storage + `==`/`!=` + `as`-cast only; no arithmetic.
     F16,
     BF16,
     F32,
     F64,
     Bool,
-    /// A single Unicode scalar value (§1.2), lowered to a 32-bit integer.
+    /// A single Unicode scalar value, lowered to a 32-bit integer.
     Char,
     String,
     Void,
@@ -28,24 +28,24 @@ pub(crate) enum Type {
     /// User-defined struct, identified by name. Field layout is resolved via the
     /// CodegenContext struct_defs table rather than embedding it in the type.
     Struct(std::string::String),
-    /// User-defined enum, identified by name (§3.5). Lowered to a tagged union
+    /// User-defined enum, identified by name. Lowered to a tagged union
     /// `{ i32 tag, [W x i64] payload }`; `W` is resolved from the enum-word table
     /// the `TypeMapper` holds, so the type need not carry the layout itself.
     Enum(std::string::String),
-    /// Immutable borrow `&T` (§2.4). Lowered to an opaque LLVM pointer; the
+    /// Immutable borrow `&T`. Lowered to an opaque LLVM pointer; the
     /// referent type drives auto-deref of method/field receivers. The one exception
     /// is a reference to a [`Type::DynObject`], which is a two-word fat pointer.
     Reference(Box<Type>),
-    /// A dynamic-dispatch trait object `dyn Trait` (§3.17), identified by trait name.
+    /// A dynamic-dispatch trait object `dyn Trait`, identified by trait name.
     /// Unsized on its own: it is lowered only as the referent of a [`Type::Reference`],
     /// which becomes a `{ data pointer, vtable pointer }` fat pointer.
     DynObject(std::string::String),
-    /// Fixed-size array `[T; N]` (§3.1). Lowered to an LLVM `[N x T]` aggregate.
+    /// Fixed-size array `[T; N]`. Lowered to an LLVM `[N x T]` aggregate.
     Array {
         element: Box<Type>,
         size: usize,
     },
-    /// Anonymous tuple `(T1, T2, ...)` (§3.2). Lowered to an anonymous LLVM struct
+    /// Anonymous tuple `(T1, T2, ...)`. Lowered to an anonymous LLVM struct
     /// `{ T1, T2, ... }`; element access is `extractvalue` by constant index.
     Tuple(Vec<Type>),
 }
@@ -74,7 +74,7 @@ impl Type {
             HirType::Void => Type::Void,
             HirType::Struct(name) => Type::Struct(name.clone()),
             HirType::Enum(name) => Type::Enum(name.clone()),
-            // A newtype is transparent at runtime (§3.15): erase it to its inner type
+            // A newtype is transparent at runtime: erase it to its inner type
             // so codegen never needs to know a newtype exists.
             HirType::Newtype { inner, .. } => Type::from_hir(inner),
             HirType::DynObject(name) => Type::DynObject(name.clone()),
@@ -92,7 +92,7 @@ impl Type {
     }
 
     /// The referent of a reference type, or the type itself otherwise. Used to
-    /// auto-deref `&T` receivers when resolving builtin methods (§2.4).
+    /// auto-deref `&T` receivers when resolving builtin methods.
     pub(crate) fn referent(&self) -> &Type {
         match self {
             Type::Reference(inner) => inner,
@@ -135,7 +135,7 @@ impl Type {
     /// semantic predicate, this **includes** `f16`/`bf16`: at the LLVM level they
     /// are floats (`half`/`bfloat`), so equality and `as`-cast lowering route
     /// through the float instructions. Arithmetic never reaches here — semantic
-    /// analysis rejects it for half-precision (§1.2).
+    /// analysis rejects it for half-precision.
     pub(crate) fn is_float(&self) -> bool {
         matches!(self, Type::F16 | Type::BF16 | Type::F32 | Type::F64)
     }

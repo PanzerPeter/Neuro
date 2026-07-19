@@ -627,7 +627,7 @@ func identity<T>(x: T) -> T {
 }
 ```
 
-## Panic Builtins (§1.2)
+## Panic Builtins
 
 Three compiler-known builtins terminate the program when an unrecoverable condition is
 reached. They follow the **abort, no unwinding** model: each prints a diagnostic

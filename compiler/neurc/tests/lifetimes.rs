@@ -1,4 +1,4 @@
-// End-to-end tests for explicit lifetime annotations (§2.6): the `'a` in
+// End-to-end tests for explicit lifetime annotations: the `'a` in
 // `func longest<'a>(a: &'a string, b: &'a string) -> &'a string`. Lifetimes are a
 // well-formedness surface only — they are validated against the declared parameter
 // list, then erased, so they add zero runtime cost and never change a reference's
@@ -9,7 +9,7 @@ use common::CompileTest;
 
 #[test]
 fn longest_returns_the_longer_borrow() {
-    // The canonical §2.6 example. Returning either borrowed parameter is permitted by
+    // The canonical example. Returning either borrowed parameter is permitted by
     // the elision-based outlives analysis; the explicit `<'a>` is the annotation form.
     let test = CompileTest::new();
     let source = r#"

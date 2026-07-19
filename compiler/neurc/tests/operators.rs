@@ -131,7 +131,7 @@ func main() -> i32 {
     assert_eq!(exit_code as i8, -6, "Expected exit code -6");
 }
 
-// Logical short-circuit (§1.4): the RHS of `&&`/`||` must not be evaluated when
+// Logical short-circuit: the RHS of `&&`/`||` must not be evaluated when
 // the LHS already decides the result. `boom()` divides by zero, so if it runs the
 // process is killed by SIGFPE and no clean exit code is produced.
 

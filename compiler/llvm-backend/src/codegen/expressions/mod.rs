@@ -68,7 +68,7 @@ impl<'ctx> CodegenContext<'ctx> {
             }
 
             HirExprKind::FieldAccess { object, field } => {
-                // A `&Struct` receiver auto-derefs to read a field of the referent (§2.4).
+                // A `&Struct` receiver auto-derefs to read a field of the referent.
                 let struct_name = match object.ty.referent() {
                     neuro_hir::HirType::Struct(n) => n.clone(),
                     other => {
@@ -99,7 +99,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
             HirExprKind::Block { stmts } => self.codegen_block_expr(stmts),
 
-            // A `loop` in value position (§3.7) lowers like the statement form, but
+            // A `loop` in value position lowers like the statement form, but
             // its `break v` result is loaded and returned. A unit loop (no value
             // `break`) yields the placeholder used elsewhere for void positions.
             HirExprKind::Loop { label, body } => {
@@ -111,33 +111,33 @@ impl<'ctx> CodegenContext<'ctx> {
             // `unsafe` is inert: lower its body identically to a bare block.
             HirExprKind::Unsafe { stmts } => self.codegen_block_expr(stmts),
 
-            // Borrow `&place` (§2.4) / `&mut place` (§2.5): the value of the borrow is
+            // Borrow `&place` / `&mut place`: the value of the borrow is
             // the storage pointer of the place. Every local/parameter is an alloca, so
             // its address is exactly the pointer already held in `variables`. Mutability
             // is a compile-time-only distinction — both lower to the same pointer.
             HirExprKind::Reference { operand, .. } => self.codegen_reference(operand),
-            // Unsizing coercion `&T` → `&dyn Trait` (§3.17): build the fat pointer that
+            // Unsizing coercion `&T` → `&dyn Trait`: build the fat pointer that
             // pairs the concrete reference with that type's vtable for the trait.
             HirExprKind::DynCoerce { value } => {
                 let target_ty = Type::from_hir(&expr.ty);
                 self.codegen_dyn_coerce(value, &target_ty)
             }
 
-            // Dereference `*operand` (§2.5): load the referent through the reference.
+            // Dereference `*operand`: load the referent through the reference.
             // The result type `T` is exactly this expression's type.
             HirExprKind::Deref { operand } => {
                 let referent_ty = Type::from_hir(&expr.ty);
                 self.codegen_deref(operand, &referent_ty)
             }
 
-            // A range `a..b` is not a value (§2.7): it is consumed directly by
+            // A range `a..b` is not a value: it is consumed directly by
             // `string.slice`'s lowering. Semantic analysis rejects any other position,
             // so reaching the general expression path here is an internal inconsistency.
             HirExprKind::Range { .. } => Err(CodegenError::InternalError(
                 "range expression reached codegen outside a slice argument".into(),
             )),
 
-            // Array literal `[e0, ...]` and indexing `object[index]` (§3.1).
+            // Array literal `[e0, ...]` and indexing `object[index]`.
             HirExprKind::ArrayLiteral { elements } => {
                 let array_ty = Type::from_hir(&expr.ty);
                 self.codegen_array_literal(elements, &array_ty)
@@ -147,26 +147,26 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.codegen_index(object, index, &obj_ty, &expr.span)
             }
 
-            // Tuple literal `(e0, ...)` and element access `object.N` (§3.2).
+            // Tuple literal `(e0, ...)` and element access `object.N`.
             HirExprKind::TupleLiteral { elements } => {
                 let tuple_ty = Type::from_hir(&expr.ty);
                 self.codegen_tuple_literal(elements, &tuple_ty)
             }
             HirExprKind::TupleIndex { object, index } => self.codegen_tuple_index(object, *index),
 
-            // Newtype construction and inner access (§3.15) are transparent: a newtype
+            // Newtype construction and inner access are transparent: a newtype
             // is representationally identical to its inner type, so both lower to the
             // inner value unchanged.
             HirExprKind::NewtypeConstruct { value, .. } => self.codegen_expr(value),
             HirExprKind::NewtypeAccess { object } => self.codegen_expr(object),
 
-            // Array rest remainder `..rest` from a destructuring desugar (§3.2).
+            // Array rest remainder `..rest` from a destructuring desugar.
             HirExprKind::ArrayRest { array, start } => {
                 let rest_ty = Type::from_hir(&expr.ty);
                 self.codegen_array_rest(array, *start, &rest_ty)
             }
 
-            // Enum construction `E::V` / `E::V(..)` / `E::V { .. }` (§3.5).
+            // Enum construction `E::V` / `E::V(..)` / `E::V { .. }`.
             HirExprKind::EnumConstruct {
                 enum_name,
                 tag,
@@ -174,7 +174,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 ..
             } => self.codegen_enum_construct(enum_name, *tag, payload),
 
-            // Pattern matching `match scrutinee { ... }` (§3.6).
+            // Pattern matching `match scrutinee { ... }`.
             HirExprKind::Match { scrutinee, arms } => {
                 let result_ty = Type::from_hir(&expr.ty);
                 self.codegen_match(scrutinee, arms, &result_ty)
@@ -194,7 +194,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
         match &callee.kind {
             HirExprKind::Variable(name) => {
-                // Panic-family builtins (§1.2) lower to a diagnostic + `abort`. A user
+                // Panic-family builtins lower to a diagnostic + `abort`. A user
                 // function of the same name shadows the builtin, matching the semantic
                 // resolver, so only intercept when none is registered.
                 if CodegenContext::is_panic_builtin(name) && !self.functions.contains_key(name) {
@@ -207,7 +207,7 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::FieldAccess { object, field } => {
                 let recv_ty = Type::from_hir(&object.ty);
                 // A trait-object receiver dispatches dynamically through its vtable
-                // (§3.17); the concrete implementation is unknown until runtime.
+                // The concrete implementation is unknown until runtime.
                 if let Type::DynObject(trait_name) = recv_ty.referent() {
                     let trait_name = trait_name.clone();
                     let result_ty = Type::from_hir(&callee.ty);
@@ -221,7 +221,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
                 if let Type::Struct(struct_name) = recv_ty.referent() {
                     let mangled = format!("{}__{}", struct_name, field);
-                    // `struct.clone()` (§2.3) is a builtin deep copy when no user method
+                    // `struct.clone()` is a builtin deep copy when no user method
                     // named `clone` exists; semantic analysis has verified the struct
                     // derives Clone. Every other field call is a user struct method.
                     if field == "clone" && !self.functions.contains_key(&mangled) {
@@ -259,7 +259,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// Lower a dereference `*operand` to a load of the referent (§2.5). The operand
+    /// Lower a dereference `*operand` to a load of the referent. The operand
     /// evaluates to a pointer (a reference); `referent_ty` (this deref's result type)
     /// selects the load type.
     fn codegen_deref(
@@ -275,7 +275,7 @@ impl<'ctx> CodegenContext<'ctx> {
         })
     }
 
-    /// Lower an immutable borrow `&place` to the storage pointer of the place (§2.4).
+    /// Lower an immutable borrow `&place` to the storage pointer of the place.
     /// Semantic analysis guarantees the operand is a live binding (identifier).
     fn codegen_reference(&self, operand: &HirExpr) -> CodegenResult<BasicValueEnum<'ctx>> {
         match &operand.kind {

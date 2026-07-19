@@ -1,4 +1,4 @@
-// End-to-end tests for newtype declarations (§3.15): `newtype Name = T` creates a
+// End-to-end tests for newtype declarations: `newtype Name = T` creates a
 // distinct nominal type wrapping `T`. Construction is `Name(value)`, the inner
 // value is read via `.0`, and — unlike a transparent `type` alias — the newtype is
 // not interchangeable with its inner type. These tests exercise the full pipeline:

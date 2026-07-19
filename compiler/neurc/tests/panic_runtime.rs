@@ -1,4 +1,4 @@
-// End-to-end tests for the panic runtime (§1.2).
+// End-to-end tests for the panic runtime.
 //
 // `panic(msg)` / `assert(cond)` / `unreachable()` print a diagnostic with source location
 // to stderr and abort the process via `abort()` (SIGABRT) — no stack unwinding. These tests

@@ -1,4 +1,4 @@
-// Neuro Example: Integer overflow semantics (§1.2)
+// Neuro Example: Integer overflow semantics
 //
 // Debug builds (compiled with -O0) trap at runtime when a `+`, `-`, or `*`
 // on an integer type overflows, turning a silent miscalculation into an

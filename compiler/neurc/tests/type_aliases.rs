@@ -1,4 +1,4 @@
-// Type-alias tests (§3.14)
+// Type-alias tests
 // End-to-end coverage: a `type Name = Target` alias is transparent and resolves
 // to its target in every type position, chains collapse to the ultimate target,
 // and malformed alias sets are rejected at compile time.

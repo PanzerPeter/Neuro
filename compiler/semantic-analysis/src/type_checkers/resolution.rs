@@ -12,11 +12,11 @@ impl TypeChecker {
     }
 
     /// Resolve a type annotation, tracking whether it appears directly behind a
-    /// reference (`behind_ref`). The flag is consulted only for `dyn Trait` (§3.17),
+    /// reference (`behind_ref`). The flag is consulted only for `dyn Trait`,
     /// which is unsized and therefore valid solely as a reference referent.
     fn resolve_type_ctx(&mut self, ty: &ast_types::Type, behind_ref: bool) -> Option<Type> {
         match ty {
-            // Dynamic-dispatch trait object `dyn Trait` (§3.17): valid only behind a
+            // Dynamic-dispatch trait object `dyn Trait`: valid only behind a
             // reference, and only for an object-safe, declared trait.
             ast_types::Type::DynTrait { trait_name, span } => {
                 if !behind_ref {
@@ -45,7 +45,7 @@ impl TypeChecker {
             }
             // `impl Trait` reaching resolution is always in a disallowed position:
             // argument position was rewritten to a generic by the parser, and return
-            // position is intercepted before resolution (§3.17).
+            // position is intercepted before resolution.
             ast_types::Type::ImplTrait { span, .. } => {
                 self.record_error(TypeError::ImplTraitNotAllowedHere { span: *span });
                 None
@@ -73,11 +73,11 @@ impl TypeChecker {
                 "void" => Some(Type::Void),
                 name => {
                     // A name matching an in-scope generic parameter resolves to a
-                    // generic placeholder rather than erroring as unknown (§3.8).
+                    // generic placeholder rather than erroring as unknown.
                     if self.generic_scope.contains(name) {
                         Some(Type::Generic(name.to_string()))
                     } else if self.is_generic_struct(name) {
-                        // A generic struct is only usable with type arguments (§3.8);
+                        // A generic struct is only usable with type arguments;
                         // its bare name (also kept in `struct_defs` as the placeholder
                         // template) must not resolve to a concrete type.
                         self.record_error(TypeError::GenericStructNeedsArgs {
@@ -100,8 +100,8 @@ impl TypeChecker {
                     }
                 }
             },
-            // Borrow `&T` (§2.4) / `&mut T` (§2.5): resolve the referent recursively,
-            // preserving mutability. An explicit lifetime `&'a T` (§2.6) is validated for
+            // Borrow `&T` / `&mut T`: resolve the referent recursively,
+            // preserving mutability. An explicit lifetime `&'a T` is validated for
             // well-formedness against the in-scope lifetime parameters, then erased — a
             // reference type's identity does not depend on its lifetime.
             ast_types::Type::Reference {
@@ -123,7 +123,7 @@ impl TypeChecker {
                     mutable: *mutable,
                 })
             }
-            // Fixed-size array `[T; N]` (§3.1). The element must be a `Copy` scalar
+            // Fixed-size array `[T; N]`. The element must be a `Copy` scalar
             // primitive in this phase — non-Copy element arrays (strings, structs)
             // need per-element move/Drop tracking, which is a documented follow-on.
             ast_types::Type::Array {
@@ -145,7 +145,7 @@ impl TypeChecker {
                     size: len,
                 })
             }
-            // Tuple `(T1, T2, ...)` (§3.2). Each element must be `Copy` in this phase
+            // Tuple `(T1, T2, ...)`. Each element must be `Copy` in this phase
             // — non-Copy element tuples (e.g. holding a `string` or a non-Copy struct)
             // need per-element move/Drop tracking, a documented follow-on (mirrors the
             // array element rule).
@@ -164,14 +164,14 @@ impl TypeChecker {
                 }
                 Some(Type::Tuple(resolved))
             }
-            // Generic type application `Name<T1, ...>` (§3.8): resolve the arguments
+            // Generic type application `Name<T1, ...>`: resolve the arguments
             // and monomorphize the generic struct into a distinct nominal instance.
             ast_types::Type::Generic { name, args, span } => {
                 let mut resolved = Vec::with_capacity(args.len());
                 for arg in args {
                     match arg {
                         // A const (value) argument `Ring<i32, 4>` becomes an internal
-                        // `ConstValue` marker consumed by monomorphization (§3.8).
+                        // `ConstValue` marker consumed by monomorphization.
                         GenericArg::Const { value, .. } => {
                             resolved.push(Type::ConstValue(*value as u64));
                         }
@@ -207,7 +207,7 @@ impl TypeChecker {
         }
     }
 
-    /// Resolve an array length annotation (§3.1, §3.8) to a semantic [`ArrayLen`]. A
+    /// Resolve an array length annotation to a semantic [`ArrayLen`]. A
     /// literal becomes `Fixed`; a name is accepted only when it is an in-scope const
     /// generic parameter (becoming `Param`), else it is an unknown length.
     fn resolve_array_size(
@@ -231,13 +231,13 @@ impl TypeChecker {
         }
     }
 
-    /// Whether `name` is a registered generic struct template (§3.8) — a type that is
+    /// Whether `name` is a registered generic struct template — a type that is
     /// usable only with type arguments.
     pub(crate) fn is_generic_struct(&self, name: &str) -> bool {
         self.generic_structs.contains_key(name)
     }
 
-    /// Whether a trait is object-safe (§3.17): every method must dispatch on a `&self`
+    /// Whether a trait is object-safe: every method must dispatch on a `&self`
     /// or `&mut self` receiver. A method with no receiver (associated function) or one
     /// that consumes `self` by value cannot be placed behind a fixed-layout vtable.
     /// Returns `Ok(())` when safe, or `Err(reason)` naming the first offending method.
@@ -262,7 +262,7 @@ impl TypeChecker {
     /// Whether a value of type `found` may be supplied where `expected` is required.
     ///
     /// This is ordinary type compatibility plus the one implicit conversion the language
-    /// has: the unsizing coercion `&T` → `&dyn Trait` (§3.17), permitted when `T`
+    /// has: the unsizing coercion `&T` → `&dyn Trait`, permitted when `T`
     /// implements `Trait` and the reference mutabilities agree. There is no `&mut T` →
     /// `&T` weakening, so the mutability match is exact.
     pub(crate) fn assignable(&self, found: &Type, expected: &Type) -> bool {
@@ -288,7 +288,7 @@ impl TypeChecker {
         found_mut == expected_mut && self.type_implements_trait(found_inner, trait_name)
     }
 
-    /// Whether a concrete type satisfies a trait bound (§3.9, §3.17): a nominal type
+    /// Whether a concrete type satisfies a trait bound: a nominal type
     /// (struct / enum / newtype) satisfies `Trait` when an `impl Trait for T` exists; a
     /// generic parameter satisfies it when it carries the bound. Used for `impl Trait`
     /// return conformance and `&T` → `&dyn Trait` coercion.

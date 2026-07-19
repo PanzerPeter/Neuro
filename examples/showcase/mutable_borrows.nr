@@ -1,4 +1,4 @@
-// Mutable borrows `&mut T` and the dereference operator `*` (§2.5).
+// Mutable borrows `&mut T` and the dereference operator `*`.
 //
 // A `&mut T` reference grants write access to a `mut` binding without taking
 // ownership. The value is read and written through the `*` dereference operator.

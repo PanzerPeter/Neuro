@@ -22,7 +22,7 @@ fn test_parse_empty_function() {
 
 #[test]
 fn test_parse_generic_function_params() {
-    // `<T, U: Bound + Other>`: two type parameters, the second with two bounds (§3.8).
+    // `<T, U: Bound + Other>`: two type parameters, the second with two bounds.
     let source = "func pick<T, U: Ord + Eq>(a: T, b: U) -> T { a }";
     let result = parse(source);
     assert!(result.is_ok(), "Parse error: {:?}", result.err());

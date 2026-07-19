@@ -1,4 +1,4 @@
-// End-to-end tests for const generic parameters, `where` clauses, and turbofish (§3.8).
+// End-to-end tests for const generic parameters, `where` clauses, and turbofish.
 //
 // A const parameter is a compile-time *value* monomorphized per distinct value (zero
 // runtime cost), inferred from array-argument lengths or supplied by a turbofish. A

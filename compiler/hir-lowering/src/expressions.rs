@@ -7,15 +7,15 @@ use shared_types::Literal;
 use crate::types::{float_suffix_type, int_suffix_type};
 use crate::{is_full_float, is_integer, peels_to_string, LoopCtx, Lowerer, LoweringError};
 
-/// The divergent panic-family builtins (§1.2). Each aborts and never returns, so a
+/// The divergent panic-family builtins. Each aborts and never returns, so a
 /// call takes on whatever type its context demands.
 const PANIC_BUILTINS: &[&str] = &["panic", "assert", "unreachable"];
 
-/// The deep-copy method shared by `string` and `Clone`-deriving structs (§2.3, §2.7).
+/// The deep-copy method shared by `string` and `Clone`-deriving structs.
 const CLONE_METHOD: &str = "clone";
 
 /// An enum variant's ordered payload fields: each `(optional field name, type)`.
-/// `Some` name marks a struct-variant field; `None` a tuple-variant element (§3.5).
+/// `Some` name marks a struct-variant field; `None` a tuple-variant element.
 type PayloadFields = Vec<(Option<String>, HirType)>;
 
 impl Lowerer {
@@ -33,7 +33,7 @@ impl Lowerer {
 
     /// Lower an expression without applying the trait-object coercion. Every contextual
     /// typing rule lives here; [`Lowerer::lower_expr`] wraps the result so the single
-    /// `&T` → `&dyn Trait` unsizing site (§3.17) is applied uniformly wherever an
+    /// `&T` → `&dyn Trait` unsizing site is applied uniformly wherever an
     /// expected type is supplied — call arguments, returns, and annotated bindings.
     fn lower_expr_uncoerced(
         &mut self,
@@ -49,7 +49,7 @@ impl Lowerer {
                 Ok(HirExpr::new(HirExprKind::Literal(lit.clone()), ty, *span))
             }
 
-            // A const generic parameter used as a value inside a monomorphized body (§3.8)
+            // A const generic parameter used as a value inside a monomorphized body
             // lowers to its concrete integer literal, typed by its declared int type.
             Expr::Identifier(ident) if self.const_subst.contains_key(&ident.name) => {
                 let value = self.const_subst[&ident.name];
@@ -82,7 +82,7 @@ impl Lowerer {
                 span,
             } => {
                 let left = self.lower_expr(left, None)?;
-                // Operator-trait dispatch on a user type (§3.10): desugar `a OP b` into the
+                // Operator-trait dispatch on a user type: desugar `a OP b` into the
                 // impl method call `a.op(b)`. The checker validated the impl, so a lookup
                 // hit means the call resolves.
                 if let HirType::Struct(name) = left.ty.referent() {
@@ -116,7 +116,7 @@ impl Lowerer {
                     UnaryOp::BitNot => expected.filter(|t| is_integer(t)),
                 };
                 let operand = self.lower_expr(operand, operand_expected)?;
-                // Operator-trait dispatch: `-a` → `a.neg()`, `~a` → `a.not()` (§3.10).
+                // Operator-trait dispatch: `-a` → `a.neg()`, `~a` → `a.not()`.
                 if let HirType::Struct(name) = operand.ty.referent() {
                     if let Some((method, result)) =
                         self.operator_unary_impls.get(&(name.clone(), *op))
@@ -162,7 +162,7 @@ impl Lowerer {
                 span,
             } => self.lower_call(func, type_args, args, expected, *span),
 
-            // A bare path is a unit-variant enum construction `E::V` (§3.5) when the
+            // A bare path is a unit-variant enum construction `E::V` when the
             // type names an enum, else an associated-function reference.
             Expr::Path {
                 type_name,
@@ -306,7 +306,7 @@ impl Lowerer {
                             *span,
                         ))
                     }
-                    // `.0` on a newtype reads its transparent inner value (§3.15). The
+                    // `.0` on a newtype reads its transparent inner value. The
                     // checker guarantees the index is 0.
                     HirType::Newtype { inner, .. } => Ok(HirExpr::new(
                         HirExprKind::NewtypeAccess {
@@ -455,7 +455,7 @@ impl Lowerer {
         }
     }
 
-    /// Lower a `match` expression (§3.6) into the fully-resolved HIR node: each arm's
+    /// Lower a `match` expression into the fully-resolved HIR node: each arm's
     /// patterns become refutable tests, its bindings resolve to payload slots or the
     /// whole scrutinee, and the guard/body lower with the bindings in scope. The match
     /// type is the first arm's body type, mirroring the checker.
@@ -479,7 +479,7 @@ impl Lowerer {
             for pat in &arm.patterns {
                 tests.push(self.pattern_test(pat)?);
             }
-            // Only a single-pattern arm binds (or-patterns cannot, §3.6).
+            // Only a single-pattern arm binds (or-patterns cannot).
             let bindings = if arm.patterns.len() == 1 {
                 self.pattern_bindings(&arm.patterns[0], &scrut_ty)?
             } else {
@@ -521,7 +521,7 @@ impl Lowerer {
         ))
     }
 
-    /// Build the refutable [`HirMatchTest`] for one pattern (§3.6).
+    /// Build the refutable [`HirMatchTest`] for one pattern.
     fn pattern_test(
         &self,
         pat: &ast_types::Pattern,
@@ -555,7 +555,7 @@ impl Lowerer {
         }
     }
 
-    /// Resolve the bindings a single (non-or) pattern introduces (§3.6): the whole
+    /// Resolve the bindings a single (non-or) pattern introduces: the whole
     /// scrutinee for a bare binding, or payload slot extractions for an enum pattern.
     fn pattern_bindings(
         &self,
@@ -633,7 +633,7 @@ impl Lowerer {
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
         match func {
-            // Newtype construction `Name(value)` (§3.15) takes precedence over a
+            // Newtype construction `Name(value)` takes precedence over a
             // same-named free function in call position, matching the checker.
             Expr::Identifier(ident) if self.newtypes.contains_key(&ident.name) => {
                 self.lower_newtype_construct(&ident.name, args, span)
@@ -644,7 +644,7 @@ impl Lowerer {
             Expr::FieldAccess { object, field, .. } => {
                 self.lower_method_call(object, &field.name, args, span)
             }
-            // `Enum::Variant(args)` is a tuple-variant construction (§3.5) when the
+            // `Enum::Variant(args)` is a tuple-variant construction when the
             // type names an enum; otherwise an associated-function call.
             Expr::Path {
                 type_name, member, ..
@@ -663,7 +663,7 @@ impl Lowerer {
         }
     }
 
-    /// Lower a newtype construction `Name(value)` (§3.15) to a transparent
+    /// Lower a newtype construction `Name(value)` to a transparent
     /// [`HirExprKind::NewtypeConstruct`] wrapper. The checker guarantees exactly one
     /// argument that matches the inner type.
     fn lower_newtype_construct(
@@ -708,7 +708,7 @@ impl Lowerer {
         expected: Option<&HirType>,
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
-        // A call to a generic function (§3.8): infer its type arguments, queue the
+        // A call to a generic function: infer its type arguments, queue the
         // matching monomorphized instance, and emit a call to that instance's name.
         if self.generic_templates.contains_key(name) {
             return self.lower_generic_call(name, type_args, args, span);
@@ -767,7 +767,7 @@ impl Lowerer {
     }
 
     /// Lower a call to a generic function to a call to its monomorphized instance
-    /// (§3.8). The concrete type arguments are inferred by unifying the template's
+    /// The concrete type arguments are inferred by unifying the template's
     /// parameter annotations against the lowered arguments' resolved types; the
     /// instance is queued for emission and the call refers to its mangled name.
     fn lower_generic_call(
@@ -795,7 +795,7 @@ impl Lowerer {
             std::collections::HashMap::new();
         let mut const_subst: std::collections::HashMap<String, u64> =
             std::collections::HashMap::new();
-        // Seed explicit turbofish arguments before inference (§3.8), positionally.
+        // Seed explicit turbofish arguments before inference, positionally.
         for (gp, arg) in template.generics.iter().zip(type_args.iter()) {
             match arg {
                 ast_types::GenericArg::Const { value, .. } => {
@@ -866,7 +866,7 @@ impl Lowerer {
         ))
     }
 
-    /// Build the method call an overloaded binary operator desugars to (§3.10):
+    /// Build the method call an overloaded binary operator desugars to:
     /// `a OP b` → `a.op(b)`. When the method's right parameter is a reference
     /// (`rhs: &Rhs`, the comparison traits), the argument is borrowed.
     fn build_operator_call(
@@ -911,7 +911,7 @@ impl Lowerer {
         ))
     }
 
-    /// Build the method call an overloaded unary operator desugars to (§3.10):
+    /// Build the method call an overloaded unary operator desugars to:
     /// `-a` → `a.neg()`, `~a` → `a.not()`.
     fn build_unary_operator_call(
         &mut self,
@@ -978,7 +978,7 @@ impl Lowerer {
                 });
             }
         } else if let HirType::DynObject(trait_name) = recv.referent() {
-            // Dynamic dispatch (§3.17): the call is typed from the trait's declaration —
+            // Dynamic dispatch: the call is typed from the trait's declaration —
             // no implementor is named here, since the concrete method is selected at
             // runtime through the vtable. The backend keys off the receiver's type.
             let trait_name = trait_name.clone();
@@ -1017,7 +1017,7 @@ impl Lowerer {
     }
 
     /// Resolve a compiler-known intrinsic on a builtin (non-struct) receiver,
-    /// returning the lowered arguments and the result type (§1.2, §2.7, §3.1).
+    /// returning the lowered arguments and the result type.
     fn lower_builtin_method(
         &mut self,
         recv: &HirType,
@@ -1100,7 +1100,7 @@ impl Lowerer {
         )
     }
 
-    /// Lower a unit-variant construction `E::V` — an empty payload (§3.5).
+    /// Lower a unit-variant construction `E::V` — an empty payload.
     fn lower_enum_construct(
         &mut self,
         enum_name: &str,
@@ -1113,7 +1113,7 @@ impl Lowerer {
     }
 
     /// Lower a tuple-variant construction `E::V(args)`: arguments are positional, so
-    /// they are the payload as-is, lowered against the declared field types (§3.5).
+    /// they are the payload as-is, lowered against the declared field types.
     fn lower_enum_tuple_call(
         &mut self,
         enum_name: &str,
@@ -1129,7 +1129,7 @@ impl Lowerer {
 
     /// Lower a struct-variant construction `E::V { field: expr, ... }`: the provided
     /// fields are reordered into the variant's declared field order before becoming
-    /// the payload, so codegen sees a single positional layout (§3.5).
+    /// the payload, so codegen sees a single positional layout.
     fn lower_enum_struct_literal(
         &mut self,
         enum_name: &str,
@@ -1215,7 +1215,7 @@ impl Lowerer {
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
         // A generic struct literal infers its type arguments from the field values,
-        // then monomorphizes into a concrete instance (§3.8).
+        // then monomorphizes into a concrete instance.
         if self.generic_structs.contains_key(&name.name) {
             return self.lower_generic_struct_literal(name, fields, base, span);
         }
@@ -1264,7 +1264,7 @@ impl Lowerer {
         ))
     }
 
-    /// Lower a generic struct literal (§3.8): infer the type arguments by unifying the
+    /// Lower a generic struct literal: infer the type arguments by unifying the
     /// template's field annotations against the lowered field values, monomorphize the
     /// instance, and emit an ordinary struct literal referring to its mangled name.
     fn lower_generic_struct_literal(
@@ -1357,7 +1357,7 @@ impl Lowerer {
     }
 
     /// Lower a `start..end` / `start..=end` range. Ranges are not first-class values
-    /// (§2.7) — only valid as a `string.slice` argument — so the node carries
+    /// Only valid as a `string.slice` argument — so the node carries
     /// `void`; the slice lowering reads the bounds directly. Bounds are `u64`-typed.
     fn lower_range(
         &mut self,
@@ -1512,7 +1512,7 @@ impl Lowerer {
     }
 }
 
-/// Wrap a concrete reference in the unsizing coercion `&T` → `&dyn Trait` (§3.17) when
+/// Wrap a concrete reference in the unsizing coercion `&T` → `&dyn Trait` when
 /// the context calls for a trait object and the value is not already one.
 ///
 /// This is the sole implicit conversion in the language, so it is applied at exactly one
@@ -1572,7 +1572,7 @@ fn literal_type(lit: &Literal, expected: Option<&HirType>) -> HirType {
 }
 
 /// The scalar value a match-pattern literal denotes, as the low bits of an `i64`
-/// (§3.6): integers as-is, `bool` as 0/1, `char` as its Unicode scalar value. Float
+/// Integers as-is, `bool` as 0/1, `char` as its Unicode scalar value. Float
 /// and string literals are not matchable (the checker rejects them before lowering).
 fn literal_scalar(lit: &Literal) -> Result<i64, LoweringError> {
     match lit {
@@ -1586,14 +1586,14 @@ fn literal_scalar(lit: &Literal) -> Result<i64, LoweringError> {
 }
 
 /// Whether `t` is a numeric type usable with `-` / arithmetic (integer or
-/// full-precision float). Half-precision is excluded (§1.2).
+/// full-precision float). Half-precision is excluded.
 fn is_numeric(t: &HirType) -> bool {
     is_integer(t) || is_full_float(t)
 }
 
 /// The result type of a binary operator given its operand types. Comparisons and
 /// logical operators yield `bool`; `+` on two strings yields a new owned `string`
-/// (§2.7); other arithmetic and bitwise operators yield the left operand's type.
+/// Other arithmetic and bitwise operators yield the left operand's type.
 fn binary_result_type(
     op: BinaryOp,
     left: &HirType,

@@ -1,4 +1,4 @@
-// The `loop { ... }` infinite-loop statement (§3.7).
+// The `loop { ... }` infinite-loop statement.
 //
 // `loop` is the canonical infinite loop — the form the `prefer-loop-over-
 // while-true` lint suggests in place of `while true { ... }`. It has no

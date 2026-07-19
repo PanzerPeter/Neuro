@@ -1,4 +1,4 @@
-// Drop — deterministic destruction at scope exit (§2.1).
+// Drop — deterministic destruction at scope exit.
 //
 // A type that implements `Drop` runs its `drop(&mut self)` destructor when its
 // owner leaves scope, on normal exit only (a panic aborts without running

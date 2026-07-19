@@ -132,7 +132,7 @@ func main() -> i32 {
 
 ### Mutating Methods (`&mut self`)
 
-A method may take `&mut self` to mutate the receiver in place (§2.5). Writes to
+A method may take `&mut self` to mutate the receiver in place. Writes to
 `self.field` propagate back to the caller's value because the receiver is passed
 by pointer:
 
@@ -162,7 +162,7 @@ func main() -> i32 {
 - Calling a `&mut self` method requires a `mut` receiver (or one reached through a
   `&mut T`). Calling it on a `val` binding is a `cannot mutably borrow` error.
 - The call takes an **exclusive** borrow of the receiver for its duration, so it is
-  rejected while another borrow of that receiver is live (§2.5 aliasing rule).
+  rejected while another borrow of that receiver is live (aliasing rule).
 
 ### Associated Functions (no `self`)
 
@@ -214,7 +214,7 @@ func main() -> i32 {
 
 A struct can define a destructor by implementing the built-in `Drop` trait. Its
 `drop(&mut self)` method runs automatically when an owner of the value goes out
-of scope (§2.1):
+of scope:
 
 ```neuro
 struct Guard {
@@ -240,12 +240,12 @@ Rules:
 
 - Destructors run **only on normal scope exit** — fall-through, `return`,
   `break`, and `continue`. A panic aborts the process without running any
-  destructor (§1.2: there is no stack unwinding).
+  destructor (there is no stack unwinding).
 - When several owned values leave the same scope, they are dropped in **reverse
   declaration order** (LIFO).
 - A value that has been **moved** out (rebound, returned, passed by value, or
   stored into a struct) is dropped exactly once, by its final owner — never
-  twice. Reading a moved value is already a compile error (§2.2).
+  twice. Reading a moved value is already a compile error.
 - A `Copy` type may **not** implement `Drop` (a type with a destructor is moved,
   not duplicated). `@derive(Copy)` together with `impl Drop` is a compile error.
 - The `drop` method must be exactly `drop(&mut self)` — no extra parameters and
@@ -280,7 +280,7 @@ func main() -> i32 {
 
 A struct may declare type parameters in `<...>` after its name; each distinct set of
 concrete type arguments is monomorphized into its own specialized struct at zero runtime
-cost (§3.8). Type arguments are **inferred** from the field values at a struct literal, or
+cost. Type arguments are **inferred** from the field values at a struct literal, or
 written explicitly in a type annotation (`Pair<i32, f64>`).
 
 ```neuro
@@ -339,7 +339,7 @@ val other: Buffer<i32, 4> = Buffer { data: [5, 6, 7, 8], count: 4 }
 Each distinct `CAP` produces its own monomorphized struct at zero runtime cost. A generic `impl`
 over a struct's const parameter is a documented limitation deferred to broader generic support.
 
-## Traits (§3.9)
+## Traits
 
 A `trait` defines shared behaviour that many types can implement. Traits are Neuro's
 mechanism for bounded polymorphism. A trait method is either **required** (a signature

@@ -439,7 +439,7 @@ func is_positive_verbose(x: i32) -> bool {
 }
 ```
 
-## Pattern Matching (§3.6)
+## Pattern Matching
 
 `match` selects a branch by deconstructing a value, and is itself an expression.
 The first arm whose pattern matches (and whose optional `if` guard holds) runs:

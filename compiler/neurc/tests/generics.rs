@@ -1,4 +1,4 @@
-// End-to-end tests for generic functions with monomorphization (§3.8).
+// End-to-end tests for generic functions with monomorphization.
 //
 // A generic function is a template: each distinct set of concrete type arguments
 // produces its own specialized native function, so `T` carries zero runtime cost and

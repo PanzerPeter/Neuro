@@ -1,4 +1,4 @@
-// Immutable borrow tests (Phase 1.7 §2.4)
+// Immutable borrow tests (Phase 1.7)
 // Verifies `&T` reference types and `&place` borrow expressions: borrowing does
 // not move the borrowee, references are Copy, and method/field access auto-derefs
 // through a borrow. Covers end-to-end compile+run and the borrow-a-temporary error.
@@ -55,7 +55,7 @@ fn run_expecting(source: &str, expected: i32) {
 
 #[test]
 fn borrowing_a_string_does_not_move_it() {
-    // The canonical §2.4 example: `length(&msg)` borrows; `msg` stays usable.
+    // The canonical example: `length(&msg)` borrows; `msg` stays usable.
     let source = r#"
 func describe(s: &string) -> u64 {
     s.len()
@@ -143,7 +143,7 @@ func main() -> i32 {
 
 #[test]
 fn borrowing_a_const_is_rejected() {
-    // A `const` is an inlined value, not an addressable place (§1.3).
+    // A `const` is an inlined value, not an addressable place.
     let source = r#"
 const LIMIT: i32 = 10
 func main() -> i32 {

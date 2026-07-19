@@ -1,4 +1,4 @@
-// Codegen for enum construction (§3.5): every surface form (unit `E::V`, tuple
+// Codegen for enum construction: every surface form (unit `E::V`, tuple
 // `E::V(..)`, struct `E::V { .. }`) reaches here as a single `EnumConstruct` node.
 //
 // An enum value is a tagged union `{ i32 tag, [W x i64] payload }`. The tag is the
@@ -62,7 +62,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(agg.into())
     }
 
-    /// Encode one scalar payload field into its 64-bit slot (§3.5). A float is first
+    /// Encode one scalar payload field into its 64-bit slot. A float is first
     /// bitcast to the integer of its own width to preserve the exact bit pattern,
     /// then every value zero-extends to `i64`; the low bits recover the original on
     /// extraction. Payloads are restricted to scalar primitives by semantic analysis,

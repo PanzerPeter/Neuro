@@ -1,4 +1,4 @@
-// Fixed-size arrays `[T; N]` (§3.1): literals, indexing, element assignment,
+// Fixed-size arrays `[T; N]`: literals, indexing, element assignment,
 // `.len()`, by-value iteration, and borrowed iteration `for x in &arr`.
 
 func sum(xs: [i32; 5]) -> i32 {

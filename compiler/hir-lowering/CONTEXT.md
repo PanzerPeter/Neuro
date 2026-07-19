@@ -18,7 +18,7 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
 - thiserror — `LoweringError` derivation
 
 ## Notes
-- 2026-07-19: Static & dynamic dispatch (§3.17). Traits are no longer fully erased here: a new
+- 2026-07-19: Static & dynamic dispatch. Traits are no longer fully erased here: a new
   `traits` table (name → methods in declaration order, with their visible parameter and return
   types) is registered before impls, and each `Item::Trait` now lowers to a `HirItem::Trait`
   carrying that method order — the canonical vtable slot layout backends need. `resolve_type`
@@ -42,15 +42,15 @@ Two type derivations are contextual and faithfully mirror the checker:
 - **Literals** take a suffix type, else the expected type when it fits the literal's family, else the default `i32`/`f64`.
 - A **function/method body's trailing expression** is an implicit return, typed against the declared return type; nested block/`if`-arm tails are typed with no hint.
 
-Tuples (§3.2): `resolve_type` lowers the tuple type to `HirType::Tuple`; a tuple literal is typed by lowering each element (each hinted by the expected tuple's element type when annotated) and a `t.N` index reads the N-th element type off the (auto-derefed) tuple type. Destructuring is already desugared by the parser, so only the literal/index nodes reach here.
+Tuples: `resolve_type` lowers the tuple type to `HirType::Tuple`; a tuple literal is typed by lowering each element (each hinted by the expected tuple's element type when annotated) and a `t.N` index reads the N-th element type off the (auto-derefed) tuple type. Destructuring is already desugared by the parser, so only the literal/index nodes reach here.
 
-Enums (§3.5): a registration pre-pass records each enum's variants and resolved payload fields (`enums` table). `resolve_type` maps an enum name to `HirType::Enum`. All three construction forms normalize to one `HirExprKind::EnumConstruct { enum_name, variant, tag, payload }`: a unit `E::V` (Path) carries an empty payload; a tuple `E::V(..)` (Call→Path) carries the positional args; a struct `E::V { .. }` (`EnumStructLiteral`) reorders its provided fields into declared order so codegen sees a single positional layout. `tag` is the variant's declaration index.
+Enums: a registration pre-pass records each enum's variants and resolved payload fields (`enums` table). `resolve_type` maps an enum name to `HirType::Enum`. All three construction forms normalize to one `HirExprKind::EnumConstruct { enum_name, variant, tag, payload }`: a unit `E::V` (Path) carries an empty payload; a tuple `E::V(..)` (Call→Path) carries the positional args; a struct `E::V { .. }` (`EnumStructLiteral`) reorders its provided fields into declared order so codegen sees a single positional layout. `tag` is the variant's declaration index.
 
-Struct + array destructuring (§3.2): the parser desugars these, so only the array-rest node reaches lowering. `Expr::ArrayRest { array, start, exact }` lowers to `HirExprKind::ArrayRest { array, start }` typed `[T; N - start]` (re-derived from the source array's `HirType`); a defensive arity re-check (`exact ⇒ N == start`, else `start <= N`) raises `Malformed` rather than underflowing `N - start`.
+Struct + array destructuring: the parser desugars these, so only the array-rest node reaches lowering. `Expr::ArrayRest { array, start, exact }` lowers to `HirExprKind::ArrayRest { array, start }` typed `[T; N - start]` (re-derived from the source array's `HirType`); a defensive arity re-check (`exact ⇒ N == start`, else `start <= N`) raises `Malformed` rather than underflowing `N - start`.
 
-Pattern matching (§3.6): `lower_match` fully resolves each arm. `pattern_test` maps a pattern to a `HirMatchTest` (variant tag / `IntEq` / `IntRange`, with `char`/`bool` literals as scalar codepoints/0-1 and an exclusive `a..b` normalized to `a..=b-1`); `pattern_bindings` resolves a single arm's bindings to `HirBindingSource::Scrutinee` (bare binding) or `EnumPayload { slot }` (payload field, slot = declared field position). Bindings are defined in a per-arm scope so the guard and body lower correctly; the body-type hint is the caller's expected type, else the first arm's type. The match type is the first arm's body type.
+Pattern matching: `lower_match` fully resolves each arm. `pattern_test` maps a pattern to a `HirMatchTest` (variant tag / `IntEq` / `IntRange`, with `char`/`bool` literals as scalar codepoints/0-1 and an exclusive `a..b` normalized to `a..=b-1`); `pattern_bindings` resolves a single arm's bindings to `HirBindingSource::Scrutinee` (bare binding) or `EnumPayload { slot }` (payload field, slot = declared field position). Bindings are defined in a per-arm scope so the guard and body lower correctly; the body-type hint is the caller's expected type, else the first arm's type. The match type is the first arm's body type.
 
-Newtypes (§3.15): a registration pre-pass records each newtype's inner AST type (`newtypes` table).
+Newtypes: a registration pre-pass records each newtype's inner AST type (`newtypes` table).
 `resolve_type` maps a newtype name to `HirType::Newtype { name, inner }`, resolving the inner
 recursively (a newtype may wrap another; the checker already rejected cycles). Construction
 `Name(value)` — a `Call` whose identifier callee names a newtype — lowers to
@@ -61,11 +61,11 @@ is purely a type-system distinction that the backends erase.
 
 Three nodes carry a deliberately-chosen type the source has no first-class form for: a `loop` value-expression takes its `break v` type (or `void`); a method-name callee `FieldAccess` carries the call's result type (there is no method value); a `Range` carries `void` (valid only as a `string.slice` argument — the slice lowering reads its bounds directly). Divergent panic-family calls (`panic`/`assert`/`unreachable`) adopt their context's expected type, or `void` in statement position.
 
-Generics (§3.8): this slice performs **monomorphization** — the HIR has no generic node, so generic templates are erased into concrete instances here. A generic `FunctionDef` is stored in `generic_templates` (not `functions`) and never lowered directly. A call to a generic function (`lower_generic_call`) infers its type arguments by unifying the template's parameter annotations against the lowered arguments' types (`unify_ast_hir`), resolves the concrete signature under a `type_subst` map (consulted by `resolve_type` for a parameter name), mangles a per-instance name (`mangle_instance` → `name__g_<type…>`), enqueues the instance if unseen, and emits a `Call` to the mangled name. A worklist drains after the ordinary items: each instance's body lowers under its `type_subst`, appended as a concrete `HirItem::Function`. The backend pre-declares all functions, so instance emission order is irrelevant.
+Generics: this slice performs **monomorphization** — the HIR has no generic node, so generic templates are erased into concrete instances here. A generic `FunctionDef` is stored in `generic_templates` (not `functions`) and never lowered directly. A call to a generic function (`lower_generic_call`) infers its type arguments by unifying the template's parameter annotations against the lowered arguments' types (`unify_ast_hir`), resolves the concrete signature under a `type_subst` map (consulted by `resolve_type` for a parameter name), mangles a per-instance name (`mangle_instance` → `name__g_<type…>`), enqueues the instance if unseen, and emits a `Call` to the mangled name. A worklist drains after the ordinary items: each instance's body lowers under its `type_subst`, appended as a concrete `HirItem::Function`. The backend pre-declares all functions, so instance emission order is irrelevant.
 
-Generic structs & impls (§3.8): monomorphized the same way. A generic `StructDef` is stored in `generic_structs` (not `structs`) and a generic `impl` in `generic_impls` (keyed by base name); neither is lowered directly. `instantiate_generic_struct(base, args)` — called from `resolve_type` for a `Type::Generic` annotation and from `lower_generic_struct_literal` after inferring the arguments from the field values via `unify_ast_hir` — mangles a per-instance name, registers the instance's concrete fields + impl-method signatures, and enqueues a `MonoStruct` if unseen. The struct-instance mangle (`mangle_struct_instance` → `Base_g_<type…>`) deliberately avoids `__`, because the backend recovers a method's receiver struct by splitting the method symbol on `__`. The struct worklist drains alongside the function worklist, emitting one `HirItem::Struct` plus one `HirItem::Impl` per generic impl (method bodies lowered under the impl's `type_subst` with `self` bound to the instance). Since these are ordinary struct/impl HIR items, the backend needs no generic awareness.
+Generic structs & impls: monomorphized the same way. A generic `StructDef` is stored in `generic_structs` (not `structs`) and a generic `impl` in `generic_impls` (keyed by base name); neither is lowered directly. `instantiate_generic_struct(base, args)` — called from `resolve_type` for a `Type::Generic` annotation and from `lower_generic_struct_literal` after inferring the arguments from the field values via `unify_ast_hir` — mangles a per-instance name, registers the instance's concrete fields + impl-method signatures, and enqueues a `MonoStruct` if unseen. The struct-instance mangle (`mangle_struct_instance` → `Base_g_<type…>`) deliberately avoids `__`, because the backend recovers a method's receiver struct by splitting the method symbol on `__`. The struct worklist drains alongside the function worklist, emitting one `HirItem::Struct` plus one `HirItem::Impl` per generic impl (method bodies lowered under the impl's `type_subst` with `self` bound to the instance). Since these are ordinary struct/impl HIR items, the backend needs no generic awareness.
 
-- 2026-07-18: Operator traits — scalar path (§3.10). Operator overloading is desugared here: an
+- 2026-07-18: Operator traits — scalar path. Operator overloading is desugared here: an
   operator trait (`Add`, `Sub`, …, `PartialEq`, `Comparable`; table in `operator_traits.rs`) impl
   populates `operator_binary_impls` / `operator_unary_impls` during `register_impl`. In `lower_expr`,
   a `Binary` / `Unary` whose (peeled) left/operand type is a struct with a matching entry desugars to
@@ -75,12 +75,12 @@ Generic structs & impls (§3.8): monomorphized the same way. A generic `StructDe
   `Reference`. Owned `self` methods are no longer skipped in `register_impl` / `lower_impl` (valid on
   a `Copy` receiver; the checker rejected any non-`Copy` case). Generic-impl paths still skip owned
   `self` (operator traits on generic structs are out of scope this phase).
-- 2026-07-16: Trait declarations (§3.9). Traits are fully erased in this slice: an `Item::Trait`
+- 2026-07-16: Trait declarations. Traits are fully erased in this slice: an `Item::Trait`
   produces no HIR and needs no registration, because the parser has already injected each trait's
   default methods into the matching `impl Trait for Type` blocks — so trait impls (and their
   inherited defaults) lower through the ordinary inherent-impl path, and a trait-bounded generic
   monomorphizes to concrete dispatch on the substituted type with no trait awareness here.
-- 2026-07-10: Const generics, `where` clauses & turbofish (§3.8). Monomorphization now keys on const
+- 2026-07-10: Const generics, `where` clauses & turbofish. Monomorphization now keys on const
   *values* as well as types: a `const_subst` (name → value) and `const_types` (name → int type) are
   active while an instance body lowers, parallel to `type_subst`. `MonoArg` (Type|Const) is the
   positional instance-argument kind; `split_mono_args` builds the two subst maps. `unify_ast_hir`

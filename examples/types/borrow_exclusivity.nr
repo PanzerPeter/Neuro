@@ -1,4 +1,4 @@
-// Borrow exclusivity — the flow-sensitive aliasing rules (§2.4, §2.5).
+// Borrow exclusivity — the flow-sensitive aliasing rules.
 //
 // The borrow checker enforces two coexistence rules at compile time:
 //   * any number of shared `&T` borrows of a place may be live at once;

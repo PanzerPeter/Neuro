@@ -258,7 +258,7 @@ An empty literal (`''`), a multi-character literal (`'ab'`), and an unterminated
 
 The `string` type is an immutable, UTF-8 encoded fat pointer `{ ptr, i64 }` — a pointer to
 the bytes plus a stored byte length. Equality (`==`, `!=`) compares byte content; the `+`
-operator concatenates two strings into a new owned `string` (§2.7).
+operator concatenates two strings into a new owned `string`.
 
 ### Storage and the `len` Guarantee
 
@@ -295,7 +295,7 @@ byte count, a multi-byte code point contributes more than one to the length.
 
 **`.clone() -> string`** — returns a fresh `string` equal to its receiver. It is the
 canonical explicit deep copy for non-`Copy` owned types and, now that move-by-default has
-landed (1C, §2.2 — see [variables](variables.md#move-semantics-ownership)), the way to
+landed (1C — see [variables](variables.md#move-semantics-ownership)), the way to
 keep using a value after it would otherwise be moved. Today strings
 are immutable and `.rodata`-backed (no heap string type exists yet), so the clone copies the
 `(ptr, len)` fat pointer — observationally a deep copy because the pointee bytes are
@@ -390,7 +390,7 @@ struct Score {
 
 By default a struct is **move-by-default**, just like `string`: binding, assigning,
 returning, or passing it by value moves the source, and reading the source afterward is a
-`use of moved value` error (§2.2). A struct opts out of moving by deriving `Copy`:
+`use of moved value` error. A struct opts out of moving by deriving `Copy`:
 
 ```neuro
 @derive(Copy, Clone)
@@ -401,7 +401,7 @@ val b = a          // a is COPIED, not moved
 val s = a.x + b.y  // a is still valid here
 ```
 
-Rules (§2.3):
+Rules:
 
 - A struct may derive `Copy` only when **every field is `Copy`**. Primitive scalars
   (`i8`–`u64`, `f32`, `f64`, `bool`) are `Copy`; `string` is not; a struct field is `Copy`
@@ -431,7 +431,7 @@ val w = v.clone()  // independent copy; v stays usable
 | `UnknownStruct` | Struct literal references an undeclared struct name |
 | `CopyDeriveNonCopyField` | `@derive(Copy)` on a struct with a non-`Copy` field |
 
-## Enum Types (§3.5)
+## Enum Types
 
 Enums are user-defined types that hold exactly one of several named **variants**. A variant may be a bare tag, carry a positional **tuple** payload, or carry **named fields** — all three may appear in one enum. Like structs, enums use nominal typing.
 
@@ -479,7 +479,7 @@ An enum is a tagged union: a discriminant identifying the active variant, plus s
 
 - **Payloads are scalar `Copy` primitives only** — integers, floats, `bool`, `char`. A payload of `string`, a struct, an array, a tuple, or a reference is rejected (`UnsupportedEnumPayload`); broader payloads arrive with pattern matching and heap support.
 - **Non-generic** — generic enums such as `Option<T>` arrive with the generics system (1F).
-- **No deconstruction yet** — reading a variant's tag or payload needs `match` (the next 1E item, §3.6). Until then an enum value is constructed and carried, not inspected.
+- **No deconstruction yet** — reading a variant's tag or payload needs `match` (the next 1E item). Until then an enum value is constructed and carried, not inspected.
 
 ### Type Errors
 
@@ -492,7 +492,7 @@ An enum is a tagged union: a discriminant identifying the active variant, plus s
 | `UnknownEnumField` / `MissingEnumField` / `DuplicateEnumField` | Struct-variant field set is wrong |
 | `UnsupportedEnumPayload` | A variant payload is not a scalar `Copy` primitive |
 
-## Newtype Declarations (§3.15)
+## Newtype Declarations
 
 A `newtype` creates a **distinct nominal type** that wraps an inner type. Unlike a `type` alias — which is transparent, so the alias and its target are interchangeable — a newtype and its inner type are *different types*. This buys unit-of-measure and domain-identifier safety at zero runtime cost.
 
@@ -538,7 +538,7 @@ A newtype forwards `Copy`/`Clone` from its inner type, so a `Copy`-inner newtype
 
 ## References — Immutable Borrows (`&T`)
 
-An **immutable borrow** `&T` is a non-owning reference to a value (§2.4). It lets a
+An **immutable borrow** `&T` is a non-owning reference to a value. It lets a
 function read a value without taking ownership, so the caller keeps using its binding
 afterward. The borrow expression `&x` takes a reference to the place `x`.
 
@@ -566,7 +566,7 @@ func main() -> i32 {
   referent.
 - Only a **place** (a `val`/`mut`/parameter binding) can be borrowed. Borrowing a
   temporary (a literal or a call result) or a `const` (an inlined value, not a memory
-  location — §1.3) is a `CannotBorrowValue` error.
+  location —) is a `CannotBorrowValue` error.
 
 ```neuro
 struct Point { x: i64, y: i64 }
@@ -584,7 +584,7 @@ func read_sum(p: &Point) -> i64 { p.sum() }   // borrow a struct, call through i
 ### References — Mutable Borrows (`&mut T`)
 
 A **mutable borrow** `&mut T` is a non-owning reference that grants **write** access to a
-value (§2.5). The borrow expression `&mut x` requires `x` to be a `mut` binding — you
+value. The borrow expression `&mut x` requires `x` to be a `mut` binding — you
 cannot acquire write access through a reference to a value you may not write directly.
 
 Values are read and written through the prefix **dereference operator** `*`:
@@ -623,7 +623,7 @@ func main() -> i32 {
 
 ### Borrow Exclusivity (`&` / `&mut` aliasing rules)
 
-The borrow checker enforces two coexistence rules at compile time (§2.4, §2.5):
+The borrow checker enforces two coexistence rules at compile time:
 
 - **Any number of shared `&T` borrows** of a place may be live at the same time.
 - **A `&mut T` borrow is exclusive**: while it is live, no other borrow of that place —
@@ -662,7 +662,7 @@ The diagnostics are `cannot borrow '<name>' as mutable` (a `&mut` while any borr
 > value while it is borrowed lands with full **lifetime inference**, which extends the same
 > borrow-region analysis.
 
-### Lifetimes — Returned References (§2.6)
+### Lifetimes — Returned References
 
 Lifetimes are **inferred** in the vast majority of cases. The elision rules match Rust: a
 single input reference lifetime is applied to the outputs, and the `&self` lifetime is applied to
@@ -713,7 +713,7 @@ surface yet.
 
 ### String Slices (`&string`)
 
-`&string` is the **borrowed string slice** (§2.7): a non-owning `(ptr, len)` view into
+`&string` is the **borrowed string slice**: a non-owning `(ptr, len)` view into
 UTF-8 data. There is no separate slice type — `&string` is both "a borrow of an owned
 `string`" and "a string slice," the analogue of Rust's `&str`.
 
@@ -740,7 +740,7 @@ func main() -> i32 {
 Comparing through borrows never moves: `lang` stays usable after each `&lang`. Reference
 peeling for equality is **string-only**, so comparing a non-string reference to its value
 (`&n == n` on an `i32`) or mixing types (`i32 == &string`) is still a type error — reading
-other `&T` through `==` needs the `*` deref operator (§2.5).
+other `&T` through `==` needs the `*` deref operator.
 
 > **Not yet available:** the slicing methods `.slice(range)` / `.char_slice(range)` that
 > produce a `&string` view into the interior of a string arrive in a later phase; today a
@@ -862,7 +862,7 @@ func returns_i32() -> i32 {
 - Explicit type conversions via `as`
 - Function types, strict type checking, type-mismatch error reporting
 - Structs, methods, fixed-size arrays `[T; N]`, tuples + destructuring, type aliases
-- Enums with associated data `enum E { A, B(T), C { f: T } }` (§3.5)
+- Enums with associated data `enum E { A, B(T), C { f: T } }`
 
 **In progress / planned (still Phase 1):**
 - Pattern matching, newtypes (1E)
@@ -1051,7 +1051,7 @@ func compose() -> i32 {
 A `type` declaration introduces a **transparent** alias for an existing type. The
 alias and its target are fully interchangeable — no new nominal type is created,
 so a value of the alias type and a value of the target type are the same type to
-the compiler (contrast with `newtype`, §3.15, which is a distinct type).
+the compiler (contrast with `newtype`, which is a distinct type).
 
 ```neuro
 type Meters = f64
@@ -1095,12 +1095,12 @@ exactly the same code as writing the target type directly. Using an alias as a
 value-position constructor or path name (e.g. `MyAlias { ... }`) is not part of
 this feature.
 
-## Arrays (§3.1)
+## Arrays
 
 A fixed-size array `[T; N]` holds exactly `N` values of element type `T`, with
 `N` fixed at compile time and part of the type — `[i32; 3]` and `[i32; 4]` are
 distinct types. `N` is an integer literal, or — inside a generic definition — a
-`const` generic parameter (`[T; CAP]`, §3.8), resolved to a concrete length by
+`const` generic parameter (`[T; CAP]`), resolved to a concrete length by
 monomorphization.
 
 ```neuro
@@ -1126,9 +1126,9 @@ for x in &a {  }                     // iterate over a borrow
   builds (`-O0`); release builds omit the check (matching the integer-overflow
   policy).
 - **Iteration**: `for x in arr` / `for x in &arr` bind each element in order;
-  the indexed form `for (i, x) in arr.enumerate()` arrives with tuples (§3.2).
+  the indexed form `for (i, x) in arr.enumerate()` arrives with tuples.
 
-## Tuples (§3.2)
+## Tuples
 
 A tuple `(T1, T2, ...)` is an anonymous, fixed-size, **heterogeneous** aggregate.
 Element types may differ; the arity is part of the type, so `(i32, bool)` and

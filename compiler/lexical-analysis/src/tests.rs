@@ -229,7 +229,7 @@ fn tokenize_float_suffixes() {
 
 #[test]
 fn tokenize_half_precision_float_suffixes() {
-    // §1.2 — `f16` / `bf16` half-precision literals. `bf16` must not be mis-split
+    // `f16` / `bf16` half-precision literals. `bf16` must not be mis-split
     // as `b` + `f16`, and `1.5f16` must not be read as `1.5` + the `f16` ident.
     let result = tokenize("1.5f16 0.02bf16 2e3f16 1.0bf16").unwrap();
     assert_eq!(result.len(), 5); // 4 suffixed floats + EOF
@@ -597,7 +597,7 @@ fn empty_and_multi_char_literals_are_rejected() {
 
 #[test]
 fn tokenize_lifetimes() {
-    // A quote-less `'ident` is a lifetime (§2.6). The stored name drops the `'`.
+    // A quote-less `'ident` is a lifetime. The stored name drops the `'`.
     let result = tokenize("<'a, 'lt>").unwrap();
     assert!(matches!(result[0].kind, TokenKind::Less));
     assert!(matches!(&result[1].kind, TokenKind::Lifetime(n) if n == "a"));

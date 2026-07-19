@@ -1,4 +1,4 @@
-// Parsing for `match` expressions and their patterns (§3.6).
+// Parsing for `match` expressions and their patterns.
 
 use lexical_analysis::TokenKind;
 use shared_types::{Identifier, Literal, Span};
@@ -10,7 +10,7 @@ use crate::precedence::Precedence;
 use super::Parser;
 
 impl Parser {
-    /// Parse a `match` expression (§3.6). The `match` keyword is already consumed;
+    /// Parse a `match` expression. The `match` keyword is already consumed;
     /// `start_span` is its span. The scrutinee is parsed with struct-literals
     /// suppressed so `match x { ... }` reads `x` as the scrutinee, not `x { ... }`.
     pub(super) fn parse_match_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
@@ -82,7 +82,7 @@ impl Parser {
         })
     }
 
-    /// Parse a single pattern (§3.6): a wildcard, binding, literal, range, or enum
+    /// Parse a single pattern: a wildcard, binding, literal, range, or enum
     /// variant pattern.
     fn parse_pattern(&mut self) -> ParseResult<Pattern> {
         self.skip_newlines();

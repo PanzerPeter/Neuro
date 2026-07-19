@@ -1,4 +1,4 @@
-// Demonstrates integer literal type suffixes (§1.4).
+// Demonstrates integer literal type suffixes.
 // Suffixes pin the type of a literal without a variable annotation.
 
 func sum_bytes(a: u8, b: u8) -> i32 {

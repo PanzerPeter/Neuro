@@ -79,18 +79,18 @@ Key design goals:
 - Typed parameters and return types
 - Explicit `return` and implicit trailing-expression returns
 - Recursion and forward references
-- **Generics** (1F, §3.8): generic functions `func identity<T>(x: T) -> T`, generic
+- **Generics** (1F): generic functions `func identity<T>(x: T) -> T`, generic
   structs `struct Pair<T, U>`, and generic inherent impls `impl<T> Wrapper<T>`,
   monomorphized (one specialized copy per concrete type-argument set, zero runtime
   cost); type arguments inferred from value/field arguments or written explicitly
-  (`Pair<i32, f64>`); trait bounds `<T: Trait>` are enforced (§3.9); type arguments
+  (`Pair<i32, f64>`); trait bounds `<T: Trait>` are enforced; type arguments
   restricted to `Copy` this phase
-- **Traits** (1F, §3.9): `trait` declarations with required and default (provided)
+- **Traits** (1F): `trait` declarations with required and default (provided)
   methods; `impl Trait for Type` checked for conformance; trait-bounded generics
   `func f<T: Shape>(x: &T)` dispatch trait methods on the type parameter, checked at the
   call site. Fully monomorphized and erased — no vtable, zero runtime cost. Associated
   types land later in 1F
-- **Static & dynamic dispatch** (1F, §3.17): `impl Trait` in argument position
+- **Static & dynamic dispatch** (1F): `impl Trait` in argument position
   (`func train(m: &impl Model)`) and return position (`func make() -> impl Shape`) is
   anonymous-generic sugar — monomorphized, zero cost; each `impl Trait` parameter is its
   own anonymous type parameter. `dyn Trait` is a runtime trait object behind
@@ -131,22 +131,22 @@ Key design goals:
 
 - `struct` definitions with any primitive or struct field types
 - `impl` blocks: instance methods (`&self` and `&mut self`) and associated functions (`TypeName::func`)
-- `&mut self` methods mutate `self.field` in place (passed by pointer, §2.5); calling one needs a `mut` receiver and takes an exclusive borrow for the call. Consuming `self` is still rejected
+- `&mut self` methods mutate `self.field` in place (passed by pointer); calling one needs a `mut` receiver and takes an exclusive borrow for the call. Consuming `self` is still rejected
 - Nominal typing; forward-reference support (definition order independent)
 
-### Arrays (1E, §3.1)
+### Arrays (1E)
 
 - Fixed-size `[T; N]` of `Copy` scalar elements: literals (with element-type inference), index read/write, `.len()` (compile-time `u64`)
 - Iteration `for x in arr` and `for x in &arr`, lowered as a counted loop over the storage
 - Out-of-bounds index panics in debug builds (`-O0`); release builds omit the check
 
-### Tuples (1E, §3.2)
+### Tuples (1E)
 
 - Anonymous `(T1, T2, ...)` of `Copy` elements: literals, `.0`/`.1` constant index access
 - Destructuring binds `val (a, b) = t` with `_` wildcards and nesting (`val ((a, b), c) = ...`)
 - Usable as function parameters and return types; a single `(x)` stays grouping
 
-### Struct + array destructuring (1E, §3.2)
+### Struct + array destructuring (1E)
 
 - Struct patterns `val Point { x, y } = p` bind each field by its own name
 - Array patterns `val [a, b, c] = arr` bind positionally; `val [first, ..rest] = arr`
@@ -154,14 +154,14 @@ Key design goals:
 - Rest-less array patterns are arity-checked against the array length; patterns nest
   and work with `mut`
 
-### Enums (1E, §3.5)
+### Enums (1E)
 
 - Tagged unions `enum E { A, B(i32), C { x: f64 } }` with unit, tuple, and struct-field variants
 - Construct via `E::A` / `E::B(1)` / `E::C { x: 1.0 }`; usable as bindings, function
   parameters/returns, and struct fields; an enum is `Copy`
 - Scalar `Copy` payloads only; non-generic
 
-### Pattern Matching (1E, §3.6)
+### Pattern Matching (1E)
 
 - `match` as an exhaustive expression; the first matching (and guard-passing) arm supplies the value
 - Patterns: `_` wildcard, bare binding, literals, `a..=b` / `a..b` ranges, `|` or-patterns, and enum
@@ -170,7 +170,7 @@ Key design goals:
 - Phase-1E limits: scrutinee is enum/integer/`char`/`bool`; payload sub-patterns are binding-or-`_`;
   `|`-alternatives may not bind
 
-### Newtypes (1E, §3.15)
+### Newtypes (1E)
 
 - `newtype Meters = i32` creates a distinct nominal type wrapping an inner type
 - Not interchangeable with the inner type (unlike a transparent `type` alias)

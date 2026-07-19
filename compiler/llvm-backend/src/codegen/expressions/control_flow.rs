@@ -118,7 +118,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// The arm is its own drop scope: locals declared in it are destroyed before
     /// control reaches the merge block, while a yielded place escapes (its drop flag
-    /// is cleared as a move, §2.2).
+    /// is cleared as a move).
     fn codegen_arm_into_alloca(
         &mut self,
         stmts: &[HirStmt],

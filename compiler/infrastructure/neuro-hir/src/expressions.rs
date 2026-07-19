@@ -60,7 +60,7 @@ pub enum HirExprKind {
         callee: Box<HirExpr>,
         args: Vec<HirExpr>,
     },
-    /// Struct literal `Name { field: value, ..base }` (§3.3). `base` carries the
+    /// Struct literal `Name { field: value, ..base }`. `base` carries the
     /// functional-update source when present.
     StructLiteral {
         name: String,
@@ -76,7 +76,7 @@ pub enum HirExprKind {
         type_name: String,
         member: String,
     },
-    /// `value as T` cast (§1.4). The target type is the expression's `ty`.
+    /// `value as T` cast. The target type is the expression's `ty`.
     Cast {
         value: Box<HirExpr>,
     },
@@ -89,26 +89,26 @@ pub enum HirExprKind {
     Block {
         stmts: Vec<HirStmt>,
     },
-    /// Value-producing infinite loop `loop { ... break v }` (§3.7).
+    /// Value-producing infinite loop `loop { ... break v }`.
     Loop {
         label: Option<String>,
         body: Vec<HirStmt>,
     },
-    /// `unsafe { ... }` block (§3). Inert outside `@kernel` bodies; the distinct
+    /// `unsafe { ... }` block. Inert outside `@kernel` bodies; the distinct
     /// node preserves the boundary for later phases.
     Unsafe {
         stmts: Vec<HirStmt>,
     },
-    /// Borrow `&place` / `&mut place` (§2.4, §2.5).
+    /// Borrow `&place` / `&mut place`.
     Reference {
         operand: Box<HirExpr>,
         mutable: bool,
     },
-    /// Dereference `*operand` (§2.5).
+    /// Dereference `*operand`.
     Deref {
         operand: Box<HirExpr>,
     },
-    /// Unsizing coercion `&T` → `&dyn Trait` (§3.17): builds a trait object from a
+    /// Unsizing coercion `&T` → `&dyn Trait`: builds a trait object from a
     /// concrete reference. `value` is the `&T` (its `ty` names the concrete type, which
     /// selects the vtable); this expression's `ty` is the `&dyn Trait` being produced.
     /// Backends lower it to a `(data pointer, vtable pointer)` fat pointer.
@@ -116,7 +116,7 @@ pub enum HirExprKind {
         value: Box<HirExpr>,
     },
     /// Range `start..end` / `start..=end`. Only valid as a `string.slice`
-    /// argument (§2.7); never produced for `for`-range loops.
+    /// argument; never produced for `for`-range loops.
     Range {
         start: Box<HirExpr>,
         end: Box<HirExpr>,
@@ -129,17 +129,17 @@ pub enum HirExprKind {
         object: Box<HirExpr>,
         index: Box<HirExpr>,
     },
-    /// Tuple literal `(e0, e1, ...)` (§3.2). The element types live on the elements;
+    /// Tuple literal `(e0, e1, ...)`. The element types live on the elements;
     /// this expression's `ty` is the [`HirType::Tuple`] of them.
     TupleLiteral {
         elements: Vec<HirExpr>,
     },
-    /// Tuple element access `object.N` (§3.2) by constant index.
+    /// Tuple element access `object.N` by constant index.
     TupleIndex {
         object: Box<HirExpr>,
         index: usize,
     },
-    /// Enum construction (§3.5): builds the `variant`-th value of `enum_name` from
+    /// Enum construction: builds the `variant`-th value of `enum_name` from
     /// the lowered `payload`, which is in the variant's declared field order (the
     /// three surface forms — unit `E::V`, tuple `E::V(..)`, and struct `E::V { .. }`
     /// — all normalize to this single node). `tag` is the variant's discriminant
@@ -150,20 +150,20 @@ pub enum HirExprKind {
         tag: u32,
         payload: Vec<HirExpr>,
     },
-    /// Newtype construction `Name(value)` (§3.15). The wrapper is transparent at
+    /// Newtype construction `Name(value)`. The wrapper is transparent at
     /// runtime, so backends lower this to `value` unchanged; the expression's `ty` is
     /// the [`HirType::Newtype`].
     NewtypeConstruct {
         name: String,
         value: Box<HirExpr>,
     },
-    /// Newtype inner access `object.0` (§3.15). A newtype is representationally
+    /// Newtype inner access `object.0`. A newtype is representationally
     /// identical to its inner type, so backends lower this to `object` unchanged; the
     /// expression's `ty` is the inner type.
     NewtypeAccess {
         object: Box<HirExpr>,
     },
-    /// Trailing remainder of an array destructuring pattern (§3.2): a fresh
+    /// Trailing remainder of an array destructuring pattern: a fresh
     /// `[T; N - start]` array copying elements `start..N` of `array` (a `[T; N]`).
     /// The arity rules are validated before lowering; this node's `ty` carries
     /// the resulting array type.
@@ -171,7 +171,7 @@ pub enum HirExprKind {
         array: Box<HirExpr>,
         start: usize,
     },
-    /// Pattern-matching expression `match scrutinee { ... }` (§3.6), fully resolved.
+    /// Pattern-matching expression `match scrutinee { ... }`, fully resolved.
     ///
     /// Each arm carries its refutable tests (already keyed to variant tags / literal
     /// values / ranges), the payload/scrutinee bindings it introduces, an optional
@@ -183,7 +183,7 @@ pub enum HirExprKind {
     },
 }
 
-/// One resolved arm of a [`HirExprKind::Match`] (§3.6).
+/// One resolved arm of a [`HirExprKind::Match`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirMatchArm {
     /// OR-alternatives: the arm's pattern part fires when any test matches. A
@@ -195,7 +195,7 @@ pub struct HirMatchArm {
     pub body: HirExpr,
 }
 
-/// A single refutable test of the scrutinee (§3.6). Payload sub-patterns never
+/// A single refutable test of the scrutinee. Payload sub-patterns never
 /// contribute a test (they are irrefutable binding/`_` forms), so only the tag /
 /// scalar value is examined here.
 #[derive(Debug, Clone, PartialEq)]
@@ -211,7 +211,7 @@ pub enum HirMatchTest {
     IntRange { lo: i64, hi: i64 },
 }
 
-/// A binding introduced by a match arm (§3.6), in scope for its guard and body.
+/// A binding introduced by a match arm, in scope for its guard and body.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirMatchBinding {
     pub name: String,
@@ -224,6 +224,6 @@ pub struct HirMatchBinding {
 pub enum HirBindingSource {
     /// The whole scrutinee value (a bare binding `n => ...`).
     Scrutinee,
-    /// Enum payload slot `slot`, decoded back to the binding's type (§3.5 layout).
+    /// Enum payload slot `slot`, decoded back to the binding's type.
     EnumPayload { slot: usize },
 }

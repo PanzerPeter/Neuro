@@ -27,7 +27,7 @@ impl<'ctx> CodegenContext<'ctx> {
         for arg in args {
             let val = self.codegen_expr(arg)?;
             // A by-value argument moves an owned `Drop` place into the callee, which
-            // now owns it; clearing the flag prevents a double drop here (§2.2). A
+            // now owns it; clearing the flag prevents a double drop here. A
             // borrow (`&x`) is not an identifier place, so it is left untouched.
             self.mark_moved_for_drop(arg);
             arg_values.push(BasicMetadataValueEnum::from(val));
@@ -47,7 +47,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// A `&self` method takes the struct by value (read-only, so mutations do not
     /// escape). A `&mut self` method takes the struct by pointer — detected by its
     /// first LLVM parameter being a pointer — so the receiver's storage address is
-    /// passed and field writes in the body propagate back to the caller (§2.5).
+    /// passed and field writes in the body propagate back to the caller.
     pub(crate) fn codegen_method_call(
         &mut self,
         mangled_name: &str,
@@ -72,7 +72,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let (self_ptr, _) = self.get_struct_ptr_and_type(receiver, struct_name)?;
             self_ptr.into()
         } else {
-            // `&self`: pass the struct value, dereferencing a `&Struct` borrow (§2.4).
+            // `&self`: pass the struct value, dereferencing a `&Struct` borrow.
             match self.codegen_expr(receiver)? {
                 BasicValueEnum::PointerValue(ptr) => {
                     let struct_ty = self.get_struct_llvm_type(struct_name)?;
@@ -125,7 +125,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let struct_name = &impl_def.type_name;
         for method in &impl_def.methods {
             // An owned `self` reaches codegen only on a `Copy` receiver (operator-trait
-            // methods, §3.10); it is emitted like `&self` — the struct is passed by value.
+            // methods); it is emitted like `&self` — the struct is passed by value.
             self.codegen_method(method, struct_name, func_types)?;
         }
         Ok(())
@@ -158,7 +158,7 @@ impl<'ctx> CodegenContext<'ctx> {
         };
 
         // A `&mut self` receiver is passed by pointer so the body's field writes
-        // reach the caller's value (§2.5); every other parameter is by value.
+        // reach the caller's value; every other parameter is by value.
         let self_by_pointer = matches!(method.self_param, Some(HirSelfParam::RefMut));
 
         let mut llvm_param_types = Vec::new();
@@ -287,7 +287,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         // Open the method-body drop scope. A by-value `Drop`-typed parameter (not the
         // borrowed `self` receiver) is moved into the method and owned by it, so it is
-        // registered for destruction at method exit (§2.1).
+        // registered for destruction at method exit.
         self.push_drop_scope();
         for (i, param) in method.params.iter().enumerate() {
             if let Some(Type::Struct(name)) = param_types.get(non_self_start + i) {
@@ -304,7 +304,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Declare a function's LLVM signature (no body) and record it so call sites can
     /// resolve it. Run in a pre-pass over every item before any body is generated, so
     /// that a call resolves regardless of definition order — required because a
-    /// monomorphized generic instance (§3.8) may be called by, or call, items that
+    /// monomorphized generic instance may be called by, or call, items that
     /// appear before it in the program.
     pub(crate) fn declare_function(
         &mut self,
@@ -425,7 +425,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// The caller is responsible for opening the function-body drop scope (and
     /// registering by-value `Drop` parameters into it) before calling this; the
     /// function scope is popped here on the way out. Drops for owned `Drop` bindings
-    /// run before every normal return path (§2.1).
+    /// run before every normal return path.
     fn codegen_body(&mut self, body: &[HirStmt], return_type: &Type) -> CodegenResult<()> {
         let tail_is_value = !matches!(return_type, Type::Void)
             && matches!(

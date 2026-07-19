@@ -94,7 +94,7 @@ val total = c.value + c.step
 
 Field access binds tighter than function calls in the precedence table.
 
-### Tuple Literals and Index Access (§3.2)
+### Tuple Literals and Index Access
 
 A tuple literal groups two or more values; element access uses a constant index:
 
@@ -121,7 +121,7 @@ val sign: i32  = if n < 0 { -1 } else if n == 0 { 0 } else { 1 }
 
 All arms must produce the same type. An `if` without `else` has type `Void` and cannot be used as a value.
 
-### Match Expressions (§3.6)
+### Match Expressions
 
 `match` is an expression that exhaustively deconstructs a value. The first arm
 whose pattern matches — and whose optional `if` guard holds — supplies the

@@ -63,7 +63,7 @@ fn comparison_yields_bool_and_arithmetic_keeps_operand_type() {
 
 #[test]
 fn tuple_literal_and_index_carry_resolved_types() {
-    // §3.2: a tuple literal is typed `HirType::Tuple`, and `t.N` reads the N-th type.
+    // A tuple literal is typed `HirType::Tuple`, and `t.N` reads the N-th type.
     let program = lower(
         "func main() -> i32 { val t: (i32, bool) = (1, true)\n val first = t.0\n val second = t.1\n 0 }",
     );
@@ -192,7 +192,7 @@ fn unresolved_binding_is_an_error_not_a_panic() {
 
 #[test]
 fn array_rest_remainder_is_sized_subarray() {
-    // §3.2: `val [a, ..rest] = arr` lowers `rest` to an ArrayRest holding the tail.
+    // `val [a, ..rest] = arr` lowers `rest` to an ArrayRest holding the tail.
     // For a `[i64; 4]` source with one leading element, rest is `[i64; 3]`.
     let program = lower(
         "func main() -> i32 { val arr: [i64; 4] = [1, 2, 3, 4]\n val [a, ..rest] = arr\n 0 }",
@@ -214,7 +214,7 @@ fn array_rest_remainder_is_sized_subarray() {
 
 #[test]
 fn enum_construction_lowers_to_enum_construct() {
-    // §3.5: each surface form normalizes to a single `EnumConstruct` node carrying
+    // Each surface form normalizes to a single `EnumConstruct` node carrying
     // the variant's discriminant tag and a payload in declared field order. The
     // struct-variant form reorders provided fields into declaration order.
     let program = lower(
@@ -326,7 +326,7 @@ func main() -> i32 { area(Shape::Unit) + classify(1) }
 #[test]
 fn newtype_construction_lowers_to_transparent_wrapper() {
     // `Meters(7)` becomes a NewtypeConstruct whose type is the newtype and whose
-    // inner value carries the inner type (§3.15).
+    // inner value carries the inner type.
     let program = lower("newtype Meters = i32\nfunc main() -> i32 { val m = Meters(7)\n m.0 }");
     let body = function_body(&program, "main");
     let init = binding_init(body, "m");
@@ -373,7 +373,7 @@ fn struct_names(program: &HirProgram) -> Vec<String> {
 #[test]
 fn generic_struct_monomorphizes_per_type_argument() {
     // `Pair<T, U>` used at two distinct argument sets yields two concrete structs,
-    // and the generic template does not survive into the HIR (§3.8).
+    // and the generic template does not survive into the HIR.
     let program = lower(
         "struct Pair<T, U> { first: T, second: U }\n\
          func main() -> i32 { val a = Pair { first: 1, second: 2.0 }\n\
@@ -436,7 +436,7 @@ fn generic_impl_emits_one_impl_per_instance() {
 #[test]
 fn generic_function_monomorphizes_per_type_argument() {
     // `identity<T>` used at i32 and f64 produces two concrete instances and no
-    // generic template survives into the HIR (§3.8).
+    // generic template survives into the HIR.
     let program = lower(
         "func identity<T>(x: T) -> T { x }\n\
          func main() -> i32 { val a = identity(1)\n val b = identity(2.0)\n a }",
@@ -486,7 +486,7 @@ fn generic_instance_return_type_is_concrete() {
 
 #[test]
 fn newtype_inner_access_lowers_to_inner_type() {
-    // `m.0` becomes a NewtypeAccess whose type is the inner type (§3.15).
+    // `m.0` becomes a NewtypeAccess whose type is the inner type.
     let program = lower("newtype Meters = i32\nfunc main() -> i32 { val m = Meters(7)\n m.0 }");
     let body = function_body(&program, "main");
     let HirStmt::Expr(access) = body.last().expect("tail expression") else {
@@ -593,7 +593,7 @@ fn impl_method_names(program: &HirProgram, type_name: &str) -> Vec<String> {
 #[test]
 fn trait_default_method_lowers_as_concrete_method() {
     // A trait impl that omits a default method still lowers with that method present —
-    // the parser injects it, so codegen sees an ordinary inherent method (§3.9).
+    // the parser injects it, so codegen sees an ordinary inherent method.
     let program = lower(
         r#"
 trait Describable {
@@ -624,7 +624,7 @@ func main() -> i32 {
 #[test]
 fn generic_trait_bound_monomorphizes_to_concrete_dispatch() {
     // `total<T: Shape>` monomorphizes to a concrete instance whose `s.area()` dispatches
-    // to `Square`'s impl method — traits carry no runtime cost (§3.9).
+    // to `Square`'s impl method — traits carry no runtime cost.
     let program = lower(
         r#"
 trait Shape { func area(&self) -> i32 }
@@ -651,7 +651,7 @@ func main() -> i32 {
 #[test]
 fn binary_operator_desugars_to_method_call() {
     // `a + b` on a struct with `impl Add` lowers to the method call `a.add(b)`, not a
-    // `Binary` node (§3.10).
+    // `Binary` node.
     let program = lower(
         r#"
 @derive(Copy, Clone)
@@ -685,7 +685,7 @@ func main() -> i32 {
 
 #[test]
 fn comparison_operator_desugars_and_yields_bool() {
-    // `a == b` lowers to `a.eq(&b)` returning bool; the argument is borrowed (§3.10).
+    // `a == b` lowers to `a.eq(&b)` returning bool; the argument is borrowed.
     let program = lower(
         r#"
 @derive(Copy, Clone)
@@ -720,7 +720,7 @@ func main() -> i32 {
 }
 
 /// A trait declaration lowers to a vtable-layout item carrying its methods in
-/// declaration order — the slot order every implementor shares (§3.17).
+/// declaration order — the slot order every implementor shares.
 #[test]
 fn trait_lowers_to_its_vtable_method_order() {
     let program = lower(
@@ -747,7 +747,7 @@ func main() -> i32 { 0 }
 }
 
 /// Passing `&Concrete` where `&dyn Trait` is expected inserts the unsizing coercion, so
-/// the backend has an explicit node at which to build the fat pointer (§3.17).
+/// the backend has an explicit node at which to build the fat pointer.
 #[test]
 fn concrete_reference_coerces_to_a_trait_object_at_a_call() {
     let program = lower(
@@ -822,7 +822,7 @@ func main() -> i32 { 0 }
 }
 
 /// Return-position `impl Trait` is static dispatch, so it resolves transparently to the
-/// single concrete type the body constructs (§3.17).
+/// single concrete type the body constructs.
 #[test]
 fn impl_trait_return_resolves_to_the_concrete_type() {
     let program = lower(

@@ -18,30 +18,30 @@ use crate::types::Type;
 /// without a struct mangled-name lookup.
 #[derive(Clone, Copy)]
 pub(crate) enum BuiltinMethod {
-    /// `string.len()` → field-1 byte length of the string fat pointer (§2.7).
+    /// `string.len()` → field-1 byte length of the string fat pointer.
     StringLen,
-    /// `string.clone()` → a copy of the string fat pointer value (§2.7).
+    /// `string.clone()` → a copy of the string fat pointer value.
     StringClone,
     /// `string.slice(a..b)` → a borrowed `&string` sub-slice; panics on an out-of-bounds
-    /// or mid-codepoint boundary (§2.7).
+    /// or mid-codepoint boundary.
     StringSlice,
-    /// `struct.clone()` → a copy of the struct aggregate value, for `@derive(Clone)` types (§2.3).
+    /// `struct.clone()` → a copy of the struct aggregate value, for `@derive(Clone)` types.
     StructClone,
-    /// `int.wrapping_add(rhs)` → two's-complement wrapping add (§1.2).
+    /// `int.wrapping_add(rhs)` → two's-complement wrapping add.
     WrappingAdd,
-    /// `int.wrapping_sub(rhs)` → two's-complement wrapping subtract (§1.2).
+    /// `int.wrapping_sub(rhs)` → two's-complement wrapping subtract.
     WrappingSub,
-    /// `int.wrapping_mul(rhs)` → two's-complement wrapping multiply (§1.2).
+    /// `int.wrapping_mul(rhs)` → two's-complement wrapping multiply.
     WrappingMul,
-    /// `int.saturating_add(rhs)` → clamp to type MIN/MAX on overflow (§1.2).
+    /// `int.saturating_add(rhs)` → clamp to type MIN/MAX on overflow.
     SaturatingAdd,
-    /// `int.saturating_sub(rhs)` → clamp to type MIN/MAX on overflow (§1.2).
+    /// `int.saturating_sub(rhs)` → clamp to type MIN/MAX on overflow.
     SaturatingSub,
-    /// `int.saturating_mul(rhs)` → clamp to type MIN/MAX on overflow (§1.2).
+    /// `int.saturating_mul(rhs)` → clamp to type MIN/MAX on overflow.
     SaturatingMul,
-    /// `int.shr(n)` → right shift: arithmetic for signed, logical for unsigned (§1.4).
+    /// `int.shr(n)` → right shift: arithmetic for signed, logical for unsigned.
     Shr,
-    /// `array.len()` → the compile-time element count `N` of `[T; N]`, as `u64` (§3.1).
+    /// `array.len()` → the compile-time element count `N` of `[T; N]`, as `u64`.
     ArrayLen,
 }
 
@@ -50,7 +50,7 @@ pub(crate) enum BuiltinMethod {
 /// keeps the backend independent of the type-checker slice.
 pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<(BuiltinMethod, Type)> {
     // Auto-deref an immutable borrow `&string` so `r.len()` / `r.clone()` resolve through
-    // the reference (§2.4). The integer intrinsics below intentionally require a value
+    // the reference. The integer intrinsics below intentionally require a value
     // receiver — reading a scalar through a reference needs the deref operator (later phase).
     // The second element is the call's *result* type. The receiver type (possibly
     // `&string`) is recorded separately by the type pass, letting codegen decide whether
@@ -58,18 +58,18 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<(Built
     match (recv.referent(), method) {
         (Type::String, "len") => Some((BuiltinMethod::StringLen, Type::U64)),
         (Type::String, "clone") => Some((BuiltinMethod::StringClone, Type::String)),
-        // The slice's result is a borrowed `&string` view (§2.7); lowered to an opaque
+        // The slice's result is a borrowed `&string` view; lowered to an opaque
         // pointer to the computed fat pointer.
         (Type::String, "slice") => Some((
             BuiltinMethod::StringSlice,
             Type::Reference(Box::new(Type::String)),
         )),
-        // `array.len()` (§3.1) → the static element count as `u64`. Auto-derefs a
+        // `array.len()` → the static element count as `u64`. Auto-derefs a
         // borrow of an array (`&[T; N]`) like the string builtins above.
         (Type::Array { .. }, "len") => Some((BuiltinMethod::ArrayLen, Type::U64)),
         // Integer intrinsics require a value receiver (matched on `recv`, not the referent):
         // reading a scalar through `&T` needs the deref operator. They return the receiver's
-        // own integer type (§1.2, §1.4).
+        // own integer type.
         (_, m) if recv.is_integer() => {
             let kind = match m {
                 "wrapping_add" => BuiltinMethod::WrappingAdd,
@@ -89,29 +89,29 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<(Built
 
 /// Tracks basic blocks for loop control flow (`continue` and `break`).
 pub(crate) struct LoopTargets<'ctx> {
-    /// Loop label (`outer:`, §3.7) when present, so a labeled `break`/`continue`
+    /// Loop label (`outer:`) when present, so a labeled `break`/`continue`
     /// can target this loop rather than the innermost one.
     pub(crate) label: Option<String>,
     /// The basic block where a `continue` statement should jump.
     pub(crate) continue_bb: BasicBlock<'ctx>,
     /// The basic block where a `break` statement should jump.
     pub(crate) break_bb: BasicBlock<'ctx>,
-    /// Result slot for a value-producing `loop` (§3.7). A value-carrying `break v`
+    /// Result slot for a value-producing `loop`. A value-carrying `break v`
     /// stores `v` here before branching to `break_bb`; the loop expression loads
     /// it at exit. `None` for `while`/`for` (unit) and unit `loop`s.
     pub(crate) break_slot: Option<PointerValue<'ctx>>,
     /// Index of this loop's body drop scope in `drop_scopes`. A `break`/`continue`
     /// leaving the loop runs the destructors of every scope from the innermost open
-    /// one down to and including this one, before branching (§2.1).
+    /// one down to and including this one, before branching.
     pub(crate) drop_scope_depth: usize,
 }
 
 /// A live owned binding (local or by-value parameter) of a `Drop` type whose
-/// destructor must run at scope exit (§2.1).
+/// destructor must run at scope exit.
 ///
 /// `flag_ptr` is an `i1` slot initialized to `true` at the binding site and set
 /// `false` when the value is moved out, so the scope-exit drop is elided for a
-/// moved value (§2.2) — the runtime drop-flag mechanism that keeps conditional
+/// moved value — the runtime drop-flag mechanism that keeps conditional
 /// moves sound.
 pub(crate) struct DropEntry<'ctx> {
     /// Source binding name, used to clear the flag when the value is moved.
@@ -167,15 +167,15 @@ pub(crate) struct CodegenContext<'ctx> {
 
     /// When true (debug builds, `-O0`), integer `+`/`-`/`*` are emitted with
     /// overflow detection that traps at runtime. When false (release builds),
-    /// the plain wrapping instruction is emitted. See §1.2.
+    /// the plain wrapping instruction is emitted. See.
     pub(crate) overflow_checks: bool,
 
     /// Source text wrapper for the module being compiled, used to render `file:line:col`
-    /// in panic-family diagnostics (§1.2). `None` when the caller did not supply source
+    /// in panic-family diagnostics. `None` when the caller did not supply source
     /// (e.g. the library doctest); panic diagnostics then omit the location suffix.
     pub(crate) source: Option<SourceFile>,
 
-    /// Names of structs implementing the `Drop` lang-item (`impl Drop for T`, §2.1).
+    /// Names of structs implementing the `Drop` lang-item (`impl Drop for T`).
     /// A binding of such a type gets a scope-exit destructor call. Empty for programs
     /// with no Drop types, in which case all drop machinery below stays inert.
     pub(crate) drop_types: std::collections::HashSet<String>,
@@ -185,12 +185,12 @@ pub(crate) struct CodegenContext<'ctx> {
     /// exit they are dropped in reverse (LIFO). Empty unless `drop_types` is non-empty.
     pub(crate) drop_scopes: Vec<Vec<DropEntry<'ctx>>>,
 
-    /// Declared traits → their method names in declaration order (§3.17). The index of a
+    /// Declared traits → their method names in declaration order. The index of a
     /// name in this list is its vtable slot, shared by every implementor of the trait.
     /// Empty for programs that declare no traits.
     pub(crate) trait_methods: HashMap<String, Vec<String>>,
 
-    /// Emitted vtables, keyed by `(trait name, concrete type name)` (§3.17). Each is a
+    /// Emitted vtables, keyed by `(trait name, concrete type name)`. Each is a
     /// private global array of pointers to that type's thunks, in trait method order.
     pub(crate) vtables: HashMap<(String, String), inkwell::values::GlobalValue<'ctx>>,
 }
@@ -223,8 +223,8 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// Record the set of structs implementing `Drop` (§2.1) before code generation.
-    /// Record each declared trait's method order, fixing the vtable slot layout (§3.17).
+    /// Record the set of structs implementing `Drop` before code generation.
+    /// Record each declared trait's method order, fixing the vtable slot layout.
     pub(crate) fn set_trait_methods(&mut self, trait_methods: HashMap<String, Vec<String>>) {
         self.trait_methods = trait_methods;
     }
@@ -233,7 +233,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.drop_types = drop_types;
     }
 
-    /// Record each enum's payload word count (§3.5) so enum types map to the
+    /// Record each enum's payload word count so enum types map to the
     /// `{ i32, [W x i64] }` tagged union before code generation begins.
     pub(crate) fn set_enum_words(&mut self, enum_words: std::collections::HashMap<String, u32>) {
         self.type_mapper.set_enum_words(enum_words);
@@ -292,7 +292,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Get the external libc `malloc` declaration, inserting it on first use.
     /// `malloc(size: i64) -> ptr`. Backs the heap buffer for runtime string
-    /// concatenation (§2.7); `size_t` is 64-bit on every supported target.
+    /// concatenation; `size_t` is 64-bit on every supported target.
     pub(crate) fn get_or_declare_malloc(&self) -> FunctionValue<'ctx> {
         if let Some(f) = self.module.get_function("malloc") {
             return f;
@@ -305,7 +305,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Get the external libc `memcpy` declaration, inserting it on first use.
     /// `memcpy(dst: ptr, src: ptr, n: i64) -> dst`. Copies each operand's bytes
-    /// into the freshly allocated buffer during string concatenation (§2.7).
+    /// into the freshly allocated buffer during string concatenation.
     pub(crate) fn get_or_declare_memcpy(&self) -> FunctionValue<'ctx> {
         if let Some(f) = self.module.get_function("memcpy") {
             return f;
@@ -325,7 +325,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Get the external libc `abort` declaration, inserting it on first use.
     /// `abort() -> void`. Terminates the process via SIGABRT without unwinding the stack,
-    /// which is exactly the §1.2 panic contract (no landing pads, `Drop`/`defer` skipped).
+    /// which is exactly the panic contract (no landing pads, `Drop`/`defer` skipped).
     pub(crate) fn get_or_declare_abort(&self) -> FunctionValue<'ctx> {
         if let Some(f) = self.module.get_function("abort") {
             return f;
@@ -377,7 +377,7 @@ mod tests {
 
     #[test]
     fn slice_resolves_through_a_string_borrow() {
-        // A `&string` receiver auto-derefs (§2.4), so `.slice` resolves on it too.
+        // A `&string` receiver auto-derefs, so `.slice` resolves on it too.
         let recv = Type::Reference(Box::new(Type::String));
         assert!(matches!(
             resolve_builtin_method(&recv, "slice"),

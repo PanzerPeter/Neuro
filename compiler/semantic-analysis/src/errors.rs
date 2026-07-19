@@ -100,7 +100,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("type '{type_name}' implements Drop at {span:?} and so cannot be Copy: a type with a destructor must be moved, not duplicated (§2.1)")]
+    #[error("type '{type_name}' implements Drop at {span:?} and so cannot be Copy: a type with a destructor must be moved, not duplicated")]
     DropTypeCannotBeCopy { type_name: String, span: Span },
 
     #[error("invalid `impl Drop for {type_name}` at {span:?}: {reason}")]
@@ -110,40 +110,38 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error(
-        "unknown trait '{trait_name}' at {span:?}: no `trait {trait_name}` is declared (§3.9)"
-    )]
+    #[error("unknown trait '{trait_name}' at {span:?}: no `trait {trait_name}` is declared")]
     UnknownTrait { trait_name: String, span: Span },
 
     #[error("trait '{trait_name}' is already defined at {span:?}")]
     TraitAlreadyDefined { trait_name: String, span: Span },
 
-    #[error("`dyn {trait_name}` at {span:?} is unsized and must appear behind a reference — write `&dyn {trait_name}` or `&mut dyn {trait_name}` (§3.17)")]
+    #[error("`dyn {trait_name}` at {span:?} is unsized and must appear behind a reference — write `&dyn {trait_name}` or `&mut dyn {trait_name}`")]
     DynTraitNotBehindReference { trait_name: String, span: Span },
 
-    #[error("trait '{trait_name}' is not object-safe and cannot be used as `dyn {trait_name}` at {span:?}: {reason} (§3.17)")]
+    #[error("trait '{trait_name}' is not object-safe and cannot be used as `dyn {trait_name}` at {span:?}: {reason}")]
     TraitNotObjectSafe {
         trait_name: String,
         reason: String,
         span: Span,
     },
 
-    #[error(
-        "`impl Trait` at {span:?} is only allowed in a function parameter or return type (§3.17)"
-    )]
+    #[error("`impl Trait` at {span:?} is only allowed in a function parameter or return type")]
     ImplTraitNotAllowedHere { span: Span },
 
-    #[error("cannot infer the concrete type of the `impl {trait_name}` return at {span:?}: return a direct constructor (a struct literal or enum value); other forms await closures/iterators (§3.17)")]
+    #[error("cannot infer the concrete type of the `impl {trait_name}` return at {span:?}: return a direct constructor (a struct literal or enum value); other forms await closures/iterators")]
     ImplReturnNotInferable { trait_name: String, span: Span },
 
-    #[error("the `impl {trait_name}` return type at {span:?} resolves to `{ty}`, which does not implement '{trait_name}' (§3.17)")]
+    #[error("the `impl {trait_name}` return type at {span:?} resolves to `{ty}`, which does not implement '{trait_name}'")]
     ImplReturnDoesNotImplement {
         trait_name: String,
         ty: Type,
         span: Span,
     },
 
-    #[error("`impl {trait_name} for {type_name}` at {span:?} is missing required method '{method}' (§3.9)")]
+    #[error(
+        "`impl {trait_name} for {type_name}` at {span:?} is missing required method '{method}'"
+    )]
     MissingTraitMethod {
         trait_name: String,
         type_name: String,
@@ -151,14 +149,14 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("method '{method}' at {span:?} is not a member of trait '{trait_name}' (§3.9)")]
+    #[error("method '{method}' at {span:?} is not a member of trait '{trait_name}'")]
     NotATraitMethod {
         trait_name: String,
         method: String,
         span: Span,
     },
 
-    #[error("method '{method}' in `impl {trait_name} for {type_name}` at {span:?} does not match the trait signature: {detail} (§3.9)")]
+    #[error("method '{method}' in `impl {trait_name} for {type_name}` at {span:?} does not match the trait signature: {detail}")]
     TraitMethodSignatureMismatch {
         trait_name: String,
         type_name: String,
@@ -167,7 +165,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("type argument `{ty}` for '{param}' does not implement required trait '{trait_name}' at {span:?} (§3.9)")]
+    #[error("type argument `{ty}` for '{param}' does not implement required trait '{trait_name}' at {span:?}")]
     TraitBoundNotSatisfied {
         param: String,
         ty: Type,
@@ -183,14 +181,14 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("operator trait '{trait_name}' can only be implemented for a `Copy` type; '{type_name}' at {span:?} is not `Copy` (§3.10)")]
+    #[error("operator trait '{trait_name}' can only be implemented for a `Copy` type; '{type_name}' at {span:?} is not `Copy`")]
     OperatorTraitRequiresCopy {
         trait_name: String,
         type_name: String,
         span: Span,
     },
 
-    #[error("in `impl {trait_name}`, `type Output = {expected}` does not match method return type {found} at {span:?} (§3.10)")]
+    #[error("in `impl {trait_name}`, `type Output = {expected}` does not match method return type {found} at {span:?}")]
     AssociatedTypeMismatch {
         trait_name: String,
         expected: Type,
@@ -198,7 +196,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("`impl {trait_name} for {type_name}` at {span:?} requires `impl {supertrait} for {type_name}` (§3.10)")]
+    #[error("`impl {trait_name} for {type_name}` at {span:?} requires `impl {supertrait} for {type_name}`")]
     MissingSupertraitImpl {
         trait_name: String,
         supertrait: String,
@@ -349,58 +347,56 @@ pub enum TypeError {
     #[error("cannot assign through an immutable reference `&{inner}` at {span:?}: writing through `*` requires a `&mut {inner}`")]
     CannotAssignThroughRef { inner: Type, span: Span },
 
-    #[error("cannot borrow '{name}' as mutable at {span:?}: it is already borrowed; a `&mut` borrow is exclusive — no other borrow of '{name}' may be live at the same time (§2.5)")]
+    #[error("cannot borrow '{name}' as mutable at {span:?}: it is already borrowed; a `&mut` borrow is exclusive — no other borrow of '{name}' may be live at the same time")]
     CannotMutablyBorrowWhileBorrowed { name: String, span: Span },
 
-    #[error("cannot borrow '{name}' as immutable at {span:?}: it is already mutably borrowed; an active `&mut` borrow excludes all other borrows of '{name}' (§2.4)")]
+    #[error("cannot borrow '{name}' as immutable at {span:?}: it is already mutably borrowed; an active `&mut` borrow excludes all other borrows of '{name}'")]
     CannotBorrowWhileMutablyBorrowed { name: String, span: Span },
 
-    #[error("cannot return a reference to '{name}' at {span:?}: it is local to this function and does not outlive the call; return a reference derived from a parameter instead (§2.6)")]
+    #[error("cannot return a reference to '{name}' at {span:?}: it is local to this function and does not outlive the call; return a reference derived from a parameter instead")]
     ReturnsReferenceToLocal { name: String, span: Span },
 
-    #[error(
-        "a range expression `a..b` is only valid as the argument to `.slice()` at {span:?} (§2.7)"
-    )]
+    #[error("a range expression `a..b` is only valid as the argument to `.slice()` at {span:?}")]
     RangeNotAllowed { span: Span },
 
-    #[error("`.slice()` expects a range argument `a..b` or `a..=b` at {span:?} (§2.7)")]
+    #[error("`.slice()` expects a range argument `a..b` or `a..=b` at {span:?}")]
     SliceExpectsRange { span: Span },
 
-    #[error("array element type {ty} is not Copy at {span:?}: arrays of non-Copy element types (strings, non-Copy structs) are not yet supported (§3.1)")]
+    #[error("array element type {ty} is not Copy at {span:?}: arrays of non-Copy element types (strings, non-Copy structs) are not yet supported")]
     NonCopyArrayElement { ty: Type, span: Span },
 
-    #[error("cannot index a value of type {found} at {span:?}: indexing applies only to arrays `[T; N]` (§3.1)")]
+    #[error("cannot index a value of type {found} at {span:?}: indexing applies only to arrays `[T; N]`")]
     NotIndexable { found: Type, span: Span },
 
-    #[error("array index must be an integer, found {found} at {span:?} (§3.1)")]
+    #[error("array index must be an integer, found {found} at {span:?}")]
     IndexNotInteger { found: Type, span: Span },
 
-    #[error("array literal has {found} elements but type annotation expects {expected} at {span:?} (§3.1)")]
+    #[error(
+        "array literal has {found} elements but type annotation expects {expected} at {span:?}"
+    )]
     ArrayLengthMismatch {
         expected: usize,
         found: usize,
         span: Span,
     },
 
-    #[error("tuple element type {ty} is not Copy at {span:?}: tuples of non-Copy element types (strings, non-Copy structs) are not yet supported (§3.2)")]
+    #[error("tuple element type {ty} is not Copy at {span:?}: tuples of non-Copy element types (strings, non-Copy structs) are not yet supported")]
     NonCopyTupleElement { ty: Type, span: Span },
 
-    #[error("cannot index a value of type {found} at {span:?}: `.N` tuple indexing applies only to tuples `(T1, T2, ...)` (§3.2)")]
+    #[error("cannot index a value of type {found} at {span:?}: `.N` tuple indexing applies only to tuples `(T1, T2, ...)`")]
     NotATuple { found: Type, span: Span },
 
-    #[error(
-        "tuple index {index} is out of range at {span:?}: the tuple has {arity} elements (§3.2)"
-    )]
+    #[error("tuple index {index} is out of range at {span:?}: the tuple has {arity} elements")]
     TupleIndexOutOfBounds {
         index: usize,
         arity: usize,
         span: Span,
     },
 
-    #[error("cannot infer the element type of an empty array literal at {span:?}: add a type annotation like `[i32; 0]` (§3.1)")]
+    #[error("cannot infer the element type of an empty array literal at {span:?}: add a type annotation like `[i32; 0]`")]
     CannotInferEmptyArray { span: Span },
 
-    #[error("array destructuring pattern binds {expected} element(s) but the array has {found} at {span:?}: list every element or add a `..rest` pattern (§3.2)")]
+    #[error("array destructuring pattern binds {expected} element(s) but the array has {found} at {span:?}: list every element or add a `..rest` pattern")]
     ArrayPatternLengthMismatch {
         expected: usize,
         found: usize,
@@ -410,32 +406,30 @@ pub enum TypeError {
     #[error("enum '{name}' is already defined at {span:?}")]
     EnumAlreadyDefined { name: String, span: Span },
 
-    #[error("type name '{name}' is already defined at {span:?}: a newtype may not reuse the name of an existing type (§3.15)")]
+    #[error("type name '{name}' is already defined at {span:?}: a newtype may not reuse the name of an existing type")]
     NewtypeAlreadyDefined { name: String, span: Span },
 
-    #[error("newtype '{name}' wraps non-Copy inner type {inner} at {span:?}: newtype inner types are restricted to Copy types in this phase (§3.15)")]
+    #[error("newtype '{name}' wraps non-Copy inner type {inner} at {span:?}: newtype inner types are restricted to Copy types in this phase")]
     NewtypeInnerNotCopy {
         name: String,
         inner: Type,
         span: Span,
     },
 
-    #[error("newtype '{name}' is cyclic at {span:?}: a newtype may not wrap itself directly or transitively (§3.15)")]
+    #[error("newtype '{name}' is cyclic at {span:?}: a newtype may not wrap itself directly or transitively")]
     CyclicNewtype { name: String, span: Span },
 
-    #[error("enum variant payload type {ty} is not supported at {span:?}: enum variants may only carry scalar Copy primitives (integers, floats, bool, char) in this phase (§3.5)")]
+    #[error("enum variant payload type {ty} is not supported at {span:?}: enum variants may only carry scalar Copy primitives (integers, floats, bool, char) in this phase")]
     UnsupportedEnumPayload { ty: Type, span: Span },
 
-    #[error("enum '{enum_name}' has no variant '{variant}' at {span:?} (§3.5)")]
+    #[error("enum '{enum_name}' has no variant '{variant}' at {span:?}")]
     UnknownEnumVariant {
         enum_name: String,
         variant: String,
         span: Span,
     },
 
-    #[error(
-        "enum variant '{enum_name}::{variant}' is a {expected} variant at {span:?}: {hint} (§3.5)"
-    )]
+    #[error("enum variant '{enum_name}::{variant}' is a {expected} variant at {span:?}: {hint}")]
     EnumVariantFormMismatch {
         enum_name: String,
         variant: String,
@@ -444,7 +438,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("enum variant '{enum_name}::{variant}' takes {expected} field(s) but {found} were provided at {span:?} (§3.5)")]
+    #[error("enum variant '{enum_name}::{variant}' takes {expected} field(s) but {found} were provided at {span:?}")]
     EnumVariantArityMismatch {
         enum_name: String,
         variant: String,
@@ -453,7 +447,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("enum variant '{enum_name}::{variant}' has no field '{field}' at {span:?} (§3.5)")]
+    #[error("enum variant '{enum_name}::{variant}' has no field '{field}' at {span:?}")]
     UnknownEnumField {
         enum_name: String,
         variant: String,
@@ -461,9 +455,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error(
-        "missing field '{field}' for enum variant '{enum_name}::{variant}' at {span:?} (§3.5)"
-    )]
+    #[error("missing field '{field}' for enum variant '{enum_name}::{variant}' at {span:?}")]
     MissingEnumField {
         enum_name: String,
         variant: String,
@@ -471,7 +463,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("field '{field}' is set more than once for enum variant '{enum_name}::{variant}' at {span:?} (§3.5)")]
+    #[error("field '{field}' is set more than once for enum variant '{enum_name}::{variant}' at {span:?}")]
     DuplicateEnumField {
         enum_name: String,
         variant: String,
@@ -479,32 +471,30 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("non-exhaustive match at {span:?}: {reason} — add the missing pattern(s) or a `_` wildcard arm (§3.6)")]
+    #[error("non-exhaustive match at {span:?}: {reason} — add the missing pattern(s) or a `_` wildcard arm")]
     NonExhaustiveMatch { reason: String, span: Span },
 
-    #[error("cannot match on a value of type {ty} at {span:?}: `match` supports enums, integers, `char`, and `bool` in this phase (§3.6)")]
+    #[error("cannot match on a value of type {ty} at {span:?}: `match` supports enums, integers, `char`, and `bool` in this phase")]
     UnsupportedMatchScrutinee { ty: Type, span: Span },
 
-    #[error("this pattern matches {pattern_ty} but the value being matched has type {scrutinee_ty} at {span:?} (§3.6)")]
+    #[error("this pattern matches {pattern_ty} but the value being matched has type {scrutinee_ty} at {span:?}")]
     PatternTypeMismatch {
         pattern_ty: String,
         scrutinee_ty: Type,
         span: Span,
     },
 
-    #[error(
-        "match arms have incompatible types at {span:?}: expected {expected}, found {found} (§3.6)"
-    )]
+    #[error("match arms have incompatible types at {span:?}: expected {expected}, found {found}")]
     MatchArmTypeMismatch {
         expected: Type,
         found: Type,
         span: Span,
     },
 
-    #[error("a range pattern requires an ordered scalar (integer or `char`) at {span:?} (§3.6)")]
+    #[error("a range pattern requires an ordered scalar (integer or `char`) at {span:?}")]
     InvalidRangePattern { span: Span },
 
-    #[error("enum variant '{enum_name}::{variant}' is a {expected} variant; its pattern must match that form at {span:?} (§3.6)")]
+    #[error("enum variant '{enum_name}::{variant}' is a {expected} variant; its pattern must match that form at {span:?}")]
     VariantPatternFormMismatch {
         enum_name: String,
         variant: String,
@@ -512,9 +502,9 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("an alternative (`|`) pattern may not bind a variable at {span:?}: move the binding to a separate arm (§3.6)")]
+    #[error("an alternative (`|`) pattern may not bind a variable at {span:?}: move the binding to a separate arm")]
     OrPatternBinding { span: Span },
 
-    #[error("a payload sub-pattern must be a binding or `_` at {span:?}: match a payload value with a guard instead (e.g. `Some(n) if n == 0`) (§3.6)")]
+    #[error("a payload sub-pattern must be a binding or `_` at {span:?}: match a payload value with a guard instead (e.g. `Some(n) if n == 0`)")]
     RefutablePayloadPattern { span: Span },
 }

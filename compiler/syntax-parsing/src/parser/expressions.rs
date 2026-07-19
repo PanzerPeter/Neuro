@@ -37,7 +37,7 @@ impl Parser {
             // continues an expression across a newline when the *previous* line ends
             // with an operator (a trailing `*`, handled without skipping here), so a
             // leading `*` must end the current expression and fall to the statement
-            // parser (§2.5).
+            // parser.
             if matches!(self.peek_kind(), Some(TokenKind::Newline))
                 && matches!(self.peek_next_nonnewline_kind(), Some(TokenKind::Star))
             {
@@ -88,7 +88,7 @@ impl Parser {
                     name,
                     span: token.span,
                 };
-                // Labeled loop expression `label: loop { ... }` (§3.7): a single `:`
+                // Labeled loop expression `label: loop { ... }`: a single `:`
                 // (not `::`) after an identifier followed by `loop` is the only
                 // expression-position use of a bare colon.
                 if self.check(&TokenKind::Colon) {
@@ -103,7 +103,7 @@ impl Parser {
                         return self.parse_labeled_loop_expr(ident, token.span);
                     }
                 }
-                // `::<` is a turbofish (`f::<T>(x)`, §3.8), not a path member: leave it
+                // `::<` is a turbofish (`f::<T>(x)`), not a path member: leave it
                 // for `parse_infix` to attach to the following call. Only `::member`
                 // is a path here.
                 if self.check(&TokenKind::ColonColon) && !self.colon_colon_opens_turbofish() {
@@ -125,7 +125,7 @@ impl Parser {
                         });
                     };
                     // `EnumName::Variant { ... }` is a struct-variant construction
-                    // (§3.5); the trailing brace is the only enum-construction shape
+                    // The trailing brace is the only enum-construction shape
                     // distinguishable at parse time. Suppressed inside a `no_struct_lit`
                     // context (an `if`/`while` condition), exactly like a struct literal.
                     if !self.no_struct_lit && self.check(&TokenKind::LeftBrace) {
@@ -178,7 +178,7 @@ impl Parser {
                 })
             }
 
-            // Borrow `&place` (§2.4) / `&mut place` (§2.5). In prefix position `&` is
+            // Borrow `&place` / `&mut place`. In prefix position `&` is
             // a borrow; as an infix operator it is bitwise-AND, handled in
             // `parse_infix`. A `mut` keyword after `&` marks a mutable borrow.
             TokenKind::Amp => {
@@ -195,7 +195,7 @@ impl Parser {
                 })
             }
 
-            // Dereference `*operand` (§2.5). In prefix position `*` reads through a
+            // Dereference `*operand`. In prefix position `*` reads through a
             // reference; as an infix operator it is multiplication, handled in
             // `parse_infix`.
             TokenKind::Star => {
@@ -207,7 +207,7 @@ impl Parser {
                 })
             }
 
-            // `( ... )` is either grouping or a tuple literal (§3.2). A comma after
+            // `( ... )` is either grouping or a tuple literal. A comma after
             // the first expression makes it a tuple; otherwise it is plain grouping.
             TokenKind::LeftParen => {
                 self.skip_newlines();
@@ -236,7 +236,7 @@ impl Parser {
                 }
             }
 
-            // Array literal `[e0, e1, ...]` (§3.1). Elements parse at the lowest
+            // Array literal `[e0, e1, ...]`. Elements parse at the lowest
             // precedence so each may be a full expression; a trailing comma is not
             // accepted (each element must be followed by `,` or the closing `]`).
             TokenKind::LeftBracket => {
@@ -342,7 +342,7 @@ impl Parser {
         Ok(Expr::Block { stmts, span })
     }
 
-    /// Parse a loop expression in value position: `loop { ... break v }` (§3.7).
+    /// Parse a loop expression in value position: `loop { ... break v }`.
     /// The `loop` keyword has already been consumed; `start_span` is its span. The
     /// loop evaluates to its value-carrying `break`s; an unlabeled form is used in
     /// expression position (labels are a statement-loop concern).
@@ -357,7 +357,7 @@ impl Parser {
         })
     }
 
-    /// Parse a labeled loop expression `label: loop { ... }` (§3.7). `label` is the
+    /// Parse a labeled loop expression `label: loop { ... }`. `label` is the
     /// already-parsed identifier; the cursor sits on the `:`. The label is tracked
     /// in scope for the body so a nested `break label v` resolves to it rather than
     /// being read as a value-carrying `break label`.
@@ -439,7 +439,7 @@ impl Parser {
                 })
             }
 
-            // Turbofish `callee::<T, N>(args)` (§3.8): explicit generic arguments before a
+            // Turbofish `callee::<T, N>(args)`: explicit generic arguments before a
             // call. Only valid immediately before a call, so a `(` argument list must
             // follow the `>`.
             TokenKind::ColonColon => {
@@ -469,7 +469,7 @@ impl Parser {
                 })
             }
 
-            // Field access `expr.field` or tuple index `expr.0` (§3.2). A numeric
+            // Field access `expr.field` or tuple index `expr.0`. A numeric
             // token after the dot is a constant tuple index; an identifier names a
             // struct field. (Chained `t.0.1` is lexed as `t` `.` `0.1`(float), so a
             // nested tuple element is accessed as `(t.0).1`.)
@@ -518,7 +518,7 @@ impl Parser {
                 })
             }
 
-            // Range expression `start..end` / `start..=end` (§2.7). Only meaningful as
+            // Range expression `start..end` / `start..=end`. Only meaningful as
             // a `string.slice` argument; semantic analysis rejects it elsewhere. The
             // right operand is parsed at `Range` precedence so a stray second `..` ends
             // the expression rather than chaining.
@@ -537,7 +537,7 @@ impl Parser {
                 })
             }
 
-            // Array indexing `object[index]` (§3.1). Binds at call precedence so
+            // Array indexing `object[index]`. Binds at call precedence so
             // `arr[i]` is a tight postfix on the preceding primary.
             TokenKind::LeftBracket => {
                 self.advance(); // consume '['
@@ -681,7 +681,7 @@ impl Parser {
     }
 
     /// Whether the current `::` is immediately followed by `<`, opening a turbofish
-    /// `::<...>` (§3.8) rather than a path member `::name`.
+    /// `::<...>` rather than a path member `::name`.
     fn colon_colon_opens_turbofish(&self) -> bool {
         matches!(
             self.tokens.get(self.current + 1).map(|t| &t.kind),
@@ -689,7 +689,7 @@ impl Parser {
         )
     }
 
-    /// Parse turbofish generic arguments `<T, N, ...>` (§3.8), positioned just after the
+    /// Parse turbofish generic arguments `<T, N, ...>`, positioned just after the
     /// `::`. Each argument is a type or a non-negative integer const value.
     fn parse_turbofish_args(&mut self) -> ParseResult<Vec<GenericArg>> {
         self.consume(TokenKind::Less, "'<' after '::' in a turbofish")?;

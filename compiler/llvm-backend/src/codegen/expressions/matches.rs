@@ -1,4 +1,4 @@
-// Codegen for `match` expressions (§3.6).
+// Codegen for `match` expressions.
 //
 // The scrutinee is evaluated once into an alloca. Each arm becomes a test block that
 // ORs its alternatives (variant tag / scalar equality / range), branching to the arm
@@ -30,7 +30,7 @@ struct SavedBinding<'ctx> {
 }
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// Lower a `match` expression (§3.6), returning its value (a placeholder for a
+    /// Lower a `match` expression, returning its value (a placeholder for a
     /// `Void` match used in statement position).
     pub(crate) fn codegen_match(
         &mut self,
@@ -378,7 +378,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Decode one packed `i64` payload slot back to a field of `field_ty` — the inverse
-    /// of the enum construction encoding (§3.5): truncate to the field's width, then
+    /// of the enum construction encoding: truncate to the field's width, then
     /// bitcast back to a float when the field is a float.
     fn decode_enum_payload_field(
         &self,

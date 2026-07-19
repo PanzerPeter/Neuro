@@ -16,7 +16,7 @@ use super::Parser;
 impl Parser {
     /// Parse top-level items: function, struct, impl, const, or type-alias definitions.
     ///
-    /// Type aliases (§3.14) are transparent and are resolved here: each declaration
+    /// Type aliases are transparent and are resolved here: each declaration
     /// is collected, then every aliased type annotation in the remaining items is
     /// rewritten to its target type before the program is returned. No alias item
     /// reaches semantic analysis or codegen.
@@ -79,7 +79,7 @@ impl Parser {
         }
 
         // Inject trait default methods before alias expansion so the copied bodies are
-        // alias-expanded along with the rest of each impl (§3.9, §3.14).
+        // alias-expanded along with the rest of each impl.
         inject_trait_defaults(&mut items);
         expand_type_aliases(&mut items, alias_decls)?;
         Ok(items)
@@ -202,7 +202,7 @@ impl Parser {
         })
     }
 
-    /// Parse a newtype declaration: `newtype Name = InnerType` (§3.15).
+    /// Parse a newtype declaration: `newtype Name = InnerType`.
     ///
     /// Unlike a `type` alias, a newtype is a distinct nominal type, so it is kept as
     /// an `Item::Newtype` for semantic analysis rather than expanded at parse time.
@@ -244,7 +244,7 @@ impl Parser {
             });
         };
 
-        // Optional generic parameter list `<'a, T, U: Bound + Bound>` (§3.8, §2.6).
+        // Optional generic parameter list `<'a, T, U: Bound + Bound>`.
         let (mut generics, lifetimes) = self.parse_generic_params()?;
 
         self.consume(TokenKind::LeftParen, "'('")?;
@@ -319,12 +319,12 @@ impl Parser {
 
         self.skip_newlines();
 
-        // Optional `where` clause (§3.8): trait bounds fold into `generics`, value
+        // Optional `where` clause: trait bounds fold into `generics`, value
         // predicates are collected for per-instantiation checking.
         let where_predicates = self.parse_where_clause(&mut generics)?;
         self.skip_newlines();
 
-        // Argument-position `impl Trait` (§3.17) is anonymous-generic sugar: rewrite each
+        // Argument-position `impl Trait` is anonymous-generic sugar: rewrite each
         // occurrence in a parameter type into a fresh trait-bounded generic parameter, so
         // the rest of the pipeline reuses the ordinary monomorphized-generic machinery.
         // Return-position `impl Trait` is left intact for the transparent semantic
@@ -351,11 +351,10 @@ impl Parser {
         })
     }
 
-    /// Parse an optional generic parameter list `<'a, T, U: Bound + Bound, const N: u32>`
-    /// (§3.8, §2.6).
+    /// Parse an optional generic parameter list `<'a, T, U: Bound + Bound, const N: u32>`.
     ///
     /// Returns two lists: the type/const parameters (which drive monomorphization) and
-    /// the explicit lifetime names (`'a`, §2.6), kept separate because a lifetime is a
+    /// the explicit lifetime names (`'a`), kept separate because a lifetime is a
     /// distinct namespace and does not monomorphize. Both are empty when no `<` follows.
     /// Type-parameter bounds are recorded but not enforced this phase (no trait system);
     /// lifetime parameters carry no bounds. An empty `<>` is rejected.
@@ -369,7 +368,7 @@ impl Parser {
         let mut generics: Vec<GenericParam> = Vec::new();
         let mut lifetimes: Vec<Identifier> = Vec::new();
         loop {
-            // A lifetime parameter `'a` (§2.6) is a leading-quote name lexed as a single
+            // A lifetime parameter `'a` is a leading-quote name lexed as a single
             // `Lifetime` token. Lifetimes are collected apart from type/const parameters.
             if let Some(TokenKind::Lifetime(lt_name)) = self.peek().map(|t| t.kind.clone()) {
                 let lt_token = self.advance().ok_or(ParseError::UnexpectedEof {
@@ -396,7 +395,7 @@ impl Parser {
             }
 
             // A const (value) parameter is introduced by the `const` keyword: `const N: u32`
-            // (§3.8). Its declared type follows a mandatory `:`.
+            // Its declared type follows a mandatory `:`.
             let is_const = self.check(&TokenKind::Const);
             if is_const {
                 self.advance(); // 'const'
@@ -433,7 +432,7 @@ impl Parser {
             } else {
                 // Optional trait bounds on a type parameter: `T: A + B`. Parsed for forward
                 // compatibility; the bound names are stored but not enforced until the trait
-                // system lands (§3.9).
+                // system lands.
                 if self.check(&TokenKind::Colon) {
                     self.advance(); // ':'
                     self.skip_newlines();
@@ -488,7 +487,7 @@ impl Parser {
         Ok((generics, lifetimes))
     }
 
-    /// Parse an optional `where` clause (§3.8), terminated by the following `{`.
+    /// Parse an optional `where` clause, terminated by the following `{`.
     ///
     /// Each comma-separated item is either a **trait bound** (`T: A + B`, folded into the
     /// matching generic parameter's `bounds` and left unenforced this phase) or a **value
@@ -598,10 +597,10 @@ impl Parser {
         };
 
         self.skip_newlines();
-        // Optional generic parameter list `<'a, T, U: Bound>` (§3.8, §2.6).
+        // Optional generic parameter list `<'a, T, U: Bound>`.
         let (mut generics, lifetimes) = self.parse_generic_params()?;
         self.skip_newlines();
-        // Optional `where` clause (§3.8) before the field block.
+        // Optional `where` clause before the field block.
         let where_predicates = self.parse_where_clause(&mut generics)?;
         self.skip_newlines();
         self.consume(TokenKind::LeftBrace, "'{'")?;
@@ -733,7 +732,7 @@ impl Parser {
         })
     }
 
-    /// Parse an enum definition: `enum Name { Unit, Tuple(T, ...), Named { f: T, ... } }` (§3.5).
+    /// Parse an enum definition: `enum Name { Unit, Tuple(T, ...), Named { f: T, ... } }`.
     ///
     /// Each variant is one of three shapes — a bare tag, a parenthesised tuple of
     /// payload types, or a brace block of named fields — distinguished by the token
@@ -836,7 +835,7 @@ impl Parser {
     }
 
     /// Parse a struct-variant enum literal: `EnumName::Variant { field: expr, ... }`
-    /// (§3.5). The path (`EnumName::Variant`) has already been consumed by
+    /// The path (`EnumName::Variant`) has already been consumed by
     /// `parse_prefix`; the cursor sits on `{`.
     pub(crate) fn parse_enum_struct_literal(
         &mut self,
@@ -887,7 +886,7 @@ impl Parser {
     /// Parse an `impl TypeName { … }` block
     pub(crate) fn parse_impl_def(&mut self) -> ParseResult<ImplDef> {
         let start = self.consume(TokenKind::Impl, "'impl'")?;
-        // Optional impl-level generic parameters `impl<'a, T, U> ...` (§3.8, §2.6).
+        // Optional impl-level generic parameters `impl<'a, T, U> ...`.
         let (mut generics, lifetimes) = self.parse_generic_params()?;
         self.skip_newlines();
 
@@ -936,7 +935,7 @@ impl Parser {
         };
 
         self.skip_newlines();
-        // Optional impl-level `where` clause (§3.8) before the method block.
+        // Optional impl-level `where` clause before the method block.
         let where_predicates = self.parse_where_clause(&mut generics)?;
         self.skip_newlines();
         self.consume(TokenKind::LeftBrace, "'{'")?;
@@ -945,7 +944,7 @@ impl Parser {
         let mut methods = Vec::new();
         let mut assoc_types = Vec::new();
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
-            // An associated-type binding `type Name = Type` (§3.10, e.g. `type Output =
+            // An associated-type binding `type Name = Type` (e.g. `type Output =
             // Vec2` in an operator-trait impl). Distinct from a method, so handled before
             // the attribute/method path.
             if self.check(&TokenKind::Type) {
@@ -975,7 +974,7 @@ impl Parser {
     }
 
     /// Parse an optional `<T1, T2, ...>` type-argument list applied to a type name
-    /// (§3.8), e.g. the `<T>` in `impl<T> Wrapper<T>`. Returns an empty vector when no
+    /// E.g. the `<T>` in `impl<T> Wrapper<T>`. Returns an empty vector when no
     /// `<` follows. Shares the delimiter grammar with [`Parser::parse_type`].
     pub(crate) fn parse_optional_type_args(&mut self) -> ParseResult<Vec<crate::ast::Type>> {
         if !self.check(&TokenKind::Less) {
@@ -998,7 +997,7 @@ impl Parser {
     }
 
     /// Parse an associated-type binding inside an `impl` block: `type Name = Type`
-    /// (§3.10). Used by operator-trait impls to declare their `Output`.
+    /// Used by operator-trait impls to declare their `Output`.
     fn parse_assoc_type_binding(&mut self) -> ParseResult<(Identifier, crate::ast::Type)> {
         self.consume(TokenKind::Type, "'type'")?;
         self.skip_newlines();
@@ -1010,12 +1009,12 @@ impl Parser {
         Ok((name, ty))
     }
 
-    /// Parse a `trait` declaration (§3.9): `trait Name { <method signatures> }`.
+    /// Parse a `trait` declaration: `trait Name { <method signatures> }`.
     ///
     /// Each method is either **required** (signature terminated by a newline, no body)
     /// or a **default** method (signature followed by a `{ ... }` block). Traits carry
     /// no generic parameters, supertraits, or associated types this phase — those land
-    /// with the operator traits and dispatch work (§3.10, §3.17).
+    /// with the operator traits and dispatch work.
     pub(crate) fn parse_trait_def(&mut self) -> ParseResult<TraitDef> {
         let start = self.consume(TokenKind::Trait, "'trait'")?;
         self.skip_newlines();
@@ -1038,7 +1037,7 @@ impl Parser {
         })
     }
 
-    /// Parse one method signature inside a `trait` block (§3.9).
+    /// Parse one method signature inside a `trait` block.
     ///
     /// A `{` immediately after the return type opens a default-method body; otherwise the
     /// method is required and the signature ends at the newline.
@@ -1280,7 +1279,7 @@ impl Parser {
 }
 
 /// Inject each trait's default methods into the `impl Trait for Type` blocks that
-/// omit them (§3.9), a whole-program parse-time desugar (like type-alias expansion).
+/// omit them, a whole-program parse-time desugar (like type-alias expansion).
 ///
 /// After this pass every trait impl carries a concrete method for each trait method it
 /// is expected to provide, so semantic analysis and HIR lowering treat trait methods as
@@ -1334,7 +1333,7 @@ fn inject_trait_defaults(items: &mut [Item]) {
     }
 }
 
-/// Rewrite argument-position `impl Trait` (§3.17) into fresh trait-bounded generic
+/// Rewrite argument-position `impl Trait` into fresh trait-bounded generic
 /// parameters. Each `impl Trait` occurrence — including one nested inside a reference,
 /// array, tuple, or generic application — becomes a distinct anonymous type parameter
 /// `__implN: Trait` appended to `generics`, and the annotation is replaced by a plain

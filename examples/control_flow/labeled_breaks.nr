@@ -1,4 +1,4 @@
-// Loop labels with `break label` / `continue label` (§3.7).
+// Loop labels with `break label` / `continue label`.
 //
 // A label (`outer:`) names an enclosing `for` / `while` / `loop` so that a
 // nested loop can break or continue an *outer* loop rather than just the

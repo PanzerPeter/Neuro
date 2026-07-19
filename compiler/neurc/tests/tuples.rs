@@ -1,4 +1,4 @@
-// End-to-end tests for tuples `(T1, T2, ...)` (§3.2): the tuple type annotation,
+// End-to-end tests for tuples `(T1, T2, ...)`: the tuple type annotation,
 // tuple literals, `.N` constant index access, destructuring binds (flat, nested,
 // and `_` wildcard), and tuples crossing function boundaries.
 mod common;

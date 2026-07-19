@@ -1,4 +1,4 @@
-// Mutable methods — `&mut self` advances struct state in place (§2.5).
+// Mutable methods — `&mut self` advances struct state in place.
 //
 // Demonstrates the ownership-gated receiver that landed in Phase 1.7:
 //   `&mut self` methods write to `self.field` and the change is observed by a

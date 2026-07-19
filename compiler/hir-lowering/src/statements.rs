@@ -264,7 +264,7 @@ impl Lowerer {
             } => {
                 let ty = self.resolve_type(ty)?;
                 let value = self.lower_expr(value, Some(&ty))?;
-                // A function-scope const is visible to later statements (§1.3).
+                // A function-scope const is visible to later statements.
                 self.constants.insert(name.name.clone(), ty.clone());
                 Ok(HirStmt::Const {
                     name: name.name.clone(),
@@ -313,7 +313,7 @@ impl Lowerer {
 
     /// Lower a loop body, running `inner` (which binds any loop variable and lowers
     /// the statements) inside the loop's context and scope. The loop context lets a
-    /// `break v` resolve to this loop and accumulate its value type (§3.7).
+    /// `break v` resolve to this loop and accumulate its value type.
     fn lower_loop_body_with(
         &mut self,
         label: &Option<shared_types::Identifier>,

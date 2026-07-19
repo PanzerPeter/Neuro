@@ -1,4 +1,4 @@
-// Generic struct / impl / type-application parsing tests (§3.8)
+// Generic struct / impl / type-application parsing tests
 
 use syntax_parsing::{parse, Item, Type};
 

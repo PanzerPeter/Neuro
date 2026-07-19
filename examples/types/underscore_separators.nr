@@ -1,4 +1,4 @@
-// Demonstrates underscore digit separators in numeric literals (§1.2).
+// Demonstrates underscore digit separators in numeric literals.
 // Underscores group digits for readability and are ignored by the compiler.
 // They work in every base, in floats, in exponents, and alongside type suffixes.
 

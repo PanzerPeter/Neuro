@@ -211,7 +211,7 @@ func main() -> i32 {
 #[test]
 fn mut_self_while_borrowed_is_rejected() {
     let test = CompileTest::new();
-    // §2.5: calling a `&mut self` method takes an exclusive borrow, so it conflicts
+    // Calling a `&mut self` method takes an exclusive borrow, so it conflicts
     // with a live shared borrow of the same receiver.
     let source = r#"
 struct Counter {

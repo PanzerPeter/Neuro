@@ -1,4 +1,4 @@
-// `loop` as a value expression (§3.7).
+// `loop` as a value expression.
 //
 // Because blocks are expressions, a `loop` can produce a value: `break v`
 // exits the loop and makes `v` the value of the whole `loop` expression. All

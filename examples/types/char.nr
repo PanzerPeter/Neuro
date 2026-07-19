@@ -1,4 +1,4 @@
-// char primitive type (§1.2)
+// char primitive type
 //
 // A `char` is a single Unicode scalar value (32-bit). Char literals are written
 // with single quotes and support escapes (`'\n'`, `'\u{1F44D}'`). `char` is

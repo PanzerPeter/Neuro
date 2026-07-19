@@ -8,7 +8,7 @@ use std::fmt;
 /// as `_` since `-` is not an identifier character.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WarningCode {
-    /// `while true { ... }` should be written as `loop { ... }` (§3.7).
+    /// `while true { ... }` should be written as `loop { ... }`.
     PreferLoopOverWhileTrue,
 }
 

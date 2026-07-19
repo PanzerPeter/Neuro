@@ -1,4 +1,4 @@
-//! Move-by-default ownership analysis (§2.2).
+//! Move-by-default ownership analysis.
 //!
 //! A non-`Copy` value is *moved* out of its source binding when it is placed
 //! into a new owner: the initializer of a `val`/`mut`, the right-hand side of an
@@ -240,7 +240,7 @@ mod tests {
 
     #[test]
     fn borrowing_a_string_does_not_move_it() {
-        // §2.4: passing `&s` borrows rather than moves, so `s` stays usable afterward.
+        // Passing `&s` borrows rather than moves, so `s` stays usable afterward.
         let errs = errors(
             r#"
             func describe(s: &string) -> u64 { s.len() }
@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn mutable_borrow_of_a_mut_binding_is_accepted() {
-        // §2.5: `&mut` of a `mut` binding type-checks, and `*r` reads/writes through it.
+        // `&mut` of a `mut` binding type-checks, and `*r` reads/writes through it.
         let errs = errors(
             r#"
             func main() -> i32 {
@@ -364,7 +364,7 @@ mod tests {
 
     #[test]
     fn mut_self_method_type_checks_and_allows_field_write() {
-        // §2.5: a `&mut self` method may assign to `self.field`, and calling it on
+        // A `&mut self` method may assign to `self.field`, and calling it on
         // a `mut` binding is sound.
         let errs = errors(
             r#"
@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn mut_self_on_field_of_immutable_binding_is_rejected() {
         // Mutating `o.inner` through a `&mut self` method needs the *root* binding
-        // `o` to be mutable; a `val` root is rejected (§2.5). Semantic-only — nested
+        // `o` to be mutable; a `val` root is rejected. Semantic-only — nested
         // struct fields are not lowered yet, so this exercises the check in isolation.
         let errs = errors(
             r#"

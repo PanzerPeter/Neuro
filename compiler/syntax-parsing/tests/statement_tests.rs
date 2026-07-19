@@ -15,7 +15,7 @@ fn first_fn_body_len(source: &str) -> usize {
 
 #[test]
 fn test_tuple_destructure_desugars_to_temp_plus_bindings() {
-    // §3.2: `val (a, b) = e` expands to a temp binding plus one bind per leaf — so
+    // `val (a, b) = e` expands to a temp binding plus one bind per leaf — so
     // three statements here. A `_` wildcard binds nothing.
     let three = r#"
         func test() {
@@ -36,7 +36,7 @@ fn test_tuple_destructure_desugars_to_temp_plus_bindings() {
 
 #[test]
 fn test_struct_destructure_desugars_to_temp_plus_field_binds() {
-    // §3.2: `val Point { x, y } = p` expands to a temp binding plus one field bind
+    // `val Point { x, y } = p` expands to a temp binding plus one field bind
     // per name — temp + x + y = 3 statements.
     let source = r#"
         func test() {
@@ -48,7 +48,7 @@ fn test_struct_destructure_desugars_to_temp_plus_field_binds() {
 
 #[test]
 fn test_array_destructure_with_rest_desugars() {
-    // §3.2: `val [a, b, ..rest] = arr` → temp + a + b + rest bind = 4 statements.
+    // `val [a, b, ..rest] = arr` → temp + a + b + rest bind = 4 statements.
     let with_rest = r#"
         func test() {
             val [a, b, ..rest] = arr

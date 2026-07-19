@@ -1,4 +1,4 @@
-// Newtype declarations (§3.15): `newtype` creates a DISTINCT nominal type that
+// Newtype declarations: `newtype` creates a DISTINCT nominal type that
 // wraps an inner type. Unlike a transparent `type` alias, a newtype and its inner
 // type are not interchangeable — `Meters` and `i32` are different types. Construct
 // a newtype with `Name(value)`; read the wrapped value back with `.0`.

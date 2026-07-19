@@ -1,4 +1,4 @@
-// Returned references and lifetime elision (§2.6).
+// Returned references and lifetime elision.
 //
 // A function that returns a reference may borrow one of its reference
 // parameters: under lifetime elision, a single input reference lifetime is

@@ -1,4 +1,4 @@
-// f16 / bf16 half-precision primitives (§1.2)
+// f16 / bf16 half-precision primitives
 //
 // `f16` (IEEE-754 half) and `bf16` (bfloat16) are first-class scalar primitives
 // with a deliberately narrow contract: binding, copy, `==`/`!=`, and `as`-cast

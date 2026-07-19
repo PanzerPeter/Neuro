@@ -2,10 +2,10 @@
 // pattern matching, and arrays.
 //
 // Integration example combining several Phase-1E features:
-//   newtype declarations (§3.15, distinct nominal wrappers constructed as
-//   `Name(value)` with `.0` inner access) · structs with newtype fields (§3.3) ·
-//   impl methods (&self, §3.4) · enums (§3.5) · pattern matching (§3.6) ·
-//   fixed-size arrays + for-in iteration (§3.1) · compound assignment.
+//   newtype declarations (distinct nominal wrappers constructed as
+//   `Name(value)` with `.0` inner access) · structs with newtype fields ·
+//   impl methods (&self) · enums · pattern matching ·
+//   fixed-size arrays + for-in iteration · compound assignment.
 //
 // Newtypes make `Meters` and `Seconds` distinct types even though both wrap `i32`,
 // so mixing them up is a compile error — the safety a plain `type` alias cannot

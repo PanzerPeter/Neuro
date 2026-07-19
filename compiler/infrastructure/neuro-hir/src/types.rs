@@ -11,7 +11,7 @@ use std::fmt;
 /// allowed to assume well-typedness.
 ///
 /// The variant set mirrors the resolved types the semantic analyzer produces
-/// today (§1.2). Composite future types (tensors, generics) are intentionally
+/// today. Composite future types (tensors, generics) are intentionally
 /// absent until the language gains them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HirType {
@@ -23,13 +23,13 @@ pub enum HirType {
     U16,
     U32,
     U64,
-    /// Half-precision floats (§1.2): narrow scalar contract, no arithmetic.
+    /// Half-precision floats: narrow scalar contract, no arithmetic.
     F16,
     BF16,
     F32,
     F64,
     Bool,
-    /// A single Unicode scalar value (§1.2).
+    /// A single Unicode scalar value.
     Char,
     String,
     /// The unit / no-value type; the resolved type of statements and of
@@ -37,32 +37,32 @@ pub enum HirType {
     Void,
     /// A user-defined struct, identified by name (nominal typing).
     Struct(String),
-    /// A user-defined enum, identified by name (nominal typing, §3.5). A tagged
+    /// A user-defined enum, identified by name (nominal typing). A tagged
     /// union; its variant layout lives on the [`crate::HirEnum`] item.
     Enum(String),
-    /// A user-defined newtype (§3.15): a distinct nominal wrapper carrying its
+    /// A user-defined newtype: a distinct nominal wrapper carrying its
     /// resolved `inner` type. The wrapper is transparent at runtime, so backends
     /// erase it to `inner`; it stays distinct only in the type system.
     Newtype {
         name: String,
         inner: Box<HirType>,
     },
-    /// A dynamic-dispatch trait object `dyn Trait` (§3.17), identified by trait name.
+    /// A dynamic-dispatch trait object `dyn Trait`, identified by trait name.
     /// Unsized: it appears only as the referent of a [`HirType::Reference`], which
     /// backends lower to a `(data pointer, vtable pointer)` fat pointer.
     DynObject(String),
-    /// Borrow `&T` (§2.4) / `&mut T` (§2.5). `mutable` distinguishes a
+    /// Borrow `&T` / `&mut T`. `mutable` distinguishes a
     /// write-capable `&mut T` from a read-only `&T`.
     Reference {
         inner: Box<HirType>,
         mutable: bool,
     },
-    /// Fixed-size array `[T; N]` (§3.1): `size` elements of `element`.
+    /// Fixed-size array `[T; N]`: `size` elements of `element`.
     Array {
         element: Box<HirType>,
         size: usize,
     },
-    /// Anonymous tuple `(T1, T2, ...)` (§3.2): a positionally-indexed, heterogeneous
+    /// Anonymous tuple `(T1, T2, ...)`: a positionally-indexed, heterogeneous
     /// aggregate with at least two elements.
     Tuple(Vec<HirType>),
     /// A function value: parameter types and return type.
@@ -74,7 +74,7 @@ pub enum HirType {
 
 impl HirType {
     /// The referent of a reference type, or the type itself when it is not a
-    /// reference. Mirrors the auto-deref helper the frontend uses (§2.4).
+    /// reference. Mirrors the auto-deref helper the frontend uses.
     pub fn referent(&self) -> &HirType {
         match self {
             HirType::Reference { inner, .. } => inner,

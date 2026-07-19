@@ -1,4 +1,4 @@
-// Copy trait + @derive(Copy, Clone) — Phase 1.7 (§2.3)
+// Copy trait + @derive(Copy, Clone) — Phase 1.7
 //
 // A struct that derives Copy is duplicated on assignment, so the source
 // binding stays valid (no move). A struct that derives Clone supports an

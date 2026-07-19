@@ -6,7 +6,7 @@ use ast_types::{BinaryOp, Expr, UnaryOp};
 use shared_types::{Identifier, Literal, Span};
 use std::collections::HashMap;
 
-/// The builtin deep-copy method name shared by `string` and Clone-deriving structs (§2.3, §2.7).
+/// The builtin deep-copy method name shared by `string` and Clone-deriving structs.
 const CLONE_METHOD: &str = "clone";
 
 impl TypeChecker {
@@ -22,10 +22,10 @@ impl TypeChecker {
         args: &[Expr],
         call_span: Span,
     ) -> Option<Type> {
-        // String methods auto-deref through an immutable borrow `&string` (§2.4), so the
+        // String methods auto-deref through an immutable borrow `&string`, so the
         // referent drives the string match below.
         match (recv.referent(), method) {
-            // §2.7 — O(1) byte length read from the string fat pointer's stored `len`.
+            // O(1) byte length read from the string fat pointer's stored `len`.
             (Type::String, "len") => {
                 if !args.is_empty() {
                     self.record_error(TypeError::ArgumentCountMismatch {
@@ -36,7 +36,7 @@ impl TypeChecker {
                 }
                 Some(Type::U64)
             }
-            // §2.7 — explicit deep copy of an owned string. Takes no arguments and yields a
+            // Explicit deep copy of an owned string. Takes no arguments and yields a
             // fresh `string`. The canonical opt-out of move-by-default for non-`Copy` types.
             (Type::String, "clone") => {
                 if !args.is_empty() {
@@ -48,10 +48,10 @@ impl TypeChecker {
                 }
                 Some(Type::String)
             }
-            // §2.7 — borrowed sub-slice. Takes a single range argument `a..b` / `a..=b`
+            // Borrowed sub-slice. Takes a single range argument `a..b` / `a..=b`
             // and yields a `&string` view into the receiver's UTF-8 data (zero copy).
             (Type::String, "slice") => Some(self.check_string_slice(args, call_span)),
-            // §3.1 — array length, the compile-time `N` of `[T; N]`. Auto-derefs through
+            // Array length, the compile-time `N` of `[T; N]`. Auto-derefs through
             // a borrow of an array (`&[T; N]`). Takes no arguments and yields `u64`.
             (Type::Array { .. }, "len") => {
                 if !args.is_empty() {
@@ -63,7 +63,7 @@ impl TypeChecker {
                 }
                 Some(Type::U64)
             }
-            // §1.2, §1.4 — wrapping/saturating arithmetic and the right-shift method.
+            // Wrapping/saturating arithmetic and the right-shift method.
             // Each takes one same-typed argument and returns the receiver's integer type.
             // Matched on `recv` (not the referent): integer intrinsics require a value
             // receiver, since reading a scalar through `&T` needs the deref operator.
@@ -103,7 +103,7 @@ impl TypeChecker {
         }
     }
 
-    /// Type-check `string.slice(range)` (§2.7): exactly one `a..b` / `a..=b` argument
+    /// Type-check `string.slice(range)`: exactly one `a..b` / `a..=b` argument
     /// whose bounds are integers. Returns the `&string` slice type; on any violation a
     /// diagnostic is recorded and the `&string` type is still returned so checking
     /// continues with the documented result type.
@@ -144,7 +144,7 @@ impl TypeChecker {
         slice_ty
     }
 
-    /// Type-check a call to a compiler-known panic-family builtin (§1.2):
+    /// Type-check a call to a compiler-known panic-family builtin:
     /// `panic(msg: string)`, `assert(cond: bool)`, or `unreachable()`.
     ///
     /// Returns `Some(ty)` when `func_name` names a builtin — recording an arity or
@@ -193,7 +193,7 @@ impl TypeChecker {
         Some(Type::Unknown)
     }
 
-    /// Enforce the §2.5 rules for the receiver of a `&mut self` method call, which
+    /// Enforce the rules for the receiver of a `&mut self` method call, which
     /// borrows the receiver mutably for the call's duration.
     ///
     /// A receiver reached through a `&mut T` borrow is already write-capable and
@@ -264,7 +264,7 @@ impl TypeChecker {
         }
     }
 
-    /// Type-check a bare path enum construction `E::V` (§3.5): valid only for a
+    /// Type-check a bare path enum construction `E::V`: valid only for a
     /// unit variant. A tuple/struct variant used here is a form error. Returns the
     /// enum type for error recovery in every case.
     fn check_enum_unit_path(&mut self, enum_name: &str, variant: &str, span: Span) -> Type {
@@ -297,7 +297,7 @@ impl TypeChecker {
         recovery
     }
 
-    /// Type-check a tuple-variant enum construction `E::V(args)` (§3.5): the variant
+    /// Type-check a tuple-variant enum construction `E::V(args)`: the variant
     /// must be a tuple variant, and the arguments must match its field types by
     /// position. Returns the enum type for error recovery.
     fn check_enum_tuple_call(
@@ -382,7 +382,7 @@ impl TypeChecker {
     }
 
     /// Type-check a struct-variant enum construction `E::V { field: expr, ... }`
-    /// (§3.5): every declared field must be provided exactly once with a matching
+    /// Every declared field must be provided exactly once with a matching
     /// type, and no unknown fields. Returns the enum type for error recovery.
     fn check_enum_struct_literal(
         &mut self,
@@ -503,7 +503,7 @@ impl TypeChecker {
         args: &[ast_types::Expr],
         span: shared_types::Span,
     ) -> Option<Type> {
-        // A call to a generic function (§3.8): unify its parameters against the call
+        // A call to a generic function: unify its parameters against the call
         // arguments (and any explicit turbofish), then yield the substituted return type.
         if self.generic_funcs.contains_key(func_name) {
             return Some(self.check_generic_call(func_name, type_args, args, span));
@@ -518,7 +518,7 @@ impl TypeChecker {
             });
         }
 
-        // Newtype construction `Name(value)` (§3.15): a call whose callee names a
+        // Newtype construction `Name(value)`: a call whose callee names a
         // newtype builds a value of that newtype from a single inner-typed argument.
         if let Some(inner) = self.lookup_newtype_inner(func_name).cloned() {
             return Some(self.check_newtype_construction(func_name, &inner, args, span));
@@ -576,7 +576,7 @@ impl TypeChecker {
     }
 
     /// Resolve a method call on a bounded type parameter to a trait method signature
-    /// (§3.9), returning the visible (non-`self`) parameter types and the return type.
+    /// Returning the visible (non-`self`) parameter types and the return type.
     ///
     /// Searches every trait named in the parameter's bounds; the first trait declaring a
     /// method of this name wins. Returns `None` when no bound trait declares it.
@@ -596,7 +596,7 @@ impl TypeChecker {
 
     /// Validate a call's arguments against the callee's visible parameter types: arity,
     /// per-argument compatibility, and by-value move recording. Shared by the trait
-    /// method-dispatch path (§3.9).
+    /// method-dispatch path.
     fn check_call_args(&mut self, args: &[ast_types::Expr], visible_params: &[Type], span: Span) {
         if args.len() != visible_params.len() {
             self.record_error(TypeError::ArgumentCountMismatch {
@@ -620,7 +620,7 @@ impl TypeChecker {
     }
 
     /// Verify each bounded type parameter's concrete argument implements every required
-    /// trait (§3.9). A concrete struct satisfies `T: Tr` when an `impl Tr for Struct`
+    /// trait. A concrete struct satisfies `T: Tr` when an `impl Tr for Struct`
     /// exists; a type parameter passed through from an enclosing generic satisfies it
     /// when that parameter carries the same bound. Any other type (e.g. a primitive) has
     /// no user-trait impl and therefore fails the bound.
@@ -662,7 +662,7 @@ impl TypeChecker {
         }
     }
 
-    /// Type-check a call to a generic function (§3.8): infer each type parameter from
+    /// Type-check a call to a generic function: infer each type parameter from
     /// the corresponding argument, validate arity and per-argument compatibility, and
     /// return the substituted return type.
     ///
@@ -690,7 +690,7 @@ impl TypeChecker {
             });
         }
 
-        // Seed the substitution with explicit turbofish arguments (§3.8), then infer the
+        // Seed the substitution with explicit turbofish arguments, then infer the
         // rest from the call arguments. A const parameter binds to `Type::ConstValue`.
         let mut subst: std::collections::HashMap<String, Type> = std::collections::HashMap::new();
         self.seed_turbofish(
@@ -740,7 +740,7 @@ impl TypeChecker {
         }
 
         // Trait bounds (`T: Drawable`) are satisfied when the inferred concrete type
-        // argument has a matching `impl Trait for T` (§3.9).
+        // argument has a matching `impl Trait for T`.
         self.check_trait_bounds(&sig.bounds, &subst, span);
 
         // Value predicates (`where N > 0`) are checked against the concrete const values.
@@ -749,7 +749,7 @@ impl TypeChecker {
         super::declarations::substitute_generic(&sig.ret, &subst)
     }
 
-    /// Bind explicit turbofish generic arguments into `subst` (§3.8), positionally against
+    /// Bind explicit turbofish generic arguments into `subst`, positionally against
     /// the callee's declared parameters. A const parameter takes a const argument (bound
     /// to [`Type::ConstValue`]); a type parameter takes a type argument. Kind or count
     /// mismatches are reported.
@@ -796,7 +796,7 @@ impl TypeChecker {
         }
     }
 
-    /// Evaluate every value predicate from a `where` clause (§3.8) against the concrete
+    /// Evaluate every value predicate from a `where` clause against the concrete
     /// const values in `subst`. A predicate that resolves to `false` is an error; one that
     /// cannot be fully evaluated (still symbolic) is skipped — it is re-checked at the
     /// concrete instantiation.
@@ -812,7 +812,7 @@ impl TypeChecker {
         }
     }
 
-    /// Type-check a newtype construction `Name(value)` (§3.15): exactly one argument,
+    /// Type-check a newtype construction `Name(value)`: exactly one argument,
     /// whose type must match the newtype's inner type. Yields the newtype.
     fn check_newtype_construction(
         &mut self,
@@ -846,7 +846,7 @@ impl TypeChecker {
         Type::Newtype(name.to_string())
     }
 
-    /// Type-check a generic struct literal (§3.8): infer each type parameter by
+    /// Type-check a generic struct literal: infer each type parameter by
     /// unifying the template's field types against the provided field values, then
     /// monomorphize into a concrete instance. Type arguments are Copy-restricted
     /// (enforced by [`Self::instantiate_generic_struct`]).
@@ -889,7 +889,7 @@ impl TypeChecker {
                     // A field whose type is fully concrete (mentions no type/const
                     // parameter) gives the value its contextual type so a bare literal
                     // infers correctly; a parameterized field is checked with no
-                    // expectation so it drives inference instead (§3.8).
+                    // expectation so it drives inference instead.
                     let expected_ctx = if mentions_type_parameter(&expected) {
                         None
                     } else {
@@ -985,7 +985,7 @@ impl TypeChecker {
                     }
                 }
                 Literal::Boolean(_) => Some(Type::Bool),
-                Literal::Char(_) => Some(Type::Char), // Char literals have char type (§1.2)
+                Literal::Char(_) => Some(Type::Char), // Char literals have char type
                 Literal::String(_) => Some(Type::String), // String literals have string type
             },
 
@@ -1004,7 +1004,7 @@ impl TypeChecker {
                 } else if let Some(const_ty) = self.constants.get(&ident.name).cloned() {
                     Some(const_ty)
                 } else if let Some(const_param_ty) = self.const_scope.get(&ident.name).cloned() {
-                    // A const generic parameter used as a value in a generic body (§3.8)
+                    // A const generic parameter used as a value in a generic body
                     // has its declared integer type.
                     Some(const_param_ty)
                 } else {
@@ -1044,7 +1044,7 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
 
-                // Operator-trait dispatch on a user type (§3.10): when the left operand is
+                // Operator-trait dispatch on a user type: when the left operand is
                 // a struct that implements the operator's trait, the operator lowers to
                 // that impl's method and takes its result type. Checked before the
                 // built-in numeric/bitwise/comparison paths, which reject struct operands.
@@ -1074,7 +1074,7 @@ impl TypeChecker {
                     | BinaryOp::Multiply
                     | BinaryOp::Divide
                     | BinaryOp::Modulo => {
-                        // String concatenation (§2.7): `+` joins two strings into a new
+                        // String concatenation: `+` joins two strings into a new
                         // owned, immutable `string`. A `&string` slice participates too, so
                         // a single string reference is peeled exactly as equality does. The
                         // other arithmetic operators have no string meaning. Checked before
@@ -1097,7 +1097,7 @@ impl TypeChecker {
                             return Some(Type::Unknown);
                         }
 
-                        // Half-precision scalars have no arithmetic (§1.2): point the
+                        // Half-precision scalars have no arithmetic: point the
                         // programmer at the `f32` workaround rather than a generic error.
                         if let Some(half) = [&left_ty, &right_ty]
                             .into_iter()
@@ -1134,7 +1134,7 @@ impl TypeChecker {
                     }
 
                     // Comparison operators: require compatible types, return bool.
-                    // `&string` is a borrowed string slice (§2.7), so an owned `string`
+                    // `&string` is a borrowed string slice, so an owned `string`
                     // and a `&string` slice compare equal byte-wise in any combination.
                     BinaryOp::Equal | BinaryOp::NotEqual => {
                         let left_cmp = left_ty.peel_string_ref();
@@ -1150,7 +1150,7 @@ impl TypeChecker {
                         Some(Type::Bool)
                     }
 
-                    // Ordering operators: require numeric or `char` operands (§1.2 gives
+                    // Ordering operators: require numeric or `char` operands (this gives
                     // `char` a built-in total order), return bool.
                     BinaryOp::Less
                     | BinaryOp::Greater
@@ -1263,7 +1263,7 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
 
-                // Operator-trait dispatch on a user type (§3.10): `-a` via `Neg`, `~a` via
+                // Operator-trait dispatch on a user type: `-a` via `Neg`, `~a` via
                 // `Not`. The boolean `!a` (`UnaryOp::Not`) is never overloadable.
                 if let Type::Struct(name) = operand_ty.referent() {
                     if let Some(result) =
@@ -1360,11 +1360,11 @@ impl TypeChecker {
                             return Some(Type::Unknown);
                         }
                         // Auto-deref through an immutable borrow: `r.method()` where
-                        // `r: &Struct` dispatches on `Struct` (§2.4). The borrow is never moved.
+                        // `r: &Struct` dispatches on `Struct`. The borrow is never moved.
                         let struct_name = match obj_ty.referent() {
                             Type::Struct(n) => n.clone(),
                             // Trait-method dispatch on a bounded type parameter inside a
-                            // generic body (§3.9): `T: Drawable` lets `obj.draw()` resolve
+                            // generic body: `T: Drawable` lets `obj.draw()` resolve
                             // to the trait's declared signature. Monomorphization later
                             // rebinds it to the concrete type's impl method.
                             Type::Generic(param) => {
@@ -1381,7 +1381,7 @@ impl TypeChecker {
                                 });
                                 return Some(Type::Unknown);
                             }
-                            // Dynamic dispatch through a trait object (§3.17): the call
+                            // Dynamic dispatch through a trait object: the call
                             // resolves against the trait's declared signature, and the
                             // concrete implementation is selected at runtime via the
                             // vtable. A `&mut self` method needs a `&mut dyn Trait`.
@@ -1413,7 +1413,7 @@ impl TypeChecker {
                             }
                             _ => {
                                 // Builtin (non-struct) receivers dispatch a fixed,
-                                // compiler-known set of intrinsic methods (§2.7). The original
+                                // compiler-known set of intrinsic methods. The original
                                 // (possibly `&T`) type is passed so `resolve_builtin_method`
                                 // can auto-deref `&string` but keep integer intrinsics
                                 // value-only.
@@ -1439,7 +1439,7 @@ impl TypeChecker {
                             Some(k) => k.clone(),
                             None => {
                                 // `.clone()` on a struct that derives `Clone` (or `Copy`) is a
-                                // compiler-known builtin (§2.3) — a deep copy yielding the same
+                                // compiler-known builtin — a deep copy yielding the same
                                 // struct type. A user-defined `clone` method shadows it (handled
                                 // above by the impl_methods lookup).
                                 if field.name == CLONE_METHOD && self.struct_is_clone(&struct_name)
@@ -1463,7 +1463,7 @@ impl TypeChecker {
                         };
 
                         // Calling a `&mut self` method takes an exclusive borrow of the
-                        // receiver for the call (§2.5): the receiver must be a mutable
+                        // receiver for the call: the receiver must be a mutable
                         // place and must not already be borrowed.
                         if self.mut_self_methods.contains(&mangled) {
                             self.check_mut_self_receiver(object, &obj_ty, *fa_span);
@@ -1510,7 +1510,7 @@ impl TypeChecker {
                     }
 
                     // Associated function call: `TypeName::func(args)`, or a
-                    // tuple-variant enum construction `Enum::Variant(args)` (§3.5).
+                    // tuple-variant enum construction `Enum::Variant(args)`.
                     Expr::Path {
                         type_name,
                         member,
@@ -1590,7 +1590,7 @@ impl TypeChecker {
                 member,
                 span,
             } => {
-                // A standalone path is either a unit-variant enum value `E::V` (§3.5)
+                // A standalone path is either a unit-variant enum value `E::V`
                 // or an associated-function reference `Type::func`.
                 if self.enum_defs.contains_key(&type_name.name) {
                     return Some(self.check_enum_unit_path(&type_name.name, &member.name, *span));
@@ -1630,7 +1630,7 @@ impl TypeChecker {
                 span,
             } => {
                 // A generic struct literal `Pair { first: 1, second: 2.0 }` infers its
-                // type arguments from the field values and monomorphizes (§3.8).
+                // type arguments from the field values and monomorphizes.
                 if self.is_generic_struct(&name.name) {
                     return Some(self.check_generic_struct_literal(name, fields, base, *span));
                 }
@@ -1717,7 +1717,7 @@ impl TypeChecker {
                 Some(Type::Struct(name.name.clone()))
             }
 
-            // Struct-variant enum construction `E::V { field: expr, ... }` (§3.5).
+            // Struct-variant enum construction `E::V { field: expr, ... }`.
             Expr::EnumStructLiteral {
                 enum_name,
                 variant,
@@ -1736,7 +1736,7 @@ impl TypeChecker {
                 }
 
                 // Auto-deref through an immutable borrow: `r.field` reads a field of the
-                // referent when `r: &Struct` (§2.4).
+                // referent when `r: &Struct`.
                 let struct_name = match obj_ty.referent() {
                     Type::Struct(n) => n.clone(),
                     other => {
@@ -1843,7 +1843,7 @@ impl TypeChecker {
                 Some(ty)
             }
 
-            // A `loop` in value position (§3.7) evaluates to the value carried by
+            // A `loop` in value position evaluates to the value carried by
             // its value-producing `break`s (which must all agree on type). With no
             // value-break it yields unit. `while`/`for` have no expression form.
             Expr::Loop { label, body, .. } => {
@@ -1860,7 +1860,7 @@ impl TypeChecker {
                 Some(ty)
             }
 
-            // Borrow `&place` (§2.4) / `&mut place` (§2.5). The result type is `&T`
+            // Borrow `&place` / `&mut place`. The result type is `&T`
             // (or `&mut T`). Checking the operand reads its type without consuming it:
             // a borrow never moves the borrowed value, which is the whole point of a
             // reference.
@@ -1870,7 +1870,7 @@ impl TypeChecker {
                 span,
             } => {
                 // Only a live binding (`val`/`mut`/parameter) is a borrowable place. A
-                // `const` is an inlined value with no address (§1.3), and temporaries
+                // `const` is an inlined value with no address, and temporaries
                 // (literals, calls, operator results) are not places.
                 let mut place = operand.as_ref();
                 while let Expr::Paren(inner, _) = place {
@@ -1889,7 +1889,7 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 };
                 // `&mut` demands a `mut` binding — you cannot acquire write access
-                // through a reference to a value you may not write directly (§2.5).
+                // through a reference to a value you may not write directly.
                 if *mutable && !is_mut_binding {
                     self.record_error(TypeError::CannotBorrowMutably { name, span: *span });
                     let _ = self.check_expr(operand, None);
@@ -1900,7 +1900,7 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
 
-                // §2.4 / §2.5 aliasing exclusivity. A `&mut` borrow is exclusive:
+                // Aliasing exclusivity. A `&mut` borrow is exclusive:
                 // no other borrow of the place may be live at the same time. A
                 // shared `&` borrow tolerates other shared borrows but excludes an
                 // active `&mut`. The counts sum persistent borrows (held by live
@@ -1931,7 +1931,7 @@ impl TypeChecker {
                 })
             }
 
-            // Dereference `*operand` (§2.5): the result is the referent type `T`. The
+            // Dereference `*operand`: the result is the referent type `T`. The
             // operand must have a reference type; dereferencing anything else is an
             // error. Reading through either `&T` or `&mut T` is permitted.
             Expr::Deref { operand, span } => {
@@ -1951,7 +1951,7 @@ impl TypeChecker {
                 }
             }
 
-            // A range `a..b` is not a first-class value (§2.7): it is consumed directly
+            // A range `a..b` is not a first-class value: it is consumed directly
             // by `string.slice` via `check_string_slice`, so reaching it through the
             // general expression path means it was used somewhere a range is not allowed.
             // Still check the bounds for cascaded diagnostics.
@@ -1964,7 +1964,7 @@ impl TypeChecker {
                 Some(Type::Unknown)
             }
 
-            // Array literal `[e0, ...]` (§3.1): all elements share one type, fixed by
+            // Array literal `[e0, ...]`: all elements share one type, fixed by
             // the first and required of the rest. An empty literal needs a `[T; N]`
             // annotation to know its element type.
             Expr::ArrayLiteral { elements, span } => {
@@ -2049,8 +2049,8 @@ impl TypeChecker {
                 })
             }
 
-            // Array indexing `object[index]` (§3.1): the object is an array (or a
-            // borrow of one, auto-derefed per §2.4); the index is an integer; the
+            // Array indexing `object[index]`: the object is an array (or a
+            // borrow of one, auto-derefed per); the index is an integer; the
             // result is the element type.
             Expr::Index {
                 object,
@@ -2083,7 +2083,7 @@ impl TypeChecker {
                 }
             }
 
-            // Array rest pattern remainder `..rest` (§3.2): the compiler-internal node
+            // Array rest pattern remainder `..rest`: the compiler-internal node
             // a `val [a, b, ..rest] = arr` desugar produces. The source must be an
             // array; the result is the `[T; N - start]` tail. `exact` (no rest binding
             // in the pattern) requires the lengths to match precisely.
@@ -2131,7 +2131,7 @@ impl TypeChecker {
                 }
             }
 
-            // Tuple literal `(e0, e1, ...)` (§3.2): each element is checked against the
+            // Tuple literal `(e0, e1, ...)`: each element is checked against the
             // corresponding element type of an expected tuple annotation, when present.
             Expr::TupleLiteral { elements, .. } => {
                 let expected_elems = match expected {
@@ -2153,7 +2153,7 @@ impl TypeChecker {
                 Some(Type::Tuple(tys))
             }
 
-            // Tuple index `object.N` (§3.2): the object must be a tuple (or a borrow of
+            // Tuple index `object.N`: the object must be a tuple (or a borrow of
             // one); `N` must be within bounds; the result is the N-th element type.
             Expr::TupleIndex {
                 object,
@@ -2177,7 +2177,7 @@ impl TypeChecker {
                             Some(Type::Unknown)
                         }
                     }
-                    // `.0` on a newtype reads its single inner value (§3.15). A newtype
+                    // `.0` on a newtype reads its single inner value. A newtype
                     // has exactly one field, so any index other than 0 is out of range.
                     Type::Newtype(nt_name) => {
                         if *index == 0 {
@@ -2205,7 +2205,7 @@ impl TypeChecker {
                 }
             }
 
-            // Pattern matching `match scrutinee { ... }` (§3.6).
+            // Pattern matching `match scrutinee { ... }`.
             Expr::Match {
                 scrutinee,
                 arms,
@@ -2233,7 +2233,7 @@ impl TypeChecker {
     }
 }
 
-/// Evaluate a `where`-clause value predicate (§3.8) to a boolean, given the const
+/// Evaluate a `where`-clause value predicate to a boolean, given the const
 /// parameter values in `subst`. Returns `None` when the predicate is not a fully
 /// resolved boolean over const values (it is then deferred to the concrete instance).
 pub(crate) fn eval_const_predicate(expr: &Expr, subst: &HashMap<String, Type>) -> Option<bool> {
@@ -2273,7 +2273,7 @@ pub(crate) fn eval_const_predicate(expr: &Expr, subst: &HashMap<String, Type>) -
     }
 }
 
-/// Evaluate a const-integer expression (§3.8): an integer literal, a const parameter
+/// Evaluate a const-integer expression: an integer literal, a const parameter
 /// looked up in `subst`, or an arithmetic combination of these. `None` when it is not a
 /// fully resolved const integer.
 fn eval_const_int(expr: &Expr, subst: &HashMap<String, Type>) -> Option<i128> {
@@ -2303,7 +2303,7 @@ fn eval_const_int(expr: &Expr, subst: &HashMap<String, Type>) -> Option<i128> {
 }
 
 /// Whether a resolved type still mentions a generic type parameter, a const-parameter
-/// array length, or an unresolved const value (§3.8) — i.e. it is not fully concrete.
+/// array length, or an unresolved const value — i.e. it is not fully concrete.
 fn mentions_type_parameter(ty: &Type) -> bool {
     match ty {
         Type::Generic(_) | Type::ConstValue(_) => true,

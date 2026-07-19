@@ -23,7 +23,7 @@ impl<'ctx> CodegenContext<'ctx> {
         match kind {
             // `string.len()` reads field 1 of the fat pointer `{ ptr, i64 }` — the
             // stored byte length. O(1), no scan; the value is already the u64 length.
-            // A `&string` receiver is auto-dereferenced first (§2.4).
+            // A `&string` receiver is auto-dereferenced first.
             BuiltinMethod::StringLen => {
                 let struct_val = self.string_receiver_struct(receiver)?;
                 self.builder
@@ -32,17 +32,17 @@ impl<'ctx> CodegenContext<'ctx> {
                         CodegenError::LlvmError(format!("failed to extract string length: {}", e))
                     })
             }
-            // `string.clone()` (§2.7) — explicit deep copy of an owned string.
+            // `string.clone()` — explicit deep copy of an owned string.
             // String literals live in immutable `.rodata` and no heap-backed string type
             // exists yet (Phase 1.7), so duplicating the `{ ptr, len }` fat-pointer value is
             // observationally a deep copy: the pointee bytes are immutable and shared safely.
             // When runtime heap strings land this must duplicate the underlying buffer.
-            // A `&string` receiver is auto-dereferenced first (§2.4).
+            // A `&string` receiver is auto-dereferenced first.
             BuiltinMethod::StringClone => Ok(self.string_receiver_struct(receiver)?.into()),
-            // `string.slice(a..b)` (§2.7) — a borrowed `&string` view into the receiver's
+            // `string.slice(a..b)` — a borrowed `&string` view into the receiver's
             // UTF-8 bytes, with runtime bounds and codepoint-boundary checks.
             BuiltinMethod::StringSlice => self.codegen_string_slice(receiver, args),
-            // `array.len()` (§3.1) — the static length `N` of `[T; N]`, read from the
+            // `array.len()` — the static length `N` of `[T; N]`, read from the
             // receiver type recorded by the type pass. A compile-time constant `u64`;
             // the receiver is not evaluated (length is independent of its value).
             BuiltinMethod::ArrayLen => {
@@ -57,10 +57,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 };
                 Ok(self.context.i64_type().const_int(size as u64, false).into())
             }
-            // `struct.clone()` (§2.3) — structs are stack-allocated aggregates with no heap
+            // `struct.clone()` — structs are stack-allocated aggregates with no heap
             // backing yet, so loading the receiver's value is a faithful deep copy. When a
             // struct gains a heap-owning field this must recurse into that field's clone.
-            // A `&Struct` receiver is auto-dereferenced first (§2.4).
+            // A `&Struct` receiver is auto-dereferenced first.
             BuiltinMethod::StructClone => {
                 let recv_val = self.codegen_expr(receiver)?;
                 match recv_val {
@@ -92,7 +92,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// Lower `string.slice(a..b)` / `string.slice(a..=b)` (§2.7) to a borrowed `&string`.
+    /// Lower `string.slice(a..b)` / `string.slice(a..=b)` to a borrowed `&string`.
     ///
     /// Computes a `(base + start, end - start)` fat pointer into the receiver's UTF-8
     /// data — zero copy, since strings are immutable. Both bounds and the two endpoint
@@ -170,7 +170,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         self.codegen_guard_or_panic(in_bounds, "string slice out of bounds", offset)?;
 
-        // Both endpoints must land on UTF-8 code-point boundaries (§2.7).
+        // Both endpoints must land on UTF-8 code-point boundaries.
         let start_aligned = self.slice_boundary_ok(base_ptr, start, len)?;
         let end_aligned = self.slice_boundary_ok(base_ptr, end, len)?;
         let aligned = self
@@ -301,7 +301,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Lower a string receiver to its `{ ptr, len }` fat-pointer value, auto-dereferencing
-    /// an immutable borrow `&string` (§2.4): a borrowed receiver lowers to a pointer to the
+    /// an immutable borrow `&string`: a borrowed receiver lowers to a pointer to the
     /// fat pointer, so the struct is loaded; an owned receiver is already the struct value.
     fn string_receiver_struct(&mut self, receiver: &HirExpr) -> CodegenResult<StructValue<'ctx>> {
         let recv_val = self.codegen_expr(receiver)?;

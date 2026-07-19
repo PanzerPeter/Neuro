@@ -78,20 +78,20 @@ pub enum HirStmt {
         value: HirExpr,
         span: Span,
     },
-    /// Assignment through a mutable reference `*pointer = value` (§2.5).
+    /// Assignment through a mutable reference `*pointer = value`.
     DerefAssignment {
         pointer: HirExpr,
         value: HirExpr,
         span: Span,
     },
-    /// Array element assignment `target[index] = value` (§3.1).
+    /// Array element assignment `target[index] = value`.
     IndexAssignment {
         target: String,
         index: HirExpr,
         value: HirExpr,
         span: Span,
     },
-    /// Function-body compile-time constant (§1.3).
+    /// Function-body compile-time constant.
     Const {
         name: String,
         ty: HirType,

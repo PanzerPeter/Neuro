@@ -1,4 +1,4 @@
-// Constant declaration tests (§1.3)
+// Constant declaration tests
 // Covers AC1–AC5: module-level consts, function-body consts, forward references,
 // arithmetic folding, and rejection of non-const expressions.
 mod common;
@@ -154,7 +154,7 @@ func main() -> i32 {
     assert!(result.is_err(), "duplicate module const should be rejected");
 }
 
-// ── Bool-typed const folding (§1.3 / §1.4) ──────────────────────────────────
+// ── Bool-typed const folding ──────────────────────────────────
 // The const folder must handle binary expressions whose operands fold to bools.
 
 #[test]
