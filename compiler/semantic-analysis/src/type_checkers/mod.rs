@@ -183,6 +183,7 @@ struct LoopContext {
     break_value_ty: Option<Type>,
 }
 
+mod closures;
 mod declarations;
 mod expressions;
 mod literals;

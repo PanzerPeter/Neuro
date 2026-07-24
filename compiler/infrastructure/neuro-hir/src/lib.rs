@@ -33,8 +33,8 @@ pub use expressions::{
     HirMatchTest,
 };
 pub use items::{
-    HirConst, HirEnum, HirEnumField, HirEnumVariant, HirField, HirFunction, HirImpl, HirItem,
-    HirMethod, HirParam, HirProgram, HirSelfParam, HirStruct, HirTrait,
+    HirCapture, HirClosure, HirConst, HirEnum, HirEnumField, HirEnumVariant, HirField, HirFunction,
+    HirImpl, HirItem, HirMethod, HirParam, HirProgram, HirSelfParam, HirStruct, HirTrait,
 };
 pub use statements::HirStmt;
 pub use types::HirType;

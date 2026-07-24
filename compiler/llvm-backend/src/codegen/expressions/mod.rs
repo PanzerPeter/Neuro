@@ -179,6 +179,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 let result_ty = Type::from_hir(&expr.ty);
                 self.codegen_match(scrutinee, arms, &result_ty)
             }
+
+            // A closure value: build its `{ fn_ptr, env_ptr }` fat pointer.
+            HirExprKind::Closure { name, captures } => self.codegen_closure_value(name, captures),
         }
     }
 
@@ -194,6 +197,12 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
         match &callee.kind {
             HirExprKind::Variable(name) => {
+                // A local binding of function type — a closure or a function-typed
+                // parameter — is called indirectly through its fat pointer. It shadows a
+                // same-named top-level function, matching the frontend's precedence.
+                if self.variables.contains_key(name) {
+                    return self.codegen_indirect_call(callee, args);
+                }
                 // Panic-family builtins lower to a diagnostic + `abort`. A user
                 // function of the same name shadows the builtin, matching the semantic
                 // resolver, so only intercept when none is registered.

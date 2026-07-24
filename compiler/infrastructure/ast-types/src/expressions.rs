@@ -195,6 +195,29 @@ pub enum Expr {
         arms: Vec<MatchArm>,
         span: Span,
     },
+    /// Closure literal `|p0: T0, p1: T1| -> R { body }` (or `|p| expr`, `|| expr`,
+    /// `move |p| body`). An anonymous callable capturing free variables from the
+    /// enclosing scope. `ret` is `None` when the return type is inferred from the
+    /// body; `body` is a single expression (a bare block for the multi-statement
+    /// form). `is_move` records the `move` keyword, which forces by-value capture.
+    Closure {
+        params: Vec<ClosureParam>,
+        ret: Option<crate::Type>,
+        body: Box<Expr>,
+        is_move: bool,
+        span: Span,
+    },
+}
+
+/// One parameter of a closure literal: a binding name and an optional type
+/// annotation. In the current phase the annotation is required (parameter-type
+/// inference is deferred), but the field is optional so the parser can surface a
+/// precise diagnostic rather than a parse failure.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClosureParam {
+    pub name: Identifier,
+    pub ty: Option<crate::Type>,
+    pub span: Span,
 }
 
 /// One arm of a `match` expression: one or more `|`-separated patterns, an
@@ -301,6 +324,7 @@ impl Expr {
             Expr::TupleIndex { span, .. } => *span,
             Expr::ArrayRest { span, .. } => *span,
             Expr::Match { span, .. } => *span,
+            Expr::Closure { span, .. } => *span,
         }
     }
 }

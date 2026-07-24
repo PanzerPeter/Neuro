@@ -196,6 +196,18 @@ impl TypeChecker {
                 }
                 Some(self.instantiate_generic_struct(&name.name, &resolved, *span))
             }
+            // Closure / function type `(T1, ...) -> R`: the type of a callable value.
+            ast_types::Type::Function { params, ret, .. } => {
+                let mut resolved = Vec::with_capacity(params.len());
+                for param in params {
+                    resolved.push(self.resolve_type(param)?);
+                }
+                let ret_ty = self.resolve_type(ret)?;
+                Some(Type::Function {
+                    params: resolved,
+                    ret: Box::new(ret_ty),
+                })
+            }
             ast_types::Type::Tensor { span, .. } => {
                 // Tensor types are Phase 3, not supported in Phase 1
                 self.record_error(TypeError::UnknownTypeName {

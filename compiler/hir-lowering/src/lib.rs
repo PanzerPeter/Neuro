@@ -28,6 +28,7 @@ use std::collections::{HashMap, HashSet};
 use ast_types::Item;
 use neuro_hir::{HirProgram, HirType};
 
+mod closures;
 mod expressions;
 mod items;
 mod operator_traits;
@@ -158,6 +159,13 @@ struct Lowerer {
     /// Concrete instance functions produced by monomorphization, appended to the
     /// program after the ordinary items.
     mono_items: Vec<neuro_hir::HirItem>,
+    /// Lifted closure bodies discovered while lowering expressions, appended to the
+    /// program as top-level [`neuro_hir::HirItem::Closure`] items.
+    closure_items: Vec<neuro_hir::HirItem>,
+    /// Monotonic counter that names each lifted closure uniquely (`__closure_N`).
+    /// The `__` prefix is a reserved generated-symbol marker the checker forbids in
+    /// user names, so a lifted closure can never collide with a user function.
+    closure_counter: usize,
 }
 
 /// One trait method's lowering-visible signature, in declaration order.
@@ -252,6 +260,8 @@ impl Lowerer {
             mono_pending: Vec::new(),
             mono_seen: HashSet::new(),
             mono_items: Vec::new(),
+            closure_items: Vec::new(),
+            closure_counter: 0,
         }
     }
 
@@ -281,6 +291,16 @@ impl Lowerer {
             }
         }
         self.constants.get(name).cloned()
+    }
+
+    /// Resolve a binding's type in the lexical scope stack only, excluding module
+    /// constants. A closure captures local bindings by value; a constant is a global
+    /// the backend references directly, so it is never a capture.
+    fn lookup_local(&self, name: &str) -> Option<HirType> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).cloned())
     }
 }
 

@@ -181,6 +181,15 @@ pub enum HirExprKind {
         scrutinee: Box<HirExpr>,
         arms: Vec<HirMatchArm>,
     },
+    /// A closure value: a reference to a lifted [`crate::HirClosure`] item by
+    /// `name`, plus the enclosing variables to snapshot into its environment (in the
+    /// closure item's capture-layout order). The expression's type is the
+    /// corresponding [`HirType::Function`]; codegen builds a `{ fn_ptr, env_ptr }`
+    /// value.
+    Closure {
+        name: String,
+        captures: Vec<crate::HirCapture>,
+    },
 }
 
 /// One resolved arm of a [`HirExprKind::Match`].

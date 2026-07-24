@@ -26,6 +26,33 @@ pub enum HirItem {
     /// A trait's vtable layout. Static-dispatch traits are fully erased, so
     /// this item exists solely to give dynamic dispatch a stable method ordering.
     Trait(HirTrait),
+    /// A closure's lifted body. Each closure literal produces one top-level item
+    /// (`__closure_N`); the backend emits it as a function whose first parameter is
+    /// the captured-environment pointer, prepended with a prologue that loads each
+    /// capture into a local.
+    Closure(HirClosure),
+}
+
+/// A closure literal lifted to a top-level item. `name` is the generated symbol;
+/// `captures` are the environment fields in layout order (also the order the value
+/// site populates them); `params` are the user-facing parameters. The environment
+/// pointer is an implicit first parameter, not listed in `params`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HirClosure {
+    pub name: String,
+    pub captures: Vec<HirCapture>,
+    pub params: Vec<HirParam>,
+    pub return_type: HirType,
+    pub body: Vec<HirStmt>,
+    pub span: Span,
+}
+
+/// One captured variable of a closure: the enclosing binding's name (used both to
+/// load it at the definition site and to bind it inside the body) and its type.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HirCapture {
+    pub name: String,
+    pub ty: HirType,
 }
 
 /// The vtable contract of a declared trait.

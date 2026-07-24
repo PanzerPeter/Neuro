@@ -95,6 +95,16 @@ pub enum Type {
     /// and any non-object-safe trait.
     DynTrait { trait_name: Identifier, span: Span },
 
+    /// Closure / function type `(T1, T2, ...) -> R`: the type of a callable value
+    /// (a closure literal or a function-typed parameter). Parentheses around the
+    /// parameter types distinguish it from a closure *literal* `|p| body`. `span`
+    /// covers the leading `(` through the return type.
+    Function {
+        params: Vec<Type>,
+        ret: Box<Type>,
+        span: Span,
+    },
+
     /// Tensor type for multi-dimensional arrays.
     ///
     /// This variant is reserved for future language support and is not yet
@@ -118,6 +128,7 @@ impl Type {
             Type::Generic { span, .. } => *span,
             Type::ImplTrait { span, .. } => *span,
             Type::DynTrait { span, .. } => *span,
+            Type::Function { span, .. } => *span,
             Type::Tensor { span, .. } => *span,
         }
     }

@@ -127,9 +127,16 @@ impl<'ctx> TypeMapper<'ctx> {
             Type::Void => Err(CodegenError::UnsupportedType(
                 "void type cannot be used as a value".to_string(),
             )),
-            Type::Function { .. } => Err(CodegenError::UnsupportedType(
-                "function types as values not yet supported".to_string(),
-            )),
+            // A closure / function value is a `{ fn_ptr, env_ptr }` fat pointer.
+            // Every closure shares this uniform two-pointer representation, so a
+            // `(T) -> U` parameter can accept any closure regardless of its captures.
+            Type::Function { .. } => {
+                let ptr = self.context.ptr_type(inkwell::AddressSpace::default());
+                Ok(self
+                    .context
+                    .struct_type(&[ptr.into(), ptr.into()], false)
+                    .into())
+            }
             // Struct types must be built via CodegenContext::get_struct_llvm_type,
             // which has access to field definitions. Calling map_type directly on
             // a struct (e.g. for a function parameter) is not supported in Phase 2.

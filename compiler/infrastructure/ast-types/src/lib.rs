@@ -8,7 +8,8 @@ pub mod statements;
 pub mod types;
 
 pub use expressions::{
-    BinaryOp, EnumPatternPayload, Expr, FieldInit, FieldPattern, MatchArm, Pattern, UnaryOp,
+    BinaryOp, ClosureParam, EnumPatternPayload, Expr, FieldInit, FieldPattern, MatchArm, Pattern,
+    UnaryOp,
 };
 pub use items::{
     Attribute, ConstDef, EnumDef, EnumVariant, FieldDef, FunctionDef, GenericParam,

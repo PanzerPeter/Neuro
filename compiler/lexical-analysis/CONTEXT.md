@@ -47,6 +47,7 @@ one-to-one token counterpart (string bodies and escapes above all) still need up
 matters for the planned stateful-lexer rewrite behind string interpolation.
 
 ## Recent Updates
+- 2026-07-24: Added `TokenKind::Move` keyword token for the `move` closure-capture prefix (`move |x| ...`). Reserves the word so it cannot be an identifier. Sits directly after `Unsafe` in declaration order. The word was already present in the editor's TextMate grammar keyword pattern, so `tests/tmlanguage_sync.rs` needed no update.
 - 2026-07-19: Added `tests/tmlanguage_sync.rs`, asserting every `#[token("…")]` keyword appears in the editor's TextMate grammar. It caught real drift on introduction: `dyn` was missing from the grammar's keyword pattern, and `f16`/`bf16` from its primitive-type and numeric-suffix patterns.
 - 2026-07-19: Added `TokenKind::Dyn` keyword token for `dyn Trait` trait objects. Reserves the word so it cannot be an identifier. Sits directly after `Trait` in declaration order. `impl` needed no new token — the existing `TokenKind::Impl` serves both `impl` blocks and the `impl Trait` bound.
 - 2026-07-13: Added `TokenKind::Lifetime(String)` for explicit lifetime names, e.g. `'a` in `func longest<'a>(...)`. Regex `'[_\p{XID_Start}]\p{XID_Continue}*`; the callback strips the leading `'` so the stored name is the bare identifier. A char literal `'a'` carries a closing quote and is a strictly longer match, so logos' longest-match rule keeps char literals winning — only the quote-less form lexes as a lifetime. Sits directly after `Char` in declaration order.

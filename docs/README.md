@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1E complete, 1F (generics, traits & dispatch) active — Alpha Development
+**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) next — Alpha Development
 
 ## Quick Links
 
@@ -97,6 +97,12 @@ Key design goals:
   `&dyn Trait` / `&mut dyn Trait`, dispatched through a per-(trait, type) vtable, so one
   function body serves every implementor. Object safety is enforced: every method of a
   `dyn`-usable trait must take `&self` or `&mut self`
+- **Closures & lambdas** (1F): anonymous callables `|x: i32| x * x`,
+  `|x: i32| -> i32 { ... }`, `|| expr`, and `move |x| ...`, capturing Copy free variables
+  by value; the function type `(T1, ...) -> R`; and higher-order functions
+  (`func apply(v: i32, f: (i32) -> i32)`). Each closure compiles to a
+  `{ fn_ptr, env_ptr }` value with no heap allocation. Parameter-type inference and passing
+  a closure to a *generic* higher-order function come later
 
 ### Control Flow
 
@@ -183,7 +189,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 971 tests passing across all components
+- 986 tests passing across all components
 
 ## Compilation Pipeline
 
@@ -293,7 +299,7 @@ See [Installation Guide](getting-started/installation.md) for other distribution
 
 ## Roadmap
 
-See the [Quick Roadmap in the project README](../README.md#quick-roadmap) for the phase-by-phase status, and [CONTRIBUTING.md](../CONTRIBUTING.md#current-contribution-priorities) for the active Phase 1 (sub-phase 1F) priorities.
+See the [Quick Roadmap in the project README](../README.md#quick-roadmap) for the phase-by-phase status, and [CONTRIBUTING.md](../CONTRIBUTING.md#current-contribution-priorities) for the active Phase 1 (sub-phase 1G) priorities.
 
 ## Architecture
 
@@ -326,5 +332,5 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 ---
 
 **Last Updated**: 2026-07-19
-**Version**: Phase 1 (Core Language) in progress — 1A–1E complete, 1F active (v1.62.3)
+**Version**: Phase 1 (Core Language) in progress — 1A–1F complete, 1G next (v1.63.0)
 **Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.9.0

@@ -18,6 +18,16 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
 - thiserror — `LoweringError` derivation
 
 ## Notes
+- 2026-07-24: Closures and lambdas. New `closures.rs`: `lower_closure` lifts each `Expr::Closure`
+  to a `HirItem::Closure` (named `__closure_N` via a `closure_counter`; the `__` prefix is a
+  reserved generated-symbol marker the checker forbids in user names) collected in `closure_items`
+  and appended after the monomorphization worklists in `lower_program`. Captures are the body's free
+  variables that resolve to an enclosing *local* binding (a new `lookup_local` excludes module
+  constants), snapshotted in first-seen order with their types; a block body lowers through
+  `lower_body` (annotation supplies the return type), a single-expression body infers it. The value
+  site emits `HirExprKind::Closure { name, captures }` typed as `HirType::Function`. `lower_ident_call`
+  now dispatches a call on a local function-typed binding indirectly (callee is an `HirExprKind::Variable`
+  of `HirType::Function`). `resolve_type` handles `Type::Function`.
 - 2026-07-19: Static & dynamic dispatch. Traits are no longer fully erased here: a new
   `traits` table (name → methods in declaration order, with their visible parameter and return
   types) is registered before impls, and each `Item::Trait` now lowers to a `HirItem::Trait`

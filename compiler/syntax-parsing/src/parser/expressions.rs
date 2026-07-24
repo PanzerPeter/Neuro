@@ -1,7 +1,7 @@
 use lexical_analysis::{Token, TokenKind};
 use shared_types::{Identifier, Literal, Span};
 
-use crate::ast::{BinaryOp, Expr, GenericArg, Stmt, UnaryOp};
+use crate::ast::{BinaryOp, ClosureParam, Expr, GenericArg, Stmt, UnaryOp};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 
@@ -268,12 +268,115 @@ impl Parser {
 
             TokenKind::Match => self.parse_match_expr(token.span),
 
+            // Closure literals: `|params| body`, `|| body`, or `move |params| body`.
+            // The `|` / `||` token has already been consumed as `token`; a leading
+            // `move` is consumed here and the following pipe fetched.
+            TokenKind::Move => {
+                let pipe = self.advance().ok_or(ParseError::UnexpectedEof {
+                    expected: "'|' or '||' after `move`".to_string(),
+                })?;
+                match pipe.kind {
+                    TokenKind::Pipe => self.parse_closure(true, token.span, false),
+                    TokenKind::PipePipe => self.parse_closure(true, token.span, true),
+                    other => Err(ParseError::UnexpectedToken {
+                        found: other,
+                        expected: "'|' or '||' after `move`".to_string(),
+                        span: pipe.span,
+                    }),
+                }
+            }
+            TokenKind::Pipe => self.parse_closure(false, token.span, false),
+            TokenKind::PipePipe => self.parse_closure(false, token.span, true),
+
             _ => Err(ParseError::UnexpectedToken {
                 found: token.kind,
                 expected: "expression".to_string(),
                 span: token.span,
             }),
         }
+    }
+
+    /// Parse a closure literal after its opening pipe token has been consumed.
+    ///
+    /// `is_move` records a leading `move` keyword. `start_span` is the span of the
+    /// opening token (`move` or the pipe). `empty_params` is true when the opener was
+    /// `||` — the zero-parameter form, which has already consumed both pipes; otherwise
+    /// a closing `|` is parsed after the comma-separated parameter list.
+    fn parse_closure(
+        &mut self,
+        is_move: bool,
+        start_span: Span,
+        empty_params: bool,
+    ) -> ParseResult<Expr> {
+        let mut params = Vec::new();
+        if !empty_params {
+            self.skip_newlines();
+            if !self.check(&TokenKind::Pipe) {
+                loop {
+                    self.skip_newlines();
+                    let name_tok =
+                        self.consume(TokenKind::Identifier(String::new()), "closure parameter")?;
+                    let name = match name_tok.kind {
+                        TokenKind::Identifier(n) => Identifier {
+                            name: n,
+                            span: name_tok.span,
+                        },
+                        other => {
+                            return Err(ParseError::UnexpectedToken {
+                                found: other,
+                                expected: "closure parameter name".to_string(),
+                                span: name_tok.span,
+                            })
+                        }
+                    };
+                    let ty = if self.check(&TokenKind::Colon) {
+                        self.advance(); // consume ':'
+                        Some(self.parse_type()?)
+                    } else {
+                        None
+                    };
+                    let span = name
+                        .span
+                        .merge(ty.as_ref().map(|t| t.span()).unwrap_or(name.span));
+                    params.push(ClosureParam { name, ty, span });
+                    self.skip_newlines();
+                    if !self.check(&TokenKind::Comma) {
+                        break;
+                    }
+                    self.advance(); // consume ','
+                }
+            }
+            self.consume(TokenKind::Pipe, "'|' to close closure parameters")?;
+        }
+
+        // Optional explicit return type `-> R`.
+        let ret = if self.check(&TokenKind::Arrow) {
+            self.advance(); // consume '->'
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        // Body: a brace block, or (when no return type is annotated) a single
+        // expression. The single-expression form binds the whole remaining
+        // expression, so it stops naturally at a `,`, `)`, or newline.
+        let body = if self.check(&TokenKind::LeftBrace) {
+            let brace = self.advance().ok_or(ParseError::UnexpectedEof {
+                expected: "'{'".to_string(),
+            })?;
+            self.parse_block_expr(brace.span)?
+        } else {
+            self.parse_expr(Precedence::Lowest)?
+        };
+
+        let span = start_span.merge(body.span());
+        Ok(Expr::Closure {
+            params,
+            ret,
+            body: Box::new(body),
+            is_move,
+            span,
+        })
     }
 
     /// Parse an if-expression. The `if` token has already been consumed; `start_span` is its span.

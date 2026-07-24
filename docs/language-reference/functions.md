@@ -835,6 +835,76 @@ trait Maker   { func build() -> i32 }      // not object-safe: no receiver
 A `&mut self` method requires a `&mut dyn Trait` receiver; mutations through it are
 visible to the caller.
 
+## Closures and Lambdas
+
+A **closure** is an anonymous callable written with pipe-delimited parameters,
+`|params| body`. It can capture variables from the enclosing scope.
+
+```neuro
+// Single-expression body (no braces): the return type is inferred.
+val square = |x: i32| x * x
+val nine   = square(3)              // 9
+
+// Block body: an explicit return type is required.
+val clamp = |x: i32| -> i32 {
+    if x < 0 { 0 } else { x }
+}
+
+// Zero parameters.
+val make = || 42
+
+// `move` forces every capture to be taken by value (required when the closure
+// would outlive the captured bindings).
+val label = 100
+val tagged = move |x: i32| x + label
+```
+
+### Capture
+
+A closure captures each free variable its body reads **by value** — the variable
+must be `Copy` this phase, and it remains usable after the closure is created
+because it was copied, not moved:
+
+```neuro
+func main() -> i32 {
+    val offset = 10
+    val shift  = |n: i32| n + offset   // captures `offset` by value
+    val a = shift(5)                   // 15
+    a + offset                         // `offset` still usable -> 25
+}
+```
+
+Capturing a non-`Copy` value (such as a `string`), or assigning to a captured
+variable inside the closure, is a compile error in this phase.
+
+### Function types and higher-order functions
+
+A closure or function value has the type `(T1, ...) -> R`. A function that takes
+one as a parameter and calls it is a **higher-order function**:
+
+```neuro
+func apply(v: i32, f: (i32) -> i32) -> i32 {
+    f(v)
+}
+
+func main() -> i32 {
+    val bump = 3
+    apply(5, |x: i32| x + bump)        // 8
+}
+```
+
+Each closure compiles to a `{ function pointer, environment pointer }` value with
+no heap allocation; a call dispatches indirectly through it.
+
+### Not yet supported
+
+- Parameter-type inference (`|x| x * x` without an annotation).
+- Passing a closure to a **generic** higher-order function
+  (`func f<T, U>(x: T, g: (T) -> U) -> U`).
+- The `Fn` / `FnMut` / `FnOnce` distinction with by-reference, mutable, or
+  move-of-owned capture (all capture is currently by-value `Copy`).
+- Returning or storing a closure so it escapes its defining scope, and `dyn Fn`.
+
 ## References
 
 - [Types](types.md) - Function types and type checking

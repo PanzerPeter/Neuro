@@ -414,6 +414,14 @@ fn tokenize_logical_operators() {
 }
 
 #[test]
+fn tokenize_move_keyword() {
+    // `move` is a keyword (closure capture), distinct from an identifier.
+    let result = tokenize("move |x|").unwrap();
+    assert!(matches!(result[0].kind, TokenKind::Move));
+    assert!(matches!(result[1].kind, TokenKind::Pipe));
+}
+
+#[test]
 fn tokenize_delimiters() {
     let result = tokenize("( ) { } [ ] , : ;").unwrap();
     assert_eq!(result.len(), 10); // 9 delimiters + EOF

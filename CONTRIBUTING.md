@@ -4,7 +4,7 @@ Thank you for your interest in contributing to the Neuro programming language co
 
 ## Project Status
 
-Neuro is in **Phase 1 — Core Language** (v1.x), the umbrella phase covering the full general-purpose language. It is divided into lettered sub-phases, implemented strictly in dependency order. **Sub-phase 1F (Generics, Traits & Dispatch) is the active sub-phase.** Completed so far: 1A (core MVP), 1B (syntax & semantics stabilization — casts, bitwise ops, literal suffixes, if/block expressions, builtin-method dispatch, integer overflow, etc.), 1C (ownership & borrow checker — move semantics, `Copy`, `&T`/`&mut T`, borrow exclusivity, lifetime elision, `&mut self`, deterministic `Drop`; one flagged item remains), 1D (HIR / MLIR plumbing — typed HIR, AST→HIR lowering, HIR-routed LLVM backend, `mlir-backend` scaffold), and 1E (type system — structs, methods, arrays, tuples, destructuring, type aliases, enums, pattern matching, and newtypes). Completing all of Phase 1 (1A–1H) ships **v2.0.0** and opens Phase 2 (Tensors). We welcome contributions, but note:
+Neuro is in **Phase 1 — Core Language** (v1.x), the umbrella phase covering the full general-purpose language. It is divided into lettered sub-phases, implemented strictly in dependency order. **Sub-phase 1G (Error Handling, Modules & Prelude) is the active sub-phase.** Completed so far: 1A (core MVP), 1B (syntax & semantics stabilization — casts, bitwise ops, literal suffixes, if/block expressions, builtin-method dispatch, integer overflow, etc.), 1C (ownership & borrow checker — move semantics, `Copy`, `&T`/`&mut T`, borrow exclusivity, lifetime elision, `&mut self`, deterministic `Drop`; one flagged item remains), 1D (HIR / MLIR plumbing — typed HIR, AST→HIR lowering, HIR-routed LLVM backend, `mlir-backend` scaffold), 1E (type system — structs, methods, arrays, tuples, destructuring, type aliases, enums, pattern matching, and newtypes), and 1F (generics, traits & dispatch — generic functions/structs/impls, const generics, `where`, turbofish, explicit lifetimes, trait declarations, operator overloading, static & dynamic dispatch, and closures). Completing all of Phase 1 (1A–1H) ships **v2.0.0** and opens Phase 2 (Tensors). We welcome contributions, but note:
 
 - Architecture and design are still evolving
 - Breaking changes are expected between minor versions
@@ -275,24 +275,11 @@ cargo run -p neurc -- compile examples/basics/hello.nr
 
 ### Phase 1 — Core Language: current priorities
 
-The active sub-phase is **1F (Generics, Traits & Dispatch)** — sub-phase 1E is
+The active sub-phase is **1G (Error Handling, Modules & Prelude)** — sub-phase 1F is
 complete. The roadmap is dependency-ordered, so pick the **topmost open item** — its
 prerequisites are already done. Coordinate on an issue before starting a large item.
 
-**Recently completed — 1E (Type System):**
-
-- [x] **Enums with associated data**. Tagged-union codegen:
-      `enum Foo { Bar, Baz(i32), Qux { x: f64 } }`. Prerequisite for pattern matching.
-      Landed v1.53.0 (unit/tuple/struct variants, scalar payloads; `match` is next).
-- [x] **Pattern matching**. `match` with exhaustiveness checking + guards;
-      required for `Option`/`Result` ergonomics in 1G. Landed v1.54.0 (enum
-      deconstruction, value/or/range/wildcard patterns, guards; scrutinee is
-      enum/integer/`char`/`bool`).
-- [x] **Newtype declarations**. `newtype Meters = f64` — distinct nominal
-      type, zero overhead; construction `Meters(3.5)`, inner access `.0`. Landed
-      v1.55.0 (Copy-inner only; backends erase the wrapper). Completes 1E.
-
-**Open now — 1F (Generics, Traits & Dispatch):** generic *functions* landed
+**Recently completed — 1F (Generics, Traits & Dispatch):** generic *functions* landed
 in v1.56.0, generic *structs & impls* in v1.57.0, *const parameters, `where`
 clauses & turbofish* in v1.58.0 (all monomorphized, type arguments inferred from
 value/field arguments or written explicitly, bounds parsed-but-unenforced, `Copy`
@@ -307,11 +294,13 @@ parsed before are now checked), *operator traits* in v1.61.0 (the built-in
 `Add`/`Sub`/`Neg`/`PartialEq`/`Comparable` family on `Copy` structs, desugared to
 method calls), and *static & dynamic dispatch* in v1.62.0 (`impl Trait` in
 argument and return position, monomorphized; `&dyn Trait` / `&mut dyn Trait` trait
-objects dispatched through a per-(trait, type) vtable, with object safety enforced).
-The topmost open item is now closures and lambdas.
+objects dispatched through a per-(trait, type) vtable, with object safety enforced),
+and *closures and lambdas* in v1.63.0 (`|params| body` literals with `move`, Copy-by-value
+capture, the function type `(T) -> R`, and higher-order functions — each closure lifted to
+a `{ fn_ptr, env_ptr }` value with no heap allocation). Completes 1F.
 
-**Next, in dependency order:** 1F (closures) → 1G (error
-handling, collections, modules, prelude) → 1H (string interpolation, triple-quoted
+**Next, in dependency order:** 1G (error handling, `Option`/`Result`, collections,
+`??`/`?`, modules, imports, prelude) → 1H (string interpolation, triple-quoted
 strings, nested comments, named arguments). See the [Quick Roadmap](README.md#quick-roadmap).
 
 `[x]` = landed · `[ ]` = open. See [CHANGELOG.md](CHANGELOG.md) and the README
