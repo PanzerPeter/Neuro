@@ -113,6 +113,17 @@ impl Lowerer {
                 let mangled = self.instantiate_generic_struct(&name.name, &resolved)?;
                 Ok(HirType::Struct(mangled))
             }
+            // Closure / function type `(T1, ...) -> R`.
+            ast_types::Type::Function { params, ret, .. } => {
+                let mut resolved = Vec::with_capacity(params.len());
+                for param in params {
+                    resolved.push(self.resolve_type(param)?);
+                }
+                Ok(HirType::Function {
+                    params: resolved,
+                    ret: Box::new(self.resolve_type(ret)?),
+                })
+            }
             ast_types::Type::Tensor { .. } => Err(LoweringError::UnresolvedType {
                 name: "Tensor".to_string(),
             }),

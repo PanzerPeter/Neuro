@@ -600,6 +600,10 @@ impl Lowerer {
             break;
         }
         hir_items.append(&mut self.mono_items);
+        // Lifted closures are appended last; their bodies are self-contained and the
+        // backend pre-declares every function signature before emitting any body, so
+        // position among the items does not matter.
+        hir_items.append(&mut self.closure_items);
 
         Ok(HirProgram { items: hir_items })
     }

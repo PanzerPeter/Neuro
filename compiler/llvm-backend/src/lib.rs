@@ -154,7 +154,11 @@ pub fn compile(
                 }
             }
 
-            HirItem::Struct(_) | HirItem::Const(_) | HirItem::Enum(_) | HirItem::Trait(_) => {}
+            HirItem::Struct(_)
+            | HirItem::Const(_)
+            | HirItem::Enum(_)
+            | HirItem::Trait(_)
+            | HirItem::Closure(_) => {}
         }
     }
 
@@ -218,6 +222,9 @@ pub fn compile(
             HirItem::Impl(impl_def) => {
                 codegen_ctx.declare_impl(impl_def, &func_types)?;
             }
+            HirItem::Closure(closure) => {
+                codegen_ctx.declare_closure(closure)?;
+            }
             HirItem::Const(_) | HirItem::Struct(_) | HirItem::Enum(_) | HirItem::Trait(_) => {}
         }
     }
@@ -235,6 +242,9 @@ pub fn compile(
             }
             HirItem::Impl(impl_def) => {
                 codegen_ctx.codegen_impl(impl_def, &func_types)?;
+            }
+            HirItem::Closure(closure) => {
+                codegen_ctx.codegen_closure(closure)?;
             }
             HirItem::Const(_) | HirItem::Struct(_) | HirItem::Enum(_) | HirItem::Trait(_) => {}
         }

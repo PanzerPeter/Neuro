@@ -171,6 +171,12 @@ fn rewrite_type(ty: &mut Type, resolved: &HashMap<String, Type>) {
             }
         }
         Type::Tensor { element_type, .. } => rewrite_type(element_type, resolved),
+        Type::Function { params, ret, .. } => {
+            for param in params.iter_mut() {
+                rewrite_type(param, resolved);
+            }
+            rewrite_type(ret, resolved);
+        }
         // `impl Trait` / `dyn Trait` name a trait, not a type alias, so a type
         // alias never substitutes into them.
         Type::ImplTrait { .. } | Type::DynTrait { .. } => {}
@@ -414,6 +420,19 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
                 rewrite_expr(&mut arm.body, resolved);
             }
         }
+        Expr::Closure {
+            params, ret, body, ..
+        } => {
+            for param in params.iter_mut() {
+                if let Some(ty) = &mut param.ty {
+                    rewrite_type(ty, resolved);
+                }
+            }
+            if let Some(ret) = ret {
+                rewrite_type(ret, resolved);
+            }
+            rewrite_expr(body, resolved);
+        }
         Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } => {}
     }
 }
@@ -448,6 +467,7 @@ mod tests {
             Type::Tensor { .. } => "<tensor>",
             Type::ImplTrait { .. } => "<impl trait>",
             Type::DynTrait { .. } => "<dyn trait>",
+            Type::Function { .. } => "<function>",
         }
     }
 

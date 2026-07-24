@@ -11,6 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.63.0] - 2026-07-24
+
+### Added
+- `parser`, `semantic`, `codegen`: **Closures and lambdas.** Anonymous callable values with
+  the `|params| body` syntax — `|x: i32| x * x` (single-expression), `|x: i32| -> i32 { ... }`
+  (block body with an explicit return type), the zero-parameter `|| expr`, and the `move`
+  capture prefix. A closure captures the free variables its body reads from the enclosing
+  scope **by value** (they must be `Copy` this phase); the captured variable stays usable
+  afterwards because it is copied, not moved. Closure and function values have the type
+  `(T1, ...) -> R`, so a **higher-order function** can take one as a parameter and call it:
+  `func apply(v: i32, f: (i32) -> i32) -> i32 { f(v) }`. Each closure compiles to a
+  `{ function pointer, environment pointer }` value with no heap allocation.
+  - Diagnostics: capturing a non-`Copy` value, assigning to a captured variable, an
+    unannotated parameter, and a block body without a return type each report a clear,
+    located error.
+  - Not yet supported (planned): closure parameter-type inference (`|x| x*x` without an
+    annotation), passing a closure to a *generic* higher-order function `f<T, U>(.. : (T)->U)`,
+    the `Fn`/`FnMut`/`FnOnce` distinction with by-reference/mutable/`move`-of-owned capture,
+    and returning or storing a closure so it escapes its defining scope.
+
+---
+
 ## [1.62.3] - 2026-07-19
 
 ### Fixed

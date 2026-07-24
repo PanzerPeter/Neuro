@@ -426,7 +426,11 @@ impl<'ctx> CodegenContext<'ctx> {
     /// registering by-value `Drop` parameters into it) before calling this; the
     /// function scope is popped here on the way out. Drops for owned `Drop` bindings
     /// run before every normal return path.
-    fn codegen_body(&mut self, body: &[HirStmt], return_type: &Type) -> CodegenResult<()> {
+    pub(crate) fn codegen_body(
+        &mut self,
+        body: &[HirStmt],
+        return_type: &Type,
+    ) -> CodegenResult<()> {
         let tail_is_value = !matches!(return_type, Type::Void)
             && matches!(
                 body.last(),

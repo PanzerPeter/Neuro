@@ -162,6 +162,14 @@ impl Lowerer {
                 span,
             } => self.lower_call(func, type_args, args, expected, *span),
 
+            Expr::Closure {
+                params,
+                ret,
+                body,
+                span,
+                ..
+            } => self.lower_closure(params, ret.as_ref(), body, *span),
+
             // A bare path is a unit-variant enum construction `E::V` when the
             // type names an enum, else an associated-function reference.
             Expr::Path {
@@ -708,6 +716,29 @@ impl Lowerer {
         expected: Option<&HirType>,
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
+        // A local binding of function type — a closure or a function-typed
+        // parameter — is called indirectly through its fat pointer. It shadows a
+        // same-named top-level function, matching the frontend's precedence.
+        if let Some(HirType::Function { params, ret }) = self.lookup_local(name) {
+            let args = self.lower_args(args, &params)?;
+            let callee = HirExpr::new(
+                HirExprKind::Variable(name.to_string()),
+                HirType::Function {
+                    params,
+                    ret: ret.clone(),
+                },
+                span,
+            );
+            return Ok(HirExpr::new(
+                HirExprKind::Call {
+                    callee: Box::new(callee),
+                    args,
+                },
+                *ret,
+                span,
+            ));
+        }
+
         // A call to a generic function: infer its type arguments, queue the
         // matching monomorphized instance, and emit a call to that instance's name.
         if self.generic_templates.contains_key(name) {

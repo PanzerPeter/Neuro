@@ -28,6 +28,12 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-07-24: Closures and lambdas. Added `Expr::Closure { params, ret, body, is_move, span }`
+  (a closure literal `|p| body` / `|p| -> R { body }` / `move |p| ...`) and the `ClosureParam
+  { name, ty, span }` struct, plus `Type::Function { params, ret, span }` for the closure/function
+  type `(T1, ...) -> R`. `ret` is `None` when inferred; `body` is a single expression (a bare
+  block for the multi-statement form). Interpreted by semantic-analysis (capture analysis, Copy-only
+  capture) and hir-lowering (each literal lifted to a `HirItem::Closure`).
 - 2026-07-19: Static & dynamic dispatch. Added `Type::ImplTrait { trait_name, span }` and `Type::DynTrait { trait_name, span }`. `ImplTrait` survives parsing only in RETURN position — in argument position the parser rewrites it into a fresh trait-bounded `GenericParam`, so downstream slices see an ordinary generic. `DynTrait` always survives; semantic-analysis resolves it to a trait-object type and rejects it outside a reference.
 - 2026-07-18: Operator traits — scalar path. `ImplDef` gains
   `assoc_types: Vec<(Identifier, Type)>` for associated-type bindings (`type Output = T`) inside a

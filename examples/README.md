@@ -72,6 +72,12 @@ isolation:
   `-` / `==` dispatch to the impl methods, combined with an `&self` method, compound
   assignment (`+=` desugaring through `Add`), a `while` loop, and if-expressions. The
   operators are monomorphized to plain calls — no vtable. Exit `35`.
+- [`showcase/closures.nr`](showcase/closures.nr) — **closures and lambdas**: a
+  higher-order `map_sum(xs, f: (i32) -> i32)` applied with a closure literal that
+  **captures** an enclosing Copy variable by value, a **`move`** closure with a block
+  body and explicit return type, and a struct `impl` method — all combined with
+  fixed-size arrays + indexed iteration and a `while` loop. Each closure is lifted to a
+  `{ fn_ptr, env_ptr }` value; the environment holds the captured value. Exit `90`.
 
 ## Compiling and running
 

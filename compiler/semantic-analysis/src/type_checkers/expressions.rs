@@ -532,6 +532,16 @@ impl TypeChecker {
             }
         }
 
+        // A local binding of function type — a closure or a function-typed
+        // parameter — is callable directly: `f(args)`. It shadows a same-named
+        // top-level function, matching the usual locals-over-globals precedence.
+        if let Some(Type::Function { params, ret }) =
+            self.symbols.lookup(func_name).map(|info| info.ty.clone())
+        {
+            self.check_call_args(args, &params, span);
+            return Some(*ret);
+        }
+
         let func_ty = if let Some(ty) = self.functions.get(func_name) {
             ty.clone()
         } else {
@@ -2211,6 +2221,14 @@ impl TypeChecker {
                 arms,
                 span,
             } => Some(self.check_match(scrutinee, arms, *span, expected)),
+
+            Expr::Closure {
+                params,
+                ret,
+                body,
+                is_move,
+                span,
+            } => Some(self.check_closure(params, ret.as_ref(), body, *is_move, *span)),
         }
     }
 

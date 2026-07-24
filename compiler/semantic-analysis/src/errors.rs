@@ -510,4 +510,16 @@ pub enum TypeError {
 
     #[error("a payload sub-pattern must be a binding or `_` at {span:?}: match a payload value with a guard instead (e.g. `Some(n) if n == 0`)")]
     RefutablePayloadPattern { span: Span },
+
+    #[error("closure parameter '{name}' needs a type annotation at {span:?}: write `|{name}: T| ...` — closure parameter-type inference is not yet supported")]
+    ClosureParamNeedsType { name: String, span: Span },
+
+    #[error("closure captures '{name}' of non-Copy type {ty} at {span:?}: only Copy values may be captured in this phase (capture by reference / move of owned values is not yet supported)")]
+    ClosureCapturesNonCopy { name: String, ty: Type, span: Span },
+
+    #[error("closure assigns to captured variable '{name}' at {span:?}: a captured variable is read-only in this phase (mutable capture / FnMut is not yet supported)")]
+    ClosureAssignsCapture { name: String, span: Span },
+
+    #[error("a block-bodied closure needs an explicit return type at {span:?}: write `|params| -> R {{ ... }}` (only single-expression closures `|x| expr` infer their return type)")]
+    ClosureBlockNeedsReturnType { span: Span },
 }

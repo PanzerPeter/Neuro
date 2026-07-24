@@ -44,28 +44,43 @@ impl Parser {
                 span,
             });
         }
-        // Tuple type `(T1, T2, ...)`: two or more element types separated by
-        // commas. A single parenthesized type is grouping, not a tuple, and the empty
-        // `()` unit type is not yet produced — both are rejected here.
+        // A parenthesized type list opens either a tuple type `(T1, T2, ...)` or a
+        // closure/function type `(T1, ...) -> R` — disambiguated by a trailing `->`.
+        // A tuple needs two or more elements; a function type accepts zero or more.
         if self.check(&TokenKind::LeftParen) {
             let open = self.advance().ok_or(ParseError::UnexpectedEof {
                 expected: "'('".to_string(),
             })?;
             let mut elements = Vec::new();
-            loop {
-                self.skip_newlines();
-                elements.push(self.parse_type()?);
-                self.skip_newlines();
-                if !self.check(&TokenKind::Comma) {
-                    break;
+            self.skip_newlines();
+            if !self.check(&TokenKind::RightParen) {
+                loop {
+                    self.skip_newlines();
+                    elements.push(self.parse_type()?);
+                    self.skip_newlines();
+                    if !self.check(&TokenKind::Comma) {
+                        break;
+                    }
+                    self.advance(); // consume ','
                 }
-                self.advance(); // consume ','
             }
-            let close = self.consume(TokenKind::RightParen, "')' to close tuple type")?;
+            let close = self.consume(TokenKind::RightParen, "')' to close type list")?;
+            // `(T1, ...) -> R` is a closure/function type.
+            if self.check(&TokenKind::Arrow) {
+                self.advance(); // consume '->'
+                let ret = self.parse_type()?;
+                let span = open.span.merge(ret.span());
+                return Ok(Type::Function {
+                    params: elements,
+                    ret: Box::new(ret),
+                    span,
+                });
+            }
             if elements.len() < 2 {
                 return Err(ParseError::UnexpectedToken {
                     found: TokenKind::RightParen,
-                    expected: "a tuple type with at least two elements `(T1, T2, ...)`".to_string(),
+                    expected: "a tuple type `(T1, T2, ...)` or a function type `(T1, ...) -> R`"
+                        .to_string(),
                     span: close.span,
                 });
             }

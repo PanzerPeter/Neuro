@@ -8,9 +8,9 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-971%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-986%20passing-success.svg)](#)
 
-**Status:** Alpha — Phase 1 (Core Language) in progress · sub-phases 1A–1E complete (MVP, syntax & semantics, ownership/borrow checker, HIR & MLIR plumbing, type system) · 1F (generics, traits & dispatch) active · → v2.0.0 when Phase 1 completes
+**Status:** Alpha — Phase 1 (Core Language) in progress · sub-phases 1A–1F complete (MVP, syntax & semantics, ownership/borrow checker, HIR & MLIR plumbing, type system, generics/traits/dispatch/closures) · 1G (error handling, modules & prelude) next · → v2.0.0 when Phase 1 completes
 
 ---
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 (Core Language) sub-phases 1A–1E are complete; 1F (generics, traits & dispatch) is active — generic functions, structs, and impls have landed, plus const generics, `where` clauses, turbofish, explicit lifetime annotations, **trait declarations**, **operator overloading**, and **static & dynamic dispatch** (`impl Trait` / `dyn Trait`). The following features are fully implemented and tested (**971 Tests Passing**):
+Phase 1 (Core Language) sub-phases 1A–1F are complete — generic functions, structs, and impls have landed, plus const generics, `where` clauses, turbofish, explicit lifetime annotations, **trait declarations**, **operator overloading**, **static & dynamic dispatch** (`impl Trait` / `dyn Trait`), and **closures & lambdas**. The following features are fully implemented and tested (**986 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -99,6 +99,7 @@ Phase 1 (Core Language) sub-phases 1A–1E are complete; 1F (generics, traits & 
 | **Traits** | `trait Shape { func area(&self) -> i32; func is_big(&self) -> i32 { ... } }` with required and default (provided) methods; `impl Trait for Type` checked for conformance (missing / mismatched / non-member methods rejected); an omitted default method is inherited, an explicit one overrides it. Trait-bounded generics `func f<T: Shape>(x: &T)` dispatch trait methods on the type parameter and are checked at the call site. Fully monomorphized and erased — no vtable, zero runtime cost. Associated types land later in 1F |
 | **Static & Dynamic Dispatch** | Two ways to satisfy a trait bound. `impl Trait` is anonymous-generic sugar in argument position (`func train(m: &impl Model)`) and return position (`func make() -> impl Shape`) — monomorphized, zero runtime cost; each `impl Trait` parameter is its own anonymous type parameter, so one call may bind two different types. `dyn Trait` is a runtime trait object behind `&dyn Trait` / `&mut dyn Trait`: one function body serves every implementor, dispatching through a per-(trait, type) **vtable**. Object safety is enforced — every method must take `&self`/`&mut self` |
 | **Operator Overloading** | Operators on a `Copy` struct are sugar for method calls: implement the built-in `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Neg`/`Not`/`BitAnd`/`BitOr`/`BitXor`/`Shl` (declaring `type Output = T`) or `PartialEq`/`Comparable` (supertrait: `Comparable` requires `PartialEq`) to get `+ - * / % -a ~a & \| ^ <<` and `== != < <= > >=`. The user writes only the `impl` (these are compiler-known traits); each operator desugars to its method and is monomorphized to a plain call — no vtable. Compound assignment (`v += w`) flows through the by-value operator |
+| **Closures & Lambdas** | Anonymous callables `\|x: i32\| x * x`, `\|x: i32\| -> i32 { ... }`, `\|\| expr`, and `move \|x\| ...`; capture Copy free variables by value; function type `(T1, ...) -> R`; higher-order functions (`func apply(v, f: (i32) -> i32)`). Each closure compiles to a `{ fn_ptr, env_ptr }` value with no heap allocation. Parameter-type inference and generic higher-order functions come later |
 | **Control Flow** | if/else/elif, `while`, `loop` (incl. as a value expression), range-for (`0..n`, `0..=n`), `break`/`continue` with value-carrying breaks and loop labels |
 | **Variables & Constants** | `val` (immutable) / `mut` (mutable) with type-safe reassignment; module- and function-scope `const` emitted as LLVM globals |
 | **Structs & Methods** | Definition, instantiation, field-init shorthand, functional update (`..base`), field read/mutation; `impl` blocks with `&self` / `&mut self` instance methods and `TypeName::func` associated functions |
@@ -491,7 +492,7 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | 1C | Ownership & borrow checker — move semantics, `Copy`, `&T`, `&mut T`, borrow exclusivity, lifetime elision / returned-reference outlives, `&mut self` methods, deterministic `Drop` | ✅ Complete ¹ |
 | 1D | Backend plumbing — `neuro-hir` typed IR crate, `melior` integration, AST → HIR lowering, HIR-routed LLVM backend, mlir-backend HIR scaffold | ✅ Complete |
 | 1E | Type system — arrays ✅, tuples ✅, structs ✅, methods ✅, destructuring ✅, type aliases ✅, enums ✅, pattern matching ✅, newtype ✅ | ✅ Complete |
-| 1F | Generics, traits & dispatch — generics, explicit lifetimes, trait declarations, operator traits, static/dynamic dispatch (`impl`/`dyn`), closures | 🔄 In progress |
+| 1F | Generics, traits & dispatch — generics, explicit lifetimes, trait declarations, operator traits, static/dynamic dispatch (`impl`/`dyn`), closures | ✅ Complete |
 | 1G | Error handling, modules & prelude — `Option`/`Result`, collections, `??`, `?`, multi-file modules, imports, prelude | 📋 Planned |
 | 1H | Language cleanup — string interpolation, triple-quoted strings, nested comments, named arguments | 📋 Planned |
 | **2** | Tensors & MLIR — `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | 📋 Planned |
@@ -567,7 +568,7 @@ vsce package
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture guidelines, coding standards, and the pull request process.
 
-The project is in early alpha — breaking changes are expected. Contributions should focus on **Phase 1 (Core Language)** items — currently sub-phase **1F** (generics, traits & dispatch).
+The project is in early alpha — breaking changes are expected. Contributions should focus on **Phase 1 (Core Language)** items — currently sub-phase **1G** (error handling, modules & prelude).
 
 ---
 
