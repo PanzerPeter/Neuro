@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.63.1] - 2026-07-25
+
+### Fixed
+- `codegen`: The MLIR scaffold (`mlir-backend`, feature `mlir`) failed to compile after
+  closures landed — `lower_program`'s `HirItem` match did not cover the new
+  `HirItem::Closure` variant. Lifted closures now emit a `func.func` declaration whose
+  implicit first parameter is the captured-environment pointer, matching the LLVM
+  backend's calling convention for `__closure_N`.
+
+---
+
 ## [1.63.0] - 2026-07-24
 
 ### Added
