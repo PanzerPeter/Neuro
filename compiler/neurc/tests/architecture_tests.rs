@@ -54,6 +54,7 @@ fn test_no_cross_slice_dependencies() {
         "compiler/hir-lowering",
         "compiler/control-flow",
         "compiler/llvm-backend",
+        "compiler/mlir-backend",
     ];
 
     for slice_path in &feature_slices {
@@ -106,14 +107,17 @@ fn test_infrastructure_no_slice_dependencies() {
         "compiler/infrastructure/source-location",
         "compiler/infrastructure/diagnostics",
         "compiler/infrastructure/project-config",
+        "compiler/infrastructure/neuro-hir",
     ];
 
     let feature_slices = vec![
         "lexical-analysis",
         "syntax-parsing",
         "semantic-analysis",
+        "hir-lowering",
         "control-flow",
         "llvm-backend",
+        "mlir-backend",
     ];
 
     for infra_path in &infrastructure_crates {
@@ -147,20 +151,22 @@ fn test_all_slices_have_context_md() {
         "compiler/hir-lowering",
         "compiler/control-flow",
         "compiler/llvm-backend",
+        "compiler/mlir-backend",
         "compiler/neurc",
-        // Infrastructure slices also require CONTEXT.md (VSA 4.3 AC-011)
+        // Infrastructure slices also require CONTEXT.md (VSA 4.4 AC-011)
         "compiler/infrastructure/shared-types",
         "compiler/infrastructure/ast-types",
         "compiler/infrastructure/diagnostics",
         "compiler/infrastructure/source-location",
         "compiler/infrastructure/project-config",
+        "compiler/infrastructure/neuro-hir",
     ];
 
     for slice_path in &all_slices {
         let context_path = root.join(slice_path).join("CONTEXT.md");
         assert!(
             context_path.exists(),
-            "VSA 4.3 Section 12: Slice {} must have CONTEXT.md (AI contract file)",
+            "VSA 4.4 Section 13: Slice {} must have CONTEXT.md (AI contract file)",
             slice_path
         );
 

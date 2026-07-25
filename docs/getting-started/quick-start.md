@@ -239,14 +239,15 @@ This shows:
 
 ## Current Feature Summary
 
-Phase 1 (Core Language) sub-phases 1A–1D are complete; 1E (type system) is active. The current compiler supports:
+Phase 1 (Core Language) sub-phases 1A–1F are complete; 1G (error handling, modules & prelude) is next. The current compiler supports:
 
 ### Types
 - Integers: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
-- Floats: `f32`, `f64`
-- Boolean: `bool`
-- Strings: `string` literals with escape sequences (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==`/`!=` for byte-level comparison
+- Floats: `f16`, `bf16`, `f32`, `f64`
+- Boolean: `bool`; `char` (32-bit Unicode scalar)
+- Strings: fat-pointer `string` with escape sequences (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==`/`!=` byte-level comparison; `+` concatenation; `.len()` / `.clone()` / `.slice(a..b)`
 - Structs: user-defined types with nominal typing
+- Fixed-size arrays `[T; N]`, tuples `(T1, T2, ...)`, enums with associated data, `newtype`, `type` aliases
 
 ### Variables & Constants
 - Immutable variables: `val x: i32 = 10`
@@ -260,13 +261,29 @@ Phase 1 (Core Language) sub-phases 1A–1D are complete; 1E (type system) is act
 - Explicit `return` statements
 - Expression-based implicit returns (trailing expression)
 - Recursion and forward references
-- `impl` blocks with `&self` methods and `TypeName::func` associated functions
+- `impl` blocks with `&self` / `&mut self` methods and `TypeName::func` associated functions
+- Generic functions, structs and impls with enforced trait bounds, const generics, `where` clauses, turbofish
+- Closures and lambdas `|x: i32| x * x`; function type `(T1, ...) -> R`; higher-order functions
+
+### Traits & Dispatch
+- `trait` declarations with required and default methods; `impl Trait for Type`
+- Static dispatch via `impl Trait` and trait-bounded generics (monomorphized)
+- Dynamic dispatch via `&dyn Trait` (vtable-backed)
+- Operator overloading through the compiler-known operator traits
+
+### Ownership
+- Move-by-default with use-after-move detection; `@derive(Copy, Clone)`; `.clone()`
+- Immutable `&T` and mutable `&mut T` borrows with `*` deref; flow-sensitive borrow exclusivity
+- Explicit lifetime annotations `<'a>`; returned-reference lifetime elision
+- Deterministic `Drop` running at scope exit in reverse declaration order
 
 ### Control Flow
-- `if` / `else if` / `else` chains
-- `while` loops
+- `if` / `else if` / `else` chains; `if` and blocks as value expressions
+- `while` loops; `loop` (including as a value expression)
 - Range-for loops: `for i in 0..n` (exclusive) and `for i in 0..=n` (inclusive)
-- `break` and `continue`
+- `break` and `continue`, with value-carrying breaks and loop labels
+- `match` as an exhaustive expression with payload binding, or-patterns, ranges, and guards
+- `panic(msg)` / `assert(cond)` / `unreachable()`
 
 ### Operators
 - Arithmetic: `+`, `-`, `*`, `/`, `%`
@@ -277,10 +294,8 @@ Phase 1 (Core Language) sub-phases 1A–1D are complete; 1E (type system) is act
 - Type cast: `as` for numeric conversions and bool-to-int
 
 ### Not Yet Implemented (later in Phase 1)
-- Enums and pattern matching (1E)
-- Generic functions, traits, and closures (1F)
-- `Option` / `Result`, collections, module system and imports (1G)
-- String interpolation (1H)
+- `Option` / `Result`, collections, `?` / `??`, module system and imports (1G)
+- String interpolation, triple-quoted strings, nested comments, named arguments (1H)
 
 ## Common Issues
 

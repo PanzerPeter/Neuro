@@ -78,6 +78,11 @@ isolation:
   body and explicit return type, and a struct `impl` method — all combined with
   fixed-size arrays + indexed iteration and a `while` loop. Each closure is lifted to a
   `{ fn_ptr, env_ptr }` value; the environment holds the captured value. Exit `90`.
+- [`showcase/scan_guard.nr`](showcase/scan_guard.nr) — **deterministic `Drop` +
+  labeled breaks**: two `impl Drop` scope guards sharing a `&mut i32` counter while a
+  labeled `break` exits *two* nested loops at once, proving the destructors still run
+  on that path. Combined with a `Copy` struct + `&self` method, a fixed-size array with
+  indexed reads, and `match` over range and `_` patterns. Exit `160`.
 
 ## Compiling and running
 

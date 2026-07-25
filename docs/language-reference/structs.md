@@ -95,7 +95,9 @@ func main() -> i32 {
 }
 ```
 
-> **Phase 1 limitation**: Structs as function *return* types are not yet supported.
+> **Phase 1 limitation**: A *free* function may not return a struct — the by-value struct ABI
+> is not implemented for them. Associated functions and methods declared in an `impl` block
+> may return structs (this is what makes the `Type::new(...)` constructor pattern work).
 
 ## impl Blocks
 
@@ -385,23 +387,27 @@ func scaled_area<T: Shape>(s: &T, factor: i32) -> i32 {
 }
 ```
 
-Traits are **fully monomorphized and erased**: each `impl` lowers to ordinary methods and
-each trait-bounded generic is specialized per concrete type, so there is no vtable and no
-runtime cost. Supertraits, associated types, dynamic dispatch (`dyn`), and the operator
-traits land later in sub-phase 1F.
+A trait-bounded generic is **fully monomorphized and erased**: each `impl` lowers to ordinary
+methods and each bound is specialized per concrete type, so there is no vtable and no runtime
+cost. Supertraits (`Comparable` requires `PartialEq`), dynamic dispatch (`dyn Trait`, which
+*does* use a vtable), and the [operator traits](operators.md#operator-overloading) have all
+landed. Associated types beyond the operator traits' `type Output` are still outstanding.
 
 ## Unsupported (Phase 1+)
 
 The following are not yet implemented and will be rejected at compile time:
 
-- `self` (consuming) — needs the by-value struct ABI
+- `self` (consuming) on a **non-`Copy`** struct — needs the by-value struct ABI. On a `Copy`
+  struct an owned `self` is accepted, because copying by value is ABI-identical to `&self`
+  (this is what lets an operator-trait method `func add(self, ...)` work)
 - Struct return types from free functions (backend limitation; associated functions and methods may return structs)
 - Nested structs as field types
 
 ```neuro
-// Consuming `self` is still rejected with a clear error:
-impl Foo {
-    func consume(self) { ... }      // Error: UnsupportedSelfParam
+// Consuming `self` on a non-`Copy` struct is rejected with a clear error:
+struct Wrapper { value: i32 }       // no @derive(Copy)
+impl Wrapper {
+    func unwrap(self) -> i32 { ... }   // Error: UnsupportedSelfParam
 }
 ```
 

@@ -85,6 +85,7 @@ showcase/mutable_borrows.nr 47
 showcase/num_algorithms.nr  32
 showcase/perceptron.nr      8
 showcase/running_stats.nr   5
+showcase/scan_guard.nr      160
 showcase/shape_traits.nr    161
 showcase/simulation.nr      2
 showcase/unit_types.nr      94

@@ -424,9 +424,43 @@ val abs: i32 = if x >= 0 { x } else { -x }
 
 ## Operator Overloading
 
-Operator overloading is not supported in Phase 1.
+Operators on a `Copy` struct are sugar for method calls. Implement the relevant compiler-known
+trait and the operator becomes available on that type — you write only the `impl`, never a
+declaration of the trait itself.
 
-Future phases may support custom operator implementations for user-defined types.
+| Trait | Operator |
+|---|---|
+| `Add` / `Sub` / `Mul` / `Div` / `Rem` | `+` `-` `*` `/` `%` |
+| `Neg` / `Not` | unary `-a` / `~a` |
+| `BitAnd` / `BitOr` / `BitXor` / `Shl` | `&` `\|` `^` `<<` |
+| `PartialEq` | `==` `!=` |
+| `Comparable` (supertrait: requires `PartialEq`) | `<` `<=` `>` `>=` |
+
+Arithmetic and bitwise traits declare their result via `type Output = T`.
+
+```neuro
+@derive(Copy, Clone)
+struct Vec2 { x: i32, y: i32 }
+
+impl Add for Vec2 {
+    type Output = Vec2
+    func add(self, rhs: Vec2) -> Vec2 {
+        Vec2 { x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+
+impl PartialEq for Vec2 {
+    func eq(&self, rhs: &Vec2) -> bool { self.x == rhs.x && self.y == rhs.y }
+    func ne(&self, rhs: &Vec2) -> bool { self.x != rhs.x || self.y != rhs.y }
+}
+```
+
+The arithmetic and bitwise traits take `self` by value; `PartialEq` and `Comparable` take
+`&self`. See [`examples/operators/operator_overloading.nr`](../../examples/operators/operator_overloading.nr)
+for a complete program.
+
+Each operator desugars to its method and is monomorphized to a plain call — there is no vtable
+and no runtime cost. Compound assignment (`v += w`) flows through the by-value operator.
 
 ## Common Mistakes
 

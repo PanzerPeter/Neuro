@@ -331,6 +331,6 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 
 ---
 
-**Last Updated**: 2026-07-19
-**Version**: Phase 1 (Core Language) in progress — 1A–1F complete, 1G next (v1.63.0)
+**Last Updated**: 2026-07-25
+**Version**: Phase 1 (Core Language) in progress — 1A–1F complete, 1G next (v1.63.1)
 **Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.9.0

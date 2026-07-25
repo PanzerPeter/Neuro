@@ -9,7 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
----
+### Added
+- `tests`: `examples/showcase/scan_guard.nr` — deterministic `Drop` and labeled loop breaks
+  had showcase coverage nowhere, so both were only ever exercised in isolation. The new
+  program runs two `Drop` guards over a shared `&mut i32` while a labeled `break` exits two
+  nested loops at once, asserting the destructors still fire on that path, and combines it
+  with a `Copy` struct + `&self` method, array indexing, and `match` range patterns.
+- `tests`: the architecture tests now cover `mlir-backend` and `neuro-hir`, which were
+  absent from every slice list and so were never checked for cross-slice imports or a
+  present `CONTEXT.md`.
+
+### Fixed
+- `docs`: corrected claims that no longer matched the compiler. Operator overloading was
+  documented as unsupported, trait bounds as unenforced, turbofish as unavailable, and
+  generics/higher-order functions as unimplemented — all have shipped. Struct return types
+  are now described accurately (rejected for free functions, allowed for associated
+  functions and methods), as is consuming `self` (rejected only on non-`Copy` structs).
+- `docs`: the quick-start feature summary was frozen at sub-phase 1D and omitted the type
+  system, generics, traits, dispatch, closures and ownership; the README binary path in the
+  usage example pointed at the wrong directory.
 
 ## [1.63.1] - 2026-07-25
 
