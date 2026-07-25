@@ -74,6 +74,21 @@ pub fn lower_program(program: &HirProgram) -> Result<String, MlirError> {
                     module.body().append_operation(op);
                 }
             }
+            HirItem::Closure(closure) => {
+                // A lifted closure is an ordinary function whose implicit first
+                // parameter is the captured-environment pointer, matching the
+                // LLVM backend's calling convention for `__closure_N`.
+                let mut params: Vec<HirType> = vec![environment_type(&closure.name)];
+                params.extend(closure.params.iter().map(|p| p.ty.clone()));
+                let op = declare_function(
+                    &context,
+                    location,
+                    &closure.name,
+                    &params,
+                    &closure.return_type,
+                )?;
+                module.body().append_operation(op);
+            }
             // Structs, enums, constants, and traits carry no callable surface; a
             // trait item is only a vtable slot order, and its methods reach
             // the module through the implementors' `impl` blocks. The scaffold
@@ -103,6 +118,16 @@ fn receiver_type(type_name: &str, self_param: &Option<HirSelfParam>) -> HirType 
             mutable: true,
         },
         _ => HirType::Struct(type_name.to_string()),
+    }
+}
+
+/// The HIR type of a closure's implicit environment parameter: a borrow of the
+/// per-closure capture record. Like the method receiver it lowers to an opaque
+/// pointer in the scaffold; naming the struct keeps the intent readable.
+fn environment_type(closure_name: &str) -> HirType {
+    HirType::Reference {
+        inner: Box::new(HirType::Struct(format!("{closure_name}_env"))),
+        mutable: false,
     }
 }
 
@@ -188,7 +213,7 @@ fn map_type<'c>(context: &'c Context, ty: &HirType) -> Result<Type<'c>, MlirErro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neuro_hir::{HirFunction, HirImpl, HirMethod, HirParam};
+    use neuro_hir::{HirCapture, HirClosure, HirFunction, HirImpl, HirMethod, HirParam};
     use shared_types::Span;
 
     fn span() -> Span {
@@ -253,6 +278,35 @@ mod tests {
         assert!(
             ir.contains("!llvm.ptr"),
             "expected the receiver pointer type:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn lowers_lifted_closure_with_environment_pointer() {
+        // |x: i32| -> i32 { x + n }, lifted with `n` captured.
+        let program = HirProgram {
+            items: vec![HirItem::Closure(HirClosure {
+                name: "__closure_0".to_string(),
+                captures: vec![HirCapture {
+                    name: "n".to_string(),
+                    ty: HirType::I32,
+                }],
+                params: vec![param("x", HirType::I32)],
+                return_type: HirType::I32,
+                body: vec![],
+                span: span(),
+            })],
+        };
+
+        let ir = lower_program(&program).expect("scaffold should produce a verifiable module");
+        assert!(
+            ir.contains("@__closure_0"),
+            "expected the lifted closure symbol:\n{ir}"
+        );
+        // The environment pointer is prepended to the user-facing parameters.
+        assert!(
+            ir.contains("(!llvm.ptr, i32) -> i32"),
+            "expected the environment pointer as first parameter:\n{ir}"
         );
     }
 

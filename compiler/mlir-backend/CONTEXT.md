@@ -45,9 +45,12 @@ prefix must include MLIR (`mlir-c` headers + `libMLIR*`); Arch's stock `llvm20`
 omits MLIR, so build LLVM 20 with `-DLLVM_ENABLE_PROJECTS=mlir`.
 
 `lower_program` registers all dialects, then maps each top-level `HirItem`:
-free functions and `impl` methods become `func.func` *declarations* (empty region,
-private visibility — external symbols, not definitions); structs and constants are
-skipped. HIR types map to MLIR scalars (`i8`–`i64`, `i1` for `bool`, `i32` for
+free functions, `impl` methods, and lifted closures become `func.func`
+*declarations* (empty region, private visibility — external symbols, not
+definitions); structs and constants are skipped. A lifted closure
+(`HirItem::Closure`, symbol `__closure_N`) declares its captured-environment
+pointer as an implicit first parameter ahead of the user-facing ones, matching the
+LLVM backend's calling convention. HIR types map to MLIR scalars (`i8`–`i64`, `i1` for `bool`, `i32` for
 `char`, `f16`/`bf16`/`f32`/`f64`), and every aggregate / reference / string type
 — including the tuple type `(T1, T2, ...)` and the enum type — maps
 to an opaque `!llvm.ptr` until real tensor and struct lowering lands (Phase 2+).
