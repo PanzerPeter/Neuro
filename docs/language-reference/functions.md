@@ -73,7 +73,9 @@ func complex(a: i32, b: i32, c: i32, d: i32) -> i32 {
 
 ### Parameter Passing
 
-In Phase 1, all parameters are passed by value (copied):
+A parameter of scalar type is passed by value (copied). Reference parameters (`&T` / `&mut T`)
+pass a borrow instead — see [Borrows](types.md); a non-`Copy` value passed by value is *moved*
+rather than copied.
 
 ```neuro
 func modify(x: i32) -> i32 {
@@ -582,7 +584,7 @@ func right() -> i32 {
 }
 ```
 
-## Future Features (Phase 1+)
+## Not Yet Implemented
 
 ### Default Parameters
 
@@ -596,7 +598,7 @@ func greet(name: string, greeting: string = "Hello") -> string {
 ### Named Arguments
 
 ```neuro
-// Not yet implemented
+// Not yet implemented (sub-phase 1H)
 greet(name="Alice", greeting="Hi")
 ```
 
@@ -609,22 +611,12 @@ func sum(values: ...i32) -> i32 {
 }
 ```
 
-### Higher-Order Functions
+### Spread / Variadic Call Sites
 
 ```neuro
-// Phase 1: closures and function types
-func apply(f: fn(i32) -> i32, x: i32) -> i32 {
-    f(x)
-}
-```
-
-### Generic Functions
-
-```neuro
-// Phase 1: generics
-func identity<T>(x: T) -> T {
-    x
-}
+// Not yet implemented (Phase 7)
+val args = [1, 2, 3]
+sum(...args)
 ```
 
 ## Panic Builtins
@@ -694,16 +686,14 @@ func main() -> i32 {
 }
 ```
 
-**Type-argument inference.** Type arguments are inferred from the call's value arguments — you do
-not write them explicitly. Every type parameter must therefore appear in at least one parameter
-so it can be inferred (a parameter used only in return position needs explicit type arguments,
-which are not yet supported).
+**Type-argument inference.** Type arguments are inferred from the call's value arguments where
+possible. A type parameter that appears only in return position cannot be inferred and must be
+supplied explicitly with a turbofish (`identity::<i32>(x)`).
 
-**What a generic body may do.** Because trait bounds are not yet enforced (the trait system is a
-separate, later feature), the body of a generic function may use only operations valid for *any*
-type: binding a value, returning it, passing it to another function, and building or observing
-tuples. Operations that need a known concrete type — arithmetic, comparison, field access, method
-calls — are rejected on a bare type parameter:
+**What a generic body may do.** On an *unbounded* type parameter the body may use only operations
+valid for *any* type: binding a value, returning it, passing it to another function, and building
+or observing tuples. Operations that need a known concrete type — arithmetic, comparison, field
+access, method calls — are rejected on a bare type parameter:
 
 ```neuro
 func bad<T>(a: T, b: T) -> T {
@@ -711,8 +701,17 @@ func bad<T>(a: T, b: T) -> T {
 }
 ```
 
-**Bounds.** A bound may be written (`func f<T: Ord + Eq>(...)`) and parses for forward
-compatibility, but it is **not enforced** yet.
+**Bounds.** A trait bound (`func f<T: Shape>(x: &T)`) is **enforced**: the bound's methods become
+callable on the type parameter inside the body, and a type argument that does not implement the
+trait is rejected at the call site.
+
+```neuro
+func scaled_area<T: Shape>(s: &T, factor: i32) -> i32 {
+    s.area() * factor       // dispatched through the `Shape` bound
+}
+
+// error: type argument `NoImpl` for 'T' does not implement required trait 'Shape'
+```
 
 **Restrictions (this phase).** Type arguments are restricted to `Copy` types. Generic structs and
 `impl` blocks are supported too (see [Structs](structs.md#generic-structs-and-impls)).

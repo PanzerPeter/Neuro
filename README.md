@@ -120,7 +120,7 @@ Phase 1 (Core Language) sub-phases 1A–1F are complete — generic functions, s
 
 ### Current Memory Model
 
-> **⚠️ Alpha Memory Warning — no ownership system yet**
+> **⚠️ Alpha Memory Warning — ownership landed, heap types have not**
 >
 > Stack-allocated values (integers, booleans, structs with primitive fields) are reclaimed automatically on function return via LLVM `alloca`. String literals are emitted into read-only program memory (`.rodata`) and consume no heap, so a program that only reads literal strings does not leak today.
 >
@@ -130,7 +130,7 @@ Phase 1 (Core Language) sub-phases 1A–1F are complete — generic functions, s
 >
 > If memory safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
 
-String fat pointers, move-by-default (use-after-move detection), the `Copy` trait, immutable borrows (`&T`), mutable borrows (`&mut T` with the `*` deref operator), flow-sensitive borrow exclusivity (the `&`/`&mut` aliasing rules), lifetime elision for returned references, `&mut self` methods (in-place receiver mutation), and deterministic `Drop` (scope-exit destructors) have already landed; the remaining work — explicit lifetime annotations (scheduled with generics in 1F) and the growable runtime-string / owning-collection heap types (1G) — is tracked in the roadmap.
+String fat pointers, move-by-default (use-after-move detection), the `Copy` trait, immutable borrows (`&T`), mutable borrows (`&mut T` with the `*` deref operator), flow-sensitive borrow exclusivity (the `&`/`&mut` aliasing rules), lifetime elision for returned references, explicit lifetime annotations (landed in 1F), `&mut self` methods (in-place receiver mutation), and deterministic `Drop` (scope-exit destructors) have already landed; the remaining work — the growable runtime-string and owning-collection heap types (1G) — is tracked in the roadmap.
 
 ---
 
@@ -326,8 +326,8 @@ cargo run -p neurc -- check examples/basics/hello.nr
 # Compile to a native executable
 cargo run -p neurc -- compile examples/basics/factorial.nr
 
-# Run the compiled binary
-./examples/factorial
+# Run the compiled binary (emitted next to the source file)
+./examples/basics/factorial
 
 # After cargo install --path compiler/neurc:
 neurc compile examples/basics/factorial.nr
