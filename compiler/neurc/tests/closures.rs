@@ -1,4 +1,4 @@
-// End-to-end tests for closures and lambdas (§3.12): closure literals with
+// End-to-end tests for closures and lambdas: closure literals with
 // Copy-by-value capture, direct calls, and higher-order functions.
 mod common;
 use common::CompileTest;

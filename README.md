@@ -8,9 +8,9 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-1011%20passing-success.svg)](#)
+[![CI](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml)
 
-**Status:** Alpha — Phase 1 (Core Language) in progress · sub-phases 1A–1F complete (MVP, syntax & semantics, ownership/borrow checker, HIR & MLIR plumbing, type system, generics/traits/dispatch/closures) · 1G (error handling, modules & prelude) underway — `Option` / `Result` have landed · → v2.0.0 when Phase 1 completes
+**Status:** Alpha — Phase 1 (Core Language) in progress; completing it ships v2.0.0. Per-sub-phase status lives in one place: the [Quick Roadmap](#quick-roadmap).
 
 ---
 
@@ -23,7 +23,7 @@
 - [Usage](#usage)
 - [Language Syntax](#language-syntax)
 - [Architecture](#architecture)
-- [Roadmap](#roadmap)
+- [Quick Roadmap](#quick-roadmap)
 - [Development](#development)
 - [VSCode Extension](#vscode-extension)
 - [File Extensions](#file-extensions)
@@ -88,50 +88,32 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 (Core Language) sub-phases 1A–1F are complete — generic functions, structs, and impls have landed, plus const generics, `where` clauses, turbofish, explicit lifetime annotations, **trait declarations**, **operator overloading**, **static & dynamic dispatch** (`impl Trait` / `dyn Trait`), and **closures & lambdas**. Sub-phase 1G has begun with **generic enums** and the standard-library **`Option<T>` / `Result<T, E>`**. The following features are fully implemented and tested (**1011 Tests Passing**):
+Every row below is implemented, tested, and usable today. Depth lives elsewhere: [docs/](docs/) for reference material, [CHANGELOG.md](CHANGELOG.md) for the per-release detail, and the [Quick Roadmap](#quick-roadmap) for what is still ahead.
 
-| Feature | Details |
+| Feature | Summary |
 |---|---|
-| **Static Typing + Inference** | All integer types (i8–u64), f16/bf16/f32/f64, bool, char, string; explicit `as` casting; contextual literal inference; literal type suffixes (`42i64`, `1.5f32`) and digit separators (`1_000_000`) |
-| **Functions** | Parameters, explicit and expression-based implicit returns, recursion, forward references |
-| **Generics** | Generic functions `func identity<T>(x: T) -> T`, generic structs `struct Pair<T, U>`, and generic inherent impls `impl<T> Wrapper<T>`; monomorphized (one specialized copy per concrete type-argument set, zero runtime cost). Type arguments are inferred from value/field arguments or written explicitly (`Pair<i32, f64>`). Trait bounds `<T: Trait>` are enforced; type arguments restricted to `Copy` this phase |
-| **Const generics, `where` & turbofish** | Compile-time value parameters `func sum<const N: u32>(a: [i32; N])` / `struct Buffer<T, const CAP: u32> { data: [T; CAP] }`, usable as array lengths and values, monomorphized per distinct value (zero cost). Inferred from array-argument lengths / struct field values or supplied by a turbofish `identity::<i32>(x)` / `zeros::<4>()`. `where` clauses carry value predicates checked per instantiation (`where N > 0`) plus trait bounds, now enforced |
-| **Traits** | `trait Shape { func area(&self) -> i32; func is_big(&self) -> i32 { ... } }` with required and default (provided) methods; `impl Trait for Type` checked for conformance (missing / mismatched / non-member methods rejected); an omitted default method is inherited, an explicit one overrides it. Trait-bounded generics `func f<T: Shape>(x: &T)` dispatch trait methods on the type parameter and are checked at the call site. Fully monomorphized and erased — no vtable, zero runtime cost. Associated types land later in 1F |
-| **Static & Dynamic Dispatch** | Two ways to satisfy a trait bound. `impl Trait` is anonymous-generic sugar in argument position (`func train(m: &impl Model)`) and return position (`func make() -> impl Shape`) — monomorphized, zero runtime cost; each `impl Trait` parameter is its own anonymous type parameter, so one call may bind two different types. `dyn Trait` is a runtime trait object behind `&dyn Trait` / `&mut dyn Trait`: one function body serves every implementor, dispatching through a per-(trait, type) **vtable**. Object safety is enforced — every method must take `&self`/`&mut self` |
-| **Operator Overloading** | Operators on a `Copy` struct are sugar for method calls: implement the built-in `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Neg`/`Not`/`BitAnd`/`BitOr`/`BitXor`/`Shl` (declaring `type Output = T`) or `PartialEq`/`Comparable` (supertrait: `Comparable` requires `PartialEq`) to get `+ - * / % -a ~a & \| ^ <<` and `== != < <= > >=`. The user writes only the `impl` (these are compiler-known traits); each operator desugars to its method and is monomorphized to a plain call — no vtable. Compound assignment (`v += w`) flows through the by-value operator |
-| **Closures & Lambdas** | Anonymous callables `\|x: i32\| x * x`, `\|x: i32\| -> i32 { ... }`, `\|\| expr`, and `move \|x\| ...`; capture Copy free variables by value; function type `(T1, ...) -> R`; higher-order functions (`func apply(v, f: (i32) -> i32)`). Each closure compiles to a `{ fn_ptr, env_ptr }` value with no heap allocation. Parameter-type inference and generic higher-order functions come later |
-| **Control Flow** | if/else/elif, `while`, `loop` (incl. as a value expression), range-for (`0..n`, `0..=n`), `break`/`continue` with value-carrying breaks and loop labels |
-| **Variables & Constants** | `val` (immutable) / `mut` (mutable) with type-safe reassignment; module- and function-scope `const` emitted as LLVM globals |
-| **Structs & Methods** | Definition, instantiation, field-init shorthand, functional update (`..base`), field read/mutation; `impl` blocks with `&self` / `&mut self` instance methods and `TypeName::func` associated functions |
-| **Arrays** | Fixed-size `[T; N]` of `Copy` scalars: literals with inference, index read/write, `.len()`, `for x in arr` / `for x in &arr`; debug-build out-of-bounds panic |
-| **Tuples** | Anonymous `(T1, T2, ...)` of `Copy` elements: literals, `.0`/`.1` index access, destructuring `val (a, b) = t` with `_` wildcards and nesting; usable as function parameters and return types |
-| **Destructuring** | Struct `val Point { x, y } = p` (field-name binds) and array `val [a, b, c] = arr` / `val [first, ..rest] = arr` (positional, with a trailing `..rest` remainder or bare `..`); arity-checked, nests, and works with `mut` |
-| **Enums** | Tagged unions `enum E { A, B(i32), C { x: f64 } }` with unit, tuple, and struct-field variants; construct via `E::A` / `E::B(1)` / `E::C { x: 1.0 }`; usable as bindings, function parameters/returns, and struct fields; `Copy`. Scalar payloads only. **Generic enums** `enum Slot<T> { Filled(T), Vacant }` monomorphize per type-argument set (one distinct tagged union each, zero runtime cost); arguments come from the expected type, the payload, or the enclosing return type |
-| **`Option` / `Result`** | `Option<T> { Some(T), None }` and `Result<T, E> { Ok(T), Err(E) }` from an implicit prelude — available in every program without a declaration, and shadowed by a local type of the same name. Ordinary generic enums: construct `Option::Some(3)` / `Result::Err(1)`, deconstruct with `match`, pass and return across functions and struct fields. The `?` / `??` operators and collections are still to come in 1G |
-| **Pattern Matching** | `match` as an exhaustive expression: enum variant deconstruction with payload binding (`E::B(n)`, `E::C { x }`), literal / `\|` or / `a..=b` range / `_` wildcard patterns, `if` guards; usable as a value. Scrutinee is enum/integer/`char`/`bool`; exhaustiveness enforced |
-| **Newtypes** | `newtype Meters = i32`: a distinct nominal type wrapping an inner type — not interchangeable with it, unlike a `type` alias; construct `Meters(30)`, read the inner value with `.0`; forwards `Copy`/`Clone`, usable as binding, parameter, return, and struct field. Inner type restricted to `Copy` |
-| **Move Semantics** | Move-by-default for non-`Copy` values; use-after-move is a compile error; `.clone()` opts out; `@derive(Copy, Clone)` on structs |
-| **Deterministic `Drop`** | `impl Drop for T { func drop(&mut self) }` runs a destructor at scope exit, in reverse declaration order, on normal exit only (never during a panic); a moved-out value is dropped exactly once; a `Copy` type may not implement `Drop` |
-| **Borrows** | Immutable `&T` and mutable `&mut T` references with the `*` deref operator; flow-sensitive borrow exclusivity (shared XOR mutable) enforced at compile time |
-| **Lifetimes** | Returned-reference lifetime elision (returning a borrow of a local or by-value parameter is rejected as it would dangle), plus **explicit lifetime annotations** `func longest<'a>(a: &'a string, b: &'a string) -> &'a string`: declared in the generic list, validated for well-formedness, then erased — `&'a T` is the same type as `&T`, zero runtime cost |
-| **Strings** | Fat-pointer `string` with full escape support; `&string` borrowed slices; byte-level `==`/`!=`; `+` concatenation (heap-allocated new string); builtin `.len()` / `.clone()` / `.slice(a..b)` (zero-copy sub-slice, panics on out-of-bounds or mid-codepoint boundary) |
-| **Panic Runtime** | `panic(msg)`, `assert(cond)`, `unreachable()` — print a located diagnostic to stderr and abort (no unwinding) |
-| **LLVM Backend + CLI** | Native executable generation via inkwell 0.9.0 (LLVM 20); `neurc check` (type-check) and `neurc compile` (native binary) |
-| **…and many more** | Half-precision `f16`/`bf16` scalars, `char`, type aliases, integer-overflow traps (debug) / wrapping (release), bitwise operators, compound assignment, if/block-as-value expressions, builtin integer methods (`wrapping_*`, `saturating_*`, `.shr`), attributes & lints, `unsafe` blocks. See [CHANGELOG.md](CHANGELOG.md) and [docs/](docs/) for the full list |
+| **Types & inference** | `i8`–`u64`, `f16`/`bf16`/`f32`/`f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, type aliases |
+| **Functions & control flow** | Recursion, forward refs, implicit returns; `if`/`elif`/`else`, `while`, `loop`, range-`for`, labelled `break`/`continue`, block-as-value |
+| **Generics** | Generic functions, structs, and impls plus const generics, `where` clauses, and turbofish — fully monomorphized, zero runtime cost |
+| **Traits & dispatch** | Required and default methods, operator traits, `impl Trait` (static) and `dyn Trait` (vtable) dispatch with object-safety checks |
+| **Closures & lambdas** | `\|x: i32\| x * x`, `move` closures, `(T) -> R` function types, higher-order functions; compiled to `{ fn_ptr, env_ptr }`, no heap |
+| **Structs & methods** | Fields, shorthand init, functional update `..base`, `impl` blocks with `&self` / `&mut self` methods and associated functions |
+| **Enums & newtypes** | Unit, tuple, and struct-field variants; generic enums monomorphized per type argument; `newtype` for distinct nominal wrappers |
+| **Arrays & tuples** | Fixed-size `[T; N]` with `.len()` and iteration; anonymous tuples with `.0` access — both over `Copy` elements |
+| **Pattern matching** | Exhaustive `match` as an expression: variant deconstruction, literal / or / range / wildcard patterns, `if` guards |
+| **Destructuring** | Struct `val Point { x, y } = p` and array `val [a, ..rest] = arr`, arity-checked, nesting, `mut`-compatible |
+| **`Option` / `Result`** | `Option<T>` and `Result<T, E>` from an implicit prelude — ordinary generic enums, available without a declaration |
+| **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop`, `&T` / `&mut T` with flow-sensitive exclusivity, lifetime elision and annotations |
+| **Strings** | Fat-pointer `string` with escapes, `&string` slices, `==`, `+` concatenation, `.len()` / `.clone()` / `.slice(a..b)` |
+| **Toolchain** | Native binaries via inkwell 0.9 / LLVM 20; `neurc check` and `neurc compile`; `panic` / `assert` / `unreachable` runtime |
 
 ### Current Memory Model
 
-> **⚠️ Alpha Memory Warning — ownership landed, heap types have not**
+> **⚠️ Alpha memory warning.** Stack values are reclaimed on return and string literals live in `.rodata`, so neither leaks. Move semantics, borrows, and deterministic `Drop` have landed — but `+` string concatenation still leaks its heap buffer, because the growable-string and owning-collection heap types have not.
 >
-> Stack-allocated values (integers, booleans, structs with primitive fields) are reclaimed automatically on function return via LLVM `alloca`. String literals are emitted into read-only program memory (`.rodata`) and consume no heap, so a program that only reads literal strings does not leak today.
+> This block is removed once those heap types land in sub-phase 1G. Until then, do not assume memory-safety semantics beyond what the table above claims.
 >
-> The ownership system is now substantially in place: move-by-default, borrows, and **deterministic `Drop`** (user destructors run at scope exit) have landed. What remains is broader heap support — the growable-string builder and owning collections — plus full lifetime inference. Until those land, `+` string concatenation still leaks its heap buffer (it allocates a buffer no `Drop` impl yet frees), and runtime string builders do not exist.
->
-> The ownership tracker, borrow checker, and deterministic destruction are sub-phase **1C** — now essentially complete (one flagged item, growable runtime strings, remains). Do not assume memory-safety semantics beyond what has actually landed.
->
-> If memory safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
-
-String fat pointers, move-by-default (use-after-move detection), the `Copy` trait, immutable borrows (`&T`), mutable borrows (`&mut T` with the `*` deref operator), flow-sensitive borrow exclusivity (the `&`/`&mut` aliasing rules), lifetime elision for returned references, explicit lifetime annotations (landed in 1F), `&mut self` methods (in-place receiver mutation), and deterministic `Drop` (scope-exit destructors) have already landed; the remaining work — the growable runtime-string and owning-collection heap types (1G) — is tracked in the roadmap.
+> If memory-safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
 
 ---
 
@@ -415,20 +397,55 @@ func main() -> i32 {
 }
 ```
 
-### Planned (Phase 2+): Tensor Types
+### Closures and Higher-Order Functions
 
-Tensor types and compile-time shape verification require the MLIR lowering infrastructure planned for Phase 2. Shape constraints (`[784, 128]`) are encoded as static type parameters and verified at compile time via the MLIR type system — this is not a simple feature and depends on both the `melior` bindings (landed) and the typed High-Level IR (`neuro-hir`, landed in sub-phase 1D).
+Verbatim from [examples/showcase/closures.nr](examples/showcase/closures.nr) — it compiles, links, and exits with code 90.
 
 ```neuro
-// Static tensor — shape verified at compile time (Phase 2)
-val weights: Tensor<f32, [784, 128]> = ...
+// Apply `f` to each element of a 4-element array and sum the results.
+func map_sum(xs: [i32; 4], f: (i32) -> i32) -> i32 {
+    mut total: i32 = 0
+    mut i: i32 = 0
+    while i < 4 {
+        total += f(xs[i])
+        i += 1
+    }
+    return total
+}
 
-// Automatic differentiation via Enzyme MLIR (Phase 3)
-@grad(model) {
-    val loss = model.forward(batch).cross_entropy(labels)
-    model.backward(loss)
+struct Scaler {
+    factor: i32
+}
+
+impl Scaler {
+    func apply(&self, x: i32) -> i32 {
+        x * self.factor
+    }
+}
+
+func main() -> i32 {
+    val data: [i32; 4] = [1, 2, 3, 4]
+
+    // A closure capturing a Copy local (`bias`) by value.
+    val bias = 10
+    val biased = map_sum(data, |x: i32| x + bias)   // 11+12+13+14 = 50
+
+    // A `move` closure with a block body and early return.
+    val scale = 3
+    val scaled = map_sum(data, move |x: i32| -> i32 {
+        val y = x * scale
+        return y
+    })                                              // 3+6+9+12 = 30
+
+    // A struct method still resolves alongside closures.
+    val s = Scaler { factor: 2 }
+    val doubled = s.apply(5)                         // 10
+
+    biased + scaled + doubled                        // 50 + 30 + 10 = 90
 }
 ```
+
+Every runnable program in [examples/showcase/](examples/showcase/) combines several features at once and is pinned to an expected exit code in [examples/expected.txt](examples/expected.txt). Tensor types, `@grad`, and GPU kernels are not shown here because they do not exist yet — see the [Quick Roadmap](#quick-roadmap).
 
 ---
 
@@ -569,7 +586,7 @@ vsce package
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture guidelines, coding standards, and the pull request process.
 
-The project is in early alpha — breaking changes are expected. Contributions should focus on **Phase 1 (Core Language)** items — currently sub-phase **1G** (error handling, modules & prelude).
+The project is in early alpha — breaking changes are expected. Contributions should focus on **Phase 1 (Core Language)**; the [Quick Roadmap](#quick-roadmap) marks which sub-phase is currently open.
 
 ---
 

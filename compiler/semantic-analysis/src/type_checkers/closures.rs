@@ -1,4 +1,4 @@
-//! Closure literal type-checking and capture analysis (§3.12).
+//! Closure literal type-checking and capture analysis.
 //!
 //! A closure is type-checked as an anonymous callable of type
 //! [`Type::Function`]. Free variables referenced in the body that resolve to an

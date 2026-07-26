@@ -1,4 +1,4 @@
-// Showcase — closures and higher-order functions (§3.12).
+// Showcase — closures and higher-order functions.
 //
 // Integration example combining the new closures with several prior features:
 //   · a higher-order function taking a `(i32) -> i32` closure parameter

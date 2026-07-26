@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.64.1] - 2026-07-26
+
+### Changed
+- `docs`: README trimmed to a shop window. The "Current Capabilities" table went from
+  30 rows — several paragraph-length — to 14 one-line rows grouped by area; per-feature
+  detail now lives in `docs/` and this changelog. The alpha memory-model warning was cut
+  to three lines and given an explicit removal trigger. The status line no longer
+  enumerates sub-phases: the Quick Roadmap table is the single public statement of
+  progress, and the table of contents anchor that pointed at it was broken and is fixed.
+- `docs`: the speculative `Tensor<f32, [784, 128]>` / `@grad(model)` snippet was replaced
+  with `examples/showcase/closures.nr`, which compiles, links, and exits 90. README code
+  blocks are now sourced from runnable example files only; unimplemented features are
+  described in prose pointing at the roadmap.
+- `ci`: `tools/check_docs_consistency.py` replaced by `tools/check_docs_hygiene.py`. The
+  old gate existed only to keep three hand-written copies of the test total in agreement
+  with each other. The new gate scans every tracked text file and fails on a hard-coded
+  test count, a hard-coded workspace version in prose, a reference to a gitignored
+  local-only path, or an internal spec-section marker.
+- `docs`: the README test-count badge became a CI status badge — the workflow result is
+  the only test claim that cannot go stale. Counts removed from `docs/README.md` and
+  `docs/getting-started/installation.md` (which still said 806).
+
+### Fixed
+- `infra`: stripped internal spec-section markers that the closures work reintroduced
+  into six tracked files. They resolve only against a document that is not published.
+
 ## [1.64.0] - 2026-07-26
 
 ### Added
