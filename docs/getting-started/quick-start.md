@@ -294,7 +294,7 @@ Phase 1 (Core Language) sub-phases 1A–1F are complete; 1G (error handling, mod
 - Type cast: `as` for numeric conversions and bool-to-int
 
 ### Not Yet Implemented (later in Phase 1)
-- `Option` / `Result`, collections, `?` / `??`, module system and imports (1G)
+- Collections, `?` / `??`, module system and imports (1G) — `Option` / `Result` themselves have landed
 - String interpolation, triple-quoted strings, nested comments, named arguments (1H)
 
 ## Common Issues

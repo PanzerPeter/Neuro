@@ -20,6 +20,14 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 - source-location — source span resolution for error display
 
 ## Notes
+- 2026-07-26: Implicit prelude. New `src/prelude.rs` + `src/prelude.nr`: after parsing, both
+  `check_file` and `compile_file` call `prelude::with_prelude`, which parses the built-in
+  `prelude.nr` source (currently `enum Option<T>` and `enum Result<T, E>`) and prepends its items to
+  the program's own. A prelude item whose name the program already declares is dropped, so a local
+  declaration shadows the prelude. The items are ordinary declarations: nothing downstream
+  special-cases `Option` or `Result`. Unqualified names (`Some(x)` without `Option::`) and
+  `@no_prelude` are the module-system item's work and are not part of this.
+
 neurc is the only component permitted to depend on all feature slices. It holds no
 business logic of its own; every decision is delegated to the owning slice.
 The two-step linker strategy (clang on Unix; lld-link / cl.exe on Windows) is

@@ -6,6 +6,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
+mod prelude;
+
 #[derive(Parser)]
 #[command(name = "neurc")]
 #[command(about = "Neuro Programming Language Compiler", long_about = None)]
@@ -105,6 +107,7 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to read file {:?}: {}", path, e))?;
 
     let ast = syntax_parsing::parse(&source).map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
+    let ast = prelude::with_prelude(ast)?;
 
     match semantic_analysis::type_check(&ast) {
         Ok(warnings) => {
@@ -157,6 +160,7 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
     let ast = syntax_parsing::parse(&source)
         .map_err(|e| anyhow::anyhow!("Parse error: {}", e))
         .context("Failed to parse source file")?;
+    let ast = prelude::with_prelude(ast).context("Failed to load the compiler prelude")?;
 
     log::debug!("Type checking...");
     let warnings = semantic_analysis::type_check(&ast)

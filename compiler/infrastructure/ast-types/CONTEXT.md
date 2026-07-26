@@ -28,6 +28,14 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-07-26: Generic enums. `EnumDef` gains `generics: Vec<GenericParam>` (empty for a plain
+  enum), so `enum Option<T> { Some(T), None }` and `enum Result<T, E> { Ok(T), Err(E) }` are
+  ordinary declarations. A generic enum is a template: semantic-analysis and hir-lowering
+  monomorphize it into one distinct nominal enum per set of type arguments. A generic-enum *type*
+  annotation reuses `Type::Generic { name, args }` (the same node a generic struct application
+  uses); construction and patterns reuse the existing `Expr::Path` / `Expr::Call(Path)` /
+  `Expr::EnumStructLiteral` / `Pattern::Enum` nodes with the base name. Enums carry no
+  `lifetimes` field — the parser rejects a lifetime parameter on an enum.
 - 2026-07-24: Closures and lambdas. Added `Expr::Closure { params, ret, body, is_move, span }`
   (a closure literal `|p| body` / `|p| -> R { body }` / `move |p| ...`) and the `ClosureParam
   { name, ty, span }` struct, plus `Type::Function { params, ret, span }` for the closure/function

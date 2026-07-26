@@ -32,6 +32,9 @@ pub enum ParseError {
     #[error("type alias '{name}' is defined in terms of itself (cyclic alias)")]
     CyclicTypeAlias { name: String, span: Span },
 
+    #[error("enum '{name}' may not declare lifetime parameters; enum payloads are restricted to scalar types, so a borrowed payload has nothing to annotate")]
+    EnumLifetimeParam { name: String, span: Span },
+
     #[error("lexical error: {0}")]
     LexError(#[from] LexError),
 }

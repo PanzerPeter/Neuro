@@ -19,7 +19,21 @@ pub(crate) struct TypeChecker {
     struct_defs: HashMap<String, Vec<(String, Type)>>,
     /// Enum definitions: name → ordered list of variants. The order is the
     /// declaration order, which is also the discriminant order used by codegen.
+    ///
+    /// A generic enum's template is also kept here under its base name, with
+    /// [`Type::Generic`] placeholders for its payloads, so construction sites can infer
+    /// the type arguments from the payload shapes. The base name is not a usable type.
     enum_defs: HashMap<String, Vec<EnumVariantInfo>>,
+    /// Generic enum templates, keyed by name. A generic enum is NOT a usable type
+    /// on its own; each distinct set of type arguments is monomorphized into a distinct
+    /// nominal enum registered in `enum_defs` on demand.
+    generic_enums: HashMap<String, ast_types::EnumDef>,
+    /// Monomorphized enum instance name → the generic enum it came from and the type
+    /// arguments it was built with. Lets a construction or pattern written with the base
+    /// name (`Option::Some`) resolve against a concrete instance (`Option<i32>`), and
+    /// lets an enclosing return type supply arguments a construction's payload leaves
+    /// undetermined.
+    enum_instances: HashMap<String, (String, Vec<Type>)>,
     /// Newtype definitions: name → resolved inner type. A newtype is a
     /// distinct nominal type wrapping this inner type; construction is `Name(value)`
     /// and the inner value is read via `.0`.
@@ -163,6 +177,7 @@ pub(crate) struct TraitMethodSig {
 /// A resolved enum variant: its name, construction form, and ordered payload
 /// fields. Each field carries an optional name (`Some` for struct variants, `None`
 /// for tuple variants) and its resolved type.
+#[derive(Clone)]
 pub(crate) struct EnumVariantInfo {
     pub(crate) name: String,
     pub(crate) form: VariantForm,
@@ -203,6 +218,8 @@ impl TypeChecker {
             functions: HashMap::new(),
             struct_defs: HashMap::new(),
             enum_defs: HashMap::new(),
+            generic_enums: HashMap::new(),
+            enum_instances: HashMap::new(),
             newtype_defs: HashMap::new(),
             copy_structs: HashSet::new(),
             clone_structs: HashSet::new(),
@@ -305,6 +322,59 @@ impl TypeChecker {
         self.newtype_defs.get(name)
     }
 
+    /// Whether `name` is a registered generic enum template — usable as a type only
+    /// with type arguments.
+    pub(crate) fn is_generic_enum(&self, name: &str) -> bool {
+        self.generic_enums.contains_key(name)
+    }
+
+    /// The generic parameter names of an enum template, in declaration order (which is
+    /// also the type-argument order).
+    pub(crate) fn generic_enum_params(&self, name: &str) -> Vec<String> {
+        self.generic_enums
+            .get(name)
+            .map(|def| def.generics.iter().map(|g| g.name.name.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// The generic enum a monomorphized instance was built from, if `name` is an
+    /// instance. A non-generic enum has no base.
+    pub(crate) fn enum_instance_base(&self, name: &str) -> Option<&str> {
+        self.enum_instances.get(name).map(|(base, _)| base.as_str())
+    }
+
+    /// The type arguments of the enclosing function's return type, when it is an
+    /// instance of the generic enum `base`.
+    ///
+    /// This is the fallback context for a construction that sits in a position no
+    /// expected type reaches — a tail `if` branch or a bare statement — where the
+    /// declared return type is the only thing that can say what `Result::Err(1)` means.
+    /// Arguments the payload does determine still win; only the undetermined ones are
+    /// taken from here.
+    pub(crate) fn enum_return_type_args(&self, base: &str) -> Option<Vec<Type>> {
+        let Some(Type::Enum(name)) = &self.current_function_return_type else {
+            return None;
+        };
+        let (instance_base, args) = self.enum_instances.get(name)?;
+        (instance_base == base).then(|| args.clone())
+    }
+
+    /// The concrete instance a construction or pattern written with a generic enum's
+    /// base name refers to, taken from the surrounding expected type.
+    ///
+    /// Returns the instance name when `expected` is an instance of `base`; `None`
+    /// otherwise, which leaves the caller to infer the arguments from the payload.
+    pub(crate) fn enum_instance_from_expected(
+        &self,
+        base: &str,
+        expected: Option<&Type>,
+    ) -> Option<String> {
+        let Some(Type::Enum(name)) = expected else {
+            return None;
+        };
+        (self.enum_instance_base(name) == Some(base)).then(|| name.clone())
+    }
+
     /// Look up a variant of an enum by name, returning its resolved info.
     pub(crate) fn lookup_enum_variant(
         &self,
@@ -338,7 +408,11 @@ impl TypeChecker {
         // struct field type (or vice versa) resolves regardless of source order.
         for item in items {
             if let Item::Enum(def) = item {
-                self.register_enum(def);
+                if def.generics.is_empty() {
+                    self.register_enum(def);
+                } else {
+                    self.register_generic_enum(def);
+                }
             }
         }
 

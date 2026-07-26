@@ -18,6 +18,20 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
 - thiserror — `LoweringError` derivation
 
 ## Notes
+- 2026-07-26: Generic enums (`Option<T>` / `Result<T, E>`). New `Lowerer` state: `generic_enums`
+  (base -> template), `enum_instance_base` / `enum_instance_args` (instance -> base + arguments),
+  and the `mono_enum_pending` worklist, drained in `lower_program` ahead of the struct worklist. A
+  generic `Item::Enum` is registered as a template and never lowered directly;
+  `instantiate_generic_enum` resolves its variants under the argument substitution and emits one
+  ordinary `HirItem::Enum` per instance, named by `mangle_struct_instance` (`Opt_g_i32`), so the
+  backends stay generic-unaware. `resolve_type` maps a `Type::Generic` application naming a generic
+  enum to `HirType::Enum(<instance>)`. Construction mirrors the checker: the instance comes from the
+  expected type, else the payload is unified against the template (`unify_ast_hir`) and any
+  remaining parameter is taken from the enclosing return instance. To make that fallback available,
+  `lower_body` now tracks the body's declared return type in `current_return` (previously left at
+  `Void`), which also gives a `return` operand its contextual type. An enum pattern written with a
+  generic base resolves against the scrutinee's instance (`pattern_enum_name`) for both its tag test
+  and its payload bindings.
 - 2026-07-24: Closures and lambdas. New `closures.rs`: `lower_closure` lifts each `Expr::Closure`
   to a `HirItem::Closure` (named `__closure_N` via a `closure_counter`; the `__` prefix is a
   reserved generated-symbol marker the checker forbids in user names) collected in `closure_items`

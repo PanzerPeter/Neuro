@@ -11,7 +11,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | Directory        | What it covers                                                         |
 | ---------------- | ---------------------------------------------------------------------- |
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference |
-| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`) |
+| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), `Option<T>` / `Result<T, E>` and generic enums |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`) |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable` |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
@@ -72,6 +72,11 @@ isolation:
   `-` / `==` dispatch to the impl methods, combined with an `&self` method, compound
   assignment (`+=` desugaring through `Add`), a `while` loop, and if-expressions. The
   operators are monomorphized to plain calls — no vtable. Exit `35`.
+- [`showcase/sensor_pipeline.nr`](showcase/sensor_pipeline.nr) — **`Option` / `Result`**: a
+  reading looked up in an array (absent → `Option::None`) and validated (out of range →
+  `Result::Err`), combined with a struct + `impl` methods (`&self`), a borrowed struct parameter
+  (`&Sensor`), a fixed-size array + `for`-in loop, a generic function used at two type arguments,
+  a guarded `match` arm, and compound assignment. Exit `57`.
 - [`showcase/closures.nr`](showcase/closures.nr) — **closures and lambdas**: a
   higher-order `map_sum(xs, f: (i32) -> i32)` applied with a closure literal that
   **captures** an enclosing Copy variable by value, a **`move`** closure with a block

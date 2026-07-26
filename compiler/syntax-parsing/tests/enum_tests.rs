@@ -69,3 +69,40 @@ func main() -> i32 {
     assert_eq!(fields.len(), 1);
     assert_eq!(fields[0].name.name, "radius");
 }
+
+#[test]
+fn parses_generic_enum_parameter_list() {
+    // A generic enum carries its `<T, E>` list; payload annotations name the parameters.
+    let source = r#"
+enum Res<T, E> {
+    Ok(T),
+    Err(E)
+}
+"#;
+    let items = parse(source).expect("program should parse");
+    let Item::Enum(def) = &items[0] else {
+        panic!("expected an enum");
+    };
+    assert_eq!(def.name.name, "Res");
+    let params: Vec<&str> = def.generics.iter().map(|g| g.name.name.as_str()).collect();
+    assert_eq!(params, vec!["T", "E"]);
+    let VariantPayload::Tuple(tys) = &def.variants[0].payload else {
+        panic!("Ok should be a tuple variant");
+    };
+    assert_eq!(tys.len(), 1);
+}
+
+#[test]
+fn plain_enum_has_no_generic_parameters() {
+    let items = parse("enum Color { Red, Green }").expect("program should parse");
+    let Item::Enum(def) = &items[0] else {
+        panic!("expected an enum");
+    };
+    assert!(def.generics.is_empty());
+}
+
+#[test]
+fn generic_enum_rejects_a_lifetime_parameter() {
+    // Payloads are scalars this phase, so there is nothing a lifetime could annotate.
+    assert!(parse("enum Holder<'a, T> { One(T) }").is_err());
+}

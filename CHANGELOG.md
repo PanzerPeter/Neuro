@@ -9,7 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.64.0] - 2026-07-26
+
 ### Added
+- `parser`, `semantic`, `codegen`: **`Option<T>` and `Result<T, E>`.** The standard
+  library's absence and failure types are now available in **every program without a
+  declaration** — the compiler prepends an implicit prelude holding
+  `enum Option<T> { Some(T), None }` and `enum Result<T, E> { Ok(T), Err(E) }`. A program
+  that declares its own `Option` or `Result` shadows the prelude entry. Construct with
+  `Option::Some(3)` / `Option::None` / `Result::Ok(v)` / `Result::Err(e)`, deconstruct with
+  `match`, and pass or return them across functions and struct fields.
+- `parser`, `semantic`, `codegen`: **Generic enums.** An enum may take type parameters
+  (`enum Slot<T> { Filled(T), Vacant }`, `enum Tagged<T, U> { Left(T), Right(U) }`) — the
+  machinery `Option` and `Result` are built from. Each distinct set of type arguments is
+  monomorphized into its own nominal tagged union, so `Slot<i32>` and `Slot<i64>` are
+  different types with their own payload widths and no runtime cost. Type arguments come
+  from the expected type, from the payload (`Slot::Filled(4)` gives `T = i32`), or from the
+  enclosing function's declared return type — the last of which is what makes the common
+  fallible shape work, where a tail `if` branch has no other context:
+  `func divide(a: i32, b: i32) -> Result<i32, i32> { if b == 0 { Result::Err(1) } else { Result::Ok(a / b) } }`.
+  A `match` pattern names the base enum and binds payloads at the scrutinee instance's
+  concrete types.
+  - Diagnostics: a construction no context can complete, a generic enum's bare name used as
+    a type, a wrong type-argument count, and a payload that is not a scalar (e.g.
+    `Option<string>`) each report a clear, located error.
+  - Not yet supported (planned): unqualified variant names (`Some(x)`), which arrive with
+    the module system's prelude imports; the `?` and `??` operators; `impl` blocks on enums,
+    and therefore helper methods such as `.map_err`; non-scalar payloads
+    (`Option<string>`, `Option<Point>`); and lifetime parameters on an enum.
+- `tests`: `examples/types/option_result.nr` (focused walkthrough of both types plus a
+  user-declared generic enum) and `examples/showcase/sensor_pipeline.nr` — a lookup that may
+  find nothing and a validation that may fail, combined with structs + `impl` methods, a
+  borrowed struct parameter, arrays + `for`-in, a generic function used at two type
+  arguments, and a guarded `match` arm.
+
+### Fixed
+- `codegen`: a `return` operand inside a function body was lowered to HIR without its
+  contextual type (the lowering never recorded the body's declared return type), so an
+  unsuffixed integer literal in `return 1` was typed `i32` regardless of the declared
+  return type.
+
+### Added (previously unreleased)
 - `tests`: `examples/showcase/scan_guard.nr` — deterministic `Drop` and labeled loop breaks
   had showcase coverage nowhere, so both were only ever exercised in isolation. The new
   program runs two `Drop` guards over a shared `&mut i32` while a labeled `break` exits two
@@ -19,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   absent from every slice list and so were never checked for cross-slice imports or a
   present `CONTEXT.md`.
 
-### Fixed
+### Fixed (previously unreleased)
 - `docs`: corrected claims that no longer matched the compiler. Operator overloading was
   documented as unsupported, trait bounds as unenforced, turbofish as unavailable, and
   generics/higher-order functions as unimplemented — all have shipped. Struct return types

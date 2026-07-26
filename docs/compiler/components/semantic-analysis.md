@@ -345,7 +345,7 @@ where a later requirement was slotted between two existing ones.
 | Pass | What it does | Why it sits here |
 |---|---|---|
 | 0a | Pre-register newtype *names* (`predeclare_newtype`) | a newtype may appear as a struct field, enum payload, or another newtype's inner before its own declaration |
-| 0 | Register enum definitions | an enum may be a struct field type, and vice versa |
+| 0 | Register enum definitions (generic ones via `register_generic_enum`, which keeps the template under its base name for construction-site inference) | an enum may be a struct field type, and vice versa |
 | 1 | Register struct definitions (generic ones via `register_generic_struct`); record `Copy`/`Clone` derive intent | type names must resolve in method signatures |
 | 1c | Resolve and validate newtype inner types | every nominal name is known by now; enforces the `Copy`-inner rule and rejects cycles |
 | 1b | Validate `@derive(Copy)` — every field of a `Copy` struct is itself `Copy` | runs after 1c so a newtype field reports its real `Copy`-ness |

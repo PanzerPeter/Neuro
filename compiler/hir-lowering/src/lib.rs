@@ -97,7 +97,22 @@ struct Lowerer {
     structs: HashMap<String, Vec<(String, HirType)>>,
     /// Enum name → ordered variants. Each variant carries its name and ordered
     /// payload fields `(optional field name, type)`; the index doubles as the tag.
+    /// A monomorphized generic enum instance is registered here under its mangled name,
+    /// exactly like a plain enum, so nothing downstream is generic-aware.
     enums: HashMap<String, Vec<EnumVariantData>>,
+    /// Generic enum templates, keyed by name. Each distinct set of type arguments
+    /// produces one monomorphized concrete enum emitted as an ordinary
+    /// [`neuro_hir::HirItem::Enum`].
+    generic_enums: HashMap<String, ast_types::EnumDef>,
+    /// Monomorphized enum instance name → the template it came from, so a
+    /// construction or pattern written with the base name resolves to the instance.
+    enum_instance_base: HashMap<String, String>,
+    /// Monomorphized enum instance name → the arguments it was built with, so the
+    /// enclosing return type can supply arguments a construction's payload leaves
+    /// undetermined — mirroring the checker's fallback.
+    enum_instance_args: HashMap<String, Vec<MonoArg>>,
+    /// Generic-enum instances discovered but whose HIR items are not yet emitted.
+    mono_enum_pending: Vec<MonoEnum>,
     /// Newtype name → its inner surface type. Kept as the AST type so a
     /// newtype annotation resolves recursively (a newtype may wrap another newtype).
     newtypes: HashMap<String, ast_types::Type>,
@@ -217,6 +232,16 @@ struct MonoStruct {
     const_subst: HashMap<String, u64>,
 }
 
+/// One pending generic-enum instantiation: the base template name, the mangled
+/// instance name, and the substitutions its payload types resolve under. Emission
+/// produces one `HirItem::Enum` carrying fully concrete payloads.
+struct MonoEnum {
+    base: String,
+    mangled: String,
+    subst: HashMap<String, HirType>,
+    const_subst: HashMap<String, u64>,
+}
+
 /// Lower a type-checked program to typed HIR.
 ///
 /// The `items` must come from a program that passed `semantic_analysis::type_check`;
@@ -239,6 +264,10 @@ impl Lowerer {
             functions: HashMap::new(),
             structs: HashMap::new(),
             enums: HashMap::new(),
+            generic_enums: HashMap::new(),
+            enum_instance_base: HashMap::new(),
+            enum_instance_args: HashMap::new(),
+            mono_enum_pending: Vec::new(),
             newtypes: HashMap::new(),
             clone_structs: HashSet::new(),
             impl_methods: HashMap::new(),
@@ -291,6 +320,12 @@ impl Lowerer {
             }
         }
         self.constants.get(name).cloned()
+    }
+
+    /// Whether `name` is a generic enum template, which is monomorphized per set of
+    /// type arguments rather than lowered directly.
+    fn is_generic_enum(&self, name: &str) -> bool {
+        self.generic_enums.contains_key(name)
     }
 
     /// Resolve a binding's type in the lexical scope stack only, excluding module

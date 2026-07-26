@@ -330,21 +330,12 @@ impl TypeChecker {
                 .struct_defs
                 .contains_key(&name.name)
                 .then(|| Type::Struct(name.name.clone())),
-            Expr::EnumStructLiteral { enum_name, .. } => self
-                .enum_defs
-                .contains_key(&enum_name.name)
-                .then(|| Type::Enum(enum_name.name.clone())),
+            Expr::EnumStructLiteral { enum_name, .. } => self.shallow_enum_type(&enum_name.name),
             // A unit (`E::V`) or tuple (`E::V(..)`) enum value; a same-shaped path that
             // does not name an enum is an associated-function call and is not inferable.
-            Expr::Path { type_name, .. } => self
-                .enum_defs
-                .contains_key(&type_name.name)
-                .then(|| Type::Enum(type_name.name.clone())),
+            Expr::Path { type_name, .. } => self.shallow_enum_type(&type_name.name),
             Expr::Call { func, .. } => match func.as_ref() {
-                Expr::Path { type_name, .. } => self
-                    .enum_defs
-                    .contains_key(&type_name.name)
-                    .then(|| Type::Enum(type_name.name.clone())),
+                Expr::Path { type_name, .. } => self.shallow_enum_type(&type_name.name),
                 Expr::Identifier(ident) => self
                     .newtype_defs
                     .contains_key(&ident.name)
@@ -359,6 +350,14 @@ impl TypeChecker {
             }
             _ => None,
         }
+    }
+
+    /// The nominal enum type a construction names, for return-position `impl Trait`
+    /// inference. A generic enum yields `None`: its base name is not a type, and the
+    /// concrete instance depends on a payload this shallow read does not inspect.
+    fn shallow_enum_type(&self, name: &str) -> Option<Type> {
+        (self.enum_defs.contains_key(name) && !self.is_generic_enum(name))
+            .then(|| Type::Enum(name.to_string()))
     }
 
     /// Put a definition's generic parameters in scope for signature and body resolution
@@ -427,6 +426,7 @@ impl TypeChecker {
     pub(crate) fn register_enum(&mut self, def: &EnumDef) {
         if self.enum_defs.contains_key(&def.name.name)
             || self.struct_defs.contains_key(&def.name.name)
+            || self.generic_enums.contains_key(&def.name.name)
         {
             self.record_error(TypeError::EnumAlreadyDefined {
                 name: def.name.name.clone(),
@@ -435,7 +435,60 @@ impl TypeChecker {
             return;
         }
 
-        let mut variants: Vec<EnumVariantInfo> = Vec::new();
+        let variants = self.resolve_variants(def);
+        self.enum_defs.insert(def.name.name.clone(), variants);
+    }
+
+    /// Resolve an enum-variant payload type, rejecting any non-scalar payload with
+    /// `UnsupportedEnumPayload` and recovering as `Type::Unknown`.
+    fn resolve_enum_payload_type(&mut self, ty: &ast_types::Type) -> Type {
+        let Some(resolved) = self.resolve_type(ty) else {
+            return Type::Unknown;
+        };
+        // A type-parameter placeholder inside a generic template carries no scalar
+        // decision yet; the check runs again per instance against the concrete argument.
+        if matches!(resolved, Type::Generic(_)) || Self::is_scalar_payload(&resolved) {
+            resolved
+        } else {
+            self.record_error(TypeError::UnsupportedEnumPayload {
+                ty: resolved,
+                span: ty.span(),
+            });
+            Type::Unknown
+        }
+    }
+
+    /// Register a generic enum template.
+    ///
+    /// Like a generic struct, a generic enum is not itself a usable type — each
+    /// distinct set of type arguments is monomorphized into a distinct nominal enum on
+    /// demand. The template's variants (carrying [`Type::Generic`] placeholders) are kept
+    /// in `enum_defs` under the base name so a construction site can infer the type
+    /// arguments by unifying its payload against them.
+    pub(crate) fn register_generic_enum(&mut self, def: &EnumDef) {
+        if self.enum_defs.contains_key(&def.name.name)
+            || self.struct_defs.contains_key(&def.name.name)
+            || self.generic_enums.contains_key(&def.name.name)
+        {
+            self.record_error(TypeError::EnumAlreadyDefined {
+                name: def.name.name.clone(),
+                span: def.name.span,
+            });
+            return;
+        }
+
+        self.enter_generic_scope(&def.generics, &[]);
+        let variants = self.resolve_variants(def);
+        self.exit_generic_scope();
+
+        self.enum_defs.insert(def.name.name.clone(), variants);
+        self.generic_enums
+            .insert(def.name.name.clone(), def.clone());
+    }
+
+    /// Resolve every variant of an enum definition into its checked form.
+    fn resolve_variants(&mut self, def: &EnumDef) -> Vec<EnumVariantInfo> {
+        let mut variants: Vec<EnumVariantInfo> = Vec::with_capacity(def.variants.len());
         for variant in &def.variants {
             let (form, fields) = match &variant.payload {
                 VariantPayload::Unit => (VariantForm::Unit, Vec::new()),
@@ -462,25 +515,99 @@ impl TypeChecker {
                 fields,
             });
         }
-
-        self.enum_defs.insert(def.name.name.clone(), variants);
+        variants
     }
 
-    /// Resolve an enum-variant payload type, rejecting any non-scalar payload with
-    /// `UnsupportedEnumPayload` and recovering as `Type::Unknown`.
-    fn resolve_enum_payload_type(&mut self, ty: &ast_types::Type) -> Type {
-        let Some(resolved) = self.resolve_type(ty) else {
-            return Type::Unknown;
+    /// Materialize a monomorphized instance of a generic enum with concrete type
+    /// arguments and return its distinct nominal [`Type::Enum`]. Idempotent per instance.
+    ///
+    /// Each payload type is the template's type with the arguments substituted in, and
+    /// must be a scalar `Copy` primitive — the same restriction a non-generic enum's
+    /// payload carries, so `Option<i32>` is available while `Option<string>` is not yet.
+    pub(crate) fn instantiate_generic_enum(
+        &mut self,
+        base: &str,
+        args: &[Type],
+        span: Span,
+    ) -> Type {
+        let template = match self.generic_enums.get(base) {
+            Some(t) => t.clone(),
+            None => {
+                self.record_error(TypeError::NotAGenericType {
+                    name: base.to_string(),
+                    span,
+                });
+                return Type::Unknown;
+            }
         };
-        if Self::is_scalar_payload(&resolved) {
-            resolved
-        } else {
-            self.record_error(TypeError::UnsupportedEnumPayload {
-                ty: resolved,
-                span: ty.span(),
+        if args.len() != template.generics.len() {
+            self.record_error(TypeError::GenericArgCountMismatch {
+                name: base.to_string(),
+                expected: template.generics.len(),
+                found: args.len(),
+                span,
             });
-            Type::Unknown
+            return Type::Unknown;
         }
+
+        let mangled = mangle_struct_instance(base, args);
+        if self.enum_defs.contains_key(&mangled) {
+            return Type::Enum(mangled);
+        }
+
+        let mut subst: HashMap<String, Type> = HashMap::new();
+        for (gp, arg) in template.generics.iter().zip(args.iter()) {
+            let is_const = matches!(gp.kind, ast_types::GenericParamKind::Const(_));
+            match arg {
+                Type::ConstValue(_) if is_const => {}
+                Type::ConstValue(_) => self.record_error(TypeError::TurbofishKindMismatch {
+                    param: gp.name.name.clone(),
+                    expected: "type".to_string(),
+                    span,
+                }),
+                _ if is_const => self.record_error(TypeError::TurbofishKindMismatch {
+                    param: gp.name.name.clone(),
+                    expected: "const".to_string(),
+                    span,
+                }),
+                _ if !self.is_type_copy(arg) => {
+                    self.record_error(TypeError::GenericArgumentNotCopy {
+                        param: gp.name.name.clone(),
+                        ty: arg.clone(),
+                        span,
+                    })
+                }
+                _ => {}
+            }
+            subst.insert(gp.name.name.clone(), arg.clone());
+        }
+
+        let template_variants = self.enum_defs.get(base).cloned().unwrap_or_default();
+        let mut variants: Vec<EnumVariantInfo> = Vec::with_capacity(template_variants.len());
+        for variant in &template_variants {
+            let mut fields = Vec::with_capacity(variant.fields.len());
+            for (name, ty) in &variant.fields {
+                let concrete = substitute_generic(ty, &subst);
+                let concrete =
+                    if Self::is_scalar_payload(&concrete) || matches!(concrete, Type::Unknown) {
+                        concrete
+                    } else {
+                        self.record_error(TypeError::UnsupportedEnumPayload { ty: concrete, span });
+                        Type::Unknown
+                    };
+                fields.push((name.clone(), concrete));
+            }
+            variants.push(EnumVariantInfo {
+                name: variant.name.clone(),
+                form: variant.form,
+                fields,
+            });
+        }
+
+        self.enum_defs.insert(mangled.clone(), variants);
+        self.enum_instances
+            .insert(mangled.clone(), (base.to_string(), args.to_vec()));
+        Type::Enum(mangled)
     }
 
     /// Whether `ty` is a scalar `Copy` primitive admissible as an enum payload in
