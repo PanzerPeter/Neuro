@@ -1,4 +1,4 @@
-// Closure literal and function-type parsing tests (§3.12)
+// Closure literal and function-type parsing tests
 
 use syntax_parsing::{parse_expr, Expr, Type};
 

@@ -1,4 +1,4 @@
-//! Closure lowering (§3.12): lift each closure literal to a top-level
+//! Closure lowering: lift each closure literal to a top-level
 //! [`HirItem::Closure`] and produce a [`HirExprKind::Closure`] value that names it.
 //!
 //! Captures are the free variables of the body that resolve to an enclosing *local*

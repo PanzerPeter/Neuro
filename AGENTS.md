@@ -51,6 +51,6 @@ For full architecture rules, coding standards, and contribution workflows, refer
 - Zero clippy warnings permitted: require clean runs of `cargo clippy --workspace --all-targets -- -D warnings`.
 - All tests must pass: `cargo test --workspace`.
 - Code must be properly formatted: `cargo fmt --all -- --check`.
-- Git Hygiene: No references to gitignored or internal paths (e.g., `CLAUDE.md`, `target/`, or local workflow directories like `.idea/`) in committed source or public docs.
+- Git Hygiene: No references to gitignored or local-only paths (build output, assistant configuration, private working notes) in committed source or public docs. Check `.gitignore` before linking or citing any path.
 - Ensure `CONTEXT.md` files are universally present and correctly document the boundaries for every slice in `compiler/`.
 - Commit hygiene: ensure all structural and pipeline changes are accurately documented.

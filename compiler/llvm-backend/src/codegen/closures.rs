@@ -1,4 +1,4 @@
-//! Closure lowering (§3.12).
+//! Closure lowering.
 //!
 //! A closure is represented uniformly as a `{ fn_ptr, env_ptr }` fat pointer. Each
 //! closure literal is lifted to a top-level function whose first LLVM parameter is a
