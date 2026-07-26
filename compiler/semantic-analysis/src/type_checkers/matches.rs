@@ -177,26 +177,31 @@ impl TypeChecker {
     /// Check an enum-variant pattern and bind its payload sub-patterns.
     fn check_enum_pattern(
         &mut self,
-        enum_name: &str,
+        base: &str,
         variant: &str,
         payload: &EnumPatternPayload,
         scrut_ty: &Type,
         span: Span,
         bindings: &mut Vec<(String, Type, Span)>,
     ) {
-        // The scrutinee must be exactly this enum (nominal typing).
-        match scrut_ty {
-            Type::Unknown => {}
-            Type::Enum(name) if name == enum_name => {}
+        // The scrutinee must be exactly this enum (nominal typing). A pattern written
+        // with a generic enum's base name (`Option::Some`) matches the monomorphized
+        // instance the scrutinee has, and its payload binds at the instance's concrete
+        // types.
+        let enum_name = match scrut_ty {
+            Type::Unknown => base,
+            Type::Enum(name) if name == base || self.enum_instance_base(name) == Some(base) => {
+                name.as_str()
+            }
             _ => {
                 self.record_error(TypeError::PatternTypeMismatch {
-                    pattern_ty: format!("{}::{}", enum_name, variant),
+                    pattern_ty: format!("{}::{}", base, variant),
                     scrutinee_ty: scrut_ty.clone(),
                     span,
                 });
                 return;
             }
-        }
+        };
 
         let Some(info) = self.lookup_enum_variant(enum_name, variant) else {
             self.record_error(TypeError::UnknownEnumVariant {

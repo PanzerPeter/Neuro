@@ -264,14 +264,64 @@ impl TypeChecker {
         }
     }
 
+    /// The enum a construction written as `E::V` targets: `E` itself when it is a
+    /// plain enum, or the monomorphized instance of a generic `E` that the surrounding
+    /// expected type names. A generic `E` with no usable context resolves to the base
+    /// name, which callers detect with [`TypeChecker::is_generic_enum`] and either infer
+    /// from the payload or reject.
+    fn enum_construction_target(&self, base: &str, expected: Option<&Type>) -> String {
+        self.enum_instance_from_expected(base, expected)
+            .unwrap_or_else(|| base.to_string())
+    }
+
+    /// Monomorphize a generic enum from the type arguments inferred at a construction
+    /// site, falling back to the enclosing return type for any the payload left
+    /// undetermined (see [`TypeChecker::enum_return_type_args`]). Records
+    /// `GenericEnumNotInferable` and returns `None` when a parameter is determined by
+    /// neither.
+    fn instantiate_inferred_enum(
+        &mut self,
+        base: &str,
+        subst: &HashMap<String, Type>,
+        span: Span,
+    ) -> Option<Type> {
+        let generics = self.generic_enum_params(base);
+        let from_return = self.enum_return_type_args(base);
+        let mut args = Vec::with_capacity(generics.len());
+        for (index, param) in generics.iter().enumerate() {
+            let inferred = subst
+                .get(param)
+                .cloned()
+                .or_else(|| from_return.as_ref().and_then(|a| a.get(index).cloned()));
+            match inferred {
+                Some(ty) => args.push(ty),
+                None => {
+                    self.record_error(TypeError::GenericEnumNotInferable {
+                        name: base.to_string(),
+                        span,
+                    });
+                    return None;
+                }
+            }
+        }
+        Some(self.instantiate_generic_enum(base, &args, span))
+    }
+
     /// Type-check a bare path enum construction `E::V`: valid only for a
     /// unit variant. A tuple/struct variant used here is a form error. Returns the
     /// enum type for error recovery in every case.
-    fn check_enum_unit_path(&mut self, enum_name: &str, variant: &str, span: Span) -> Type {
-        let recovery = Type::Enum(enum_name.to_string());
+    fn check_enum_unit_path(
+        &mut self,
+        base: &str,
+        variant: &str,
+        span: Span,
+        expected: Option<&Type>,
+    ) -> Type {
+        let enum_name = &self.enum_construction_target(base, expected);
+        let recovery = Type::Enum(enum_name.clone());
         let Some(info) = self.lookup_enum_variant(enum_name, variant) else {
             self.record_error(TypeError::UnknownEnumVariant {
-                enum_name: enum_name.to_string(),
+                enum_name: enum_name.clone(),
                 variant: variant.to_string(),
                 span,
             });
@@ -294,20 +344,32 @@ impl TypeChecker {
                 span,
             }),
         }
+        // A unit variant of a generic enum carries no payload, so its type arguments come
+        // entirely from context: the expected type (already applied above) or the
+        // enclosing return type.
+        if self.is_generic_enum(enum_name) {
+            return self
+                .instantiate_inferred_enum(enum_name, &HashMap::new(), span)
+                .unwrap_or(Type::Unknown);
+        }
         recovery
     }
 
     /// Type-check a tuple-variant enum construction `E::V(args)`: the variant
     /// must be a tuple variant, and the arguments must match its field types by
-    /// position. Returns the enum type for error recovery.
+    /// position. For a generic enum the type arguments come from the expected type
+    /// when there is one, else they are inferred by unifying the template's payload
+    /// against the argument types. Returns the enum type for error recovery.
     fn check_enum_tuple_call(
         &mut self,
-        enum_name: &str,
+        base: &str,
         variant: &str,
         args: &[Expr],
         span: Span,
+        expected: Option<&Type>,
     ) -> Type {
-        let recovery = Type::Enum(enum_name.to_string());
+        let enum_name = &self.enum_construction_target(base, expected);
+        let recovery = Type::Enum(enum_name.clone());
         let info = match self.lookup_enum_variant(enum_name, variant) {
             Some(info) => info,
             None => {
@@ -367,18 +429,50 @@ impl TypeChecker {
             });
         }
 
-        for (arg, expected_ty) in args.iter().zip(field_tys.iter()) {
-            if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
-                if !arg_ty.is_compatible_with(expected_ty) {
-                    self.record_error(TypeError::Mismatch {
-                        expected: expected_ty.clone(),
-                        found: arg_ty,
-                        span: arg.span(),
-                    });
+        // An unresolved generic base still carries type-parameter placeholders in its
+        // payload: check each argument without imposing a placeholder as its context,
+        // then unify to recover the type arguments.
+        let inferring = self.is_generic_enum(enum_name);
+        let mut subst: HashMap<String, Type> = HashMap::new();
+        let mut arg_tys: Vec<Option<Type>> = Vec::with_capacity(args.len());
+        for (arg, declared) in args.iter().zip(field_tys.iter()) {
+            let ctx = (!mentions_type_parameter(declared)).then(|| declared.clone());
+            let arg_ty = self.check_expr(arg, ctx.as_ref());
+            if inferring {
+                if let Some(ty) = &arg_ty {
+                    super::declarations::unify_generic(declared, ty, &mut subst);
                 }
             }
+            arg_tys.push(arg_ty);
         }
-        recovery
+
+        let (result, payload_tys) = if inferring {
+            let Some(instance) = self.instantiate_inferred_enum(enum_name, &subst, span) else {
+                return Type::Unknown;
+            };
+            let concrete = match &instance {
+                Type::Enum(name) => self
+                    .lookup_enum_variant(name, variant)
+                    .map(|info| info.fields.iter().map(|(_, t)| t.clone()).collect())
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            };
+            (instance, concrete)
+        } else {
+            (recovery, field_tys)
+        };
+
+        for ((arg, declared), arg_ty) in args.iter().zip(payload_tys.iter()).zip(arg_tys.iter()) {
+            let Some(arg_ty) = arg_ty else { continue };
+            if !arg_ty.is_compatible_with(declared) {
+                self.record_error(TypeError::Mismatch {
+                    expected: declared.clone(),
+                    found: arg_ty.clone(),
+                    span: arg.span(),
+                });
+            }
+        }
+        result
     }
 
     /// Type-check a struct-variant enum construction `E::V { field: expr, ... }`
@@ -386,16 +480,18 @@ impl TypeChecker {
     /// type, and no unknown fields. Returns the enum type for error recovery.
     fn check_enum_struct_literal(
         &mut self,
-        enum_name: &Identifier,
+        base: &Identifier,
         variant: &Identifier,
         fields: &[FieldInit],
         span: Span,
+        expected: Option<&Type>,
     ) -> Type {
-        let recovery = Type::Enum(enum_name.name.clone());
+        let enum_name = self.enum_construction_target(&base.name, expected);
+        let recovery = Type::Enum(enum_name.clone());
 
-        if !self.enum_defs.contains_key(&enum_name.name) {
+        if !self.enum_defs.contains_key(&enum_name) {
             self.record_error(TypeError::UnknownPathType {
-                type_name: enum_name.name.clone(),
+                type_name: enum_name,
                 member: variant.name.clone(),
                 span,
             });
@@ -406,11 +502,11 @@ impl TypeChecker {
         }
 
         let info_fields: Vec<(Option<String>, Type)> =
-            match self.lookup_enum_variant(&enum_name.name, &variant.name) {
+            match self.lookup_enum_variant(&enum_name, &variant.name) {
                 Some(info) if info.form == VariantForm::Struct => info.fields.clone(),
                 Some(_) => {
                     self.record_error(TypeError::EnumVariantFormMismatch {
-                        enum_name: enum_name.name.clone(),
+                        enum_name,
                         variant: variant.name.clone(),
                         expected: "non-struct".to_string(),
                         hint: "this variant is not constructed with braces".to_string(),
@@ -423,7 +519,7 @@ impl TypeChecker {
                 }
                 None => {
                     self.record_error(TypeError::UnknownEnumVariant {
-                        enum_name: enum_name.name.clone(),
+                        enum_name,
                         variant: variant.name.clone(),
                         span,
                     });
@@ -434,7 +530,12 @@ impl TypeChecker {
                 }
             };
 
+        // An unresolved generic base carries placeholders in its payload; the field
+        // values determine the type arguments.
+        let inferring = self.is_generic_enum(&enum_name);
+        let mut subst: HashMap<String, Type> = HashMap::new();
         let mut seen: HashMap<String, Span> = HashMap::new();
+        let mut provided: Vec<(&Expr, Type, Type)> = Vec::new();
         for FieldInit {
             name: fname,
             value,
@@ -443,7 +544,7 @@ impl TypeChecker {
         {
             if seen.insert(fname.name.clone(), *fspan).is_some() {
                 self.record_error(TypeError::DuplicateEnumField {
-                    enum_name: enum_name.name.clone(),
+                    enum_name: enum_name.clone(),
                     variant: variant.name.clone(),
                     field: fname.name.clone(),
                     span: *fspan,
@@ -454,21 +555,21 @@ impl TypeChecker {
             match info_fields
                 .iter()
                 .find(|(n, _)| n.as_deref() == Some(&fname.name))
+                .map(|(_, t)| t.clone())
             {
-                Some((_, expected_ty)) => {
-                    if let Some(actual_ty) = self.check_expr(value, Some(expected_ty)) {
-                        if !actual_ty.is_compatible_with(expected_ty) {
-                            self.record_error(TypeError::Mismatch {
-                                expected: expected_ty.clone(),
-                                found: actual_ty,
-                                span: value.span(),
-                            });
+                Some(declared) => {
+                    let ctx = (!mentions_type_parameter(&declared)).then(|| declared.clone());
+                    let actual = self.check_expr(value, ctx.as_ref());
+                    if let Some(actual) = actual {
+                        if inferring {
+                            super::declarations::unify_generic(&declared, &actual, &mut subst);
                         }
+                        provided.push((value, declared, actual));
                     }
                 }
                 None => {
                     self.record_error(TypeError::UnknownEnumField {
-                        enum_name: enum_name.name.clone(),
+                        enum_name: enum_name.clone(),
                         variant: variant.name.clone(),
                         field: fname.name.clone(),
                         span: *fspan,
@@ -482,7 +583,7 @@ impl TypeChecker {
             if let Some(field_name) = field_name {
                 if !seen.contains_key(field_name) {
                     self.record_error(TypeError::MissingEnumField {
-                        enum_name: enum_name.name.clone(),
+                        enum_name: enum_name.clone(),
                         variant: variant.name.clone(),
                         field: field_name.clone(),
                         span,
@@ -491,7 +592,28 @@ impl TypeChecker {
             }
         }
 
-        recovery
+        let result = if inferring {
+            match self.instantiate_inferred_enum(&enum_name, &subst, span) {
+                Some(instance) => instance,
+                None => return Type::Unknown,
+            }
+        } else {
+            recovery
+        };
+
+        for (value, declared, actual) in &provided {
+            // Under inference the declared type is a placeholder the argument bound, so
+            // the concrete comparison is the substituted one.
+            let declared = super::declarations::substitute_generic(declared, &subst);
+            if !actual.is_compatible_with(&declared) {
+                self.record_error(TypeError::Mismatch {
+                    expected: declared,
+                    found: actual.clone(),
+                    span: value.span(),
+                });
+            }
+        }
+        result
     }
 
     /// Type-check a plain identifier call (free function or previously registered
@@ -1532,6 +1654,7 @@ impl TypeChecker {
                                 &member.name,
                                 args,
                                 *path_span,
+                                expected,
                             ));
                         }
                         if !self.struct_defs.contains_key(&type_name.name) {
@@ -1603,7 +1726,12 @@ impl TypeChecker {
                 // A standalone path is either a unit-variant enum value `E::V`
                 // or an associated-function reference `Type::func`.
                 if self.enum_defs.contains_key(&type_name.name) {
-                    return Some(self.check_enum_unit_path(&type_name.name, &member.name, *span));
+                    return Some(self.check_enum_unit_path(
+                        &type_name.name,
+                        &member.name,
+                        *span,
+                        expected,
+                    ));
                 }
                 // Standalone path expression (not used as a call target).
                 // Validate the struct and member exist; the type is a function type.
@@ -1733,7 +1861,7 @@ impl TypeChecker {
                 variant,
                 fields,
                 span,
-            } => Some(self.check_enum_struct_literal(enum_name, variant, fields, *span)),
+            } => Some(self.check_enum_struct_literal(enum_name, variant, fields, *span, expected)),
 
             Expr::FieldAccess {
                 object,

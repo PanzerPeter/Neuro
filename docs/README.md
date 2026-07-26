@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) next — Alpha Development
+**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) underway with `Option` / `Result` landed — Alpha Development
 
 ## Quick Links
 
@@ -165,7 +165,19 @@ Key design goals:
 - Tagged unions `enum E { A, B(i32), C { x: f64 } }` with unit, tuple, and struct-field variants
 - Construct via `E::A` / `E::B(1)` / `E::C { x: 1.0 }`; usable as bindings, function
   parameters/returns, and struct fields; an enum is `Copy`
-- Scalar `Copy` payloads only; non-generic
+- Scalar `Copy` payloads only
+
+### Generic enums, `Option` and `Result` (1G)
+
+- `enum Slot<T> { Filled(T), Vacant }` — monomorphized per type-argument set, so each instance
+  is its own tagged union with its own payload width and zero runtime cost
+- Type arguments come from the expected type, the payload (`Slot::Filled(4)` → `T = i32`), or the
+  enclosing function's return type (which is what a tail `if` branch relies on)
+- A `match` pattern names the base enum and binds payloads at the scrutinee instance's types
+- `Option<T> { Some(T), None }` and `Result<T, E> { Ok(T), Err(E) }` come from an implicit prelude:
+  available in every program with no declaration, shadowed by a local type of the same name
+- Limits: scalar `Copy` payloads per instance (`Option<string>` awaits heap payloads), `Copy` type
+  arguments, no `impl` blocks on enums, no lifetime parameters
 
 ### Pattern Matching (1E)
 
@@ -189,7 +201,7 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- 986 tests passing across all components
+- 1011 tests passing across all components
 
 ## Compilation Pipeline
 

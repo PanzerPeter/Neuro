@@ -60,8 +60,14 @@ pub enum TypeError {
     #[error("generic struct '{name}' at {span:?} requires type arguments, e.g. `{name}<...>`")]
     GenericStructNeedsArgs { name: String, span: Span },
 
+    #[error("generic enum '{name}' at {span:?} requires type arguments, e.g. `{name}<...>`")]
+    GenericEnumNeedsArgs { name: String, span: Span },
+
+    #[error("cannot infer the type arguments of generic enum '{name}' at {span:?}; annotate the target, e.g. `val x: {name}<...> = ...`, or construct a variant that carries them")]
+    GenericEnumNotInferable { name: String, span: Span },
+
     #[error(
-        "generic struct '{name}' at {span:?} expects {expected} type argument(s), found {found}"
+        "generic type '{name}' at {span:?} expects {expected} type argument(s), found {found}"
     )]
     GenericArgCountMismatch {
         name: String,

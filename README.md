@@ -8,9 +8,9 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
-[![Tests](https://img.shields.io/badge/tests-986%20passing-success.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-1011%20passing-success.svg)](#)
 
-**Status:** Alpha — Phase 1 (Core Language) in progress · sub-phases 1A–1F complete (MVP, syntax & semantics, ownership/borrow checker, HIR & MLIR plumbing, type system, generics/traits/dispatch/closures) · 1G (error handling, modules & prelude) next · → v2.0.0 when Phase 1 completes
+**Status:** Alpha — Phase 1 (Core Language) in progress · sub-phases 1A–1F complete (MVP, syntax & semantics, ownership/borrow checker, HIR & MLIR plumbing, type system, generics/traits/dispatch/closures) · 1G (error handling, modules & prelude) underway — `Option` / `Result` have landed · → v2.0.0 when Phase 1 completes
 
 ---
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 
 ## Current Capabilities
 
-Phase 1 (Core Language) sub-phases 1A–1F are complete — generic functions, structs, and impls have landed, plus const generics, `where` clauses, turbofish, explicit lifetime annotations, **trait declarations**, **operator overloading**, **static & dynamic dispatch** (`impl Trait` / `dyn Trait`), and **closures & lambdas**. The following features are fully implemented and tested (**986 Tests Passing**):
+Phase 1 (Core Language) sub-phases 1A–1F are complete — generic functions, structs, and impls have landed, plus const generics, `where` clauses, turbofish, explicit lifetime annotations, **trait declarations**, **operator overloading**, **static & dynamic dispatch** (`impl Trait` / `dyn Trait`), and **closures & lambdas**. Sub-phase 1G has begun with **generic enums** and the standard-library **`Option<T>` / `Result<T, E>`**. The following features are fully implemented and tested (**1011 Tests Passing**):
 
 | Feature | Details |
 |---|---|
@@ -106,7 +106,8 @@ Phase 1 (Core Language) sub-phases 1A–1F are complete — generic functions, s
 | **Arrays** | Fixed-size `[T; N]` of `Copy` scalars: literals with inference, index read/write, `.len()`, `for x in arr` / `for x in &arr`; debug-build out-of-bounds panic |
 | **Tuples** | Anonymous `(T1, T2, ...)` of `Copy` elements: literals, `.0`/`.1` index access, destructuring `val (a, b) = t` with `_` wildcards and nesting; usable as function parameters and return types |
 | **Destructuring** | Struct `val Point { x, y } = p` (field-name binds) and array `val [a, b, c] = arr` / `val [first, ..rest] = arr` (positional, with a trailing `..rest` remainder or bare `..`); arity-checked, nests, and works with `mut` |
-| **Enums** | Tagged unions `enum E { A, B(i32), C { x: f64 } }` with unit, tuple, and struct-field variants; construct via `E::A` / `E::B(1)` / `E::C { x: 1.0 }`; usable as bindings, function parameters/returns, and struct fields; `Copy`. Scalar payloads only |
+| **Enums** | Tagged unions `enum E { A, B(i32), C { x: f64 } }` with unit, tuple, and struct-field variants; construct via `E::A` / `E::B(1)` / `E::C { x: 1.0 }`; usable as bindings, function parameters/returns, and struct fields; `Copy`. Scalar payloads only. **Generic enums** `enum Slot<T> { Filled(T), Vacant }` monomorphize per type-argument set (one distinct tagged union each, zero runtime cost); arguments come from the expected type, the payload, or the enclosing return type |
+| **`Option` / `Result`** | `Option<T> { Some(T), None }` and `Result<T, E> { Ok(T), Err(E) }` from an implicit prelude — available in every program without a declaration, and shadowed by a local type of the same name. Ordinary generic enums: construct `Option::Some(3)` / `Result::Err(1)`, deconstruct with `match`, pass and return across functions and struct fields. The `?` / `??` operators and collections are still to come in 1G |
 | **Pattern Matching** | `match` as an exhaustive expression: enum variant deconstruction with payload binding (`E::B(n)`, `E::C { x }`), literal / `\|` or / `a..=b` range / `_` wildcard patterns, `if` guards; usable as a value. Scrutinee is enum/integer/`char`/`bool`; exhaustiveness enforced |
 | **Newtypes** | `newtype Meters = i32`: a distinct nominal type wrapping an inner type — not interchangeable with it, unlike a `type` alias; construct `Meters(30)`, read the inner value with `.0`; forwards `Copy`/`Clone`, usable as binding, parameter, return, and struct field. Inner type restricted to `Copy` |
 | **Move Semantics** | Move-by-default for non-`Copy` values; use-after-move is a compile error; `.clone()` opts out; `@derive(Copy, Clone)` on structs |

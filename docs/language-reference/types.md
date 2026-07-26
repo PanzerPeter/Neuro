@@ -475,11 +475,76 @@ An enum value can be bound to a `val`/`mut`, passed to and returned from functio
 
 An enum is a tagged union: a discriminant identifying the active variant, plus storage for the widest variant's payload. Two enums with the same variant names but declared separately are distinct types.
 
-### Phase 1E Limitations
+### Generic Enums
 
-- **Payloads are scalar `Copy` primitives only** — integers, floats, `bool`, `char`. A payload of `string`, a struct, an array, a tuple, or a reference is rejected (`UnsupportedEnumPayload`); broader payloads arrive with pattern matching and heap support.
-- **Non-generic** — generic enums such as `Option<T>` arrive with the generics system (1F).
-- **No deconstruction yet** — reading a variant's tag or payload needs `match` (the next 1E item). Until then an enum value is constructed and carried, not inspected.
+An enum may take type parameters. Each distinct set of type arguments is **monomorphized** into its own nominal tagged union, exactly as a generic struct is — so `Slot<i32>` and `Slot<i64>` are different types, each with its own payload width, and there is no runtime cost.
+
+```neuro
+enum Slot<T> { Filled(T), Vacant }
+enum Tagged<T, U> { Left(T), Right(U) }
+
+val a = Slot::Filled(4)                  // T inferred from the payload → Slot<i32>
+val b: Slot<bool> = Slot::Vacant         // no payload, so the annotation fixes T
+```
+
+Where the type arguments come from, in order:
+
+1. **The expected type** — an annotated binding, a parameter, a struct field, a `return`.
+2. **The payload** — `Slot::Filled(4)` determines `T = i32` by unifying `4`'s type against the variant's declared payload.
+3. **The enclosing function's return type**, when it is an instance of the same enum. This is what makes the common fallible-function shape work, because a tail `if` branch has no other context:
+
+```neuro
+func divide(a: i32, b: i32) -> Result<i32, i32> {
+    if b == 0 {
+        Result::Err(1)                   // Err determines E; T comes from the return type
+    } else {
+        Result::Ok(a / b)                // Ok determines T; E comes from the return type
+    }
+}
+```
+
+If none of the three determines an argument, the construction is rejected with `GenericEnumNotInferable` — annotate the target. Using the bare name as a type (`func f(o: Slot) -> i32`) is `GenericEnumNeedsArgs`.
+
+A `match` pattern is written with the **base** name; it matches whatever instance the scrutinee has, and its payload binds at that instance's concrete type:
+
+```neuro
+match a {
+    Slot::Filled(v) => v + 1,            // v is i32 here
+    Slot::Vacant => 0
+}
+```
+
+### `Option<T>` and `Result<T, E>`
+
+These two generic enums are the standard library's absence and failure types. They are available in **every program without a declaration** — the compiler prepends an implicit prelude:
+
+```neuro
+enum Option<T> { Some(T), None }
+enum Result<T, E> { Ok(T), Err(E) }
+```
+
+They are ordinary generic enums: nothing about them is special-cased in the type checker or the backend, and a program that declares its own `Option` or `Result` shadows the prelude entry.
+
+```neuro
+func unwrap_or(o: Option<i32>, fallback: i32) -> i32 {
+    match o {
+        Option::Some(v) => v,
+        Option::None => fallback
+    }
+}
+
+val present = Option::Some(30)
+val absent: Option<i32> = Option::None
+```
+
+Variants are written qualified (`Option::Some`, `Result::Err`). Unqualified names (`Some(x)`) arrive with the module system and its implicit-prelude imports; the `?` propagation operator, `??`, and `checked_*` are separate items still open in 1G.
+
+### Phase 1 Limitations
+
+- **Payloads are scalar `Copy` primitives only** — integers, floats, `bool`, `char`. A payload of `string`, a struct, an array, a tuple, or a reference is rejected (`UnsupportedEnumPayload`); broader payloads arrive with heap support. The rule is enforced **per instance**, so `Option<i32>` is available while `Option<string>` is not yet.
+- **Type arguments are `Copy`** — the same restriction generic functions and structs carry this phase.
+- **No `impl` blocks on enums** — methods (and therefore `Option`/`Result` helpers such as `.map_err`) need impls over enums, which are struct-only today.
+- **No lifetime parameters on an enum** — with scalar-only payloads there is nothing to annotate; `enum E<'a, T>` is a parse error.
 
 ### Type Errors
 
@@ -491,6 +556,9 @@ An enum is a tagged union: a discriminant identifying the active variant, plus s
 | `EnumVariantArityMismatch` | A tuple variant built with the wrong number of arguments |
 | `UnknownEnumField` / `MissingEnumField` / `DuplicateEnumField` | Struct-variant field set is wrong |
 | `UnsupportedEnumPayload` | A variant payload is not a scalar `Copy` primitive |
+| `GenericEnumNeedsArgs` | A generic enum's bare name used as a type |
+| `GenericEnumNotInferable` | A construction whose type arguments no context determines |
+| `GenericArgCountMismatch` | `Option<i32, bool>` — wrong number of type arguments |
 
 ## Newtype Declarations
 
@@ -862,12 +930,14 @@ func returns_i32() -> i32 {
 - Explicit type conversions via `as`
 - Function types, strict type checking, type-mismatch error reporting
 - Structs, methods, fixed-size arrays `[T; N]`, tuples + destructuring, type aliases
-- Enums with associated data `enum E { A, B(T), C { f: T } }`
+- Enums with associated data `enum E { A, B(T), C { f: T } }`, generic enums `enum Slot<T> { ... }`
+- Pattern matching, newtypes
+- Generics + monomorphization, traits, operator traits, static/dynamic dispatch, closures
+- `Option<T>` / `Result<T, E>` from the implicit prelude
 
 **In progress / planned (still Phase 1):**
-- Pattern matching, newtypes (1E)
-- Generics + monomorphization, traits, operator traits, static/dynamic dispatch, closures (1F)
-- `Option` / `Result`, collections, modules, prelude (1G)
+- Collections, the `?` and `??` operators, `checked_*` integer methods, modules and imports (1G)
+- String interpolation, triple-quoted strings, named arguments (1H)
 
 ### Phase 2 — Tensors (Planned)
 

@@ -732,16 +732,26 @@ impl Parser {
         })
     }
 
-    /// Parse an enum definition: `enum Name { Unit, Tuple(T, ...), Named { f: T, ... } }`.
+    /// Parse an enum definition: `enum Name<T, ...> { Unit, Tuple(T, ...), Named { f: T, ... } }`.
     ///
     /// Each variant is one of three shapes — a bare tag, a parenthesised tuple of
     /// payload types, or a brace block of named fields — distinguished by the token
-    /// following the variant name.
+    /// following the variant name. The optional `<...>` list makes the enum a template
+    /// monomorphized per set of type arguments.
     pub(crate) fn parse_enum_def(&mut self) -> ParseResult<EnumDef> {
         let start = self.consume(TokenKind::Enum, "'enum'")?;
         self.skip_newlines();
 
         let name = self.consume_identifier("enum name")?;
+
+        self.skip_newlines();
+        let (generics, lifetimes) = self.parse_generic_params()?;
+        if let Some(lt) = lifetimes.first() {
+            return Err(ParseError::EnumLifetimeParam {
+                name: name.name.clone(),
+                span: lt.span,
+            });
+        }
 
         self.skip_newlines();
         self.consume(TokenKind::LeftBrace, "'{'")?;
@@ -763,6 +773,7 @@ impl Parser {
 
         Ok(EnumDef {
             name,
+            generics,
             variants,
             span: start.span.merge(close.span),
         })

@@ -299,8 +299,13 @@ and *closures and lambdas* in v1.63.0 (`|params| body` literals with `move`, Cop
 capture, the function type `(T) -> R`, and higher-order functions — each closure lifted to
 a `{ fn_ptr, env_ptr }` value with no heap allocation). Completes 1F.
 
-**Next, in dependency order:** 1G (error handling, `Option`/`Result`, collections,
-`??`/`?`, modules, imports, prelude) → 1H (string interpolation, triple-quoted
+**In progress — 1G (Error Handling, Modules & Prelude):** `Option<T>` and
+`Result<T, E>` landed in v1.64.0, together with the generic enums they are built
+from (monomorphized per type-argument set) and an implicit prelude that makes both
+available in every program without a declaration.
+
+**Next, in dependency order:** the rest of 1G (collections, `checked_*`, `??`, `?`,
+modules, imports, the full prelude) → 1H (string interpolation, triple-quoted
 strings, nested comments, named arguments). See the [Quick Roadmap](README.md#quick-roadmap).
 
 `[x]` = landed · `[ ]` = open. See [CHANGELOG.md](CHANGELOG.md) and the README

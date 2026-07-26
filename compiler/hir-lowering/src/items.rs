@@ -30,7 +30,12 @@ impl Lowerer {
         }
         for item in items {
             if let Item::Enum(def) = item {
-                self.register_enum(def)?;
+                if def.generics.is_empty() {
+                    self.register_enum(def)?;
+                } else {
+                    self.generic_enums
+                        .insert(def.name.name.clone(), def.clone());
+                }
             }
         }
         for item in items {
@@ -320,6 +325,14 @@ impl Lowerer {
     /// Mirrors the checker's registration; payload-type Copy/scalar
     /// validation is the checker's job and not repeated here.
     fn register_enum(&mut self, def: &EnumDef) -> Result<(), LoweringError> {
+        let variants = self.resolve_variants(def)?;
+        self.enums.insert(def.name.name.clone(), variants);
+        Ok(())
+    }
+
+    /// Resolve every variant's payload types under the active substitution, so a
+    /// generic template resolves to concrete payloads inside an instantiation.
+    fn resolve_variants(&mut self, def: &EnumDef) -> Result<Vec<EnumVariantData>, LoweringError> {
         let mut variants = Vec::with_capacity(def.variants.len());
         for variant in &def.variants {
             let fields = match &variant.payload {
@@ -344,7 +357,80 @@ impl Lowerer {
                 fields,
             });
         }
-        self.enums.insert(def.name.name.clone(), variants);
+        Ok(variants)
+    }
+
+    /// Materialize a monomorphized generic-enum instance: register its concrete
+    /// variants, queue its HIR item for emission, and return the mangled instance name.
+    /// Idempotent per instance.
+    pub(crate) fn instantiate_generic_enum(
+        &mut self,
+        base: &str,
+        args: &[crate::MonoArg],
+    ) -> Result<String, LoweringError> {
+        let template = match self.generic_enums.get(base) {
+            Some(t) => t.clone(),
+            None => {
+                return Err(LoweringError::UnresolvedType {
+                    name: base.to_string(),
+                })
+            }
+        };
+        let mangled = crate::mangle_struct_instance(base, args);
+        if !self.enums.contains_key(&mangled) {
+            let (subst, const_subst) = split_mono_args(&template.generics, args);
+            let saved_ty = std::mem::replace(&mut self.type_subst, subst.clone());
+            let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
+            let variants = self.resolve_variants(&template);
+            self.type_subst = saved_ty;
+            self.const_subst = saved_c;
+            self.enums.insert(mangled.clone(), variants?);
+            self.enum_instance_base
+                .insert(mangled.clone(), base.to_string());
+            self.enum_instance_args
+                .insert(mangled.clone(), args.to_vec());
+            self.mono_enum_pending.push(crate::MonoEnum {
+                base: base.to_string(),
+                mangled: mangled.clone(),
+                subst,
+                const_subst,
+            });
+        }
+        Ok(mangled)
+    }
+
+    /// The concrete instance a construction or pattern written with a generic enum's
+    /// base name refers to, taken from the surrounding expected type.
+    pub(crate) fn enum_instance_from_expected(
+        &self,
+        base: &str,
+        expected: Option<&HirType>,
+    ) -> Option<String> {
+        let Some(HirType::Enum(name)) = expected else {
+            return None;
+        };
+        (self.enum_instance_base.get(name).map(|s| s.as_str()) == Some(base)).then(|| name.clone())
+    }
+
+    /// Emit the HIR item for one monomorphized enum instance: an ordinary
+    /// `HirItem::Enum` whose payload types are fully concrete.
+    fn emit_mono_enum(&mut self, me: &crate::MonoEnum) -> Result<(), LoweringError> {
+        let template = match self.generic_enums.get(&me.base) {
+            Some(t) => t.clone(),
+            None => {
+                return Err(LoweringError::UnresolvedType {
+                    name: me.base.clone(),
+                })
+            }
+        };
+        let saved_ty = std::mem::replace(&mut self.type_subst, me.subst.clone());
+        let saved_c = std::mem::replace(&mut self.const_subst, me.const_subst.clone());
+        let lowered = self.lower_enum(&template);
+        self.type_subst = saved_ty;
+        self.const_subst = saved_c;
+        let mut lowered = lowered?;
+        lowered.name = me.mangled.clone();
+        self.mono_items.push(HirItem::Enum(lowered));
         Ok(())
     }
 
@@ -561,6 +647,7 @@ impl Lowerer {
                 // Generic struct / impl templates are likewise never lowered directly;
                 // each concrete instance is emitted from the monomorphization worklist.
                 Item::Struct(def) if !def.generics.is_empty() => {}
+                Item::Enum(def) if !def.generics.is_empty() => {}
                 Item::Impl(def) if !def.generics.is_empty() || !def.type_args.is_empty() => {}
                 Item::Struct(def) => hir_items.push(HirItem::Struct(self.lower_struct(def)?)),
                 Item::Enum(def) => hir_items.push(HirItem::Enum(self.lower_enum(def)?)),
@@ -588,6 +675,10 @@ impl Lowerer {
         // Struct instances are drained first because emitting their method bodies can in
         // turn enqueue generic-function instances.
         loop {
+            if let Some(me) = self.mono_enum_pending.pop() {
+                self.emit_mono_enum(&me)?;
+                continue;
+            }
             if let Some(ms) = self.mono_struct_pending.pop() {
                 self.emit_mono_struct(&ms)?;
                 continue;
@@ -816,6 +907,20 @@ impl Lowerer {
     /// the contextual hint the checker applies; every other statement lowers
     /// with no expected type.
     pub(crate) fn lower_body(
+        &mut self,
+        body: &[ast_types::Stmt],
+        return_type: &HirType,
+    ) -> Result<Vec<HirStmt>, LoweringError> {
+        // The declared return type is the contextual type for `return` operands and the
+        // fallback instance for a generic-enum construction in a position no expected
+        // type reaches (a tail `if` branch), so it is tracked for the whole body.
+        let saved_return = std::mem::replace(&mut self.current_return, return_type.clone());
+        let lowered = self.lower_body_stmts(body, return_type);
+        self.current_return = saved_return;
+        lowered
+    }
+
+    fn lower_body_stmts(
         &mut self,
         body: &[ast_types::Stmt],
         return_type: &HirType,

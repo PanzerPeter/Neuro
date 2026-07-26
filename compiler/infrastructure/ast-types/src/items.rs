@@ -216,11 +216,16 @@ pub struct EnumVariant {
 }
 
 /// Enum definition: a tagged union of named variants, each optionally
-/// carrying associated data. Non-generic in Phase 1E — generic enums (`Option<T>`)
-/// arrive with the generics system (1F).
+/// carrying associated data.
+///
+/// `generics` is the `<T, E>` type-parameter list; empty for a non-generic enum.
+/// A generic enum is a *template* — later passes monomorphize it into one concrete
+/// tagged union per distinct set of type arguments, exactly as they do for a generic
+/// struct. `Option<T>` and `Result<T, E>` are ordinary generic enums built this way.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumDef {
     pub name: Identifier,
+    pub generics: Vec<GenericParam>,
     pub variants: Vec<EnumVariant>,
     pub span: Span,
 }

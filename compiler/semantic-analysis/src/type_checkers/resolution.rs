@@ -85,6 +85,15 @@ impl TypeChecker {
                             span: ident.span,
                         });
                         None
+                    } else if self.is_generic_enum(name) {
+                        // Like a generic struct, a generic enum's bare name is not a
+                        // type — the template lives in `enum_defs` only so construction
+                        // sites can infer its arguments.
+                        self.record_error(TypeError::GenericEnumNeedsArgs {
+                            name: name.to_string(),
+                            span: ident.span,
+                        });
+                        None
                     } else if self.struct_defs.contains_key(name) {
                         Some(Type::Struct(name.to_string()))
                     } else if self.enum_defs.contains_key(name) {
@@ -178,7 +187,7 @@ impl TypeChecker {
                         GenericArg::Type(ty) => resolved.push(self.resolve_type(ty)?),
                     }
                 }
-                if !self.is_generic_struct(&name.name) {
+                if !self.is_generic_struct(&name.name) && !self.is_generic_enum(&name.name) {
                     self.record_error(TypeError::NotAGenericType {
                         name: name.name.clone(),
                         span: *span,
@@ -193,6 +202,9 @@ impl TypeChecker {
                 if resolved.iter().any(|t| matches!(t, Type::Generic(_))) {
                     self.record_error(TypeError::NestedGenericTypeArg { span: *span });
                     return None;
+                }
+                if self.is_generic_enum(&name.name) {
+                    return Some(self.instantiate_generic_enum(&name.name, &resolved, *span));
                 }
                 Some(self.instantiate_generic_struct(&name.name, &resolved, *span))
             }

@@ -110,6 +110,10 @@ impl Lowerer {
                         }
                     }
                 }
+                if self.is_generic_enum(&name.name) {
+                    let mangled = self.instantiate_generic_enum(&name.name, &resolved)?;
+                    return Ok(HirType::Enum(mangled));
+                }
                 let mangled = self.instantiate_generic_struct(&name.name, &resolved)?;
                 Ok(HirType::Struct(mangled))
             }
