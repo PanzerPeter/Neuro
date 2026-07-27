@@ -22,9 +22,15 @@ The lexical-analysis dependency is deliberate intra-pipeline coupling, not a VSA
 syntax-parsing is the sole token-stream consumer, and externalising tokenisation would add an
 unnecessary neurc coordination step. The architecture test allowlists this pairing.
 
-Struct literal disambiguation: `Parser` carries `no_struct_lit: bool`, set `true` while parsing
-if/while/for and `else if` conditions, so `Identifier { ... }` does not consume the `{` opening the
-body block (same strategy as Rust). All condition sites set/clear the flag symmetrically.
+Struct literal disambiguation: `Parser` carries `no_struct_lit: bool`, raised while parsing a
+guarded header — an `if`/`else if`/`while` condition, a `for` iterable, a `match` scrutinee, a
+match-arm guard, a `where`-clause value predicate — so `Identifier { ... }` does not consume the
+`{` opening the body block (same strategy as Rust). Two scoped helpers own the flag and nothing
+else assigns it: `guarded_header` raises it, `inside_delimiters` lifts it for `( ... )` and
+`[ ... ]` (grouping, tuple literals, call and turbofish argument lists, array literals, index
+brackets), where a `{` cannot be a body block. Both restore the previous value, on the error path
+too, so nesting composes — `if check(Point { x: 1 }) && flag { }` reads the literal inside the
+argument list and the trailing brace as the body.
 
 `impl` blocks: `parse_program` dispatches `TokenKind::Impl` → `parse_impl_def`, which accepts both
 inherent `impl TypeName { method* }` and trait `impl TraitName for TypeName { method* }` (a `for`

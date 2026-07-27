@@ -240,9 +240,7 @@ impl Parser {
     pub(crate) fn parse_if_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
         self.skip_newlines();
 
-        self.no_struct_lit = true;
-        let condition = self.parse_expr(Precedence::Lowest)?;
-        self.no_struct_lit = false;
+        let condition = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
         self.skip_newlines();
 
         let then_block = self.parse_block()?;
@@ -259,9 +257,8 @@ impl Parser {
                 self.advance(); // consume 'if'
                 self.skip_newlines();
 
-                self.no_struct_lit = true;
-                let else_if_condition = self.parse_expr(Precedence::Lowest)?;
-                self.no_struct_lit = false;
+                let else_if_condition =
+                    self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
                 self.skip_newlines();
 
                 let else_if_block = self.parse_block()?;
@@ -298,9 +295,7 @@ impl Parser {
     ) -> ParseResult<Stmt> {
         self.skip_newlines();
 
-        self.no_struct_lit = true;
-        let condition = self.parse_expr(Precedence::Lowest)?;
-        self.no_struct_lit = false;
+        let condition = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
         self.skip_newlines();
 
         let body = self.parse_labeled_block(label.as_ref())?;
@@ -380,8 +375,7 @@ impl Parser {
         // consumed. Parse it at `Range` precedence so a `..` / `..=` separator is
         // not swallowed as a range expression; the operator (if any)
         // then distinguishes a numeric range from an array iterable.
-        self.no_struct_lit = true;
-        let start = self.parse_expr(Precedence::Range)?;
+        let start = self.guarded_header(|p| p.parse_expr(Precedence::Range))?;
         self.skip_newlines();
 
         let inclusive = if self.check(&TokenKind::DotDotEqual) {
@@ -392,7 +386,6 @@ impl Parser {
             false
         } else {
             // No range operator: iterate the parsed expression as an array.
-            self.no_struct_lit = false;
             let body = self.parse_labeled_block(label.as_ref())?;
             let end_span = body.last().map(stmt_span).unwrap_or(start.span());
             return Ok(Stmt::ForEach {
@@ -406,8 +399,7 @@ impl Parser {
 
         self.skip_newlines();
 
-        let end = self.parse_expr(Precedence::Lowest)?;
-        self.no_struct_lit = false;
+        let end = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
         self.skip_newlines();
 
         let body = self.parse_labeled_block(label.as_ref())?;

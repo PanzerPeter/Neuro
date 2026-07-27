@@ -412,10 +412,25 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         }
 
-        // Open the function-body drop scope. Free functions cannot take struct values
-        // by value today, so no `Drop` parameters are registered here; locals are
+        // Open the function-body drop scope. A by-value parameter that owns heap
+        // storage was moved into this function, which now owns it, so it is destroyed
+        // at function exit — the same rule the method path applies. Locals are
         // registered as their declarations are lowered.
         self.push_drop_scope();
+        for (i, param) in func_def.params.iter().enumerate() {
+            let owns_heap = match param_types.get(i) {
+                Some(Type::Struct(name)) if self.drop_types.contains(name) => {
+                    Some(DropTarget::UserDrop(name.clone()))
+                }
+                Some(Type::Collection { .. }) => Some(DropTarget::Collection),
+                _ => None,
+            };
+            if let Some(target) = owns_heap {
+                if let Some(alloca) = self.variables.get(&param.name).copied() {
+                    self.register_local_drop(&param.name, alloca, target)?;
+                }
+            }
+        }
         self.codegen_body(&func_def.body, return_type)
     }
 

@@ -284,6 +284,23 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-07-27: By-value structs, and literals at their resolved type.
+  `TypeMapper` now holds a struct-layout table (`set_struct_fields`, fed by
+  `CodegenContext::set_struct_defs`) beside `enum_words`, so `map_type` builds a named struct's
+  aggregate instead of rejecting it: a struct works as a free function's parameter and return type,
+  and as a field of another struct. The ABI is by value, direct — no `sret` — matching what methods
+  already did for `&self`. `get_struct_llvm_type` delegates to `TypeMapper::struct_type`, so one
+  definition of the layout serves both paths; recursion is bounded by `MAX_STRUCT_DEPTH` (a cycle is
+  impossible today — a field type must be declared before use — so the limit is insurance against a
+  stack overflow, not a live case). `codegen_function` registers a by-value `Drop` or collection
+  parameter for destruction at function exit, as `codegen_method` already did. `codegen_field_access`
+  takes `&mut self` and reads a field of a non-place object (a chain `o.inner.v`, a call result) with
+  `extractvalue`, keeping the GEP-and-load path for a named binding; `get_struct_ptr_and_type` still
+  requires a place, so a `&mut self` method through a chain remains unsupported. `codegen_literal`
+  takes the literal's resolved type and emits the constant at it — an unsuffixed literal has no width
+  of its own, and nothing coerces a call argument or a return value, so the suffix default (`i32` /
+  `f64`) reached the verifier; the suffix rule remains only as the fallback for a non-numeric
+  resolved type.
 - 2026-07-27: Standard collections. New `codegen/collections/` module (`mod` / `vectors` / `maps` /
   `keys`) lowering `Vec<T>`, `HashMap<K, V>`, and `BTreeMap<K, V>`. Every kind is one
   `{ ptr buffer, i64 len, i64 cap, i64 used }` header held by value

@@ -71,29 +71,52 @@ impl FoldedConst {
 }
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// Generate code for a literal expression
+    /// Generate code for a literal expression.
+    ///
+    /// `ty` is the literal's *resolved* type, taken from its HIR node. An unsuffixed
+    /// literal has no width of its own — the frontend picks one from the context
+    /// (`take(0.75)` where `take` wants `f32`), and the emitted constant must use that
+    /// type. Falling back to the suffix default here would produce a `double` where the
+    /// callee expects a `float`, which nothing downstream coerces at a call or return.
+    /// The suffix rule stays as the fallback for the few positions where the resolved
+    /// type is not itself numeric (a generic parameter left abstract, say).
     pub(crate) fn codegen_literal(
         &self,
         lit: &shared_types::Literal,
+        ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         match lit {
             shared_types::Literal::Integer(val, suffix_opt) => {
                 use shared_types::IntSuffix;
-                let llvm_ty = match suffix_opt {
-                    None | Some(IntSuffix::I32) | Some(IntSuffix::U32) => self.context.i32_type(),
-                    Some(IntSuffix::I8) | Some(IntSuffix::U8) => self.context.i8_type(),
-                    Some(IntSuffix::I16) | Some(IntSuffix::U16) => self.context.i16_type(),
-                    Some(IntSuffix::I64) | Some(IntSuffix::U64) => self.context.i64_type(),
+                let llvm_ty = if ty.is_int_like() {
+                    self.type_mapper.map_int_type(ty)
+                } else {
+                    match suffix_opt {
+                        None | Some(IntSuffix::I32) | Some(IntSuffix::U32) => {
+                            self.context.i32_type()
+                        }
+                        Some(IntSuffix::I8) | Some(IntSuffix::U8) => self.context.i8_type(),
+                        Some(IntSuffix::I16) | Some(IntSuffix::U16) => self.context.i16_type(),
+                        Some(IntSuffix::I64) | Some(IntSuffix::U64) => self.context.i64_type(),
+                    }
                 };
-                Ok(llvm_ty.const_int(*val as u64, true).into())
+                Ok(llvm_ty
+                    .const_int(*val as u64, !ty.is_unsigned_like())
+                    .into())
             }
             shared_types::Literal::Float(val, suffix_opt) => {
                 use shared_types::FloatSuffix;
-                let llvm_ty = match suffix_opt {
-                    Some(FloatSuffix::F16) => self.context.f16_type(),
-                    Some(FloatSuffix::BF16) => self.context.bf16_type(),
-                    Some(FloatSuffix::F32) => self.context.f32_type(),
-                    None | Some(FloatSuffix::F64) => self.context.f64_type(),
+                let llvm_ty = match ty {
+                    Type::F16 => self.context.f16_type(),
+                    Type::BF16 => self.context.bf16_type(),
+                    Type::F32 => self.context.f32_type(),
+                    Type::F64 => self.context.f64_type(),
+                    _ => match suffix_opt {
+                        Some(FloatSuffix::F16) => self.context.f16_type(),
+                        Some(FloatSuffix::BF16) => self.context.bf16_type(),
+                        Some(FloatSuffix::F32) => self.context.f32_type(),
+                        None | Some(FloatSuffix::F64) => self.context.f64_type(),
+                    },
                 };
                 Ok(llvm_ty.const_float(*val).into())
             }

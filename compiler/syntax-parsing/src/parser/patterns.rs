@@ -15,10 +15,7 @@ impl Parser {
     /// suppressed so `match x { ... }` reads `x` as the scrutinee, not `x { ... }`.
     pub(super) fn parse_match_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
         self.skip_newlines();
-        let saved_no_struct_lit = self.no_struct_lit;
-        self.no_struct_lit = true;
-        let scrutinee = self.parse_expr(Precedence::Lowest)?;
-        self.no_struct_lit = saved_no_struct_lit;
+        let scrutinee = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
         self.skip_newlines();
 
         self.consume(TokenKind::LeftBrace, "'{' to open match body")?;
@@ -59,10 +56,7 @@ impl Parser {
         let guard = if self.check(&TokenKind::If) {
             self.advance(); // consume 'if'
             self.skip_newlines();
-            let saved_no_struct_lit = self.no_struct_lit;
-            self.no_struct_lit = true;
-            let guard = self.parse_expr(Precedence::Lowest)?;
-            self.no_struct_lit = saved_no_struct_lit;
+            let guard = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
             Some(Box::new(guard))
         } else {
             None

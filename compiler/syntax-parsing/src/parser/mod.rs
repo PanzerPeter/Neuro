@@ -18,6 +18,7 @@ pub(crate) struct Parser {
     pub(super) expr_depth: usize,
     /// When true, an identifier followed by `{` is NOT parsed as a struct literal.
     /// Set to true inside if/while/for conditions to prevent consuming the block's `{`.
+    /// Cleared again inside a delimiter pair — see [`Parser::inside_delimiters`].
     pub(super) no_struct_lit: bool,
     /// Loop labels in scope at the current parse position, innermost last.
     /// `break`/`continue` labels and value-carrying `break v` share bare-identifier
@@ -116,6 +117,40 @@ impl Parser {
                 span: token.span,
             })
         }
+    }
+
+    /// Parse `f` in a guarded-header position (an `if`/`while` condition, a `for`
+    /// iterable, a `match` scrutinee, a match-arm guard): a bare `Ident {` there opens
+    /// the header's body block, so it must not be read as a struct literal. The
+    /// previous guard state is restored afterwards, so nesting behaves.
+    pub(super) fn guarded_header<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> ParseResult<T>,
+    ) -> ParseResult<T> {
+        self.with_struct_lit_guard(true, f)
+    }
+
+    /// Parse `f` inside a delimiter pair — `( ... )`, `[ ... ]`, or an argument list.
+    /// A `{` there cannot be a header's body block, so a struct literal is unambiguous
+    /// and the guard is lifted for the duration.
+    pub(super) fn inside_delimiters<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> ParseResult<T>,
+    ) -> ParseResult<T> {
+        self.with_struct_lit_guard(false, f)
+    }
+
+    /// Run `f` with [`Parser::no_struct_lit`] forced to `guarded`, restoring the
+    /// previous value on both the success and the error path.
+    fn with_struct_lit_guard<T>(
+        &mut self,
+        guarded: bool,
+        f: impl FnOnce(&mut Self) -> ParseResult<T>,
+    ) -> ParseResult<T> {
+        let saved = std::mem::replace(&mut self.no_struct_lit, guarded);
+        let result = f(self);
+        self.no_struct_lit = saved;
+        result
     }
 
     /// Skip newline tokens (whitespace handling)

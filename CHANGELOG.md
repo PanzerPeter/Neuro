@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.65.1] - 2026-07-27
+
+### Fixed
+- `codegen`: an unsuffixed literal is emitted at the type the frontend resolved for it
+  instead of the suffix default. `take(0.75)` where `take` wants `f32` no longer emits a
+  `double` the LLVM verifier rejects, and the same applies in return position
+  (`func half() -> f32 { 0.5 }`) and to integers reaching an `i64`/`u8` parameter.
+- `parser`: a struct literal is accepted inside a delimiter pair in a guarded header —
+  `match grid.get(Point { x: 3, y: 4 }) { ... }`, and the same in `if`, `while`, and both
+  `for` forms. The guard that keeps `if x {` from reading `x {` as a struct literal is now
+  lifted inside `( ... )` and `[ ... ]`, where a `{` is unambiguous, and restored on the
+  way out — it is scoped rather than assigned, so nesting no longer drops it.
+- `codegen`: a struct can be a free function's parameter and return type. The type mapper
+  holds a struct-layout table, so a struct also works as a *field* of another struct, and
+  a return-position `impl Trait` yielding a struct now compiles. A by-value `Drop`
+  parameter of a free function is destroyed at function exit, as it already was for
+  methods.
+- `codegen`: chained field reads (`o.inner.v`) — an intermediate struct value is read
+  with `extractvalue` rather than requiring a named binding to address.
+- `semantic`: a move in a tail (implicit-return) expression is no longer reported as a use
+  of the value it moved itself. The trailing expression was type-checked twice; it is now
+  checked once, against the declared return type, which also stops tail-expression
+  diagnostics from being emitted twice.
+
 ## [1.65.0] - 2026-07-27
 
 ### Added

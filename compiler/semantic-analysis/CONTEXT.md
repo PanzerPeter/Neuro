@@ -99,6 +99,13 @@ opt-out. Conservative: `if`/`while`/`for` bodies and if-expr arms snapshot/resto
 (`snapshot_moves`/`restore_moves`) so a conditional move never leaks onto a non-executing path. May
 miss some moves (e.g. second-iteration loop moves) but never rejects a valid program.
 
+Every expression is checked exactly once, and the trailing bare expression of a non-void body is
+the case that has to be arranged deliberately: it is skipped in `check_function`'s statement loop
+and checked afterwards with the declared return type as its expected type. Checking it in both
+places re-ran its effects — a by-value argument was recorded as moved twice, and the second read
+then reported a use of the value the expression had moved itself — and duplicated any diagnostic
+the tail produced. The method loop in `declarations.rs` follows the same rule.
+
 Borrow exclusivity (`symbol_table.rs` + the `Expr::Reference` arm): each binding tracks
 borrows taken *against its place* — persistent counts (a borrow held by a reference binding via
 `val r = &x`) plus transient counts (a borrow passed to a call, used in a condition, or returned).

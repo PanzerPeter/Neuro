@@ -538,11 +538,7 @@ impl Parser {
                 // A value predicate is a boolean expression over const parameters. Struct
                 // literals cannot appear in a predicate, and the trailing `{` opens the
                 // body/fields, so suppress struct-literal parsing while reading it.
-                let saved = self.no_struct_lit;
-                self.no_struct_lit = true;
-                let pred = self.parse_expr(Precedence::Lowest);
-                self.no_struct_lit = saved;
-                predicates.push(pred?);
+                predicates.push(self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?);
             }
 
             self.skip_newlines();
