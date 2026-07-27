@@ -209,54 +209,53 @@ impl Parser {
 
             // `( ... )` is either grouping or a tuple literal. A comma after
             // the first expression makes it a tuple; otherwise it is plain grouping.
-            TokenKind::LeftParen => {
-                self.skip_newlines();
-                let first = self.parse_expr(Precedence::Lowest)?;
-                self.skip_newlines();
-                if self.check(&TokenKind::Comma) {
+            TokenKind::LeftParen => self.inside_delimiters(|p| {
+                p.skip_newlines();
+                let first = p.parse_expr(Precedence::Lowest)?;
+                p.skip_newlines();
+                if p.check(&TokenKind::Comma) {
                     let mut elements = vec![first];
-                    while self.check(&TokenKind::Comma) {
-                        self.advance(); // consume ','
-                        self.skip_newlines();
+                    while p.check(&TokenKind::Comma) {
+                        p.advance(); // consume ','
+                        p.skip_newlines();
                         // A trailing comma before `)` closes the tuple.
-                        if self.check(&TokenKind::RightParen) {
+                        if p.check(&TokenKind::RightParen) {
                             break;
                         }
-                        elements.push(self.parse_expr(Precedence::Lowest)?);
-                        self.skip_newlines();
+                        elements.push(p.parse_expr(Precedence::Lowest)?);
+                        p.skip_newlines();
                     }
-                    let close =
-                        self.consume(TokenKind::RightParen, "')' to close tuple literal")?;
+                    let close = p.consume(TokenKind::RightParen, "')' to close tuple literal")?;
                     let span = token.span.merge(close.span);
                     Ok(Expr::TupleLiteral { elements, span })
                 } else {
-                    let close = self.consume(TokenKind::RightParen, "')'")?;
+                    let close = p.consume(TokenKind::RightParen, "')'")?;
                     let span = token.span.merge(close.span);
                     Ok(Expr::Paren(Box::new(first), span))
                 }
-            }
+            }),
 
             // Array literal `[e0, e1, ...]`. Elements parse at the lowest
             // precedence so each may be a full expression; a trailing comma is not
             // accepted (each element must be followed by `,` or the closing `]`).
-            TokenKind::LeftBracket => {
-                self.skip_newlines();
+            TokenKind::LeftBracket => self.inside_delimiters(|p| {
+                p.skip_newlines();
                 let mut elements = Vec::new();
-                if !self.check(&TokenKind::RightBracket) {
+                if !p.check(&TokenKind::RightBracket) {
                     loop {
-                        elements.push(self.parse_expr(Precedence::Lowest)?);
-                        self.skip_newlines();
-                        if !self.check(&TokenKind::Comma) {
+                        elements.push(p.parse_expr(Precedence::Lowest)?);
+                        p.skip_newlines();
+                        if !p.check(&TokenKind::Comma) {
                             break;
                         }
-                        self.advance(); // consume ','
-                        self.skip_newlines();
+                        p.advance(); // consume ','
+                        p.skip_newlines();
                     }
                 }
-                let close = self.consume(TokenKind::RightBracket, "']' to close array literal")?;
+                let close = p.consume(TokenKind::RightBracket, "']' to close array literal")?;
                 let span = token.span.merge(close.span);
                 Ok(Expr::ArrayLiteral { elements, span })
-            }
+            }),
 
             TokenKind::If => self.parse_if_expr(token.span),
 
@@ -382,9 +381,7 @@ impl Parser {
     /// Parse an if-expression. The `if` token has already been consumed; `start_span` is its span.
     fn parse_if_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
         self.skip_newlines();
-        self.no_struct_lit = true;
-        let condition = self.parse_expr(Precedence::Lowest)?;
-        self.no_struct_lit = false;
+        let condition = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
         self.skip_newlines();
 
         let then_block = self.parse_block()?;
@@ -400,9 +397,7 @@ impl Parser {
             if self.check(&TokenKind::If) {
                 self.advance(); // consume 'if'
                 self.skip_newlines();
-                self.no_struct_lit = true;
-                let elif_cond = self.parse_expr(Precedence::Lowest)?;
-                self.no_struct_lit = false;
+                let elif_cond = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
                 self.skip_newlines();
                 let elif_block = self.parse_block()?;
                 else_if_blocks.push((elif_cond, elif_block));
@@ -506,6 +501,29 @@ impl Parser {
         Ok(Expr::Unsafe { stmts, span })
     }
 
+    /// Parse a comma-separated argument list, stopping at the closing `)` (which the
+    /// caller consumes). The opening `(` is already consumed. Arguments sit inside a
+    /// delimiter pair, so a struct literal is unambiguous here even when the call
+    /// appears in a guarded header (`if f(Point { x: 1 }) { ... }`).
+    fn parse_call_arguments(&mut self) -> ParseResult<Vec<Expr>> {
+        self.inside_delimiters(|p| {
+            let mut args = Vec::new();
+            p.skip_newlines();
+            if !p.check(&TokenKind::RightParen) {
+                loop {
+                    args.push(p.parse_expr(Precedence::Lowest)?);
+                    p.skip_newlines();
+                    if !p.check(&TokenKind::Comma) {
+                        break;
+                    }
+                    p.advance(); // consume ','
+                    p.skip_newlines();
+                }
+            }
+            Ok(args)
+        })
+    }
+
     /// Parse an infix expression (binary operators, function calls, field access, casts)
     fn parse_infix(&mut self, left: Expr) -> ParseResult<Expr> {
         let token = self.peek().ok_or(ParseError::UnexpectedEof {
@@ -515,22 +533,7 @@ impl Parser {
         match &token.kind {
             TokenKind::LeftParen => {
                 self.advance(); // consume '('
-                let mut args = Vec::new();
-
-                self.skip_newlines();
-                if !self.check(&TokenKind::RightParen) {
-                    loop {
-                        args.push(self.parse_expr(Precedence::Lowest)?);
-                        self.skip_newlines();
-
-                        if !self.check(&TokenKind::Comma) {
-                            break;
-                        }
-                        self.advance(); // consume ','
-                        self.skip_newlines();
-                    }
-                }
-
+                let args = self.parse_call_arguments()?;
                 let close = self.consume(TokenKind::RightParen, "')'")?;
                 let span = left.span().merge(close.span);
 
@@ -549,19 +552,7 @@ impl Parser {
                 self.advance(); // consume '::'
                 let type_args = self.parse_turbofish_args()?;
                 self.consume(TokenKind::LeftParen, "'(' after turbofish `::<...>`")?;
-                let mut args = Vec::new();
-                self.skip_newlines();
-                if !self.check(&TokenKind::RightParen) {
-                    loop {
-                        args.push(self.parse_expr(Precedence::Lowest)?);
-                        self.skip_newlines();
-                        if !self.check(&TokenKind::Comma) {
-                            break;
-                        }
-                        self.advance(); // consume ','
-                        self.skip_newlines();
-                    }
-                }
+                let args = self.parse_call_arguments()?;
                 let close = self.consume(TokenKind::RightParen, "')'")?;
                 let span = left.span().merge(close.span);
                 Ok(Expr::Call {
@@ -644,9 +635,12 @@ impl Parser {
             // `arr[i]` is a tight postfix on the preceding primary.
             TokenKind::LeftBracket => {
                 self.advance(); // consume '['
-                self.skip_newlines();
-                let index = self.parse_expr(Precedence::Lowest)?;
-                self.skip_newlines();
+                let index = self.inside_delimiters(|p| {
+                    p.skip_newlines();
+                    let index = p.parse_expr(Precedence::Lowest)?;
+                    p.skip_newlines();
+                    Ok(index)
+                })?;
                 let close = self.consume(TokenKind::RightBracket, "']' to close index")?;
                 let span = left.span().merge(close.span);
                 Ok(Expr::Index {

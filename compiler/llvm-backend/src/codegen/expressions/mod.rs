@@ -30,7 +30,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let target_ty = Type::from_hir(&expr.ty);
                 self.codegen_cast(value, &target_ty)
             }
-            HirExprKind::Literal(lit) => self.codegen_literal(lit),
+            HirExprKind::Literal(lit) => self.codegen_literal(lit, &Type::from_hir(&expr.ty)),
             HirExprKind::Variable(name) => self.codegen_identifier(name),
             HirExprKind::Binary { op, left, right } => {
                 // `codegen_binary` dispatches on the left-operand type (instruction

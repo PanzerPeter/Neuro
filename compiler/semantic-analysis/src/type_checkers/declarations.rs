@@ -236,14 +236,25 @@ impl TypeChecker {
             }
         }
 
-        // Check function body
-        for stmt in &func.body {
+        // Check function body. A trailing bare expression is the implicit return and
+        // is checked once, below, against the declared return type — checking it here
+        // as well would run its effects twice: a by-value argument would be recorded
+        // as moved a second time (and then reported as a use of the value it moved
+        // itself), and any diagnostic it produced would be recorded twice.
+        let tail_returns =
+            !matches!(return_type, Type::Void) && matches!(func.body.last(), Some(Stmt::Expr(_)));
+        let leading = if tail_returns {
+            &func.body[..func.body.len() - 1]
+        } else {
+            &func.body[..]
+        };
+        for stmt in leading {
             let _ = self.check_stmt(stmt);
         }
 
         // A trailing expression acts as an expression-based return, so it must
         // match the declared return type.
-        if !matches!(return_type, Type::Void) && !func.body.is_empty() {
+        if tail_returns {
             if let Some(Stmt::Expr(expr)) = func.body.last() {
                 if let Some(expr_type) = self.check_expr(expr, Some(&return_type)) {
                     if !self.assignable(&expr_type, &return_type) {
@@ -254,6 +265,7 @@ impl TypeChecker {
                         });
                     }
                 }
+                self.symbols.clear_transient_borrows();
                 // A trailing reference expression is an implicit return; verify it
                 // does not borrow a function-local place.
                 if matches!(return_type, Type::Reference { .. }) {
@@ -1596,12 +1608,21 @@ impl TypeChecker {
                 }
             }
 
-            for stmt in &method.body {
+            // The implicit-return tail is checked once, below — see the same rule in
+            // `check_function`, where checking it twice moved a by-value argument twice.
+            let tail_returns = !matches!(return_type, Type::Void)
+                && matches!(method.body.last(), Some(Stmt::Expr(_)));
+            let leading = if tail_returns {
+                &method.body[..method.body.len() - 1]
+            } else {
+                &method.body[..]
+            };
+            for stmt in leading {
                 let _ = self.check_stmt(stmt);
             }
 
             // Validate trailing expression return (same rule as free functions).
-            if !matches!(return_type, Type::Void) && !method.body.is_empty() {
+            if tail_returns {
                 if let Some(Stmt::Expr(expr)) = method.body.last() {
                     if let Some(expr_type) = self.check_expr(expr, Some(&return_type)) {
                         if !expr_type.is_compatible_with(&return_type) {
@@ -1612,6 +1633,7 @@ impl TypeChecker {
                             });
                         }
                     }
+                    self.symbols.clear_transient_borrows();
                     if matches!(return_type, Type::Reference { .. }) {
                         self.check_returned_reference(expr);
                     }

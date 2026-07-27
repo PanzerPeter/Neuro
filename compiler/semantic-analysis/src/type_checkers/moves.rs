@@ -185,6 +185,72 @@ mod tests {
     }
 
     #[test]
+    fn move_in_a_tail_expression_is_counted_once() {
+        // The tail expression is the implicit return, and it is the last use of `p`.
+        // Checking it twice would see the move it performed itself.
+        let errs = errors(
+            r#"
+            struct Point { x: i32, y: i32 }
+            func total(p: Point) -> i32 { p.x + p.y }
+            func main() -> i32 {
+                val p = Point { x: 1, y: 2 }
+                total(p)
+            }
+            "#,
+        );
+        assert!(
+            errs.is_empty(),
+            "a move in the tail expression must not report itself; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn move_in_a_tail_method_expression_is_counted_once() {
+        let errs = errors(
+            r#"
+            struct Sink { n: i32 }
+            impl Sink {
+                func swallow(&self, s: string) -> i32 { self.n }
+            }
+            func main() -> i32 {
+                val s: Sink = Sink { n: 1 }
+                val text: string = "hi"
+                s.swallow(text)
+            }
+            "#,
+        );
+        assert!(
+            errs.is_empty(),
+            "a move in a tail method call must not report itself; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn a_real_use_after_move_in_a_tail_expression_is_reported_once() {
+        // The genuine error still fires — and only once, since the tail is no
+        // longer checked twice.
+        let errs = errors(
+            r#"
+            func consume(s: string) -> i32 { 0 }
+            func main() -> i32 {
+                val s: string = "hi"
+                val first: i32 = consume(s)
+                consume(s)
+            }
+            "#,
+        );
+        let moved: Vec<_> = errs
+            .iter()
+            .filter(|e| e.contains("use of moved value 's'"))
+            .collect();
+        assert_eq!(
+            moved.len(),
+            1,
+            "expected exactly one use-of-moved diagnostic, got {errs:?}"
+        );
+    }
+
+    #[test]
     fn derive_copy_with_non_copy_field_is_rejected() {
         let errs = errors(
             r#"

@@ -8,6 +8,11 @@ use inkwell::types::{BasicType, BasicTypeEnum};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
+/// How deep struct nesting may go before the mapper gives up. Field types must be
+/// declared before use, so a cycle is impossible today; the limit turns any future
+/// self-referential layout into a diagnostic instead of a stack overflow.
+const MAX_STRUCT_DEPTH: u32 = 64;
+
 /// Maps Neuro semantic types to LLVM types
 pub(crate) struct TypeMapper<'ctx> {
     context: &'ctx LLVMContext,
@@ -16,6 +21,11 @@ pub(crate) struct TypeMapper<'ctx> {
     /// Populated before code generation so every enum type maps to a single,
     /// consistent `{ i32, [W x i64] }` aggregate.
     enum_words: HashMap<String, u32>,
+    /// Struct name → its field types in declaration order. A struct's layout is not
+    /// carried by [`Type::Struct`] (which holds only the name), so the mapper needs
+    /// this table to build the LLVM aggregate for one — as a function parameter, a
+    /// return type, or a field of another struct.
+    struct_fields: HashMap<String, Vec<Type>>,
 }
 
 impl<'ctx> TypeMapper<'ctx> {
@@ -23,12 +33,50 @@ impl<'ctx> TypeMapper<'ctx> {
         Self {
             context,
             enum_words: HashMap::new(),
+            struct_fields: HashMap::new(),
         }
     }
 
     /// Record each enum's payload word count before code generation begins.
     pub(crate) fn set_enum_words(&mut self, enum_words: HashMap<String, u32>) {
         self.enum_words = enum_words;
+    }
+
+    /// Record every struct's field types before code generation begins.
+    pub(crate) fn set_struct_fields(&mut self, struct_fields: HashMap<String, Vec<Type>>) {
+        self.struct_fields = struct_fields;
+    }
+
+    /// The LLVM aggregate for a named struct: its field types in declaration order.
+    ///
+    /// LLVM deduplicates anonymous struct types structurally, so rebuilding the type
+    /// on each call yields the same type and no cache is needed.
+    pub(crate) fn struct_type(
+        &self,
+        name: &str,
+    ) -> CodegenResult<inkwell::types::StructType<'ctx>> {
+        self.struct_type_at_depth(name, 0)
+    }
+
+    fn struct_type_at_depth(
+        &self,
+        name: &str,
+        depth: u32,
+    ) -> CodegenResult<inkwell::types::StructType<'ctx>> {
+        if depth >= MAX_STRUCT_DEPTH {
+            return Err(CodegenError::UnsupportedType(format!(
+                "struct '{}' nests more than {} levels deep, or refers to itself",
+                name, MAX_STRUCT_DEPTH
+            )));
+        }
+        let fields = self.struct_fields.get(name).ok_or_else(|| {
+            CodegenError::UnsupportedType(format!("unknown struct type '{}'", name))
+        })?;
+        let mut field_llvm_types = Vec::with_capacity(fields.len());
+        for field_ty in fields {
+            field_llvm_types.push(self.map_type_at_depth(field_ty, depth + 1)?);
+        }
+        Ok(self.context.struct_type(&field_llvm_types, false))
     }
 
     /// The LLVM tagged-union type for a named enum: `{ i32 tag, [W x i64] payload }`
@@ -75,6 +123,12 @@ impl<'ctx> TypeMapper<'ctx> {
 
     /// Convert a Neuro semantic type to an LLVM type
     pub(crate) fn map_type(&self, ty: &Type) -> CodegenResult<BasicTypeEnum<'ctx>> {
+        self.map_type_at_depth(ty, 0)
+    }
+
+    /// `map_type` carrying the struct-nesting depth, so a struct field that is itself
+    /// a struct is bounded by [`MAX_STRUCT_DEPTH`].
+    fn map_type_at_depth(&self, ty: &Type, depth: u32) -> CodegenResult<BasicTypeEnum<'ctx>> {
         match ty {
             // Signed integers
             Type::I8 => Ok(self.context.i8_type().into()),
@@ -125,17 +179,14 @@ impl<'ctx> TypeMapper<'ctx> {
             ))),
             // Fixed-size array `[T; N]` → LLVM `[N x T]` aggregate.
             Type::Array { element, size } => {
-                let elem_llvm = self.map_type(element)?;
+                let elem_llvm = self.map_type_at_depth(element, depth)?;
                 Ok(elem_llvm.array_type(*size as u32).into())
             }
             // Tuple `(T1, T2, ...)` → anonymous LLVM struct `{ T1, T2, ... }`.
-            // Elements are restricted to Copy non-struct types at resolution, so each
-            // maps directly here (a struct element would need field definitions and is
-            // not yet permitted — same restriction as arrays).
             Type::Tuple(elements) => {
                 let mut field_tys = Vec::with_capacity(elements.len());
                 for el in elements {
-                    field_tys.push(self.map_type(el)?);
+                    field_tys.push(self.map_type_at_depth(el, depth)?);
                 }
                 Ok(self.context.struct_type(&field_tys, false).into())
             }
@@ -152,13 +203,9 @@ impl<'ctx> TypeMapper<'ctx> {
                     .struct_type(&[ptr.into(), ptr.into()], false)
                     .into())
             }
-            // Struct types must be built via CodegenContext::get_struct_llvm_type,
-            // which has access to field definitions. Calling map_type directly on
-            // a struct (e.g. for a function parameter) is not supported in Phase 2.
-            Type::Struct(name) => Err(CodegenError::UnsupportedType(format!(
-                "struct '{}' as a function parameter or return type is not yet supported",
-                name
-            ))),
+            // A named struct is its field aggregate, built from the layout table. It is
+            // passed and returned by value like any other first-class aggregate.
+            Type::Struct(name) => Ok(self.struct_type_at_depth(name, depth)?.into()),
             // Every standard collection is a `{ buffer, len, cap, used }` header
             // held by value; the elements live in the heap buffer it points at.
             Type::Collection { .. } => Ok(self.collection_header_type().into()),

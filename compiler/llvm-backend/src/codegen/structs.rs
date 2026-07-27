@@ -9,24 +9,29 @@ use crate::types::Type;
 use super::context::CodegenContext;
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// Populate the struct definition table before code generation begins.
+    /// Populate the struct definition table before code generation begins. The field
+    /// *types* are also handed to the [`crate::type_mapping::TypeMapper`], which needs
+    /// them to build a struct's LLVM aggregate wherever one appears — a parameter, a
+    /// return type, or a field of another struct.
     pub(crate) fn set_struct_defs(&mut self, defs: HashMap<String, Vec<(String, Type)>>) {
+        let field_types = defs
+            .iter()
+            .map(|(name, fields)| {
+                (
+                    name.clone(),
+                    fields.iter().map(|(_, ty)| ty.clone()).collect(),
+                )
+            })
+            .collect();
+        self.type_mapper.set_struct_fields(field_types);
         self.struct_defs = defs;
     }
 
-    /// Build (or reconstruct) the LLVM struct type for a named struct.
-    ///
-    /// LLVM deduplicates anonymous struct types by structure, so reconstructing
-    /// the type each call is safe and avoids storing LLVM types in the context.
+    /// The LLVM struct type for a named struct. Field *names* live in `struct_defs`
+    /// (for index lookup); the layout itself comes from the type mapper, so both
+    /// paths agree on one aggregate.
     pub(crate) fn get_struct_llvm_type(&self, name: &str) -> CodegenResult<StructType<'ctx>> {
-        let def = self.struct_defs.get(name).ok_or_else(|| {
-            CodegenError::UnsupportedType(format!("unknown struct type '{}'", name))
-        })?;
-        let mut field_llvm_types = Vec::new();
-        for (_, field_ty) in def {
-            field_llvm_types.push(self.type_mapper.map_type(field_ty)?);
-        }
-        Ok(self.context.struct_type(&field_llvm_types, false))
+        self.type_mapper.struct_type(name)
     }
 
     /// Build a struct aggregate value from a struct literal expression.
@@ -79,22 +84,40 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(agg.into())
     }
 
-    /// Load a single field from a struct variable.
+    /// Read a single field from a struct.
+    ///
+    /// A named binding is addressed and the field loaded through a GEP. Any other
+    /// object — a chained access (`o.inner.v`), a call result, a struct literal —
+    /// has no storage of its own, so it is evaluated to a first-class aggregate and
+    /// the field extracted from that value.
     pub(crate) fn codegen_field_access(
-        &self,
+        &mut self,
         object: &HirExpr,
         field_name: &str,
         struct_name: &str,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let (ptr, llvm_ty) = self.get_struct_ptr_and_type(object, struct_name)?;
+        let idx = self.struct_field_index(struct_name, field_name)?;
 
-        let def = self.struct_defs.get(struct_name).ok_or_else(|| {
-            CodegenError::UnsupportedType(format!("unknown struct '{}'", struct_name))
-        })?;
-        let (idx, (_, field_ty)) = def
-            .iter()
-            .enumerate()
-            .find(|(_, (n, _))| n == field_name)
+        if !matches!(object.kind, HirExprKind::Variable(_)) {
+            let aggregate = self.codegen_expr(object)?;
+            let BasicValueEnum::StructValue(struct_val) = aggregate else {
+                return Err(CodegenError::InternalError(format!(
+                    "field access on a non-aggregate value of struct '{}'",
+                    struct_name
+                )));
+            };
+            return self
+                .builder
+                .build_extract_value(struct_val, idx as u32, field_name)
+                .map_err(|e| CodegenError::LlvmError(format!("failed to read field: {}", e)));
+        }
+
+        let (ptr, llvm_ty) = self.get_struct_ptr_and_type(object, struct_name)?;
+        let field_ty = self
+            .struct_defs
+            .get(struct_name)
+            .and_then(|def| def.get(idx))
+            .map(|(_, ty)| ty.clone())
             .ok_or_else(|| {
                 CodegenError::InternalError(format!(
                     "struct '{}' has no field '{}'",
@@ -107,10 +130,26 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_struct_gep(llvm_ty, ptr, idx as u32, &format!("{}.ptr", field_name))
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
-        let llvm_field_ty = self.type_mapper.map_type(field_ty)?;
+        let llvm_field_ty = self.type_mapper.map_type(&field_ty)?;
         self.builder
             .build_load(llvm_field_ty, field_ptr, field_name)
             .map_err(|e| CodegenError::LlvmError(format!("failed to load field: {}", e)))
+    }
+
+    /// The declaration-order position of `field_name` in `struct_name`, which is also
+    /// its index in the LLVM aggregate.
+    fn struct_field_index(&self, struct_name: &str, field_name: &str) -> CodegenResult<usize> {
+        let def = self.struct_defs.get(struct_name).ok_or_else(|| {
+            CodegenError::UnsupportedType(format!("unknown struct '{}'", struct_name))
+        })?;
+        def.iter()
+            .position(|(n, _)| n == field_name)
+            .ok_or_else(|| {
+                CodegenError::InternalError(format!(
+                    "struct '{}' has no field '{}'",
+                    struct_name, field_name
+                ))
+            })
     }
 
     /// Store a value into a field of a named struct variable.
