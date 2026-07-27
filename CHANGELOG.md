@@ -9,6 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.65.0] - 2026-07-27
+
+### Added
+- `semantic`, `codegen`: standard collections — `Vec<T>`, `HashMap<K, V>`, and
+  `BTreeMap<K, V>`. They are specified as library types, but the language exposes no
+  allocator and no raw pointers, so nothing in `.nr` source could implement them: all
+  three are compiler-known, with a new `Type::Collection { kind, args }` in semantic
+  analysis, `HirType::Collection` + `HirExprKind::CollectionNew` in the HIR, and a
+  `codegen/collections/` module in the backend. None is `Copy` — assignment moves them,
+  and each frees its buffer at scope exit.
+  - `Vec<T>`: `Vec::new()`, `push`, `pop`, `get`, `len`, `clear`, `v[i]` read and write,
+    and `for x in v`. Indexing is bounds-checked in *every* build, unlike `[T; N]`, whose
+    length is a compile-time constant the optimizer can fold.
+  - `HashMap<K, V>`: open-addressed with linear probing over `{ state, key, value }`
+    slots, a power-of-two capacity, tombstoned removal, and a rehash at a 3/4 load factor
+    measured on occupied slots — so a table churned by insert/remove reclaims its
+    tombstones instead of growing its probe runs without bound.
+  - `BTreeMap<K, V>`: key-sorted slots with binary-search lookup, so its entries are
+    ordered. `keys()` returns a `Vec<K>` — ascending for the ordered map — which is how
+    both maps are iterated.
+  - Elements and values may be any `Copy` type or `string`. Keys are int-like or `string`
+    (the compiler supplies equality, order, and hash), or a struct that supplies them
+    itself via `impl PartialEq` plus `impl Hashable` or `impl Comparable`.
+- `semantic`: `Hashable` — a compiler-known lang-item trait like `Drop` and the operator
+  traits, holding exactly `func hash(&self) -> u64`. Write the `impl`, never a `trait`
+  declaration.
+- `semantic`: `OrderedF32` / `OrderedF64` in the prelude — validating wrapper structs whose
+  `new` panics on NaN. A raw float key is now rejected with a diagnostic naming them:
+  IEEE-754 comparison is a partial order, so a map keyed on a raw float could hold a key it
+  could never find again.
+- `tests`: `compiler/neurc/tests/collections.rs` — 18 end-to-end tests covering the method
+  surface, `Option`-returning readers, growth and tombstone churn, ordered iteration, struct
+  keys, `OrderedF32` keys, the move rule, and the bounds panic.
+- `docs`: `examples/types/collections.nr` (exit 101) and
+  `examples/showcase/inventory_ledger.nr` (exit 179), the latter combining all three
+  collections with `impl` methods, an enum + `match`, `Option` matching, and arrays.
+
+### Changed
+- `codegen`: the drop machinery is no longer struct-only. `DropEntry` carries a
+  `DropTarget` — a user `impl Drop for T`, or a collection whose buffer is `free`d — so a
+  collection binding is destroyed through the same flag-guarded, move-aware path.
+- `codegen`: `codegen_enum_construct` was split so `codegen_enum_value` can build a tagged
+  union from already-evaluated values, which is how a fallible collection reader returns
+  its `Option<T>`. The codegen context gained an enum variant-order table so a synthesized
+  construction resolves `Some` / `None` by name rather than assuming a declaration order.
+
 ## [1.64.1] - 2026-07-26
 
 ### Changed

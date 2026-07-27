@@ -24,6 +24,25 @@ impl<'ctx> CodegenContext<'ctx> {
         tag: u32,
         payload: &[HirExpr],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let mut fields = Vec::with_capacity(payload.len());
+        for field in payload {
+            let field_ty = Type::from_hir(&field.ty);
+            fields.push((self.codegen_expr(field)?, field_ty));
+        }
+        let borrowed: Vec<(BasicValueEnum<'ctx>, &Type)> =
+            fields.iter().map(|(v, t)| (*v, t)).collect();
+        self.codegen_enum_value(enum_name, tag, &borrowed)
+    }
+
+    /// Build a tagged-union value from already-evaluated payload values. Shared by the
+    /// surface `EnumConstruct` node and by the collection readers, which produce their
+    /// `Option<T>` payload from a heap load rather than from a sub-expression.
+    pub(crate) fn codegen_enum_value(
+        &mut self,
+        enum_name: &str,
+        tag: u32,
+        payload: &[(BasicValueEnum<'ctx>, &Type)],
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let enum_ty = self.type_mapper.enum_struct_type(enum_name)?;
 
         // The payload array type is the enum struct's second field.
@@ -35,10 +54,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .into_array_type();
 
         let mut payload_val = payload_array_ty.get_undef();
-        for (slot, field) in payload.iter().enumerate() {
-            let field_ty = Type::from_hir(&field.ty);
-            let value = self.codegen_expr(field)?;
-            let encoded = self.encode_enum_payload_field(value, &field_ty)?;
+        for (slot, (value, field_ty)) in payload.iter().enumerate() {
+            let encoded = self.encode_enum_payload_field(*value, field_ty)?;
             payload_val = self
                 .builder
                 .build_insert_value(payload_val, encoded, slot as u32, "enum.slot")

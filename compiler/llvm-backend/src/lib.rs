@@ -95,6 +95,10 @@ pub fn compile(
     // Collect each enum's payload word count `W`: the widest variant's field
     // count, so every value of the enum maps to one `{ i32, [W x i64] }` aggregate.
     let mut enum_words: HashMap<String, u32> = HashMap::new();
+    // Variant names in declaration (discriminant) order, so a compiler-generated
+    // construction — the `Option<T>` a collection reader returns — can look a tag up
+    // by name instead of assuming the prelude's declaration order.
+    let mut enum_variants: HashMap<String, Vec<String>> = HashMap::new();
     for item in items {
         if let HirItem::Enum(def) = item {
             let words = def
@@ -104,6 +108,10 @@ pub fn compile(
                 .max()
                 .unwrap_or(0) as u32;
             enum_words.insert(def.name.clone(), words);
+            enum_variants.insert(
+                def.name.clone(),
+                def.variants.iter().map(|v| v.name.clone()).collect(),
+            );
         }
     }
 
@@ -189,6 +197,7 @@ pub fn compile(
     let mut codegen_ctx = CodegenContext::new(&context, "neuro_module");
     codegen_ctx.set_struct_defs(struct_defs);
     codegen_ctx.set_enum_words(enum_words);
+    codegen_ctx.set_enum_variants(enum_variants);
     codegen_ctx.set_drop_types(drop_types);
     codegen_ctx.set_trait_methods(trait_methods);
 

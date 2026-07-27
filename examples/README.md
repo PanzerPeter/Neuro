@@ -11,7 +11,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | Directory        | What it covers                                                         |
 | ---------------- | ---------------------------------------------------------------------- |
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference |
-| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), `Option<T>` / `Result<T, E>` and generic enums |
+| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`) |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable` |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
@@ -51,6 +51,13 @@ isolation:
   (`Buffer<T, const CAP>` and `sum_all<const N>` with a `where N > 0` predicate),
   **turbofish** (`identity::<i32>(8)`), a fixed-size array + `for`-in loop, an enum +
   pattern matching, and a tuple used as a generic type argument. Exit `85`.
+- [`showcase/inventory_ledger.nr`](showcase/inventory_ledger.nr) — the **standard
+  collections** carrying a small ledger: a `Vec<Item>` of `Copy` structs, a
+  `Vec<string>`, a `HashMap<string, i32>` name index, and a key-ordered
+  `BTreeMap<i32, i32>` report, working together with an `impl` block of `&self`
+  methods, an enum + `match` classifier, `Option` matching on every fallible
+  read, fixed-size arrays, and `for`-in over both arrays and collections.
+  Exit `179`.
 - [`showcase/borrowed_text.nr`](showcase/borrowed_text.nr) — **explicit lifetime
   annotations** `<'a>` on the classic `longest<'a>(a: &'a string, b: &'a string)
   -> &'a string`, working together with immutable string borrows, zero-copy
@@ -149,7 +156,7 @@ No Rust edits are needed — discovery is automatic.
   array elements positionally; `val [first, ..rest] = arr` captures the remainder as
   a fresh `[T; N - k]` array, and a bare `..` ignores it. A rest-less array pattern
   must match the array's length exactly.
-- Move semantics, borrows (`&T`/`&mut T`), borrow exclusivity, lifetime elision, and deterministic `Drop` are implemented (sub-phase 1C). Growable heap strings (`String` builder) and owning collections (`Vec`, `HashMap`) are not yet implemented (1G).
+- Move semantics, borrows (`&T`/`&mut T`), borrow exclusivity, lifetime elision, and deterministic `Drop` are implemented (sub-phase 1C). The owning collections `Vec<T>`, `HashMap<K, V>`, and `BTreeMap<K, V>` are implemented (1G) — they move on assignment and free their buffers at scope exit. A growable heap string (`String` builder) is still not implemented.
 - `&self` and `&mut self` methods are supported; a `&mut self` method mutates
   struct state in place (see `structs/mut_self_accumulator.nr`). Consuming `self`
   is not yet supported.

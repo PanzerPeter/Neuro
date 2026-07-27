@@ -18,6 +18,15 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
 - thiserror — `LoweringError` derivation
 
 ## Notes
+- 2026-07-27: Standard collections. New `collections.rs`: `lower_collection_new` lowers
+  `Vec::new()` / `HashMap::new()` / `BTreeMap::new()` to `HirExprKind::CollectionNew` typed from the
+  annotated target, and `lower_collection_method` re-derives each method's argument and result types
+  — instantiating `Option<T>` through the ordinary generic-enum path, so backends see a real
+  `HirItem::Enum`. `resolve_type` maps the `Vec` / `HashMap` / `BTreeMap` generic application to
+  `HirType::Collection` instead of monomorphizing a nominal instance (a user-declared type of that
+  name still shadows it), and indexing / index assignment / `for`-in resolve a `Vec` element
+  alongside an array's. The method table is duplicated from the checker's rather than shared: the two
+  slices stay independent, and a divergence surfaces as a `LoweringError`.
 - 2026-07-26: Generic enums (`Option<T>` / `Result<T, E>`). New `Lowerer` state: `generic_enums`
   (base -> template), `enum_instance_base` / `enum_instance_args` (instance -> base + arguments),
   and the `mono_enum_pending` worklist, drained in `lower_program` ahead of the struct worklist. A

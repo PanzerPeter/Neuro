@@ -58,6 +58,21 @@ impl<'ctx> TypeMapper<'ctx> {
         self.context.struct_type(&[ptr.into(), ptr.into()], false)
     }
 
+    /// The LLVM header shared by every standard collection:
+    /// `{ ptr buffer, i64 len, i64 cap, i64 used }`.
+    ///
+    /// `len` counts live elements/entries and `cap` the allocated slots. `used` counts
+    /// occupied *slots* — for the hash map that includes tombstones, which is what the
+    /// load factor must be measured against; the other kinds leave it zero.
+    pub(crate) fn collection_header_type(&self) -> inkwell::types::StructType<'ctx> {
+        let ptr = self.context.ptr_type(inkwell::AddressSpace::default());
+        let i64_ty = self.context.i64_type();
+        self.context.struct_type(
+            &[ptr.into(), i64_ty.into(), i64_ty.into(), i64_ty.into()],
+            false,
+        )
+    }
+
     /// Convert a Neuro semantic type to an LLVM type
     pub(crate) fn map_type(&self, ty: &Type) -> CodegenResult<BasicTypeEnum<'ctx>> {
         match ty {
@@ -144,6 +159,9 @@ impl<'ctx> TypeMapper<'ctx> {
                 "struct '{}' as a function parameter or return type is not yet supported",
                 name
             ))),
+            // Every standard collection is a `{ buffer, len, cap, used }` header
+            // held by value; the elements live in the heap buffer it points at.
+            Type::Collection { .. } => Ok(self.collection_header_type().into()),
             // Enum `{ i32 tag, [W x i64] payload }`. Unlike structs, the enum
             // layout is self-contained (the word count comes from `enum_words`), so an
             // enum maps directly here and works as a parameter, return, or field type.

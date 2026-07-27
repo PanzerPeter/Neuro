@@ -210,6 +210,48 @@ clears a binding's flag at every move site (bind/assign/return/break value/call 
 store), so a moved value is dropped exactly once. Known limits: reassigning a `Drop` binding
 does not drop its prior value, and a struct's `Drop` fields are not auto-dropped (no recursive glue).
 
+## Collections ABI
+
+`Vec<T>`, `HashMap<K, V>`, and `BTreeMap<K, V>` share one by-value header —
+`{ ptr buffer, i64 len, i64 cap, i64 used }` (`TypeMapper::collection_header_type`) — held in the
+owner's alloca, with all elements in a single heap buffer. `len` counts live elements/entries,
+`cap` the allocated slots, and `used` the *occupied* slots (live + tombstoned) that the hash map's
+load factor is measured against; the other kinds leave `used` zero.
+
+Buffer layouts, per kind:
+- `Vec<T>` — a plain `[T]` run. Growth doubles `cap` (minimum 8) through one shared byte-sized
+  `__neuro_vec_reserve(header, elem_size)` helper, so every `Vec<T>` in a module reuses it.
+- `HashMap<K, V>` — `{ i8 state, K key, V value }` slots, power-of-two `cap`, so the bucket is
+  `hash & (cap - 1)`. Linear probing; `state` is `0` EMPTY / `1` FULL / `2` TOMBSTONE. A lookup
+  stops at the first EMPTY and skips tombstones; an insert takes the first non-FULL slot, so a
+  tombstoned run is reused. Rehashing at a 3/4 load factor reclaims tombstones, which is what keeps
+  a churned table's probe runs bounded.
+- `BTreeMap<K, V>` — `{ K key, V value }` slots kept sorted by key: binary search to look up,
+  `memmove` the tail to insert or erase. That gives the ordered iteration the type promises; a
+  multi-way tree would change only the insert/erase constant, not this ABI.
+
+Loop-shaped operations are emitted once per instantiation as private helpers named
+`__neuro_{hmap,bmap}_{find,insert,keys}_<key>_<value>` (plus `__neuro_vec_reserve` and
+`__neuro_hash_string`), created through `get_or_build_helper`, which saves and restores the
+caller's insertion point and `current_function`. A lookup returns the slot index, or `-1`.
+
+Key equality, order, and hash are compiler-supplied for int-like and `string` keys (FNV-1a for
+strings, a SplitMix64 finalizer for integers, `memcmp` for string order) and routed to
+`{Struct}__{eq,lt,hash}` for struct keys — each argument adapted to whatever parameter shape the
+impl declared. Semantic analysis has already required those impls, and rejects raw float keys.
+
+`v[i]` is bounds-checked in **every** build, unlike `[T; N]`: a `Vec`'s length is not a
+compile-time constant the optimizer can fold away. `pop` / `get` build their `Option<T>` with
+`codegen_enum_value`, resolving the `Some` / `None` tags through the context's `enum_variants`
+table rather than assuming the prelude's declaration order.
+
+A collection binding is registered in the drop scope with `DropTarget::Collection`, so scope exit
+`free`s field 0 under the same runtime drop flag that user `Drop` types use — a moved-out
+collection is not freed twice. An unnamed collection *temporary* (`for k in m.keys()`) is
+registered the same way under a synthetic `__`-containing name that no source binding can
+collide with; without that, the only route to map iteration would leak. A `string` *inside* a collection is not freed; that rides with the
+heap-string work.
+
 ## Constant Declarations ABI
 Module-level consts emit as `@NAME = internal constant TYPE VALUE` globals before any function defs;
 their LLVM value is also stored in `CodegenContext.const_values` so body references resolve without
@@ -242,6 +284,25 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-07-27: Standard collections. New `codegen/collections/` module (`mod` / `vectors` / `maps` /
+  `keys`) lowering `Vec<T>`, `HashMap<K, V>`, and `BTreeMap<K, V>`. Every kind is one
+  `{ ptr buffer, i64 len, i64 cap, i64 used }` header held by value
+  (`TypeMapper::collection_header_type`), with the elements in a single heap buffer: a plain element
+  array for `Vec`, `{ i8 state, K, V }` probe slots for the open-addressed `HashMap` (linear probing,
+  power-of-two capacity, tombstoned removal, rehash at a 3/4 load factor measured on `used`), and
+  key-sorted `{ K, V }` slots for `BTreeMap` (binary search + memmove). Loop-shaped operations are
+  emitted once per instantiation as private helpers (`__neuro_vec_reserve`,
+  `__neuro_{hmap,bmap}_{find,insert,keys}_<key>_<value>`, `__neuro_hash_string`) via
+  `get_or_build_helper`, which saves and restores the caller's insertion point. Key equality / order
+  / hash are compiler-supplied for int-like and `string` keys and routed to `{Struct}__{eq,lt,hash}`
+  for struct keys, adapting each argument to the impl's declared parameter shape. `DropEntry` now
+  carries a `DropTarget` (`UserDrop(struct)` | `Collection`), so a collection binding's scope exit
+  `free`s its buffer through the same flag-guarded machinery; `drop_struct_name` became
+  `drop_target`. `codegen_enum_construct` was split so `codegen_enum_value` can build the `Option<T>`
+  a fallible reader returns from already-evaluated values, and the context gained `enum_variants`
+  (name → declaration order) to resolve `Some` / `None` tags by name. New libc declarations: `free`,
+  `realloc`, `memmove`, `memset`. `Vec` indexing is bounds-checked in **every** build (its length is
+  not a compile-time constant), panicking through the existing runtime.
 - 2026-07-24: Closures and lambdas. New `codegen/closures.rs`: a closure is a `{ fn_ptr, env_ptr }` fat pointer. `declare_closure`/`codegen_closure` emit each `HirItem::Closure` as a function `(env_ptr, params...) -> ret` whose prologue GEP/loads the captures out of the environment struct into locals; `codegen_closure_value` allocates that struct in the defining frame (`codegen/functions.rs` `codegen_body` is now `pub(crate)` for reuse), snapshots each Copy capture, and pairs the closure function pointer with it. `codegen_call_dispatch` routes a call whose callee is a local variable to `codegen_indirect_call`, which extracts both pointers and issues an indirect call with the environment as the hidden first argument. `map_type` lowers `Type::Function` to the two-pointer struct (previously an error). `lib.rs` declares/emits `HirItem::Closure` items in the existing pre-declare-then-emit passes. Closure env is frame-local, so a closure that escapes its defining scope is out of scope this phase.
 - 2026-07-19: Static & dynamic dispatch. Static dispatch needs nothing here — `impl Trait` is monomorphized away before the HIR arrives. For dynamic dispatch, new `codegen/dispatch.rs`: `emit_vtables` walks every `impl Trait for Type` whose trait is user-declared and emits a private constant global `[N x ptr]` per `(trait, type)`, in the trait's declaration order, filled with per-method THUNKS. A thunk is needed because a `&self` method takes its struct by value while a trait object holds only a pointer, so the thunk loads the receiver and forwards (a `&mut self` method is already pointer-passed and forwards directly). `codegen_dyn_coerce` builds the `{ data, vtable }` fat pointer for a `HirExprKind::DynCoerce`; `codegen_dyn_method_call` extracts both words, GEPs the method's fixed slot, and issues an indirect call. `Type::DynObject` added; `map_type` lowers `Reference(DynObject)` to the two-word `dyn_ref_type()` struct (every other reference stays a plain `ptr`) and rejects a bare `DynObject` as unsized. `CodegenContext` gained `trait_methods` (vtable slot order, via `set_trait_methods`) and `vtables`. Vtables are emitted after all signatures are declared but before any body, so item order never matters.
 - 2026-07-18: Operator traits — scalar path. No new codegen: an overloaded operator is

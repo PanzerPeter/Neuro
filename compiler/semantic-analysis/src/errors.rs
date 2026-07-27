@@ -374,8 +374,29 @@ pub enum TypeError {
     #[error("array element type {ty} is not Copy at {span:?}: arrays of non-Copy element types (strings, non-Copy structs) are not yet supported")]
     NonCopyArrayElement { ty: Type, span: Span },
 
-    #[error("cannot index a value of type {found} at {span:?}: indexing applies only to arrays `[T; N]`")]
+    #[error("cannot index a value of type {found} at {span:?}: indexing applies only to arrays `[T; N]` and `Vec<T>`")]
     NotIndexable { found: Type, span: Span },
+
+    #[error("cannot infer the element type of `{name}::new()` at {span:?}; annotate the binding, e.g. `val v: {name}<...> = {name}::new()`")]
+    CollectionTypeNotInferable { name: String, span: Span },
+
+    #[error("{ty} cannot be stored in a `{collection}` at {span:?}: elements must be `Copy` or `string`")]
+    InvalidCollectionElement {
+        collection: String,
+        ty: Type,
+        span: Span,
+    },
+
+    #[error("{ty} is not a valid `{collection}` key at {span:?}: {reason}")]
+    InvalidCollectionKey {
+        collection: String,
+        ty: Type,
+        reason: String,
+        span: Span,
+    },
+
+    #[error("`impl Hashable for {type_name}` at {span:?} must provide exactly `func hash(&self) -> u64`")]
+    InvalidHashableImpl { type_name: String, span: Span },
 
     #[error("array index must be an integer, found {found} at {span:?}")]
     IndexNotInteger { found: Type, span: Span },

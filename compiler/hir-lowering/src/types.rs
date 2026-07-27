@@ -110,6 +110,28 @@ impl Lowerer {
                         }
                     }
                 }
+                // A standard collection is compiler-known, so it is not monomorphized
+                // into a nominal instance: it carries its type arguments directly. A
+                // program declaring its own generic type of that name shadows it.
+                if let Some(kind) = crate::collections::collection_kind(&name.name) {
+                    if !self.structs.contains_key(&name.name) && !self.is_generic_enum(&name.name) {
+                        let mut collection_args = Vec::with_capacity(resolved.len());
+                        for arg in resolved {
+                            match arg {
+                                crate::MonoArg::Type(ty) => collection_args.push(ty),
+                                crate::MonoArg::Const(_) => {
+                                    return Err(LoweringError::UnresolvedType {
+                                        name: name.name.clone(),
+                                    })
+                                }
+                            }
+                        }
+                        return Ok(HirType::Collection {
+                            kind,
+                            args: collection_args,
+                        });
+                    }
+                }
                 if self.is_generic_enum(&name.name) {
                     let mangled = self.instantiate_generic_enum(&name.name, &resolved)?;
                     return Ok(HirType::Enum(mangled));

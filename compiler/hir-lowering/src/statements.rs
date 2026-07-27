@@ -161,13 +161,16 @@ impl Lowerer {
                 span,
             } => {
                 let iterable = self.lower_expr(iterable, None)?;
-                let element_ty = match iterable.ty.referent() {
-                    HirType::Array { element, .. } => (**element).clone(),
-                    other => {
-                        return Err(LoweringError::Malformed {
-                            detail: format!("for-each over non-array type '{}'", other),
-                        })
-                    }
+                let element_ty = match Self::collection_element(&iterable.ty) {
+                    Some(element) => element,
+                    None => match iterable.ty.referent() {
+                        HirType::Array { element, .. } => (**element).clone(),
+                        other => {
+                            return Err(LoweringError::Malformed {
+                                detail: format!("for-each over non-iterable type '{}'", other),
+                            })
+                        }
+                    },
                 };
                 let body = self.lower_loop_body_with(label, false, |lo| {
                     lo.define(iterator.name.clone(), element_ty.clone());
@@ -244,6 +247,9 @@ impl Lowerer {
             } => {
                 let element_ty = match self.lookup(&target.name) {
                     Some(HirType::Array { element, .. }) => Some(*element),
+                    Some(ref collection @ HirType::Collection { .. }) => {
+                        Self::collection_element(collection)
+                    }
                     _ => None,
                 };
                 let index = self.lower_expr(index, None)?;

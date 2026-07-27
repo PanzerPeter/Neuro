@@ -1,4 +1,5 @@
 pub(crate) mod closures;
+pub(crate) mod collections;
 pub(crate) mod context;
 pub(crate) mod dispatch;
 pub(crate) mod drops;

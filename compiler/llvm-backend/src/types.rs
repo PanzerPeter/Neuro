@@ -48,6 +48,40 @@ pub(crate) enum Type {
     /// Anonymous tuple `(T1, T2, ...)`. Lowered to an anonymous LLVM struct
     /// `{ T1, T2, ... }`; element access is `extractvalue` by constant index.
     Tuple(Vec<Type>),
+    /// A heap-backed standard collection. Every kind lowers to the same
+    /// `{ buffer, length, capacity, used }` header; `kind` selects the buffer layout
+    /// and the operations emitted against it.
+    Collection {
+        kind: CollectionKind,
+        args: Vec<Type>,
+    },
+}
+
+/// Which standard collection a [`Type::Collection`] denotes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum CollectionKind {
+    Vec,
+    HashMap,
+    BTreeMap,
+}
+
+impl CollectionKind {
+    fn from_hir(kind: neuro_hir::HirCollectionKind) -> Self {
+        match kind {
+            neuro_hir::HirCollectionKind::Vec => CollectionKind::Vec,
+            neuro_hir::HirCollectionKind::HashMap => CollectionKind::HashMap,
+            neuro_hir::HirCollectionKind::BTreeMap => CollectionKind::BTreeMap,
+        }
+    }
+
+    /// A symbol-safe tag for the collection, used when naming its generated helpers.
+    pub(crate) fn tag(self) -> &'static str {
+        match self {
+            CollectionKind::Vec => "vec",
+            CollectionKind::HashMap => "hmap",
+            CollectionKind::BTreeMap => "bmap",
+        }
+    }
 }
 
 impl Type {
@@ -88,6 +122,45 @@ impl Type {
                 params: params.iter().map(Type::from_hir).collect(),
                 ret: Box::new(Type::from_hir(ret)),
             },
+            HirType::Collection { kind, args } => Type::Collection {
+                kind: CollectionKind::from_hir(*kind),
+                args: args.iter().map(Type::from_hir).collect(),
+            },
+        }
+    }
+
+    /// A symbol-safe token for this type, used to name the per-instance collection
+    /// helpers so `HashMap<string, i32>` and `HashMap<i32, i32>` get distinct ones.
+    pub(crate) fn mangle(&self) -> String {
+        match self {
+            Type::I8 => "i8".to_string(),
+            Type::I16 => "i16".to_string(),
+            Type::I32 => "i32".to_string(),
+            Type::I64 => "i64".to_string(),
+            Type::U8 => "u8".to_string(),
+            Type::U16 => "u16".to_string(),
+            Type::U32 => "u32".to_string(),
+            Type::U64 => "u64".to_string(),
+            Type::F16 => "f16".to_string(),
+            Type::BF16 => "bf16".to_string(),
+            Type::F32 => "f32".to_string(),
+            Type::F64 => "f64".to_string(),
+            Type::Bool => "bool".to_string(),
+            Type::Char => "char".to_string(),
+            Type::String => "string".to_string(),
+            Type::Void => "void".to_string(),
+            Type::Struct(name) | Type::Enum(name) | Type::DynObject(name) => name.clone(),
+            Type::Reference(inner) => format!("ref{}", inner.mangle()),
+            Type::Array { element, size } => format!("arr{}x{}", size, element.mangle()),
+            Type::Tuple(elements) => {
+                let parts: Vec<String> = elements.iter().map(Type::mangle).collect();
+                format!("tup{}", parts.join("_"))
+            }
+            Type::Function { .. } => "fn".to_string(),
+            Type::Collection { kind, args } => {
+                let parts: Vec<String> = args.iter().map(Type::mangle).collect();
+                format!("{}{}", kind.tag(), parts.join("_"))
+            }
         }
     }
 

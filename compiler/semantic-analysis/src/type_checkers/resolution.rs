@@ -2,7 +2,7 @@ use ast_types::{ArraySize, GenericArg};
 
 use super::TypeChecker;
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, Type};
+use crate::types::{ArrayLen, CollectionKind, Type};
 
 impl TypeChecker {
     /// Convert syntax-parsing type to semantic type.
@@ -71,6 +71,18 @@ impl TypeChecker {
                 "char" => Some(Type::Char),
                 "string" => Some(Type::String),
                 "void" => Some(Type::Void),
+                // A collection's bare name is not a type, exactly like a generic
+                // struct's: `Vec` alone says nothing about what it holds.
+                name if CollectionKind::from_name(name).is_some()
+                    && !self.is_generic_struct(name)
+                    && !self.is_generic_enum(name) =>
+                {
+                    self.record_error(TypeError::GenericStructNeedsArgs {
+                        name: name.to_string(),
+                        span: ident.span,
+                    });
+                    None
+                }
                 name => {
                     // A name matching an in-scope generic parameter resolves to a
                     // generic placeholder rather than erroring as unknown.
@@ -185,6 +197,14 @@ impl TypeChecker {
                             resolved.push(Type::ConstValue(*value as u64));
                         }
                         GenericArg::Type(ty) => resolved.push(self.resolve_type(ty)?),
+                    }
+                }
+                // A compiler-known collection resolves to its own type, unless the
+                // program declares a generic type of that name — a local declaration
+                // shadows the standard library, as it does for the prelude enums.
+                if let Some(kind) = CollectionKind::from_name(&name.name) {
+                    if !self.is_generic_struct(&name.name) && !self.is_generic_enum(&name.name) {
+                        return self.resolve_collection(kind, resolved, *span);
                     }
                 }
                 if !self.is_generic_struct(&name.name) && !self.is_generic_enum(&name.name) {

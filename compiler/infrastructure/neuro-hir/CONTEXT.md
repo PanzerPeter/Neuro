@@ -30,6 +30,19 @@ differences that make it the *typed* contract:
    span lives on the enclosing node.
 
 ## Recent Updates
+- 2026-07-27: Standard collections. Added `HirType::Collection { kind, args }` with
+  `HirCollectionKind::{Vec, HashMap, BTreeMap}` (Display renders `Vec<i32>`), and the
+  `HirExprKind::CollectionNew` expression kind — the typed mirror of `Vec::new()` and its siblings,
+  whose `ty` is the collection being built. Collection *methods* need no node of their own: they
+  reach backends as an ordinary `Call` with a `FieldAccess` callee, and the callee's `ty` carries the
+  call's resolved result (the `Option<T>` a fallible reader returns, the `Vec<K>` `keys()` builds).
+- 2026-07-27: Standard collections. Added `HirType::Collection { kind, args }` with
+  `HirCollectionKind::{Vec, HashMap, BTreeMap}` (Display renders `Vec<i32>`), and the
+  `HirExprKind::CollectionNew` expression kind — the typed mirror of `Vec::new()` and its siblings,
+  whose `ty` is the collection being built. Collection *methods* need no node of their own: they
+  reach backends as an ordinary `Call` with a `FieldAccess` callee, and the callee's `ty` carries the
+  call's resolved result (the `Option<T>` instance a fallible reader returns, the `Vec<K>` that
+  `keys()` builds).
 - 2026-07-24: Closures and lambdas. Added `HirItem::Closure(HirClosure { name, captures, params, return_type, body, span })` — one lifted item per closure literal, whose first (implicit) parameter at codegen is the captured-environment pointer — and `HirExprKind::Closure { name, captures }`, the closure value that references its lifted item and lists the enclosing variables to snapshot (in capture-layout order). Added `HirCapture { name, ty }`. The value's `ty` is the existing `HirType::Function { params, ret }` (previously only used for function references). Re-exported `HirClosure` and `HirCapture` from the crate root.
 - 2026-07-19: Static & dynamic dispatch. Added `HirType::DynObject(String)` (a trait object, valid only as a `HirType::Reference` referent; backends lower `&dyn T` to a `{ data ptr, vtable ptr }` fat pointer), `HirExprKind::DynCoerce { value }` (the `&T` -> `&dyn Trait` unsizing coercion — `value.ty` names the concrete type that selects the vtable, the node's `ty` is the trait-object reference), and `HirItem::Trait(HirTrait { name, methods, span })`. `HirTrait` exists ONLY to give dynamic dispatch a canonical vtable slot order (the trait's declaration order); static-dispatch traits remain fully erased. Re-exported `HirTrait` from the crate root.
 - 2026-07-02: Newtype declarations. Added `HirType::Newtype { name, inner }` (a nominal wrapper

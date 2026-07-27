@@ -135,6 +135,38 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-07-27: Standard collections. New `Type::Collection { kind, args }` + `CollectionKind`
+  (`Vec` / `HashMap` / `BTreeMap`) — a compiler-known nominal type, never `Copy` and always
+  move-tracked (`is_type_copy` / `is_type_move_tracked`). The new `type_checkers/collections.rs`
+  owns the rules: `resolve_collection` resolves `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` from
+  the generic-application arm of `resolve_type`, validating storable elements (`Copy` or `string`)
+  and map keys, and a program declaring its own generic type of that name shadows the builtin.
+  `check_collection_new` types `Vec::new()` from the expected type (else
+  `CollectionTypeNotInferable`); `resolve_collection_method` types the method surface, requiring a
+  mutable receiver for the mutating half and taking ownership only of stored arguments (a lookup key
+  is read, like a `==` operand); fallible readers instantiate the prelude `Option<T>`. Raw float keys
+  are rejected toward `OrderedF32` / `OrderedF64`; a struct key requires `impl PartialEq` plus
+  `impl Hashable` (hashed) or `impl Comparable` (ordered). `Hashable` joins `Drop` and the operator
+  traits as a lang-item — `register_hashable_impl` enforces the single `hash(&self) -> u64` method.
+  Indexing, index assignment, and `for`-in accept a `Vec` alongside an array.
+  `check_mut_self_receiver` is now `pub(crate)`. New errors: `CollectionTypeNotInferable`,
+  `InvalidCollectionElement`, `InvalidCollectionKey`, `InvalidHashableImpl`.
+- 2026-07-27: Standard collections. New `Type::Collection { kind, args }` + `CollectionKind`
+  (`Vec` / `HashMap` / `BTreeMap`) — a compiler-known nominal type, never `Copy` and always
+  move-tracked (`is_type_copy` / `is_type_move_tracked`). The new `type_checkers/collections.rs`
+  owns the rules: `resolve_collection` resolves `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` from
+  the generic-application arm of `resolve_type`, validating storable elements (`Copy` or `string`)
+  and map keys, and a program declaring its own generic type of that name shadows the builtin.
+  `check_collection_new` types `Vec::new()` from the expected type (else
+  `CollectionTypeNotInferable`); `resolve_collection_method` types the method surface, requiring a
+  mutable receiver for the mutating half and taking ownership only of stored arguments (a lookup key
+  is read, like a `==` operand); fallible readers instantiate the prelude `Option<T>`. Raw float keys
+  are rejected toward `OrderedF32` / `OrderedF64`; a struct key requires `impl PartialEq` plus
+  `impl Hashable` (hashed) or `impl Comparable` (ordered). `Hashable` joins `Drop` and the operator
+  traits as a lang-item — `register_hashable_impl` enforces the single `hash(&self) -> u64` method.
+  Indexing, index assignment, and `for`-in accept a `Vec` alongside an array.
+  `check_mut_self_receiver` is now `pub(crate)`. New errors: `CollectionTypeNotInferable`,
+  `InvalidCollectionElement`, `InvalidCollectionKey`, `InvalidHashableImpl`.
 - 2026-07-26: Generic enums (`Option<T>` / `Result<T, E>`). New `TypeChecker` state:
   `generic_enums` (base name -> template) and `enum_instances` (instance name -> base + type
   arguments). Pass 0 routes an `EnumDef` with generics to `register_generic_enum`, which resolves

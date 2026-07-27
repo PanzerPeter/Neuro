@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) underway with `Option` / `Result` landed — Alpha Development
+**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) underway with `Option` / `Result` and the standard collections landed — Alpha Development
 
 ## Quick Links
 
@@ -179,6 +179,23 @@ Key design goals:
 - Limits: scalar `Copy` payloads per instance (`Option<string>` awaits heap payloads), `Copy` type
   arguments, no `impl` blocks on enums, no lifetime parameters
 
+### Standard Collections (1G)
+
+- `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>` — heap-backed library types the compiler knows by
+  name, since the language exposes no allocator to build them from
+- Not `Copy`: they move on assignment and free their buffer at scope exit; a mutating method needs
+  a `mut` binding
+- `Vec`: `push` / `pop` / `get` / `len` / `clear`, `v[i]` read+write (bounds-checked in every
+  build), and `for x in v`
+- Maps: `insert` / `get` / `contains_key` / `remove` / `len` / `clear` / `keys`; `keys()` returns a
+  `Vec<K>`, ascending for `BTreeMap`
+- Keys are integer / `bool` / `char` / `string`, or a struct with `impl PartialEq` plus
+  `impl Hashable` (hashed) or `impl Comparable` (ordered). Raw float keys are rejected — the
+  prelude's `OrderedF32` / `OrderedF64` wrappers reject NaN and provide the total order
+- `Hashable` is a compiler-known lang-item trait: `func hash(&self) -> u64`
+- Limits: `pop` / `get` build an `Option<T>`, so they need an `Option`-carryable element type;
+  a `string` inside a collection is not freed with it
+
 ### Pattern Matching (1E)
 
 - `match` as an exhaustive expression; the first matching (and guard-passing) arm supplies the value
@@ -343,6 +360,6 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 
 ---
 
-**Last Updated**: 2026-07-25
-**Version**: Phase 1 (Core Language) in progress — 1A–1F complete, 1G next (v1.63.1)
+**Last Updated**: 2026-07-27
+**Version**: Phase 1 (Core Language) in progress — 1A–1F complete, 1G underway
 **Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.9.0

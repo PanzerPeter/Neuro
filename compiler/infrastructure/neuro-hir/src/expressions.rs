@@ -181,6 +181,11 @@ pub enum HirExprKind {
         scrutinee: Box<HirExpr>,
         arms: Vec<HirMatchArm>,
     },
+    /// Construction of an empty standard collection — `Vec::new()`,
+    /// `HashMap::new()`, `BTreeMap::new()`. The expression's `ty` is the
+    /// [`HirType::Collection`] being built; backends emit a zero-capacity header with
+    /// no allocation (the first insertion allocates).
+    CollectionNew,
     /// A closure value: a reference to a lifted [`crate::HirClosure`] item by
     /// `name`, plus the enclosing variables to snapshot into its environment (in the
     /// closure item's capture-layout order). The expression's type is the

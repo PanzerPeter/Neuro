@@ -99,7 +99,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | **Closures & lambdas** | `\|x: i32\| x * x`, `move` closures, `(T) -> R` function types, higher-order functions; compiled to `{ fn_ptr, env_ptr }`, no heap |
 | **Structs & methods** | Fields, shorthand init, functional update `..base`, `impl` blocks with `&self` / `&mut self` methods and associated functions |
 | **Enums & newtypes** | Unit, tuple, and struct-field variants; generic enums monomorphized per type argument; `newtype` for distinct nominal wrappers |
-| **Arrays & tuples** | Fixed-size `[T; N]` with `.len()` and iteration; anonymous tuples with `.0` access — both over `Copy` elements |
+| **Arrays, tuples & collections** | Fixed-size `[T; N]` and anonymous tuples over `Copy` elements; heap-backed `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>` that move on assignment and free at scope exit |
 | **Pattern matching** | Exhaustive `match` as an expression: variant deconstruction, literal / or / range / wildcard patterns, `if` guards |
 | **Destructuring** | Struct `val Point { x, y } = p` and array `val [a, ..rest] = arr`, arity-checked, nesting, `mut`-compatible |
 | **`Option` / `Result`** | `Option<T>` and `Result<T, E>` from an implicit prelude — ordinary generic enums, available without a declaration |
@@ -109,9 +109,9 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 
 ### Current Memory Model
 
-> **⚠️ Alpha memory warning.** Stack values are reclaimed on return and string literals live in `.rodata`, so neither leaks. Move semantics, borrows, and deterministic `Drop` have landed — but `+` string concatenation still leaks its heap buffer, because the growable-string and owning-collection heap types have not.
+> **⚠️ Alpha memory warning.** Stack values are reclaimed on return and string literals live in `.rodata`, so neither leaks. Move semantics, borrows, deterministic `Drop`, and the owning collections have landed — a `Vec` / `HashMap` / `BTreeMap` frees its buffer at scope exit. Two gaps remain: `+` string concatenation still leaks its heap buffer, and a `string` stored inside a collection is not freed with it, because the growable heap-string type has not landed.
 >
-> This block is removed once those heap types land in sub-phase 1G. Until then, do not assume memory-safety semantics beyond what the table above claims.
+> This block is removed once that type lands in sub-phase 1G. Until then, do not assume memory-safety semantics beyond what the table above claims.
 >
 > If memory-safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
 
@@ -511,7 +511,7 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | 1D | Backend plumbing — `neuro-hir` typed IR crate, `melior` integration, AST → HIR lowering, HIR-routed LLVM backend, mlir-backend HIR scaffold | ✅ Complete |
 | 1E | Type system — arrays ✅, tuples ✅, structs ✅, methods ✅, destructuring ✅, type aliases ✅, enums ✅, pattern matching ✅, newtype ✅ | ✅ Complete |
 | 1F | Generics, traits & dispatch — generics, explicit lifetimes, trait declarations, operator traits, static/dynamic dispatch (`impl`/`dyn`), closures | ✅ Complete |
-| 1G | Error handling, modules & prelude — `Option`/`Result`, collections, `??`, `?`, multi-file modules, imports, prelude | 📋 Planned |
+| 1G | Error handling, modules & prelude — `Option`/`Result` ✅, collections ✅, `??`, `?`, multi-file modules, imports, prelude | 🔄 In progress |
 | 1H | Language cleanup — string interpolation, triple-quoted strings, nested comments, named arguments | 📋 Planned |
 | **2** | Tensors & MLIR — `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | 📋 Planned |
 | **3** | Automatic differentiation — Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | 📋 Planned |
