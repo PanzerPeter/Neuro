@@ -144,8 +144,14 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             HirExprKind::Index { object, index } => {
                 let obj_ty = Type::from_hir(&object.ty);
+                if matches!(obj_ty.referent(), Type::Collection { .. }) {
+                    return self.codegen_vec_index(object, &obj_ty, index, expr.span.start);
+                }
                 self.codegen_index(object, index, &obj_ty, &expr.span)
             }
+
+            // `Vec::new()` / `HashMap::new()` / `BTreeMap::new()`.
+            HirExprKind::CollectionNew => self.codegen_collection_new(),
 
             // Tuple literal `(e0, ...)` and element access `object.N`.
             HirExprKind::TupleLiteral { elements } => {
@@ -242,6 +248,15 @@ impl<'ctx> CodegenContext<'ctx> {
                         )?));
                     }
                     return self.codegen_method_call(&mangled, object, args);
+                }
+
+                // A standard collection's methods are compiler-known too, but their
+                // result type comes from the call (an `Option<T>` instance, a `Vec<K>`),
+                // which the callee node carries.
+                if matches!(recv_ty.referent(), Type::Collection { .. }) {
+                    let result_ty = Type::from_hir(&callee.ty);
+                    return self
+                        .codegen_collection_method(field, &recv_ty, &result_ty, object, args);
                 }
 
                 // Non-struct receiver: a compiler-known intrinsic on a builtin type.

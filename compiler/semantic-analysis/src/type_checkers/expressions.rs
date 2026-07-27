@@ -1,6 +1,6 @@
 use super::{TypeChecker, VariantForm};
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, Type};
+use crate::types::{ArrayLen, CollectionKind, Type};
 use ast_types::FieldInit;
 use ast_types::{BinaryOp, Expr, UnaryOp};
 use shared_types::{Identifier, Literal, Span};
@@ -8,6 +8,9 @@ use std::collections::HashMap;
 
 /// The builtin deep-copy method name shared by `string` and Clone-deriving structs.
 const CLONE_METHOD: &str = "clone";
+
+/// The associated function that builds an empty standard collection.
+const COLLECTION_CTOR: &str = "new";
 
 impl TypeChecker {
     /// Resolve a compiler-known intrinsic method on a builtin (non-struct) receiver.
@@ -204,7 +207,12 @@ impl TypeChecker {
     /// is tracked at binding granularity (matching `&place` borrows), so only a
     /// receiver that *is* the binding registers the call's transient exclusive
     /// borrow and checks for a coexisting borrow; both clear at statement end.
-    fn check_mut_self_receiver(&mut self, object: &Expr, obj_ty: &Type, span: shared_types::Span) {
+    pub(crate) fn check_mut_self_receiver(
+        &mut self,
+        object: &Expr,
+        obj_ty: &Type,
+        span: shared_types::Span,
+    ) {
         if let Type::Reference { mutable, .. } = obj_ty {
             if !mutable {
                 let name = Self::place_root_name(object).unwrap_or_else(|| "value".to_string());
@@ -1549,6 +1557,15 @@ impl TypeChecker {
                                 // (possibly `&T`) type is passed so `resolve_builtin_method`
                                 // can auto-deref `&string` but keep integer intrinsics
                                 // value-only.
+                                if let Some(ret) = self.resolve_collection_method(
+                                    &obj_ty,
+                                    object,
+                                    &field.name,
+                                    args,
+                                    *span,
+                                ) {
+                                    return Some(ret);
+                                }
                                 if let Some(ret) =
                                     self.resolve_builtin_method(&obj_ty, &field.name, args, *span)
                                 {
@@ -1648,6 +1665,18 @@ impl TypeChecker {
                         member,
                         span: path_span,
                     } => {
+                        // `Vec::new()` and friends: a compiler-known constructor, unless
+                        // the program declares its own type of that name.
+                        if let Some(kind) = CollectionKind::from_name(&type_name.name) {
+                            if member.name == COLLECTION_CTOR
+                                && !self.struct_defs.contains_key(&type_name.name)
+                                && !self.enum_defs.contains_key(&type_name.name)
+                            {
+                                return Some(
+                                    self.check_collection_new(kind, args, expected, *path_span),
+                                );
+                            }
+                        }
                         if self.enum_defs.contains_key(&type_name.name) {
                             return Some(self.check_enum_tuple_call(
                                 &type_name.name,
@@ -2209,6 +2238,9 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
 
+                if let Some(element) = self.collection_element(&obj_ty) {
+                    return Some(element);
+                }
                 match obj_ty.referent() {
                     Type::Array { element, .. } => Some((**element).clone()),
                     other => {

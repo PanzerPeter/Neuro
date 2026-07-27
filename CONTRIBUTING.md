@@ -302,9 +302,13 @@ a `{ fn_ptr, env_ptr }` value with no heap allocation). Completes 1F.
 **In progress — 1G (Error Handling, Modules & Prelude):** `Option<T>` and
 `Result<T, E>` landed in v1.64.0, together with the generic enums they are built
 from (monomorphized per type-argument set) and an implicit prelude that makes both
-available in every program without a declaration.
+available in every program without a declaration. The **standard collections**
+`Vec<T>`, `HashMap<K, V>`, and `BTreeMap<K, V>` landed in v1.65.0 — heap-backed,
+move-on-assignment, freed at scope exit — along with the `Hashable` lang-item trait
+and the prelude's `OrderedF32` / `OrderedF64` total-order wrappers that let an
+ordered map be keyed on a float.
 
-**Next, in dependency order:** the rest of 1G (collections, `checked_*`, `??`, `?`,
+**Next, in dependency order:** the rest of 1G (`checked_*`, `??`, `?`, `val-else`,
 modules, imports, the full prelude) → 1H (string interpolation, triple-quoted
 strings, nested comments, named arguments). See the [Quick Roadmap](README.md#quick-roadmap).
 

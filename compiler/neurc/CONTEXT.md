@@ -20,6 +20,11 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 - source-location — source span resolution for error display
 
 ## Notes
+- 2026-07-27: Standard collections. `prelude.nr` gains the `OrderedF32` / `OrderedF64` validating
+  wrapper structs — `@derive(Copy, Clone)`, a `new` constructor that panics on NaN, and `PartialEq` +
+  `Comparable` impls. They exist so an ordered map can be keyed on a float: IEEE-754 `<` is a partial
+  order, so a raw float key could be inserted and never found again. They deliberately do not
+  implement `Hashable`.
 - 2026-07-26: Implicit prelude. New `src/prelude.rs` + `src/prelude.nr`: after parsing, both
   `check_file` and `compile_file` call `prelude::with_prelude`, which parses the built-in
   `prelude.nr` source (currently `enum Option<T>` and `enum Result<T, E>`) and prepends its items to

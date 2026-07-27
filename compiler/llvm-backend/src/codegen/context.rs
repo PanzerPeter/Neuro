@@ -10,6 +10,7 @@ use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 use source_location::SourceFile;
 use std::collections::HashMap;
 
+use crate::errors::{CodegenError, CodegenResult};
 use crate::type_mapping::TypeMapper;
 use crate::types::Type;
 
@@ -120,8 +121,17 @@ pub(crate) struct DropEntry<'ctx> {
     pub(crate) storage_ptr: PointerValue<'ctx>,
     /// The `i1` drop-flag slot.
     pub(crate) flag_ptr: PointerValue<'ctx>,
-    /// Struct name, used to resolve the `{struct}__drop` destructor function.
-    pub(crate) struct_name: String,
+    /// What running the destructor means for this binding.
+    pub(crate) target: DropTarget,
+}
+
+/// How a scope-exit destructor is emitted for an owned binding.
+#[derive(Clone)]
+pub(crate) enum DropTarget {
+    /// A user `impl Drop for T`: call `{T}__drop(&mut self)`.
+    UserDrop(String),
+    /// A standard collection: release the heap buffer its header points at.
+    Collection,
 }
 
 /// Central state container for LLVM IR code generation.
@@ -193,6 +203,11 @@ pub(crate) struct CodegenContext<'ctx> {
     /// Emitted vtables, keyed by `(trait name, concrete type name)`. Each is a
     /// private global array of pointers to that type's thunks, in trait method order.
     pub(crate) vtables: HashMap<(String, String), inkwell::values::GlobalValue<'ctx>>,
+
+    /// Enum name → variant names in declaration order, which is discriminant order.
+    /// Surface constructions carry their tag in the HIR; this table serves the
+    /// constructions codegen synthesizes itself, which know a variant only by name.
+    pub(crate) enum_variants: HashMap<String, Vec<String>>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -220,7 +235,47 @@ impl<'ctx> CodegenContext<'ctx> {
             vtables: HashMap::new(),
             drop_types: std::collections::HashSet::new(),
             drop_scopes: Vec::new(),
+            enum_variants: HashMap::new(),
         }
+    }
+
+    /// Record each enum's variant order before code generation, so a synthesized
+    /// construction can resolve a variant name to its discriminant.
+    pub(crate) fn set_enum_variants(&mut self, enum_variants: HashMap<String, Vec<String>>) {
+        self.enum_variants = enum_variants;
+    }
+
+    /// The discriminant of `variant` in `enum_name`.
+    pub(crate) fn enum_variant_tag(&self, enum_name: &str, variant: &str) -> CodegenResult<u32> {
+        self.enum_variants
+            .get(enum_name)
+            .and_then(|variants| variants.iter().position(|v| v == variant))
+            .map(|index| index as u32)
+            .ok_or_else(|| {
+                CodegenError::InternalError(format!(
+                    "enum '{}' has no variant '{}'",
+                    enum_name, variant
+                ))
+            })
+    }
+
+    /// Get the external libc `memset` declaration, inserting it on first use.
+    /// `memset(dst, byte: i32, n: i64) -> dst`. Resets a collection's slots on `clear`.
+    pub(crate) fn get_or_declare_memset(&self) -> FunctionValue<'ctx> {
+        if let Some(f) = self.module.get_function("memset") {
+            return f;
+        }
+        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let fn_type = ptr_type.fn_type(
+            &[
+                ptr_type.into(),
+                self.context.i32_type().into(),
+                self.context.i64_type().into(),
+            ],
+            false,
+        );
+        self.module
+            .add_function("memset", fn_type, Some(inkwell::module::Linkage::External))
     }
 
     /// Record the set of structs implementing `Drop` before code generation.
@@ -301,6 +356,53 @@ impl<'ctx> CodegenContext<'ctx> {
         let fn_type = ptr_type.fn_type(&[self.context.i64_type().into()], false);
         self.module
             .add_function("malloc", fn_type, Some(inkwell::module::Linkage::External))
+    }
+
+    /// Get the external libc `free` declaration, inserting it on first use.
+    /// `free(ptr)`. Releases a collection's heap buffer when its owner leaves scope;
+    /// a null pointer is a defined no-op, so an untouched empty collection needs no guard.
+    pub(crate) fn get_or_declare_free(&self) -> FunctionValue<'ctx> {
+        if let Some(f) = self.module.get_function("free") {
+            return f;
+        }
+        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
+        self.module
+            .add_function("free", fn_type, Some(inkwell::module::Linkage::External))
+    }
+
+    /// Get the external libc `realloc` declaration, inserting it on first use.
+    /// `realloc(ptr, size: i64) -> ptr`. Grows a collection's buffer, preserving its
+    /// contents; a null `ptr` degenerates to `malloc`, which is how the first
+    /// insertion into an empty collection allocates.
+    pub(crate) fn get_or_declare_realloc(&self) -> FunctionValue<'ctx> {
+        if let Some(f) = self.module.get_function("realloc") {
+            return f;
+        }
+        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let fn_type = ptr_type.fn_type(&[ptr_type.into(), self.context.i64_type().into()], false);
+        self.module
+            .add_function("realloc", fn_type, Some(inkwell::module::Linkage::External))
+    }
+
+    /// Get the external libc `memmove` declaration, inserting it on first use.
+    /// `memmove(dst, src, n: i64) -> dst`. Shifts the ordered map's slot array on
+    /// insertion and removal, where source and destination overlap.
+    pub(crate) fn get_or_declare_memmove(&self) -> FunctionValue<'ctx> {
+        if let Some(f) = self.module.get_function("memmove") {
+            return f;
+        }
+        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let fn_type = ptr_type.fn_type(
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                self.context.i64_type().into(),
+            ],
+            false,
+        );
+        self.module
+            .add_function("memmove", fn_type, Some(inkwell::module::Linkage::External))
     }
 
     /// Get the external libc `memcpy` declaration, inserting it on first use.

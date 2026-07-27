@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
-use super::context::CodegenContext;
+use super::context::{CodegenContext, DropTarget};
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a function call
@@ -290,11 +290,16 @@ impl<'ctx> CodegenContext<'ctx> {
         // registered for destruction at method exit.
         self.push_drop_scope();
         for (i, param) in method.params.iter().enumerate() {
-            if let Some(Type::Struct(name)) = param_types.get(non_self_start + i) {
-                if self.drop_types.contains(name) {
-                    if let Some(alloca) = self.variables.get(&param.name).copied() {
-                        self.register_local_drop(&param.name, alloca, name.clone())?;
-                    }
+            let owns_heap = match param_types.get(non_self_start + i) {
+                Some(Type::Struct(name)) if self.drop_types.contains(name) => {
+                    Some(DropTarget::UserDrop(name.clone()))
+                }
+                Some(Type::Collection { .. }) => Some(DropTarget::Collection),
+                _ => None,
+            };
+            if let Some(target) = owns_heap {
+                if let Some(alloca) = self.variables.get(&param.name).copied() {
+                    self.register_local_drop(&param.name, alloca, target)?;
                 }
             }
         }

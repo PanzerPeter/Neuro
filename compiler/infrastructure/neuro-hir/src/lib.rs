@@ -37,7 +37,7 @@ pub use items::{
     HirImpl, HirItem, HirMethod, HirParam, HirProgram, HirSelfParam, HirStruct, HirTrait,
 };
 pub use statements::HirStmt;
-pub use types::HirType;
+pub use types::{HirCollectionKind, HirType};
 
 #[cfg(test)]
 mod tests {

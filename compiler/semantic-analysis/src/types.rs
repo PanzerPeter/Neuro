@@ -103,7 +103,57 @@ pub enum Type {
     /// template: monomorphization substitutes each `Generic` with a concrete type, so a
     /// `Generic` never reaches the HIR.
     Generic(std::string::String),
+    /// A heap-backed standard collection: `Vec<T>`, `HashMap<K, V>`, or
+    /// `BTreeMap<K, V>`. These are library types rather than language primitives, but
+    /// the compiler knows them by name because the language has no allocator surface
+    /// to build them from. They own a heap buffer, so they are never `Copy`: assignment
+    /// moves, and the buffer is freed when the owner leaves scope.
+    Collection {
+        kind: CollectionKind,
+        args: Vec<Type>,
+    },
     Unknown,
+}
+
+/// Which standard collection a [`Type::Collection`] denotes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CollectionKind {
+    /// Growable contiguous array `Vec<T>` — the dynamic counterpart to `[T; N]`.
+    Vec,
+    /// Average-O(1) hash map `HashMap<K, V>`; keys are `Hashable + PartialEq`.
+    HashMap,
+    /// Key-ordered map `BTreeMap<K, V>`; keys are `Comparable` (a total order).
+    BTreeMap,
+}
+
+impl CollectionKind {
+    /// The collection's surface name, as written in a type annotation.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            CollectionKind::Vec => "Vec",
+            CollectionKind::HashMap => "HashMap",
+            CollectionKind::BTreeMap => "BTreeMap",
+        }
+    }
+
+    /// The collection named by `name`, or `None` when the name is not a
+    /// compiler-known collection.
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "Vec" => Some(CollectionKind::Vec),
+            "HashMap" => Some(CollectionKind::HashMap),
+            "BTreeMap" => Some(CollectionKind::BTreeMap),
+            _ => None,
+        }
+    }
+
+    /// How many type arguments the collection takes.
+    pub(crate) fn arity(self) -> usize {
+        match self {
+            CollectionKind::Vec => 1,
+            CollectionKind::HashMap | CollectionKind::BTreeMap => 2,
+        }
+    }
 }
 
 impl Type {
@@ -197,6 +247,17 @@ impl Type {
                     size: bn,
                 },
             ) => an == bn && a.is_compatible_with(b),
+
+            // Collections match when they are the same kind over the same
+            // element/key/value types — `Vec<i32>` and `Vec<i64>` are distinct.
+            (Type::Collection { kind: ak, args: aa }, Type::Collection { kind: bk, args: ba }) => {
+                ak == bk
+                    && aa.len() == ba.len()
+                    && aa
+                        .iter()
+                        .zip(ba.iter())
+                        .all(|(x, y)| x.is_compatible_with(y))
+            }
 
             // Tuples match when they have the same arity and each element matches.
             (Type::Tuple(a), Type::Tuple(b)) => {
@@ -388,6 +449,16 @@ impl fmt::Display for Type {
                     write!(f, "{}", param)?;
                 }
                 write!(f, ") -> {}", ret)
+            }
+            Type::Collection { kind, args } => {
+                write!(f, "{}<", kind.name())?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", arg)?;
+                }
+                write!(f, ">")
             }
         }
     }

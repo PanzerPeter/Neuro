@@ -24,6 +24,7 @@ basics/type_inference.nr        42
 types/arrays.nr                     8
 types/borrow_exclusivity.nr         31
 types/char.nr                       65
+types/collections.nr                101
 types/constants.nr                  51
 types/copy_clone.nr                 14
 types/dispatch.nr                   44
@@ -82,6 +83,7 @@ showcase/borrowed_text.nr   18
 showcase/closures.nr        90
 showcase/enum_records.nr    46
 showcase/generic_toolkit.nr 85
+showcase/inventory_ledger.nr 179
 showcase/mutable_borrows.nr 47
 showcase/num_algorithms.nr  32
 showcase/perceptron.nr      8

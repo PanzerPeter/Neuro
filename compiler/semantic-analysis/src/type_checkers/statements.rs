@@ -606,16 +606,19 @@ impl TypeChecker {
                 span: _,
             } => {
                 let iterable_ty = self.check_expr(iterable, None).unwrap_or(Type::Unknown);
-                let element_ty = match iterable_ty.referent() {
-                    Type::Array { element, .. } => Some((**element).clone()),
-                    Type::Unknown => None,
-                    other => {
-                        self.record_error(TypeError::NotIndexable {
-                            found: other.clone(),
-                            span: iterable.span(),
-                        });
-                        None
-                    }
+                let element_ty = match self.collection_element(&iterable_ty) {
+                    Some(element) => Some(element),
+                    None => match iterable_ty.referent() {
+                        Type::Array { element, .. } => Some((**element).clone()),
+                        Type::Unknown => None,
+                        other => {
+                            self.record_error(TypeError::NotIndexable {
+                                found: other.clone(),
+                                span: iterable.span(),
+                            });
+                            None
+                        }
+                    },
                 };
 
                 // Body moves are not guaranteed straight-line; restore move state after
@@ -677,15 +680,18 @@ impl TypeChecker {
                     return None;
                 }
 
-                let element_ty = match &symbol.ty {
-                    Type::Array { element, .. } => (**element).clone(),
-                    other => {
-                        self.record_error(TypeError::NotIndexable {
-                            found: other.clone(),
-                            span: *span,
-                        });
-                        return None;
-                    }
+                let element_ty = match self.collection_element(&symbol.ty) {
+                    Some(element) => element,
+                    None => match &symbol.ty {
+                        Type::Array { element, .. } => (**element).clone(),
+                        other => {
+                            self.record_error(TypeError::NotIndexable {
+                                found: other.clone(),
+                                span: *span,
+                            });
+                            return None;
+                        }
+                    },
                 };
 
                 let idx_ty = self.check_expr(index, None).unwrap_or(Type::Unknown);

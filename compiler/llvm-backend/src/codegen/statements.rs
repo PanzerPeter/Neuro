@@ -23,7 +23,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<()> {
         // Resolve whether this binding owns a `Drop` value before the initializer is
         // consumed, so its destructor can be scheduled for scope exit.
-        let drop_name = self.drop_struct_name(ty);
+        let drop_target = self.drop_target(ty);
 
         let init_val = if let Some(expr) = init {
             Some(self.codegen_expr(expr)?)
@@ -55,8 +55,8 @@ impl<'ctx> CodegenContext<'ctx> {
             if let Some(expr) = init {
                 self.mark_moved_for_drop(expr);
             }
-            if let Some(struct_name) = drop_name {
-                self.register_local_drop(name, alloca, struct_name)?;
+            if let Some(target) = drop_target {
+                self.register_local_drop(name, alloca, target)?;
             }
         }
 
@@ -679,13 +679,31 @@ impl<'ctx> CodegenContext<'ctx> {
                 iterable,
                 body,
                 ..
-            } => self.codegen_for_each(label.as_deref(), iterator, iterable, body),
+            } => {
+                let obj_ty = Type::from_hir(&iterable.ty);
+                if matches!(obj_ty.referent(), Type::Collection { .. }) {
+                    return self.codegen_vec_for_each(
+                        label.as_deref(),
+                        iterator,
+                        iterable,
+                        &obj_ty,
+                        body,
+                    );
+                }
+                self.codegen_for_each(label.as_deref(), iterator, iterable, body)
+            }
             HirStmt::IndexAssignment {
                 target,
                 index,
                 value,
                 ..
-            } => self.codegen_index_assignment(target, index, value),
+            } => {
+                let target_ty = self.type_env.get(target).cloned();
+                if let Some(ty @ Type::Collection { .. }) = target_ty {
+                    return self.codegen_vec_index_assignment(target, &ty, index, value);
+                }
+                self.codegen_index_assignment(target, index, value)
+            }
             HirStmt::Break { label, value, .. } => {
                 let target = self.lookup_loop_target(label.as_deref())?;
                 let break_bb = target.break_bb;

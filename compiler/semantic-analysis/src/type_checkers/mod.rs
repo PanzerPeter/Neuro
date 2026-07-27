@@ -199,6 +199,7 @@ struct LoopContext {
 }
 
 mod closures;
+mod collections;
 mod declarations;
 mod expressions;
 mod literals;
@@ -295,6 +296,9 @@ impl TypeChecker {
             // Element Copy-ness is enforced at resolution, so this is always true in
             // practice; it keeps the rule honest if that restriction is relaxed.
             Type::Tuple(elements) => elements.iter().all(|e| self.is_type_copy(e)),
+            // A collection owns a heap buffer, so duplicating its header would
+            // alias — and later double-free — that buffer.
+            Type::Collection { .. } => false,
             _ => true,
         }
     }
@@ -307,6 +311,7 @@ impl TypeChecker {
         match ty {
             Type::String => true,
             Type::Struct(name) => !self.copy_structs.contains(name),
+            Type::Collection { .. } => true,
             _ => false,
         }
     }

@@ -70,6 +70,36 @@ pub enum HirType {
         params: Vec<HirType>,
         ret: Box<HirType>,
     },
+    /// A heap-backed standard collection: `Vec<T>` (one argument) or
+    /// `HashMap<K, V>` / `BTreeMap<K, V>` (two). Backends lower every kind to the
+    /// same `{ buffer pointer, length, capacity }` header and read `kind` to pick the
+    /// buffer layout.
+    Collection {
+        kind: HirCollectionKind,
+        args: Vec<HirType>,
+    },
+}
+
+/// Which standard collection a [`HirType::Collection`] denotes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HirCollectionKind {
+    /// Growable contiguous array `Vec<T>`.
+    Vec,
+    /// Open-addressed hash map `HashMap<K, V>`.
+    HashMap,
+    /// Key-ordered map `BTreeMap<K, V>`.
+    BTreeMap,
+}
+
+impl HirCollectionKind {
+    /// The surface name of the collection, used in diagnostics and mangling.
+    pub fn name(self) -> &'static str {
+        match self {
+            HirCollectionKind::Vec => "Vec",
+            HirCollectionKind::HashMap => "HashMap",
+            HirCollectionKind::BTreeMap => "BTreeMap",
+        }
+    }
 }
 
 impl HirType {
@@ -138,6 +168,16 @@ impl fmt::Display for HirType {
                     write!(f, "{}", param)?;
                 }
                 write!(f, ") -> {}", ret)
+            }
+            HirType::Collection { kind, args } => {
+                write!(f, "{}<", kind.name())?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", arg)?;
+                }
+                write!(f, ">")
             }
         }
     }

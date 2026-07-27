@@ -17,3 +17,89 @@ enum Result<T, E> {
     Ok(T),
     Err(E)
 }
+
+// Total-order wrappers over the floating-point types.
+//
+// `<` on a raw float is IEEE-754, which is a partial order: NaN compares false against
+// everything, including itself. An ordered map keyed on a raw float would therefore be
+// able to hold a key it can never find again. These wrappers restore a total order by
+// excluding NaN at construction, which is why they are validating structs rather than
+// newtypes — a newtype has no construction-time hook. They implement `Comparable`, so
+// they are ordered-map keys; hashing a float has no representation-independent answer,
+// so they deliberately do not implement `Hashable`.
+@derive(Copy, Clone)
+struct OrderedF32 {
+    value: f32
+}
+
+impl OrderedF32 {
+    func new(value: f32) -> OrderedF32 {
+        // NaN is the only value that differs from itself.
+        if value != value {
+            panic("OrderedF32 cannot hold NaN")
+        }
+        OrderedF32 { value: value }
+    }
+}
+
+impl PartialEq for OrderedF32 {
+    func eq(&self, rhs: &OrderedF32) -> bool {
+        self.value == rhs.value
+    }
+    func ne(&self, rhs: &OrderedF32) -> bool {
+        self.value != rhs.value
+    }
+}
+
+impl Comparable for OrderedF32 {
+    func lt(&self, rhs: &OrderedF32) -> bool {
+        self.value < rhs.value
+    }
+    func le(&self, rhs: &OrderedF32) -> bool {
+        self.value <= rhs.value
+    }
+    func gt(&self, rhs: &OrderedF32) -> bool {
+        self.value > rhs.value
+    }
+    func ge(&self, rhs: &OrderedF32) -> bool {
+        self.value >= rhs.value
+    }
+}
+
+@derive(Copy, Clone)
+struct OrderedF64 {
+    value: f64
+}
+
+impl OrderedF64 {
+    func new(value: f64) -> OrderedF64 {
+        if value != value {
+            panic("OrderedF64 cannot hold NaN")
+        }
+        OrderedF64 { value: value }
+    }
+}
+
+impl PartialEq for OrderedF64 {
+    func eq(&self, rhs: &OrderedF64) -> bool {
+        self.value == rhs.value
+    }
+    func ne(&self, rhs: &OrderedF64) -> bool {
+        self.value != rhs.value
+    }
+}
+
+impl Comparable for OrderedF64 {
+    func lt(&self, rhs: &OrderedF64) -> bool {
+        self.value < rhs.value
+    }
+    func le(&self, rhs: &OrderedF64) -> bool {
+        self.value <= rhs.value
+    }
+    func gt(&self, rhs: &OrderedF64) -> bool {
+        self.value > rhs.value
+    }
+    func ge(&self, rhs: &OrderedF64) -> bool {
+        self.value >= rhs.value
+    }
+}

@@ -14,7 +14,7 @@ use neuro_hir::{HirExpr, HirExprKind, HirType};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
-use super::context::{CodegenContext, DropEntry};
+use super::context::{CodegenContext, DropEntry, DropTarget};
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Open a new lexical drop scope. Paired with [`pop_drop_scope`].
@@ -29,16 +29,17 @@ impl<'ctx> CodegenContext<'ctx> {
         let _ = self.drop_scopes.pop();
     }
 
-    /// Resolve the `Drop`-type struct name a binding holds, or `None` if the binding
-    /// is not a Drop type. The HIR carries the binding's resolved type, so this reads
-    /// it directly. Only struct names present in `drop_types` match, so this returns
-    /// `None` for every program without Drop types.
-    pub(crate) fn drop_struct_name(&self, binding_ty: &HirType) -> Option<String> {
-        if self.drop_types.is_empty() {
-            return None;
-        }
+    /// Resolve how a binding of `binding_ty` is destroyed at scope exit, or `None`
+    /// when it owns nothing that needs releasing. The HIR carries the binding's
+    /// resolved type, so this reads it directly.
+    pub(crate) fn drop_target(&self, binding_ty: &HirType) -> Option<DropTarget> {
         match Type::from_hir(binding_ty) {
-            Type::Struct(name) if self.drop_types.contains(&name) => Some(name),
+            // A collection always owns a heap buffer, independently of whether the
+            // program declares any user `Drop` type.
+            Type::Collection { .. } => Some(DropTarget::Collection),
+            Type::Struct(name) if self.drop_types.contains(&name) => {
+                Some(DropTarget::UserDrop(name))
+            }
             _ => None,
         }
     }
@@ -47,12 +48,12 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// Allocates the binding's `i1` drop flag (initialized `true`) and pushes a
     /// [`DropEntry`] onto the innermost scope. The caller must have verified the
-    /// binding's type is a Drop type via [`drop_struct_name`].
+    /// binding's type needs one via [`drop_target`].
     pub(crate) fn register_local_drop(
         &mut self,
         name: &str,
         storage_ptr: PointerValue<'ctx>,
-        struct_name: String,
+        target: DropTarget,
     ) -> CodegenResult<()> {
         let bool_ty = self.context.bool_type();
         let flag_ptr = self
@@ -68,7 +69,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 name: name.to_string(),
                 storage_ptr,
                 flag_ptr,
-                struct_name,
+                target,
             });
         }
         Ok(())
@@ -121,25 +122,25 @@ impl<'ctx> CodegenContext<'ctx> {
         // Snapshot the entries first so the destructor calls below can borrow `self`
         // mutably without aliasing the scope stack. Innermost scope first, reverse
         // declaration order within each scope.
-        let mut pending: Vec<(PointerValue<'ctx>, PointerValue<'ctx>, String)> = Vec::new();
+        let mut pending: Vec<(PointerValue<'ctx>, PointerValue<'ctx>, DropTarget)> = Vec::new();
         for scope in self.drop_scopes[min_index..].iter().rev() {
             for entry in scope.iter().rev() {
-                pending.push((entry.storage_ptr, entry.flag_ptr, entry.struct_name.clone()));
+                pending.push((entry.storage_ptr, entry.flag_ptr, entry.target.clone()));
             }
         }
-        for (storage_ptr, flag_ptr, struct_name) in pending {
-            self.emit_one_drop(storage_ptr, flag_ptr, &struct_name)?;
+        for (storage_ptr, flag_ptr, target) in pending {
+            self.emit_one_drop(storage_ptr, flag_ptr, &target)?;
         }
         Ok(())
     }
 
-    /// Emit a single flag-guarded destructor call:
-    /// `if drop_flag { struct__drop(&storage); drop_flag = false }`.
+    /// Emit a single flag-guarded destructor:
+    /// `if drop_flag { destroy(&storage); drop_flag = false }`.
     fn emit_one_drop(
         &mut self,
         storage_ptr: PointerValue<'ctx>,
         flag_ptr: PointerValue<'ctx>,
-        struct_name: &str,
+        target: &DropTarget,
     ) -> CodegenResult<()> {
         if self.current_block_terminated() {
             return Ok(());
@@ -162,15 +163,22 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
         self.builder.position_at_end(run_bb);
-        let mangled = format!("{}__drop", struct_name);
-        let drop_fn = *self
-            .functions
-            .get(&mangled)
-            .ok_or_else(|| CodegenError::UndefinedFunction(mangled.clone()))?;
-        let receiver: BasicValueEnum<'ctx> = storage_ptr.into();
-        self.builder
-            .build_call(drop_fn, &[receiver.into()], "")
-            .map_err(|e| CodegenError::LlvmError(format!("failed to build drop call: {}", e)))?;
+        match target {
+            DropTarget::UserDrop(struct_name) => {
+                let mangled = format!("{}__drop", struct_name);
+                let drop_fn = *self
+                    .functions
+                    .get(&mangled)
+                    .ok_or_else(|| CodegenError::UndefinedFunction(mangled.clone()))?;
+                let receiver: BasicValueEnum<'ctx> = storage_ptr.into();
+                self.builder
+                    .build_call(drop_fn, &[receiver.into()], "")
+                    .map_err(|e| {
+                        CodegenError::LlvmError(format!("failed to build drop call: {}", e))
+                    })?;
+            }
+            DropTarget::Collection => self.emit_collection_free(storage_ptr)?,
+        }
         // Clear the flag so a re-reachable drop site cannot run the destructor twice.
         self.builder
             .build_store(flag_ptr, bool_ty.const_zero())

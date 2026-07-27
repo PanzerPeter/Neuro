@@ -1236,6 +1236,115 @@ positionally with an optional trailing `..rest` (a fresh `[T; N - k]` remainder)
 bare `..` to ignore it. A rest-less array pattern must match the array's length
 exactly. See [Variables → Destructuring](variables.md#destructuring).
 
+## Standard Collections
+
+Beyond the fixed-size `[T; N]`, the standard library provides three heap-backed
+collections. They are library types, not language primitives — but because the
+language exposes no allocator, the compiler knows all three by name and lowers
+their operations directly.
+
+```neuro
+mut counts: Vec<i32> = Vec::new()               // growable contiguous array
+mut stock: HashMap<string, i32> = HashMap::new() // average-O(1) lookup
+mut ranks: BTreeMap<i32, i32> = BTreeMap::new()  // key-ordered map
+```
+
+`Vec::new()` and its siblings carry no value to infer an element type from, so
+the binding must be annotated.
+
+### Ownership
+
+All three own a heap buffer, so none is `Copy`: assignment and by-value passing
+**move** them, and the buffer is freed when the owner leaves scope. A method
+that mutates (`push`, `pop`, `insert`, `remove`, `clear`) needs a `mut` binding,
+exactly like a `&mut self` method.
+
+```neuro
+mut a: Vec<i32> = Vec::new()
+val b: Vec<i32> = a       // moves; `a` is invalid from here
+```
+
+### `Vec<T>`
+
+| Operation | Result | Notes |
+| --- | --- | --- |
+| `v.push(x)` | — | Appends; grows the buffer as needed |
+| `v.pop()` | `Option<T>` | `None` when empty |
+| `v.get(i)` | `Option<T>` | The checked read |
+| `v[i]` / `v[i] = x` | `T` / — | Panics out of range, in **every** build |
+| `v.len()` | `u64` | Live element count |
+| `v.clear()` | — | Empties without releasing the buffer |
+| `for x in v` | — | Iterates the live elements in order |
+
+Unlike `[T; N]`, whose length is a compile-time constant, a `Vec`'s length is
+only known at run time — so its bounds check is never elided in release builds.
+
+### `HashMap<K, V>` and `BTreeMap<K, V>`
+
+Both share one surface:
+
+| Operation | Result | Notes |
+| --- | --- | --- |
+| `m.insert(k, v)` | — | Overwrites the value of an existing key |
+| `m.get(k)` | `Option<V>` | `None` when absent |
+| `m.contains_key(k)` | `bool` | |
+| `m.remove(k)` | `bool` | `true` when a key was removed |
+| `m.len()` | `u64` | Live entry count |
+| `m.clear()` | — | |
+| `m.keys()` | `Vec<K>` | A fresh `Vec`, so a map is iterated via `for k in m.keys()` |
+
+`HashMap` is open-addressed with linear probing and average-O(1) lookup.
+`BTreeMap` keeps its entries ordered by key, so `keys()` comes back **ascending**
+— that ordering is the reason to choose it.
+
+### Element and key types
+
+- **Elements and values** must be `Copy` (any integer, float, `bool`, `char`,
+  `Copy` struct, enum, tuple, or array) or `string`.
+- **Keys** additionally need equality and, per map, a hash or a total order. The
+  compiler supplies both for integer, `bool`, `char`, and `string` keys. A
+  struct key supplies them itself: `impl PartialEq` plus `impl Hashable`
+  (`HashMap`) or `impl Comparable` (`BTreeMap`).
+- **Float keys are rejected.** IEEE-754 comparison is a partial order — NaN
+  compares false against everything, including itself — so a map keyed on a raw
+  float could hold a key it can never find again. Use the prelude's validating
+  wrappers, which reject NaN at construction:
+
+```neuro
+mut scores: BTreeMap<OrderedF32, i32> = BTreeMap::new()
+scores.insert(OrderedF32::new(0.75f32), 3)
+```
+
+`OrderedF32` / `OrderedF64` implement `Comparable`, not `Hashable`: hashing a
+float has no representation-independent answer, so they are ordered-map keys.
+
+### `Hashable`
+
+`Hashable` is a compiler-known lang-item trait, like `Drop` and the operator
+traits — write the `impl`, never a `trait` declaration:
+
+```neuro
+impl Hashable for Point {
+    func hash(&self) -> u64 {
+        (self.x * 31 + self.y) as u64
+    }
+}
+```
+
+The shape is fixed: exactly one `hash(&self) -> u64`. Equal keys must hash
+equally; the map only needs that much.
+
+### Current limits
+
+- `pop()` and `get()` build an `Option<T>`, so they are available only for
+  element types `Option` can carry — scalar `Copy` primitives in this phase.
+  Index a `Vec` of structs or strings with `v[i]` instead.
+- A `string` stored in a collection is not freed when the collection is dropped;
+  only the collection's own buffer is. This matches the existing string-concat
+  limitation and resolves with the heap-string work.
+- The general iterator protocol is not involved: `for x in v` lowers to a counted
+  loop, exactly as `for x in arr` does.
+
 ## References
 
 - [Variables](variables.md) - Variable declaration and usage

@@ -344,17 +344,23 @@ impl Lowerer {
             } => {
                 let object = self.lower_expr(object, None)?;
                 let index = self.lower_expr(index, None)?;
-                let HirType::Array { element, .. } = object.ty.referent().clone() else {
-                    return Err(LoweringError::Malformed {
-                        detail: format!("index into non-array type '{}'", object.ty),
-                    });
+                let element = match Self::collection_element(&object.ty) {
+                    Some(element) => element,
+                    None => match object.ty.referent().clone() {
+                        HirType::Array { element, .. } => *element,
+                        other => {
+                            return Err(LoweringError::Malformed {
+                                detail: format!("index into non-indexable type '{}'", other),
+                            })
+                        }
+                    },
                 };
                 Ok(HirExpr::new(
                     HirExprKind::Index {
                         object: Box::new(object),
                         index: Box::new(index),
                     },
-                    *element,
+                    element,
                     *span,
                 ))
             }
@@ -675,6 +681,23 @@ impl Lowerer {
             }
             Expr::FieldAccess { object, field, .. } => {
                 self.lower_method_call(object, &field.name, args, span)
+            }
+            // `Vec::new()` and friends build an empty standard collection, unless the
+            // program declares its own type of that name.
+            Expr::Path {
+                type_name, member, ..
+            } if member.name == crate::collections::COLLECTION_CTOR
+                && crate::collections::collection_kind(&type_name.name).is_some()
+                && !self.structs.contains_key(&type_name.name)
+                && !self.enums.contains_key(&type_name.name) =>
+            {
+                let kind =
+                    crate::collections::collection_kind(&type_name.name).ok_or_else(|| {
+                        LoweringError::UnresolvedType {
+                            name: type_name.name.clone(),
+                        }
+                    })?;
+                self.lower_collection_new(kind, expected, span)
             }
             // `Enum::Variant(args)` is a tuple-variant construction when the
             // type names an enum; otherwise an associated-function call.
@@ -1048,6 +1071,8 @@ impl Lowerer {
                 })?;
             let (params, ret) = (sig.params.clone(), sig.ret.clone());
             (self.lower_args(args, &params)?, ret)
+        } else if matches!(recv.referent(), HirType::Collection { .. }) {
+            self.lower_collection_method(&recv, method, args)?
         } else {
             self.lower_builtin_method(&recv, method, args)?
         };
@@ -1460,7 +1485,7 @@ impl Lowerer {
 
     /// Lower each argument against its corresponding parameter type (the contextual
     /// hint a callee imposes on its arguments). Extra arguments lower with no hint.
-    fn lower_args(
+    pub(crate) fn lower_args(
         &mut self,
         args: &[Expr],
         params: &[HirType],

@@ -29,6 +29,7 @@ use ast_types::Item;
 use neuro_hir::{HirProgram, HirType};
 
 mod closures;
+mod collections;
 mod expressions;
 mod items;
 mod operator_traits;
@@ -503,6 +504,10 @@ fn mangle_type(ty: &HirType) -> String {
         }
         HirType::DynObject(name) => format!("dyn_{}", name),
         HirType::Function { .. } => "fn".to_string(),
+        HirType::Collection { kind, args } => {
+            let parts: Vec<String> = args.iter().map(mangle_type).collect();
+            format!("{}_{}", kind.name().to_lowercase(), parts.join("_"))
+        }
     }
 }
 

@@ -1,3 +1,4 @@
+use super::collections::{HASHABLE_TRAIT, HASH_METHOD};
 use super::operator_traits::{is_operator_trait, operator_trait_spec};
 use super::{EnumVariantInfo, TraitInfo, TraitMethodSig, TypeChecker, VariantForm};
 use crate::errors::TypeError;
@@ -1103,6 +1104,8 @@ impl TypeChecker {
         if let Some(t) = &def.trait_name {
             if t.name == DROP_TRAIT {
                 // handled above
+            } else if t.name == HASHABLE_TRAIT {
+                self.register_hashable_impl(def, &struct_name);
             } else if is_operator_trait(&t.name) {
                 self.register_operator_impl(def, &struct_name, &t.name.clone(), struct_is_copy);
             } else {
@@ -1276,6 +1279,38 @@ impl TypeChecker {
                 span: def.span,
             });
         }
+    }
+
+    /// Validate an `impl Hashable for T` block and record the impl.
+    ///
+    /// `Hashable` is a compiler-known lang-item like `Drop` and the operator traits: it
+    /// exists so a user struct can be a `HashMap` key, and the generated probe sequence
+    /// calls `T__hash` directly. The shape is therefore fixed — one `hash(&self) -> u64`
+    /// method, taking the receiver by reference so hashing never moves the key.
+    fn register_hashable_impl(&mut self, def: &ImplDef, struct_name: &str) {
+        let valid = match def.methods.as_slice() {
+            [method] if method.name.name == HASH_METHOD => {
+                matches!(method.self_param, Some(SelfParam::Ref))
+                    && method.params.is_empty()
+                    && method
+                        .return_type
+                        .as_ref()
+                        .and_then(|t| self.resolve_type(t))
+                        .is_some_and(|t| t == Type::U64)
+            }
+            _ => false,
+        };
+
+        if !valid {
+            self.record_error(TypeError::InvalidHashableImpl {
+                type_name: struct_name.to_string(),
+                span: def.span,
+            });
+            return;
+        }
+
+        self.trait_impls
+            .insert((HASHABLE_TRAIT.to_string(), struct_name.to_string()));
     }
 
     /// Register a trait declaration's method signatures.
