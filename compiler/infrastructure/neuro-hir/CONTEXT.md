@@ -30,6 +30,8 @@ differences that make it the *typed* contract:
    span lives on the enclosing node.
 
 ## Recent Updates
+- 2026-07-28: One `loop` node. `HirStmt::Loop` is removed to mirror the AST change; `HirExprKind::Loop`
+  is the sole loop node and a statement-position loop is a `HirStmt::Expr` wrapping it, typed `void`.
 - 2026-07-27: Standard collections. Added `HirType::Collection { kind, args }` with
   `HirCollectionKind::{Vec, HashMap, BTreeMap}` (Display renders `Vec<i32>`), and the
   `HirExprKind::CollectionNew` expression kind — the typed mirror of `Vec::new()` and its siblings,

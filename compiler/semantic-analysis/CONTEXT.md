@@ -145,6 +145,20 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-07-28: Divergent `loop`, and expression/declaration module split.
+  `LoopContext` gains `has_break`, set by `record_break_target` from the `Stmt::Break` arm, and
+  `check_loop_body` returns `LoopExit { value_ty, has_break }`. `Expr::Loop` now yields its agreed
+  value-break type; unit when only plain `break`s target it; and the *expected* type when no `break`
+  targets it at all — such a loop never reaches its exit, so it satisfies any context, the same
+  divergent contract the panic-family builtins carry. This keeps
+  `func f() -> i32 { loop { ... return x } }` valid now that a trailing `loop` is checked as the
+  implicit return. `Stmt::Loop` handling is gone (the node no longer exists); the `while true` lint
+  descends through `Stmt::Expr(Expr::Loop)`.
+  `type_checkers/expressions.rs` is now `expressions/` (`mod.rs` holds the `check_expr` dispatch;
+  `calls`, `enum_exprs`, `struct_exprs`, `operators`, `blocks`, `places`, `sequences`, `builtins`,
+  `const_predicates` hold the rest) and `declarations.rs` is now `declarations/` (`mod.rs` holds the
+  reserved-name pass, generic scope, and generic unification/substitution; one module per
+  declaration kind). `tests/` is likewise split by subject. Behaviour is unchanged by both splits.
 - 2026-07-27: Standard collections. New `Type::Collection { kind, args }` + `CollectionKind`
   (`Vec` / `HashMap` / `BTreeMap`) — a compiler-known nominal type, never `Copy` and always
   move-tracked (`is_type_copy` / `is_type_move_tracked`). The new `type_checkers/collections.rs`

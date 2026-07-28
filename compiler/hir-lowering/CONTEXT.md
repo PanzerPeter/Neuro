@@ -18,6 +18,14 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
 - thiserror — `LoweringError` derivation
 
 ## Notes
+- 2026-07-28: Divergent `loop`, and expression module split. `LoopCtx` gains `has_break`, set by
+  `record_break_target`; `Expr::Loop` lowers to its value-break type, or to the *expected* type when
+  no `break` targets it, so the (dead) exit-block result slot is still typed for the position the
+  loop sits in. `lower_stmt` loses its `Stmt::Loop` arm — the node is gone, so a statement-position
+  loop arrives as `Stmt::Expr(Expr::Loop)` and `lower_body_stmts`' existing tail rule types it
+  against the declared return type. `expressions.rs` is now `expressions/` (`mod.rs` holds the
+  dispatch and the block-value tail rule; `calls`, `enums`, `structs`, `matches`, `sequences`,
+  `coercion` hold the rest) and `tests.rs` is split by subject. Behaviour is unchanged by the split.
 - 2026-07-28: `checked_{add,sub,mul}`. `lower_builtin_method` (`expressions.rs`) types these on any
   integer receiver as `Option<T>` over that receiver, reusing `collections.rs`'s `option_of` so the
   instance is materialized as an ordinary `HirItem::Enum` exactly like `Vec::pop`'s. They are the

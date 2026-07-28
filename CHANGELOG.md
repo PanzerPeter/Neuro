@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.66.1] - 2026-07-28
+
+### Fixed
+- `codegen`: a `loop` in tail position — the function's implicit return — spun forever
+  instead of exiting on `break`. Binding the same loop to a `val` and returning that
+  worked, so the defect was in the tail path.
+
+  ```neuro
+  func count_to(n: i32) -> i32 {
+      mut i: i32 = 0
+      loop {
+          if i == n { break i }
+          i += 1
+      }
+  }
+  ```
+
+  Root cause: `loop` had two AST shapes — `Stmt::Loop` in statement position and
+  `Expr::Loop` in value position — while every "is the trailing statement
+  value-producing?" test in the pipeline keys on `Stmt::Expr`. A trailing `loop` was
+  therefore lowered as a discard-value statement, and the backend terminated its exit
+  block with `unreachable`, which emits no instruction at `-O0` and leaves the `break`
+  target as a jump to itself.
+
+  `Stmt::Loop` and `HirStmt::Loop` are removed. `Expr::Loop` is the sole loop node and
+  carries the label; a statement-position `loop` parses to `Stmt::Expr(Expr::Loop)`, so
+  every tail-value site sees it with no special case.
+
+### Changed
+- `semantic`: a `loop` that no `break` targets now takes its context's expected type.
+  Such a loop never reaches its exit block — it runs forever or leaves via `return` — so
+  it satisfies any declared return type, the same divergent contract the panic-family
+  builtins carry. This keeps `func f() -> i32 { loop { ... return x } }` valid now that a
+  trailing `loop` is checked as the implicit return.
+- `parser`/`semantic`/`codegen`: split the nine largest modules along the seams they
+  already had, with no behaviour change. `type_checkers/expressions.rs` and
+  `declarations.rs`, `hir-lowering/expressions.rs`, `codegen/collections/maps.rs`, and
+  the parser's `items.rs` and `statements.rs` each become a directory (or a set of
+  siblings) holding one module per category, with the dispatch left in place. The three
+  largest test modules are split by subject the same way.
+
 ## [1.66.0] - 2026-07-28
 
 ### Added

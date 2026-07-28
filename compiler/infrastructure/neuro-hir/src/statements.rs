@@ -57,11 +57,6 @@ pub enum HirStmt {
         body: Vec<HirStmt>,
         span: Span,
     },
-    Loop {
-        label: Option<String>,
-        body: Vec<HirStmt>,
-        span: Span,
-    },
     Break {
         label: Option<String>,
         value: Option<HirExpr>,

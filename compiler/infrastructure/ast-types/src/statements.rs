@@ -69,18 +69,6 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// Infinite loop statement.
-    ///
-    /// Executes `body` repeatedly; the only exit is a `break`. `continue`
-    /// re-enters the body from the top. Unlike `while`/`for`, a `loop` has no
-    /// fall-through exit. In statement position the loop's value is discarded;
-    /// the value-producing form lives in [`Expr::Loop`] (`break value`).
-    /// An optional `label` names the loop for labeled break/continue.
-    Loop {
-        label: Option<Identifier>,
-        body: Vec<Stmt>,
-        span: Span,
-    },
     /// Break out of the nearest enclosing loop, or out of the loop named by
     /// `label` when present (`break outer`).
     ///

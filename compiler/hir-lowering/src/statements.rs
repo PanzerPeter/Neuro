@@ -117,15 +117,6 @@ impl Lowerer {
                 })
             }
 
-            Stmt::Loop { label, body, span } => {
-                let body = self.lower_loop_body(label, true, body)?;
-                Ok(HirStmt::Loop {
-                    label: label.as_ref().map(|l| l.name.clone()),
-                    body,
-                    span: *span,
-                })
-            }
-
             Stmt::ForRange {
                 label,
                 iterator,
@@ -190,6 +181,7 @@ impl Lowerer {
                     Some(expr) => Some(self.lower_expr(expr, None)?),
                     None => None,
                 };
+                self.record_break_target(label.as_ref().map(|l| l.name.as_str()));
                 if let Some(v) = &value {
                     self.record_break_value(label.as_ref().map(|l| l.name.as_str()), v.ty.clone());
                 }
@@ -330,6 +322,7 @@ impl Lowerer {
             label: label.as_ref().map(|l| l.name.clone()),
             is_value,
             value_ty: None,
+            has_break: false,
         });
         self.push_scope();
         let body = inner(self);
@@ -341,18 +334,31 @@ impl Lowerer {
     /// Record a value-carrying `break`'s type against its target loop: the loop named
     /// by `label`, or the innermost loop. Only a value-capable `loop` accepts one.
     fn record_break_value(&mut self, label: Option<&str>, ty: HirType) {
-        let target = match label {
+        if let Some(ctx) = self.break_target(label) {
+            if ctx.is_value && ctx.value_ty.is_none() {
+                ctx.value_ty = Some(ty);
+            }
+        }
+    }
+
+    /// Record that a `break` targets the loop named by `label`, or the innermost
+    /// loop when unlabeled.
+    fn record_break_target(&mut self, label: Option<&str>) {
+        if let Some(ctx) = self.break_target(label) {
+            ctx.has_break = true;
+        }
+    }
+
+    /// The loop a `break` refers to: the innermost one carrying `label`, or the
+    /// innermost loop when unlabeled.
+    fn break_target(&mut self, label: Option<&str>) -> Option<&mut LoopCtx> {
+        match label {
             Some(l) => self
                 .loop_stack
                 .iter_mut()
                 .rev()
                 .find(|ctx| ctx.label.as_deref() == Some(l)),
             None => self.loop_stack.last_mut(),
-        };
-        if let Some(ctx) = target {
-            if ctx.is_value && ctx.value_ty.is_none() {
-                ctx.value_ty = Some(ty);
-            }
         }
     }
 

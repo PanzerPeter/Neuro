@@ -289,6 +289,15 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-07-28: BUG-005 — a tail `loop` never exited. `HirStmt::Loop` is removed; a statement-position
+  loop reaches `codegen_stmt` as `HirStmt::Expr` carrying a `void`-typed loop node, so no result slot
+  is allocated and the value is discarded exactly as before. The fix itself is upstream: a trailing
+  `loop` used as a function's implicit return used to be lowered as a discard-value statement, so
+  `codegen_body` fell to its non-tail path and terminated `loop.exit` with `unreachable` — which
+  emits no instruction at `-O0`, leaving the `break` target as a jump to itself. It is now a
+  value-producing tail like any other expression.
+  `codegen/collections/maps.rs` is split into `maps/` (`mod` dispatch and slot access, plus
+  `lookup`, `insertion`, `iteration`, `probing`, `growth`); behaviour is unchanged.
 - 2026-07-27: By-value structs, and literals at their resolved type.
   `TypeMapper` now holds a struct-layout table (`set_struct_fields`, fed by
   `CodegenContext::set_struct_defs`) beside `enum_words`, so `map_type` builds a named struct's

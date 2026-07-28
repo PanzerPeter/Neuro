@@ -196,6 +196,10 @@ struct LoopContext {
     /// The agreed type of value-carrying `break`s seen so far, or `None` until the
     /// first one. All value-breaks targeting the same loop must agree on type.
     break_value_ty: Option<Type>,
+    /// Whether any `break` at all targeted this loop. A `loop` with none has no
+    /// exit edge, so it never produces a value — it diverges, and adopts its
+    /// context's expected type exactly as the panic-family builtins do.
+    has_break: bool,
 }
 
 mod closures;
@@ -587,7 +591,7 @@ impl TypeChecker {
             Stmt::ForRange { body, .. } => {
                 self.lint_block(body, suppress_while_true);
             }
-            Stmt::Loop { body, .. } => {
+            Stmt::Expr(ast_types::Expr::Loop { body, .. }) => {
                 self.lint_block(body, suppress_while_true);
             }
             _ => {}

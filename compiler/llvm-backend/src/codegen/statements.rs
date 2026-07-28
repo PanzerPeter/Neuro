@@ -402,8 +402,8 @@ impl<'ctx> CodegenContext<'ctx> {
     /// `break`. `continue` re-enters the body from the top. `result_ty` is the loop
     /// expression's type: when it is not `Void`, a result slot is allocated,
     /// value-carrying `break`s store into it, and the loaded value is returned.
-    /// `Stmt::Loop` passes `Void` (the value is discarded); `Expr::Loop` passes its
-    /// resolved type.
+    /// A statement-position loop reaches here as a `HirStmt::Expr` whose loop node
+    /// carries type `void`, so no slot is allocated and no value is produced.
     pub(crate) fn codegen_loop(
         &mut self,
         label: Option<&str>,
@@ -659,11 +659,6 @@ impl<'ctx> CodegenContext<'ctx> {
                 body,
                 ..
             } => self.codegen_while(label.as_deref(), condition, body),
-            HirStmt::Loop { label, body, .. } => {
-                // Statement position: the loop value (if any) is discarded.
-                self.codegen_loop(label.as_deref(), body, &Type::Void)?;
-                Ok(())
-            }
             HirStmt::ForRange {
                 label,
                 iterator,
