@@ -12,11 +12,14 @@ use crate::types::Type;
 impl<'ctx> CodegenContext<'ctx> {
     /// Lower a compiler-known intrinsic method call on a builtin receiver. `recv_ty` is the
     /// receiver's resolved HIR type (the call dispatcher maps it from `object.ty`), used for
-    /// the integer intrinsics' signedness and the string/array receiver shape.
+    /// the integer intrinsics' signedness and the string/array receiver shape; `result_ty`
+    /// is the call's resolved result type, which supplies the `Option<T>` instance the
+    /// `checked_*` intrinsics build.
     pub(crate) fn codegen_builtin_method(
         &mut self,
         kind: BuiltinMethod,
         recv_ty: &Type,
+        result_ty: &Type,
         receiver: &HirExpr,
         args: &[HirExpr],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
@@ -81,6 +84,9 @@ impl<'ctx> CodegenContext<'ctx> {
                     }
                     other => Ok(other),
                 }
+            }
+            BuiltinMethod::CheckedAdd | BuiltinMethod::CheckedSub | BuiltinMethod::CheckedMul => {
+                self.codegen_checked_int_intrinsic(kind, recv_ty, result_ty, receiver, args)
             }
             BuiltinMethod::WrappingAdd
             | BuiltinMethod::WrappingSub
@@ -333,22 +339,7 @@ impl<'ctx> CodegenContext<'ctx> {
         args: &[HirExpr],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let unsigned = recv_ty.is_unsigned_int();
-
-        // Both operands must share the receiver's exact integer type. The arg literal can
-        // arrive widened (the backend's literal default is i32), so coerce it down/up to the
-        // receiver type — semantic analysis has already proven the two types compatible.
-        let target_llvm = self.type_mapper.map_type(recv_ty)?;
-        let lhs_raw = self.codegen_expr(receiver)?;
-        let lhs = self
-            .coerce_if_needed(lhs_raw, target_llvm, recv_ty)?
-            .into_int_value();
-        let rhs_expr = args.first().ok_or_else(|| {
-            CodegenError::InternalError("integer intrinsic is missing its argument".into())
-        })?;
-        let rhs_raw = self.codegen_expr(rhs_expr)?;
-        let rhs = self
-            .coerce_if_needed(rhs_raw, target_llvm, recv_ty)?
-            .into_int_value();
+        let (lhs, rhs) = self.int_intrinsic_operands(recv_ty, receiver, args)?;
 
         let value = match kind {
             BuiltinMethod::WrappingAdd => self
@@ -382,12 +373,121 @@ impl<'ctx> CodegenContext<'ctx> {
             | BuiltinMethod::StringClone
             | BuiltinMethod::StringSlice
             | BuiltinMethod::StructClone
-            | BuiltinMethod::ArrayLen => {
-                unreachable!("non-integer intrinsics are handled by codegen_builtin_method")
+            | BuiltinMethod::ArrayLen
+            | BuiltinMethod::CheckedAdd
+            | BuiltinMethod::CheckedSub
+            | BuiltinMethod::CheckedMul => {
+                unreachable!("handled by codegen_builtin_method's other arms")
             }
         };
 
         Ok(value.into())
+    }
+
+    /// Lower `checked_add` / `checked_sub` / `checked_mul` on an integer receiver to
+    /// `Option::Some(result)`, or `Option::None` when the operation overflowed.
+    ///
+    /// The `llvm.{s,u}{add,sub,mul}.with.overflow` intrinsics report both halves in one
+    /// aggregate, so the overflow bit selects the variant with no branch. `result_ty` is
+    /// the monomorphized `Option<T>` the frontend resolved; its variant tags and payload
+    /// layout are read from it rather than assumed.
+    fn codegen_checked_int_intrinsic(
+        &mut self,
+        kind: BuiltinMethod,
+        recv_ty: &Type,
+        result_ty: &Type,
+        receiver: &HirExpr,
+        args: &[HirExpr],
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let unsigned = recv_ty.is_unsigned_int();
+        let (lhs, rhs) = self.int_intrinsic_operands(recv_ty, receiver, args)?;
+
+        let intrinsic_name = match (kind, unsigned) {
+            (BuiltinMethod::CheckedAdd, false) => "llvm.sadd.with.overflow",
+            (BuiltinMethod::CheckedAdd, true) => "llvm.uadd.with.overflow",
+            (BuiltinMethod::CheckedSub, false) => "llvm.ssub.with.overflow",
+            (BuiltinMethod::CheckedSub, true) => "llvm.usub.with.overflow",
+            (BuiltinMethod::CheckedMul, false) => "llvm.smul.with.overflow",
+            (BuiltinMethod::CheckedMul, true) => "llvm.umul.with.overflow",
+            _ => {
+                return Err(CodegenError::InternalError(
+                    "non-checked intrinsic routed to the checked path".into(),
+                ))
+            }
+        };
+
+        let (value, overflowed) = self.emit_with_overflow(intrinsic_name, lhs, rhs)?;
+        let ok = self
+            .builder
+            .build_not(overflowed, "chk.ok")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.build_option_value(result_ty, ok, value.into(), recv_ty)
+    }
+
+    /// Evaluate an integer intrinsic's receiver and single argument, both coerced to the
+    /// receiver's exact integer type. The argument literal can arrive widened (the
+    /// backend's literal default is `i32`), and semantic analysis has already proven the
+    /// two types compatible.
+    fn int_intrinsic_operands(
+        &mut self,
+        recv_ty: &Type,
+        receiver: &HirExpr,
+        args: &[HirExpr],
+    ) -> CodegenResult<(IntValue<'ctx>, IntValue<'ctx>)> {
+        let target_llvm = self.type_mapper.map_type(recv_ty)?;
+        let lhs_raw = self.codegen_expr(receiver)?;
+        let lhs = self
+            .coerce_if_needed(lhs_raw, target_llvm, recv_ty)?
+            .into_int_value();
+        let rhs_expr = args.first().ok_or_else(|| {
+            CodegenError::InternalError("integer intrinsic is missing its argument".into())
+        })?;
+        let rhs_raw = self.codegen_expr(rhs_expr)?;
+        let rhs = self
+            .coerce_if_needed(rhs_raw, target_llvm, recv_ty)?
+            .into_int_value();
+        Ok((lhs, rhs))
+    }
+
+    /// Call an overloaded `llvm.*.with.overflow` intrinsic, returning its
+    /// `(wrapped result, overflow bit)` pair.
+    fn emit_with_overflow(
+        &self,
+        intrinsic_name: &str,
+        lhs: IntValue<'ctx>,
+        rhs: IntValue<'ctx>,
+    ) -> CodegenResult<(IntValue<'ctx>, IntValue<'ctx>)> {
+        let int_ty = lhs.get_type();
+        let intrinsic = Intrinsic::find(intrinsic_name).ok_or_else(|| {
+            CodegenError::InternalError(format!("missing LLVM intrinsic {intrinsic_name}"))
+        })?;
+        let decl = intrinsic
+            .get_declaration(&self.module, &[int_ty.into()])
+            .ok_or_else(|| {
+                CodegenError::InternalError(format!(
+                    "could not declare LLVM intrinsic {intrinsic_name}"
+                ))
+            })?;
+
+        let agg = self
+            .builder
+            .build_call(decl, &[lhs.into(), rhs.into()], "ovf")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .try_as_basic_value()
+            .basic()
+            .ok_or_else(|| CodegenError::InternalError(format!("{intrinsic_name} returned void")))?
+            .into_struct_value();
+        let result = self
+            .builder
+            .build_extract_value(agg, 0, "ovf.res")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_int_value();
+        let overflowed = self
+            .builder
+            .build_extract_value(agg, 1, "ovf.bit")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_int_value();
+        Ok((result, overflowed))
     }
 
     /// Emit a saturating add/sub via the overloaded `llvm.{s,u}{add,sub}.sat` intrinsic,
@@ -437,37 +537,7 @@ impl<'ctx> CodegenContext<'ctx> {
         } else {
             "llvm.smul.with.overflow"
         };
-        let intrinsic = Intrinsic::find(intrinsic_name).ok_or_else(|| {
-            CodegenError::InternalError(format!("missing LLVM intrinsic {intrinsic_name}"))
-        })?;
-        let decl = intrinsic
-            .get_declaration(&self.module, &[int_ty.into()])
-            .ok_or_else(|| {
-                CodegenError::InternalError(format!(
-                    "could not declare LLVM intrinsic {intrinsic_name}"
-                ))
-            })?;
-
-        let agg = self
-            .builder
-            .build_call(decl, &[lhs.into(), rhs.into()], "smul")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-            .try_as_basic_value()
-            .basic()
-            .ok_or_else(|| {
-                CodegenError::InternalError("mul-overflow intrinsic returned void".to_string())
-            })?
-            .into_struct_value();
-        let result = self
-            .builder
-            .build_extract_value(agg, 0, "smul.res")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-            .into_int_value();
-        let overflowed = self
-            .builder
-            .build_extract_value(agg, 1, "smul.ovf")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-            .into_int_value();
+        let (result, overflowed) = self.emit_with_overflow(intrinsic_name, lhs, rhs)?;
 
         let width = int_ty.get_bit_width();
         let umax = int_ty.const_all_ones();

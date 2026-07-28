@@ -71,8 +71,11 @@ diagnostic on wrong count). Intrinsics: `string.len() -> u64`, `string.clone() -
 nullary); `string.slice(a..b) -> &string` (`check_string_slice`: one `Expr::Range` arg with
 integer bounds, else `SliceExpectsRange`); and on any integer receiver `wrapping_{add,sub,mul}`,
 `saturating_{add,sub,mul}`, `.shr(n)` — each one same-typed arg
-(`check_unary_int_intrinsic_arg`), returns the receiver type. A bare `Expr::Range` outside a
-`.slice` argument is `RangeNotAllowed`.
+(`check_unary_int_intrinsic_arg`), returns the receiver type. `checked_{add,sub,mul}` take the same
+argument but return `Option<T>` over the receiver type, instantiated through the shared
+`option_of` (`collections.rs`) so the overflow-reporting intrinsics and the fallible collection
+readers materialize the same prelude enum instance; a program without an `Option` in scope gets
+`UnknownTypeName`. A bare `Expr::Range` outside a `.slice` argument is `RangeNotAllowed`.
 A struct receiver's `.clone()` is a nullary builtin when the struct derives `Clone`/`Copy` and
 no user `clone` method exists (user method shadows); returns the struct type.
 

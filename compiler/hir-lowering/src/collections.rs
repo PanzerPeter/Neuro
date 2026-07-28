@@ -10,7 +10,7 @@ use neuro_hir::{HirCollectionKind, HirExpr, HirExprKind, HirType};
 
 use crate::{Lowerer, LoweringError, MonoArg};
 
-/// The prelude enum the fallible readers (`Vec::pop`, `Map::get`) return.
+/// The prelude enum the fallible readers (`Vec::pop`, `Map::get`, `int.checked_*`) return.
 const OPTION_ENUM: &str = "Option";
 
 /// The associated function that builds an empty collection.
@@ -112,7 +112,7 @@ impl Lowerer {
 
     /// Monomorphize `Option<T>` for a fallible reader's result, materializing the
     /// instance so the backend sees an ordinary enum item.
-    fn option_of(&mut self, inner: HirType) -> Result<HirType, LoweringError> {
+    pub(crate) fn option_of(&mut self, inner: HirType) -> Result<HirType, LoweringError> {
         let mangled = self.instantiate_generic_enum(OPTION_ENUM, &[MonoArg::Type(inner)])?;
         Ok(HirType::Enum(mangled))
     }

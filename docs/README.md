@@ -176,6 +176,9 @@ Key design goals:
 - A `match` pattern names the base enum and binds payloads at the scrutinee instance's types
 - `Option<T> { Some(T), None }` and `Result<T, E> { Ok(T), Err(E) }` come from an implicit prelude:
   available in every program with no declaration, shadowed by a local type of the same name
+- `checked_add` / `checked_sub` / `checked_mul` on any integer type return `Option<T>` over the
+  receiver's type: `Option::Some(result)` when it fits, `Option::None` on overflow. Branchless —
+  the LLVM `*.with.overflow` overflow bit picks the variant
 - Limits: scalar `Copy` payloads per instance (`Option<string>` awaits heap payloads), `Copy` type
   arguments, no `impl` blocks on enums, no lifetime parameters
 

@@ -96,13 +96,14 @@ The debug-build trap turns a silent miscalculation into an immediate failure dur
 
 #### Integer Methods
 
-When the overflow behavior matters, request it explicitly with a builtin intrinsic method. These dispatch on any integer receiver, take one same-typed argument, and return the receiver's type. They are compiler-known intrinsics, not user-defined `impl` methods.
+When the overflow behavior matters, request it explicitly with a builtin intrinsic method. These dispatch on any integer receiver and take one same-typed argument. They are compiler-known intrinsics, not user-defined `impl` methods.
 
-| Method | Behavior |
-|--------|----------|
-| `.wrapping_add(rhs)` / `.wrapping_sub(rhs)` / `.wrapping_mul(rhs)` | Two's-complement wrap on overflow. Never traps, regardless of build profile. |
-| `.saturating_add(rhs)` / `.saturating_sub(rhs)` / `.saturating_mul(rhs)` | Clamp to the type's `MIN` / `MAX` instead of overflowing. |
-| `.shr(n)` | Right shift by `n`. Arithmetic (sign-preserving) for signed types, logical for unsigned. Right shift is a method rather than an operator — see [operators.md](operators.md). |
+| Method | Returns | Behavior |
+|--------|---------|----------|
+| `.wrapping_add(rhs)` / `.wrapping_sub(rhs)` / `.wrapping_mul(rhs)` | receiver type | Two's-complement wrap on overflow. Never traps, regardless of build profile. |
+| `.saturating_add(rhs)` / `.saturating_sub(rhs)` / `.saturating_mul(rhs)` | receiver type | Clamp to the type's `MIN` / `MAX` instead of overflowing. |
+| `.checked_add(rhs)` / `.checked_sub(rhs)` / `.checked_mul(rhs)` | `Option<T>` | `Option::Some(result)` when it fits, `Option::None` when it would overflow. |
+| `.shr(n)` | receiver type | Right shift by `n`. Arithmetic (sign-preserving) for signed types, logical for unsigned. Right shift is a method rather than an operator — see [operators.md](operators.md). |
 
 ```neuro
 val a: u8 = 200
@@ -113,7 +114,21 @@ val floored: u8   = b.saturating_sub(a)   // 0    (unsigned underflow clamps to 
 val shifted: u8   = a.shr(2)              // 50   (200 >> 2, logical)
 ```
 
-`checked_*` (which returns `Option<T>` on overflow) is deferred until `Option` lands in 1G.
+`checked_*` is the reporting form: the overflow is not papered over, and the caller must
+deconstruct the [`Option`](../../examples/types/option_result.nr) before using the value.
+`T` is the receiver's own type, so `200u8.checked_add(100u8)` is an `Option<u8>`.
+
+```neuro
+val checked: Option<u8> = a.checked_add(b)
+val total: u8 = match checked {
+    Option::Some(v) => v,
+    Option::None => 0u8               // 300 does not fit in a u8
+}
+```
+
+None of these ever trap: the checked forms compile to the LLVM `*.with.overflow`
+intrinsics and select the variant from the overflow bit, so there is no branch on the
+happy path.
 
 ### Floating-Point Types
 

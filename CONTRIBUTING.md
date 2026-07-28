@@ -306,10 +306,13 @@ available in every program without a declaration. The **standard collections**
 `Vec<T>`, `HashMap<K, V>`, and `BTreeMap<K, V>` landed in v1.65.0 — heap-backed,
 move-on-assignment, freed at scope exit — along with the `Hashable` lang-item trait
 and the prelude's `OrderedF32` / `OrderedF64` total-order wrappers that let an
-ordered map be keyed on a float.
+ordered map be keyed on a float. The **`checked_*` integer methods**
+(`checked_add` / `checked_sub` / `checked_mul`) landed in v1.66.0, returning
+`Option<T>` over the receiver's type so an overflow is reported rather than
+wrapped, clamped, or trapped.
 
-**Next, in dependency order:** the rest of 1G (`checked_*`, `??`, `?`, `val-else`,
-modules, imports, the full prelude) → 1H (string interpolation, triple-quoted
+**Next, in dependency order:** the rest of 1G (`??`, `?`, `val-else`, modules,
+imports, the full prelude) → 1H (string interpolation, triple-quoted
 strings, nested comments, named arguments). See the [Quick Roadmap](README.md#quick-roadmap).
 
 `[x]` = landed · `[ ]` = open. See [CHANGELOG.md](CHANGELOG.md) and the README

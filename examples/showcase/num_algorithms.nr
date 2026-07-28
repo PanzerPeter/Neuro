@@ -2,9 +2,10 @@
 //
 // Integration example combining several control-flow and operator features:
 //   recursion · while loops · modulo (%) · compound assignment (+=)
-//   · saturating overflow method · nested if/else · early return.
+//   · saturating and checked overflow methods · Option + match deconstruction
+//   · tuples · loop-as-value · nested if/else · early return.
 //
-// Four classic routines are computed and composed into a single exit code.
+// Five classic routines are computed and composed into a single exit code.
 
 // Integer square root via linear scan.
 func isqrt(n: i32) -> i32 {
@@ -43,10 +44,44 @@ func ipow(base: i32, exp: i32) -> i32 {
     return acc
 }
 
+// The same power, but reporting overflow rather than clamping it away.
+// `checked_mul` yields `Option::None` at the first step whose product does not fit,
+// and the loop stops there with the absent answer.
+func pow_checked(base: i32, exp: i32) -> Option<i32> {
+    mut acc: i32 = 1
+    mut i: i32 = 0
+    val outcome = loop {
+        if i == exp {
+            break Option::Some(acc)
+        }
+        // One match, both halves: the product and whether it fit.
+        val step: (i32, bool) = match acc.checked_mul(base) {
+            Option::Some(v) => (v, true),
+            Option::None => (acc, false)
+        }
+        if step.1 == false {
+            break Option::None
+        }
+        acc = step.0
+        i += 1
+    }
+    return outcome
+}
+
 func main() -> i32 {
     val s = isqrt(144)      // 12
     val g = gcd(48, 36)     // 12
     val p = ipow(2, 10)     // 1024
+
+    // 2^10 fits in an i32; 1000^5 = 10^15 does not, and says so.
+    val fits = match pow_checked(2, 10) {
+        Option::Some(v) => v,          // 1024
+        Option::None => 0
+    }
+    val refused = match pow_checked(1000, 5) {
+        Option::Some(_) => 0,
+        Option::None => 1              // 1
+    }
 
     // Count primes in 0..=20: {2,3,5,7,11,13,17,19} -> 8.
     mut primes: i32 = 0
@@ -56,9 +91,11 @@ func main() -> i32 {
         k += 1
     }
 
-    // Compose, gated on the power result.
+    // Compose, gated on both power results agreeing.
     if p == 1024 {
-        return s + g + primes   // 12 + 12 + 8 = 32
+        if fits == 1024 {
+            return s + g + primes + refused   // 12 + 12 + 8 + 1 = 33
+        }
     }
     return 1
 }

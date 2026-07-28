@@ -78,6 +78,13 @@ impl TypeChecker {
                 self.check_unary_int_intrinsic_arg(recv, args, call_span);
                 Some(recv.clone())
             }
+            // Overflow-reporting arithmetic. Same argument contract as the intrinsics
+            // above, but the result is `Option<T>` over the receiver's type: `None` is
+            // the overflow answer, so the caller must deconstruct before using the value.
+            (_, "checked_add" | "checked_sub" | "checked_mul") if recv.is_integer() => {
+                self.check_unary_int_intrinsic_arg(recv, args, call_span);
+                Some(self.option_of(recv.clone(), call_span))
+            }
             _ => None,
         }
     }

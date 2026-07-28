@@ -29,8 +29,10 @@ isolation:
   pass. Structs + `impl` (method calling method) + `f64` math + ReLU branch +
   `while` loop + `as` cast. Exit `8`.
 - [`showcase/num_algorithms.nr`](showcase/num_algorithms.nr) — `isqrt`, `gcd`
-  (recursion), `is_prime`, `ipow` (saturating multiply). Loops + recursion +
-  modulo + compound assignment. Exit `32`.
+  (recursion), `is_prime`, `ipow` (saturating multiply), `pow_checked`
+  (`checked_mul` reporting overflow as `Option::None`). Loops + recursion +
+  modulo + compound assignment + `Option`/`match` + tuples + loop-as-value.
+  Exit `33`.
 - [`showcase/running_stats.nr`](showcase/running_stats.nr) — an online mean
   accumulator. Struct state, direct field mutation, `&self` query method, `f64`
   division, `as` casts. Exit `5`.

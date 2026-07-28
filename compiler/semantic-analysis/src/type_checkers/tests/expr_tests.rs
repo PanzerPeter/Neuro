@@ -447,6 +447,43 @@ fn integer_intrinsics_resolve_to_receiver_type() {
     }
 }
 
+/// A program body wrapped in a `main` that also declares `Option`, which the checker
+/// normally receives from the prelude `neurc` prepends.
+fn program_with_option(body: &str) -> String {
+    format!("enum Option<T> {{ Some(T), None }}\nfunc main() -> i32 {{\n{body}\n}}\n")
+}
+
+#[test]
+fn checked_intrinsics_resolve_to_an_option_instance() {
+    for method in ["checked_add", "checked_sub", "checked_mul"] {
+        let errors = semantic_errors(&program_with_option(&format!(
+            "    val a: u8 = 200
+    val r: Option<u8> = a.{method}(100u8)
+    return match r {{ Option::Some(v) => v as i32, Option::None => 0 }}"
+        )));
+        assert!(
+            errors.is_empty(),
+            "{method} should type-check to Option<u8>, got: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn checked_intrinsic_mismatched_option_instance_rejected() {
+    // The receiver is `u8`, so the result is `Option<u8>` — not `Option<i64>`.
+    let errors = semantic_errors(&program_with_option(
+        "    val a: u8 = 200
+    val r: Option<i64> = a.checked_add(100u8)
+    return 0",
+    ));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })),
+        "Expected Mismatch, got: {errors:?}"
+    );
+}
+
 #[test]
 fn integer_intrinsic_wrong_arity_rejected() {
     let mut checker = TypeChecker::new();

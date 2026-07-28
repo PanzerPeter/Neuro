@@ -101,11 +101,11 @@ rather than the loaded value.
 
 ## Builtin Method ABI
 Intrinsics on non-struct (primitive/string) receivers resolve in `resolve_builtin_method`
-(`context.rs`) during the type-collection pass, which tags the `Call`'s full span `(start, end)` in
-`builtin_methods` with the result type. `codegen_expr` checks `builtin_methods` before the struct
-path and lowers via `codegen_builtin_method`. Keyed by full span (not `span.start`) because chained
-calls (`s.clone().len()`) nest two `Call` nodes sharing `span.start` — same workaround as
-`binary_left_types`.
+(`context.rs`), which maps a receiver `Type` + method name to a `BuiltinMethod` tag only — the
+call's **result type comes from the HIR callee node**, because `checked_*` yields a monomorphized
+`Option<T>` instance whose mangled name only the frontend can produce. The method-call arm of
+`codegen_call_expr` (`expressions/mod.rs`) passes both the receiver type (from `object.ty`) and that
+result type into `codegen_builtin_method` (`expressions/methods.rs`).
 
 - `string.len()` → `extractvalue` field 1 (O(1) stored byte length, u64, no conversion).
 - `string.clone()` → the receiver's own fat-pointer value: strings are immutable /
@@ -118,18 +118,23 @@ calls (`s.clone().len()`) nest two `Call` nodes sharing `span.start` — same wo
   in every build. Result is a `&string`: the computed fat pointer is spilled to an `alloca` and its
   address returned, matching the `&place` opaque-pointer ABI. The `Expr::Range` argument is consumed
   here; reaching it through general `codegen_expr` is an internal error.
-- `struct.clone()` → handled in the type-pass struct method-call arm (not
-  `resolve_builtin_method`, which is keyed by `Type`): when receiver is a struct, field is `clone`,
-  and no `StructName__clone` exists, it tags `BuiltinMethod::StructClone`. Semantic analysis already
-  verified the `Clone` derive. Lowers to the receiver's aggregate value (faithful while
-  stack-allocated; must recurse into heap-owning fields later).
+- `struct.clone()` → handled in the struct method-call arm (not `resolve_builtin_method`, which is
+  keyed by `Type`): when receiver is a struct, field is `clone`, and no `StructName__clone` exists,
+  it passes `BuiltinMethod::StructClone`. Semantic analysis already verified the `Clone` derive.
+  Lowers to the receiver's aggregate value (faithful while stack-allocated; must recurse into
+  heap-owning fields later).
 - Integer intrinsics — `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, `.shr(n)` — resolve on
-  any integer receiver to its own type, lower in `codegen_int_intrinsic` (`expressions.rs`). Both
-  operands coerced to the receiver int via `coerce_if_needed` (arg literal may arrive widened to
-  i32). Wrapping → plain `add`/`sub`/`mul` (no `nsw`/`nuw`, never traps). `.shr` → `ashr` (signed) /
-  `lshr` (unsigned). `saturating_add`/`sub` → `llvm.{s,u}{add,sub}.sat`. `saturating_mul` (no direct
-  intrinsic) → `{s,u}mul.with.overflow` + `select` (unsigned→MAX; signed→MIN on differing operand
-  signs, else MAX).
+  any integer receiver to its own type, lower in `codegen_int_intrinsic` (`expressions/methods.rs`).
+  Both operands are evaluated by `int_intrinsic_operands` and coerced to the receiver int via
+  `coerce_if_needed` (arg literal may arrive widened to i32). Wrapping → plain `add`/`sub`/`mul` (no
+  `nsw`/`nuw`, never traps). `.shr` → `ashr` (signed) / `lshr` (unsigned). `saturating_add`/`sub` →
+  `llvm.{s,u}{add,sub}.sat`. `saturating_mul` (no direct intrinsic) → `{s,u}mul.with.overflow` +
+  `select` (unsigned→MAX; signed→MIN on differing operand signs, else MAX).
+- `checked_{add,sub,mul}` → `codegen_checked_int_intrinsic`: `llvm.{s,u}{add,sub,mul}.with.overflow`
+  via the shared `emit_with_overflow` helper, then `build_option_value` (`collections/mod.rs`)
+  selects `Option::Some(result)` / `Option::None` on the negated overflow bit. Branchless — both
+  variants are materialized and `select`ed. The `Option<T>` instance, its variant tags, and its
+  payload layout all come from the call's result type; nothing about `Option` is assumed here.
 
 `resolve_builtin_method` / `is_panic_builtin` are duplicated from `semantic-analysis` to keep the
 backend independent of the type-checker slice.
