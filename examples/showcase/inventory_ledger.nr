@@ -3,7 +3,8 @@
 // Combines: `Vec<T>` holding `Copy` structs, a second `Vec<string>` of names, a
 // `HashMap<string, i32>` name index, a key-ordered `BTreeMap<i32, i32>` report,
 // an enum + `match` classifier, an `impl` block with `&self` methods, `Option`
-// matching on the fallible reads, and `for`-in iteration over collections.
+// matching on the fallible reads, `??` for the reads that only want a default,
+// and `for`-in iteration over collections.
 
 @derive(Copy, Clone)
 struct Item {
@@ -97,6 +98,12 @@ func main() -> i32 {
         Option::None => { missing = 1 }
     }
 
+    // `??` reads the same fallible lookups without a `match` when the only thing the
+    // absent case needs is a default. It chains right-to-left, so the second lookup
+    // only runs after the first has come up empty.
+    val bolt_at = index.get("bolt") ?? -1                           // 0
+    val rivet_at = index.get("rivet") ?? index.get("washer") ?? -1   // 2
+
     // Surcharges, driven by the enum classifier.
     mut fees: i32 = 0
     for item in items {
@@ -114,6 +121,7 @@ func main() -> i32 {
     val lines = items.len() as i32                    // 3
     val indexed = index.len() as i32                  // 3
 
-    // 73 + 45 + 1 + 9 + 45 + 3 + 3 = 179
-    total_weight + girder_weight + missing + fees + heaviest + lines + indexed
+    // 73 + 45 + 1 + 9 + 45 + 3 + 3 + 0 + 2 = 181
+    total_weight + girder_weight + missing + fees + heaviest + lines + indexed +
+        bolt_at + rivet_at
 }

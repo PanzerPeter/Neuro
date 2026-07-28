@@ -5,9 +5,20 @@
 
 use super::TypeChecker;
 use crate::errors::TypeError;
+use crate::type_checkers::collections::OPTION_ENUM;
 use crate::types::Type;
 use ast_types::{BinaryOp, Expr, UnaryOp};
 use shared_types::Span;
+
+/// The `Result<T, E>` half of the fallible pair `??` unwraps. Like `Option`, it comes
+/// from the prelude rather than the compiler; `??` recognizes it by name.
+const RESULT_ENUM: &str = "Result";
+
+/// The variant of `Option` that carries a value — the one `??` unwraps.
+const OPTION_SUCCESS_VARIANT: &str = "Some";
+
+/// The variant of `Result` that carries a value. `Err`'s payload is discarded by `??`.
+const RESULT_SUCCESS_VARIANT: &str = "Ok";
 
 impl TypeChecker {
     pub(super) fn check_binary_expr(
@@ -18,6 +29,13 @@ impl TypeChecker {
         span: &Span,
         _expected: Option<&Type>,
     ) -> Option<Type> {
+        // `??` is the one binary operator whose operands are not symmetric: the right
+        // side is typed by the left's *payload*, not by the left itself. Handled before
+        // the shared operand check below, which would type `fallback` as an Option.
+        if matches!(op, BinaryOp::NullCoalesce) {
+            return self.check_null_coalesce(left, right, span);
+        }
+
         if op.is_comparison() {
             if let Expr::Binary { op: inner_op, .. } = left {
                 if inner_op.is_comparison() {
@@ -195,16 +213,8 @@ impl TypeChecker {
                 Some(left_ty)
             }
 
-            // `??` is parsed (R-to-L per Appendix B) but unwrapping Option/Result
-            // arrives in Phase 2; reject here so codegen never sees it.
-            BinaryOp::NullCoalesce => {
-                self.record_error(TypeError::OperatorNotYetSupported {
-                    op: op.to_string(),
-                    hint: "requires Option<T> / Result<T, E> — available in Phase 2".to_string(),
-                    span: *span,
-                });
-                Some(Type::Unknown)
-            }
+            // Handled by the guard clause at the top of this function.
+            BinaryOp::NullCoalesce => Some(Type::Unknown),
 
             // Logical operators: require bool types, return bool
             BinaryOp::And | BinaryOp::Or => {
@@ -237,6 +247,68 @@ impl TypeChecker {
                 }
             }
         }
+    }
+
+    /// Check `lhs ?? fallback`: the left side must be an `Option<T>` or `Result<T, E>`,
+    /// the fallback must produce that `T`, and the expression's type is `T`.
+    ///
+    /// The `Result` error payload is deliberately unconstrained — `??` means "I do not
+    /// care why it failed", so `E` never reaches the fallback.
+    fn check_null_coalesce(&mut self, left: &Expr, right: &Expr, span: &Span) -> Option<Type> {
+        let left_ty = self.check_expr(left, None).unwrap_or(Type::Unknown);
+        // The fallback is still checked on every error path so a second mistake inside it
+        // is reported in the same pass rather than on the next compile.
+        if matches!(left_ty, Type::Unknown) {
+            self.check_expr(right, None);
+            return Some(Type::Unknown);
+        }
+
+        let Some(payload) = self.fallible_payload(&left_ty) else {
+            self.record_error(TypeError::NullCoalesceOnNonFallible {
+                found: left_ty,
+                span: *span,
+            });
+            self.check_expr(right, None);
+            return Some(Type::Unknown);
+        };
+
+        let right_ty = self
+            .check_expr(right, Some(&payload))
+            .unwrap_or(Type::Unknown);
+        if matches!(right_ty, Type::Unknown) {
+            return Some(Type::Unknown);
+        }
+
+        if !payload.is_compatible_with(&right_ty) {
+            self.record_error(TypeError::Mismatch {
+                expected: payload,
+                found: right_ty,
+                span: *span,
+            });
+            return Some(Type::Unknown);
+        }
+
+        Some(payload)
+    }
+
+    /// The payload type `??` unwraps out of a fallible enum: `Option`'s `Some` or
+    /// `Result`'s `Ok`. `None` for every other type, which is what makes `??` reject them.
+    fn fallible_payload(&self, ty: &Type) -> Option<Type> {
+        let Type::Enum(instance) = ty.referent() else {
+            return None;
+        };
+        // A monomorphized `Option<i32>` answers with the template it came from; a program
+        // that shadows the prelude with a non-generic `Option` is its own base.
+        let base = self
+            .enum_instance_base(instance)
+            .unwrap_or(instance.as_str());
+        let variant = match base {
+            OPTION_ENUM => OPTION_SUCCESS_VARIANT,
+            RESULT_ENUM => RESULT_SUCCESS_VARIANT,
+            _ => return None,
+        };
+        let info = self.lookup_enum_variant(instance, variant)?;
+        info.fields.first().map(|(_, ty)| ty.clone())
     }
 
     pub(super) fn check_unary_expr(

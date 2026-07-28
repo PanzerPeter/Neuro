@@ -327,15 +327,11 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("operator '{op}' is not yet supported at {span:?}: {hint}")]
-    OperatorNotYetSupported {
-        op: String,
-        hint: String,
-        span: Span,
-    },
-
     #[error("comparison operators cannot be chained at {span:?}: use `&&` to combine separate comparisons")]
     ComparisonChain { span: Span },
+
+    #[error("`??` expects an `Option<T>` or `Result<T, E>` on the left, found {found} at {span:?}: `??` unwraps a fallible value or falls back")]
+    NullCoalesceOnNonFallible { found: Type, span: Span },
 
     #[error("use of moved value '{name}' at {span:?}: it was moved at {moved_at:?}; bind a `.clone()` if you need an independent copy")]
     UseOfMovedValue {

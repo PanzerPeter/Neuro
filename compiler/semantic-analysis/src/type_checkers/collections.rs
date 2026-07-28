@@ -16,7 +16,7 @@ use crate::types::{CollectionKind, Type};
 /// The `Option<T>` returned by the fallible readers (`Vec::pop`, `Map::get`). It comes
 /// from the prelude rather than the compiler, so a program compiled without one gets a
 /// plain "unknown type" diagnostic instead of a silently wrong result type.
-const OPTION_ENUM: &str = "Option";
+pub(crate) const OPTION_ENUM: &str = "Option";
 
 /// The lang-item trait a `HashMap` key must implement: `func hash(&self) -> u64`.
 pub(crate) const HASHABLE_TRAIT: &str = "Hashable";

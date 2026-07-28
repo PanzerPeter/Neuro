@@ -56,6 +56,7 @@ types/underscore_separators.nr      0
 operators/bitwise_ops.nr          1
 operators/compound_assignment.nr  21
 operators/integer_methods.nr      0
+operators/null_coalesce.nr        75
 operators/operator_overloading.nr 24
 
 # --- control flow ---------------------------------------------------------
@@ -83,7 +84,7 @@ showcase/borrowed_text.nr   18
 showcase/closures.nr        90
 showcase/enum_records.nr    46
 showcase/generic_toolkit.nr 85
-showcase/inventory_ledger.nr 179
+showcase/inventory_ledger.nr 181
 showcase/mutable_borrows.nr 47
 showcase/num_algorithms.nr  33
 showcase/perceptron.nr      8

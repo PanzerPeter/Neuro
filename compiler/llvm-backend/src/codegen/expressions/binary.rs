@@ -794,11 +794,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_left_shift(lhs.into_int_value(), rhs.into_int_value(), "shltmp")
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                 .into()),
-            // Gated upstream by the type checker (OperatorNotYetSupported); reaching codegen
-            // means semantic analysis was skipped — surface that as an ICE rather than panic.
+            // HIR lowering desugars `??` into a `match`, so no binary node ever carries it.
+            // Reaching here means the HIR was not produced by that pass — an ICE, not a panic.
             BinaryOp::NullCoalesce => Err(CodegenError::InternalError(
-                "operator '??' reached codegen; semantic analysis must reject it (Phase 2 feature)"
-                    .into(),
+                "operator '??' reached codegen; HIR lowering must desugar it to a match".into(),
             )),
         }
     }

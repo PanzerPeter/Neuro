@@ -4,6 +4,7 @@
 //! add methods to the same `impl Lowerer` block.
 
 mod calls;
+mod coalesce;
 mod coercion;
 mod enums;
 mod matches;
@@ -92,6 +93,11 @@ impl Lowerer {
                 right,
                 span,
             } => {
+                // `??` is not an operand-symmetric operator: it desugars to a `match` on
+                // the left side, which types the right side from the unwrapped payload.
+                if matches!(op, ast_types::BinaryOp::NullCoalesce) {
+                    return self.lower_null_coalesce(left, right, *span);
+                }
                 let left = self.lower_expr(left, None)?;
                 // Operator-trait dispatch on a user type: desugar `a OP b` into the
                 // impl method call `a.op(b)`. The checker validated the impl, so a lookup

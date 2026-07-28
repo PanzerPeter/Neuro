@@ -186,6 +186,9 @@ struct Lowerer {
     /// The `__` prefix is a reserved generated-symbol marker the checker forbids in
     /// user names, so a lifted closure can never collide with a user function.
     closure_counter: usize,
+    /// Monotonic counter naming the binding each `??` desugar introduces for the
+    /// unwrapped payload (`__coalesce_N`), so nested coalesces never shadow each other.
+    coalesce_counter: usize,
 }
 
 /// One trait method's lowering-visible signature, in declaration order.
@@ -296,6 +299,7 @@ impl Lowerer {
             mono_items: Vec::new(),
             closure_items: Vec::new(),
             closure_counter: 0,
+            coalesce_counter: 0,
         }
     }
 

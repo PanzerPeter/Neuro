@@ -1,6 +1,7 @@
 mod array_tests;
 mod borrow_tests;
 mod builtin_tests;
+mod coalesce_tests;
 mod comparison_tests;
 mod decl_tests;
 mod drop_tests;
