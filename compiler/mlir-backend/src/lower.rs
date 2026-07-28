@@ -192,6 +192,7 @@ fn map_type<'c>(context: &'c Context, ty: &HirType) -> Result<Type<'c>, MlirErro
         | HirType::Reference { .. }
         | HirType::Array { .. }
         | HirType::Tuple(_)
+        | HirType::Collection { .. }
         // Address space 0; all LLVM pointers are opaque (`!llvm.ptr`) since LLVM 19.
         | HirType::Function { .. } => llvm::r#type::pointer(context, 0),
         HirType::Void => {
@@ -330,6 +331,37 @@ mod tests {
         assert!(
             ir.contains("(i1, i32, f64) -> f32"),
             "expected scalar type mapping:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn maps_aggregate_types_to_opaque_pointers() {
+        // Every aggregate is a pointer in the scaffold. Collections are listed explicitly
+        // because a new `HirType` variant must be routed here rather than silently
+        // breaking this crate's build behind the off-by-default `mlir` feature.
+        let program = HirProgram {
+            items: vec![HirItem::Function(HirFunction {
+                name: "aggregates".to_string(),
+                params: vec![
+                    param("a", HirType::String),
+                    param(
+                        "b",
+                        HirType::Collection {
+                            kind: neuro_hir::HirCollectionKind::Vec,
+                            args: vec![HirType::I32],
+                        },
+                    ),
+                ],
+                return_type: HirType::Tuple(vec![HirType::I32, HirType::I32]),
+                body: vec![],
+                span: span(),
+            })],
+        };
+
+        let ir = lower_program(&program).expect("scaffold should produce a verifiable module");
+        assert!(
+            ir.contains("(!llvm.ptr, !llvm.ptr) -> !llvm.ptr"),
+            "expected aggregate types to map to opaque pointers:\n{ir}"
         );
     }
 }

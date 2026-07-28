@@ -240,9 +240,11 @@ impl<'ctx> CodegenContext<'ctx> {
                     // named `clone` exists; semantic analysis has verified the struct
                     // derives Clone. Every other field call is a user struct method.
                     if field == "clone" && !self.functions.contains_key(&mangled) {
+                        let result_ty = Type::from_hir(&callee.ty);
                         return Ok(Some(self.codegen_builtin_method(
                             BuiltinMethod::StructClone,
                             &recv_ty,
+                            &result_ty,
                             object,
                             args,
                         )?));
@@ -261,9 +263,14 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 // Non-struct receiver: a compiler-known intrinsic on a builtin type.
                 match resolve_builtin_method(&recv_ty, field) {
-                    Some((kind, _)) => Ok(Some(
-                        self.codegen_builtin_method(kind, &recv_ty, object, args)?,
-                    )),
+                    Some(kind) => {
+                        // `checked_*` builds an `Option<T>` instance, so the call's result
+                        // type — which only the frontend can name — travels on the callee.
+                        let result_ty = Type::from_hir(&callee.ty);
+                        Ok(Some(self.codegen_builtin_method(
+                            kind, &recv_ty, &result_ty, object, args,
+                        )?))
+                    }
                     None => Err(CodegenError::InternalError(format!(
                         "unresolved builtin method '{}' on {:?} reached codegen",
                         field, recv_ty

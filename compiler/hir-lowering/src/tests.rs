@@ -1009,3 +1009,31 @@ func main() -> i32 {
         Err(LoweringError::UnresolvedType { .. })
     ));
 }
+
+#[test]
+fn checked_intrinsic_lowers_to_an_option_instance() {
+    // `checked_*` is the only builtin intrinsic whose result is a monomorphized enum,
+    // so lowering must materialize the instance the backend then emits.
+    let program = lower(
+        r#"
+enum Option<T> { Some(T), None }
+func main() -> i32 {
+    val a: u8 = 200
+    val r = a.checked_add(100u8)
+    0
+}
+"#,
+    );
+    let body = function_body(&program, "main");
+    assert_eq!(
+        binding_init(body, "r").ty,
+        HirType::Enum("Option_g_u8".to_string())
+    );
+    assert!(
+        program
+            .items
+            .iter()
+            .any(|item| matches!(item, HirItem::Enum(e) if e.name == "Option_g_u8")),
+        "the Option<u8> instance should be emitted for the backend"
+    );
+}

@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.66.0] - 2026-07-28
+
+### Added
+- `semantic`/`codegen`: `checked_add`, `checked_sub`, and `checked_mul` on every integer
+  type. Each takes one same-typed argument and returns `Option<T>` over the receiver's
+  own type — `Option::Some(result)` when the arithmetic fits, `Option::None` when it
+  would overflow — so an overflow is reported to the caller instead of wrapping,
+  clamping, or trapping.
+
+  ```neuro
+  val a: u8 = 200
+  val total: u8 = match a.checked_add(100u8) {
+      Option::Some(v) => v,
+      Option::None => 0u8          // 300 does not fit in a u8
+  }
+  ```
+
+  The result is the ordinary monomorphized prelude `Option<T>`, built through the same
+  helper the fallible collection readers use, so it deconstructs with `match` and passes
+  to any function taking that instance. Codegen is branchless: the LLVM
+  `{s,u}{add,sub,mul}.with.overflow` intrinsic's overflow bit selects between the two
+  variants, with signedness taken from the receiver type.
+
+### Fixed
+- `codegen`: the `mlir-backend` slice builds again under `--all-features`. Its HIR type
+  mapping did not cover the `Collection` variant added with the standard collections, and
+  because the crate compiles only behind the off-by-default `mlir` feature, the breakage
+  surfaced on CI rather than in a default build. Collections now map to `!llvm.ptr` like
+  every other aggregate, with a regression test pinning it.
+
 ## [1.65.1] - 2026-07-27
 
 ### Fixed

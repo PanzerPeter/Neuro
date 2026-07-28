@@ -1130,6 +1130,11 @@ impl Lowerer {
                 let args = self.lower_args(args, std::slice::from_ref(recv))?;
                 Ok((args, recv.clone()))
             }
+            (_, "checked_add" | "checked_sub" | "checked_mul") if is_integer(recv) => {
+                let args = self.lower_args(args, std::slice::from_ref(recv))?;
+                let result = self.option_of(recv.clone())?;
+                Ok((args, result))
+            }
             _ => Err(LoweringError::UnresolvedCall {
                 target: format!("{}.{}", recv, method),
             }),

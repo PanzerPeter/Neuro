@@ -52,8 +52,12 @@ definitions); structs and constants are skipped. A lifted closure
 pointer as an implicit first parameter ahead of the user-facing ones, matching the
 LLVM backend's calling convention. HIR types map to MLIR scalars (`i8`–`i64`, `i1` for `bool`, `i32` for
 `char`, `f16`/`bf16`/`f32`/`f64`), and every aggregate / reference / string type
-— including the tuple type `(T1, T2, ...)` and the enum type — maps
-to an opaque `!llvm.ptr` until real tensor and struct lowering lands (Phase 2+).
+— including the tuple type `(T1, T2, ...)`, the enum type, and the standard
+collections (`Vec` / `HashMap` / `BTreeMap`) — maps to an opaque `!llvm.ptr` until
+real tensor and struct lowering lands (Phase 2+). `map_type` matches `HirType`
+exhaustively with no wildcard, so a new variant is a compile error here rather than a
+silent mis-map; because the crate builds only under the off-by-default `mlir` feature,
+that error surfaces on the `--all-features` CI job, not on a default `cargo build`.
 A newtype is transparent: `HirType::Newtype { inner, .. }` maps to the mapping of its inner
 type. Enum items, like structs and constants, carry no callable surface and are skipped. `void` is the empty result list in return position and an error
 (`MlirError::UnsupportedType`) anywhere else. The module is run through the MLIR

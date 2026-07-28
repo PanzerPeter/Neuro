@@ -1,7 +1,7 @@
-// Neuro Programming Language - Integer Primitive Methods (Phase 1.5)
-// Demonstrates the wrapping / saturating arithmetic intrinsics and the right-shift
-// method on builtin integer types. All dispatch through the builtin-method path:
-// they are compiler-known intrinsics, not user-defined impl methods.
+// Neuro Programming Language - Integer Primitive Methods
+// Demonstrates the wrapping / saturating / checked arithmetic intrinsics and the
+// right-shift method on builtin integer types. All dispatch through the builtin-method
+// path: they are compiler-known intrinsics, not user-defined impl methods.
 
 func main() -> i32 {
     val a: u8 = 200
@@ -25,12 +25,28 @@ func main() -> i32 {
     val neg: i32 = -16
     val arith: i32 = neg.shr(2)                // -4
 
+    // checked_*: the overflow is reported instead of being papered over. The result is
+    // an Option<T> over the receiver's type, so it must be deconstructed before use.
+    val overflowed: Option<u8> = a.checked_add(b)   // 300 > u8::MAX -> Option::None
+    val checked_none: u8 = match overflowed {
+        Option::Some(v) => v,
+        Option::None => 0u8
+    }
+    val checked_some: u8 = match b.checked_add(b) {  // 100 + 100 fits
+        Option::Some(v) => v,                        // 200
+        Option::None => 0u8
+    }
+
     if wrapped == 44u8 {
         if saturated == 255u8 {
             if floored == 0u8 {
                 if shifted == 15u8 {
                     if arith == -4 {
-                        return 0
+                        if checked_none == 0u8 {
+                            if checked_some == 200u8 {
+                                return 0
+                            }
+                        }
                     }
                 }
             }

@@ -42,48 +42,51 @@ pub(crate) enum BuiltinMethod {
     SaturatingMul,
     /// `int.shr(n)` → right shift: arithmetic for signed, logical for unsigned.
     Shr,
+    /// `int.checked_add(rhs)` → `Option::Some(sum)`, or `Option::None` on overflow.
+    CheckedAdd,
+    /// `int.checked_sub(rhs)` → `Option::Some(difference)`, or `Option::None` on overflow.
+    CheckedSub,
+    /// `int.checked_mul(rhs)` → `Option::Some(product)`, or `Option::None` on overflow.
+    CheckedMul,
     /// `array.len()` → the compile-time element count `N` of `[T; N]`, as `u64`.
     ArrayLen,
 }
 
-/// Resolve a compiler-known intrinsic on a builtin receiver, returning the method
-/// tag and its result type. Mirrors the resolver in `semantic-analysis`; the duplication
-/// keeps the backend independent of the type-checker slice.
-pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<(BuiltinMethod, Type)> {
+/// Resolve a compiler-known intrinsic on a builtin receiver. Mirrors the resolver in
+/// `semantic-analysis`; the duplication keeps the backend independent of the
+/// type-checker slice.
+///
+/// Only the method tag is resolved here — the call's result type comes from the HIR
+/// node, because `checked_*` yields a monomorphized `Option<T>` instance whose mangled
+/// name only the frontend can produce.
+pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<BuiltinMethod> {
     // Auto-deref an immutable borrow `&string` so `r.len()` / `r.clone()` resolve through
     // the reference. The integer intrinsics below intentionally require a value
     // receiver — reading a scalar through a reference needs the deref operator (later phase).
-    // The second element is the call's *result* type. The receiver type (possibly
-    // `&string`) is recorded separately by the type pass, letting codegen decide whether
-    // to load through the reference.
+    // The receiver type (possibly `&string`) is carried by the HIR receiver node, letting
+    // codegen decide whether to load through the reference.
     match (recv.referent(), method) {
-        (Type::String, "len") => Some((BuiltinMethod::StringLen, Type::U64)),
-        (Type::String, "clone") => Some((BuiltinMethod::StringClone, Type::String)),
-        // The slice's result is a borrowed `&string` view; lowered to an opaque
-        // pointer to the computed fat pointer.
-        (Type::String, "slice") => Some((
-            BuiltinMethod::StringSlice,
-            Type::Reference(Box::new(Type::String)),
-        )),
+        (Type::String, "len") => Some(BuiltinMethod::StringLen),
+        (Type::String, "clone") => Some(BuiltinMethod::StringClone),
+        (Type::String, "slice") => Some(BuiltinMethod::StringSlice),
         // `array.len()` → the static element count as `u64`. Auto-derefs a
         // borrow of an array (`&[T; N]`) like the string builtins above.
-        (Type::Array { .. }, "len") => Some((BuiltinMethod::ArrayLen, Type::U64)),
+        (Type::Array { .. }, "len") => Some(BuiltinMethod::ArrayLen),
         // Integer intrinsics require a value receiver (matched on `recv`, not the referent):
-        // reading a scalar through `&T` needs the deref operator. They return the receiver's
-        // own integer type.
-        (_, m) if recv.is_integer() => {
-            let kind = match m {
-                "wrapping_add" => BuiltinMethod::WrappingAdd,
-                "wrapping_sub" => BuiltinMethod::WrappingSub,
-                "wrapping_mul" => BuiltinMethod::WrappingMul,
-                "saturating_add" => BuiltinMethod::SaturatingAdd,
-                "saturating_sub" => BuiltinMethod::SaturatingSub,
-                "saturating_mul" => BuiltinMethod::SaturatingMul,
-                "shr" => BuiltinMethod::Shr,
-                _ => return None,
-            };
-            Some((kind, recv.clone()))
-        }
+        // reading a scalar through `&T` needs the deref operator.
+        (_, m) if recv.is_integer() => match m {
+            "wrapping_add" => Some(BuiltinMethod::WrappingAdd),
+            "wrapping_sub" => Some(BuiltinMethod::WrappingSub),
+            "wrapping_mul" => Some(BuiltinMethod::WrappingMul),
+            "saturating_add" => Some(BuiltinMethod::SaturatingAdd),
+            "saturating_sub" => Some(BuiltinMethod::SaturatingSub),
+            "saturating_mul" => Some(BuiltinMethod::SaturatingMul),
+            "shr" => Some(BuiltinMethod::Shr),
+            "checked_add" => Some(BuiltinMethod::CheckedAdd),
+            "checked_sub" => Some(BuiltinMethod::CheckedSub),
+            "checked_mul" => Some(BuiltinMethod::CheckedMul),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -451,29 +454,18 @@ mod tests {
     use crate::types::Type;
 
     #[test]
-    fn string_len_resolves_to_u64() {
-        let resolved = resolve_builtin_method(&Type::String, "len");
+    fn string_intrinsics_resolve() {
         assert!(matches!(
-            resolved,
-            Some((BuiltinMethod::StringLen, Type::U64))
+            resolve_builtin_method(&Type::String, "len"),
+            Some(BuiltinMethod::StringLen)
         ));
-    }
-
-    #[test]
-    fn string_clone_resolves_to_string() {
-        let resolved = resolve_builtin_method(&Type::String, "clone");
         assert!(matches!(
-            resolved,
-            Some((BuiltinMethod::StringClone, Type::String))
+            resolve_builtin_method(&Type::String, "clone"),
+            Some(BuiltinMethod::StringClone)
         ));
-    }
-
-    #[test]
-    fn string_slice_resolves_to_string_reference() {
-        let resolved = resolve_builtin_method(&Type::String, "slice");
         assert!(matches!(
-            resolved,
-            Some((BuiltinMethod::StringSlice, Type::Reference(inner))) if matches!(*inner, Type::String)
+            resolve_builtin_method(&Type::String, "slice"),
+            Some(BuiltinMethod::StringSlice)
         ));
     }
 
@@ -483,7 +475,7 @@ mod tests {
         let recv = Type::Reference(Box::new(Type::String));
         assert!(matches!(
             resolve_builtin_method(&recv, "slice"),
-            Some((BuiltinMethod::StringSlice, _))
+            Some(BuiltinMethod::StringSlice)
         ));
     }
 
@@ -496,18 +488,34 @@ mod tests {
     }
 
     #[test]
-    fn integer_intrinsics_resolve_to_receiver_type() {
+    fn integer_intrinsics_resolve_on_any_integer_receiver() {
         assert!(matches!(
             resolve_builtin_method(&Type::U8, "wrapping_add"),
-            Some((BuiltinMethod::WrappingAdd, Type::U8))
+            Some(BuiltinMethod::WrappingAdd)
         ));
         assert!(matches!(
             resolve_builtin_method(&Type::I64, "saturating_mul"),
-            Some((BuiltinMethod::SaturatingMul, Type::I64))
+            Some(BuiltinMethod::SaturatingMul)
         ));
         assert!(matches!(
             resolve_builtin_method(&Type::I32, "shr"),
-            Some((BuiltinMethod::Shr, Type::I32))
+            Some(BuiltinMethod::Shr)
+        ));
+    }
+
+    #[test]
+    fn checked_intrinsics_resolve_on_any_integer_receiver() {
+        assert!(matches!(
+            resolve_builtin_method(&Type::U8, "checked_add"),
+            Some(BuiltinMethod::CheckedAdd)
+        ));
+        assert!(matches!(
+            resolve_builtin_method(&Type::I32, "checked_sub"),
+            Some(BuiltinMethod::CheckedSub)
+        ));
+        assert!(matches!(
+            resolve_builtin_method(&Type::I64, "checked_mul"),
+            Some(BuiltinMethod::CheckedMul)
         ));
     }
 
@@ -516,5 +524,7 @@ mod tests {
         assert!(resolve_builtin_method(&Type::String, "wrapping_add").is_none());
         assert!(resolve_builtin_method(&Type::F64, "saturating_sub").is_none());
         assert!(resolve_builtin_method(&Type::I32, "wrapping_div").is_none());
+        assert!(resolve_builtin_method(&Type::F64, "checked_add").is_none());
+        assert!(resolve_builtin_method(&Type::I32, "checked_div").is_none());
     }
 }

@@ -257,7 +257,7 @@ impl TypeChecker {
 
     /// Instantiate `Option<T>` for a fallible reader's result. The prelude declares it;
     /// a program without one gets `UnknownTypeName` rather than a wrong type.
-    fn option_of(&mut self, inner: Type, span: Span) -> Type {
+    pub(crate) fn option_of(&mut self, inner: Type, span: Span) -> Type {
         if !self.is_generic_enum(OPTION_ENUM) {
             self.record_error(TypeError::UnknownTypeName {
                 name: OPTION_ENUM.to_string(),

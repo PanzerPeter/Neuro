@@ -18,6 +18,10 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
 - thiserror — `LoweringError` derivation
 
 ## Notes
+- 2026-07-28: `checked_{add,sub,mul}`. `lower_builtin_method` (`expressions.rs`) types these on any
+  integer receiver as `Option<T>` over that receiver, reusing `collections.rs`'s `option_of` so the
+  instance is materialized as an ordinary `HirItem::Enum` exactly like `Vec::pop`'s. They are the
+  only builtin intrinsics whose result is a monomorphized enum rather than a fixed type.
 - 2026-07-27: Standard collections. New `collections.rs`: `lower_collection_new` lowers
   `Vec::new()` / `HashMap::new()` / `BTreeMap::new()` to `HirExprKind::CollectionNew` typed from the
   annotated target, and `lower_collection_method` re-derives each method's argument and result types
