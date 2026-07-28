@@ -5,9 +5,16 @@ use lexical_analysis::{Token, TokenKind};
 use crate::errors::{ParseError, ParseResult};
 
 mod expressions;
+mod item_enums;
+mod item_functions;
+mod item_impls;
+mod item_structs;
 mod items;
 mod patterns;
 mod statements;
+mod stmt_assignments;
+mod stmt_destructure;
+mod stmt_loops;
 mod type_aliases;
 mod types;
 

@@ -95,13 +95,20 @@ pub enum Expr {
         stmts: Vec<Stmt>,
         span: Span,
     },
-    /// Infinite loop in value position: `loop { ... break v }`.
+    /// Infinite loop: `loop { ... }`, optionally `label`ed, optionally yielding a
+    /// value via `break v`.
     ///
-    /// Distinct from [`Stmt::Loop`]: only `loop` can yield a non-unit value
-    /// (it has no fall-through exit, so it leaves solely via `break`). The loop
-    /// evaluates to the value carried by its value-producing `break`s, which must
-    /// all agree on type. `while`/`for` always yield unit and have no expression
-    /// form. The expression form is unlabeled; labels are a statement-loop concern.
+    /// `loop` is the sole loop form that can yield a non-unit value — it has no
+    /// fall-through exit, so it leaves solely via `break`, and the loop evaluates
+    /// to the value carried by its value-producing `break`s (which must all agree
+    /// on type). `while`/`for` always yield unit and so have no expression form.
+    ///
+    /// There is deliberately no statement counterpart: a `loop` written in
+    /// statement position parses to `Stmt::Expr(Expr::Loop { .. })`. A second
+    /// statement-only shape would be invisible to every "is the tail statement
+    /// value-producing?" test in the pipeline, which is exactly how a tail `loop`
+    /// used as a function's implicit return came to be compiled as a discarded
+    /// value with an unreachable exit block.
     Loop {
         label: Option<Identifier>,
         body: Vec<Stmt>,

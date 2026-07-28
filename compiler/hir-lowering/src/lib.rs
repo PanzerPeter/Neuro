@@ -86,6 +86,10 @@ struct LoopCtx {
     /// The agreed type of value-carrying `break`s seen so far, `None` until the
     /// first one. The loop expression evaluates to this (or `void` when absent).
     value_ty: Option<HirType>,
+    /// Whether any `break` targeted this loop. With none the loop has no exit
+    /// edge and diverges, so it takes its context's expected type — the checker
+    /// applies the same rule.
+    has_break: bool,
 }
 
 /// Lowering state: the global symbol tables built in a pre-pass plus the

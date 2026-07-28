@@ -4,6 +4,13 @@ use crate::types::Type;
 use ast_types::{Expr, Stmt};
 use shared_types::Identifier;
 
+/// How a checked loop body is left: the agreed type of its value-carrying
+/// `break`s (`None` when it has none), and whether any `break` targeted it at all.
+pub(crate) struct LoopExit {
+    pub(crate) value_ty: Option<Type>,
+    pub(crate) has_break: bool,
+}
+
 /// If `expr` is a direct borrow of a named place (`&x` / `&mut x`, possibly
 /// parenthesised), return that place's name and whether the borrow is exclusive.
 /// A borrow wrapped in any other expression (a block, an `if`, a call result) is
@@ -163,23 +170,23 @@ impl TypeChecker {
         }
     }
 
-    /// Check a loop body under a fresh [`LoopContext`], returning the agreed
-    /// value-break type accumulated inside (`None` when no value-carrying `break`
-    /// targeted this loop). Loop bodies run any number of times, so a move inside
-    /// is not a straight-line move; the move state is snapshotted and restored on
-    /// exit. `is_value_loop` is true only for `loop` — the sole construct
-    /// that can yield a value.
+    /// Check a loop body under a fresh [`LoopContext`], returning how the loop is
+    /// left. Loop bodies run any number of times, so a move inside is not a
+    /// straight-line move; the move state is snapshotted and restored on exit.
+    /// `is_value_loop` is true only for `loop` — the sole construct that can yield
+    /// a value.
     pub(crate) fn check_loop_body(
         &mut self,
         label: Option<&Identifier>,
         is_value_loop: bool,
         body: &[Stmt],
-    ) -> Option<Type> {
+    ) -> LoopExit {
         let move_snapshot = self.symbols.snapshot_moves();
         self.loop_stack.push(LoopContext {
             label: label.map(|l| l.name.clone()),
             is_value_loop,
             break_value_ty: None,
+            has_break: false,
         });
         self.symbols.push_scope();
         for stmt in body {
@@ -188,7 +195,32 @@ impl TypeChecker {
         self.symbols.pop_scope();
         let ctx = self.loop_stack.pop();
         self.symbols.restore_moves(&move_snapshot);
-        ctx.and_then(|c| c.break_value_ty)
+        match ctx {
+            Some(ctx) => LoopExit {
+                value_ty: ctx.break_value_ty,
+                has_break: ctx.has_break,
+            },
+            None => LoopExit {
+                value_ty: None,
+                has_break: false,
+            },
+        }
+    }
+
+    /// Record that a `break` targets the loop named by `label`, or the innermost
+    /// loop when unlabeled.
+    fn record_break_target(&mut self, label: Option<&Identifier>) {
+        let target = match label {
+            Some(label) => self
+                .loop_stack
+                .iter_mut()
+                .rev()
+                .find(|ctx| ctx.label.as_deref() == Some(label.name.as_str())),
+            None => self.loop_stack.last_mut(),
+        };
+        if let Some(ctx) = target {
+            ctx.has_break = true;
+        }
     }
 
     /// Record a value-carrying `break v` against its target loop: the
@@ -513,18 +545,6 @@ impl TypeChecker {
                 Some(())
             }
 
-            Stmt::Loop {
-                label,
-                body,
-                span: _,
-            } => {
-                // A `loop` is value-capable; in statement position the value
-                // is simply discarded, but value-breaks are still type-checked.
-                let _ = self.check_loop_body(label.as_ref(), true, body);
-
-                Some(())
-            }
-
             Stmt::ForRange {
                 label,
                 iterator,
@@ -571,6 +591,7 @@ impl TypeChecker {
                     label: label.as_ref().map(|l| l.name.clone()),
                     is_value_loop: false,
                     break_value_ty: None,
+                    has_break: false,
                 });
                 self.symbols.push_scope();
 
@@ -628,6 +649,7 @@ impl TypeChecker {
                     label: label.as_ref().map(|l| l.name.clone()),
                     is_value_loop: false,
                     break_value_ty: None,
+                    has_break: false,
                 });
                 self.symbols.push_scope();
 
@@ -719,6 +741,7 @@ impl TypeChecker {
 
             Stmt::Break { label, value, span } => {
                 self.check_loop_control_label(label.as_ref(), *span, true);
+                self.record_break_target(label.as_ref());
                 if let Some(value_expr) = value {
                     let value_ty = self.check_expr(value_expr, None).unwrap_or(Type::Unknown);
                     if !matches!(value_ty, Type::Unknown) {

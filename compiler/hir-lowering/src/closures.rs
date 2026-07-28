@@ -195,7 +195,6 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             fv.bound.insert(iterator.name.clone());
             collect_block(body, fv);
         }
-        Stmt::Loop { body, .. } => collect_block(body, fv),
         Stmt::Break { value, .. } => {
             if let Some(value) = value {
                 collect_expr(value, fv);

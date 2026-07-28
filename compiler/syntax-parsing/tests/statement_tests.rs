@@ -357,7 +357,10 @@ fn test_parse_loop_statement() {
         panic!("expected a function item");
     };
     assert!(
-        matches!(func.body.get(1), Some(ast_types::Stmt::Loop { .. })),
+        matches!(
+            func.body.get(1),
+            Some(ast_types::Stmt::Expr(ast_types::Expr::Loop { .. }))
+        ),
         "second statement should be a Stmt::Loop, got {:?}",
         func.body.get(1)
     );
@@ -500,7 +503,8 @@ fn test_parse_labeled_loop_and_while() {
     };
     assert!(matches!(
         func.body.first(),
-        Some(ast_types::Stmt::Loop { label: Some(l), .. }) if l.name == "search"
+        Some(ast_types::Stmt::Expr(ast_types::Expr::Loop { label: Some(l), .. }))
+            if l.name == "search"
     ));
     assert!(matches!(
         func.body.get(1),
@@ -521,7 +525,7 @@ fn test_unlabeled_break_has_no_label() {
     let ast_types::Item::Function(func) = &items[0] else {
         panic!("expected a function item");
     };
-    let Some(ast_types::Stmt::Loop { body, .. }) = func.body.first() else {
+    let Some(ast_types::Stmt::Expr(ast_types::Expr::Loop { body, .. })) = func.body.first() else {
         panic!("expected a loop");
     };
     assert!(matches!(

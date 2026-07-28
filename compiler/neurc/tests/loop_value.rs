@@ -81,6 +81,61 @@ func main() -> i32 {
     );
 }
 
+// A tail `loop` is the function's implicit return. It used to reach codegen as a
+// discard-value statement, so its exit block got `unreachable` — no instruction at
+// -O0 — and the `break` target collapsed into a jump to itself.
+#[test]
+fn test_tail_loop_is_the_implicit_return() {
+    let test = CompileTest::new();
+    let source = r#"
+func count_to(n: i32) -> i32 {
+    mut i: i32 = 0
+    loop {
+        if i == n {
+            break i
+        }
+        i += 1
+    }
+}
+
+func main() -> i32 {
+    return count_to(7)
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("loop_tail_return.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 7, "a tail `loop` must return its `break` value");
+}
+
+// A `loop` no `break` targets never reaches its exit block, so it satisfies any
+// declared return type — the same divergent contract `panic` carries.
+#[test]
+fn test_tail_loop_without_break_leaves_via_return() {
+    let test = CompileTest::new();
+    let source = r#"
+func first_multiple_of_three(from: i32) -> i32 {
+    mut i: i32 = from
+    loop {
+        if i % 3 == 0 {
+            return i
+        }
+        i += 1
+    }
+}
+
+func main() -> i32 {
+    return first_multiple_of_three(7)
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("loop_tail_diverges.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 9);
+}
+
 #[test]
 fn test_break_value_type_mismatch_is_rejected() {
     let test = CompileTest::new();

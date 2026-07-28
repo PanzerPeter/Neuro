@@ -89,7 +89,10 @@ pub enum HirExprKind {
     Block {
         stmts: Vec<HirStmt>,
     },
-    /// Value-producing infinite loop `loop { ... break v }`.
+    /// Infinite loop `loop { ... }`. The sole loop node: a statement-position
+    /// `loop` is a `HirStmt::Expr` wrapping this, so every tail-value site sees
+    /// it without a special case. Evaluates to the value carried by its
+    /// `break v`s, or unit when it has none.
     Loop {
         label: Option<String>,
         body: Vec<HirStmt>,

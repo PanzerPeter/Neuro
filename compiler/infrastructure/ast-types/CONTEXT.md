@@ -28,6 +28,11 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-07-28: One `loop` node. `Stmt::Loop` is removed; `Expr::Loop` is the sole loop node and now
+  carries the `label`, so a statement-position `loop` is `Stmt::Expr(Expr::Loop { .. })`. Two shapes
+  for one construct meant every "is the tail statement value-producing?" test in the pipeline — all
+  of which key on `Stmt::Expr` — silently missed a trailing `loop`, which is how a tail `loop` used
+  as a function's implicit return came to be compiled as a discarded value (BUG-005).
 - 2026-07-26: Generic enums. `EnumDef` gains `generics: Vec<GenericParam>` (empty for a plain
   enum), so `enum Option<T> { Some(T), None }` and `enum Result<T, E> { Ok(T), Err(E) }` are
   ordinary declarations. A generic enum is a template: semantic-analysis and hir-lowering

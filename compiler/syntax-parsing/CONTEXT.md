@@ -57,6 +57,12 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-07-28: `parse_loop_stmt` returns `Stmt::Expr(Expr::Loop { .. })` instead of the removed
+  `Stmt::Loop`; `stmt_span` and the type-alias rewrite walker lose their `Stmt::Loop` arms (both
+  already reach the node through `Stmt::Expr`). `items.rs` and `statements.rs` are split by item and
+  statement kind into `item_{functions,structs,enums,impls}.rs` and
+  `stmt_{loops,assignments,destructure}.rs`; `parse_program`, attributes, `parse_stmt` dispatch,
+  and `stmt_span` stay in the original files. No parser behaviour changed by the split.
 - 2026-07-26: Generic enums. `parse_enum_def` now parses an optional `<...>` list after the enum
   name via the existing `parse_generic_params`, filling `EnumDef.generics`; a lifetime parameter is
   rejected with the new `ParseError::EnumLifetimeParam` (enum payloads are scalars this phase, so
