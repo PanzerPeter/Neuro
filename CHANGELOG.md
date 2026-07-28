@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.67.0] - 2026-07-28
+
+### Added
+- `semantic`: `??` full implementation — the operator unwraps an `Option<T>` or
+  `Result<T, E>` to its payload and otherwise evaluates a fallback.
+
+  ```neuro
+  val present = lookup(1) ?? 0        // the Some payload
+  val absent  = lookup(7) ?? 5        // 5 — the fallback
+  val failed  = divide(1, 0) ?? 4     // 4 — the Err payload is discarded
+  val chained = lookup(7) ?? lookup(1) ?? 99
+  ```
+
+  The expression's type is the unwrapped payload `T`, and the fallback must produce
+  that `T`. For a `Result` the error payload is discarded — `??` says "I do not care
+  why it failed, use this instead"; `match` remains the way to inspect it. The
+  fallback is **lazy**: it is only evaluated when the left operand is absent or
+  failed. `a ?? b ?? c` associates right-to-left, so every operand but the last must
+  itself be fallible.
+
+  `??` had been tokenized and parsed since v1.19.0 purely to pin its associativity;
+  it is now type-checked and executable.
+
+### Changed
+- `semantic`: `check_binary_expr` routes `??` to `check_null_coalesce` before the
+  shared operand check. `??` is the one binary operator whose operands are not
+  symmetric — the right side is typed by the left's *payload*, not by the left — so
+  the general path would have typed a bare fallback literal as an `Option`.
+- `parser`/`codegen`: no change. HIR lowering desugars `lhs ?? fallback` into a
+  two-arm `match` (success-tag test binding payload slot 0; wildcard → fallback), so
+  no HIR node was added and neither backend learned anything about `??`. The
+  fallback's laziness comes free from the per-arm basic-block chain the backend
+  already emits for `match`.
+
+### Removed
+- `semantic`: the `OperatorNotYetSupported` diagnostic. `??` was its only user.
+
 ## [1.66.1] - 2026-07-28
 
 ### Fixed

@@ -482,7 +482,9 @@ emission layer in all paths.
   `type_pass.rs` records the matching type; `FoldedConst::from_literal` discards the suffix (type
   carried by context).
 - 2026-05-18: Exhaustive `BinaryOp::NullCoalesce` arms in `codegen_binary`/`fold_const` return
-  `InternalError` (semantic-analysis gates `??`, so reaching codegen is a pipeline bug → ICE).
+  `InternalError`. Since 2026-07-28 `??` is desugared to a `match` by hir-lowering, so a binary
+  node carrying it means the HIR did not come from that pass → ICE. `??` in a const expression is
+  rejected outright.
 - 2026-04-18: Bitwise codegen — `BitAnd/BitOr/BitXor/Shl` → `build_and/or/xor/left_shift`;
   `BitNot` → `build_not`; type-pass maps to left-operand type; `fold_const` handles all on `Int`.
 - 2026-04-16: Const declarations end-to-end — `codegen_global_const`, `codegen_const_expr`,

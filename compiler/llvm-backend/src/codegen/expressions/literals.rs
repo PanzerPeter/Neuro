@@ -276,7 +276,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         BinaryOp::BitXor => Ok(FoldedConst::Int(a ^ b)),
                         BinaryOp::Shl => Ok(FoldedConst::Int(a.wrapping_shl(b as u32))),
                         BinaryOp::NullCoalesce => Err(CodegenError::InternalError(
-                            "operator '??' is not valid in const expressions (Phase 2)".into(),
+                            "operator '??' is not valid in const expressions".into(),
                         )),
                     },
                     (FoldedConst::Bool(a), FoldedConst::Bool(b)) => match op {

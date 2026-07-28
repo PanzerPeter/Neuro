@@ -114,11 +114,11 @@ pub(super) fn binary_result_type(
         | BinaryOp::BitOr
         | BinaryOp::BitXor
         | BinaryOp::Shl => left.clone(),
-        // `??` is rejected by the checker (Option/Result arrive in Phase 2), so it
-        // never reaches a well-typed program's HIR.
+        // `??` desugars to a `match` before any operand type is combined, so it never
+        // reaches the operand-symmetric result rule.
         BinaryOp::NullCoalesce => {
             return Err(LoweringError::Malformed {
-                detail: "`??` operator is not supported until Phase 2".to_string(),
+                detail: "`??` reached the binary result rule; it desugars to a match".to_string(),
             })
         }
     })

@@ -145,6 +145,15 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-07-28: `??` full implementation. `check_binary_expr` routes `BinaryOp::NullCoalesce` to
+  `check_null_coalesce` (`expressions/operators.rs`) BEFORE the shared operand check, because the
+  operator is not operand-symmetric: the right side is typed by the left's *payload*, not by the
+  left. `fallible_payload` resolves the left type to an `Option`/`Result` instance through
+  `enum_instance_base` (a shadowing non-generic declaration is its own base) and returns the
+  `Some`/`Ok` slot-0 type; anything else is the new `NullCoalesceOnNonFallible { found, span }`.
+  The `Result` error payload is deliberately unconstrained — `??` discards it. A mistyped fallback
+  is an ordinary `Mismatch`. `OperatorNotYetSupported` is deleted (it had no other user).
+  `OPTION_ENUM` in `collections.rs` is now `pub(crate)`, shared with the operator rule.
 - 2026-07-28: Divergent `loop`, and expression/declaration module split.
   `LoopContext` gains `has_break`, set by `record_break_target` from the `Stmt::Break` arm, and
   `check_loop_body` returns `LoopExit { value_ty, has_break }`. `Expr::Loop` now yields its agreed
@@ -417,9 +426,6 @@ expression context.
 - 2026-05-20: Lint infra — `Warning`/`WarningCode` (`warnings.rs`); `run_lints` final pass; first
   lint `prefer-loop-over-while-true` (`while true`, suppressed by `@allow(...)`; parenthesised
   `while (true)` deliberately not matched). Public signature now `Result<Vec<Warning>, Vec<TypeError>>`.
-- 2026-05-18: `BinaryOp::NullCoalesce` rejection — `OperatorNotYetSupported { op, hint, span }`
-  (hint: "requires Option<T>/Result<T,E> — 1G"), returns `Unknown` for recovery. `??` is parsed
-  only to lock in R-to-L associativity ahead of 1G.
 - 2026-05-13: IEEE-754 native float comparison — inequalities (`<`,`>`,`<=`,`>=`)
   restricted to `is_numeric()`, rejecting struct/string/bool (prevents codegen panics). NaN handled
   natively via LLVM `fcmp`.

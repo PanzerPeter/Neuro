@@ -12,7 +12,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | ---------------- | ---------------------------------------------------------------------- |
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference |
 | `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` |
-| `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`) |
+| `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result` |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable` |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
 | `showcase/`      | **Bigger programs that combine many features at once** — incl. mutable borrows `&mut T` + `*` deref (`mutable_borrows.nr`) |
@@ -58,8 +58,9 @@ isolation:
   `Vec<string>`, a `HashMap<string, i32>` name index, and a key-ordered
   `BTreeMap<i32, i32>` report, working together with an `impl` block of `&self`
   methods, an enum + `match` classifier, `Option` matching on every fallible
-  read, fixed-size arrays, and `for`-in over both arrays and collections.
-  Exit `179`.
+  read, `??` unwrapping the reads that only need a default (including a
+  right-to-left chain), fixed-size arrays, and `for`-in over both arrays and
+  collections. Exit `181`.
 - [`showcase/borrowed_text.nr`](showcase/borrowed_text.nr) — **explicit lifetime
   annotations** `<'a>` on the classic `longest<'a>(a: &'a string, b: &'a string)
   -> &'a string`, working together with immutable string borrows, zero-copy

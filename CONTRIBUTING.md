@@ -309,9 +309,11 @@ and the prelude's `OrderedF32` / `OrderedF64` total-order wrappers that let an
 ordered map be keyed on a float. The **`checked_*` integer methods**
 (`checked_add` / `checked_sub` / `checked_mul`) landed in v1.66.0, returning
 `Option<T>` over the receiver's type so an overflow is reported rather than
-wrapped, clamped, or trapped.
+wrapped, clamped, or trapped. The **`??` coalescing operator** landed in v1.67.0:
+it unwraps an `Option<T>` or `Result<T, E>` to its payload and otherwise evaluates
+a lazy fallback, discarding the `Err` payload, and chains right-to-left.
 
-**Next, in dependency order:** the rest of 1G (`??`, `?`, `val-else`, modules,
+**Next, in dependency order:** the rest of 1G (`?`, `val-else`, modules,
 imports, the full prelude) → 1H (string interpolation, triple-quoted
 strings, nested comments, named arguments). See the [Quick Roadmap](README.md#quick-roadmap).
 

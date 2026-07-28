@@ -309,22 +309,37 @@ while i <= 10 {
 
 ## Null/Error Coalescing Operator (`??`)
 
-`??` is the read-site equivalent of `unwrap_or(default)` — it returns the unwrapped value of an `Option<T>` or `Result<T, E>` when present, and falls back to the right-hand expression when absent (`None`) or failed (`Err`).
+`??` is the read-site equivalent of `unwrap_or(default)` — it returns the unwrapped value of an `Option<T>` or `Result<T, E>` when present, and falls back to the right-hand expression when absent (`None`) or failed (`Err`). The expression's type is the unwrapped payload `T`.
 
 ```neuro
-val name   = user.display_name ?? "anonymous"
-val config = load_config()     ?? Config::default()
+val present = lookup(1) ?? 0        // the Some payload
+val absent  = lookup(7) ?? 5        // 5 — the fallback
+
+val ok     = divide(24, 4) ?? 0     // the Ok payload
+val failed = divide(1, 0)  ?? 4     // 4 — the Err payload is discarded
 ```
 
-**Associativity**: right-to-left. `a ?? b ?? c` parses as `a ?? (b ?? c)`, so each fallback is evaluated only when every left-hand side up to it has produced the absent / error variant. Left-to-right would force the middle fallback even when the chain succeeds early — defeating the short-circuit contract.
+For a `Result`, the error payload is **discarded**: `??` states "I do not care why it failed, use this instead". When the reason matters, `match` on the value instead.
+
+**Laziness**: the fallback is only evaluated when the left-hand side is absent or failed. A fallback that calls a function, panics, or does real work is skipped entirely when the value is present.
+
+**Fallback type**: the right-hand side must produce the payload type `T` — not another `Option`/`Result`. A mismatch is an ordinary type error.
+
+**Associativity**: right-to-left. `a ?? b ?? c` parses as `a ?? (b ?? c)`, so each fallback is evaluated only when every left-hand side up to it has produced the absent / error variant. Left-to-right would force the middle fallback even when the chain succeeds early — defeating the short-circuit contract. In a chain, every operand but the last must itself be fallible:
+
+```neuro
+val chained = lookup(7) ?? lookup(1) ?? 99
+```
 
 **Precedence**: level 14 — looser than `||` (so `a ?? b || c` means `a ?? (b || c)`), tighter than range operators.
 
-**Status**: the operator is tokenized and parsed today so the precedence and associativity are locked in. `Option<T>` and `Result<T, E>` have landed (see [types.md](types.md#optiont-and-resultt-e)), but the operator's own type checking and codegen are a separate 1G item — until then, using `??` produces:
+Applying `??` to anything that is not an `Option<T>` or `Result<T, E>` is rejected:
 
 ```
-error: operator '??' is not yet supported … requires Option<T> / Result<T, E> — available in Phase 1
+error: `??` expects an `Option<T>` or `Result<T, E>` on the left, found i32
 ```
+
+Payloads are scalar `Copy` values in this phase (see [types.md](types.md#optiont-and-resultt-e)), so `??` unwraps to a scalar. Runnable program: [`examples/operators/null_coalesce.nr`](../../examples/operators/null_coalesce.nr).
 
 ## Operator Precedence
 

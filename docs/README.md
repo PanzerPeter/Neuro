@@ -129,7 +129,7 @@ Key design goals:
 - Logical: `&&`, `||`, `!`
 - Bitwise: `&`, `|`, `^`, `~`, `<<` (integer types only)
 - Type cast: `n as f64`, `pi as i32`
-- Null-coalescing `??`: tokenized and parsed (R-to-L associativity); codegen deferred to 1G
+- Null-coalescing `??`: unwraps an `Option<T>` / `Result<T, E>` to its payload, else evaluates the fallback (R-to-L associativity, lazy fallback, `Err` payload discarded)
 - String equality: `==` and `!=` via length-check + `memcmp`
 - Builtin method dispatch on primitive & string receivers: `string.len() -> u64` (O(1) fat-pointer read), `.clone()`, and `.slice(a..b) -> &string` (zero-copy sub-slice; panics on out-of-bounds or mid-codepoint boundary)
 
@@ -179,6 +179,9 @@ Key design goals:
 - `checked_add` / `checked_sub` / `checked_mul` on any integer type return `Option<T>` over the
   receiver's type: `Option::Some(result)` when it fits, `Option::None` on overflow. Branchless —
   the LLVM `*.with.overflow` overflow bit picks the variant
+- `??` reads either type without a `match`: `lookup(k) ?? 0` yields the `Some`/`Ok` payload, else
+  the fallback. The `Err` payload is discarded, the fallback is lazy, and `a ?? b ?? c` chains
+  right-to-left. Desugared to a two-arm `match` during HIR lowering, so neither backend sees it
 - Limits: scalar `Copy` payloads per instance (`Option<string>` awaits heap payloads), `Copy` type
   arguments, no `impl` blocks on enums, no lifetime parameters
 

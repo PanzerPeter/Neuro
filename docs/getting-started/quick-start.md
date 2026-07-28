@@ -292,9 +292,10 @@ Phase 1 (Core Language) sub-phases 1A–1F are complete; 1G (error handling, mod
 - Bitwise: `&`, `|`, `^`, `~`, `<<` (integer types only)
 - Compound assignment: `+=`, `-=`, `*=`, `/=`, `%=`
 - Type cast: `as` for numeric conversions and bool-to-int
+- Coalescing: `??` unwraps an `Option` / `Result`, else evaluates a lazy fallback
 
 ### Not Yet Implemented (later in Phase 1)
-- Collections, `?` / `??`, module system and imports (1G) — `Option` / `Result` themselves have landed
+- The `?` propagation operator, module system and imports (1G)
 - String interpolation, triple-quoted strings, nested comments, named arguments (1H)
 
 ## Common Issues

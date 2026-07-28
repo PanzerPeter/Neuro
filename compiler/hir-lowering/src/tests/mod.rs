@@ -1,4 +1,5 @@
 mod closure_tests;
+mod coalesce_tests;
 mod enum_tests;
 mod expr_tests;
 mod generic_tests;

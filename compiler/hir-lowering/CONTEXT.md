@@ -18,6 +18,14 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
 - thiserror — `LoweringError` derivation
 
 ## Notes
+- 2026-07-28: `??` full implementation. New `expressions/coalesce.rs`: the `Expr::Binary` dispatch
+  hands `BinaryOp::NullCoalesce` to `lower_null_coalesce`, which desugars `lhs ?? fallback` into
+  `HirExprKind::Match` — arm 0 tests the `Some`/`Ok` tag and binds payload slot 0 as
+  `__coalesce_N` (named off the new `coalesce_counter`, so nested coalesces cannot shadow each
+  other), arm 1 is a `Wildcard` whose body is the fallback. No HIR node and no backend change: the
+  fallback's laziness comes free from the per-arm basic-block chain codegen already emits. The
+  fallback lowers with the payload type as its expected type, which is what types a bare literal.
+  `binary_result_type`'s `NullCoalesce` arm is now unreachable-by-construction and says so.
 - 2026-07-28: Divergent `loop`, and expression module split. `LoopCtx` gains `has_break`, set by
   `record_break_target`; `Expr::Loop` lowers to its value-break type, or to the *expected* type when
   no `break` targets it, so the (dead) exit-block result slot is still typed for the position the

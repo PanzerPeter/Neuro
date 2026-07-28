@@ -193,7 +193,8 @@ only (var/const/param/return/field/cast); alias as value constructor or path nam
   accepted so future `@grad`/`@gpu`/`@no_prelude` need no grammar churn.
 - 2026-05-18: `??` (null/error coalescing) — `Precedence::NullCoalesce` between `Lowest` and
   `LogicalOr` (Appendix B row 14); R-to-L associativity via recursing on the right operand at
-  `Precedence::Lowest`. Semantic/codegen don't yet support it.
+  `Precedence::Lowest`. The parse surface is unchanged since; semantic analysis and HIR
+  lowering gave it meaning on 2026-07-28 (it desugars to a `match`).
 - 2026-05-25: Float literal suffixes — `parse_prefix` handles `TokenKind::FloatSuffix` →
   `Literal::Float(val, Some(suffix))`; plain `Float(f)` → `None`.
 - 2026-04-18: Integer literal suffixes — `parse_prefix` handles `TokenKind::IntegerSuffix` →

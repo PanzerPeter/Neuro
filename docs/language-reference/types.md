@@ -552,7 +552,7 @@ val present = Option::Some(30)
 val absent: Option<i32> = Option::None
 ```
 
-Variants are written qualified (`Option::Some`, `Result::Err`). Unqualified names (`Some(x)`) arrive with the module system and its implicit-prelude imports; the `?` propagation operator, `??`, and `checked_*` are separate items still open in 1G.
+Variants are written qualified (`Option::Some`, `Result::Err`). Unqualified names (`Some(x)`) arrive with the module system and its implicit-prelude imports. The [`??` operator](operators.md#nullerror-coalescing-operator-) unwraps either type with a fallback; the `?` propagation operator is still open in 1G.
 
 ### Phase 1 Limitations
 
@@ -948,10 +948,11 @@ func returns_i32() -> i32 {
 - Enums with associated data `enum E { A, B(T), C { f: T } }`, generic enums `enum Slot<T> { ... }`
 - Pattern matching, newtypes
 - Generics + monomorphization, traits, operator traits, static/dynamic dispatch, closures
-- `Option<T>` / `Result<T, E>` from the implicit prelude
+- `Option<T>` / `Result<T, E>` from the implicit prelude, the `??` coalescing operator
+- Collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, `checked_*` integer methods
 
 **In progress / planned (still Phase 1):**
-- Collections, the `?` and `??` operators, `checked_*` integer methods, modules and imports (1G)
+- The `?` propagation operator, `val-else` binding, modules and imports (1G)
 - String interpolation, triple-quoted strings, named arguments (1H)
 
 ### Phase 2 — Tensors (Planned)
