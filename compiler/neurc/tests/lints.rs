@@ -4,18 +4,14 @@ use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
 
+/// Path to the `neurc` binary Cargo built for this test run.
+///
+/// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
+/// package; it is absolute and already carries the platform executable
+/// suffix. Do not derive it from `current_exe()` — that assumes the legacy
+/// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
 fn neurc_path() -> std::path::PathBuf {
-    let exe_name = if cfg!(target_os = "windows") {
-        "neurc.exe"
-    } else {
-        "neurc"
-    };
-    std::env::current_exe()
-        .expect("current exe")
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("workspace target dir")
-        .join(exe_name)
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
 }
 
 fn run_check(source: &str) -> (i32, String, String) {

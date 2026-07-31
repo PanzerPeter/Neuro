@@ -26,14 +26,14 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Path to the freshly built `neurc` binary that sits beside the test binary.
-fn neurc_path() -> PathBuf {
-    std::env::current_exe()
-        .expect("current exe")
-        .parent()
-        .and_then(Path::parent)
-        .expect("target/<profile> dir")
-        .join("neurc")
+/// Path to the `neurc` binary Cargo built for this test run.
+///
+/// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
+/// package; it is absolute and already carries the platform executable
+/// suffix. Do not derive it from `current_exe()` — that assumes the legacy
+/// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
+fn neurc_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
 }
 
 /// Recursively collect every `.nr` file under `dir`, as paths relative to it.
