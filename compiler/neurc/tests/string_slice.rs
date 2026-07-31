@@ -7,24 +7,17 @@ mod common;
 use common::CompileTest;
 
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
 
-fn neurc_path() -> PathBuf {
-    let neurc_exe = if cfg!(target_os = "windows") {
-        "neurc.exe"
-    } else {
-        "neurc"
-    };
-
-    std::env::current_exe()
-        .expect("Failed to get current exe path")
-        .parent()
-        .expect("Failed to get parent directory")
-        .parent()
-        .expect("Failed to get grandparent directory")
-        .join(neurc_exe)
+/// Path to the `neurc` binary Cargo built for this test run.
+///
+/// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
+/// package; it is absolute and already carries the platform executable
+/// suffix. Do not derive it from `current_exe()` — that assumes the legacy
+/// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
+fn neurc_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
 }
 
 fn check_source(source: &str) -> (bool, String) {

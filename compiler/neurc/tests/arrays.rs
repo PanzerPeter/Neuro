@@ -4,7 +4,6 @@
 mod common;
 use common::CompileTest;
 
-use std::path::PathBuf;
 use std::process::Command;
 
 #[test]
@@ -175,13 +174,12 @@ func main() -> i32 {
     );
 }
 
-/// Path to the compiled `neurc` binary beside the test executable.
-fn neurc_path() -> PathBuf {
-    std::env::current_exe()
-        .expect("get current exe")
-        .parent()
-        .expect("parent")
-        .parent()
-        .expect("grandparent")
-        .join("neurc")
+/// Path to the `neurc` binary Cargo built for this test run.
+///
+/// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
+/// package; it is absolute and already carries the platform executable
+/// suffix. Do not derive it from `current_exe()` — that assumes the legacy
+/// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
+fn neurc_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
 }

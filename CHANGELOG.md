@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.68.2] - 2026-07-31
+
+### Fixed
+- `tests`: the integration suite located the `neurc` binary by walking two
+  directories up from the test executable, which hard-codes Cargo's legacy
+  `target/<profile>/deps/` layout. Under Cargo's build-dir layout test binaries
+  live elsewhere, so every compile-and-run test aborted with
+  `Failed to execute neurc: NotFound` on Linux, macOS, and Windows alike. All
+  fifteen lookups now use `env!("CARGO_BIN_EXE_neurc")`, Cargo's documented,
+  layout- and platform-independent path to the built binary.
+- `tests`: added an architecture test that fails if any `neurc` integration test
+  reintroduces a `current_exe()`-derived compiler path.
+
+### Documentation
+- Added a Windows (MSVC) installation section to the getting-started guide,
+  covering the LLVM 20 development-build requirement, the `/MD` CRT variant, the
+  x86-only target set, and the matching troubleshooting entries. The guide now
+  covers every platform CI builds and releases for.
+
 ## [1.68.1] - 2026-07-31
 
 ### Fixed

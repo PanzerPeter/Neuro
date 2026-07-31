@@ -6,6 +6,16 @@ use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
 
+/// Path to the `neurc` binary Cargo built for this test run.
+///
+/// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
+/// package; it is absolute and already carries the platform executable
+/// suffix. Do not derive it from `current_exe()` — that assumes the legacy
+/// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
+fn neurc_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
+}
+
 /// Helper struct for running end-to-end compilation tests
 pub struct CompileTest {
     temp_dir: TempDir,
@@ -33,23 +43,8 @@ impl CompileTest {
             ""
         });
 
-        // Build neurc path relative to the test binary
-        let neurc_exe = if cfg!(target_os = "windows") {
-            "neurc.exe"
-        } else {
-            "neurc"
-        };
-
-        let neurc_path = std::env::current_exe()
-            .expect("Failed to get current exe path")
-            .parent()
-            .expect("Failed to get parent directory")
-            .parent()
-            .expect("Failed to get grandparent directory")
-            .join(neurc_exe);
-
         // Run the compiler
-        let output = Command::new(&neurc_path)
+        let output = Command::new(neurc_path())
             .arg("compile")
             .arg(source_path)
             .arg("-o")

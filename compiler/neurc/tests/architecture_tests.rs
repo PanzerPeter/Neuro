@@ -208,6 +208,57 @@ fn test_pub_crate_usage() {
 }
 
 #[test]
+fn test_integration_tests_locate_neurc_via_cargo_bin_exe() {
+    // Integration tests must resolve the compiler through Cargo's
+    // `CARGO_BIN_EXE_neurc`, never by walking up from `current_exe()`.
+    // The parent-of-parent walk hard-codes the legacy
+    // `target/<profile>/deps/` layout; under Cargo's build-dir layout test
+    // binaries live elsewhere and every such lookup fails with NotFound.
+    let tests_dir = workspace_root().join("compiler/neurc/tests");
+    let mut offenders = Vec::new();
+
+    let mut stack = vec![tests_dir.clone()];
+    while let Some(dir) = stack.pop() {
+        let entries =
+            fs::read_dir(&dir).unwrap_or_else(|e| panic!("Failed to read {}: {e}", dir.display()));
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs")
+                // This file names the banned call in its own assertion text.
+                && path.file_name().and_then(|n| n.to_str()) != Some("architecture_tests.rs")
+            {
+                let source = fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("Failed to read {}: {e}", path.display()));
+                // Comment lines may name the banned call while explaining it.
+                let uses_it = source
+                    .lines()
+                    .filter(|line| !line.trim_start().starts_with("//"))
+                    .any(|line| line.contains("current_exe"));
+                if uses_it {
+                    offenders.push(
+                        path.strip_prefix(&tests_dir)
+                            .unwrap_or(&path)
+                            .display()
+                            .to_string(),
+                    );
+                }
+            }
+        }
+    }
+
+    offenders.sort();
+    assert!(
+        offenders.is_empty(),
+        "These integration tests derive the neurc path from current_exe(), \
+         which breaks under Cargo's build-dir layout on every OS. \
+         Use env!(\"CARGO_BIN_EXE_neurc\") instead: {}",
+        offenders.join(", ")
+    );
+}
+
+#[test]
 fn test_ast_types_in_infrastructure() {
     // Verify AST types are in infrastructure, not syntax-parsing
     let root = workspace_root();
