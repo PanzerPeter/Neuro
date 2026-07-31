@@ -19,6 +19,8 @@ fn unsafe_block_yields_trailing_expr_type_without_errors() {
         })],
     );
 
+    checker.register_function_signature(&func);
+
     checker.check_function(&func);
     assert!(
         !checker.has_errors(),
@@ -102,6 +104,7 @@ fn user_function_shadows_panic_builtin() {
             span: Span::new(0, 8),
         }],
     );
+    checker.register_function_signature(&func);
     checker.check_function(&func);
     assert!(!checker.has_errors());
 

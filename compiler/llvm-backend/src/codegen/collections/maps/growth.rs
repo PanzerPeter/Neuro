@@ -127,10 +127,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         // The old table is read through a private header so the live one can be swapped
         // to the fresh buffer before reinsertion.
-        let old_header = self
-            .builder
-            .build_alloca(self.collection_header_type(), "table.old")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let old_header = self.entry_alloca(self.collection_header_type(), "table.old")?;
         let old_buffer = self.load_header_buffer(header)?;
         self.store_header_buffer(old_header, old_buffer)?;
         self.store_header_field(old_header, FIELD_CAP, capacity)?;
@@ -147,10 +144,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let step_bb = self.context.append_basic_block(parent_fn, "rehash.step");
         let exit_bb = self.context.append_basic_block(parent_fn, "rehash.done");
 
-        let cursor = self
-            .builder
-            .build_alloca(i64_ty, "rehash.i")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let cursor = self.entry_alloca(i64_ty, "rehash.i")?;
         self.builder
             .build_store(cursor, zero)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -252,10 +246,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
         let i64_ty = self.context.i64_type();
-        let cursor = self
-            .builder
-            .build_alloca(i64_ty, "probe.i")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let cursor = self.entry_alloca(i64_ty, "probe.i")?;
         self.builder
             .build_store(cursor, start)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;

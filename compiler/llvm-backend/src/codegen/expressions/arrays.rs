@@ -74,6 +74,9 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut agg = rest_arr_llvm.get_undef();
         for offset in 0..rest_len {
             let src_index = (start + offset) as u64;
+            // SAFETY: `rest_len` is `size - start`, so `src_index = start + offset` is
+            // below `size` for every `offset` in the loop and the GEP stays inside the
+            // source array.
             let elem_ptr = unsafe {
                 self.builder
                     .build_in_bounds_gep(
@@ -175,17 +178,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let i64t = self.context.i64_type();
 
         // Induction variable `i` and the element binding `x`, both stack slots.
-        let idx_alloca = self
-            .builder
-            .build_alloca(i64t, "foreach.i")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let idx_alloca = self.entry_alloca(i64t, "foreach.i")?;
         self.builder
             .build_store(idx_alloca, i64t.const_zero())
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let elem_alloca = self
-            .builder
-            .build_alloca(elem_llvm, iterator)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let elem_alloca = self.entry_alloca(elem_llvm, iterator)?;
 
         // Record the element binding's resolved type so a place statement in the body
         // (e.g. indexing a struct/array element) can recover its nominal type.
@@ -223,6 +220,8 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(body_bb);
         // Load the current element into the binding slot, then run the body.
+        // SAFETY: this block is only reached when the loop condition proved
+        // `i_val < size`, so the indexed element is inside the array.
         let elem_ptr = unsafe {
             self.builder
                 .build_in_bounds_gep(
@@ -344,10 +343,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         let val = self.codegen_expr(object)?;
-        let tmp = self
-            .builder
-            .build_alloca(val.get_type(), "arr.tmp")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let tmp = self.entry_alloca(val.get_type(), "arr.tmp")?;
         self.builder
             .build_store(tmp, val)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -383,6 +379,9 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         let arr_llvm = elem_llvm.array_type(size as u32);
+        // SAFETY: in debug builds the guard above panics unless `idx64 < size`; in
+        // release builds an out-of-range index is the documented wrapping behaviour
+        // of the array bounds policy, matching the integer-overflow policy.
         unsafe {
             self.builder
                 .build_in_bounds_gep(

@@ -65,10 +65,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_int_compare(IntPredicate::UGT, capacity, i64_ty.const_zero(), "any")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let cursor = self
-            .builder
-            .build_alloca(i64_ty, "cursor")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let cursor = self.entry_alloca(i64_ty, "cursor")?;
         let start = self.bucket_of(key_ty, key, capacity)?;
         self.builder
             .build_store(cursor, start)
@@ -172,10 +169,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_int_compare(IntPredicate::ULT, bound, len, "in.range")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         let match_bb = self.context.append_basic_block(func, "check.match");
-        let result_slot = self
-            .builder
-            .build_alloca(i64_ty, "result")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let result_slot = self.entry_alloca(i64_ty, "result")?;
         self.builder
             .build_store(result_slot, i64_ty.const_int(NOT_FOUND as u64, true))
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -230,14 +224,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
         let i64_ty = self.context.i64_type();
-        let low = self
-            .builder
-            .build_alloca(i64_ty, "lo")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let high = self
-            .builder
-            .build_alloca(i64_ty, "hi")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let low = self.entry_alloca(i64_ty, "lo")?;
+        let high = self.entry_alloca(i64_ty, "hi")?;
         let len = self.load_header_field(header, FIELD_LEN, "len")?;
         self.builder
             .build_store(low, i64_ty.const_zero())

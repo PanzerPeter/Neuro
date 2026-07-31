@@ -242,6 +242,46 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
+    /// Allocate a fixed-size stack slot in the current function's **entry block**.
+    ///
+    /// Every local binding and every result/scratch slot must go through this. An
+    /// `alloca` emitted at the current builder position is executed once per pass
+    /// through that position, so a slot allocated inside a loop body grows the stack by
+    /// one slot per iteration until the process runs out of it — a segfault on a
+    /// perfectly ordinary counted loop. LLVM's `mem2reg` cannot rescue it either: the
+    /// pass only promotes allocas that are already in the entry block, so the leak
+    /// survives every optimization level.
+    ///
+    /// The initializing store stays where the caller emits it. Reusing one slot across
+    /// iterations is sound because every one of these slots is written before it is
+    /// read, and a fresh frame per call keeps recursion correct.
+    pub(crate) fn entry_alloca(
+        &self,
+        ty: impl inkwell::types::BasicType<'ctx>,
+        name: &str,
+    ) -> CodegenResult<inkwell::values::PointerValue<'ctx>> {
+        let function = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("stack slot requested outside a function".to_string())
+        })?;
+        let entry = function.get_first_basic_block().ok_or_else(|| {
+            CodegenError::InternalError("function has no entry block".to_string())
+        })?;
+
+        let restore = self.builder.get_insert_block();
+        match entry.get_first_instruction() {
+            Some(first) => self.builder.position_before(&first),
+            None => self.builder.position_at_end(entry),
+        }
+        let slot = self
+            .builder
+            .build_alloca(ty, name)
+            .map_err(|e| CodegenError::LlvmError(e.to_string()));
+        if let Some(block) = restore {
+            self.builder.position_at_end(block);
+        }
+        slot
+    }
+
     /// Record each enum's variant order before code generation, so a synthesized
     /// construction can resolve a variant name to its discriminant.
     pub(crate) fn set_enum_variants(&mut self, enum_variants: HashMap<String, Vec<String>>) {

@@ -186,17 +186,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let elem_llvm = self.collection_value_type(&element_ty)?;
         let i64_ty = self.context.i64_type();
 
-        let idx_alloca = self
-            .builder
-            .build_alloca(i64_ty, "veach.i")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let idx_alloca = self.entry_alloca(i64_ty, "veach.i")?;
         self.builder
             .build_store(idx_alloca, i64_ty.const_zero())
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let elem_alloca = self
-            .builder
-            .build_alloca(elem_llvm, iterator)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let elem_alloca = self.entry_alloca(elem_llvm, iterator)?;
 
         self.type_env
             .insert(iterator.to_string(), element_ty.clone());
@@ -344,6 +338,9 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<PointerValue<'ctx>> {
         let buffer = self.load_header_buffer(header)?;
         let elem_llvm = self.collection_value_type(element_ty)?;
+        // SAFETY: unchecked by contract — every caller either bounds-checks `index`
+        // first (`checked_vec_slot`) or derives it from the vector's own `len`/`cap`,
+        // so it addresses a slot inside the allocated buffer.
         unsafe {
             self.builder
                 .build_in_bounds_gep(elem_llvm, buffer, &[index], "vec.slot")
@@ -384,10 +381,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
         let elem_llvm = self.collection_value_type(element_ty)?;
-        let slot_alloca = self
-            .builder
-            .build_alloca(elem_llvm, "vec.read")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let slot_alloca = self.entry_alloca(elem_llvm, "vec.read")?;
         self.builder
             .build_store(slot_alloca, zero_of(elem_llvm))
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;

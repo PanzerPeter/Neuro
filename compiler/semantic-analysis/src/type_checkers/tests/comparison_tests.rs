@@ -22,6 +22,8 @@ fn comparison_chain_less_less_rejected() {
         })],
     );
 
+    checker.register_function_signature(&func);
+
     checker.check_function(&func);
     assert!(checker.has_errors());
 
@@ -56,6 +58,8 @@ fn comparison_chain_mixed_operators_rejected() {
             span: Span::new(0, 10),
         })],
     );
+
+    checker.register_function_signature(&func);
 
     checker.check_function(&func);
     assert!(checker.has_errors());
@@ -92,6 +96,8 @@ fn comparison_chain_equality_rejected() {
         })],
     );
 
+    checker.register_function_signature(&func);
+
     checker.check_function(&func);
     assert!(checker.has_errors());
 
@@ -121,6 +127,8 @@ fn single_comparison_accepted() {
             span: Span::new(0, 5),
         })],
     );
+
+    checker.register_function_signature(&func);
 
     checker.check_function(&func);
     assert!(
@@ -156,6 +164,8 @@ fn comparison_with_logical_and_accepted() {
             span: Span::new(0, 14),
         })],
     );
+
+    checker.register_function_signature(&func);
 
     checker.check_function(&func);
     assert!(

@@ -930,9 +930,33 @@ impl Lowerer {
         for (i, stmt) in body.iter().enumerate() {
             let is_tail = i == last;
             if is_tail && !matches!(return_type, HirType::Void) {
-                if let ast_types::Stmt::Expr(expr) = stmt {
-                    out.push(HirStmt::Expr(self.lower_expr(expr, Some(return_type))?));
-                    continue;
+                match stmt {
+                    ast_types::Stmt::Expr(expr) => {
+                        out.push(HirStmt::Expr(self.lower_expr(expr, Some(return_type))?));
+                        continue;
+                    }
+                    // A statement-position `if` parses to `Stmt::If`, so a trailing
+                    // `if/else` acting as the implicit return must be lowered as an
+                    // expression — otherwise its branches lower as statement blocks and
+                    // whatever they evaluate to is discarded.
+                    ast_types::Stmt::If {
+                        condition,
+                        then_block,
+                        else_if_blocks,
+                        else_block,
+                        span,
+                    } if else_block.is_some() => {
+                        let tail = self.lower_if_expr(
+                            condition,
+                            then_block,
+                            else_if_blocks,
+                            else_block,
+                            *span,
+                        )?;
+                        out.push(HirStmt::Expr(tail));
+                        continue;
+                    }
+                    _ => {}
                 }
             }
             out.push(self.lower_stmt(stmt)?);

@@ -268,10 +268,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Materialize a value into a stack slot and yield its address, so it can be passed
     /// where a `&self` / `&Rhs` parameter is expected.
     fn spill_to_stack(&mut self, value: BasicValueEnum<'ctx>) -> CodegenResult<PointerValue<'ctx>> {
-        let slot = self
-            .builder
-            .build_alloca(value.get_type(), "key.spill")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let slot = self.entry_alloca(value.get_type(), "key.spill")?;
         self.builder
             .build_store(slot, value)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -300,14 +297,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 .ok_or_else(|| CodegenError::InternalError("hash helper arity".into()))?
                 .into_int_value();
 
-            let hash_slot = ctx
-                .builder
-                .build_alloca(i64_ty, "hash")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            let index_slot = ctx
-                .builder
-                .build_alloca(i64_ty, "i")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let hash_slot = ctx.entry_alloca(i64_ty, "hash")?;
+            let index_slot = ctx.entry_alloca(i64_ty, "i")?;
             ctx.builder
                 .build_store(hash_slot, i64_ty.const_int(FNV_OFFSET_BASIS, false))
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -333,6 +324,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
             ctx.builder.position_at_end(body_bb);
+            // SAFETY: the loop condition above proved `index < len`, so the byte is
+            // inside the string's UTF-8 buffer.
             let byte_ptr = unsafe {
                 ctx.builder
                     .build_in_bounds_gep(ctx.context.i8_type(), bytes, &[index], "byte.ptr")

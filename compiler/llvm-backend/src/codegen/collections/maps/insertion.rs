@@ -95,10 +95,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(fresh_bb);
         self.emit_hashed_grow_if_needed(header, key_ty, value_ty)?;
         let capacity = self.load_header_field(header, FIELD_CAP, "cap")?;
-        let cursor = self
-            .builder
-            .build_alloca(i64_ty, "cursor")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let cursor = self.entry_alloca(i64_ty, "cursor")?;
         let start = self.bucket_of(key_ty, key, capacity)?;
         self.builder
             .build_store(cursor, start)

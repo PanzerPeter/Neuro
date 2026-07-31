@@ -193,10 +193,7 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         }
         let value = self.codegen_expr(object)?;
-        let tmp = self
-            .builder
-            .build_alloca(value.get_type(), "col.tmp")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let tmp = self.entry_alloca(value.get_type(), "col.tmp")?;
         self.builder
             .build_store(tmp, value)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;

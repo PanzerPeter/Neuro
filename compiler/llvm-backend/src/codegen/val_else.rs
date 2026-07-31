@@ -31,10 +31,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let scrut_sem = Type::from_hir(&scrutinee.ty);
         let scrut_val = self.codegen_expr(scrutinee)?;
         let scrut_llvm = scrut_val.get_type();
-        let scrut_alloca = self
-            .builder
-            .build_alloca(scrut_llvm, "valelse.scrut")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let scrut_alloca = self.entry_alloca(scrut_llvm, "valelse.scrut")?;
         self.builder
             .build_store(scrut_alloca, scrut_val)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;

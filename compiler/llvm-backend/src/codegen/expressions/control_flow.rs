@@ -34,10 +34,7 @@ impl<'ctx> CodegenContext<'ctx> {
         })?;
 
         let llvm_result_ty = self.get_any_llvm_type(&result_ty)?;
-        let result_alloca = self
-            .builder
-            .build_alloca(llvm_result_ty, "ifexpr.result")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let result_alloca = self.entry_alloca(llvm_result_ty, "ifexpr.result")?;
 
         let cond_val = self.codegen_expr(condition)?.into_int_value();
         let then_bb = self.context.append_basic_block(parent_fn, "ifexpr.then");

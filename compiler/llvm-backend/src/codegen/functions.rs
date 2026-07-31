@@ -437,11 +437,9 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Lower a function or method body, treating a value-producing tail statement
     /// as the implicit return value.
     ///
-    /// A statement-position `if` parses to `Stmt::If`, so a trailing `if/else` used
-    /// as the implicit return is not a `Stmt::Expr`; it must still yield the
-    /// if-expression's value rather than falling through with `unreachable`, which
-    /// produces no instruction at `-O0` and lets execution run off the end of the
-    /// function.
+    /// A trailing `if/else` acting as the implicit return already arrives as a
+    /// `HirStmt::Expr` holding an if-expression: hir-lowering owns that promotion, so
+    /// the rule lives in exactly one place.
     /// The caller is responsible for opening the function-body drop scope (and
     /// registering by-value `Drop` parameters into it) before calling this; the
     /// function scope is popped here on the way out. Drops for owned `Drop` bindings
@@ -451,15 +449,8 @@ impl<'ctx> CodegenContext<'ctx> {
         body: &[HirStmt],
         return_type: &Type,
     ) -> CodegenResult<()> {
-        let tail_is_value = !matches!(return_type, Type::Void)
-            && matches!(
-                body.last(),
-                Some(HirStmt::Expr(_))
-                    | Some(HirStmt::If {
-                        else_block: Some(_),
-                        ..
-                    })
-            );
+        let tail_is_value =
+            !matches!(return_type, Type::Void) && matches!(body.last(), Some(HirStmt::Expr(_)));
 
         if tail_is_value {
             for stmt in &body[..body.len() - 1] {
@@ -472,21 +463,6 @@ impl<'ctx> CodegenContext<'ctx> {
                 let tail = body.last();
                 let ret_val = match tail {
                     Some(HirStmt::Expr(expr)) => self.codegen_expr(expr)?,
-                    // A tail `if` is the implicit return, so its result type is the
-                    // function's declared return type.
-                    Some(HirStmt::If {
-                        condition,
-                        then_block,
-                        else_if_blocks,
-                        else_block,
-                        ..
-                    }) => self.codegen_if_expr(
-                        condition,
-                        then_block,
-                        else_if_blocks,
-                        else_block,
-                        return_type,
-                    )?,
                     _ => {
                         return Err(CodegenError::InternalError(
                             "tail statement is not value-producing".to_string(),

@@ -42,6 +42,8 @@ fn test_integer_literal_infers_from_function_parameter() {
         vec![],
     );
 
+    checker.register_function_signature(&func);
+
     checker.check_function(&func);
     assert!(!checker.has_errors());
 
@@ -149,6 +151,8 @@ fn test_literal_inference_in_return() {
             Span::new(0, 2),
         ))],
     );
+
+    checker.register_function_signature(&func);
 
     checker.check_function(&func);
     assert!(!checker.has_errors());
