@@ -333,6 +333,12 @@ pub enum TypeError {
     #[error("`??` expects an `Option<T>` or `Result<T, E>` on the left, found {found} at {span:?}: `??` unwraps a fallible value or falls back")]
     NullCoalesceOnNonFallible { found: Type, span: Span },
 
+    #[error("the `else` branch of a `val-else` at {span:?} can fall through: it must exit the scope with `return`, `break`, `continue`, `panic(...)`, or `unreachable()`")]
+    ValElseMustDiverge { span: Span },
+
+    #[error("`else |{name}|` at {span:?} has nothing to bind: `Option::None` carries no payload; write `else` or `else |_|`")]
+    ValElseBindingOnOption { name: String, span: Span },
+
     #[error("use of moved value '{name}' at {span:?}: it was moved at {moved_at:?}; bind a `.clone()` if you need an independent copy")]
     UseOfMovedValue {
         name: String,

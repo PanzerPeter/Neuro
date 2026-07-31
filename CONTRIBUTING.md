@@ -311,11 +311,16 @@ ordered map be keyed on a float. The **`checked_*` integer methods**
 `Option<T>` over the receiver's type so an overflow is reported rather than
 wrapped, clamped, or trapped. The **`??` coalescing operator** landed in v1.67.0:
 it unwraps an `Option<T>` or `Result<T, E>` to its payload and otherwise evaluates
-a lazy fallback, discarding the `Err` payload, and chains right-to-left.
+a lazy fallback, discarding the `Err` payload, and chains right-to-left. The
+**`val-else` binding** landed in v1.68.0: `val PATTERN = value else |binding| { ... }`
+unwraps a refutable pattern or leaves the scope, with the bindings live for the rest
+of the enclosing block, a required-diverging `else` branch, and a type-directed
+`else |name|` (a `Result`'s `Err` payload, nothing on an `Option`, the whole
+scrutinee for any other enum).
 
-**Next, in dependency order:** the rest of 1G (`?`, `val-else`, modules,
-imports, the full prelude) → 1H (string interpolation, triple-quoted
-strings, nested comments, named arguments). See the [Quick Roadmap](README.md#quick-roadmap).
+**Next, in dependency order:** the rest of 1G (`?`, modules, imports, the full
+prelude) → 1H (string interpolation, triple-quoted strings, nested comments, named
+arguments). See the [Quick Roadmap](README.md#quick-roadmap).
 
 `[x]` = landed · `[ ]` = open. See [CHANGELOG.md](CHANGELOG.md) and the README
 capabilities table for full behavior.

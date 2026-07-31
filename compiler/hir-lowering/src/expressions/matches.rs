@@ -90,7 +90,7 @@ impl Lowerer {
     }
 
     /// Build the refutable [`HirMatchTest`] for one pattern.
-    pub(super) fn pattern_test(
+    pub(crate) fn pattern_test(
         &self,
         pat: &ast_types::Pattern,
         scrut_ty: &HirType,
@@ -127,7 +127,7 @@ impl Lowerer {
 
     /// Resolve the bindings a single (non-or) pattern introduces: the whole
     /// scrutinee for a bare binding, or payload slot extractions for an enum pattern.
-    pub(super) fn pattern_bindings(
+    pub(crate) fn pattern_bindings(
         &self,
         pat: &ast_types::Pattern,
         scrut_ty: &HirType,

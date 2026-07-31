@@ -30,6 +30,13 @@ differences that make it the *typed* contract:
    span lives on the enclosing node.
 
 ## Recent Updates
+- 2026-07-31: `val-else`. Added `HirStmt::ValElse { scrutinee, test, bindings, else_binding,
+  else_block, span }`, reusing `HirMatchTest` / `HirMatchBinding` verbatim rather than introducing a
+  parallel vocabulary. It is a statement, not a `Match` variant, because its `bindings` belong to the
+  ENCLOSING scope and stay live for every following statement — a `Match` arm's die with the arm.
+  `else_binding` is scoped to `else_block` alone and is `None` for `Option` (whose failure variant has
+  no payload) and for an omitted / `|_|` form. The frontend guarantees `else_block` diverges, so
+  backends may terminate it with `unreachable`.
 - 2026-07-28: One `loop` node. `HirStmt::Loop` is removed to mirror the AST change; `HirExprKind::Loop`
   is the sole loop node and a statement-position loop is a `HirStmt::Expr` wrapping it, typed `void`.
 - 2026-07-27: Standard collections. Added `HirType::Collection { kind, args }` with

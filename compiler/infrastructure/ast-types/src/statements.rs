@@ -2,7 +2,7 @@
 
 use shared_types::{Identifier, Span};
 
-use super::expressions::Expr;
+use super::expressions::{Expr, Pattern};
 use super::types::Type;
 
 /// Statement AST nodes
@@ -111,6 +111,22 @@ pub enum Stmt {
         target: Identifier,
         index: Expr,
         value: Expr,
+        span: Span,
+    },
+    /// `val PATTERN = value else |binding| { ... }` — bind a refutable pattern or
+    /// leave the enclosing scope.
+    ///
+    /// The pattern's bindings are introduced into the *enclosing* block, not just a
+    /// nested arm, which is what distinguishes this from a `match`. `else_binding` is
+    /// the optional `|name|` after `else`; what it names depends on the scrutinee's
+    /// type: a `Result`'s `Err` payload, nothing for an `Option` (only `_` is
+    /// accepted), and the whole scrutinee for any other enum. `else_block` must
+    /// diverge — semantic analysis rejects one that can fall through.
+    ValElse {
+        pattern: Pattern,
+        value: Expr,
+        else_binding: Option<Identifier>,
+        else_block: Vec<Stmt>,
         span: Span,
     },
     /// Compile-time constant declaration inside a function body.

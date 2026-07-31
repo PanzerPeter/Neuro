@@ -13,7 +13,7 @@ impl Lowerer {
     /// Look up an enum variant by name, returning its discriminant tag (declaration
     /// index) and a clone of its ordered payload fields. The clone frees the enum
     /// table's immutable borrow before the mutable argument lowering that follows.
-    pub(super) fn enum_variant(
+    pub(crate) fn enum_variant(
         &self,
         enum_name: &str,
         variant: &str,

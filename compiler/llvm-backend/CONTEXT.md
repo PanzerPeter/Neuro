@@ -289,6 +289,14 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-07-31: `val-else`. New `codegen/val_else.rs`: the scrutinee is stored once into an alloca,
+  `codegen_single_test` (now `pub(crate)`, shared with match codegen) picks the branch, and the else
+  block runs in its own drop scope with its binding saved/restored. The success block's bindings are
+  materialized by `bind_arm` and deliberately NOT restored — they belong to the enclosing block, which
+  is the whole difference from a match arm. The else block is terminated with `unreachable` if it
+  still falls through; the frontend has already rejected that case, so this only keeps the emitted
+  function verifier-clean. `SavedBinding`, `bind_arm`, and `restore_bindings` moved from private to
+  `pub(crate)` for the sharing.
 - 2026-07-28: BUG-005 — a tail `loop` never exited. `HirStmt::Loop` is removed; a statement-position
   loop reaches `codegen_stmt` as `HirStmt::Expr` carrying a `void`-typed loop node, so no result slot
   is allocated and the value is discarded exactly as before. The fix itself is upstream: a trailing

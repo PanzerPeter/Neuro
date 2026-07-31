@@ -145,6 +145,15 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-07-31: `val-else`. New `val_else.rs`: `check_val_else` checks the scrutinee, runs the
+  pattern through `matches.rs`'s `check_pattern` (now `pub(crate)`), checks the `else` branch in its
+  own scope, and only THEN defines the pattern's bindings in the enclosing scope — so the branch
+  cannot see bindings its own failure means were never produced. `else_binding_type` implements the
+  documented binding table by resolving the scrutinee through `enum_instance_base`: `Result` binds the `Err`
+  payload, `Option` is the new `ValElseBindingOnOption` (its failure variant is empty; `|_|` and an
+  omitted form are filtered out before the check), any other type binds the scrutinee itself. A
+  local `stmts_diverge` walk (return / break / continue, `panic` / `unreachable` calls, an
+  if/else or `match` whose every branch diverges) enforces the new `ValElseMustDiverge`.
 - 2026-07-28: `??` full implementation. `check_binary_expr` routes `BinaryOp::NullCoalesce` to
   `check_null_coalesce` (`expressions/operators.rs`) BEFORE the shared operand check, because the
   operator is not operand-symmetric: the right side is typed by the left's *payload*, not by the

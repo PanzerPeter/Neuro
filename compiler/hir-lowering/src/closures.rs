@@ -219,6 +219,22 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             collect_expr(index, fv);
             collect_expr(value, fv);
         }
+        Stmt::ValElse {
+            pattern,
+            value,
+            else_binding,
+            else_block,
+            ..
+        } => {
+            collect_expr(value, fv);
+            if let Some(binding) = else_binding {
+                fv.bound.insert(binding.name.clone());
+            }
+            collect_block(else_block, fv);
+            for name in pattern.binding_names() {
+                fv.bound.insert(name);
+            }
+        }
         Stmt::Const { name, value, .. } => {
             collect_expr(value, fv);
             fv.bound.insert(name.name.clone());

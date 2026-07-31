@@ -314,6 +314,12 @@ fn rewrite_stmt(stmt: &mut Stmt, resolved: &HashMap<String, Type>) {
             rewrite_expr(pointer, resolved);
             rewrite_expr(value, resolved);
         }
+        Stmt::ValElse {
+            value, else_block, ..
+        } => {
+            rewrite_expr(value, resolved);
+            rewrite_block(else_block, resolved);
+        }
         Stmt::Const { ty, value, .. } => {
             rewrite_type(ty, resolved);
             rewrite_expr(value, resolved);

@@ -879,6 +879,14 @@ impl TypeChecker {
                 Some(())
             }
 
+            Stmt::ValElse {
+                pattern,
+                value,
+                else_binding,
+                else_block,
+                span,
+            } => self.check_val_else(pattern, value, else_binding.as_ref(), else_block, *span),
+
             Stmt::Const {
                 name,
                 ty,

@@ -131,7 +131,7 @@ impl TypeChecker {
 
     /// Check a pattern against the scrutinee type, collecting the bindings it
     /// introduces into `bindings`.
-    fn check_pattern(
+    pub(crate) fn check_pattern(
         &mut self,
         pattern: &Pattern,
         scrut_ty: &Type,

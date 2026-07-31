@@ -22,7 +22,7 @@ use crate::types::Type;
 
 /// A binding's saved prior state in the three name maps, restored when the arm's
 /// blocks are done so bindings do not leak to sibling arms or shadow the outer scope.
-struct SavedBinding<'ctx> {
+pub(crate) struct SavedBinding<'ctx> {
     name: String,
     ptr: Option<PointerValue<'ctx>>,
     ty: Option<BasicTypeEnum<'ctx>>,
@@ -152,7 +152,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Lower one refutable test to an `i1`.
-    fn codegen_single_test(
+    pub(crate) fn codegen_single_test(
         &mut self,
         test: &HirMatchTest,
         scrut_alloca: PointerValue<'ctx>,
@@ -263,7 +263,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Create allocas for an arm's bindings and register them in the name maps,
     /// returning the prior entries so they can be restored afterwards.
-    fn bind_arm(
+    pub(crate) fn bind_arm(
         &mut self,
         bindings: &[HirMatchBinding],
         scrut_alloca: PointerValue<'ctx>,
@@ -308,7 +308,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Restore the name maps to their pre-arm state.
-    fn restore_bindings(&mut self, saved: Vec<SavedBinding<'ctx>>) {
+    pub(crate) fn restore_bindings(&mut self, saved: Vec<SavedBinding<'ctx>>) {
         for s in saved.into_iter().rev() {
             match s.ptr {
                 Some(prev) => self.variables.insert(s.name.clone(), prev),
