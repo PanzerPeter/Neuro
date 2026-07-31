@@ -45,10 +45,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let scrut_sem = Type::from_hir(&scrutinee.ty);
         let scrut_val = self.codegen_expr(scrutinee)?;
         let scrut_llvm = scrut_val.get_type();
-        let scrut_alloca = self
-            .builder
-            .build_alloca(scrut_llvm, "match.scrut")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let scrut_alloca = self.entry_alloca(scrut_llvm, "match.scrut")?;
         self.builder
             .build_store(scrut_alloca, scrut_val)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -58,11 +55,7 @@ impl<'ctx> CodegenContext<'ctx> {
             None
         } else {
             let llvm_ty = self.get_any_llvm_type(result_ty)?;
-            Some(
-                self.builder
-                    .build_alloca(llvm_ty, "match.result")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?,
-            )
+            Some(self.entry_alloca(llvm_ty, "match.result")?)
         };
 
         let merge_bb = self.context.append_basic_block(parent_fn, "match.merge");
@@ -289,10 +282,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             };
 
-            let alloca = self
-                .builder
-                .build_alloca(llvm_ty, &b.name)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let alloca = self.entry_alloca(llvm_ty, &b.name)?;
             self.builder
                 .build_store(alloca, value)
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;

@@ -76,10 +76,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .builder
                 .build_load(llvm_ty, field_ptr, &cap.name)
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            let alloca = self
-                .builder
-                .build_alloca(llvm_ty, &cap.name)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let alloca = self.entry_alloca(llvm_ty, &cap.name)?;
             self.builder
                 .build_store(alloca, loaded)
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -94,10 +91,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 CodegenError::InternalError(format!("closure is missing parameter {}", i))
             })?;
             let param_type = param_val.get_type();
-            let alloca = self
-                .builder
-                .build_alloca(param_type, &param.name)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let alloca = self.entry_alloca(param_type, &param.name)?;
             self.builder
                 .build_store(alloca, param_val)
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -137,10 +131,7 @@ impl<'ctx> CodegenContext<'ctx> {
         captures: &[HirCapture],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let env_struct_ty = self.closure_env_type(captures)?;
-        let env_ptr = self
-            .builder
-            .build_alloca(env_struct_ty, "closure.env")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let env_ptr = self.entry_alloca(env_struct_ty, "closure.env")?;
         for (i, cap) in captures.iter().enumerate() {
             let value = self.codegen_identifier(&cap.name)?;
             let field_ptr = self

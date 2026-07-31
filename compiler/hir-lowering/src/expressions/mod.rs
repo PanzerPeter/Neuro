@@ -424,34 +424,7 @@ impl Lowerer {
                 else_if_blocks,
                 else_block,
                 span,
-            } => {
-                let condition = self.lower_expr(condition, Some(&HirType::Bool))?;
-                let (then_stmts, then_ty) = self.lower_block_value(then_block)?;
-                let mut elifs = Vec::with_capacity(else_if_blocks.len());
-                for (cond, block) in else_if_blocks {
-                    let cond = self.lower_expr(cond, Some(&HirType::Bool))?;
-                    let (block, _) = self.lower_block_value(block)?;
-                    elifs.push((cond, block));
-                }
-                // An `if` is a value only with an `else`; otherwise it yields unit.
-                let (else_block, ty) = match else_block {
-                    Some(block) => {
-                        let (block, _) = self.lower_block_value(block)?;
-                        (Some(block), then_ty)
-                    }
-                    None => (None, HirType::Void),
-                };
-                Ok(HirExpr::new(
-                    HirExprKind::If {
-                        condition: Box::new(condition),
-                        then_block: then_stmts,
-                        else_if_blocks: elifs,
-                        else_block,
-                    },
-                    ty,
-                    *span,
-                ))
-            }
+            } => self.lower_if_expr(condition, then_block, else_if_blocks, else_block, *span),
 
             Expr::Block { stmts, span } => {
                 let (stmts, ty) = self.lower_block_value(stmts)?;
@@ -510,6 +483,43 @@ impl Lowerer {
     /// returning the lowered statements and the block's value type — the type of the
     /// trailing expression, or `void`. The tail is typed with no contextual hint,
     /// matching the checker's `check_block_expr_type`.
+    /// Lower an `if` in value position, from either `Expr::If` or a block's trailing
+    /// `Stmt::If`. An `if` is a value only with an `else`; otherwise it yields unit.
+    pub(super) fn lower_if_expr(
+        &mut self,
+        condition: &ast_types::Expr,
+        then_block: &[ast_types::Stmt],
+        else_if_blocks: &[(ast_types::Expr, Vec<ast_types::Stmt>)],
+        else_block: &Option<Vec<ast_types::Stmt>>,
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let condition = self.lower_expr(condition, Some(&HirType::Bool))?;
+        let (then_stmts, then_ty) = self.lower_block_value(then_block)?;
+        let mut elifs = Vec::with_capacity(else_if_blocks.len());
+        for (cond, block) in else_if_blocks {
+            let cond = self.lower_expr(cond, Some(&HirType::Bool))?;
+            let (block, _) = self.lower_block_value(block)?;
+            elifs.push((cond, block));
+        }
+        let (else_block, ty) = match else_block {
+            Some(block) => {
+                let (block, _) = self.lower_block_value(block)?;
+                (Some(block), then_ty)
+            }
+            None => (None, HirType::Void),
+        };
+        Ok(HirExpr::new(
+            HirExprKind::If {
+                condition: Box::new(condition),
+                then_block: then_stmts,
+                else_if_blocks: elifs,
+                else_block,
+            },
+            ty,
+            span,
+        ))
+    }
+
     pub(super) fn lower_block_value(
         &mut self,
         stmts: &[ast_types::Stmt],
@@ -529,8 +539,27 @@ impl Lowerer {
         let last = stmts.len().saturating_sub(1);
         for (i, stmt) in stmts.iter().enumerate() {
             if i == last {
-                if let ast_types::Stmt::Expr(expr) = stmt {
-                    let tail = self.lower_expr(expr, None)?;
+                // An `if` written in statement position parses to `Stmt::If`, never
+                // `Stmt::Expr(Expr::If)`, so a trailing `if/else` has to be recognized
+                // here to carry the block's value.
+                let tail = match stmt {
+                    ast_types::Stmt::Expr(expr) => Some(self.lower_expr(expr, None)?),
+                    ast_types::Stmt::If {
+                        condition,
+                        then_block,
+                        else_if_blocks,
+                        else_block,
+                        span,
+                    } if else_block.is_some() => Some(self.lower_if_expr(
+                        condition,
+                        then_block,
+                        else_if_blocks,
+                        else_block,
+                        *span,
+                    )?),
+                    _ => None,
+                };
+                if let Some(tail) = tail {
                     ty = tail.ty.clone();
                     out.push(HirStmt::Expr(tail));
                     return Ok((out, ty));

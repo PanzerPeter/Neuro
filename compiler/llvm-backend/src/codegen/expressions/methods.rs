@@ -211,6 +211,15 @@ impl<'ctx> CodegenContext<'ctx> {
 
         // `&string` is an opaque pointer to a fat pointer (the `&place` ABI), so spill the
         // computed slice to a stack slot and yield its address.
+        //
+        // Deliberately NOT an `entry_alloca`, unlike every other slot in this backend.
+        // This slot's address escapes: `func head(s: &string) -> &string { s.slice(0..2) }`
+        // hands the caller a pointer into a frame that is already gone, so the value
+        // survives only until the next call reuses that stack region. Moving the slot to
+        // the entry block does not create or cure that defect, but it does change the
+        // frame layout enough to turn it from latent into observable. The real fix is to
+        // give `&string` the by-value `{ ptr, i64 }` representation the ABI documents, at
+        // which point this slot disappears entirely; until then it stays put.
         let slot = self
             .builder
             .build_alloca(fat_ty, "slice.slot")

@@ -116,7 +116,9 @@ result type into `codegen_builtin_method` (`expressions/methods.rs`).
   (`end` = `b+1` for `..=`); runtime bounds (`0 <= start <= end <= len`) and UTF-8 codepoint-boundary
   checks at both endpoints route through `codegen_guard_or_panic` (`panic.rs`) — abort, no unwinding,
   in every build. Result is a `&string`: the computed fat pointer is spilled to an `alloca` and its
-  address returned, matching the `&place` opaque-pointer ABI. The `Expr::Range` argument is consumed
+  address returned, matching the `&place` opaque-pointer ABI. That slot is function-local, so a
+  slice **returned** from a function points into a frame that is gone (BUG-008); consuming a slice
+  where it is produced is correct. The `Expr::Range` argument is consumed
   here; reaching it through general `codegen_expr` is an internal error.
 - `struct.clone()` → handled in the struct method-call arm (not `resolve_builtin_method`, which is
   keyed by `Type`): when receiver is a struct, field is `clone`, and no `StructName__clone` exists,
@@ -146,10 +148,9 @@ the first remaining `else_if` arm (`split_first` recursion), so every arm is mut
 the final `else` is reached only when all conditions are false.
 
 A value-producing `if`/`else` in expression position → `codegen_if_expr`: a result `alloca` written
-per arm, loaded at the merge block. A statement-position `if` (`Stmt::If`) that is the *tail* of a
-function/method body is routed through `codegen_if_expr` by `codegen_body` (else the non-void
-function emits `unreachable` at merge and runs off its end). `record_tail_if_type` (type pass)
-records the tail `if`'s result type so the slot can be allocated (mirrors the `Expr::If` arm).
+per arm, loaded at the merge block. A trailing `if` acting as a block's or a body's value arrives as
+a `HirStmt::Expr` holding an if-expression — hir-lowering owns that promotion, so the backend needs
+no rule of its own and `codegen_body` handles only `HirStmt::Expr` tails.
 
 ## Logical Operator Lowering
 `&&`/`||` short-circuit. `codegen_binary` intercepts them before eager operand evaluation and
@@ -297,6 +298,24 @@ emission layer in all paths.
   still falls through; the frontend has already rejected that case, so this only keeps the emitted
   function verifier-clean. `SavedBinding`, `bind_arm`, and `restore_bindings` moved from private to
   `pub(crate)` for the sharing.
+- 2026-07-31: Stack slots are allocated in the entry block. New `CodegenContext::entry_alloca`
+  (`context.rs`) positions the builder before the entry block's first instruction, allocates, and
+  restores; every local binding, result slot, induction variable, scratch temp, drop flag, and
+  closure environment goes through it. They were `alloca`'d at the current builder position, so a
+  slot inside a loop body was re-allocated per iteration and a long enough loop segfaulted — at every
+  `-O` level, since `mem2reg` only promotes entry-block allocas. The initializing store stays where
+  it was; sharing one slot across iterations is sound because each is written before it is read, and
+  a fresh frame per call keeps recursion correct. Parameter/`self` allocas in `functions.rs` are
+  already in the entry block by construction and stay as they are. The single exception is
+  `slice.slot` in `expressions/methods.rs`, whose address escapes to the caller (BUG-008); the
+  comment there records why it is left positional.
+- 2026-07-31: A nested tail `if` yielded garbage. Same shape as BUG-005, one level down:
+  `codegen_body` recognised a trailing `HirStmt::If` as the implicit return, but nothing recognised
+  one nested inside another block, so its branches' values were discarded. hir-lowering now promotes
+  every trailing `Stmt::If` (with an `else`) to a value expression, at the body tail and in nested
+  blocks alike, so `codegen_body`'s `HirStmt::If` arm became unreachable and is deleted — the rule
+  lives in exactly one slice. Every `unsafe` block here also gained a `// SAFETY:` rationale naming
+  the bound that keeps its GEP in range.
 - 2026-07-28: BUG-005 — a tail `loop` never exited. `HirStmt::Loop` is removed; a statement-position
   loop reaches `codegen_stmt` as `HirStmt::Expr` carrying a `void`-typed loop node, so no result slot
   is allocated and the value is discarded exactly as before. The fix itself is upstream: a trailing

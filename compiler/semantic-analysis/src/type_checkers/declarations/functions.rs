@@ -12,14 +12,18 @@ use shared_types::Span;
 use std::collections::HashMap;
 
 impl TypeChecker {
-    /// Check a function definition.
+    /// Register a function's signature without checking its body.
+    ///
+    /// Run over every function before any body is checked, so a call resolves
+    /// regardless of source order — the same order-independence structs, enums,
+    /// traits, and constants already get, and what mutual recursion requires.
     ///
     /// A generic function (non-empty `func.generics`) is a template: its type
-    /// parameters are put in scope so the signature and body type-check with
-    /// [`Type::Generic`] placeholders, and its signature is recorded in `generic_funcs`
-    /// rather than `functions`. Concrete instantiation happens per call site.
-    pub(crate) fn check_function(&mut self, func: &FunctionDef) -> Option<()> {
-        // Put the generic type + const parameters in scope for signature + body
+    /// parameters are put in scope so the signature resolves with [`Type::Generic`]
+    /// placeholders, and it is recorded in `generic_funcs` rather than `functions`.
+    /// Concrete instantiation happens per call site.
+    pub(crate) fn register_function_signature(&mut self, func: &FunctionDef) -> Option<()> {
+        // Put the generic type + const parameters in scope for signature
         // resolution. A parameter may not shadow a built-in type name.
         self.enter_generic_scope(&func.generics, &func.lifetimes);
 
@@ -120,6 +124,27 @@ impl TypeChecker {
             );
         }
 
+        self.exit_generic_scope();
+        Some(())
+    }
+
+    /// Check a function body against the signature [`Self::register_function_signature`]
+    /// already recorded for it.
+    pub(crate) fn check_function(&mut self, func: &FunctionDef) -> Option<()> {
+        // Re-enter the generic scope the signature was resolved in; the body needs the
+        // same `Type::Generic` placeholders and const-parameter values.
+        self.enter_generic_scope(&func.generics, &func.lifetimes);
+
+        let (param_types, return_type) = match self.lookup_registered_signature(func) {
+            Some(sig) => sig,
+            // Signature registration failed (a duplicate definition, already reported);
+            // there is nothing sound to check the body against.
+            None => {
+                self.exit_generic_scope();
+                return None;
+            }
+        };
+
         // Enter function scope
         self.symbols.push_scope();
         self.current_function_return_type = Some(return_type.clone());
@@ -201,6 +226,19 @@ impl TypeChecker {
         self.exit_generic_scope();
 
         Some(())
+    }
+
+    /// The `(parameter types, return type)` recorded for `func` by the signature pass,
+    /// read back from whichever table its genericity put it in.
+    fn lookup_registered_signature(&self, func: &FunctionDef) -> Option<(Vec<Type>, Type)> {
+        if func.generics.is_empty() {
+            let Some(Type::Function { params, ret }) = self.functions.get(&func.name.name) else {
+                return None;
+            };
+            return Some((params.clone(), (**ret).clone()));
+        }
+        let sig = self.generic_funcs.get(&func.name.name)?;
+        Some((sig.params.clone(), sig.ret.clone()))
     }
 
     /// Resolve a return-position `impl Trait` to the single concrete type the

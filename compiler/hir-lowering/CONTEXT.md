@@ -18,6 +18,14 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
 - thiserror — `LoweringError` derivation
 
 ## Notes
+- 2026-07-31: A trailing `Stmt::If` is a value at every depth. `Expr::If` lowering moved into
+  `lower_if_expr` (`expressions/mod.rs`), and both tail rules — `lower_body_stmts` (`items.rs`, the
+  implicit return) and `lower_block_value_inner` (`expressions/mod.rs`, every nested block) — now
+  route a trailing `Stmt::If` carrying an `else` through it, emitting `HirStmt::Expr`. Only the
+  function body used to recognise it, so a nested tail `if` lowered via `lower_stmt_block` and its
+  branches' values were discarded; a generic-enum construction inside one also lost its payload,
+  since a branch that is not a value position never reaches the `current_return` instance fallback.
+  The rule now lives only here — the LLVM backend's `codegen_body` no longer carries its own copy.
 - 2026-07-31: `val-else`. New `val_else.rs`: `lower_val_else` reuses `pattern_test` /
   `pattern_bindings` from `expressions/matches.rs` (both now `pub(crate)`) for the success test and
   bindings, lowers the `else` branch in a pushed scope with its own binding, then defines the

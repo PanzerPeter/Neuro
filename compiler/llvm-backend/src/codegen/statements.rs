@@ -38,9 +38,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let alloca_ty = self.get_any_llvm_type(&target_sem)?;
             let final_val = self.coerce_if_needed(val, alloca_ty, &target_sem)?;
 
-            let alloca = self.builder.build_alloca(alloca_ty, name).map_err(|e| {
-                CodegenError::LlvmError(format!("failed to allocate variable: {}", e))
-            })?;
+            let alloca = self.entry_alloca(alloca_ty, name)?;
             self.builder.build_store(alloca, final_val).map_err(|e| {
                 CodegenError::LlvmError(format!("failed to store initial value: {}", e))
             })?;
@@ -419,11 +417,7 @@ impl<'ctx> CodegenContext<'ctx> {
             None
         } else {
             let llvm_ty = self.get_any_llvm_type(&result_ty)?;
-            Some(
-                self.builder
-                    .build_alloca(llvm_ty, "loopexpr.result")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?,
-            )
+            Some(self.entry_alloca(llvm_ty, "loopexpr.result")?)
         };
 
         let body_bb = self.context.append_basic_block(parent_fn, "loop.body");
@@ -509,10 +503,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // Record the iterator's type so a body place statement can recover it.
         self.type_env.insert(iter_name.clone(), iter_sem_ty.clone());
 
-        let iter_alloca = self
-            .builder
-            .build_alloca(start_val.get_type(), &iter_name)
-            .map_err(|e| CodegenError::LlvmError(format!("failed to allocate iterator: {}", e)))?;
+        let iter_alloca = self.entry_alloca(start_val.get_type(), &iter_name)?;
         self.builder
             .build_store(iter_alloca, start_val)
             .map_err(|e| {

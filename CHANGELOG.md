@@ -9,6 +9,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.68.1] - 2026-07-31
+
+### Fixed
+- `semantic`, `codegen`: a **nested** trailing `if`/`else` is now the value of the
+  block that contains it. Only the function-body tail recognised a trailing `if` as
+  value-producing, so an `if` written as the last thing inside another block — an
+  if-branch, a bare block, a block with statements before it — lowered as a plain
+  statement and whatever it evaluated to was discarded:
+
+  ```neuro
+  func classify(c: i32) -> i32 {
+      if c <= 0 { 7 } else { if c > 50 { 3 } else { c } }   // returned garbage
+  }
+  ```
+
+  The same shape returning a generic enum constructed the right variant with a
+  **zeroed payload**, because a branch that is not a value position never inherits
+  the enclosing function's return instance and so lowered against the erased
+  template. Both are the one defect. The checker also typed such an `if` as `void`,
+  making `val r = if a { x } else { if b { y } else { z } }` a spurious type error.
+
+  The promotion now lives in exactly one place — hir-lowering, for the function-body
+  tail and for every nested block alike — and the backend's separate copy of the rule
+  is gone.
+
+- `semantic`: a function may now be **called before it is defined**. Free-function
+  signatures were registered by the body-checking pass itself, which runs in source
+  order, so any forward reference was `undefined function` and mutual recursion could
+  not be written at all:
+
+  ```neuro
+  func is_even(n: i32) -> bool { if n == 0 { true } else { is_odd(n - 1) } }
+  func is_odd(n: i32) -> bool { if n == 0 { false } else { is_even(n - 1) } }
+  ```
+
+  Every other item kind — structs, enums, traits, constants — was already
+  order-independent, and the LLVM backend already pre-declared every signature; only
+  the type checker insisted on definition-before-use. Signatures are now registered in
+  their own pass ahead of any body check.
+
+- `codegen`: a loop no longer grows the stack once per iteration. Every local binding and
+  every result or scratch slot was `alloca`'d at the current builder position, so a slot
+  inside a loop body was allocated again on each pass and an ordinary counted loop
+  segfaulted once it ran long enough:
+
+  ```neuro
+  mut i = 0
+  while i < 2000000 {
+      val v = i % 2      // one fresh stack slot per iteration
+      i = i + 1
+  }
+  ```
+
+  `mem2reg` could not rescue it — the pass only promotes allocas already in the entry
+  block — so the crash reproduced at every optimization level, `-O0` through `-O3`. All
+  such slots now go through a new `entry_alloca`, which allocates in the function's entry
+  block and leaves the initializing store where it was. Recursion is unaffected (each call
+  gets its own frame), and the loops become promotable, so they optimize as well.
+
+- `codegen`: every `unsafe` block in the LLVM backend carries a `// SAFETY:` rationale
+  naming the bound that makes its pointer arithmetic in-range.
+
+### Known Issues
+- `codegen`: a `&string` produced by `.slice(range)` and **returned from a function**
+  points into the callee's dead frame, so a later call can clobber it. Pre-existing at
+  v1.68.0 (verified against a clean tree). Consuming a slice in the function that produced
+  it is correct; only returning one across a call boundary is affected. The real fix is to
+  give `&string` the by-value `{ ptr, i64 }` representation the string ABI already
+  documents, which is an ABI change and gets its own pass. This is also why the one
+  `slice.slot` allocation is deliberately left out of the entry-block hoisting above — the
+  code comment there explains it.
+
+- `tests`: dropped an internal spec-section marker from a parser test comment, which
+  the documentation hygiene check rejects.
+
 ## [1.68.0] - 2026-07-31
 
 ### Added
@@ -53,10 +128,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   precisely because its bindings outlive it.
 
 ### Known Issues
-- `docs`: recorded BUG-006 — a function returning a generic enum from a *nested*
-  `if`/`else` tail constructs the right variant with a zeroed payload. Pre-existing at
-  v1.67.0 (verified against a clean tree) and independent of this release; the examples
-  use the early-`return` form as the workaround. See `.idea/bugs.md`.
+- `docs`: a function returning a generic enum from a *nested* `if`/`else` tail
+  constructs the right variant with a zeroed payload. Pre-existing at v1.67.0 (verified
+  against a clean tree) and independent of this release; the examples use the
+  early-`return` form as the workaround. Fixed in 1.68.1.
 
 ## [1.67.0] - 2026-07-28
 

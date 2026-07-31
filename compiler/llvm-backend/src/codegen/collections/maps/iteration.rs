@@ -67,14 +67,8 @@ impl<'ctx> CodegenContext<'ctx> {
             CollectionKind::HashMap => self.load_header_field(header, FIELD_CAP, "cap")?,
             _ => self.load_header_field(header, FIELD_LEN, "len")?,
         };
-        let slot_slot = self
-            .builder
-            .build_alloca(i64_ty, "slot")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let out_slot = self
-            .builder
-            .build_alloca(i64_ty, "out.i")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let slot_slot = self.entry_alloca(i64_ty, "slot")?;
+        let out_slot = self.entry_alloca(i64_ty, "out.i")?;
         for target in [slot_slot, out_slot] {
             self.builder
                 .build_store(target, i64_ty.const_zero())
@@ -125,6 +119,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?
             .into_int_value();
         let key_llvm = self.collection_value_type(key_ty)?;
+        // SAFETY: `out` was allocated with the map's `used` count and `out_index` is
+        // incremented once per live slot taken, so it never reaches that count.
         let dst = unsafe {
             self.builder
                 .build_in_bounds_gep(key_llvm, out, &[out_index], "out.slot")

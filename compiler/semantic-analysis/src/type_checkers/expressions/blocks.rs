@@ -116,15 +116,35 @@ impl TypeChecker {
     }
 
     /// Check all stmts in a block and return the type of the trailing expression, or Void.
+    ///
+    /// An `if` written in statement position parses to `Stmt::If`, never
+    /// `Stmt::Expr(Expr::If)`, so a trailing `if/else` has to be recognized here to
+    /// carry the block's value — the same rule the function-body tail applies.
     pub(super) fn check_block_expr_type(&mut self, stmts: &[ast_types::Stmt]) -> Type {
         self.symbols.push_scope();
         let mut result = Type::Void;
         for (i, stmt) in stmts.iter().enumerate() {
             if i == stmts.len() - 1 {
-                if let ast_types::Stmt::Expr(expr) = stmt {
-                    result = self.check_expr(expr, None).unwrap_or(Type::Unknown);
-                    self.symbols.pop_scope();
-                    return result;
+                match stmt {
+                    ast_types::Stmt::Expr(expr) => {
+                        result = self.check_expr(expr, None).unwrap_or(Type::Unknown);
+                        self.symbols.pop_scope();
+                        return result;
+                    }
+                    ast_types::Stmt::If {
+                        condition,
+                        then_block,
+                        else_if_blocks,
+                        else_block,
+                        span,
+                    } if else_block.is_some() => {
+                        result = self
+                            .check_if_expr(condition, then_block, else_if_blocks, else_block, span)
+                            .unwrap_or(Type::Unknown);
+                        self.symbols.pop_scope();
+                        return result;
+                    }
+                    _ => {}
                 }
             }
             let _ = self.check_stmt(stmt);

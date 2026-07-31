@@ -1,4 +1,4 @@
-// Parsing for the `val PATTERN = value else |binding| { ... }` statement (§8.2).
+// Parsing for the `val PATTERN = value else |binding| { ... }` statement.
 
 use syntax_parsing::{parse, EnumPatternPayload, Item, Pattern, Stmt};
 

@@ -56,10 +56,7 @@ impl<'ctx> CodegenContext<'ctx> {
         target: DropTarget,
     ) -> CodegenResult<()> {
         let bool_ty = self.context.bool_type();
-        let flag_ptr = self
-            .builder
-            .build_alloca(bool_ty, "drop.flag")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let flag_ptr = self.entry_alloca(bool_ty, "drop.flag")?;
         self.builder
             .build_store(flag_ptr, bool_ty.const_int(1, false))
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;

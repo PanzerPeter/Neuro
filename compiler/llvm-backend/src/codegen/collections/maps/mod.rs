@@ -188,10 +188,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
         let value_llvm = self.collection_value_type(value_ty)?;
-        let out = self
-            .builder
-            .build_alloca(value_llvm, "map.read")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let out = self.entry_alloca(value_llvm, "map.read")?;
         self.builder
             .build_store(out, value_llvm.const_zero())
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -335,6 +332,8 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<PointerValue<'ctx>> {
         let buffer = self.load_header_buffer(header)?;
         let slot_ty = self.map_slot_type(kind, key_ty, value_ty)?;
+        // SAFETY: `slot` always comes from a probe or binary search bounded by the
+        // header's capacity, so the record lies inside the allocated slot buffer.
         unsafe {
             self.builder
                 .build_in_bounds_gep(slot_ty, buffer, &[slot], "map.slot")

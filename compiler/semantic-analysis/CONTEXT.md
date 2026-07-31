@@ -41,6 +41,12 @@ Multi-pass `check_program` — numbered passes below, with lettered sub-passes s
    Drop state is kept on the checker.
 3. Pre-register all `Item::Const` names/types into `constants` (forward refs + cross-function
    visibility, no ordering constraint).
+3b. Pre-register every `Item::Function` signature via `register_function_signature` — parameter
+   and return types resolved in the function's generic scope, then recorded in `functions` (or
+   `generic_funcs` for a template), along with the duplicate-name check. Runs over all functions
+   before any body is checked, so a call resolves regardless of source order and mutually recursive
+   functions can name each other. `check_function` reads the signature back
+   (`lookup_registered_signature`) rather than resolving it a second time.
 4. Full-check: `check_function` / `check_impl` / `check_const_item`.
 5. Lint pass: `run_lints` walks bodies collecting non-fatal `Warning`s. Currently
    `prefer-loop-over-while-true`, silenced by `@allow(prefer_loop_over_while_true)`. Lints run
@@ -108,6 +114,12 @@ and checked afterwards with the declared return type as its expected type. Check
 places re-ran its effects — a by-value argument was recorded as moved twice, and the second read
 then reported a use of the value the expression had moved itself — and duplicated any diagnostic
 the tail produced. The method loop in `declarations.rs` follows the same rule.
+
+A trailing `if`/`else` is a value too, at every depth. An `if` in statement position parses to
+`Stmt::If`, never `Stmt::Expr(Expr::If)`, so `check_block_expr_type` matches a trailing `Stmt::If`
+carrying an `else` and routes it through `check_if_expr`. Without that, an `if` written as the last
+thing inside an if-branch or a bare block typed as `void`, which made
+`val r = if a { x } else { if b { y } else { z } }` a spurious mismatch.
 
 Borrow exclusivity (`symbol_table.rs` + the `Expr::Reference` arm): each binding tracks
 borrows taken *against its place* — persistent counts (a borrow held by a reference binding via

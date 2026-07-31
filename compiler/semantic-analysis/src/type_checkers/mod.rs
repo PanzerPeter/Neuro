@@ -484,6 +484,15 @@ impl TypeChecker {
             }
         }
 
+        // Pass 3b: register every free function's signature before any body is checked,
+        // so a call resolves regardless of source order — and so mutually recursive
+        // functions can name each other at all.
+        for item in items {
+            if let Item::Function(func) = item {
+                let _ = self.register_function_signature(func);
+            }
+        }
+
         // Pass 4: check function, method, and const bodies.
         for item in items {
             match item {
