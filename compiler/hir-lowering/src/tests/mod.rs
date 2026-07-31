@@ -6,6 +6,7 @@ mod generic_tests;
 mod match_tests;
 mod newtype_tests;
 mod trait_tests;
+mod val_else_tests;
 
 use crate::lower_program;
 use neuro_hir::{HirExpr, HirItem, HirProgram, HirStmt};

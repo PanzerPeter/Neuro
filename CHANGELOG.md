@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.68.0] - 2026-07-31
+
+### Added
+- `semantic`: `val-else` binding — `val PATTERN = value else |binding| { ... }`
+  unwraps a refutable pattern or leaves the enclosing scope.
+
+  ```neuro
+  func doubled_or_error(raw: i32) -> i32 {
+      val Result::Ok(value) = parse(raw) else |err| { return err }
+      value + 1        // `value` is in scope for the rest of the block
+  }
+  ```
+
+  The pattern's bindings live for the **rest of the enclosing block**, not just one
+  arm — the difference from a one-armed `match`, and the reason the construct exists.
+  The `else` branch must **exit the scope** (`return`, `break`, `continue`,
+  `panic(...)`, `unreachable()`); one that can fall through is rejected with
+  `ValElseMustDiverge`, which is what guarantees the binding is initialized on the
+  path that continues.
+
+  The optional `else |name|` is a dedicated production, **not** a closure literal, and
+  what it names is decided by the scrutinee's type: a `Result<T, E>` binds the `Err`
+  payload, an `Option<T>` binds nothing (only `|_|` or a bare `else` is accepted —
+  `None` is empty, so a named binding is `ValElseBindingOnOption`), and any other enum
+  binds the whole scrutinee, unmodified, for the else branch to discriminate with a
+  nested `match`. Because `break` counts as leaving the scope, `val-else` is also the
+  natural drain loop:
+
+  ```neuro
+  loop {
+      val Option::Some(v) = next(i) else { break }
+      total = total + v
+      i = i + 1
+  }
+  ```
+
+  Parsing keys off the two-token marker `val Name::` — a binding name is always
+  followed by `:`, `=`, or a newline — so `val Point { x, y } = p` still desugars as a
+  struct destructure. The pattern, its success test, and its bindings reuse the `match`
+  machinery unchanged (`Pattern`, `HirMatchTest`, `HirMatchBinding`); the one new node
+  is `Stmt::ValElse` / `HirStmt::ValElse`, a *statement* rather than a `Match` variant
+  precisely because its bindings outlive it.
+
+### Known Issues
+- `docs`: recorded BUG-006 — a function returning a generic enum from a *nested*
+  `if`/`else` tail constructs the right variant with a zeroed payload. Pre-existing at
+  v1.67.0 (verified against a clean tree) and independent of this release; the examples
+  use the early-`return` form as the workaround. See `.idea/bugs.md`.
+
 ## [1.67.0] - 2026-07-28
 
 ### Added

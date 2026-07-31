@@ -160,8 +160,12 @@ impl Parser {
         match &token.kind {
             TokenKind::Val => {
                 let start_span = token.span;
+                let val_else = self.starts_val_else();
                 self.advance(); // consume 'val'
                 self.skip_newlines();
+                if val_else {
+                    return self.parse_val_else(start_span);
+                }
                 self.parse_var_decl(false, start_span)
             }
             TokenKind::Mut => {
@@ -378,6 +382,7 @@ impl Parser {
 pub(crate) fn stmt_span(stmt: &Stmt) -> shared_types::Span {
     match stmt {
         Stmt::VarDecl { span, .. } => *span,
+        Stmt::ValElse { span, .. } => *span,
         Stmt::Const { span, .. } => *span,
         Stmt::Assignment { span, .. } => *span,
         Stmt::Return { span, .. } => *span,

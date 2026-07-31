@@ -18,6 +18,14 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
 - thiserror — `LoweringError` derivation
 
 ## Notes
+- 2026-07-31: `val-else`. New `val_else.rs`: `lower_val_else` reuses `pattern_test` /
+  `pattern_bindings` from `expressions/matches.rs` (both now `pub(crate)`) for the success test and
+  bindings, lowers the `else` branch in a pushed scope with its own binding, then defines the
+  pattern's bindings in the ENCLOSING scope so later statements type against them.
+  `resolve_else_binding` mirrors the checker's binding table off `enum_instance_base`: a `Result`'s
+  `Err` payload (slot 0), `None` for `Option`, else the whole scrutinee. `enum_variant` is now
+  `pub(crate)`. The table is duplicated from the checker's rather than shared — the two slices stay
+  independent, and a divergence surfaces as a `LoweringError`.
 - 2026-07-28: `??` full implementation. New `expressions/coalesce.rs`: the `Expr::Binary` dispatch
   hands `BinaryOp::NullCoalesce` to `lower_null_coalesce`, which desugars `lhs ?? fallback` into
   `HirExprKind::Match` — arm 0 tests the `Some`/`Ok` tag and binds payload slot 0 as

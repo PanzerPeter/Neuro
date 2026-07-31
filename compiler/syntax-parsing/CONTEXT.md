@@ -57,6 +57,14 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-07-31: `val-else`. New `stmt_val_else.rs`: `parse_stmt`'s `Val` arm consults
+  `starts_val_else` (an `Identifier` followed by `ColonColon` after the keyword) before falling
+  through to `parse_var_decl`. That two-token marker is unambiguous — a binding name is followed by
+  `:`, `=`, or a newline — and it is checked ahead of `starts_destructure_pattern`, so
+  `val Point { x, y } = p` still desugars as a struct destructure while `val Shape::Circle { r } = s
+  else { ... }` parses as a `val-else`. `parse_pattern` is now `pub(super)` and shared with
+  `patterns.rs`. The `|name|` after `else` is a dedicated production, not a closure literal.
+  `stmt_span` and the type-alias rewrite walker gained `Stmt::ValElse` arms.
 - 2026-07-28: `parse_loop_stmt` returns `Stmt::Expr(Expr::Loop { .. })` instead of the removed
   `Stmt::Loop`; `stmt_span` and the type-alias rewrite walker lose their `Stmt::Loop` arms (both
   already reach the node through `Stmt::Expr`). `items.rs` and `statements.rs` are split by item and

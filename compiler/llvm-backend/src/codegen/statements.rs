@@ -774,6 +774,17 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.codegen_deref_assignment(pointer, value)
             }
 
+            HirStmt::ValElse {
+                scrutinee,
+                test,
+                bindings,
+                else_binding,
+                else_block,
+                ..
+            } => {
+                self.codegen_val_else(scrutinee, test, bindings, else_binding.as_ref(), else_block)
+            }
+
             HirStmt::Const {
                 name, ty, value, ..
             } => {

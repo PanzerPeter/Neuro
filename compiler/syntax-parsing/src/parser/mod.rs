@@ -15,6 +15,7 @@ mod statements;
 mod stmt_assignments;
 mod stmt_destructure;
 mod stmt_loops;
+mod stmt_val_else;
 mod type_aliases;
 mod types;
 

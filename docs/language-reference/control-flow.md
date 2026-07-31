@@ -461,6 +461,76 @@ Enum variants deconstruct and bind their payloads (`E::Tuple(a)`,
 [Expressions → Match Expressions](expressions.md) for the full pattern grammar,
 exhaustiveness rules, and current Phase-1E limits.
 
+## `val-else` — Unwrap or Leave the Scope
+
+`val PATTERN = value else { ... }` binds a refutable pattern and hands the failure to
+an `else` branch. The bindings are live for the **rest of the enclosing block**, not
+just one arm — which is what makes it the straight-line alternative to a `match` whose
+success arm would otherwise swallow the whole function:
+
+```neuro
+func doubled_or_error(raw: i32) -> i32 {
+    val Result::Ok(value) = parse(raw) else |err| { return err }
+    value + 1        // `value` is in scope from here on
+}
+```
+
+The `else` branch **must exit the scope** — `return`, `break`, `continue`,
+`panic(...)`, or `unreachable()`. A branch that can fall through is rejected, so the
+binding is guaranteed initialized on the path that continues:
+
+```
+error: the `else` branch of a `val-else` can fall through: it must exit the scope
+       with `return`, `break`, `continue`, `panic(...)`, or `unreachable()`
+```
+
+### The `else |binding|` form
+
+Writing `else |name|` after `else` binds the value the failure carried. This is a
+dedicated `val-else` production, **not** a closure literal. What `name` refers to is
+decided by the scrutinee's type:
+
+| Scrutinee type | `else \|name\|` binds |
+| --- | --- |
+| `Result<T, E>` | the `Err` payload (`Result::Err(e)` → `e: E`) |
+| `Option<T>` | nothing — `None` is empty, so only `\|_\|` (or a bare `else`) is accepted |
+| any other enum | the original scrutinee, unmodified, for a nested `match` |
+
+`Option` and `Result` have exactly one "other" variant, so the payload to unwrap is
+unambiguous. A general enum has several, so `|name|` hands back the whole value and the
+branch discriminates further:
+
+```neuro
+func area(s: Shape) -> i32 {
+    val Shape::Circle { radius } = s else |other| {
+        match other {
+            Shape::Square(side) => { return side * side },
+            _ => { return 0 }
+        }
+    }
+    radius * 3
+}
+```
+
+Naming an `Option`'s binding is rejected, since there is nothing to name:
+
+```
+error: `else |e|` has nothing to bind: `Option::None` carries no payload;
+       write `else` or `else |_|`
+```
+
+Because `break` counts as leaving the scope, `val-else` is also the natural drain loop:
+
+```neuro
+loop {
+    val Option::Some(v) = next(i) else { break }
+    total = total + v
+    i = i + 1
+}
+```
+
+Runnable program: [`examples/control_flow/val_else.nr`](../../examples/control_flow/val_else.nr).
+
 ## References
 
 - [Expressions](expressions.md) - Boolean expressions

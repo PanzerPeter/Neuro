@@ -28,6 +28,14 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-07-31: `val-else`. Added `Stmt::ValElse { pattern, value, else_binding, else_block, span }` —
+  `val PATTERN = value else |binding| { ... }`. Unlike the tuple/struct/array destructuring binds
+  (parse-time desugars that never reach the AST), this one survives: its pattern is refutable, so the
+  test and the failure branch have to be represented. `pattern` reuses the existing `Pattern` node set
+  from `match`; `else_binding` is the optional `|name|` (an `Identifier` named `_` is the written
+  wildcard, distinct from `None`). Also added `Pattern::binding_names()`, a pure structural query used
+  by both closure free-variable walkers. Interpreted by semantic-analysis (type-directed else binding
+  + divergence rule) and hir-lowering.
 - 2026-07-28: One `loop` node. `Stmt::Loop` is removed; `Expr::Loop` is the sole loop node and now
   carries the `label`, so a statement-position `loop` is `Stmt::Expr(Expr::Loop { .. })`. Two shapes
   for one construct meant every "is the tail statement value-producing?" test in the pipeline — all

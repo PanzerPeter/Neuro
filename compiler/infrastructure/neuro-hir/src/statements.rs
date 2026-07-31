@@ -2,7 +2,7 @@
 
 use shared_types::Span;
 
-use crate::expressions::HirExpr;
+use crate::expressions::{HirExpr, HirMatchBinding, HirMatchTest};
 use crate::types::HirType;
 
 /// A typed HIR statement.
@@ -84,6 +84,22 @@ pub enum HirStmt {
         target: String,
         index: HirExpr,
         value: HirExpr,
+        span: Span,
+    },
+    /// `val PATTERN = scrutinee else |binding| { ... }`, fully resolved.
+    ///
+    /// `test` decides the success path; `bindings` are then materialized into the
+    /// ENCLOSING scope and stay live for every statement after this one — the
+    /// difference from a [`HirExprKind::Match`](crate::HirExprKind::Match) arm, whose
+    /// bindings die with the arm. `else_binding` is scoped to `else_block` alone. The
+    /// frontend has verified that `else_block` diverges, so control leaves the scope
+    /// on the failure path and never rejoins the success path.
+    ValElse {
+        scrutinee: HirExpr,
+        test: HirMatchTest,
+        bindings: Vec<HirMatchBinding>,
+        else_binding: Option<HirMatchBinding>,
+        else_block: Vec<HirStmt>,
         span: Span,
     },
     /// Function-body compile-time constant.

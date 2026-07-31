@@ -70,6 +70,7 @@ control_flow/loop_value.nr            0
 control_flow/panic_assert.nr          7
 control_flow/pattern_matching.nr      209
 control_flow/unsafe_block.nr          24
+control_flow/val_else.nr              61
 control_flow/while_true_lint.nr       7
 
 # --- structs & methods ----------------------------------------------------
@@ -85,6 +86,7 @@ showcase/closures.nr        90
 showcase/enum_records.nr    46
 showcase/generic_toolkit.nr 85
 showcase/inventory_ledger.nr 181
+showcase/job_queue.nr       139
 showcase/mutable_borrows.nr 47
 showcase/num_algorithms.nr  33
 showcase/perceptron.nr      8

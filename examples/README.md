@@ -13,7 +13,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference |
 | `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result` |
-| `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable` |
+| `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
 | `showcase/`      | **Bigger programs that combine many features at once** — incl. mutable borrows `&mut T` + `*` deref (`mutable_borrows.nr`) |
 
@@ -93,6 +93,13 @@ isolation:
   body and explicit return type, and a struct `impl` method — all combined with
   fixed-size arrays + indexed iteration and a `while` loop. Each closure is lifted to a
   `{ fn_ptr, env_ptr }` value; the environment holds the captured value. Exit `90`.
+- [`showcase/job_queue.nr`](showcase/job_queue.nr) — **`val-else`**: three stages of a
+  job queue each unwrap-or-exit, exercising all three `else` forms — `|reason|` naming a
+  `Result`'s `Err` payload, `|verdict|` naming a plain enum's whole scrutinee for a nested
+  `match`, and a bare `else { break }` draining a `Vec` through `pop`. Combined with `??`
+  defaulting an absent lookup, a `@derive(Copy)` struct with an associated function and
+  `&self` method, an enum + guarded `match`, a fixed-size array, a range-`for`, and
+  `for`-in over the collection. Exit `139`.
 - [`showcase/scan_guard.nr`](showcase/scan_guard.nr) — **deterministic `Drop` +
   labeled breaks**: two `impl Drop` scope guards sharing a `&mut i32` counter while a
   labeled `break` exits *two* nested loops at once, proving the destructors still run

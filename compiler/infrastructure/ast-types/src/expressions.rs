@@ -301,6 +301,34 @@ impl Pattern {
             Pattern::Enum { span, .. } => *span,
         }
     }
+
+    /// The names this pattern binds, in declaration order. A `_` wildcard and the
+    /// literal/range forms bind nothing.
+    pub fn binding_names(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        self.collect_binding_names(&mut names);
+        names
+    }
+
+    fn collect_binding_names(&self, names: &mut Vec<String>) {
+        match self {
+            Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Range { .. } => {}
+            Pattern::Binding(ident) => names.push(ident.name.clone()),
+            Pattern::Enum { payload, .. } => match payload {
+                EnumPatternPayload::Unit => {}
+                EnumPatternPayload::Tuple(subs) => {
+                    for sub in subs {
+                        sub.collect_binding_names(names);
+                    }
+                }
+                EnumPatternPayload::Struct(fields) => {
+                    for field in fields {
+                        field.pattern.collect_binding_names(names);
+                    }
+                }
+            },
+        }
+    }
 }
 
 impl Expr {
