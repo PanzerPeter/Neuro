@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.68.3] - 2026-07-31
+
+### Removed
+- `ci`: the Dependabot configuration. It proposed bumps to the newest release of
+  every dependency regardless of what the pinned toolchain supports, so
+  dependency updates are made by hand from now on.
+
 ## [1.68.2] - 2026-07-31
 
 ### Fixed
