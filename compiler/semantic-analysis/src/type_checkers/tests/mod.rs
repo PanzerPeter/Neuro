@@ -15,6 +15,7 @@ mod match_tests;
 mod newtype_tests;
 mod string_tests;
 mod trait_tests;
+mod try_tests;
 mod val_else_tests;
 
 use super::TypeChecker;

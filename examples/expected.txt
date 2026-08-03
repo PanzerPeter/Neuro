@@ -55,6 +55,7 @@ types/underscore_separators.nr      0
 # --- operators ------------------------------------------------------------
 operators/bitwise_ops.nr          1
 operators/compound_assignment.nr  21
+operators/error_propagation.nr    129
 operators/integer_methods.nr      0
 operators/null_coalesce.nr        75
 operators/operator_overloading.nr 24
@@ -91,6 +92,7 @@ showcase/mutable_borrows.nr 47
 showcase/num_algorithms.nr  33
 showcase/perceptron.nr      8
 showcase/running_stats.nr   5
+showcase/sample_audit.nr    177
 showcase/scan_guard.nr      160
 showcase/sensor_pipeline.nr 57
 showcase/shape_traits.nr    161

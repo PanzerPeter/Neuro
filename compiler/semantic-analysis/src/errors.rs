@@ -333,6 +333,17 @@ pub enum TypeError {
     #[error("`??` expects an `Option<T>` or `Result<T, E>` on the left, found {found} at {span:?}: `??` unwraps a fallible value or falls back")]
     NullCoalesceOnNonFallible { found: Type, span: Span },
 
+    #[error("`?` expects an `Option<T>` or `Result<T, E>`, found {found} at {span:?}: `?` unwraps a fallible value or propagates its failure")]
+    TryOnNonFallible { found: Type, span: Span },
+
+    #[error("`?` on a {operand} at {span:?} has nowhere to propagate: the enclosing function returns {found}, but it must return an `{expected}` for the failure to be forwarded; otherwise handle the value with `match`, `??`, or `val-else`")]
+    TryOutsideFallibleFunction {
+        operand: Type,
+        expected: String,
+        found: Type,
+        span: Span,
+    },
+
     #[error("the `else` branch of a `val-else` at {span:?} can fall through: it must exit the scope with `return`, `break`, `continue`, `panic(...)`, or `unreachable()`")]
     ValElseMustDiverge { span: Span },
 

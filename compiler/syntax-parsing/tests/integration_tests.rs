@@ -360,6 +360,42 @@ fn test_null_coalesce_is_right_associative() {
     assert!(matches!(*ir, Expr::Identifier(ref id) if id.name == "c"));
 }
 
+// `?` (error propagation) — a postfix operator binding as tightly as a call.
+#[test]
+fn test_try_is_postfix_and_binds_tighter_than_arithmetic() {
+    use syntax_parsing::{parse_expr, BinaryOp, Expr};
+
+    // `f(x)? + 1` propagates the call's failure and adds to the unwrapped payload.
+    let expr = parse_expr("f(x)? + 1").expect("parse should succeed");
+
+    let Expr::Binary {
+        left, op, right, ..
+    } = expr
+    else {
+        panic!("expected top-level binary expression, got {:?}", expr);
+    };
+    assert_eq!(op, BinaryOp::Add);
+    assert!(matches!(*right, Expr::Literal(..)));
+
+    let Expr::Try { operand, .. } = *left else {
+        panic!("the left operand must be the `?` propagation");
+    };
+    assert!(matches!(*operand, Expr::Call { .. }));
+}
+
+#[test]
+fn test_try_chains_with_field_access() {
+    use syntax_parsing::{parse_expr, Expr};
+
+    // `parse(s)?.field` reads a field of the UNWRAPPED value, so `?` applies first.
+    let expr = parse_expr("parse(s)?.field").expect("parse should succeed");
+
+    let Expr::FieldAccess { object, .. } = expr else {
+        panic!("expected a field access at the top, got {:?}", expr);
+    };
+    assert!(matches!(*object, Expr::Try { .. }));
+}
+
 #[test]
 fn test_null_coalesce_binds_looser_than_logical_or() {
     use syntax_parsing::{parse_expr, BinaryOp, Expr};

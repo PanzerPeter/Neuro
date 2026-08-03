@@ -57,6 +57,11 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-08-03: Error propagation. `parse_infix` gains a `TokenKind::Question` arm producing
+  `Expr::Try`, and `get_precedence` maps `?` to `Precedence::Call` — postfix, binding as tightly as
+  a call or index, so `f(x)? + 1` adds to the unwrapped payload and `parse(s)?.field` reads a field
+  of it. No new precedence level is needed (Appendix B row 1). The type-alias rewrite walker gained
+  the `Expr::Try` arm.
 - 2026-07-31: `val-else`. New `stmt_val_else.rs`: `parse_stmt`'s `Val` arm consults
   `starts_val_else` (an `Identifier` followed by `ColonColon` after the keyword) before falling
   through to `parse_var_decl`. That two-token marker is unambiguous — a binding name is followed by

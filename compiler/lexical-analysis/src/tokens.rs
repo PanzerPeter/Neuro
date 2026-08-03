@@ -266,6 +266,10 @@ pub enum TokenKind {
     // tokenized + parsed now so the R-to-L precedence (Appendix B row 14) is locked in.
     #[token("??")]
     QuestionQuestion,
+    // Error propagation `expr?`. Declared after `??` for readability only — logos
+    // matches the longest token, so `a ?? b` is never read as two propagations.
+    #[token("?")]
+    Question,
 
     // Delimiters
     #[token("(")]
@@ -387,6 +391,7 @@ impl Token {
             TokenKind::DotDot => "..",
             TokenKind::DotDotEqual => "..=",
             TokenKind::QuestionQuestion => "??",
+            TokenKind::Question => "?",
             TokenKind::LeftParen => "(",
             TokenKind::RightParen => ")",
             TokenKind::LeftBrace => "{",

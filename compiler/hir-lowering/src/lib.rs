@@ -190,6 +190,9 @@ struct Lowerer {
     /// Monotonic counter naming the binding each `??` desugar introduces for the
     /// unwrapped payload (`__coalesce_N`), so nested coalesces never shadow each other.
     coalesce_counter: usize,
+    /// Monotonic counter naming the bindings each `?` desugar introduces (`__try_N`),
+    /// so a chain of propagations in one expression never shadows itself.
+    try_counter: usize,
 }
 
 /// One trait method's lowering-visible signature, in declaration order.
@@ -301,6 +304,7 @@ impl Lowerer {
             closure_items: Vec::new(),
             closure_counter: 0,
             coalesce_counter: 0,
+            try_counter: 0,
         }
     }
 

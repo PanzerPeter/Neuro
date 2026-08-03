@@ -12,7 +12,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | ---------------- | ---------------------------------------------------------------------- |
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference |
 | `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` |
-| `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result` |
+| `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result`, `?` error propagation |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
 | `showcase/`      | **Bigger programs that combine many features at once** — incl. mutable borrows `&mut T` + `*` deref (`mutable_borrows.nr`) |
@@ -105,6 +105,13 @@ isolation:
   labeled `break` exits *two* nested loops at once, proving the destructors still run
   on that path. Combined with a `Copy` struct + `&self` method, a fixed-size array with
   indexed reads, and `match` over range and `_` patterns. Exit `160`.
+- [`showcase/sample_audit.nr`](showcase/sample_audit.nr) — **the `?` propagation
+  operator**: a validator whose `Err` carries the offending sample, propagated with `?`
+  out of a `for`-in loop body (leaving the whole function, not the iteration), plus `?`
+  on an `Option` rebuilt as the caller's own `None`. Combined with a `@derive(Copy)`
+  struct + `&self` method, fixed-size arrays, `match` on the returned `Result`,
+  `val-else` with an `|e|` error binding, and `??` defaulting the reads that only need
+  a fallback. Exit `177`.
 
 ## Compiling and running
 

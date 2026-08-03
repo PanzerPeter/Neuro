@@ -264,6 +264,7 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
             }
         }
         Expr::Unary { operand, .. } => collect_expr(operand, fv),
+        Expr::Try { operand, .. } => collect_expr(operand, fv),
         Expr::Paren(inner, _) => collect_expr(inner, fv),
         Expr::StructLiteral { fields, base, .. } => {
             for field in fields {

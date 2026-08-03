@@ -11,6 +11,7 @@ mod operators;
 mod places;
 mod sequences;
 mod struct_exprs;
+mod try_expr;
 
 use super::{declarations, TypeChecker, VariantForm};
 use crate::errors::TypeError;
@@ -232,6 +233,8 @@ impl TypeChecker {
                 arms,
                 span,
             } => Some(self.check_match(scrutinee, arms, *span, expected)),
+
+            Expr::Try { operand, span } => self.check_try_expr(operand, *span),
 
             Expr::Closure {
                 params,

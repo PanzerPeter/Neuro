@@ -18,6 +18,16 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
 - thiserror — `LoweringError` derivation
 
 ## Notes
+- 2026-08-03: `?` error propagation. New `expressions/try_op.rs`: `lower_try` desugars `operand?`
+  into `HirExprKind::Match` — arm 0 tests the `Some`/`Ok` tag and yields payload slot 0 as
+  `__try_N` (named off the new `try_counter`), arm 1 is a `Wildcard` whose body is a
+  `Block` holding a single `HirStmt::Return` of the failure variant. No HIR node and no backend
+  change: the arm terminates, and `codegen_arm_body` already skips the result-slot store for a
+  terminated block. The failure value is rebuilt against `current_return`'s instance, NOT the
+  operand's — a `Result<u8, E>` propagating out of a `-> Result<i32, E>` function must produce the
+  latter — and the `Err` payload is bound out of the operand's slot 0 and passed straight through,
+  which is the "no implicit conversion" rule made structural. `success_variant`, `not_fallible`, and
+  the new `fallible_base` are shared with the `??` desugar in `coalesce.rs`.
 - 2026-07-31: A trailing `Stmt::If` is a value at every depth. `Expr::If` lowering moved into
   `lower_if_expr` (`expressions/mod.rs`), and both tail rules — `lower_body_stmts` (`items.rs`, the
   implicit return) and `lower_block_value_inner` (`expressions/mod.rs`, every nested block) — now

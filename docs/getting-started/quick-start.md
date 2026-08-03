@@ -293,9 +293,10 @@ Phase 1 (Core Language) sub-phases 1A–1F are complete; 1G (error handling, mod
 - Compound assignment: `+=`, `-=`, `*=`, `/=`, `%=`
 - Type cast: `as` for numeric conversions and bool-to-int
 - Coalescing: `??` unwraps an `Option` / `Result`, else evaluates a lazy fallback
+- Propagation: `expr?` unwraps an `Option` / `Result`, else returns the failure to the caller
 
 ### Not Yet Implemented (later in Phase 1)
-- The `?` propagation operator, module system and imports (1G)
+- Module system and imports (1G)
 - String interpolation, triple-quoted strings, nested comments, named arguments (1H)
 
 ## Common Issues

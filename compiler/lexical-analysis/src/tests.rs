@@ -38,6 +38,15 @@ fn tokenize_loop_keyword() {
 }
 
 #[test]
+fn tokenize_question_operators() {
+    // Longest match decides: `??` stays one coalescing token, and a lone `?` is the
+    // error-propagation operator rather than half of one.
+    let result = tokenize("a? b ?? c").unwrap();
+    assert!(matches!(result[1].kind, TokenKind::Question));
+    assert!(matches!(result[3].kind, TokenKind::QuestionQuestion));
+}
+
+#[test]
 fn tokenize_identifiers() {
     let result = tokenize("foo bar_baz _underscore").unwrap();
     assert_eq!(result.len(), 4); // 3 identifiers + EOF
