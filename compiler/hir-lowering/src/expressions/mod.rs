@@ -10,6 +10,7 @@ mod enums;
 mod matches;
 mod sequences;
 mod structs;
+mod try_op;
 
 use ast_types::{Expr, UnaryOp};
 use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirType};
@@ -55,6 +56,10 @@ impl Lowerer {
         match expr {
             // Grouping is encoded by tree structure in the HIR; drop the node.
             Expr::Paren(inner, _) => self.lower_expr(inner, expected),
+
+            // `?` desugars to a `match` whose failure arm returns; the expected type
+            // describes the unwrapped payload, not the fallible operand.
+            Expr::Try { operand, span } => self.lower_try(operand, *span),
 
             Expr::Literal(lit, span) => {
                 let ty = literal_type(lit, expected);

@@ -316,9 +316,13 @@ a lazy fallback, discarding the `Err` payload, and chains right-to-left. The
 unwraps a refutable pattern or leaves the scope, with the bindings live for the rest
 of the enclosing block, a required-diverging `else` branch, and a type-directed
 `else |name|` (a `Result`'s `Err` payload, nothing on an `Option`, the whole
-scrutinee for any other enum).
+scrutinee for any other enum). The **`?` propagation operator** landed in v1.69.0:
+`expr?` unwraps an `Option` / `Result` or hands the failure straight to the caller,
+which must return the same fallible enum; the error travels unconverted (there is
+no `From`/`Into`), and — like `??` — it desugars to a `match` during HIR lowering,
+so neither backend learned anything new.
 
-**Next, in dependency order:** the rest of 1G (`?`, modules, imports, the full
+**Next, in dependency order:** the rest of 1G (modules, imports, the full
 prelude) → 1H (string interpolation, triple-quoted strings, nested comments, named
 arguments). See the [Quick Roadmap](README.md#quick-roadmap).
 

@@ -650,6 +650,20 @@ impl Parser {
                 })
             }
 
+            // Error propagation `operand?`. A postfix operator: it binds as tightly
+            // as a call, so `f(x)? + 1` propagates the call's failure and adds to its
+            // payload, and `parse(s)?.field` reads a field of the unwrapped value.
+            TokenKind::Question => {
+                let op_token = self.advance().ok_or(ParseError::UnexpectedEof {
+                    expected: "'?'".to_string(),
+                })?;
+                let span = left.span().merge(op_token.span);
+                Ok(Expr::Try {
+                    operand: Box::new(left),
+                    span,
+                })
+            }
+
             // Type casts
             TokenKind::As => {
                 self.advance(); // consume 'as'
@@ -770,6 +784,7 @@ impl Parser {
             TokenKind::As => Precedence::Cast,
             TokenKind::LeftParen => Precedence::Call,
             TokenKind::LeftBracket => Precedence::Call,
+            TokenKind::Question => Precedence::Call,
             // A turbofish `::<...>` binds like a call — it only ever precedes one.
             TokenKind::ColonColon => Precedence::Call,
             TokenKind::Dot => Precedence::FieldAccess,

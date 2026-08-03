@@ -28,6 +28,11 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-08-03: Error propagation. Added `Expr::Try { operand, span }` — the postfix `expr?`.
+  A node of its own rather than a `BinaryOp`: it has one operand, and its type comes from that
+  operand's success payload while its *failure* path is typed by the enclosing function's return
+  type. Interpreted by semantic-analysis (which enforces both) and desugared to a `match` by
+  hir-lowering, so the HIR has no counterpart node.
 - 2026-07-31: `val-else`. Added `Stmt::ValElse { pattern, value, else_binding, else_block, span }` —
   `val PATTERN = value else |binding| { ... }`. Unlike the tuple/struct/array destructuring binds
   (parse-time desugars that never reach the AST), this one survives: its pattern is refutable, so the

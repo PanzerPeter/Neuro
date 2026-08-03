@@ -12,13 +12,21 @@ use shared_types::Span;
 
 /// The `Result<T, E>` half of the fallible pair `??` unwraps. Like `Option`, it comes
 /// from the prelude rather than the compiler; `??` recognizes it by name.
-const RESULT_ENUM: &str = "Result";
+pub(super) const RESULT_ENUM: &str = "Result";
 
 /// The variant of `Option` that carries a value — the one `??` unwraps.
 const OPTION_SUCCESS_VARIANT: &str = "Some";
 
 /// The variant of `Result` that carries a value. `Err`'s payload is discarded by `??`.
 const RESULT_SUCCESS_VARIANT: &str = "Ok";
+
+/// A fallible value's resolved shape: which prelude enum it is, which monomorphized
+/// instance, and what its success variant carries.
+pub(super) struct FallibleKind {
+    pub(super) instance: String,
+    pub(super) base: String,
+    pub(super) payload: Type,
+}
 
 impl TypeChecker {
     pub(super) fn check_binary_expr(
@@ -294,6 +302,15 @@ impl TypeChecker {
     /// The payload type `??` unwraps out of a fallible enum: `Option`'s `Some` or
     /// `Result`'s `Ok`. `None` for every other type, which is what makes `??` reject them.
     fn fallible_payload(&self, ty: &Type) -> Option<Type> {
+        self.fallible_kind(ty).map(|kind| kind.payload)
+    }
+
+    /// Resolve a type to the fallible enum it is, if any: the concrete instance, the
+    /// prelude base it was monomorphized from, and the payload its success variant carries.
+    ///
+    /// Shared by `??` and `?` — the two operators that read a fallible value — so both
+    /// recognize exactly the same set of left-hand types.
+    pub(super) fn fallible_kind(&self, ty: &Type) -> Option<FallibleKind> {
         let Type::Enum(instance) = ty.referent() else {
             return None;
         };
@@ -308,7 +325,11 @@ impl TypeChecker {
             _ => return None,
         };
         let info = self.lookup_enum_variant(instance, variant)?;
-        info.fields.first().map(|(_, ty)| ty.clone())
+        Some(FallibleKind {
+            instance: instance.clone(),
+            base: base.to_string(),
+            payload: info.fields.first().map(|(_, ty)| ty.clone())?,
+        })
     }
 
     pub(super) fn check_unary_expr(

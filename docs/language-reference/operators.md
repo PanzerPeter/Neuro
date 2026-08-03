@@ -341,12 +341,52 @@ error: `??` expects an `Option<T>` or `Result<T, E>` on the left, found i32
 
 Payloads are scalar `Copy` values in this phase (see [types.md](types.md#optiont-and-resultt-e)), so `??` unwraps to a scalar. Runnable program: [`examples/operators/null_coalesce.nr`](../../examples/operators/null_coalesce.nr).
 
+## Error Propagation Operator (`?`)
+
+`?` is the postfix complement of `??`: instead of supplying a fallback, it hands the failure to the caller. `expr?` evaluates to the unwrapped payload when `expr` is `Some` / `Ok`, and otherwise leaves the enclosing function immediately, carrying the failure variant on.
+
+```neuro
+func quarter(n: i32) -> Result<i32, i32> {
+    val half = halve(n)?     // Err(n) leaves quarter() right here
+    val rest = halve(half)?
+    Result::Ok(rest)
+}
+```
+
+It desugars to exactly this `match`:
+
+```neuro
+val half = match halve(n) {
+    Result::Ok(v)  => v,
+    Result::Err(e) => return Result::Err(e)
+}
+```
+
+**Enclosing function**: the function containing the `?` must return the same fallible enum — a `Result` propagates only out of a `-> Result<_, _>` function, an `Option` only out of a `-> Option<_>` one. Otherwise the failure has nowhere to go:
+
+```
+error: `?` on a Option<i32> has nowhere to propagate: the enclosing function returns i32
+```
+
+**No conversion**: the error travels as-is. There is no `From`/`Into` trait system, so the callee's `E` must already be the caller's `E`; a mismatch is an ordinary type error. Convert first with `.map_err(...)` when the types differ.
+
+**Payload types are independent**: only the error types must agree. `?` on a `Result<bool, E>` inside a `-> Result<i32, E>` function is fine — the unwrapped `bool` is used locally, not returned.
+
+**Short-circuiting**: nothing after a failing `?` runs, including the rest of a loop body — `?` returns from the *function*, not from the iteration.
+
+**Precedence**: postfix, binding as tightly as a call or index. `f(x)? + 1` adds to the unwrapped payload, and `parse(s)?.field` reads a field of the unwrapped value.
+
+Runnable program: [`examples/operators/error_propagation.nr`](../../examples/operators/error_propagation.nr).
+
+When the reason for a failure should be handled rather than forwarded, use [`match`](control-flow.md), `??` for a fallback, or [`val-else`](control-flow.md#val-else--unwrap-or-leave-the-scope) to unwrap or leave the scope.
+
 ## Operator Precedence
 
 From highest to lowest (Appendix B):
 
 | Level | Operators | Associativity | Example |
 |-------|-----------|---------------|---------|
+| 1 | `()`, `[]`, `.`, `::`, `?` (postfix) | L-to-R | `f(x)?`, `arr[i]`, `p.x` |
 | 2 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
 | 3 | `as` | L-to-R | `n as f64` |
 | 5 | `*`, `/`, `%` | L-to-R | `a * b`, `n % 2` |

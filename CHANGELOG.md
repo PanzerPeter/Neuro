@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.69.0] - 2026-08-03
+
+### Added
+- `parser`: the error-propagation operator `?`. `expr?` unwraps an `Option<T>` /
+  `Result<T, E>` to its success payload, or leaves the enclosing function
+  immediately carrying the failure variant (`None` / `Err(e)`) on. It is postfix
+  and binds as tightly as a call, so `f(x)? + 1` adds to the unwrapped payload
+  and `parse(s)?.field` reads a field of it. New `TokenKind::Question` — logos'
+  longest-match rule keeps `??` a single coalescing token.
+- `semantic`: `?` requires the enclosing function to return the same fallible
+  enum the operand is (`TryOutsideFallibleFunction`), and the operand itself to
+  be an `Option` / `Result` (`TryOnNonFallible`). A `Result`'s error must already
+  be the function's error type — the error is propagated as-is, with no implicit
+  conversion — so a mismatch is an ordinary type error, resolved explicitly.
+  Success payloads are unconstrained: `?` on a `Result<bool, E>` inside a
+  `-> Result<i32, E>` function is fine.
+- `docs`: `examples/operators/error_propagation.nr` and
+  `examples/showcase/sample_audit.nr`, which propagates a validation error with
+  `?` out of a `for`-in loop body alongside a `@derive(Copy)` struct with a
+  `&self` method, arrays, `match`, `val-else`, and `??`.
+
+### Changed
+- `codegen`: unchanged. `?` desugars during HIR lowering into a two-arm `match`
+  whose failure arm is a block terminating in a `return`, so both backends stay
+  unaware of the operator — the same treatment `??` received.
+
 ## [1.68.3] - 2026-07-31
 
 ### Removed

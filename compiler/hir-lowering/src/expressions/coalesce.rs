@@ -73,21 +73,36 @@ impl Lowerer {
         ))
     }
 
-    /// The success variant's tag and payload type for a fallible enum instance.
+    /// The prelude enum a fallible value is an instance of — `Option` or `Result`.
     ///
-    /// The checker has already rejected every other left operand, so a miss here means
-    /// the two passes disagree — reported as a lowering error rather than a panic.
-    fn success_variant(&self, ty: &HirType) -> Result<(u32, HirType), LoweringError> {
+    /// A monomorphized `Option<i32>` answers with the template it came from; a program
+    /// that shadows the prelude with a non-generic `Option` is its own base.
+    pub(super) fn fallible_base(&self, ty: &HirType) -> Option<&str> {
         let HirType::Enum(instance) = ty.referent() else {
-            return Err(Self::not_fallible(ty));
+            return None;
         };
-        // A monomorphized `Option<i32>` answers with the template it came from; a program
-        // that shadows the prelude with a non-generic `Option` is its own base.
         let base = self
             .enum_instance_base
             .get(instance)
             .map(String::as_str)
             .unwrap_or(instance.as_str());
+        FALLIBLE_ENUMS
+            .iter()
+            .find(|(name, _)| *name == base)
+            .map(|(name, _)| *name)
+    }
+
+    /// The success variant's tag and payload type for a fallible enum instance.
+    ///
+    /// The checker has already rejected every other left operand, so a miss here means
+    /// the two passes disagree — reported as a lowering error rather than a panic.
+    pub(super) fn success_variant(&self, ty: &HirType) -> Result<(u32, HirType), LoweringError> {
+        let HirType::Enum(instance) = ty.referent() else {
+            return Err(Self::not_fallible(ty));
+        };
+        let Some(base) = self.fallible_base(ty) else {
+            return Err(Self::not_fallible(ty));
+        };
         let Some((_, variant)) = FALLIBLE_ENUMS.iter().find(|(name, _)| *name == base) else {
             return Err(Self::not_fallible(ty));
         };
@@ -98,17 +113,14 @@ impl Lowerer {
                 .first()
                 .map(|(_, t)| t.clone())
                 .ok_or_else(|| LoweringError::Malformed {
-                    detail: format!(
-                        "`{}::{}` carries no payload for `??` to unwrap",
-                        base, variant
-                    ),
+                    detail: format!("`{}::{}` carries no payload to unwrap", base, variant),
                 })?;
         Ok((tag, payload))
     }
 
-    fn not_fallible(ty: &HirType) -> LoweringError {
+    pub(super) fn not_fallible(ty: &HirType) -> LoweringError {
         LoweringError::Malformed {
-            detail: format!("`??` applied to {:?}, which is not Option or Result", ty),
+            detail: format!("{:?} is not an Option or a Result", ty),
         }
     }
 }

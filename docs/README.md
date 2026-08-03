@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) underway with `Option` / `Result`, the standard collections, and `val-else` landed — Alpha Development
+**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) underway with `Option` / `Result`, the standard collections, `val-else`, and the `?` propagation operator landed — Alpha Development
 
 ## Quick Links
 
@@ -182,6 +182,10 @@ Key design goals:
 - `??` reads either type without a `match`: `lookup(k) ?? 0` yields the `Some`/`Ok` payload, else
   the fallback. The `Err` payload is discarded, the fallback is lazy, and `a ?? b ?? c` chains
   right-to-left. Desugared to a two-arm `match` during HIR lowering, so neither backend sees it
+- `expr?` propagates instead of defaulting: it yields the `Some`/`Ok` payload, or returns the
+  failure (`None` / `Err(e)`, rebuilt as the enclosing function's own instance) to the caller. The
+  function must return the same fallible enum, and the error travels unconverted — there is no
+  `From`/`Into`. Also a lowering-time desugar to a two-arm `match` whose failure arm `return`s
 - `val PATTERN = value else |binding| { ... }` unwraps a variant or leaves the scope: the pattern's
   bindings stay live for the rest of the enclosing block, and the `else` branch must diverge
   (`return` / `break` / `continue` / `panic` / `unreachable`). The `else |name|` form is

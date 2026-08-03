@@ -359,6 +359,7 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
         Expr::Loop { body, .. } => collect_block(body, fv),
         Expr::Reference { operand, .. } => collect_expr(operand, fv),
         Expr::Deref { operand, .. } => collect_expr(operand, fv),
+        Expr::Try { operand, .. } => collect_expr(operand, fv),
         Expr::Range { start, end, .. } => {
             collect_expr(start, fv);
             collect_expr(end, fv);

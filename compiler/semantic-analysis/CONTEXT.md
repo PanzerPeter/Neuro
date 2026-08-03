@@ -157,6 +157,17 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-08-03: `?` error propagation. New `expressions/try_expr.rs`: `check_try_expr` types
+  `Expr::Try` as the operand's success payload after two checks. The operand must be fallible —
+  resolved through the new `fallible_kind` helper (`expressions/operators.rs`, the shared form of
+  `fallible_payload`, so `?` and `??` accept exactly the same set of types); anything else is the
+  new `TryOnNonFallible`. And `current_function_return_type` must be an instance of the SAME
+  fallible enum, since that is where the failure goes; otherwise the new
+  `TryOutsideFallibleFunction` (which also covers propagating an `Option` out of a `Result`
+  function — the two do not convert). For `Result`, the operand's `Err` payload must already equal
+  the function's, reported as an ordinary `Mismatch`: the spec forwards the error with no implicit
+  `.into()`, so `.map_err(...)` is the explicit conversion path. Success payloads are unconstrained
+  — only the error types must agree.
 - 2026-07-31: `val-else`. New `val_else.rs`: `check_val_else` checks the scrutinee, runs the
   pattern through `matches.rs`'s `check_pattern` (now `pub(crate)`), checks the `else` branch in its
   own scope, and only THEN defines the pattern's bindings in the enclosing scope — so the branch

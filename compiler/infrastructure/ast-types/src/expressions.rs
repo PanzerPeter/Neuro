@@ -214,6 +214,17 @@ pub enum Expr {
         is_move: bool,
         span: Span,
     },
+    /// Error propagation `operand?`: unwraps an `Option<T>` / `Result<T, E>` to its
+    /// success payload, or leaves the enclosing function carrying the failure variant
+    /// on (`None` / `Err(e)`) unchanged — the error is never converted.
+    ///
+    /// A postfix operator rather than a binary one, which is why it is a node of its
+    /// own instead of a [`BinaryOp`]: it has a single operand and its result type is
+    /// derived from that operand plus the enclosing function's return type.
+    Try {
+        operand: Box<Expr>,
+        span: Span,
+    },
 }
 
 /// One parameter of a closure literal: a binding name and an optional type
@@ -360,6 +371,7 @@ impl Expr {
             Expr::ArrayRest { span, .. } => *span,
             Expr::Match { span, .. } => *span,
             Expr::Closure { span, .. } => *span,
+            Expr::Try { span, .. } => *span,
         }
     }
 }
