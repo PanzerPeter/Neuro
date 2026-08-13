@@ -320,7 +320,12 @@ scrutinee for any other enum). The **`?` propagation operator** landed in v1.69.
 `expr?` unwraps an `Option` / `Result` or hands the failure straight to the caller,
 which must return the same fallible enum; the error travels unconverted (there is
 no `From`/`Into`), and — like `??` — it desugars to a `match` during HIR lowering,
-so neither backend learned anything new.
+so neither backend learned anything new. **Error-path outlining** landed in
+v1.70.0: every panic-family failure path — `panic` / `assert` / `unreachable` and
+the array, `Vec`, string-slice, and UTF-8-boundary guards — is emitted into a
+module-private cold function and called from the failure site, so the diagnostic
+machinery no longer sits inline in the function that can fail; guard branches
+carry `!prof` weights keeping the failure edge off the fall-through path.
 
 **Next, in dependency order:** the rest of 1G (modules, imports, the full
 prelude) → 1H (string interpolation, triple-quoted strings, nested comments, named

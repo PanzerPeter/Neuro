@@ -6,6 +6,10 @@
 // fire only on normal scope exit. Diagnostics are written with the POSIX `write`
 // syscall to stderr (fd 2) rather than buffered stdio, so the message reaches the
 // terminal before the process dies.
+//
+// The diagnostic machinery itself does not live here in the hot function: every failure
+// path below is outlined into a cold thunk by `codegen::outlining`, leaving one call
+// behind at the failure site.
 
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum};
 use neuro_hir::HirExpr;
@@ -41,17 +45,13 @@ impl<'ctx> CodegenContext<'ctx> {
                     CodegenError::InternalError("panic() reached codegen without a message".into())
                 })?;
                 let msg_val = self.codegen_expr(message)?;
-                self.emit_write_cstr("panic: ")?;
-                self.emit_write_string_value(msg_val)?;
-                self.emit_write_cstr(&format!("{}\n", location))?;
-                self.emit_abort_unreachable()?;
+                self.emit_outlined_panic_with_message(msg_val, &format!("{}\n", location))?;
             }
             "unreachable" => {
-                self.emit_write_cstr(&format!(
+                self.emit_outlined_panic(&format!(
                     "internal error: entered unreachable code{}\n",
                     location
                 ))?;
-                self.emit_abort_unreachable()?;
             }
             "assert" => {
                 let condition = args.first().ok_or_else(|| {
@@ -90,14 +90,15 @@ impl<'ctx> CodegenContext<'ctx> {
         let fail_bb = self.context.append_basic_block(parent_fn, "guard.fail");
         let cont_bb = self.context.append_basic_block(parent_fn, "guard.cont");
 
-        self.builder
+        let branch = self
+            .builder
             .build_conditional_branch(ok, cont_bb, fail_bb)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.mark_cold_branch(branch, false)?;
 
         self.builder.position_at_end(fail_bb);
         let location = self.panic_location_suffix(offset);
-        self.emit_write_cstr(&format!("panic: {}{}\n", message, location))?;
-        self.emit_abort_unreachable()?;
+        self.emit_outlined_panic(&format!("panic: {}{}\n", message, location))?;
 
         self.builder.position_at_end(cont_bb);
         Ok(())
@@ -113,13 +114,14 @@ impl<'ctx> CodegenContext<'ctx> {
         let fail_bb = self.context.append_basic_block(parent_fn, "assert.fail");
         let cont_bb = self.context.append_basic_block(parent_fn, "assert.cont");
 
-        self.builder
+        let branch = self
+            .builder
             .build_conditional_branch(cond_val, cont_bb, fail_bb)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.mark_cold_branch(branch, false)?;
 
         self.builder.position_at_end(fail_bb);
-        self.emit_write_cstr(&format!("assertion failed{}\n", location))?;
-        self.emit_abort_unreachable()?;
+        self.emit_outlined_panic(&format!("assertion failed{}\n", location))?;
 
         self.builder.position_at_end(cont_bb);
         Ok(())
@@ -138,7 +140,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Emit `write(2, <global ".rodata" bytes>, len)` for a compile-time-known string.
-    fn emit_write_cstr(&self, text: &str) -> CodegenResult<()> {
+    pub(crate) fn emit_write_cstr(&self, text: &str) -> CodegenResult<()> {
         let global = self
             .builder
             .build_global_string_ptr(text, "panic.str")
@@ -147,23 +149,8 @@ impl<'ctx> CodegenContext<'ctx> {
         self.emit_write(global.as_pointer_value().into(), len)
     }
 
-    /// Emit `write(2, ptr, len)` for a runtime `string` fat pointer `{ ptr, i64 }`.
-    fn emit_write_string_value(&self, value: BasicValueEnum<'ctx>) -> CodegenResult<()> {
-        let fat = value.into_struct_value();
-        let ptr = self
-            .builder
-            .build_extract_value(fat, 0, "panic.msg.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let len = self
-            .builder
-            .build_extract_value(fat, 1, "panic.msg.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-            .into_int_value();
-        self.emit_write(ptr, len)
-    }
-
     /// Emit a single `write(STDERR_FD, ptr, len)` call, discarding the return value.
-    fn emit_write(
+    pub(crate) fn emit_write(
         &self,
         ptr: BasicValueEnum<'ctx>,
         len: inkwell::values::IntValue<'ctx>,
@@ -178,7 +165,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Emit `abort()` followed by an `unreachable` terminator, ending the basic block.
-    fn emit_abort_unreachable(&self) -> CodegenResult<()> {
+    pub(crate) fn emit_abort_unreachable(&self) -> CodegenResult<()> {
         let abort_fn = self.get_or_declare_abort();
         self.builder
             .build_call(abort_fn, &[], "panic.abort")

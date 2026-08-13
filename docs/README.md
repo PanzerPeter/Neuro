@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) underway with `Option` / `Result`, the standard collections, `val-else`, and the `?` propagation operator landed — Alpha Development
+**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) underway with `Option` / `Result`, the standard collections, `val-else`, the `?` propagation operator, and error-path outlining landed — Alpha Development
 
 ## Quick Links
 
@@ -233,6 +233,11 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
+- Error-path outlining: every panic-family failure path — `panic` / `assert` / `unreachable` and the
+  array, `Vec`, string-slice, and UTF-8-boundary guards — is emitted into a module-private cold
+  function and called from the failure site, so the diagnostic machinery never sits inline in the
+  function that can fail; guard branches carry `!prof` weights keeping the failure edge off the
+  fall-through path
 - Full workspace test suite green on every push (see the CI badge in the root [README](../README.md))
 
 ## Compilation Pipeline

@@ -105,7 +105,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | **`Option` / `Result`** | `Option<T>` and `Result<T, E>` from an implicit prelude — ordinary generic enums, available without a declaration; `??` unwraps either with a lazy fallback; `?` propagates the failure to the caller; `val-else` unwraps or exits the scope; `checked_add` / `checked_sub` / `checked_mul` report integer overflow as `Option::None` |
 | **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop`, `&T` / `&mut T` with flow-sensitive exclusivity, lifetime elision and annotations |
 | **Strings** | Fat-pointer `string` with escapes, `&string` slices, `==`, `+` concatenation, `.len()` / `.clone()` / `.slice(a..b)` |
-| **Toolchain** | Native binaries via inkwell 0.9 / LLVM 20; `neurc check` and `neurc compile`; `panic` / `assert` / `unreachable` runtime |
+| **Toolchain** | Native binaries via inkwell 0.9 / LLVM 20; `neurc check` and `neurc compile`; `panic` / `assert` / `unreachable` runtime, with error paths outlined off the hot path |
 
 ### Current Memory Model
 
@@ -511,7 +511,7 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | 1D | Backend plumbing — `neuro-hir` typed IR crate, `melior` integration, AST → HIR lowering, HIR-routed LLVM backend, mlir-backend HIR scaffold | ✅ Complete |
 | 1E | Type system — arrays ✅, tuples ✅, structs ✅, methods ✅, destructuring ✅, type aliases ✅, enums ✅, pattern matching ✅, newtype ✅ | ✅ Complete |
 | 1F | Generics, traits & dispatch — generics, explicit lifetimes, trait declarations, operator traits, static/dynamic dispatch (`impl`/`dyn`), closures | ✅ Complete |
-| 1G | Error handling, modules & prelude — `Option`/`Result` ✅, collections ✅, `checked_*` ✅, `??` ✅, `val-else` ✅, `?` ✅, multi-file modules, imports, prelude | 🔄 In progress |
+| 1G | Error handling, modules & prelude — `Option`/`Result` ✅, collections ✅, `checked_*` ✅, `??` ✅, `val-else` ✅, `?` ✅, error-path outlining ✅, multi-file modules, imports, prelude | 🔄 In progress |
 | 1H | Language cleanup — string interpolation, triple-quoted strings, nested comments, named arguments | 📋 Planned |
 | **2** | Tensors & MLIR — `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | 📋 Planned |
 | **3** | Automatic differentiation — Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | 📋 Planned |

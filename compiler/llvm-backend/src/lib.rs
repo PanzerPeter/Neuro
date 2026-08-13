@@ -78,6 +78,22 @@ pub fn compile(
     source: &str,
     source_path: &str,
 ) -> CodegenResult<Vec<u8>> {
+    let context = LLVMContext::create();
+    let codegen_ctx = build_module(&context, program, optimization, source, source_path)?;
+    emit_object_code(&codegen_ctx, optimization)
+}
+
+/// Generate and verify the LLVM module for `program`.
+///
+/// Split from `compile` so the emitted IR can be inspected directly; object emission
+/// erases the structure the codegen tests assert on (cold thunks, branch weights).
+fn build_module<'ctx>(
+    context: &'ctx LLVMContext,
+    program: &HirProgram,
+    optimization: OptimizationLevelSetting,
+    source: &str,
+    source_path: &str,
+) -> CodegenResult<CodegenContext<'ctx>> {
     let items = &program.items;
 
     // Collect struct definitions first so struct field/parameter types resolve below.
@@ -192,9 +208,7 @@ pub fn compile(
         }
     }
 
-    // Initialize LLVM context
-    let context = LLVMContext::create();
-    let mut codegen_ctx = CodegenContext::new(&context, "neuro_module");
+    let mut codegen_ctx = CodegenContext::new(context, "neuro_module");
     codegen_ctx.set_struct_defs(struct_defs);
     codegen_ctx.set_enum_words(enum_words);
     codegen_ctx.set_enum_variants(enum_variants);
@@ -276,7 +290,14 @@ pub fn compile(
         )));
     }
 
-    // Generate object code
+    Ok(codegen_ctx)
+}
+
+/// Emit linkable object code for an already-verified module.
+fn emit_object_code(
+    codegen_ctx: &CodegenContext<'_>,
+    optimization: OptimizationLevelSetting,
+) -> CodegenResult<Vec<u8>> {
     let target_triple = inkwell::targets::TargetMachine::get_default_triple();
     inkwell::targets::Target::initialize_native(&inkwell::targets::InitializationConfig::default())
         .map_err(|e| CodegenError::InitializationFailed(e.to_string()))?;
@@ -318,6 +339,155 @@ mod tests {
     fn lower(source: &str) -> neuro_hir::HirProgram {
         let ast = syntax_parsing::parse(source).expect("parsing failed");
         hir_lowering::lower_program(&ast).expect("HIR lowering failed")
+    }
+
+    /// Compile `source` to LLVM IR text, for the tests that assert on module structure
+    /// rather than on the opaque object code `compile` returns.
+    fn module_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
+        let hir = lower(source);
+        let context = LLVMContext::create();
+        let codegen_ctx = build_module(&context, &hir, optimization, source, "outlining.nr")
+            .expect("module generation failed");
+        codegen_ctx.module.print_to_string().to_string()
+    }
+
+    /// The body of the function named `name` in `ir`, excluding every other definition.
+    fn function_body<'a>(ir: &'a str, name: &str) -> &'a str {
+        let header = format!("@{}(", name);
+        let start = ir
+            .find(&header)
+            .unwrap_or_else(|| panic!("no definition of @{} in the module", name));
+        let rest = &ir[start..];
+        match rest.find("\n}\n") {
+            Some(end) => &rest[..end],
+            None => rest,
+        }
+    }
+
+    #[test]
+    fn panic_diagnostics_are_outlined_out_of_the_hot_function() {
+        let source = r#"
+            func main() -> i32 {
+                val arr: [i32; 3] = [1, 2, 3]
+                assert(arr.len() == 3)
+                return 0
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let main_body = function_body(&ir, "main");
+
+        assert!(
+            !main_body.contains("@abort") && !main_body.contains("@write"),
+            "the diagnostic machinery must not remain inline in @main:\n{}",
+            main_body
+        );
+        assert!(
+            main_body.contains("call void @neuro.cold.panic.0()"),
+            "the failure block must call the outlined thunk:\n{}",
+            main_body
+        );
+        assert!(
+            ir.contains("define private void @neuro.cold.panic.0()"),
+            "the outlined thunk must be a module-private definition:\n{}",
+            ir
+        );
+    }
+
+    #[test]
+    fn outlined_thunks_are_cold_noreturn_and_pinned() {
+        let source = r#"
+            func main() -> i32 {
+                panic("stop")
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+
+        // `noinline` is the attribute that actually holds the outlining in place; without
+        // it the inliner folds a single-call-site function back into its caller.
+        for attribute in ["cold", "noreturn", "noinline", "minsize"] {
+            assert!(
+                ir.contains(attribute),
+                "outlined thunks must carry `{}`:\n{}",
+                attribute,
+                ir
+            );
+        }
+        assert!(
+            ir.contains("declare void @abort() #"),
+            "abort must carry an attribute group (cold, noreturn):\n{}",
+            ir
+        );
+    }
+
+    #[test]
+    fn a_runtime_panic_message_is_passed_to_the_thunk() {
+        // The message is a runtime `string`, so only the constant fragments are baked
+        // into the thunk; the fat pointer travels as two arguments.
+        let source = r#"
+            func main() -> i32 {
+                panic("stop")
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+
+        assert!(
+            ir.contains("define private void @neuro.cold.panic.0(ptr %0, i64 %1)"),
+            "the message thunk must take the fat pointer's (ptr, len) pair:\n{}",
+            ir
+        );
+    }
+
+    #[test]
+    fn identically_worded_failures_share_one_thunk() {
+        // Monomorphization copies a generic body once per type argument, so both copies
+        // render the same diagnostic text from the same span.
+        let source = r#"
+            func checked<T>(value: T) -> T {
+                assert(true)
+                value
+            }
+
+            func main() -> i32 {
+                val a = checked(1)
+                val b = checked(2.5)
+                return a
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let thunks = ir.matches("define private void @neuro.cold.panic.").count();
+
+        assert_eq!(thunks, 1, "the two instances must share one thunk:\n{}", ir);
+    }
+
+    #[test]
+    fn guard_and_overflow_branches_are_weighted() {
+        // At -O0 arithmetic traps on overflow, so this program carries both branch
+        // shapes: a bounds guard (cold edge false) and an overflow check (cold edge true).
+        let source = r#"
+            func main() -> i32 {
+                val arr: [i32; 3] = [1, 2, 3]
+                mut i: i32 = 0
+                val total = arr[i] + 1
+                return total
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+
+        assert!(
+            ir.contains(r#"!{!"branch_weights", i32 2000, i32 1}"#),
+            "a guard's failure edge must be the unlikely one:\n{}",
+            ir
+        );
+        assert!(
+            ir.contains(r#"!{!"branch_weights", i32 1, i32 2000}"#),
+            "an overflow check's trap edge must be the unlikely one:\n{}",
+            ir
+        );
     }
 
     #[test]

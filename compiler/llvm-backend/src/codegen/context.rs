@@ -211,6 +211,11 @@ pub(crate) struct CodegenContext<'ctx> {
     /// Surface constructions carry their tag in the HIR; this table serves the
     /// constructions codegen synthesizes itself, which know a variant only by name.
     pub(crate) enum_variants: HashMap<String, Vec<String>>,
+
+    /// Outlined cold panic thunks, keyed by whether the thunk takes a runtime message
+    /// and by the constant diagnostic text baked into it. Failure sites worded
+    /// identically share one body instead of emitting the diagnostic machinery twice.
+    pub(crate) cold_thunks: HashMap<(bool, String), FunctionValue<'ctx>>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -239,6 +244,7 @@ impl<'ctx> CodegenContext<'ctx> {
             drop_types: std::collections::HashSet::new(),
             drop_scopes: Vec::new(),
             enum_variants: HashMap::new(),
+            cold_thunks: HashMap::new(),
         }
     }
 
@@ -479,11 +485,16 @@ impl<'ctx> CodegenContext<'ctx> {
         let func =
             self.module
                 .add_function("abort", fn_type, Some(inkwell::module::Linkage::External));
-        func.add_attribute(
-            inkwell::attributes::AttributeLoc::Function,
-            self.context
-                .create_enum_attribute(Attribute::get_named_enum_kind_id("noreturn"), 0),
-        );
+        // `cold` alongside `noreturn`: a block whose terminator is `unreachable` is only
+        // treated as unlikely-executed by LLVM's placement heuristics when the call
+        // preceding it is itself marked cold — `noreturn` on its own does not imply it.
+        for attribute in ["noreturn", "cold"] {
+            func.add_attribute(
+                inkwell::attributes::AttributeLoc::Function,
+                self.context
+                    .create_enum_attribute(Attribute::get_named_enum_kind_id(attribute), 0),
+            );
+        }
         func
     }
 }

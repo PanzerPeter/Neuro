@@ -181,21 +181,45 @@ Panic-family builtins `panic(msg: string)`, `assert(cond: bool)`, `unreachable()
 matching the semantic resolver).
 
 Each builtin writes its diagnostic to stderr (fd 2) via external POSIX `write`
-(`get_or_declare_write`), then calls libc `abort` (`get_or_declare_abort`, `noreturn`) + an
+(`get_or_declare_write`), then calls libc `abort` (`get_or_declare_abort`, `noreturn cold`) + an
 `unreachable` terminator:
 - `panic` → write `"panic: "`, the msg fat-ptr, `" at file:line:col\n"`, abort.
 - `unreachable` → write `"internal error: entered unreachable code at file:line:col\n"`, abort.
 - `assert` → true falls through to `assert.cont`; false enters `assert.fail` (write
   `"assertion failed at file:line:col\n"`, abort).
 
-The dynamic `panic` message is a runtime `string` fat ptr; fields read via `extractvalue` and passed
-straight to `write`. The `file:line:col` suffix comes from the `Call` span start via the `SourceFile`
-(empty when no source supplied). `write`+`abort` are POSIX/libc (Linux, macOS; MSVC CRT on Windows).
+That sequence is **not** emitted inline — see "Error-Path Outlining" below. The `file:line:col`
+suffix comes from the `Call` span start via the `SourceFile` (empty when no source supplied).
+`write`+`abort` are POSIX/libc (Linux, macOS; MSVC CRT on Windows).
 
 Because `panic`/`unreachable` terminate the block with `unreachable`, following statements are dead
 code: `codegen_stmt` early-returns when the block is already terminated, and `codegen_return` /
 `codegen_body`'s tail path skip the `ret` when evaluating the returned expr terminated the block
 (`func f() -> i32 { panic("x") }`). Keeps LLVM from seeing instructions after a terminator.
+
+## Error-Path Outlining
+`outlining.rs` emits every panic-family failure path into a module-private cold function and leaves
+one call at the failure site, so the diagnostic machinery never sits inline in the function that can
+fail. Covers `panic` / `assert` / `unreachable` (`panic.rs`) and every `codegen_guard_or_panic`
+caller — array and `Vec` bounds, string-slice bounds, UTF-8 codepoint boundary.
+
+- Thunks are named `neuro.cold.panic.N`, `Linkage::Private`, attributes `cold noreturn noinline
+  minsize`; the call site repeats `cold noreturn` so the information survives inlining of the
+  *enclosing* function. `noinline` is load-bearing: without it the inliner folds a single-call-site
+  function straight back in.
+- `cold_thunks: HashMap<(bool, String), FunctionValue>` on `CodegenContext` dedups by (takes a
+  runtime message, constant diagnostic text). Monomorphization's copies of one generic body render
+  identical text from the same span and therefore share one thunk.
+- The runtime-message form is a `(ptr, i64)` thunk: only the constant fragments are baked in, the
+  fat pointer travels as two arguments. `emit_write_cstr` / `emit_write` / `emit_abort_unreachable`
+  (`panic.rs`) are `pub(crate)` for it; `build_thunk_body` saves and restores the builder position,
+  since thunks are created lazily mid-function.
+- `mark_cold_branch(branch, cold_edge_is_true)` attaches `!prof` `branch_weights` (`2000 : 1`) to
+  every guard branch and to the `-O0` overflow check. The overflow trap is weighted but NOT outlined
+  — its block is a single `llvm.trap`, so a call would trade one instruction for another.
+
+`compile` is split into `build_module` (generate + verify) and `emit_object_code`, so the codegen
+tests can assert on IR text that object emission erases.
 
 ## Drop ABI (deterministic destruction)
 `drops.rs` inserts a `{struct}__drop(&mut self)` call at each lexical scope exit for an owned binding
@@ -290,6 +314,11 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-08-13: Error-path outlining. New `codegen/outlining.rs`; `panic.rs` and every
+  `codegen_guard_or_panic` caller now leave one `call @neuro.cold.panic.N` at the failure site
+  instead of the inline diagnostic sequence, and guard branches carry `!prof` weights. `abort` gains
+  `cold`; `emit_write_string_value` is gone (folded into the message thunk); `compile` split into
+  `build_module` + `emit_object_code`. No behavioral change. See "Error-Path Outlining".
 - 2026-07-31: `val-else`. New `codegen/val_else.rs`: the scrutinee is stored once into an alloca,
   `codegen_single_test` (now `pub(crate)`, shared with match codegen) picks the branch, and the else
   block runs in its own drop scope with its binding saved/restored. The success block's bindings are
