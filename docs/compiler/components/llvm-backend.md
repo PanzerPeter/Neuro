@@ -113,6 +113,41 @@ User-defined structs are lowered to anonymous LLVM struct types `{ T0, T1, ... }
 
 `impl` methods are lowered to free functions with a mangled name `StructName__methodName`. For `&self` instance methods the struct is passed by value as the first LLVM parameter (`self`). Associated functions (no `self`) have no implicit first parameter and are called via `TypeName::func(args)`.
 
+## Error-Path Outlining
+
+Every panic-family failure path — `panic` / `assert` / `unreachable`, the array and `Vec`
+bounds guards, and the string-slice bounds and UTF-8 boundary checks — is emitted into a
+module-private cold function rather than inline in the function that can fail:
+
+```llvm
+guard.fail:
+  call void @neuro.cold.panic.0() #1   ; cold noreturn
+  unreachable
+
+; Function Attrs: cold minsize noinline noreturn
+define private void @neuro.cold.panic.0() #0 {
+entry:
+  %panic.write = call i64 @write(i32 2, ptr @panic.str, i64 46)
+  call void @abort()
+  unreachable
+}
+```
+
+The diagnostic machinery — one `write(2, …)` per message fragment plus the `abort()` —
+otherwise occupies cache lines between the guard branch and the code that follows it, at
+every check. `noinline` is what holds the split in place; without it the inliner folds a
+single-call-site function straight back in. Thunks are deduplicated by their rendered
+diagnostic text, so the copies monomorphization makes of one generic body share a single
+thunk.
+
+A `panic(msg)` whose message is a runtime `string` uses a `(ptr, i64)` thunk: only the
+constant fragments are baked in, and the fat pointer travels as two arguments.
+
+Each guard branch also carries `!prof` branch weights (`2000 : 1`) marking the failure edge
+as the improbable one, so block placement keeps it off the fall-through path. The `-O0`
+integer-overflow check is weighted but *not* outlined — its trap block is a single
+`llvm.trap`, so moving it behind a call would trade one instruction for another.
+
 ## Error Types
 
 ```rust

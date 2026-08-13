@@ -340,9 +340,14 @@ impl<'ctx> CodegenContext<'ctx> {
         let trap_bb = self.context.append_basic_block(func, "arith.overflow");
         let cont_bb = self.context.append_basic_block(func, "arith.cont");
 
-        self.builder
+        let branch = self
+            .builder
             .build_conditional_branch(overflowed, trap_bb, cont_bb)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        // Weighted, but not outlined: the trap block is a single `llvm.trap`, so moving
+        // it behind a call would trade one instruction for another. The weights are what
+        // keep it off the fall-through path.
+        self.mark_cold_branch(branch, true)?;
 
         self.builder.position_at_end(trap_bb);
         self.emit_trap()?;

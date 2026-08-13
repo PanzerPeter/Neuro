@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.70.0] - 2026-08-13
+
+### Added
+- `codegen`: error-path outlining. Every panic-family failure path — `panic`,
+  `assert`, `unreachable`, and the array / `Vec` bounds, string-slice bounds, and
+  UTF-8 codepoint-boundary guards — is emitted into a module-private cold
+  function (`cold noreturn noinline minsize`), leaving a single call behind at
+  the failure site. The diagnostic machinery is several `write(2, …)` calls plus
+  `abort()` plus the string globals they reference, and it previously sat inline
+  between the guard branch and the code that follows it, at every check. Thunks
+  are deduplicated by their rendered diagnostic text, so the copies
+  monomorphization makes of one generic body share a single thunk.
+- `codegen`: `!prof` branch weights on every guard branch and on the `-O0`
+  integer-overflow check, marking the failure edge as the improbable one so block
+  placement keeps it off the fall-through path. The overflow check is weighted
+  but not outlined — its trap block is a single `llvm.trap`, so a call would
+  trade one instruction for another.
+- `tests`: `compiler/neurc/tests/cold_outlining.rs` drives a failure through an
+  outlined thunk at both `-O0` and `-O2` in programs combining collections,
+  structs, methods, enums, and `match`, asserting the diagnostic text and the
+  abort are unchanged — and that a runtime `panic` message, which travels to its
+  thunk as a `(ptr, len)` pair rather than being baked in, still prints in full.
+
+### Changed
+- `codegen`: `abort` is declared `cold` alongside `noreturn`. A block whose
+  terminator is `unreachable` is only treated as unlikely-executed by LLVM's
+  placement heuristics when the call preceding it is itself marked cold.
+
 ## [1.69.0] - 2026-08-03
 
 ### Added
