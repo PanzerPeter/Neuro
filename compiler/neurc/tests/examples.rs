@@ -63,9 +63,20 @@ fn collect_examples(dir: &Path) -> Vec<String> {
     found
 }
 
-/// Parse `expected.txt`: `<relative-path>  <exit-code>` per line; `#` comments
+/// What the manifest says about one `.nr` file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Expectation {
+    /// A standalone program: compile it and assert this exit code.
+    Exit(i32),
+    /// A non-root module of a multi-file program. It has no `main` of its own and is
+    /// compiled only as part of the root that reaches into it, so the harness records
+    /// that it is accounted for and moves on.
+    Module,
+}
+
+/// Parse `expected.txt`: `<relative-path>  <exit-code|module>` per line; `#` comments
 /// and blank lines ignored.
-fn parse_manifest(path: &Path) -> BTreeMap<String, i32> {
+fn parse_manifest(path: &Path) -> BTreeMap<String, Expectation> {
     let text = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("read manifest {}: {}", path.display(), e));
     let mut map = BTreeMap::new();
@@ -78,12 +89,18 @@ fn parse_manifest(path: &Path) -> BTreeMap<String, i32> {
         let rel = parts
             .next()
             .unwrap_or_else(|| panic!("manifest line {}: missing path", lineno + 1));
-        let code: i32 = parts
+        let marker = parts
             .next()
-            .unwrap_or_else(|| panic!("manifest line {}: missing exit code", lineno + 1))
-            .parse()
-            .unwrap_or_else(|e| panic!("manifest line {}: bad exit code: {}", lineno + 1, e));
-        if map.insert(rel.to_string(), code).is_some() {
+            .unwrap_or_else(|| panic!("manifest line {}: missing exit code", lineno + 1));
+        let expectation =
+            if marker == "module" {
+                Expectation::Module
+            } else {
+                Expectation::Exit(marker.parse().unwrap_or_else(|e| {
+                    panic!("manifest line {}: bad exit code: {}", lineno + 1, e)
+                }))
+            };
+        if map.insert(rel.to_string(), expectation).is_some() {
             panic!("manifest line {}: duplicate entry for {}", lineno + 1, rel);
         }
     }
@@ -132,11 +149,14 @@ fn all_examples_compile_run_and_match_manifest() {
 
     // Every discovered example must be registered and behave as registered.
     for rel in &discovered {
-        let Some(&expected) = manifest.get(rel) else {
+        let Some(&expectation) = manifest.get(rel) else {
             failures.push(format!(
                 "{rel}: present on disk but missing from examples/expected.txt \
                  (add a line: `{rel}  <exit-code>`)"
             ));
+            continue;
+        };
+        let Expectation::Exit(expected) = expectation else {
             continue;
         };
         match compile_example(&examples_dir, rel) {

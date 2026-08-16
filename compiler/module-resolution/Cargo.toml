@@ -1,0 +1,16 @@
+[package]
+name = "module-resolution"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[dependencies]
+ast-types = { path = "../infrastructure/ast-types" }
+shared-types = { path = "../infrastructure/shared-types" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.8"

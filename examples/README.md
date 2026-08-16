@@ -15,10 +15,13 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result`, `?` error propagation |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
+| `modules/`       | Multi-file programs: a sibling module, a `mod.nr` directory module and its child, reached through qualified paths |
 | `showcase/`      | **Bigger programs that combine many features at once** — incl. mutable borrows `&mut T` + `*` deref (`mutable_borrows.nr`) |
 
 The single source of truth for each program's expected exit code is
-[`expected.txt`](expected.txt).
+[`expected.txt`](expected.txt). A multi-file program registers its root with an exit
+code and each of its other modules with the marker `module`: those have no `main` of
+their own and are compiled as part of the root that reaches into them.
 
 ## Showcase programs
 
@@ -112,6 +115,12 @@ isolation:
   struct + `&self` method, fixed-size arrays, `match` on the returned `Result`,
   `val-else` with an `|e|` error binding, and `??` defaulting the reads that only need
   a fallback. Exit `177`.
+- [`showcase/telemetry/main.nr`](showcase/telemetry/main.nr) — **multi-file
+  compilation**: a root module reaching a sibling (`stats`), a `mod.nr` directory module
+  (`report`), and its child (`report::format`). Combined with a struct + `impl` methods
+  built in one module and used in another, a generic function monomorphized at `i32` and
+  `bool`, a fixed-size array, a heap-backed `Vec<T>` that frees its buffer at scope exit,
+  an enum + `match`, and `??` defaulting an absent `Option`. Exit `75`.
 
 ## Compiling and running
 

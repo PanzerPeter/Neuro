@@ -18,6 +18,7 @@ neuro-hir = { path = "../infrastructure/neuro-hir" }
 # Feature Slices
 lexical-analysis = { path = "../lexical-analysis" }
 syntax-parsing = { path = "../syntax-parsing" }
+module-resolution = { path = "../module-resolution" }
 semantic-analysis = { path = "../semantic-analysis" }
 hir-lowering = { path = "../hir-lowering" }
 control-flow = { path = "../control-flow" }

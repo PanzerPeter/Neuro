@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) underway with `Option` / `Result`, the standard collections, `val-else`, the `?` propagation operator, and error-path outlining landed — Alpha Development
+**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) underway with `Option` / `Result`, the standard collections, `val-else`, the `?` propagation operator, error-path outlining, and multi-file compilation landed — Alpha Development
 
 ## Quick Links
 
@@ -26,6 +26,7 @@
 - [Control Flow](language-reference/control-flow.md) — if/else, while, loop, range-for, break/continue
 - [Operators](language-reference/operators.md) — Arithmetic, comparison, logical, bitwise, cast operators
 - [Structs](language-reference/structs.md) — User-defined types, methods, associated functions
+- [Modules](language-reference/modules.md) — Multi-file programs, `mod.nr` directories, qualified paths
 
 ### User Guides
 
@@ -210,6 +211,22 @@ Key design goals:
 - `Hashable` is a compiler-known lang-item trait: `func hash(&self) -> u64`
 - Limits: `pop` / `get` build an `Option<T>`, so they need an `Option`-carryable element type;
   a `string` inside a collection is not freed with it
+
+### Modules (1G)
+
+- A program may span several files: every `.nr` file is a module, and a directory holding a
+  `mod.nr` is a module with children. You compile the root; every module it reaches comes with it
+- A **qualified path** is what pulls a module in — `math::sqrt`, `utils::io::read`,
+  `geometry::Point` — in value position and in type annotations alike. There is no `import` yet
+- Only referenced modules load, so a directory of unrelated single-file programs still compiles one
+  at a time. A leaf `math.nr` has no children; only a `mod.nr` directory opens a level
+- A locally declared type wins over a same-named file, so `Point::new` keeps meaning the associated
+  function even with a `Point.nr` beside it
+- Modules share one flat namespace this phase: a name declared by two loaded modules is a reported
+  collision, not a silent winner. `export` visibility, `import`, inline `module { }`, and
+  re-exports are still ahead
+- See the [modules reference](language-reference/modules.md) for the resolution rules and
+  diagnostics
 
 ### Pattern Matching (1E)
 

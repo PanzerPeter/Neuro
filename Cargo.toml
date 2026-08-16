@@ -13,6 +13,7 @@ members = [
     # Phase 1: Core Compiler Slices
     "compiler/lexical-analysis",
     "compiler/syntax-parsing",
+    "compiler/module-resolution",
     "compiler/semantic-analysis",
     "compiler/control-flow",
     "compiler/llvm-backend",
@@ -29,7 +30,6 @@ members = [
     # "compiler/automatic-differentiation",
     # "compiler/gpu-compilation",
     # "compiler/memory-management",
-    # "compiler/module-system",
     # "compiler/pattern-matching",
     # "compiler/optimization-passes",
     # "compiler/error-reporting",
@@ -52,7 +52,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.70.0"
+version = "1.71.0"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Neuro Contributors"]

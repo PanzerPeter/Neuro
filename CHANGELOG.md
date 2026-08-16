@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.71.0] - 2026-08-16
+
+### Added
+- `infra`: multi-file compilation. Every `.nr` file is a module and a directory
+  holding a `mod.nr` is a module with children, so a program can span files and
+  directories. The new `compiler/module-resolution` slice expands the root file
+  into one item list: `resolve_program(root, parse)` loads each reachable module,
+  verifies every qualified path against the module that owns the name, and strips
+  the qualifier. Semantic analysis, HIR lowering, and both backends are unchanged
+  — they still see a single-file program.
+- `infra`: reference-driven module discovery. There is no `import` yet, so
+  writing a qualified path is what pulls a module into the build:
+  `math::sqrt`, `utils::io::read`, `geometry::Point` in value and type position
+  alike. A directory of unrelated single-file programs therefore still compiles
+  one program at a time. A leaf `math.nr` has no children; only a `mod.nr`
+  directory opens a level, and a directory named in a path but missing its
+  `mod.nr` is an error rather than a silent miss. A locally declared type wins
+  over a same-named file, so `Point::new` keeps meaning the associated function.
+- `parser`: paths accept more than two segments (`utils::io::read`) and type
+  annotations accept a module qualifier (`geometry::Point`). No AST node changed
+  — the qualifier rides inside the identifier until module resolution splits and
+  erases it, and the `::<` turbofish check still wins at every step.
+- `tests`: `compiler/neurc/tests/modules.rs` compiles and runs multi-file
+  programs end to end — a sibling module supplying functions, structs, methods
+  and constants; a directory module and its child; two modules referencing each
+  other; a module enum matched from the root — plus the three module
+  diagnostics. The slice carries its own unit tests against a stub parser.
+- `docs`: `docs/language-reference/modules.md`, the `examples/modules/` teaching
+  program (exit `40`), and the `examples/showcase/telemetry/` cumulative
+  showcase (exit `75`) combining modules with structs, methods, a generic
+  function, arrays, `Vec<T>`, an enum, `match`, and `??`.
+
+### Changed
+- `neurc`: `check` and `compile` no longer parse the input themselves; both call
+  `resolve_modules`, which hands `syntax_parsing::parse` to the resolver. The
+  parser is injected rather than imported because a feature slice may not depend
+  on another — neurc is the one place the two meet. `check` now reports how many
+  modules were loaded.
+- `tests`: the example manifest accepts `module` in place of an exit code,
+  marking a non-root module that is compiled as part of its root rather than on
+  its own.
+
+### Known limitations
+- Modules share one flat namespace: a name declared by two loaded modules is a
+  reported collision naming both files, not a silent winner. Per-module privacy
+  needs `export`, which lands with the visibility item, as do `import`, inline
+  `module { }` blocks, and re-exports.
+- A `match` pattern takes the bare enum name (the flat namespace makes it reach);
+  a module-qualified trait in `impl` / `dyn` position and the functional-update
+  form `mod::Point { x: 1.0, ..base }` do not parse.
+- Merged modules share one span space, so a panic diagnostic from a non-root
+  module reports a position in the root file's coordinates — the same
+  approximation the implicit prelude already carries.
+
 ## [1.70.0] - 2026-08-13
 
 ### Added

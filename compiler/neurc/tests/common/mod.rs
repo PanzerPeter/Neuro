@@ -28,9 +28,15 @@ impl CompileTest {
         }
     }
 
-    /// Write source code to a temporary .nr file and return its path
+    /// Write source code to a temporary .nr file and return its path.
+    ///
+    /// `filename` may carry directories (`utils/mod.nr`) so a multi-file program can be
+    /// laid out the way module resolution expects to find it.
     pub fn write_source(&self, filename: &str, source: &str) -> PathBuf {
         let source_path = self.temp_dir.path().join(filename);
+        if let Some(parent) = source_path.parent() {
+            fs::create_dir_all(parent).expect("Failed to create source directory");
+        }
         fs::write(&source_path, source).expect("Failed to write source file");
         source_path
     }

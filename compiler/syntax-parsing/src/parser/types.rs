@@ -149,7 +149,20 @@ impl Parser {
 
         match token.kind {
             TokenKind::Identifier(name) => {
-                let span = token.span;
+                let mut span = token.span;
+                let mut name = name;
+                // A module-qualified type (`geometry::Point`). The qualifier rides in the
+                // name until module resolution verifies and strips it; no downstream pass
+                // ever sees a `::` in a type name.
+                while self.check(&TokenKind::ColonColon) {
+                    self.advance(); // consume '::'
+                    let segment =
+                        self.consume(TokenKind::Identifier(String::new()), "type name after '::'")?;
+                    if let TokenKind::Identifier(next) = segment.kind {
+                        name = format!("{}::{}", name, next);
+                        span = span.merge(segment.span);
+                    }
+                }
                 let ident = Identifier { name, span };
                 // Generic type application `Name<T1, T2, ...>`. Without a
                 // following `<`, this is a plain named type. Arguments may be types or

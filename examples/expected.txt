@@ -1,6 +1,7 @@
 # Expected exit codes for every example program.
 #
 # Format:  <path-relative-to-examples/>   <expected-exit-code>
+#          <path-relative-to-examples/>   module
 # Blank lines and lines beginning with '#' are ignored.
 #
 # This file is the single source of truth for the example test harness
@@ -8,6 +9,10 @@
 # compiles and runs every *.nr file, and asserts its exit code matches the
 # value here. A *.nr file with no entry below — or an entry with no file —
 # fails the test, so adding an example is one new line here and nothing else.
+#
+# `module` in place of an exit code marks a non-root module of a multi-file
+# program: it has no `main`, and is compiled as part of the root that reaches
+# into it rather than on its own.
 
 # --- basics ---------------------------------------------------------------
 basics/assignment.nr            15
@@ -81,6 +86,12 @@ structs/neuron.nr   4
 structs/structs.nr  50
 structs/struct_update.nr  14
 
+# --- modules (multi-file programs) ----------------------------------------
+modules/main.nr             40
+modules/geometry.nr         module
+modules/shapes/mod.nr       module
+modules/shapes/area.nr      module
+
 # --- showcase (multiple features working together) ------------------------
 showcase/borrowed_text.nr   18
 showcase/closures.nr        90
@@ -97,5 +108,9 @@ showcase/scan_guard.nr      160
 showcase/sensor_pipeline.nr 57
 showcase/shape_traits.nr    161
 showcase/simulation.nr      2
+showcase/telemetry/main.nr          75
+showcase/telemetry/stats.nr         module
+showcase/telemetry/report/mod.nr    module
+showcase/telemetry/report/format.nr module
 showcase/unit_types.nr      94
 showcase/vector_physics.nr  35

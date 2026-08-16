@@ -50,6 +50,7 @@ fn test_no_cross_slice_dependencies() {
     let feature_slices = vec![
         "compiler/lexical-analysis",
         "compiler/syntax-parsing",
+        "compiler/module-resolution",
         "compiler/semantic-analysis",
         "compiler/hir-lowering",
         "compiler/control-flow",
@@ -113,6 +114,7 @@ fn test_infrastructure_no_slice_dependencies() {
     let feature_slices = vec![
         "lexical-analysis",
         "syntax-parsing",
+        "module-resolution",
         "semantic-analysis",
         "hir-lowering",
         "control-flow",
@@ -147,6 +149,7 @@ fn test_all_slices_have_context_md() {
     let all_slices = vec![
         "compiler/lexical-analysis",
         "compiler/syntax-parsing",
+        "compiler/module-resolution",
         "compiler/semantic-analysis",
         "compiler/hir-lowering",
         "compiler/control-flow",
