@@ -99,15 +99,27 @@ fn validate_source_file(path: &Path) -> Result<()> {
     }
 }
 
+/// Expand `input` and every module it reaches through a qualified path into one program.
+///
+/// The parser is passed in rather than imported by `module-resolution`: that slice depends
+/// only on the AST it rewrites, so the driver is the single place the two meet.
+fn resolve_modules(input: &Path) -> Result<module_resolution::ResolvedProgram> {
+    // The resolver's own message names the file, the module, and what was expected, so it
+    // is reported as-is rather than wrapped in a context line that would hide it behind
+    // `check`'s single-line error rendering.
+    module_resolution::resolve_program(input, &|source| {
+        syntax_parsing::parse(source).map_err(|e| e.to_string())
+    })
+    .map_err(|e| anyhow::anyhow!("Module error: {}", e))
+}
+
 /// Check a Neuro source file for syntax and type errors
 fn check_file(path: &PathBuf) -> anyhow::Result<()> {
     validate_source_file(path)?;
 
-    let source = fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("Failed to read file {:?}: {}", path, e))?;
-
-    let ast = syntax_parsing::parse(&source).map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
-    let ast = prelude::with_prelude(ast)?;
+    let program = resolve_modules(path)?;
+    let module_count = program.modules.len();
+    let ast = prelude::with_prelude(program.items)?;
 
     match semantic_analysis::type_check(&ast) {
         Ok(warnings) => {
@@ -118,8 +130,9 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
             let hir = hir_lowering::lower_program(&ast)
                 .map_err(|e| anyhow::anyhow!("HIR lowering error: {}", e))?;
             println!(
-                "Type checking passed for {:?} ({} HIR items)",
+                "Type checking passed for {:?} ({} module(s), {} HIR items)",
                 path,
+                module_count,
                 hir.items.len()
             );
             Ok(())
@@ -156,11 +169,11 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
     log::info!("Compiling {}", input.display());
     log::info!("Using optimization level -O{}", optimization);
 
-    log::debug!("Parsing source...");
-    let ast = syntax_parsing::parse(&source)
-        .map_err(|e| anyhow::anyhow!("Parse error: {}", e))
-        .context("Failed to parse source file")?;
-    let ast = prelude::with_prelude(ast).context("Failed to load the compiler prelude")?;
+    log::debug!("Resolving modules and parsing...");
+    let program = resolve_modules(input)?;
+    log::debug!("Resolved {} module(s)", program.modules.len());
+    let ast =
+        prelude::with_prelude(program.items).context("Failed to load the compiler prelude")?;
 
     log::debug!("Type checking...");
     let warnings = semantic_analysis::type_check(&ast)

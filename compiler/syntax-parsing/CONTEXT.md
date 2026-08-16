@@ -40,6 +40,13 @@ before the param list.
 
 Path expressions: when `parse_prefix` sees `Identifier` `::`, it produces `Expr::Path { type_name,
 member, span }` — the `func` of an `Expr::Call` for associated calls like `Point::new(x, y)`.
+A path may carry more than two segments now that modules exist (`utils::io::read`): the loop
+folds everything ahead of the final segment into one qualifier identifier whose `name` holds the
+`::` separators, and `parse_type` does the same for a qualified type annotation
+(`geometry::Point`). No AST node changed — `module-resolution` splits the qualifier again,
+verifies it against the module that owns the name, and erases it before semantic analysis, so
+no `::` name ever reaches the type checker. The `::<` turbofish check still wins at every step,
+so `f::<i32>(x)` and `math::helper::<i32>(x)` both parse.
 
 `Amp` (`&`) token added to the lexer for self-param parsing; logos longest-match keeps `&&` as
 `AmpAmp`.

@@ -326,10 +326,19 @@ the array, `Vec`, string-slice, and UTF-8-boundary guards — is emitted into a
 module-private cold function and called from the failure site, so the diagnostic
 machinery no longer sits inline in the function that can fail; guard branches
 carry `!prof` weights keeping the failure edge off the fall-through path.
+**Multi-file compilation** landed in v1.71.0: every `.nr` file is a module and a
+directory holding a `mod.nr` is a module with children, expanded from the root file
+by the new `module-resolution` slice. With no `import` yet, a qualified path
+(`utils::io::read`) is what pulls a module into the build; qualifiers are verified
+against the module that owns the name and then erased, so the rest of the pipeline
+still sees a single-file program. Modules share one flat namespace for now — a name
+two modules both declare is a reported collision, and per-module privacy arrives
+with `export`.
 
-**Next, in dependency order:** the rest of 1G (modules, imports, the full
-prelude) → 1H (string interpolation, triple-quoted strings, nested comments, named
-arguments). See the [Quick Roadmap](README.md#quick-roadmap).
+**Next, in dependency order:** the rest of 1G (imports, `export` visibility, inline
+`module { }` blocks, the full prelude) → 1H (string interpolation, triple-quoted
+strings, nested comments, named arguments). See the
+[Quick Roadmap](README.md#quick-roadmap).
 
 `[x]` = landed · `[ ]` = open. See [CHANGELOG.md](CHANGELOG.md) and the README
 capabilities table for full behavior.

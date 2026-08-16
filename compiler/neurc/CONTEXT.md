@@ -20,6 +20,15 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 - source-location — source span resolution for error display
 
 ## Notes
+- 2026-08-16: Multi-file compilation. `check_file` and `compile_file` no longer parse the input
+  themselves: both call the new `resolve_modules`, which hands `syntax_parsing::parse` to
+  `module_resolution::resolve_program` and gets back the merged item list of every module the
+  root reaches through a qualified path. The parser is passed in rather than depended on because
+  `module-resolution` may not import a feature slice — neurc is the single place the two meet.
+  The prelude still rides on top of the merged program, so a local declaration in any module
+  shadows a prelude item exactly as before. The backend is still handed the *root* file's source
+  for panic-location rendering; merged modules share one span space, the same approximation the
+  prepended prelude has always had.
 - 2026-07-27: Standard collections. `prelude.nr` gains the `OrderedF32` / `OrderedF64` validating
   wrapper structs — `@derive(Copy, Clone)`, a `new` constructor that panics on NaN, and `PartialEq` +
   `Comparable` impls. They exist so an ordered map can be keyed on a float: IEEE-754 `<` is a partial

@@ -107,23 +107,40 @@ impl Parser {
                 // for `parse_infix` to attach to the following call. Only `::member`
                 // is a path here.
                 if self.check(&TokenKind::ColonColon) && !self.colon_colon_opens_turbofish() {
-                    self.advance(); // consume '::'
-                    let member_token = self.consume(
-                        TokenKind::Identifier(String::new()),
-                        "member name after '::'",
-                    )?;
-                    let member = if let TokenKind::Identifier(n) = member_token.kind {
-                        Identifier {
-                            name: n,
-                            span: member_token.span,
+                    // A path may carry more than two segments once modules exist
+                    // (`utils::io::read`). Everything ahead of the final segment folds into
+                    // one qualifier identifier; module resolution splits it again and erases
+                    // the module prefix before semantic analysis sees the name.
+                    let mut qualifier = ident;
+                    let mut member;
+                    loop {
+                        self.advance(); // consume '::'
+                        let member_token = self.consume(
+                            TokenKind::Identifier(String::new()),
+                            "member name after '::'",
+                        )?;
+                        member = if let TokenKind::Identifier(n) = member_token.kind {
+                            Identifier {
+                                name: n,
+                                span: member_token.span,
+                            }
+                        } else {
+                            return Err(ParseError::UnexpectedToken {
+                                found: member_token.kind,
+                                expected: "member name".to_string(),
+                                span: member_token.span,
+                            });
+                        };
+                        if !self.check(&TokenKind::ColonColon) || self.colon_colon_opens_turbofish()
+                        {
+                            break;
                         }
-                    } else {
-                        return Err(ParseError::UnexpectedToken {
-                            found: member_token.kind,
-                            expected: "member name".to_string(),
-                            span: member_token.span,
-                        });
-                    };
+                        qualifier = Identifier {
+                            name: format!("{}::{}", qualifier.name, member.name),
+                            span: qualifier.span.merge(member.span),
+                        };
+                    }
+                    let ident = qualifier;
                     // `EnumName::Variant { ... }` is a struct-variant construction
                     // The trailing brace is the only enum-construction shape
                     // distinguishable at parse time. Suppressed inside a `no_struct_lit`
