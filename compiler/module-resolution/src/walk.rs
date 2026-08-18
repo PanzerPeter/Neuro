@@ -5,21 +5,24 @@
 //! grammar nobody re-checked.
 
 use ast_types::{
-    ClosureParam, Expr, GenericArg, GenericParamKind, Item, MatchArm, MethodDef, Stmt, Type,
-    VariantPayload,
+    ClosureParam, EnumPatternPayload, Expr, GenericArg, GenericParamKind, Item, MatchArm,
+    MethodDef, Pattern, Stmt, Type, VariantPayload,
 };
 use shared_types::Identifier;
 
 use crate::ModuleError;
 
-/// A place in the AST a qualified name can appear.
+/// A place in the AST a qualified or imported name can appear.
 pub(crate) enum Site<'a> {
-    /// An `Expr::Path` or `Expr::EnumStructLiteral`. Handed over whole because stripping
-    /// the qualifier can change which node it is: `geometry::Point { x: 1.0 }` parses as a
-    /// struct-variant construction and resolves to a plain struct literal.
+    /// An `Expr::Path`, `Expr::EnumStructLiteral`, or bare `Expr::Identifier`. Handed over
+    /// whole because resolving the name can change which node it is: `geometry::Point { x: 1.0 }`
+    /// parses as a struct-variant construction and resolves to a plain struct literal.
     Expr(&'a mut Expr),
     /// The name of a `Type::Named` or `Type::Generic`.
     TypeName(&'a mut Identifier),
+    /// A `match` / `val-else` pattern that names a variant — qualified, imported, or (for a
+    /// payload-less variant) still indistinguishable from a binding.
+    Pattern(&'a mut Pattern),
 }
 
 /// The callback shape both passes use. `dyn` rather than a generic parameter: the walk is
@@ -128,6 +131,9 @@ fn walk_item(item: &mut Item, f: SiteFn) -> Result<(), ModuleError> {
             walk_expr(&mut def.value, f)
         }
         Item::Newtype(def) => walk_type(&mut def.inner, f),
+        // Imports are lifted out of the item list as each module is loaded, so the walk
+        // never meets one.
+        Item::Import(_) => Ok(()),
     }
 }
 
@@ -250,8 +256,12 @@ fn walk_stmt(stmt: &mut Stmt, f: SiteFn) -> Result<(), ModuleError> {
             walk_expr(value, f)
         }
         Stmt::ValElse {
-            value, else_block, ..
+            pattern,
+            value,
+            else_block,
+            ..
         } => {
+            walk_pattern(pattern, f)?;
             walk_expr(value, f)?;
             walk_stmts(else_block, f)
         }
@@ -266,7 +276,10 @@ fn walk_stmt(stmt: &mut Stmt, f: SiteFn) -> Result<(), ModuleError> {
 fn walk_expr(expr: &mut Expr, f: SiteFn) -> Result<(), ModuleError> {
     // The callback runs before the descent: it may replace this node, and the replacement's
     // children still need walking.
-    if matches!(expr, Expr::Path { .. } | Expr::EnumStructLiteral { .. }) {
+    if matches!(
+        expr,
+        Expr::Path { .. } | Expr::EnumStructLiteral { .. } | Expr::Identifier(_)
+    ) {
         f(Site::Expr(expr))?;
     }
 
@@ -381,10 +394,41 @@ fn walk_expr(expr: &mut Expr, f: SiteFn) -> Result<(), ModuleError> {
 }
 
 fn walk_arm(arm: &mut MatchArm, f: SiteFn) -> Result<(), ModuleError> {
+    for pattern in &mut arm.patterns {
+        walk_pattern(pattern, f)?;
+    }
     if let Some(guard) = &mut arm.guard {
         walk_expr(guard, f)?;
     }
     walk_expr(&mut arm.body, f)
+}
+
+fn walk_pattern(pattern: &mut Pattern, f: SiteFn) -> Result<(), ModuleError> {
+    // As in `walk_expr`, the callback runs first: resolving an imported variant turns a
+    // binding or an unqualified variant into a `Pattern::Enum`, whose payload still needs
+    // walking afterwards.
+    f(Site::Pattern(pattern))?;
+
+    let payload = match pattern {
+        Pattern::Wildcard(_) | Pattern::Binding(_) | Pattern::Literal(_, _) => return Ok(()),
+        Pattern::Range { .. } => return Ok(()),
+        Pattern::Enum { payload, .. } | Pattern::UnqualifiedEnum { payload, .. } => payload,
+    };
+    match payload {
+        EnumPatternPayload::Unit => Ok(()),
+        EnumPatternPayload::Tuple(subs) => {
+            for sub in subs {
+                walk_pattern(sub, f)?;
+            }
+            Ok(())
+        }
+        EnumPatternPayload::Struct(fields) => {
+            for field in fields {
+                walk_pattern(&mut field.pattern, f)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 fn walk_closure_param(param: &mut ClosureParam, f: SiteFn) -> Result<(), ModuleError> {

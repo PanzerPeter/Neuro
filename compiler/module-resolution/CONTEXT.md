@@ -22,10 +22,12 @@ Expand a root `.nr` file into the single item list its program is built from, lo
   `syntax-parsing`, a feature slice; `neurc` is the one place both meet, and it passes
   `syntax_parsing::parse` in. The slice's own unit tests use a stub parser, so it builds
   and tests with no feature-slice dependency at all.
-- **Discovery is reference-driven.** There is no `import` yet (that is the next roadmap
-  item), so a module is loaded when a qualified path names it: `math::sqrt` looks for
-  `math.nr` or `math/mod.nr` beside the referencing file. Globbing a directory instead
-  would drag every unrelated single-file program in `examples/` into one build.
+- **Discovery is reference-driven.** A module is loaded when an `import` names it or a
+  qualified path reaches into it: `math::sqrt` looks for `math.nr` or `math/mod.nr` beside
+  the referencing file. Globbing a directory instead would drag every unrelated single-file
+  program in `examples/` into one build. An import's path is a discovery chain like any
+  other, and each `{...}` entry extends it, since a listed name may be a child module
+  (`import ./utils::{io}`) rather than an item.
 - **A leaf module has no children.** `math.nr` is a file, so `math::io::read` cannot reach
   `io.nr` beside `math.nr`; only a directory with a `mod.nr` opens a level. A directory
   named in a path but *missing* its `mod.nr` is an error rather than a silent miss —
@@ -37,6 +39,25 @@ Expand a root `.nr` file into the single item list its program is built from, lo
   remainder is left for the type checker: that is how `Point::new` and `Option::Some`
   survive this pass untouched. Only a path of three or more segments whose head resolves
   to nothing is an error — it can have been meant as nothing but a module path.
+- **An import binds names, it does not gate them.** `imports.rs` turns each file's
+  declarations into one `ImportScope` — module aliases, item renames, and variant bindings —
+  and the rewriting pass consults the scope of the module it is walking. This is the one
+  place the slice is *not* flat: two modules may bind one name to different things, though
+  a single module may not bind one name twice. Because the namespace underneath is flat, an
+  unrenamed item import is an identity binding: the name already reaches. What the import
+  buys is the module load, the validation that the name exists where it was taken from, and
+  the renaming and variant forms, none of which the flat namespace gives for free.
+- **A variant import is what is left when nothing named a module.** `import Option::{Some}`
+  cannot be verified here: `Option` comes from the prelude, which the driver prepends *after*
+  this pass. A single-segment path that names no module is therefore read as an enum and its
+  listed names as variants, left for the type checker to reject if the enum is bogus. A
+  multi-segment head that names no module can only have been meant as a module path and is
+  an error.
+- **A bare `None` is a binding until an import says otherwise.** `Some(n)` carries a payload
+  and parses as `Pattern::UnqualifiedEnum`, so it is unambiguous and an error when no import
+  accounts for it. `None` is written exactly like a catch-all binding, so only the import
+  table tells them apart — which is why pattern rewriting lives here rather than in the
+  parser.
 - **The merge is flat, and collisions are reported.** Every module's items join one
   namespace; qualifiers are verified against the owning module and then stripped, so
   semantic analysis, HIR lowering, and both backends never learn that modules exist. The
@@ -49,9 +70,13 @@ Expand a root `.nr` file into the single item list its program is built from, lo
   literal `geometry::Point { x: 1.0 }` parses as an enum struct-variant construction (the
   brace form is ambiguous until the qualifier is known) and is rewritten into a plain
   struct literal here.
-- **One walk, two passes.** `walk.rs` visits every place a qualified name can be written;
-  discovery and rewriting are the same traversal with different callbacks, so a new
-  qualified position cannot be handled by one and forgotten by the other.
+- **One walk, two passes.** `walk.rs` visits every place a qualified or imported name can
+  be written — including bare identifiers and `match` / `val-else` patterns, both of which
+  imports made significant; discovery and rewriting are the same traversal with different
+  callbacks, so a new position cannot be handled by one and forgotten by the other.
+- **Rewriting does not track locals.** A bare name is replaced when an import bound it,
+  whether or not a local of the same name is in scope. Shadowing an imported name is
+  therefore not supported: rename the import with `as`.
 - Spans stay per-file. Merged modules therefore share one offset space, exactly as the
   driver's prepended prelude already does, so a panic diagnostic from a non-root module
   reports a position in the root file's coordinates. Per-file diagnostic attribution needs

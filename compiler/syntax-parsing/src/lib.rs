@@ -8,8 +8,9 @@ mod precedence;
 
 pub use ast::{
     ArraySize, Attribute, BinaryOp, EnumDef, EnumPatternPayload, EnumVariant, Expr, FieldDef,
-    FieldInit, FieldPattern, FunctionDef, GenericArg, GenericParamKind, ImplDef, Item, MatchArm,
-    MethodDef, Parameter, Pattern, SelfParam, Stmt, StructDef, Type, UnaryOp, VariantPayload,
+    FieldInit, FieldPattern, FunctionDef, GenericArg, GenericParamKind, ImplDef, ImportDef,
+    ImportName, ImportSelection, Item, MatchArm, MethodDef, Parameter, Pattern, SelfParam, Stmt,
+    StructDef, Type, UnaryOp, VariantPayload,
 };
 pub use errors::{ParseError, ParseResult};
 

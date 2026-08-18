@@ -346,7 +346,7 @@ fn collect_pattern_bindings(pattern: &Pattern, fv: &mut FreeVars) {
         Pattern::Binding(ident) => {
             fv.bound.insert(ident.name.clone());
         }
-        Pattern::Enum { payload, .. } => match payload {
+        Pattern::Enum { payload, .. } | Pattern::UnqualifiedEnum { payload, .. } => match payload {
             EnumPatternPayload::Unit => {}
             EnumPatternPayload::Tuple(patterns) => {
                 for p in patterns {

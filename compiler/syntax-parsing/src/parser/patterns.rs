@@ -96,6 +96,18 @@ impl Parser {
                     let enum_name = Identifier { name, span };
                     return self.parse_enum_pattern(enum_name);
                 }
+                // `Some(n)` — a variant an import brought into scope. A payload settles
+                // the reading; a bare `None` cannot be told from a binding here and is
+                // resolved against the same import table during module resolution.
+                if self.check(&TokenKind::LeftParen) || self.check(&TokenKind::LeftBrace) {
+                    let variant = Identifier { name, span };
+                    let (payload, end_span) = self.parse_variant_payload_pattern(variant.span)?;
+                    return Ok(Pattern::UnqualifiedEnum {
+                        span: variant.span.merge(end_span),
+                        variant,
+                        payload,
+                    });
+                }
                 Ok(Pattern::Binding(Identifier { name, span }))
             }
             _ => {
@@ -122,8 +134,23 @@ impl Parser {
     fn parse_enum_pattern(&mut self, enum_name: Identifier) -> ParseResult<Pattern> {
         self.advance(); // consume '::'
         let variant = self.consume_identifier("enum variant name after '::'")?;
+        let (payload, end_span) = self.parse_variant_payload_pattern(variant.span)?;
 
-        let (payload, end_span) = if self.check(&TokenKind::LeftParen) {
+        Ok(Pattern::Enum {
+            span: enum_name.span.merge(end_span),
+            enum_name,
+            variant,
+            payload,
+        })
+    }
+
+    /// Parse a variant pattern's `(...)` / `{...}` payload, or none at all.
+    /// `variant_span` ends the pattern when the variant carries no payload.
+    fn parse_variant_payload_pattern(
+        &mut self,
+        variant_span: Span,
+    ) -> ParseResult<(EnumPatternPayload, Span)> {
+        let payload = if self.check(&TokenKind::LeftParen) {
             self.advance(); // consume '('
             self.skip_newlines();
             let mut subs = Vec::new();
@@ -159,15 +186,9 @@ impl Parser {
                 self.consume(TokenKind::RightBrace, "'}' to close struct variant pattern")?;
             (EnumPatternPayload::Struct(fields), close.span)
         } else {
-            (EnumPatternPayload::Unit, variant.span)
+            (EnumPatternPayload::Unit, variant_span)
         };
-
-        Ok(Pattern::Enum {
-            span: enum_name.span.merge(end_span),
-            enum_name,
-            variant,
-            payload,
-        })
+        Ok(payload)
     }
 
     /// Parse one `field` (shorthand → binds `field`) or `field: sub_pattern` entry of

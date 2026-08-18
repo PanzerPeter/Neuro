@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) underway with `Option` / `Result`, the standard collections, `val-else`, the `?` propagation operator, error-path outlining, and multi-file compilation landed — Alpha Development
+**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) underway with `Option` / `Result`, the standard collections, `val-else`, the `?` propagation operator, error-path outlining, multi-file compilation, and `import` landed — Alpha Development
 
 ## Quick Links
 
@@ -26,7 +26,7 @@
 - [Control Flow](language-reference/control-flow.md) — if/else, while, loop, range-for, break/continue
 - [Operators](language-reference/operators.md) — Arithmetic, comparison, logical, bitwise, cast operators
 - [Structs](language-reference/structs.md) — User-defined types, methods, associated functions
-- [Modules](language-reference/modules.md) — Multi-file programs, `mod.nr` directories, qualified paths
+- [Modules](language-reference/modules.md) — Multi-file programs, `mod.nr` directories, qualified paths, `import`
 
 ### User Guides
 
@@ -216,15 +216,19 @@ Key design goals:
 
 - A program may span several files: every `.nr` file is a module, and a directory holding a
   `mod.nr` is a module with children. You compile the root; every module it reaches comes with it
-- A **qualified path** is what pulls a module in — `math::sqrt`, `utils::io::read`,
-  `geometry::Point` — in value position and in type annotations alike. There is no `import` yet
+- An **`import`, or a qualified path** written without one, is what pulls a module in —
+  `math::sqrt`, `utils::io::read`, `geometry::Point` — in value position and in type annotations
+  alike
+- `import math`, `import ./utils::io`, `import math::{sqrt, sin}`, `import math::sin as sine`,
+  `import math::matrix as mat`, and `import Option::{Some, None}` are all available. An imported
+  variant reads unqualified as a value and as a `match` pattern
 - Only referenced modules load, so a directory of unrelated single-file programs still compiles one
   at a time. A leaf `math.nr` has no children; only a `mod.nr` directory opens a level
 - A locally declared type wins over a same-named file, so `Point::new` keeps meaning the associated
   function even with a `Point.nr` beside it
-- Modules share one flat namespace this phase: a name declared by two loaded modules is a reported
-  collision, not a silent winner. `export` visibility, `import`, inline `module { }`, and
-  re-exports are still ahead
+- Modules share one flat namespace this phase, so an import is a convenience rather than a gate: a
+  name declared by two loaded modules is a reported collision, not a silent winner. `export`
+  visibility, inline `module { }`, re-exports, and the implicit prelude import are still ahead
 - See the [modules reference](language-reference/modules.md) for the resolution rules and
   diagnostics
 

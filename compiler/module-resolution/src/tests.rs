@@ -6,8 +6,11 @@
 
 use std::path::{Path, PathBuf};
 
-use ast_types::{Expr, FunctionDef, Item, Parameter, Stmt, Type};
-use shared_types::{Identifier, Span};
+use ast_types::{
+    EnumPatternPayload, Expr, FunctionDef, ImportDef, ImportName, ImportSelection, Item, MatchArm,
+    Parameter, Pattern, Stmt, Type,
+};
+use shared_types::{Identifier, Literal, Span};
 use tempfile::TempDir;
 
 use crate::{resolve_program, ModuleError, ResolvedProgram};
@@ -60,8 +63,76 @@ fn call_path(qualifier: &str, member: &str) -> Stmt {
     })
 }
 
-/// The stub parser: each line is `func NAME`, `call QUALIFIER::MEMBER`, or
-/// `param NAME: TYPE`, which is enough surface to drive every resolution rule.
+/// A statement calling the bare name `callee`.
+fn call_bare(callee: &str) -> Stmt {
+    Stmt::Expr(Expr::Call {
+        func: Box::new(Expr::Identifier(ident(callee))),
+        type_args: Vec::new(),
+        args: Vec::new(),
+        span: Span::new(0, 0),
+    })
+}
+
+/// A statement matching on `0` with `pattern` as its only arm.
+fn match_on(pattern: Pattern) -> Stmt {
+    Stmt::Expr(Expr::Match {
+        scrutinee: Box::new(Expr::Literal(Literal::Integer(0, None), Span::new(0, 0))),
+        arms: vec![MatchArm {
+            patterns: vec![pattern],
+            guard: None,
+            body: Box::new(Expr::Literal(Literal::Integer(0, None), Span::new(0, 0))),
+            span: Span::new(0, 0),
+        }],
+        span: Span::new(0, 0),
+    })
+}
+
+/// Build one `import` item from the stub's `import <rest>` line.
+fn import_item(rest: &str) -> Result<Item, String> {
+    let (relative, rest) = match rest.strip_prefix("./") {
+        Some(stripped) => (true, stripped),
+        None => (false, rest),
+    };
+
+    let segments = |path: &str| path.split("::").map(ident).collect::<Vec<_>>();
+    let (path, selection) = if let Some((head, list)) = rest.split_once("::{") {
+        let list = list
+            .strip_suffix('}')
+            .ok_or_else(|| format!("unterminated import list: {}", rest))?;
+        let names = list
+            .split(',')
+            .map(str::trim)
+            .map(|entry| match entry.split_once(" as ") {
+                Some((name, alias)) => ImportName {
+                    name: ident(name),
+                    alias: Some(ident(alias)),
+                    span: Span::new(0, 0),
+                },
+                None => ImportName {
+                    name: ident(entry),
+                    alias: None,
+                    span: Span::new(0, 0),
+                },
+            })
+            .collect();
+        (segments(head), ImportSelection::List(names))
+    } else if let Some((path, alias)) = rest.split_once(" as ") {
+        (segments(path), ImportSelection::Alias(ident(alias)))
+    } else {
+        (segments(rest), ImportSelection::Module)
+    };
+
+    Ok(Item::Import(ImportDef {
+        relative,
+        path,
+        selection,
+        span: Span::new(0, 0),
+    }))
+}
+
+/// The stub parser: each line is `func NAME`, `call QUALIFIER::MEMBER`, `bare NAME`,
+/// `param NAME: TYPE`, `import ...`, `pat NAME(BIND)`, or `patbare NAME` — enough
+/// surface to drive every resolution rule.
 fn stub_parse(source: &str) -> Result<Vec<Item>, String> {
     let mut items = Vec::new();
     let mut calls = Vec::new();
@@ -73,11 +144,29 @@ fn stub_parse(source: &str) -> Result<Vec<Item>, String> {
                 .rsplit_once("::")
                 .ok_or_else(|| format!("bad call line: {}", line))?;
             calls.push(call_path(qualifier, member));
+        } else if let Some(name) = line.strip_prefix("bare ") {
+            calls.push(call_bare(name));
         } else if let Some(rest) = line.strip_prefix("param ") {
             let (name, ty) = rest
                 .split_once(": ")
                 .ok_or_else(|| format!("bad param line: {}", line))?;
             items.push(function_taking(name, ty));
+        } else if let Some(rest) = line.strip_prefix("import ") {
+            items.push(import_item(rest)?);
+        } else if let Some(rest) = line.strip_prefix("pat ") {
+            let (variant, binding) = rest
+                .split_once('(')
+                .ok_or_else(|| format!("bad pat line: {}", line))?;
+            let binding = binding
+                .strip_suffix(')')
+                .ok_or_else(|| format!("bad pat line: {}", line))?;
+            calls.push(match_on(Pattern::UnqualifiedEnum {
+                variant: ident(variant),
+                payload: EnumPatternPayload::Tuple(vec![Pattern::Binding(ident(binding))]),
+                span: Span::new(0, 0),
+            }));
+        } else if let Some(name) = line.strip_prefix("patbare ") {
+            calls.push(match_on(Pattern::Binding(ident(name))));
         } else {
             return Err(format!("unparsable line: {}", line));
         }
@@ -139,6 +228,22 @@ fn first_callee(program: &ResolvedProgram) -> Option<String> {
                 } => Some(format!("{}::{}", type_name.name, member.name)),
                 _ => None,
             },
+            _ => None,
+        })
+}
+
+/// The first match-arm pattern anywhere in the resolved program.
+fn first_pattern(program: &ResolvedProgram) -> Option<Pattern> {
+    program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Function(def) => Some(&def.body),
+            _ => None,
+        })
+        .flatten()
+        .find_map(|stmt| match stmt {
+            Stmt::Expr(Expr::Match { arms, .. }) => arms.first()?.patterns.first().cloned(),
             _ => None,
         })
 }
@@ -286,5 +391,190 @@ fn a_leaf_module_has_no_children() {
             assert_eq!(item, "io");
         }
         other => panic!("expected UndeclaredItem, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn an_import_pulls_in_a_module_nothing_else_references() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "math.nr", "func sqrt\n");
+    let root = write(dir.path(), "main.nr", "import math\nfunc main\n");
+
+    let program = resolve(&root).expect("resolution succeeds");
+
+    // Discovery is reference-driven, so without the import nothing would reach `math.nr`.
+    assert_eq!(program.modules.len(), 2);
+    assert!(declared_names(&program).contains(&"sqrt".to_string()));
+}
+
+#[test]
+fn an_imported_item_is_usable_unqualified() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "math.nr", "func sqrt\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import math::{sqrt}\nfunc main\nbare sqrt\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+
+    assert_eq!(first_callee(&program).as_deref(), Some("sqrt"));
+}
+
+#[test]
+fn an_aliased_item_resolves_to_its_original_name() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "math.nr", "func sqrt\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import math::sqrt as root\nfunc main\nbare root\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+
+    assert_eq!(first_callee(&program).as_deref(), Some("sqrt"));
+}
+
+#[test]
+fn an_aliased_module_qualifies_a_path() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "math/mod.nr", "func dummy\n");
+    write(dir.path(), "math/matrix.nr", "func mul\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import math::matrix as mat\nfunc main\ncall mat::mul\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+
+    assert_eq!(first_callee(&program).as_deref(), Some("mul"));
+}
+
+#[test]
+fn a_relative_import_reaches_a_child_module_in_its_list() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "utils/mod.nr", "func helper\n");
+    write(dir.path(), "utils/io.nr", "func read\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import ./utils::{io}\nfunc main\ncall io::read\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+
+    // `io` names a child module rather than an item of `utils`, so the list entry binds a
+    // module and the qualified call resolves through it.
+    assert_eq!(program.modules.len(), 3);
+    assert_eq!(first_callee(&program).as_deref(), Some("read"));
+}
+
+#[test]
+fn an_imported_variant_resolves_in_expression_position() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import Option::{Some, None}\nfunc main\nbare None\n",
+    );
+
+    // `Option` names no module — it is an enum the prelude supplies, invisible to this
+    // pass — so the variant is qualified for the type checker rather than resolved here.
+    let program = resolve(&root).expect("resolution succeeds");
+    assert_eq!(first_callee(&program).as_deref(), Some("Option::None"));
+}
+
+#[test]
+fn an_imported_variant_resolves_in_pattern_position() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import Option::{Some}\nfunc main\npat Some(v)\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+
+    match first_pattern(&program) {
+        Some(Pattern::Enum {
+            enum_name, variant, ..
+        }) => {
+            assert_eq!(enum_name.name, "Option");
+            assert_eq!(variant.name, "Some");
+        }
+        other => panic!("expected a resolved enum pattern, got {:?}", other),
+    }
+}
+
+#[test]
+fn a_payloadless_imported_variant_stops_reading_as_a_binding() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import Option::{None}\nfunc main\npatbare None\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+
+    match first_pattern(&program) {
+        Some(Pattern::Enum { variant, .. }) => assert_eq!(variant.name, "None"),
+        other => panic!("expected a resolved enum pattern, got {:?}", other),
+    }
+}
+
+#[test]
+fn a_variant_pattern_no_import_accounts_for_is_rejected() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(dir.path(), "main.nr", "func main\npat Some(v)\n");
+
+    match resolve(&root) {
+        Err(ModuleError::UnimportedVariant { variant, .. }) => assert_eq!(variant, "Some"),
+        other => panic!("expected UnimportedVariant, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn an_import_of_a_name_the_module_does_not_declare_is_rejected() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "math.nr", "func sqrt\n");
+    let root = write(dir.path(), "main.nr", "import math::{cbrt}\nfunc main\n");
+
+    match resolve(&root) {
+        Err(ModuleError::UndeclaredItem { module, item, .. }) => {
+            assert_eq!(module, "math");
+            assert_eq!(item, "cbrt");
+        }
+        other => panic!("expected UndeclaredItem, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn an_import_naming_no_module_is_rejected() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(dir.path(), "main.nr", "import nosuch\nfunc main\n");
+
+    match resolve(&root) {
+        Err(ModuleError::UnknownModule { head, .. }) => assert_eq!(head, "nosuch"),
+        other => panic!("expected UnknownModule, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn one_name_may_not_be_imported_twice() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import Option::{Some}\nimport Maybe::{Some}\nfunc main\n",
+    );
+
+    // Two imports binding `Some` would leave the name meaning whichever came last.
+    match resolve(&root) {
+        Err(ModuleError::DuplicateImport { name, .. }) => assert_eq!(name, "Some"),
+        other => panic!("expected DuplicateImport, got {:?}", other.map(|_| ())),
     }
 }

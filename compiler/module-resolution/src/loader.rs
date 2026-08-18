@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use ast_types::Item;
+use ast_types::{ImportDef, Item};
 
 use crate::walk::{walk_items, Site};
 use crate::ModuleError;
@@ -31,6 +31,9 @@ pub(crate) struct Module {
     /// `math.nr` has no children, so `math::helper` must not reach `math`'s siblings.
     child_dir: Option<PathBuf>,
     pub(crate) items: Vec<Item>,
+    /// The file's `import` declarations, lifted out of `items` at load time so nothing
+    /// downstream has to know the item kind existed.
+    pub(crate) imports: Vec<ImportDef>,
     pub(crate) declared: HashSet<String>,
     /// Declared struct / enum / newtype / trait names. A locally declared type wins over a
     /// same-named file, so `Point::new` keeps meaning the associated function even when a
@@ -73,11 +76,26 @@ impl ModuleGraph {
     }
 
     /// The module-path candidates written in module `id` — every qualified name minus its
-    /// final segment, which is the item or type being named rather than a module.
+    /// final segment, which is the item or type being named rather than a module, plus the
+    /// path of every `import`, which is what makes an import pull its module in even when
+    /// no qualified name reaches into it.
     fn module_chains(&mut self, id: usize) -> Vec<Vec<String>> {
         let mut items = std::mem::take(&mut self.modules[id].items);
         let declared_types = std::mem::take(&mut self.modules[id].declared_types);
         let mut chains: Vec<Vec<String>> = Vec::new();
+        for import in &self.modules[id].imports {
+            let path: Vec<String> = import.path.iter().map(|s| s.name.clone()).collect();
+            // A `{...}` entry may name a child module rather than an item
+            // (`import ./utils::{io}`), so each one extends the path it is loaded along.
+            if let ast_types::ImportSelection::List(names) = &import.selection {
+                for entry in names {
+                    let mut deeper = path.clone();
+                    deeper.push(entry.name.name.clone());
+                    chains.push(deeper);
+                }
+            }
+            chains.push(path);
+        }
         let mut collect = |site: Site<'_>| -> Result<(), ModuleError> {
             let segments = site_segments(&site);
             if segments.len() < 2 {
@@ -171,10 +189,21 @@ impl ModuleGraph {
             path: display.clone(),
             message: e.to_string(),
         })?;
-        let items = parse_module(&source).map_err(|message| ModuleError::Parse {
+        let mut items = parse_module(&source).map_err(|message| ModuleError::Parse {
             path: display.clone(),
             message,
         })?;
+
+        // Imports are consumed here rather than carried along: after resolution the
+        // program is one flat item list, and an `import` has nothing left to say.
+        let mut imports = Vec::new();
+        items.retain(|item| match item {
+            Item::Import(def) => {
+                imports.push(def.clone());
+                false
+            }
+            _ => true,
+        });
 
         let mut declared = HashSet::new();
         let mut declared_types = HashSet::new();
@@ -197,6 +226,7 @@ impl ModuleGraph {
             ref_dir,
             child_dir,
             items,
+            imports,
             declared,
             declared_types,
         });
@@ -287,10 +317,15 @@ impl ModuleGraph {
 }
 
 /// The `::`-separated segments a qualified site names, item or type name included.
+///
+/// A site that names no path — a pattern, a non-path expression — yields nothing, and a
+/// bare name yields the one segment an import table is keyed on.
 pub(crate) fn site_segments(site: &Site<'_>) -> Vec<String> {
     match site {
         Site::TypeName(name) => split_segments(&name.name),
+        Site::Pattern(_) => Vec::new(),
         Site::Expr(expr) => match expr {
+            ast_types::Expr::Identifier(name) => vec![name.name.clone()],
             ast_types::Expr::Path {
                 type_name, member, ..
             } => {
@@ -342,7 +377,7 @@ fn item_name(item: &Item) -> Option<&str> {
         Item::Trait(def) => Some(&def.name.name),
         Item::Const(def) => Some(&def.name.name),
         Item::Newtype(def) => Some(&def.name.name),
-        Item::Impl(_) => None,
+        Item::Impl(_) | Item::Import(_) => None,
     }
 }
 
@@ -352,6 +387,6 @@ fn type_name(item: &Item) -> Option<&str> {
         Item::Enum(def) => Some(&def.name.name),
         Item::Trait(def) => Some(&def.name.name),
         Item::Newtype(def) => Some(&def.name.name),
-        Item::Function(_) | Item::Const(_) | Item::Impl(_) => None,
+        Item::Function(_) | Item::Const(_) | Item::Impl(_) | Item::Import(_) => None,
     }
 }

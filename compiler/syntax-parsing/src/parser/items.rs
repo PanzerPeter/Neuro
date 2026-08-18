@@ -11,6 +11,9 @@ use crate::precedence::Precedence;
 use super::type_aliases::{expand_type_aliases, TypeAliasDecl};
 use super::Parser;
 
+const ITEM_EXPECTED: &str =
+    "function, struct, enum, impl, const, type, newtype, or import definition";
+
 impl Parser {
     /// Parse top-level items: function, struct, impl, const, or type-alias definitions.
     ///
@@ -61,15 +64,16 @@ impl Parser {
             } else if self.check(&TokenKind::Newtype) {
                 let nt = self.parse_newtype_def()?;
                 items.push(Item::Newtype(nt));
+            } else if self.check(&TokenKind::Import) {
+                let import = self.parse_import()?;
+                items.push(Item::Import(import));
             } else {
                 let token = self.peek().ok_or(ParseError::UnexpectedEof {
-                    expected: "function, struct, enum, impl, const, type, or newtype definition"
-                        .to_string(),
+                    expected: ITEM_EXPECTED.to_string(),
                 })?;
                 return Err(ParseError::UnexpectedToken {
                     found: token.kind.clone(),
-                    expected: "function, struct, enum, impl, const, type, or newtype definition"
-                        .to_string(),
+                    expected: ITEM_EXPECTED.to_string(),
                     span: token.span,
                 });
             }

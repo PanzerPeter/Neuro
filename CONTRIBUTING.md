@@ -328,14 +328,21 @@ machinery no longer sits inline in the function that can fail; guard branches
 carry `!prof` weights keeping the failure edge off the fall-through path.
 **Multi-file compilation** landed in v1.71.0: every `.nr` file is a module and a
 directory holding a `mod.nr` is a module with children, expanded from the root file
-by the new `module-resolution` slice. With no `import` yet, a qualified path
-(`utils::io::read`) is what pulls a module into the build; qualifiers are verified
-against the module that owns the name and then erased, so the rest of the pipeline
-still sees a single-file program. Modules share one flat namespace for now — a name
-two modules both declare is a reported collision, and per-module privacy arrives
-with `export`.
+by the new `module-resolution` slice. A qualified path (`utils::io::read`) is what
+pulls a module into the build; qualifiers are verified against the module that owns
+the name and then erased, so the rest of the pipeline still sees a single-file
+program. Modules share one flat namespace for now — a name two modules both declare
+is a reported collision, and per-module privacy arrives with `export`.
+**`import` statements** landed in v1.72.0, covering every form: `import math`, the
+relative `import ./utils`, the name list `import math::{sqrt, sin}`, the renames
+`import math::sin as sine` and `import math::matrix as mat`, and variant imports
+`import Option::{Some, None}` that let `Some(n)` and `None` be written unqualified in
+value and pattern position alike. An import both pulls its module into the build and
+binds names for the file that wrote it; since the merged namespace is still flat,
+an import is a convenience rather than a gate, and a name reaches whether or not you
+imported it.
 
-**Next, in dependency order:** the rest of 1G (imports, `export` visibility, inline
+**Next, in dependency order:** the rest of 1G (`export` visibility, inline
 `module { }` blocks, the full prelude) → 1H (string interpolation, triple-quoted
 strings, nested comments, named arguments). See the
 [Quick Roadmap](README.md#quick-roadmap).

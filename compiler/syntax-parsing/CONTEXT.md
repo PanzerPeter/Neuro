@@ -64,6 +64,14 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-08-18: `import` declarations. New `parser/item_imports.rs`: `parse_import` reads all five
+  surface forms into one `Item::Import` — an optional leading `./`, a `::`-separated path, then an
+  optional `{a, b as c}` list or a trailing `as` alias. `as` doubles as the cast operator, so an
+  import reads it as a rename marker only when an identifier follows; a cast keeps its meaning.
+  `parse_pattern` also learned the unqualified variant form: a bare identifier followed by `(` or
+  `{` becomes `Pattern::UnqualifiedEnum` (the payload parser is now shared with the qualified
+  `Enum::Variant` form). A bare `None` still parses as `Pattern::Binding` — nothing at parse time
+  tells the two apart, and module-resolution owns the decision either way.
 - 2026-08-03: Error propagation. `parse_infix` gains a `TokenKind::Question` arm producing
   `Expr::Try`, and `get_precedence` maps `?` to `Precedence::Call` — postfix, binding as tightly as
   a call or index, so `f(x)? + 1` adds to the unwrapped payload and `parse(s)?.field` reads a field

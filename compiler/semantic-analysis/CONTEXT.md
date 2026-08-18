@@ -157,6 +157,11 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-08-18: `import` declarations. Nothing about imports reaches the checker — module-resolution
+  consumes every `Item::Import` and rewrites every name it bound — so the new arms are no-ops. The
+  one exception is `Pattern::UnqualifiedEnum`, which the resolver rejects when no import accounts
+  for it; reaching the checker means the resolver did not run, reported as the new
+  `TypeError::UnimportedVariantPattern` and contributing no exhaustiveness coverage.
 - 2026-08-03: `?` error propagation. New `expressions/try_expr.rs`: `check_try_expr` types
   `Expr::Try` as the operand's success payload after two checks. The operand must be fallible —
   resolved through the new `fallible_kind` helper (`expressions/operators.rs`, the shared form of

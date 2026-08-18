@@ -167,3 +167,9 @@ Generic structs & impls: monomorphized the same way. A generic `StructDef` is st
   concrete length; a const-param value reference lowers to a typed integer literal; mangles include
   const values (`_cN`). Turbofish `type_args` seed the substitution before inference. Backends are
   unaffected — every instance reaching HIR has concrete `usize` array lengths.
+
+## Recent Updates
+- 2026-08-18: `import` declarations. Lowering is unchanged in substance: `Item::Import` is
+  consumed by module-resolution long before this pass, and an imported name arrives already
+  rewritten to what it stands for. A `Pattern::UnqualifiedEnum` reaching `pattern_test` means
+  neither the resolver nor the checker ran, so it surfaces as a `LoweringError::Malformed`.

@@ -8,6 +8,7 @@ mod expressions;
 mod item_enums;
 mod item_functions;
 mod item_impls;
+mod item_imports;
 mod item_structs;
 mod items;
 mod patterns;

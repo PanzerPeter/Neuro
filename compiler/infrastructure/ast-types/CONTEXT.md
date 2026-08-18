@@ -28,6 +28,15 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-08-18: Imports. Added `Item::Import(ImportDef)` — `relative` (the explicit `./` form),
+  the `::`-separated `path`, and an `ImportSelection` of `Module` / `Alias(Identifier)` /
+  `List(Vec<ImportName>)`. Whether a path segment names a module file, an item inside one, or
+  an enum is a file-system question, so the node records only what was written and
+  module-resolution settles it; nothing downstream ever sees an `Item::Import`. Also added
+  `Pattern::UnqualifiedEnum { variant, payload, span }` — `Some(n)` written without its enum,
+  which module-resolution rewrites into `Pattern::Enum` against the importing file's table.
+  A payload-*less* variant (`None`) is indistinguishable from a binding at parse time and
+  arrives as `Pattern::Binding`, resolved by the same table.
 - 2026-08-03: Error propagation. Added `Expr::Try { operand, span }` — the postfix `expr?`.
   A node of its own rather than a `BinaryOp`: it has one operand, and its type comes from that
   operand's success payload while its *failure* path is typed by the enclosing function's return

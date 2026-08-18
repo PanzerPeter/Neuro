@@ -537,6 +537,9 @@ pub enum TypeError {
     #[error("a range pattern requires an ordered scalar (integer or `char`) at {span:?}")]
     InvalidRangePattern { span: Span },
 
+    #[error("variant '{variant}' is written without its enum at {span:?}: qualify it as `Enum::{variant}` or import it with `import Enum::{{{variant}}}`")]
+    UnimportedVariantPattern { variant: String, span: Span },
+
     #[error("enum variant '{enum_name}::{variant}' is a {expected} variant; its pattern must match that form at {span:?}")]
     VariantPatternFormMismatch {
         enum_name: String,
