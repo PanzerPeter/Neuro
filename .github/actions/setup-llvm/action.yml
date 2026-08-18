@@ -15,21 +15,54 @@ runs:
   steps:
 
     # ── Linux ──────────────────────────────────────────────────────────────────
+    # GitHub's Ubuntu runners reach archive.ubuntu.com through an Azure mirror
+    # list that intermittently blackholes connections (the repeated `Ign:` lines
+    # in a stuck log). apt applies no network timeout by default, so a blackholed
+    # mirror leaves `apt-get update` waiting indefinitely and the job burns its
+    # whole budget without ever producing a failure. Every fetch below is
+    # therefore bounded and retried, and apt waits for the dpkg lock — held early
+    # in a runner's life by unattended-upgrades — instead of aborting on it.
     - name: Install LLVM 20 (Linux)
       if: runner.os == 'Linux'
       shell: bash
       run: |
         set -euo pipefail
 
-        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+        sudo tee /etc/apt/apt.conf.d/99-neuro-ci > /dev/null <<'APTCONF'
+        Acquire::Retries "3";
+        Acquire::http::Timeout "20";
+        Acquire::https::Timeout "20";
+        Acquire::ftp::Timeout "20";
+        DPkg::Lock::Timeout "300";
+        APTCONF
+
+        # Bound a single attempt, then retry the whole command. `timeout` runs
+        # under sudo so it signals apt itself rather than the sudo wrapper.
+        apt_retry() {
+          local attempt
+          for attempt in 1 2 3; do
+            if sudo timeout -k 30 600 "$@"; then
+              return 0
+            fi
+            echo "::warning::'$*' failed (attempt ${attempt}/3) — retrying in 15s"
+            # A killed apt can leave half-unpacked packages behind; clear that
+            # before the next attempt so the retry is not doomed from the start.
+            sudo dpkg --configure -a || true
+            sleep 15
+          done
+          echo "::error::'$*' failed after 3 attempts"
+          return 1
+        }
+
+        wget --timeout=20 --tries=3 -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
           | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
 
         echo "deb http://apt.llvm.org/$(lsb_release -cs)/ \
           llvm-toolchain-$(lsb_release -cs)-20 main" \
           | sudo tee /etc/apt/sources.list.d/llvm.list
 
-        sudo apt-get update -q
-        sudo apt-get install -y \
+        apt_retry apt-get update -q
+        apt_retry apt-get install -y \
           llvm-20 \
           llvm-20-dev \
           llvm-20-tools \
@@ -58,7 +91,25 @@ runs:
       run: |
         set -euo pipefail
 
-        sudo apt-get install -y \
+        # Same bounded-retry shape as the step above; each composite step runs in
+        # its own shell, so the helper is redefined rather than shared.
+        apt_retry() {
+          local attempt
+          for attempt in 1 2 3; do
+            if sudo timeout -k 30 600 "$@"; then
+              return 0
+            fi
+            echo "::warning::'$*' failed (attempt ${attempt}/3) — retrying in 15s"
+            # A killed apt can leave half-unpacked packages behind; clear that
+            # before the next attempt so the retry is not doomed from the start.
+            sudo dpkg --configure -a || true
+            sleep 15
+          done
+          echo "::error::'$*' failed after 3 attempts"
+          return 1
+        }
+
+        apt_retry apt-get install -y \
           libmlir-20-dev \
           mlir-20-tools \
           libclang-20-dev \
