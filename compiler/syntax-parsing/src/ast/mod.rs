@@ -3,6 +3,7 @@
 pub use ast_types::{
     ArraySize, Attribute, BinaryOp, ClosureParam, ConstDef, EnumDef, EnumPatternPayload,
     EnumVariant, Expr, FieldDef, FieldInit, FieldPattern, FunctionDef, GenericArg, GenericParam,
-    GenericParamKind, ImplDef, Item, MatchArm, MethodDef, NewtypeDef, Parameter, Pattern,
-    SelfParam, Stmt, StructDef, TraitDef, TraitMethod, Type, UnaryOp, VariantPayload,
+    GenericParamKind, ImplDef, ImportDef, ImportName, ImportSelection, Item, MatchArm, MethodDef,
+    NewtypeDef, Parameter, Pattern, SelfParam, Stmt, StructDef, TraitDef, TraitMethod, Type,
+    UnaryOp, VariantPayload,
 };

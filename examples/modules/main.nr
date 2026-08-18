@@ -8,8 +8,9 @@
 //       mod.nr         <- module `shapes`
 //       area.nr        <- module `shapes::area`
 //
-// Nothing is imported: writing a qualified path is what pulls a module into the build,
-// so the unrelated programs sitting elsewhere under examples/ stay out of it.
+// This program imports nothing on purpose: a qualified path pulls a module into the build
+// on its own, so the unrelated programs sitting elsewhere under examples/ stay out of it.
+// See imports.nr beside this file for the same modules named through `import`.
 
 func main() -> i32 {
     // A struct from another module, built directly and through its associated function.

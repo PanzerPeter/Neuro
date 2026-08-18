@@ -246,6 +246,8 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
         }
         // A newtype's inner may itself be written via a `type` alias, so expand it.
         Item::Newtype(def) => rewrite_type(&mut def.inner, resolved),
+        // An import names modules and items, never a type annotation.
+        Item::Import(_) => {}
     }
 }
 

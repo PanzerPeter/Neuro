@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.72.0] - 2026-08-18
+
+### Added
+- `parser`: `import` declarations, in every form the module system specifies —
+  `import math`, the explicitly relative `import ./utils::io`, the name list
+  `import math::{sqrt, sin}`, the renames `import math::sin as sine` and
+  `import math::sqrt as root`, the module alias `import math::matrix as mat`, and
+  variant imports `import Option::{Some, None}`. New `Item::Import(ImportDef)`
+  carries the written syntax and nothing more: whether a path segment names a
+  module file, an item inside one, or an enum is a question about the file system,
+  so module resolution answers it.
+- `infra`: import binding in `module-resolution`. The new `imports.rs` walks each
+  import's path greedily as modules and binds its selection against however far
+  that reached, producing one `ImportScope` per file — module aliases, item
+  renames, and variant bindings. An import's path is a discovery chain like any
+  other, and each `{...}` entry extends it, so an import pulls its module into the
+  build when no qualified path reaches it and a listed name may be a child module
+  (`import ./utils::{io}`) as easily as an item. The rewriting pass consults the
+  scope of the module it is walking, which is the one place the slice is not flat:
+  two modules may bind one name differently, while one module may not bind one name
+  twice.
+- `parser`: unqualified variant patterns. A bare `Some(n)` parses as the new
+  `Pattern::UnqualifiedEnum`, which module resolution rewrites into `Pattern::Enum`
+  against the importing file's table; a payload-less `None` is written exactly like
+  a catch-all binding, so it arrives as `Pattern::Binding` and is rewritten by the
+  same table. A variant pattern no import accounts for is reported rather than
+  silently read as a binding.
+- `docs`: `examples/modules/imports.nr` demonstrates every import form over the
+  existing `geometry` / `shapes` modules (exit code `40`), and the
+  `examples/showcase/telemetry/` program now names its three modules through a name
+  list, a rename, a module alias, and a variant import alongside structs, generics,
+  arrays, `Vec<T>`, `Option`, and enums (exit code `75`, unchanged).
+
+### Changed
+- `docs`: the modules language reference gains an "Importing" section and the
+  import diagnostics; the README, `docs/README.md`, and CONTRIBUTING no longer say
+  there is no `import`.
+
 ## [1.71.0] - 2026-08-16
 
 ### Added

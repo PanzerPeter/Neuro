@@ -122,6 +122,11 @@ impl Lowerer {
                 let (tag, _) = self.enum_variant(&resolved, &variant.name)?;
                 Ok(HirMatchTest::Tag { tag })
             }
+            // Module resolution rewrites an imported variant into `Pattern::Enum`, and the
+            // checker rejects any it could not; reaching lowering means neither ran.
+            ast_types::Pattern::UnqualifiedEnum { variant, .. } => Err(LoweringError::Malformed {
+                detail: format!("variant `{}` was never resolved to an enum", variant.name),
+            }),
         }
     }
 

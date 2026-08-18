@@ -278,6 +278,18 @@ pub enum Pattern {
         payload: EnumPatternPayload,
         span: Span,
     },
+    /// A payload-carrying variant pattern written without its enum: `Some(n)`.
+    ///
+    /// Only writable for a variant an `import Enum::{Variant}` brought into scope;
+    /// module resolution rewrites it into [`Pattern::Enum`] and rejects any that no
+    /// import accounts for, so later passes never see one. A payload-*less* variant
+    /// (`None`) is indistinguishable from a binding at parse time and arrives as
+    /// [`Pattern::Binding`] instead, rewritten by the same table.
+    UnqualifiedEnum {
+        variant: Identifier,
+        payload: EnumPatternPayload,
+        span: Span,
+    },
 }
 
 /// The payload sub-patterns of an enum-variant pattern, matching the variant's
@@ -310,6 +322,7 @@ impl Pattern {
             Pattern::Literal(_, span) => *span,
             Pattern::Range { span, .. } => *span,
             Pattern::Enum { span, .. } => *span,
+            Pattern::UnqualifiedEnum { span, .. } => *span,
         }
     }
 
@@ -325,19 +338,21 @@ impl Pattern {
         match self {
             Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Range { .. } => {}
             Pattern::Binding(ident) => names.push(ident.name.clone()),
-            Pattern::Enum { payload, .. } => match payload {
-                EnumPatternPayload::Unit => {}
-                EnumPatternPayload::Tuple(subs) => {
-                    for sub in subs {
-                        sub.collect_binding_names(names);
+            Pattern::Enum { payload, .. } | Pattern::UnqualifiedEnum { payload, .. } => {
+                match payload {
+                    EnumPatternPayload::Unit => {}
+                    EnumPatternPayload::Tuple(subs) => {
+                        for sub in subs {
+                            sub.collect_binding_names(names);
+                        }
+                    }
+                    EnumPatternPayload::Struct(fields) => {
+                        for field in fields {
+                            field.pattern.collect_binding_names(names);
+                        }
                     }
                 }
-                EnumPatternPayload::Struct(fields) => {
-                    for field in fields {
-                        field.pattern.collect_binding_names(names);
-                    }
-                }
-            },
+            }
         }
     }
 }

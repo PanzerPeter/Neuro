@@ -171,6 +171,15 @@ impl TypeChecker {
                 *span,
                 bindings,
             ),
+            // Module resolution rewrites an imported variant into `Pattern::Enum` and
+            // rejects any it cannot account for, so one arriving here means the pattern
+            // names a variant no import brought into scope.
+            Pattern::UnqualifiedEnum { variant, span, .. } => {
+                self.record_error(TypeError::UnimportedVariantPattern {
+                    variant: variant.name.clone(),
+                    span: *span,
+                });
+            }
         }
     }
 
@@ -373,7 +382,11 @@ fn pattern_coverage(pat: &Pattern) -> Coverage {
         Pattern::Wildcard(_) | Pattern::Binding(_) => Coverage::CatchAll,
         Pattern::Enum { variant, .. } => Coverage::Variant(variant.name.clone()),
         Pattern::Literal(Literal::Boolean(b), _) => Coverage::Bool(*b),
-        Pattern::Literal(_, _) | Pattern::Range { .. } => Coverage::Nothing,
+        // An unresolved variant pattern is already an error; contributing no coverage
+        // keeps the exhaustiveness report from compounding it.
+        Pattern::Literal(_, _) | Pattern::Range { .. } | Pattern::UnqualifiedEnum { .. } => {
+            Coverage::Nothing
+        }
     }
 }
 

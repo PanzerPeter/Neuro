@@ -39,8 +39,7 @@ pub fn with_prelude(items: Vec<Item>) -> Result<Vec<Item>> {
     Ok(combined)
 }
 
-/// The name an item declares, for shadow detection. An `impl` block declares no name of
-/// its own — it extends a type declared elsewhere — so it never shadows a prelude item.
+/// The name an item declares, for shadow detection.
 fn item_name(item: &Item) -> Option<&str> {
     match item {
         Item::Function(def) => Some(&def.name.name),
@@ -49,6 +48,8 @@ fn item_name(item: &Item) -> Option<&str> {
         Item::Trait(def) => Some(&def.name.name),
         Item::Const(def) => Some(&def.name.name),
         Item::Newtype(def) => Some(&def.name.name),
-        Item::Impl(_) => None,
+        // An `impl` block extends a type declared elsewhere, and module resolution has
+        // already consumed every import — neither declares a name that could shadow.
+        Item::Impl(_) | Item::Import(_) => None,
     }
 }

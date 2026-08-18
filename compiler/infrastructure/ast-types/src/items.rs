@@ -273,6 +273,44 @@ pub struct TraitDef {
     pub span: Span,
 }
 
+/// What an `import` declaration takes from the path it names.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImportSelection {
+    /// `import math` — the module itself, brought in under its own name.
+    Module,
+    /// `import math::matrix as mat` / `import math::sqrt as root` — the last path
+    /// segment under a new name. Whether that segment is a module or an item is a
+    /// question about the file system, so it is settled during module resolution.
+    Alias(Identifier),
+    /// `import math::{sqrt, sin}` — a brace list of names taken from the path.
+    List(Vec<ImportName>),
+}
+
+/// One entry of an `import path::{...}` list, optionally renamed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportName {
+    pub name: Identifier,
+    /// The `as` name this entry is bound under, when it is renamed.
+    pub alias: Option<Identifier>,
+    pub span: Span,
+}
+
+/// An `import` declaration.
+///
+/// The declaration is consumed by module resolution and never reaches semantic
+/// analysis: after resolution every name is unqualified and the program is flat.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportDef {
+    /// `true` for the explicitly relative `import ./utils` form. Every module path is
+    /// resolved relative to the importing file either way; the marker records what the
+    /// author wrote.
+    pub relative: bool,
+    /// The `::`-separated segments before any `{...}` list or `as` alias.
+    pub path: Vec<Identifier>,
+    pub selection: ImportSelection,
+    pub span: Span,
+}
+
 /// Top-level AST item
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
@@ -283,4 +321,5 @@ pub enum Item {
     Impl(ImplDef),
     Const(ConstDef),
     Newtype(NewtypeDef),
+    Import(ImportDef),
 }

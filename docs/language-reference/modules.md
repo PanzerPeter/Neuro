@@ -20,7 +20,7 @@ neurc compile examples/modules/main.nr
 
 ## Reaching into a module
 
-There is no `import` yet — writing a qualified path is what pulls a module into the
+An `import`, or a qualified path written without one, is what pulls a module into the
 build. A path is `module::item`, and it may descend through directory modules.
 
 ```neuro
@@ -44,6 +44,48 @@ resolves on the value's type, wherever that type was declared.
 Because only referenced modules load, a directory full of unrelated single-file programs
 still compiles one program at a time.
 
+## Importing
+
+An `import` does two things: it pulls the module into the build even when no qualified
+path reaches into it, and it binds names locally so the rest of the file can drop the
+qualifier.
+
+```neuro
+import math                          // the module, still written `math::sqrt` below
+import ./utils                       // the same, written explicitly relative
+import math::{sqrt, sin}             // two names, usable bare
+import math::{sin as sine}           // one of them under a different name
+import math::matrix as mat           // a child module under a shorter qualifier
+import math::sqrt as root            // a single item under a different name
+import Option::{Some, None}          // enum variants, usable without `Option::`
+```
+
+Every path is resolved relative to the importing file, whether or not it is written
+`./`-first. A brace entry may name a **child module** as easily as an item —
+`import ./utils::{io}` binds the module `utils::io`, so `io::read(x)` resolves.
+
+Imported variants read as themselves in value and pattern position alike:
+
+```neuro
+import Option::{Some, None}
+
+func halve(n: i32) -> Option<i32> {
+    if n % 2 == 0 { return Some(n / 2) }
+    None
+}
+
+func main() -> i32 {
+    match halve(20) {
+        Some(half) => half,
+        None       => 0
+    }
+}
+```
+
+A variant written without its enum is only readable when an import accounts for it —
+otherwise write `Option::Some`. Imports bind per file, so two modules may bind the same
+name to different things, but one module may not bind one name twice.
+
 ## How a path is resolved
 
 Each segment is looked up beside the file that wrote the path:
@@ -66,18 +108,23 @@ re-point an existing `Point::new`.
 | `utils::read` where `utils/` has no `mod.nr` | ``utils` is a directory with no `mod.nr` … add `utils/mod.nr`` |
 | `missing::inner::value()` naming no module at all | ``missing::inner::value` does not name a module … expected `missing.nr` or `missing/mod.nr` beside it` |
 | The same name declared by two loaded modules | ``shared` is declared in both `main.nr` and `helper.nr` … rename one of them` |
+| `import math::{cbrt}` where `math.nr` has no `cbrt` | ``module `math` declares no item named `cbrt` `` |
+| Two imports binding one name | ``sqrt` is imported twice … rename one of them with `as`` |
+| `Some(n)` in a pattern with no import behind it | ``variant `Some` is used without its enum … write `Enum::Some` or add `import Enum::{Some}`` |
 
 ## What has not landed yet
 
 Modules currently share **one flat namespace**: qualifiers are checked against the module
 that owns the name and then erased, so the rest of the compiler sees a single-file program.
-Two consequences, both of which the visibility and import items lift:
+Two consequences, both of which the visibility item lifts:
 
 - **Two modules cannot declare the same name.** The collision is reported, naming both
-  files, rather than one declaration silently winning.
-- **Nothing is private, and nothing is required to be qualified.** `export`, `import`
-  (`import math::{sqrt}`, aliases, relative paths, variant imports), inline `module { }`
-  blocks, and `export import` re-exports are all still ahead.
+  files, rather than one declaration silently winning. Renaming at the import site does
+  not help — the clash is between the declarations, not the uses.
+- **Nothing is private, and nothing is required to be qualified.** An import is a
+  convenience, not a gate: a name reaches whether or not you imported it. `export`, inline
+  `module { }` blocks, `export import` re-exports, and the implicit prelude import are
+  still ahead.
 
 Also not yet available: a qualified name in a `match` pattern (write the bare enum name —
 the flat namespace makes it reach), a module-qualified trait in `impl`/`dyn` position, and
@@ -88,6 +135,8 @@ modules share one span space — the same approximation the implicit prelude alr
 
 ## See also
 
-- [`examples/modules/`](../../examples/modules/) — the program shown above, exit code `40`
-- [`examples/showcase/telemetry/`](../../examples/showcase/telemetry/) — modules working
-  alongside structs, generics, `Vec<T>`, `Option`, and enums
+- [`examples/modules/main.nr`](../../examples/modules/main.nr) — qualified paths, exit code `40`
+- [`examples/modules/imports.nr`](../../examples/modules/imports.nr) — every import form
+  over the same modules, exit code `40`
+- [`examples/showcase/telemetry/`](../../examples/showcase/telemetry/) — modules and imports
+  working alongside structs, generics, `Vec<T>`, `Option`, and enums
