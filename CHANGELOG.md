@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.72.1] - 2026-08-18
+
+### Fixed
+- `ci`: bounded the Linux LLVM install. GitHub's Ubuntu runners reach
+  `archive.ubuntu.com` through an Azure mirror list that intermittently
+  blackholes connections, and apt applies no network timeout by default, so
+  `apt-get update` could wait indefinitely — the Benchmark Regression and Test
+  Suite jobs sat in "Setup LLVM 20" for over an hour without failing. The
+  composite action now writes an apt config with fetch retries and 20s
+  transport timeouts, waits up to five minutes for the dpkg lock instead of
+  aborting on it, and runs each apt invocation through a bounded three-attempt
+  retry that repairs a half-unpacked dpkg state between tries. `wget` of the
+  LLVM signing key is bounded the same way.
+- `ci`: every job now carries a `timeout-minutes` cap. The GitHub default is six
+  hours, so a stalled step previously burned the whole budget before anyone saw
+  a red X.
+
 ## [1.72.0] - 2026-08-18
 
 ### Added
