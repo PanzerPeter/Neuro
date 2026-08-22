@@ -15,7 +15,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result`, `?` error propagation |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
-| `modules/`       | Multi-file programs: a sibling module, a `mod.nr` directory module and its child, reached through qualified paths and `import` |
+| `modules/`       | Multi-file programs: a sibling module, a `mod.nr` directory module and its child, reached through qualified paths and `import`, with `export` choosing each module's surface |
 | `showcase/`      | **Bigger programs that combine many features at once** — incl. mutable borrows `&mut T` + `*` deref (`mutable_borrows.nr`) |
 
 The single source of truth for each program's expected exit code is
@@ -121,7 +121,9 @@ isolation:
   name list, a rename, a module alias, and a variant import. Combined with a struct +
   `impl` methods built in one module and used in another, a generic function monomorphized
   at `i32` and `bool`, a fixed-size array, a heap-backed `Vec<T>` that frees its buffer at
-  scope exit, an enum + `match`, and `??` defaulting an absent `Option`. Exit `75`.
+  scope exit, an enum + `match`, and `??` defaulting an absent `Option`. Each module publishes
+  a surface with `export` and keeps the rest private — `Summary.total` and `report`'s `Band`
+  never leave the file that declares them. Exit `75`.
 
 ## Compiling and running
 

@@ -20,6 +20,12 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 - source-location — source span resolution for error display
 
 ## Notes
+- 2026-08-22: Prelude visibility. `with_prelude` stamps every prelude declaration with
+  `PRELUDE_MODULE` (`ModuleId::MAX`), an id no loaded file can hold: the prelude is prepended
+  *after* module resolution has numbered the program's files, and leaving it at 0 would make its
+  internals private to whichever file happens to be the root rather than to the prelude itself.
+  `prelude.nr` marks its own surface with `export` for the same reason it now has to —
+  `OrderedF32` / `OrderedF64` and their `value` field are reachable from any module.
 - 2026-08-16: Multi-file compilation. `check_file` and `compile_file` no longer parse the input
   themselves: both call the new `resolve_modules`, which hands `syntax_parsing::parse` to
   `module_resolution::resolve_program` and gets back the merged item list of every module the

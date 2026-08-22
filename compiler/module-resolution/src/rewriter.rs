@@ -144,6 +144,7 @@ fn resolve_qualified(
                     from: graph.display(from).to_string(),
                 });
             }
+            graph.check_visible(from, module, item)?;
             rewrite_bare(site, item);
             Ok(())
         }
@@ -155,6 +156,9 @@ fn resolve_qualified(
                     from: graph.display(from).to_string(),
                 });
             }
+            // The member is a method or a variant, which carry the type's visibility —
+            // only the type itself is gated.
+            graph.check_visible(from, module, ty)?;
             rewrite_member(site, ty, member, &path, graph.display(from))
         }
         _ => Err(ModuleError::PathTooDeep {

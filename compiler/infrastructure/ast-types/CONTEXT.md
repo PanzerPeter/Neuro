@@ -28,6 +28,17 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-08-22: Visibility. Added `exported: bool` to `FunctionDef`, `StructDef`, `EnumDef`,
+  `TraitDef`, `ConstDef`, `NewtypeDef`, and `FieldDef` — `false` is the private default, and
+  the parser sets it from a leading `export`. An enum struct-variant's `FieldDef` is always
+  `exported: true`: a variant is reached through a pattern naming its enum, so its fields
+  carry no visibility of their own. Added the `ModuleId` alias (`u32`) and a `module:
+  ModuleId` field on `FunctionDef`, `StructDef`, `ImplDef`, and `ConstDef` — the file a
+  declaration was loaded from, stamped by module-resolution and 0 for everything the parser
+  produces alone. The merge is flat, so this stamp is the only surviving trace of which file
+  a declaration came from; field visibility needs the receiver's type and is therefore
+  checked by semantic-analysis, which has nothing else to read it from. `ImplDef` carries
+  `module` but no `exported`: an `impl` declares no name of its own.
 - 2026-08-18: Imports. Added `Item::Import(ImportDef)` — `relative` (the explicit `./` form),
   the `::`-separated `path`, and an `ImportSelection` of `Module` / `Alias(Identifier)` /
   `List(Vec<ImportName>)`. Whether a path segment names a module file, an item inside one, or

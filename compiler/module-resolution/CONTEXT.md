@@ -1,12 +1,12 @@
 # module-resolution
 
 ## Purpose
-Expand a root `.nr` file into the single item list its program is built from, loading every module a qualified path reaches into and erasing the qualifier.
+Expand a root `.nr` file into the single item list its program is built from, loading every module a qualified path reaches into, enforcing what each module exports, and erasing the qualifier.
 
 ## Entry Point
 - Type: Library function
 - Input: `root: &Path`, plus a `&dyn Fn(&str) -> Result<Vec<Item>, String>` parser supplied by the caller
-- Output: `Result<ResolvedProgram, ModuleError>` — `items: Vec<ast_types::Item>` and one `ResolvedModule` per loaded file
+- Output: `Result<ResolvedProgram, ModuleError>` — `items: Vec<ast_types::Item>`, each stamped with the module it came from, and one `ResolvedModule` per loaded file
 
 ## Data Ownership
 - Tables / Events Published / Events Consumed / Public Read Model: none
@@ -39,6 +39,18 @@ Expand a root `.nr` file into the single item list its program is built from, lo
   remainder is left for the type checker: that is how `Point::new` and `Option::Some`
   survive this pass untouched. Only a path of three or more segments whose head resolves
   to nothing is an error — it can have been meant as nothing but a module path.
+- **A declaration is private to its module unless it is written with `export`.** This pass is
+  the last one that knows both which file a name was declared in and which file reaches for it,
+  so item visibility is settled here: a qualified path and an import are each checked through
+  the one `check_visible`, which passes a module referring to its own name. Only the *item* is
+  gated — `mod::Type::member` checks `Type`, because a method and a variant carry the
+  visibility of the type they belong to.
+- **Field visibility is not settled here.** `c.timeout` needs the receiver's type, and this
+  pass runs before type checking. Instead, the merge stamps each item with the module it came
+  from (`ast_types::ModuleId` on `FunctionDef` / `StructDef` / `ImplDef` / `ConstDef`) and the
+  type checker compares the access site's module against the struct's. That stamp is the one
+  thing about modules that survives this slice; HIR lowering and both backends still see none
+  of it.
 - **An import binds names, it does not gate them.** `imports.rs` turns each file's
   declarations into one `ImportScope` — module aliases, item renames, and variant bindings —
   and the rewriting pass consults the scope of the module it is walking. This is the one

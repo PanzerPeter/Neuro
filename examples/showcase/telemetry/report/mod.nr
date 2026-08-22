@@ -16,8 +16,11 @@ func band_for(mean: i32) -> Band {
     }
 }
 
+// `Band` and `band_for` carry no `export`: they are how this module decides, not part
+// of what it offers, so only `weight_of` crosses the module boundary.
+//
 // Absence is a value: a batch that read nothing has no band to weigh.
-func weight_of(mean: i32) -> Option<i32> {
+export func weight_of(mean: i32) -> Option<i32> {
     if mean == 0 {
         return Option::None
     }

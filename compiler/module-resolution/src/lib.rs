@@ -9,9 +9,12 @@
 //! qualifier on each path is verified against the module that owns the name and then
 //! stripped, and every name an import bound is replaced by what it stands for. Downstream
 //! slices therefore see an ordinary single-file program and know nothing about modules.
-//! The flat namespace is what makes per-module privacy impossible this phase: two modules
-//! cannot each declare `helper`. That collision is reported rather than silently resolved,
-//! and lifting it is the visibility item's job.
+//! A declaration is private to its module unless it is written with `export`, and that
+//! rule is enforced here: this pass is the only one that still knows which file a name was
+//! written in and which file it is reached from. Field visibility needs the receiver's
+//! type, so each item carries the module it came from and the type checker settles it.
+//! The namespace underneath stays flat, which is why two modules still cannot each declare
+//! `helper` even when both keep it private.
 
 use std::path::Path;
 
@@ -99,6 +102,16 @@ pub enum ModuleError {
          into scope; write `Enum::{variant}` or add `import Enum::{{{variant}}}`"
     )]
     UnimportedVariant { variant: String, from: String },
+
+    #[error(
+        "`{item}` is private to module `{module}` and cannot be used from `{from}`; \
+         write `export` before its declaration to make it module-public"
+    )]
+    PrivateItem {
+        module: String,
+        item: String,
+        from: String,
+    },
 }
 
 /// Expand `root` and every module it reaches into one item list.
@@ -109,8 +122,9 @@ pub enum ModuleError {
 /// # Errors
 ///
 /// Returns a [`ModuleError`] when a module file cannot be read or parsed, when an import or
-/// a qualified path names a module or an item that does not exist, or when two modules
-/// declare the same name.
+/// a qualified path names a module or an item that does not exist, when a name it reaches
+/// for is private to the module that declares it, or when two modules declare the same
+/// name.
 pub fn resolve_program(
     root: &Path,
     parse_module: &dyn Fn(&str) -> Result<Vec<Item>, String>,

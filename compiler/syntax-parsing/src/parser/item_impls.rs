@@ -90,6 +90,7 @@ impl Parser {
         let close = self.consume(TokenKind::RightBrace, "'}'")?;
 
         Ok(ImplDef {
+            module: 0,
             trait_name,
             type_name,
             generics,
@@ -163,6 +164,7 @@ impl Parser {
         let close = self.consume(TokenKind::RightBrace, "'}'")?;
         Ok(TraitDef {
             name,
+            exported: false,
             methods,
             span: start.span.merge(close.span),
         })

@@ -18,6 +18,25 @@ struct Rectangle {
 
 Fields are declared as `name: Type` and separated by commas. Trailing commas are allowed.
 
+### Field visibility
+
+A field is private to the module (the file) that declares its struct unless it carries
+`export`. In a single-file program every field is reachable throughout it, so this only
+begins to matter once a second file reads your code:
+
+```neuro
+export struct Config {
+    export host: string,
+    export port: i32,
+    timeout: i32          // private — internal implementation detail
+}
+```
+
+`export` is per field, so an exported struct can still hold something back. Another module
+cannot read `c.timeout`, assign to it, list it in a literal, or reach it through `..base` —
+which is what makes a constructor like `Config::new` the only way in. See
+[Modules → Visibility](modules.md#visibility).
+
 ## Struct Instantiation
 
 Use `StructName { field: value, ... }` to create a value:

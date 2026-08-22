@@ -6,14 +6,14 @@
 
 // The absence-or-presence type: `Option::Some(v)` carries a value, `Option::None`
 // carries nothing.
-enum Option<T> {
+export enum Option<T> {
     Some(T),
     None
 }
 
 // The success-or-failure type: `Result::Ok(v)` carries the produced value,
 // `Result::Err(e)` the reason it failed.
-enum Result<T, E> {
+export enum Result<T, E> {
     Ok(T),
     Err(E)
 }
@@ -28,8 +28,8 @@ enum Result<T, E> {
 // they are ordered-map keys; hashing a float has no representation-independent answer,
 // so they deliberately do not implement `Hashable`.
 @derive(Copy, Clone)
-struct OrderedF32 {
-    value: f32
+export struct OrderedF32 {
+    export value: f32
 }
 
 impl OrderedF32 {
@@ -67,8 +67,8 @@ impl Comparable for OrderedF32 {
 }
 
 @derive(Copy, Clone)
-struct OrderedF64 {
-    value: f64
+export struct OrderedF64 {
+    export value: f64
 }
 
 impl OrderedF64 {

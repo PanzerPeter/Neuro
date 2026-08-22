@@ -269,6 +269,13 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("field '{field_name}' of struct '{struct_name}' is private to the module that declares it; write `export` before the field to make it reachable from another module (at {span:?})")]
+    PrivateField {
+        struct_name: String,
+        field_name: String,
+        span: Span,
+    },
+
     #[error("missing field '{field_name}' in struct literal for '{struct_name}' at {span:?}")]
     MissingStructField {
         struct_name: String,

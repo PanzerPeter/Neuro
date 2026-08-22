@@ -1,9 +1,12 @@
 // Module `stats`: turns a batch of raw readings into a summary value.
+//
+// Visibility is per declaration and, for a struct, per field: `total` is the running
+// sum this module keeps for itself, readable only through `mean()`.
 
-struct Summary {
-    count: i32,
+export struct Summary {
+    export count: i32,
     total: i32,
-    peak: i32
+    export peak: i32
 }
 
 impl Summary {
@@ -21,13 +24,13 @@ impl Summary {
 }
 
 // A generic helper reused below at two different type arguments.
-func pick<T>(condition: bool, when_true: T, when_false: T) -> T {
+export func pick<T>(condition: bool, when_true: T, when_false: T) -> T {
     if condition { when_true } else { when_false }
 }
 
 // The Vec is built, read, and dropped inside this function: it owns its buffer and
 // frees it at scope exit, so nothing about the heap escapes into the summary.
-func summarize(samples: [i32; 5]) -> Summary {
+export func summarize(samples: [i32; 5]) -> Summary {
     mut buffer: Vec<i32> = Vec::new()
     for sample in samples {
         buffer.push(sample)

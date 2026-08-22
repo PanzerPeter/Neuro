@@ -157,6 +157,18 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-08-22: Struct field visibility. A field is private to its declaring module unless it
+  carries `export`, and this slice is where that is enforced — the rule needs the receiver's
+  type, so module-resolution (which runs before type checking) cannot state it. `register_struct`
+  / `register_generic_struct` record each struct's `module` and its private field names;
+  `instantiate_generic_struct` copies both onto every monomorphized instance. `current_module`
+  is set from the item being checked in pass 4, and `reject_private_field` compares the two at
+  the four places a field is reached: a read (`check_field_access_expr`, which also covers
+  struct destructuring — the parser desugars it into field reads), a write
+  (`Stmt::FieldAssignment`), and a literal's listed fields (plain and generic).
+  `reject_private_update` covers `..base`, which supplies every *unlisted* field and so would
+  otherwise copy private ones out. New `TypeError::PrivateField`. Nothing else in the checker
+  reads `current_module`; a single-file program is one module, so the rule is inert there.
 - 2026-08-18: `import` declarations. Nothing about imports reaches the checker — module-resolution
   consumes every `Item::Import` and rewrites every name it bound — so the new arms are no-ops. The
   one exception is `Pattern::UnqualifiedEnum`, which the resolver rejects when no import accounts

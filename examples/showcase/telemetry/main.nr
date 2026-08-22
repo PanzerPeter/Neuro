@@ -10,6 +10,8 @@
 //   · a heap-backed `Vec<T>` that frees its buffer at scope exit
 //   · `Option<T>` unwrapped with a lazy `??` fallback and by pattern
 //   · enums with pattern matching
+//   · `export` visibility: each module publishes a surface and keeps the rest private —
+//     `Summary.total` and `report`'s `Band` never leave the file that declares them
 //
 //   examples/showcase/telemetry/
 //     main.nr            <- the root module

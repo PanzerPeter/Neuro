@@ -47,6 +47,14 @@ impl Parser {
 
         let mut fields: Vec<FieldDef> = Vec::new();
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            // A field carries its own visibility: an exported struct may still keep an
+            // internal field to itself, so the marker is per field, not per struct.
+            let field_exported = self.check(&TokenKind::Export);
+            if field_exported {
+                self.advance();
+                self.skip_newlines();
+            }
+
             let field_name_token =
                 self.consume(TokenKind::Identifier(String::new()), "field name")?;
             let field_name = if let TokenKind::Identifier(n) = field_name_token.kind {
@@ -71,6 +79,7 @@ impl Parser {
 
             fields.push(FieldDef {
                 name: field_name,
+                exported: field_exported,
                 ty: field_ty,
                 span: field_span,
             });
@@ -88,6 +97,8 @@ impl Parser {
 
         Ok(StructDef {
             name,
+            exported: false,
+            module: 0,
             generics,
             lifetimes,
             where_predicates,

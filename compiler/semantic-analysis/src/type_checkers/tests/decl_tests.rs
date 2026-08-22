@@ -5,6 +5,8 @@ use ast_types::{FieldDef, Item, MethodDef, StructDef};
 fn struct_item(name: &str, fields: &[(&str, &str)]) -> Item {
     Item::Struct(StructDef {
         name: make_ident(name),
+        exported: false,
+        module: 0,
         generics: Vec::new(),
         lifetimes: Vec::new(),
         where_predicates: Vec::new(),
@@ -12,6 +14,7 @@ fn struct_item(name: &str, fields: &[(&str, &str)]) -> Item {
             .iter()
             .map(|(fname, fty)| FieldDef {
                 name: make_ident(fname),
+                exported: false,
                 ty: make_type(fty),
                 span: Span::new(0, 0),
             })
@@ -23,6 +26,7 @@ fn struct_item(name: &str, fields: &[(&str, &str)]) -> Item {
 
 fn impl_item(type_name: &str, method_names: &[&str]) -> Item {
     Item::Impl(ast_types::ImplDef {
+        module: 0,
         trait_name: None,
         type_name: make_ident(type_name),
         generics: Vec::new(),

@@ -53,6 +53,7 @@ impl Parser {
 
         Ok(EnumDef {
             name,
+            exported: false,
             generics,
             variants,
             span: start.span.merge(close.span),
@@ -99,6 +100,9 @@ impl Parser {
                 let field_span = field_name.span.merge(field_ty.span());
                 fields.push(FieldDef {
                     name: field_name,
+                    // A variant's shape is part of the enum it is matched through, so
+                    // its fields carry the enum's visibility rather than their own.
+                    exported: true,
                     ty: field_ty,
                     span: field_span,
                 });

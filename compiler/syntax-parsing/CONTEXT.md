@@ -64,6 +64,16 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-08-22: `export` visibility. `parse_program` consumes an optional `export` marker between
+  the attributes and the item keyword — the position `pub` takes in Rust, so `@derive(Copy)`
+  still reads as attached to the declaration — and sets `exported` on the item it parses.
+  `parse_struct_def` reads the same marker per field, since an exported struct may still keep
+  a field to itself. `export` is rejected on an `impl` block (it declares no name), on a
+  `type` alias (expanded at parse time, so nothing of it survives to reach another module),
+  and on an `import` (`export import` re-export is a later item), all through the new
+  `ParseError::ExportNotAllowed`. An enum struct-variant's fields are marked exported: a
+  variant is reached through a pattern naming its enum. Nothing here *enforces* visibility —
+  the parser only records what was written.
 - 2026-08-18: `import` declarations. New `parser/item_imports.rs`: `parse_import` reads all five
   surface forms into one `Item::Import` — an optional leading `./`, a `::`-separated path, then an
   optional `{a, b as c}` list or a trailing `as` alias. `as` doubles as the cast operator, so an

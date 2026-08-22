@@ -26,7 +26,7 @@
 - [Control Flow](language-reference/control-flow.md) — if/else, while, loop, range-for, break/continue
 - [Operators](language-reference/operators.md) — Arithmetic, comparison, logical, bitwise, cast operators
 - [Structs](language-reference/structs.md) — User-defined types, methods, associated functions
-- [Modules](language-reference/modules.md) — Multi-file programs, `mod.nr` directories, qualified paths, `import`
+- [Modules](language-reference/modules.md) — Multi-file programs, `mod.nr` directories, qualified paths, `import`, `export` visibility
 
 ### User Guides
 
@@ -212,7 +212,7 @@ Key design goals:
 - Limits: `pop` / `get` build an `Option<T>`, so they need an `Option`-carryable element type;
   a `string` inside a collection is not freed with it
 
-### Modules (1G)
+### Modules & Visibility (1G)
 
 - A program may span several files: every `.nr` file is a module, and a directory holding a
   `mod.nr` is a module with children. You compile the root; every module it reaches comes with it
@@ -226,9 +226,17 @@ Key design goals:
   at a time. A leaf `math.nr` has no children; only a `mod.nr` directory opens a level
 - A locally declared type wins over a same-named file, so `Point::new` keeps meaning the associated
   function even with a `Point.nr` beside it
-- Modules share one flat namespace this phase, so an import is a convenience rather than a gate: a
-  name declared by two loaded modules is a reported collision, not a silent winner. `export`
-  visibility, inline `module { }`, re-exports, and the implicit prelude import are still ahead
+- A declaration is **private to its file** unless it carries `export`, and a struct field carries
+  its own marker — an exported struct may still keep a field to itself. From another module a
+  private field can be neither read, written, listed in a literal, destructured, nor copied through
+  `..base`. Methods have no marker: an `impl` declares no name, so its methods follow their type
+- Item visibility is reported while modules resolve; field visibility needs the receiver's type and
+  is reported by the type checker. Neither rule is visible in a single-file program — one file is
+  one module
+- Modules still share one flat namespace, so qualification is checked but never required, and a
+  name declared by two loaded modules is a reported collision rather than a silent winner — even
+  when both keep it private. Inline `module { }`, re-exports, and the implicit prelude import are
+  still ahead
 - See the [modules reference](language-reference/modules.md) for the resolution rules and
   diagnostics
 

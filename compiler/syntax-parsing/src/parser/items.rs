@@ -30,11 +30,19 @@ impl Parser {
             let attributes = self.parse_attributes()?;
             self.skip_newlines();
 
+            // `export` sits between the attributes and the item keyword, the position
+            // `pub` takes in Rust, so `@derive(Copy)` still reads as attached to the
+            // declaration rather than to the visibility marker.
+            let export = self.parse_export_marker();
+            self.skip_newlines();
+
             if self.check(&TokenKind::Func) {
-                let func = self.parse_function(attributes)?;
+                let mut func = self.parse_function(attributes)?;
+                func.exported = export.is_some();
                 items.push(Item::Function(func));
             } else if self.check(&TokenKind::Struct) {
-                let s = self.parse_struct_def(attributes)?;
+                let mut s = self.parse_struct_def(attributes)?;
+                s.exported = export.is_some();
                 items.push(Item::Struct(s));
             } else if !attributes.is_empty() {
                 // Attributes attach only to functions and structs today; rejecting here
@@ -48,23 +56,33 @@ impl Parser {
                     span: token.span,
                 });
             } else if self.check(&TokenKind::Enum) {
-                let e = self.parse_enum_def()?;
+                let mut e = self.parse_enum_def()?;
+                e.exported = export.is_some();
                 items.push(Item::Enum(e));
             } else if self.check(&TokenKind::Trait) {
-                let trait_def = self.parse_trait_def()?;
+                let mut trait_def = self.parse_trait_def()?;
+                trait_def.exported = export.is_some();
                 items.push(Item::Trait(trait_def));
             } else if self.check(&TokenKind::Impl) {
+                reject_export(
+                    export,
+                    "an `impl` block (its methods are reachable wherever the type they extend is)",
+                )?;
                 let impl_def = self.parse_impl_def()?;
                 items.push(Item::Impl(impl_def));
             } else if self.check(&TokenKind::Const) {
-                let c = self.parse_const_def()?;
+                let mut c = self.parse_const_def()?;
+                c.exported = export.is_some();
                 items.push(Item::Const(c));
             } else if self.check(&TokenKind::Type) {
+                reject_export(export, "a `type` alias (an alias is expanded at parse time, so no name of it survives to reach another module)")?;
                 alias_decls.push(self.parse_type_alias()?);
             } else if self.check(&TokenKind::Newtype) {
-                let nt = self.parse_newtype_def()?;
+                let mut nt = self.parse_newtype_def()?;
+                nt.exported = export.is_some();
                 items.push(Item::Newtype(nt));
             } else if self.check(&TokenKind::Import) {
+                reject_export(export, "an `import` (re-exporting an imported name with `export import` is not supported yet)")?;
                 let import = self.parse_import()?;
                 items.push(Item::Import(import));
             } else {
@@ -85,6 +103,17 @@ impl Parser {
         inject_trait_defaults(&mut items);
         expand_type_aliases(&mut items, alias_decls)?;
         Ok(items)
+    }
+
+    /// Consume a leading `export` marker, yielding the span it was written at.
+    ///
+    /// The span is what a rejection points at, so the marker is returned rather than a
+    /// bare flag: an item kind that cannot be exported must name the `export` itself.
+    fn parse_export_marker(&mut self) -> Option<shared_types::Span> {
+        if !self.check(&TokenKind::Export) {
+            return None;
+        }
+        self.advance().map(|token| token.span)
     }
 
     /// Parse zero or more `@name` / `@name(arg, ...)` attributes attached to the
@@ -198,6 +227,8 @@ impl Parser {
 
         Ok(ConstDef {
             name,
+            exported: false,
+            module: 0,
             ty,
             value,
             span,
@@ -221,7 +252,23 @@ impl Parser {
         let inner = self.parse_type()?;
         let span = start.span.merge(inner.span());
 
-        Ok(NewtypeDef { name, inner, span })
+        Ok(NewtypeDef {
+            name,
+            exported: false,
+            inner,
+            span,
+        })
+    }
+}
+
+/// Reject an `export` written before an item kind that has no visibility of its own.
+fn reject_export(export: Option<shared_types::Span>, what: &str) -> ParseResult<()> {
+    match export {
+        Some(span) => Err(ParseError::ExportNotAllowed {
+            what: what.to_string(),
+            span,
+        }),
+        None => Ok(()),
     }
 }
 

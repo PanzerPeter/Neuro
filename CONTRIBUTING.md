@@ -331,20 +331,30 @@ directory holding a `mod.nr` is a module with children, expanded from the root f
 by the new `module-resolution` slice. A qualified path (`utils::io::read`) is what
 pulls a module into the build; qualifiers are verified against the module that owns
 the name and then erased, so the rest of the pipeline still sees a single-file
-program. Modules share one flat namespace for now — a name two modules both declare
-is a reported collision, and per-module privacy arrives with `export`.
+program. Modules share one flat namespace — a name two modules both declare is a
+reported collision, which `export` does not lift: visibility says who may reach a
+name, not which names may coexist.
 **`import` statements** landed in v1.72.0, covering every form: `import math`, the
 relative `import ./utils`, the name list `import math::{sqrt, sin}`, the renames
 `import math::sin as sine` and `import math::matrix as mat`, and variant imports
 `import Option::{Some, None}` that let `Some(n)` and `None` be written unqualified in
 value and pattern position alike. An import both pulls its module into the build and
-binds names for the file that wrote it; since the merged namespace is still flat,
-an import is a convenience rather than a gate, and a name reaches whether or not you
-imported it.
+binds names for the file that wrote it; since the merged namespace is flat,
+qualification is checked but never required — what an import buys is the module load,
+the check that the name exists where you took it from, and the rename forms.
+**`export` visibility** landed in v1.73.0: a `func`, `struct`, `enum`, `trait`,
+`const`, or `newtype` declaration — and each struct field independently — is private
+to its own file unless written with `export`, so an exported struct can still keep a
+field to itself. Item visibility is settled while modules resolve, which is the last
+point that knows both the declaring file and the referencing one; field visibility
+needs the receiver's type, so each item now carries the module it came from and the
+type checker enforces reads, writes, literals, destructuring, and `..base` updates
+against it. Methods take no marker — an `impl` declares no name, so they follow the
+type they extend. A single-file program is one module, so none of this changes it.
 
-**Next, in dependency order:** the rest of 1G (`export` visibility, inline
-`module { }` blocks, the full prelude) → 1H (string interpolation, triple-quoted
-strings, nested comments, named arguments). See the
+**Next, in dependency order:** the rest of 1G (inline `module { }` blocks with
+`export import` re-export, the full prelude) → 1H (string interpolation,
+triple-quoted strings, nested comments, named arguments). See the
 [Quick Roadmap](README.md#quick-roadmap).
 
 `[x]` = landed · `[ ]` = open. See [CHANGELOG.md](CHANGELOG.md) and the README

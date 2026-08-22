@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use ast_types::{Attribute, Item, MethodDef, Stmt};
+use ast_types::{Attribute, Item, MethodDef, ModuleId, Stmt};
 
 use crate::errors::TypeError;
 use crate::symbol_table::SymbolTable;
@@ -17,6 +17,17 @@ pub(crate) struct TypeChecker {
     functions: HashMap<String, Type>,
     /// Struct definitions: name → ordered list of (field_name, field_type)
     struct_defs: HashMap<String, Vec<(String, Type)>>,
+    /// Struct name → the module its declaration was written in. Only module resolution
+    /// knows this; everything the parser produces alone is one module.
+    struct_modules: HashMap<String, ModuleId>,
+    /// Struct name → the fields it keeps to itself. A field is private unless its
+    /// declaration carries `export`, and a private field is reachable only from the
+    /// module that declares the struct.
+    private_fields: HashMap<String, HashSet<String>>,
+    /// The module whose body is being checked. Field visibility is the difference
+    /// between this and the struct's own module, and nothing else in the checker
+    /// depends on it.
+    current_module: ModuleId,
     /// Enum definitions: name → ordered list of variants. The order is the
     /// declaration order, which is also the discriminant order used by codegen.
     ///
@@ -223,6 +234,9 @@ impl TypeChecker {
             symbols: SymbolTable::new(),
             functions: HashMap::new(),
             struct_defs: HashMap::new(),
+            struct_modules: HashMap::new(),
+            private_fields: HashMap::new(),
+            current_module: 0,
             enum_defs: HashMap::new(),
             generic_enums: HashMap::new(),
             enum_instances: HashMap::new(),
@@ -250,6 +264,69 @@ impl TypeChecker {
             current_fn_outliving: HashSet::new(),
             loop_stack: Vec::new(),
         }
+    }
+
+    /// Reject reading, writing, or initializing a field the declaring module keeps to
+    /// itself.
+    ///
+    /// Returns `true` when the access is rejected, so a caller that would otherwise
+    /// report a second, more confusing error can stop.
+    pub(crate) fn reject_private_field(
+        &mut self,
+        struct_name: &str,
+        field_name: &str,
+        span: shared_types::Span,
+    ) -> bool {
+        if self.struct_modules.get(struct_name).copied() == Some(self.current_module) {
+            return false;
+        }
+        let private = self
+            .private_fields
+            .get(struct_name)
+            .is_some_and(|fields| fields.contains(field_name));
+        if !private {
+            return false;
+        }
+        self.record_error(TypeError::PrivateField {
+            struct_name: struct_name.to_string(),
+            field_name: field_name.to_string(),
+            span,
+        });
+        true
+    }
+
+    /// Reject a `..base` update that would copy a private field out of another module.
+    ///
+    /// The listed fields are checked one by one elsewhere; `..base` supplies everything
+    /// *not* listed, so it is the unlisted private fields that this catches.
+    pub(crate) fn reject_private_update(
+        &mut self,
+        struct_name: &str,
+        listed: &HashMap<String, shared_types::Span>,
+        span: shared_types::Span,
+    ) {
+        if self.struct_modules.get(struct_name).copied() == Some(self.current_module) {
+            return;
+        }
+        let mut hidden: Vec<String> = match self.private_fields.get(struct_name) {
+            Some(fields) => fields
+                .iter()
+                .filter(|f| !listed.contains_key(*f))
+                .cloned()
+                .collect(),
+            None => return,
+        };
+        // The set has no order of its own and one name has to be named, so pick the
+        // same one every run.
+        hidden.sort_unstable();
+        let Some(field_name) = hidden.first() else {
+            return;
+        };
+        self.record_error(TypeError::PrivateField {
+            struct_name: struct_name.to_string(),
+            field_name: field_name.clone(),
+            span,
+        });
     }
 
     /// Record an error and continue type checking
@@ -493,13 +570,16 @@ impl TypeChecker {
             }
         }
 
-        // Pass 4: check function, method, and const bodies.
+        // Pass 4: check function, method, and const bodies. Each body is checked as the
+        // module it was written in, which is what a private field is measured against.
         for item in items {
             match item {
                 Item::Function(func) => {
+                    self.current_module = func.module;
                     let _ = self.check_function(func);
                 }
                 Item::Impl(def) => {
+                    self.current_module = def.module;
                     if def.generics.is_empty() && def.type_args.is_empty() {
                         self.check_impl(def);
                     } else {
@@ -507,6 +587,7 @@ impl TypeChecker {
                     }
                 }
                 Item::Const(def) => {
+                    self.current_module = def.module;
                     let _ = self.check_const_item(def);
                 }
                 // Enums, newtypes, and traits carry no directly-checked bodies. Trait
