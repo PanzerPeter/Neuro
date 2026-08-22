@@ -156,6 +156,7 @@ fn bind_from_module(
                 match graph.resolve_segment(from, Some(module), name) {
                     Some(child) => scope.bind_module(&bound.name, child, &owner)?,
                     None if graph.declares(module, name) => {
+                        graph.check_visible(from, module, name)?;
                         scope.bind_item(&bound.name, name, &owner)?
                     }
                     None => {
@@ -193,6 +194,7 @@ fn bind_from_item(
             if !graph.declares(module, item) {
                 return Err(undeclared());
             }
+            graph.check_visible(from, module, item)?;
             let bound = match &import.selection {
                 ImportSelection::Alias(alias) => &alias.name,
                 _ => item,
@@ -205,6 +207,9 @@ fn bind_from_item(
             if !graph.declares_type(module, item) {
                 return Err(undeclared());
             }
+            // The listed names are variants of `item`, and a variant carries the enum's
+            // visibility — so the enum itself is the only thing to gate.
+            graph.check_visible(from, module, item)?;
             for entry in names {
                 let bound = entry.alias.as_ref().unwrap_or(&entry.name);
                 scope.bind_variant(&bound.name, item, &entry.name.name, &owner)?;

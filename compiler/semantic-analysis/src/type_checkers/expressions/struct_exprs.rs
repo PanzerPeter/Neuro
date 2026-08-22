@@ -84,6 +84,7 @@ impl TypeChecker {
             }
             match template_fields.iter().find(|(n, _)| n == &fname.name) {
                 Some((_, expected)) => {
+                    self.reject_private_field(&name.name, &fname.name, *fspan);
                     let expected = expected.clone();
                     // A field whose type is fully concrete (mentions no type/const
                     // parameter) gives the value its contextual type so a bare literal
@@ -145,6 +146,7 @@ impl TypeChecker {
 
         // A `..base` source, when present, must be the same monomorphized instance.
         if let Some(base_expr) = base {
+            self.reject_private_update(&name.name, &seen, span);
             if let Some(base_ty) = self.check_expr(base_expr, Some(&inst)) {
                 if !base_ty.is_compatible_with(&inst) {
                     self.record_error(TypeError::Mismatch {
@@ -205,6 +207,7 @@ impl TypeChecker {
                 .map(|(_, t)| t.clone());
 
             if let Some(ref expected_ty) = expected_field_ty {
+                self.reject_private_field(&name.name, &fname.name, *fspan);
                 if let Some(actual_ty) = self.check_expr(value, Some(expected_ty)) {
                     if !actual_ty.is_compatible_with(expected_ty) {
                         self.record_error(TypeError::Mismatch {
@@ -229,6 +232,7 @@ impl TypeChecker {
         // fields are only an error for a plain literal. The base itself
         // must be the same struct type.
         if let Some(base_expr) = base {
+            self.reject_private_update(&name.name, &seen, *span);
             let expected = Type::Struct(name.name.clone());
             if let Some(base_ty) = self.check_expr(base_expr, Some(&expected)) {
                 if !base_ty.is_compatible_with(&expected) {
@@ -282,6 +286,7 @@ impl TypeChecker {
         let def = self.struct_defs.get(&struct_name).cloned();
         if let Some(def) = def {
             if let Some((_, field_ty)) = def.iter().find(|(n, _)| n == &field.name) {
+                self.reject_private_field(&struct_name, &field.name, field.span);
                 Some(field_ty.clone())
             } else {
                 self.record_error(TypeError::UnknownField {

@@ -6,6 +6,13 @@ use super::expressions::Expr;
 use super::statements::Stmt;
 use super::types::Type;
 
+/// Which module a declaration came from.
+///
+/// Module resolution merges every loaded file into one flat item list, so the module a
+/// declaration was written in is otherwise unrecoverable downstream — and visibility is
+/// exactly the rule that needs it. The parser stamps 0 on everything it produces.
+pub type ModuleId = u32;
+
 /// What a generic parameter binds.
 ///
 /// A `Type` parameter (`T`) is substituted with a concrete type at each instantiation.
@@ -44,6 +51,13 @@ pub struct GenericParam {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDef {
     pub name: Identifier,
+    /// `true` when the declaration carries `export`. Items are private to their module
+    /// unless they opt in; the flag is inert in a single-module program.
+    pub exported: bool,
+    /// The module this declaration was loaded from, stamped during module resolution.
+    /// Everything the parser produces is module 0 — a single-file program is one module —
+    /// so a program that never reaches the resolver behaves as it always did.
+    pub module: ModuleId,
     pub generics: Vec<GenericParam>,
     /// Explicit lifetime parameters, the `'a` names in `func f<'a>(...)`.
     /// Kept separate from `generics` because lifetimes are a distinct namespace and,
@@ -89,6 +103,10 @@ pub struct Parameter {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldDef {
     pub name: Identifier,
+    /// `true` when the field carries `export`, or when it belongs to an enum
+    /// struct-variant — a variant's shape is part of the enum it is matched through,
+    /// so its fields follow the enum rather than carrying visibility of their own.
+    pub exported: bool,
     pub ty: Type,
     pub span: Span,
 }
@@ -97,6 +115,10 @@ pub struct FieldDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructDef {
     pub name: Identifier,
+    /// `true` when the declaration carries `export`. See [`FunctionDef::exported`].
+    pub exported: bool,
+    /// The module this declaration was loaded from. See [`FunctionDef::module`].
+    pub module: ModuleId,
     /// `generics` is the `<T, U>` type-parameter list; empty for a
     /// non-generic struct. A generic struct is a *template* — later passes
     /// monomorphize it into one concrete struct per distinct set of type arguments.
@@ -155,6 +177,10 @@ pub struct MethodDef {
 /// against which semantic analysis checks the impl for conformance.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImplDef {
+    /// The module this block was loaded from. See [`FunctionDef::module`]. An `impl`
+    /// declares no name of its own, so it has no `exported` flag: its methods are
+    /// reachable wherever the type they extend is.
+    pub module: ModuleId,
     pub trait_name: Option<Identifier>,
     pub type_name: Identifier,
     /// `generics` is the impl-level `<T, U>` type-parameter list, as in
@@ -186,6 +212,10 @@ pub struct ImplDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConstDef {
     pub name: Identifier,
+    /// `true` when the declaration carries `export`. See [`FunctionDef::exported`].
+    pub exported: bool,
+    /// The module this declaration was loaded from. See [`FunctionDef::module`].
+    pub module: ModuleId,
     pub ty: Type,
     pub value: super::expressions::Expr,
     pub span: Span,
@@ -225,6 +255,8 @@ pub struct EnumVariant {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumDef {
     pub name: Identifier,
+    /// `true` when the declaration carries `export`. See [`FunctionDef::exported`].
+    pub exported: bool,
     pub generics: Vec<GenericParam>,
     pub variants: Vec<EnumVariant>,
     pub span: Span,
@@ -239,6 +271,8 @@ pub struct EnumDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewtypeDef {
     pub name: Identifier,
+    /// `true` when the declaration carries `export`. See [`FunctionDef::exported`].
+    pub exported: bool,
     pub inner: Type,
     pub span: Span,
 }
@@ -269,6 +303,8 @@ pub struct TraitMethod {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraitDef {
     pub name: Identifier,
+    /// `true` when the declaration carries `export`. See [`FunctionDef::exported`].
+    pub exported: bool,
     pub methods: Vec<TraitMethod>,
     pub span: Span,
 }

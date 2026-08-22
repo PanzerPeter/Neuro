@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.73.0] - 2026-08-22
+
+### Added
+- `parser`: `export` visibility markers. A `func`, `struct`, `enum`, `trait`,
+  `const`, or `newtype` declaration is private to its own module unless written
+  with `export`, and each struct field carries the marker independently — an
+  exported struct may still keep a field to itself. `export` goes between any
+  `@derive(...)` attributes and the item keyword. It is rejected on an `impl`
+  block (which declares no name of its own), on a `type` alias (expanded at parse
+  time, so nothing of it survives to be reached), and on an `import`
+  (`export import` re-export is a later item).
+- `semantic`: struct field visibility. From another module a private field can be
+  neither read nor assigned, listed in a struct literal, bound by destructuring,
+  nor copied through the `..base` update form, which supplies every field the
+  literal did not list. A monomorphized generic instance inherits its template's
+  field visibility. New `PrivateField` diagnostic.
+- `infra`: `module-resolution` enforces item visibility. It is the last pass that
+  knows both which file declared a name and which file reaches for it, so the
+  qualified-path and import routes are gated through one check; a module naming
+  itself always passes, and `mod::Type::member` gates the type, since a method or
+  a variant carries the visibility of the type it belongs to. New `PrivateItem`
+  diagnostic.
+- `infra`: `ast_types::ModuleId`. The merge is flat, so the file a declaration
+  came from is otherwise unrecoverable downstream — and field visibility needs
+  both it and the receiver's type. Module resolution stamps each `FunctionDef`,
+  `StructDef`, `ImplDef`, and `ConstDef`; the parser alone leaves 0, so a
+  single-file program is one module and the rule is inert there. HIR lowering and
+  both backends still see nothing of modules.
+
 ## [1.72.1] - 2026-08-18
 
 ### Fixed

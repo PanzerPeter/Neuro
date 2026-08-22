@@ -805,6 +805,7 @@ impl TypeChecker {
                 };
 
                 if let Some(expected_ty) = field_ty {
+                    self.reject_private_field(&struct_name, &field.name, field.span);
                     if let Some(actual_ty) = self.check_expr(value, Some(&expected_ty)) {
                         if !actual_ty.is_compatible_with(&expected_ty) {
                             self.record_error(TypeError::Mismatch {

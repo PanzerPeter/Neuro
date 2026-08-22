@@ -134,6 +134,10 @@ impl Parser {
 
         Ok(FunctionDef {
             name,
+            // Visibility and module are settled outside the item parsers: `export` is
+            // consumed by the item dispatch, and the module is stamped by resolution.
+            exported: false,
+            module: 0,
             generics,
             lifetimes,
             where_predicates,

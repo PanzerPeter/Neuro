@@ -8,6 +8,14 @@
 use anyhow::{anyhow, Result};
 use syntax_parsing::Item;
 
+/// The module id the prelude's own declarations are stamped with.
+///
+/// The prelude is prepended after module resolution has numbered the program's files, so
+/// it needs an id no loaded module can hold. Its declarations are reachable from every
+/// module the same way — a private prelude field is private to the prelude, not to
+/// whichever file happens to be the root.
+const PRELUDE_MODULE: ast_types::ModuleId = ast_types::ModuleId::MAX;
+
 /// The prelude in Neuro source form, so the declarations read exactly as a user would
 /// write them and stay in one place as more items join them.
 const PRELUDE_SOURCE: &str = include_str!("prelude.nr");
@@ -34,9 +42,22 @@ pub fn with_prelude(items: Vec<Item>) -> Result<Vec<Item>> {
     let mut combined: Vec<Item> = prelude
         .into_iter()
         .filter(|item| !item_name(item).is_some_and(|name| declared.contains(&name)))
+        .map(stamp_prelude_module)
         .collect();
     combined.extend(items);
     Ok(combined)
+}
+
+/// Mark a prelude declaration as belonging to the prelude's own module.
+fn stamp_prelude_module(mut item: Item) -> Item {
+    match &mut item {
+        Item::Function(def) => def.module = PRELUDE_MODULE,
+        Item::Struct(def) => def.module = PRELUDE_MODULE,
+        Item::Impl(def) => def.module = PRELUDE_MODULE,
+        Item::Const(def) => def.module = PRELUDE_MODULE,
+        Item::Enum(_) | Item::Newtype(_) | Item::Trait(_) | Item::Import(_) => {}
+    }
+    item
 }
 
 /// The name an item declares, for shadow detection.

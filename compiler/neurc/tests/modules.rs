@@ -29,9 +29,9 @@ fn a_sibling_module_supplies_functions_structs_and_constants() {
         (
             "math.nr",
             r#"
-struct Vec2 {
-    x: i32,
-    y: i32
+export struct Vec2 {
+    export x: i32,
+    export y: i32
 }
 
 impl Vec2 {
@@ -44,9 +44,9 @@ impl Vec2 {
     }
 }
 
-const SCALE: i32 = 3
+export const SCALE: i32 = 3
 
-func double(n: i32) -> i32 {
+export func double(n: i32) -> i32 {
     n * 2
 }
 "#,
@@ -73,7 +73,7 @@ fn a_directory_module_and_its_child_are_both_reachable() {
         (
             "utils/mod.nr",
             r#"
-func triple(n: i32) -> i32 {
+export func triple(n: i32) -> i32 {
     n * 3
 }
 "#,
@@ -81,7 +81,7 @@ func triple(n: i32) -> i32 {
         (
             "utils/io.nr",
             r#"
-func width(text: &string) -> i32 {
+export func width(text: &string) -> i32 {
     text.len() as i32
 }
 "#,
@@ -107,11 +107,11 @@ fn modules_may_reference_each_other() {
         (
             "left.nr",
             r#"
-func base() -> i32 {
+export func base() -> i32 {
     4
 }
 
-func combined() -> i32 {
+export func combined() -> i32 {
     right::twice(base())
 }
 "#,
@@ -119,11 +119,11 @@ func combined() -> i32 {
         (
             "right.nr",
             r#"
-func twice(n: i32) -> i32 {
+export func twice(n: i32) -> i32 {
     n * 2
 }
 
-func offset() -> i32 {
+export func offset() -> i32 {
     left::base() + 1
 }
 "#,
@@ -148,12 +148,12 @@ fn a_module_enum_matches_from_the_root() {
         (
             "signal.nr",
             r#"
-enum Level {
+export enum Level {
     Low,
     High
 }
 
-func classify(n: i32) -> Level {
+export func classify(n: i32) -> Level {
     if n > 10 { Level::High } else { Level::Low }
 }
 "#,

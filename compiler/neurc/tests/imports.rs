@@ -24,9 +24,9 @@ fn run_program(files: &[(&str, &str)], root: &str) -> Result<i32, String> {
 }
 
 const MATH: &str = r#"
-struct Vec2 {
-    x: i32,
-    y: i32
+export struct Vec2 {
+    export x: i32,
+    export y: i32
 }
 
 impl Vec2 {
@@ -39,9 +39,9 @@ impl Vec2 {
     }
 }
 
-const SCALE: i32 = 3
+export const SCALE: i32 = 3
 
-func double(n: i32) -> i32 {
+export func double(n: i32) -> i32 {
     n * 2
 }
 "#;
@@ -109,8 +109,14 @@ func main() -> i32 {
 #[test]
 fn a_module_alias_qualifies_a_path() {
     let files = [
-        ("utils/mod.nr", "func triple(n: i32) -> i32 { n * 3 }\n"),
-        ("utils/io.nr", "func width(n: i32) -> i32 { n + 1 }\n"),
+        (
+            "utils/mod.nr",
+            "export func triple(n: i32) -> i32 { n * 3 }\n",
+        ),
+        (
+            "utils/io.nr",
+            "export func width(n: i32) -> i32 { n + 1 }\n",
+        ),
         (
             "main.nr",
             r#"

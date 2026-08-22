@@ -36,8 +36,25 @@ impl TypeChecker {
         }
 
         self.struct_defs.insert(def.name.name.clone(), fields);
+        self.record_visibility(def);
         self.record_derive_intent(def);
         Some(())
+    }
+
+    /// Record which module a struct was declared in and which of its fields it keeps
+    /// private, so a field reached from another module can be rejected.
+    pub(super) fn record_visibility(&mut self, def: &StructDef) {
+        self.struct_modules
+            .insert(def.name.name.clone(), def.module);
+        let private: std::collections::HashSet<String> = def
+            .fields
+            .iter()
+            .filter(|f| !f.exported)
+            .map(|f| f.name.name.clone())
+            .collect();
+        if !private.is_empty() {
+            self.private_fields.insert(def.name.name.clone(), private);
+        }
     }
 
     /// Record the `@derive(Copy, Clone)` intent declared on a struct.
@@ -131,6 +148,7 @@ impl TypeChecker {
         self.exit_generic_scope();
 
         self.struct_defs.insert(def.name.name.clone(), fields);
+        self.record_visibility(def);
         self.record_derive_intent(def);
         self.generic_structs
             .insert(def.name.name.clone(), def.clone());
@@ -243,6 +261,15 @@ impl TypeChecker {
                 .map(|(n, t)| (n.clone(), substitute_generic(t, &subst)))
                 .collect();
             self.struct_defs.insert(mangled.clone(), concrete_fields);
+
+            // A monomorphized instance is the template's struct, so it inherits the
+            // template's module and its private fields verbatim.
+            if let Some(module) = self.struct_modules.get(base).copied() {
+                self.struct_modules.insert(mangled.clone(), module);
+            }
+            if let Some(private) = self.private_fields.get(base).cloned() {
+                self.private_fields.insert(mangled.clone(), private);
+            }
 
             if self.copy_structs.contains(base) {
                 self.copy_structs.insert(mangled.clone());

@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use ast_types::{ImportDef, Item};
+use ast_types::{ImportDef, Item, ModuleId};
 
 use crate::walk::{walk_items, Site};
 use crate::ModuleError;
@@ -35,6 +35,9 @@ pub(crate) struct Module {
     /// downstream has to know the item kind existed.
     pub(crate) imports: Vec<ImportDef>,
     pub(crate) declared: HashSet<String>,
+    /// The subset of `declared` written with `export`. Everything else is private to
+    /// this module, so a qualified path or an import naming it is rejected.
+    exported: HashSet<String>,
     /// Declared struct / enum / newtype / trait names. A locally declared type wins over a
     /// same-named file, so `Point::new` keeps meaning the associated function even when a
     /// `Point.nr` happens to sit next door.
@@ -206,10 +209,14 @@ impl ModuleGraph {
         });
 
         let mut declared = HashSet::new();
+        let mut exported = HashSet::new();
         let mut declared_types = HashSet::new();
         for item in &items {
             if let Some(name) = item_name(item) {
                 declared.insert(name.to_string());
+                if is_exported(item) {
+                    exported.insert(name.to_string());
+                }
             }
             if let Some(name) = type_name(item) {
                 declared_types.insert(name.to_string());
@@ -228,6 +235,7 @@ impl ModuleGraph {
             items,
             imports,
             declared,
+            exported,
             declared_types,
         });
         self.by_file.insert(file, id);
@@ -264,6 +272,30 @@ impl ModuleGraph {
 
     pub(crate) fn declares_type(&self, id: usize, name: &str) -> bool {
         self.modules[id].declared_types.contains(name)
+    }
+
+    /// Is `name` reachable from outside module `id`?
+    pub(crate) fn exports(&self, id: usize, name: &str) -> bool {
+        self.modules[id].exported.contains(name)
+    }
+
+    /// Reject a reference from `from` into `module` naming a declaration that module
+    /// keeps to itself. A module referring to its own name is always allowed, which is
+    /// what makes a self-qualified path inside a module legal.
+    pub(crate) fn check_visible(
+        &self,
+        from: usize,
+        module: usize,
+        name: &str,
+    ) -> Result<(), ModuleError> {
+        if from == module || self.exports(module, name) {
+            return Ok(());
+        }
+        Err(ModuleError::PrivateItem {
+            module: self.path_of(module).to_string(),
+            item: name.to_string(),
+            from: self.display(from).to_string(),
+        })
     }
 
     /// The file a module is read from, as diagnostics name it.
@@ -305,12 +337,18 @@ impl ModuleGraph {
     pub(crate) fn into_program(self) -> crate::ResolvedProgram {
         let mut items = Vec::new();
         let mut modules = Vec::new();
-        for module in self.modules {
+        for (id, module) in self.modules.into_iter().enumerate() {
             modules.push(ResolvedModule {
                 path: module.path,
                 file: module.file,
             });
-            items.extend(module.items);
+            // The merge is flat, so this stamp is the only trace of which file a
+            // declaration came from. Field visibility needs types and is therefore
+            // settled by the type checker, which has nothing else to read it from.
+            for mut item in module.items {
+                stamp_module(&mut item, id as ModuleId);
+                items.push(item);
+            }
         }
         crate::ResolvedProgram { items, modules }
     }
@@ -367,6 +405,35 @@ fn display_path(file: &Path, root_dir: &Path) -> String {
         .display()
         .to_string()
         .replace('\\', "/")
+}
+
+/// Record which module a declaration was loaded from, on the item kinds whose bodies
+/// or fields the visibility rules are checked against.
+fn stamp_module(item: &mut Item, module: ModuleId) {
+    match item {
+        Item::Function(def) => def.module = module,
+        Item::Struct(def) => def.module = module,
+        Item::Impl(def) => def.module = module,
+        Item::Const(def) => def.module = module,
+        // An enum, a newtype, and a trait declaration hold no field access to check:
+        // an enum payload is reached through a pattern, which names the variant rather
+        // than a field, and a trait's default bodies are checked through the impl copies
+        // the parser injects.
+        Item::Enum(_) | Item::Newtype(_) | Item::Trait(_) | Item::Import(_) => {}
+    }
+}
+
+/// Whether a declaration opted into module-public visibility with `export`.
+fn is_exported(item: &Item) -> bool {
+    match item {
+        Item::Function(def) => def.exported,
+        Item::Struct(def) => def.exported,
+        Item::Enum(def) => def.exported,
+        Item::Trait(def) => def.exported,
+        Item::Const(def) => def.exported,
+        Item::Newtype(def) => def.exported,
+        Item::Impl(_) | Item::Import(_) => false,
+    }
 }
 
 fn item_name(item: &Item) -> Option<&str> {

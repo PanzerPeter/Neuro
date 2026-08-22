@@ -22,9 +22,12 @@ fn ident(name: &str) -> Identifier {
     }
 }
 
-fn function(name: &str, body: Vec<Stmt>) -> Item {
+fn function(name: &str, exported: bool, body: Vec<Stmt>) -> Item {
     Item::Function(FunctionDef {
         name: ident(name),
+        exported,
+        // Resolution stamps the real module; the fixture's value is what it overwrites.
+        module: 0,
         generics: Vec::new(),
         lifetimes: Vec::new(),
         where_predicates: Vec::new(),
@@ -38,7 +41,7 @@ fn function(name: &str, body: Vec<Stmt>) -> Item {
 
 /// A function whose one parameter is annotated with `ty` — the type-position site.
 fn function_taking(name: &str, ty: &str) -> Item {
-    let Item::Function(mut def) = function(name, Vec::new()) else {
+    let Item::Function(mut def) = function(name, false, Vec::new()) else {
         unreachable!("function() builds a function")
     };
     def.params.push(Parameter {
@@ -130,15 +133,18 @@ fn import_item(rest: &str) -> Result<Item, String> {
     }))
 }
 
-/// The stub parser: each line is `func NAME`, `call QUALIFIER::MEMBER`, `bare NAME`,
-/// `param NAME: TYPE`, `import ...`, `pat NAME(BIND)`, or `patbare NAME` — enough
-/// surface to drive every resolution rule.
+/// The stub parser: each line is `func NAME`, `export func NAME`,
+/// `call QUALIFIER::MEMBER`, `bare NAME`, `param NAME: TYPE`, `import ...`,
+/// `pat NAME(BIND)`, or `patbare NAME` — enough surface to drive every resolution rule.
+/// `func` without `export` is private to its file, exactly as in real source.
 fn stub_parse(source: &str) -> Result<Vec<Item>, String> {
     let mut items = Vec::new();
     let mut calls = Vec::new();
     for line in source.lines().map(str::trim).filter(|l| !l.is_empty()) {
-        if let Some(name) = line.strip_prefix("func ") {
-            items.push(function(name, Vec::new()));
+        if let Some(name) = line.strip_prefix("export func ") {
+            items.push(function(name, true, Vec::new()));
+        } else if let Some(name) = line.strip_prefix("func ") {
+            items.push(function(name, false, Vec::new()));
         } else if let Some(path) = line.strip_prefix("call ") {
             let (qualifier, member) = path
                 .rsplit_once("::")
@@ -179,7 +185,7 @@ fn stub_parse(source: &str) -> Result<Vec<Item>, String> {
             _ => None,
         }) {
             Some(def) => def.body.extend(calls),
-            None => items.push(function("entry", calls)),
+            None => items.push(function("entry", false, calls)),
         }
     }
     Ok(items)
@@ -251,7 +257,7 @@ fn first_pattern(program: &ResolvedProgram) -> Option<Pattern> {
 #[test]
 fn loads_a_sibling_module_and_strips_the_qualifier() {
     let dir = TempDir::new().expect("temp dir");
-    write(dir.path(), "math.nr", "func sqrt\n");
+    write(dir.path(), "math.nr", "export func sqrt\n");
     let root = write(dir.path(), "main.nr", "call math::sqrt\n");
 
     let program = resolve(&root).expect("resolution succeeds");
@@ -264,8 +270,8 @@ fn loads_a_sibling_module_and_strips_the_qualifier() {
 #[test]
 fn descends_into_a_directory_module_through_its_mod_file() {
     let dir = TempDir::new().expect("temp dir");
-    write(dir.path(), "utils/mod.nr", "func helper\n");
-    write(dir.path(), "utils/io.nr", "func read\n");
+    write(dir.path(), "utils/mod.nr", "export func helper\n");
+    write(dir.path(), "utils/io.nr", "export func read\n");
     let root = write(dir.path(), "main.nr", "call utils::io::read\n");
 
     let program = resolve(&root).expect("resolution succeeds");
@@ -278,7 +284,7 @@ fn descends_into_a_directory_module_through_its_mod_file() {
 #[test]
 fn a_qualified_type_annotation_loses_its_module_prefix() {
     let dir = TempDir::new().expect("temp dir");
-    write(dir.path(), "geometry.nr", "func Point\n");
+    write(dir.path(), "geometry.nr", "export func Point\n");
     let root = write(dir.path(), "main.nr", "param take: geometry::Point\n");
 
     let program = resolve(&root).expect("resolution succeeds");
@@ -296,7 +302,11 @@ fn a_qualified_type_annotation_loses_its_module_prefix() {
 #[test]
 fn an_unqualified_associated_path_is_left_alone() {
     let dir = TempDir::new().expect("temp dir");
-    let root = write(dir.path(), "main.nr", "func Point\ncall Point::new\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "export func Point\ncall Point::new\n",
+    );
 
     let program = resolve(&root).expect("resolution succeeds");
 
@@ -308,8 +318,8 @@ fn an_unqualified_associated_path_is_left_alone() {
 #[test]
 fn a_module_reference_never_pulls_in_unrelated_neighbours() {
     let dir = TempDir::new().expect("temp dir");
-    write(dir.path(), "math.nr", "func sqrt\n");
-    write(dir.path(), "unrelated.nr", "func sqrt\n");
+    write(dir.path(), "math.nr", "export func sqrt\n");
+    write(dir.path(), "unrelated.nr", "export func sqrt\n");
     let root = write(dir.path(), "main.nr", "call math::sqrt\n");
 
     // `unrelated.nr` declares a colliding name; it is not loaded, so it cannot collide.
@@ -320,8 +330,8 @@ fn a_module_reference_never_pulls_in_unrelated_neighbours() {
 #[test]
 fn mutually_referencing_modules_terminate() {
     let dir = TempDir::new().expect("temp dir");
-    write(dir.path(), "b.nr", "func twice\ncall a::base\n");
-    let root = write(dir.path(), "a.nr", "func base\ncall b::twice\n");
+    write(dir.path(), "b.nr", "export func twice\ncall a::base\n");
+    let root = write(dir.path(), "a.nr", "export func base\ncall b::twice\n");
 
     let program = resolve(&root).expect("resolution succeeds");
     assert_eq!(program.modules.len(), 2);
@@ -330,7 +340,7 @@ fn mutually_referencing_modules_terminate() {
 #[test]
 fn an_item_the_module_does_not_declare_is_rejected() {
     let dir = TempDir::new().expect("temp dir");
-    write(dir.path(), "math.nr", "func sqrt\n");
+    write(dir.path(), "math.nr", "export func sqrt\n");
     let root = write(dir.path(), "main.nr", "call math::cbrt\n");
 
     match resolve(&root) {
@@ -345,8 +355,12 @@ fn an_item_the_module_does_not_declare_is_rejected() {
 #[test]
 fn a_name_declared_by_two_modules_collides() {
     let dir = TempDir::new().expect("temp dir");
-    write(dir.path(), "other.nr", "func shared\n");
-    let root = write(dir.path(), "main.nr", "func shared\ncall other::shared\n");
+    write(dir.path(), "other.nr", "export func shared\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "export func shared\ncall other::shared\n",
+    );
 
     match resolve(&root) {
         Err(ModuleError::DuplicateItem { name, .. }) => assert_eq!(name, "shared"),
@@ -380,8 +394,8 @@ fn a_deep_path_with_no_module_head_is_rejected() {
 #[test]
 fn a_leaf_module_has_no_children() {
     let dir = TempDir::new().expect("temp dir");
-    write(dir.path(), "math.nr", "func sqrt\n");
-    write(dir.path(), "io.nr", "func read\n");
+    write(dir.path(), "math.nr", "export func sqrt\n");
+    write(dir.path(), "io.nr", "export func read\n");
     // `math` is a leaf file, so `math::io` must not reach `io.nr` beside it.
     let root = write(dir.path(), "main.nr", "call math::io::read\n");
 
@@ -397,8 +411,8 @@ fn a_leaf_module_has_no_children() {
 #[test]
 fn an_import_pulls_in_a_module_nothing_else_references() {
     let dir = TempDir::new().expect("temp dir");
-    write(dir.path(), "math.nr", "func sqrt\n");
-    let root = write(dir.path(), "main.nr", "import math\nfunc main\n");
+    write(dir.path(), "math.nr", "export func sqrt\n");
+    let root = write(dir.path(), "main.nr", "import math\nexport func main\n");
 
     let program = resolve(&root).expect("resolution succeeds");
 
@@ -410,7 +424,7 @@ fn an_import_pulls_in_a_module_nothing_else_references() {
 #[test]
 fn an_imported_item_is_usable_unqualified() {
     let dir = TempDir::new().expect("temp dir");
-    write(dir.path(), "math.nr", "func sqrt\n");
+    write(dir.path(), "math.nr", "export func sqrt\n");
     let root = write(
         dir.path(),
         "main.nr",
@@ -425,7 +439,7 @@ fn an_imported_item_is_usable_unqualified() {
 #[test]
 fn an_aliased_item_resolves_to_its_original_name() {
     let dir = TempDir::new().expect("temp dir");
-    write(dir.path(), "math.nr", "func sqrt\n");
+    write(dir.path(), "math.nr", "export func sqrt\n");
     let root = write(
         dir.path(),
         "main.nr",
@@ -440,8 +454,8 @@ fn an_aliased_item_resolves_to_its_original_name() {
 #[test]
 fn an_aliased_module_qualifies_a_path() {
     let dir = TempDir::new().expect("temp dir");
-    write(dir.path(), "math/mod.nr", "func dummy\n");
-    write(dir.path(), "math/matrix.nr", "func mul\n");
+    write(dir.path(), "math/mod.nr", "export func dummy\n");
+    write(dir.path(), "math/matrix.nr", "export func mul\n");
     let root = write(
         dir.path(),
         "main.nr",
@@ -456,8 +470,8 @@ fn an_aliased_module_qualifies_a_path() {
 #[test]
 fn a_relative_import_reaches_a_child_module_in_its_list() {
     let dir = TempDir::new().expect("temp dir");
-    write(dir.path(), "utils/mod.nr", "func helper\n");
-    write(dir.path(), "utils/io.nr", "func read\n");
+    write(dir.path(), "utils/mod.nr", "export func helper\n");
+    write(dir.path(), "utils/io.nr", "export func read\n");
     let root = write(
         dir.path(),
         "main.nr",
@@ -529,7 +543,7 @@ fn a_payloadless_imported_variant_stops_reading_as_a_binding() {
 #[test]
 fn a_variant_pattern_no_import_accounts_for_is_rejected() {
     let dir = TempDir::new().expect("temp dir");
-    let root = write(dir.path(), "main.nr", "func main\npat Some(v)\n");
+    let root = write(dir.path(), "main.nr", "export func main\npat Some(v)\n");
 
     match resolve(&root) {
         Err(ModuleError::UnimportedVariant { variant, .. }) => assert_eq!(variant, "Some"),
@@ -540,8 +554,12 @@ fn a_variant_pattern_no_import_accounts_for_is_rejected() {
 #[test]
 fn an_import_of_a_name_the_module_does_not_declare_is_rejected() {
     let dir = TempDir::new().expect("temp dir");
-    write(dir.path(), "math.nr", "func sqrt\n");
-    let root = write(dir.path(), "main.nr", "import math::{cbrt}\nfunc main\n");
+    write(dir.path(), "math.nr", "export func sqrt\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import math::{cbrt}\nexport func main\n",
+    );
 
     match resolve(&root) {
         Err(ModuleError::UndeclaredItem { module, item, .. }) => {
@@ -555,7 +573,7 @@ fn an_import_of_a_name_the_module_does_not_declare_is_rejected() {
 #[test]
 fn an_import_naming_no_module_is_rejected() {
     let dir = TempDir::new().expect("temp dir");
-    let root = write(dir.path(), "main.nr", "import nosuch\nfunc main\n");
+    let root = write(dir.path(), "main.nr", "import nosuch\nexport func main\n");
 
     match resolve(&root) {
         Err(ModuleError::UnknownModule { head, .. }) => assert_eq!(head, "nosuch"),
@@ -577,4 +595,79 @@ fn one_name_may_not_be_imported_twice() {
         Err(ModuleError::DuplicateImport { name, .. }) => assert_eq!(name, "Some"),
         other => panic!("expected DuplicateImport, got {:?}", other.map(|_| ())),
     }
+}
+
+#[test]
+fn a_private_item_cannot_be_reached_by_a_qualified_path() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "math.nr", "func sqrt\n");
+    let root = write(dir.path(), "main.nr", "call math::sqrt\n");
+
+    match resolve(&root) {
+        Err(ModuleError::PrivateItem { module, item, .. }) => {
+            assert_eq!(module, "math");
+            assert_eq!(item, "sqrt");
+        }
+        other => panic!("expected PrivateItem, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn a_private_item_cannot_be_imported() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "math.nr", "func sqrt\n");
+    let root = write(dir.path(), "main.nr", "import math::{sqrt}\n");
+
+    match resolve(&root) {
+        Err(ModuleError::PrivateItem { item, .. }) => assert_eq!(item, "sqrt"),
+        other => panic!("expected PrivateItem, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn a_private_item_cannot_be_imported_under_an_alias() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "math.nr", "func sqrt\n");
+    let root = write(dir.path(), "main.nr", "import math::sqrt as root\n");
+
+    match resolve(&root) {
+        Err(ModuleError::PrivateItem { item, .. }) => assert_eq!(item, "sqrt"),
+        other => panic!("expected PrivateItem, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn a_private_item_is_still_usable_inside_its_own_module() {
+    let dir = TempDir::new().expect("temp dir");
+    // `helper` is private, and `math` names itself in the qualifier — a module is never
+    // closed to itself.
+    write(
+        dir.path(),
+        "math.nr",
+        "func helper\nexport func sqrt\ncall math::helper\n",
+    );
+    let root = write(dir.path(), "main.nr", "call math::sqrt\n");
+
+    let program = resolve(&root).expect("resolution succeeds");
+    assert!(declared_names(&program).contains(&"helper".to_string()));
+}
+
+#[test]
+fn every_item_carries_the_module_it_was_loaded_from() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "math.nr", "export func sqrt\n");
+    let root = write(dir.path(), "main.nr", "call math::sqrt\n");
+
+    let program = resolve(&root).expect("resolution succeeds");
+
+    let module_of = |name: &str| {
+        program.items.iter().find_map(|item| match item {
+            Item::Function(def) if def.name.name == name => Some(def.module),
+            _ => None,
+        })
+    };
+    // The root is module 0 and every other file gets its own id, which is what the type
+    // checker measures a private field against.
+    assert_eq!(module_of("entry"), Some(0));
+    assert_eq!(module_of("sqrt"), Some(1));
 }

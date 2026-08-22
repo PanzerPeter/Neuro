@@ -17,6 +17,7 @@ mod string_tests;
 mod trait_tests;
 mod try_tests;
 mod val_else_tests;
+mod visibility_tests;
 
 use super::TypeChecker;
 use crate::errors::TypeError;
@@ -43,6 +44,8 @@ pub(super) fn make_function(
 ) -> FunctionDef {
     FunctionDef {
         name: make_ident(name),
+        exported: false,
+        module: 0,
         generics: Vec::new(),
         lifetimes: Vec::new(),
         where_predicates: Vec::new(),
