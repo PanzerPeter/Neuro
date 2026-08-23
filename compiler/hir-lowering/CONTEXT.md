@@ -119,7 +119,7 @@ The lowerer runs a registration pre-pass mirroring the checker's: struct field t
 
 Two type derivations are contextual and faithfully mirror the checker:
 - **Literals** take a suffix type, else the expected type when it fits the literal's family, else the default `i32`/`f64`.
-- A **function/method body's trailing expression** is an implicit return, typed against the declared return type; nested block/`if`-arm tails are typed with no hint.
+- A **function/method body's trailing expression** is an implicit return, typed against the declared return type. Nested block and `if`-arm tails inherit the context the same way: `lower_if_expr` takes the expected type if there is one, else the first arm's type, and `lower_block_value` threads it to the tail — the rule `lower_match` already applied to arm bodies.
 
 Tuples: `resolve_type` lowers the tuple type to `HirType::Tuple`; a tuple literal is typed by lowering each element (each hinted by the expected tuple's element type when annotated) and a `t.N` index reads the N-th element type off the (auto-derefed) tuple type. Destructuring is already desugared by the parser, so only the literal/index nodes reach here.
 

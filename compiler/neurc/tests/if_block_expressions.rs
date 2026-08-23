@@ -130,3 +130,72 @@ func main() -> i32 {
         .expect("compile/run failed");
     assert_eq!(exit, 15);
 }
+
+// An `if`/`else` in value position now carries its context into the arms, the way a
+// `match` always has. Before, the arms were typed against nothing, so an arm that names
+// no type of its own — a bare `None`, an untyped integer literal — had nothing to resolve
+// against and the annotation on the target it initialized was ignored.
+
+#[test]
+fn regression_if_arm_takes_annotated_option_type_from_target() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val o: Option<i32> = if 1 > 0 { Some(4) } else { None }
+    o ?? 9
+}
+"#;
+    let exit = test
+        .compile_and_run("if_arm_annotated_option.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 4);
+}
+
+#[test]
+fn regression_if_arm_takes_option_type_from_call_argument() {
+    let test = CompileTest::new();
+    let source = r#"
+func take(o: Option<i32>) -> i32 { o ?? 9 }
+
+func main() -> i32 {
+    take(if 1 > 0 { None } else { Some(2) })
+}
+"#;
+    let exit = test
+        .compile_and_run("if_arm_option_argument.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 9);
+}
+
+#[test]
+fn regression_unannotated_if_arms_resolve_against_each_other() {
+    let test = CompileTest::new();
+    let source = r#"
+func f(x: i32) -> i32 {
+    val o = if x > 0 { Some(x * 2) } else { None }
+    o ?? 9
+}
+
+func main() -> i32 { f(5) + f(0) }
+"#;
+    let exit = test
+        .compile_and_run("if_arms_mutual_inference.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 19);
+}
+
+#[test]
+fn regression_if_and_match_agree_on_the_same_computation() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val by_if: Option<i32> = if 1 > 0 { Some(4) } else { None }
+    val by_match: Option<i32> = match 1 { 0 => None, _ => Some(4) }
+    if (by_if ?? 0) == (by_match ?? 0) { by_if ?? 0 } else { 99 }
+}
+"#;
+    let exit = test
+        .compile_and_run("if_match_agree.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 4);
+}

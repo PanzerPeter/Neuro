@@ -121,6 +121,14 @@ carrying an `else` and routes it through `check_if_expr`. Without that, an `if` 
 thing inside an if-branch or a bare block typed as `void`, which made
 `val r = if a { x } else { if b { y } else { z } }` a spurious mismatch.
 
+An `if`/`else` in value position carries its context into its arms, mirroring `check_match`
+exactly: the arm-type hint is the caller's expected type when there is one, else the first arm's
+type once known. Without it the arms were typed against nothing, so an arm naming no type of its
+own — a bare `None`, an untyped integer literal — resolved against nothing even when the `val` it
+initialized was annotated, and `if`/`else` disagreed with the `match` spelling of the same
+computation. `check_bare_block_expr`, `check_unsafe_block_expr`, and `check_block_expr_type` thread
+the same expected type down to the tail expression.
+
 Borrow exclusivity (`symbol_table.rs` + the `Expr::Reference` arm): each binding tracks
 borrows taken *against its place* — persistent counts (a borrow held by a reference binding via
 `val r = &x`) plus transient counts (a borrow passed to a call, used in a condition, or returned).

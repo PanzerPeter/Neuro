@@ -953,6 +953,7 @@ impl Lowerer {
                             then_block,
                             else_if_blocks,
                             else_block,
+                            Some(return_type),
                             *span,
                         )?;
                         out.push(HirStmt::Expr(tail));

@@ -17,6 +17,7 @@ impl TypeChecker {
         else_if_blocks: &[(Expr, Vec<ast_types::Stmt>)],
         else_block: &Option<Vec<ast_types::Stmt>>,
         span: &Span,
+        expected: Option<&Type>,
     ) -> Option<Type> {
         let cond_ty = self
             .check_expr(condition, Some(&Type::Bool))
@@ -34,8 +35,17 @@ impl TypeChecker {
         // after the (unconditional) condition and restore it between arms.
         let move_snapshot = self.symbols.snapshot_moves();
 
+        // Arm-type hint, mirroring `check_match`: the caller's expected type if any,
+        // else the first arm's type once known. Without it a later arm carrying no type
+        // of its own — a bare `None`, an untyped integer literal — has nothing to
+        // resolve against, even when the `val` it initializes is annotated.
+        let mut hint: Option<Type> = expected.cloned();
+
         // Collect arm types: then + each else-if + optional else
-        let then_ty = self.check_block_expr_type(then_block);
+        let then_ty = self.check_block_expr_type(then_block, hint.as_ref());
+        if hint.is_none() && !matches!(then_ty, Type::Unknown) {
+            hint = Some(then_ty.clone());
+        }
 
         let mut arm_types: Vec<Type> = vec![then_ty.clone()];
 
@@ -51,12 +61,16 @@ impl TypeChecker {
                     span: elif_cond.span(),
                 });
             }
-            arm_types.push(self.check_block_expr_type(elif_block));
+            let elif_ty = self.check_block_expr_type(elif_block, hint.as_ref());
+            if hint.is_none() && !matches!(elif_ty, Type::Unknown) {
+                hint = Some(elif_ty.clone());
+            }
+            arm_types.push(elif_ty);
         }
 
         self.symbols.restore_moves(&move_snapshot);
         if let Some(else_stmts) = else_block {
-            arm_types.push(self.check_block_expr_type(else_stmts));
+            arm_types.push(self.check_block_expr_type(else_stmts, hint.as_ref()));
             self.symbols.restore_moves(&move_snapshot);
         } else {
             return Some(Type::Void);
@@ -77,9 +91,13 @@ impl TypeChecker {
         Some(result_ty)
     }
 
-    pub(super) fn check_bare_block_expr(&mut self, stmts: &[ast_types::Stmt]) -> Option<Type> {
+    pub(super) fn check_bare_block_expr(
+        &mut self,
+        stmts: &[ast_types::Stmt],
+        expected: Option<&Type>,
+    ) -> Option<Type> {
         self.symbols.push_scope();
-        let ty = self.check_block_expr_type(stmts);
+        let ty = self.check_block_expr_type(stmts, expected);
         self.symbols.pop_scope();
         Some(ty)
     }
@@ -108,9 +126,13 @@ impl TypeChecker {
 
     /// `unsafe` is inert in Phase 1.7: it introduces a scope and yields
     /// its trailing expression's type, exactly like a bare block.
-    pub(super) fn check_unsafe_block_expr(&mut self, stmts: &[ast_types::Stmt]) -> Option<Type> {
+    pub(super) fn check_unsafe_block_expr(
+        &mut self,
+        stmts: &[ast_types::Stmt],
+        expected: Option<&Type>,
+    ) -> Option<Type> {
         self.symbols.push_scope();
-        let ty = self.check_block_expr_type(stmts);
+        let ty = self.check_block_expr_type(stmts, expected);
         self.symbols.pop_scope();
         Some(ty)
     }
@@ -120,14 +142,18 @@ impl TypeChecker {
     /// An `if` written in statement position parses to `Stmt::If`, never
     /// `Stmt::Expr(Expr::If)`, so a trailing `if/else` has to be recognized here to
     /// carry the block's value — the same rule the function-body tail applies.
-    pub(super) fn check_block_expr_type(&mut self, stmts: &[ast_types::Stmt]) -> Type {
+    pub(super) fn check_block_expr_type(
+        &mut self,
+        stmts: &[ast_types::Stmt],
+        expected: Option<&Type>,
+    ) -> Type {
         self.symbols.push_scope();
         let mut result = Type::Void;
         for (i, stmt) in stmts.iter().enumerate() {
             if i == stmts.len() - 1 {
                 match stmt {
                     ast_types::Stmt::Expr(expr) => {
-                        result = self.check_expr(expr, None).unwrap_or(Type::Unknown);
+                        result = self.check_expr(expr, expected).unwrap_or(Type::Unknown);
                         self.symbols.pop_scope();
                         return result;
                     }
@@ -139,7 +165,14 @@ impl TypeChecker {
                         span,
                     } if else_block.is_some() => {
                         result = self
-                            .check_if_expr(condition, then_block, else_if_blocks, else_block, span)
+                            .check_if_expr(
+                                condition,
+                                then_block,
+                                else_if_blocks,
+                                else_block,
+                                span,
+                                expected,
+                            )
                             .unwrap_or(Type::Unknown);
                         self.symbols.pop_scope();
                         return result;
