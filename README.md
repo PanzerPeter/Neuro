@@ -101,17 +101,17 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | **Enums & newtypes** | Unit, tuple, and struct-field variants; generic enums monomorphized per type argument; `newtype` for distinct nominal wrappers |
 | **Arrays, tuples & collections** | Fixed-size `[T; N]` and anonymous tuples over `Copy` elements; heap-backed `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>` that move on assignment and free at scope exit |
 | **Pattern matching** | Exhaustive `match` expressions over variant / literal / or / range / wildcard patterns with `if` guards, plus `val Point { x, y } = p` and `val [a, ..rest] = arr` destructuring |
-| **`Option` / `Result`** | `Option<T>` and `Result<T, E>` from an implicit prelude — ordinary generic enums, available without a declaration; `??` unwraps either with a lazy fallback; `?` propagates the failure to the caller; `val-else` unwraps or exits the scope; `checked_add` / `checked_sub` / `checked_mul` report integer overflow as `Option::None` |
+| **`Option` / `Result`** | `Option<T>` and `Result<T, E>` from the implicit prelude — ordinary generic enums, available with no declaration and no import, variants included; `??` unwraps either with a lazy fallback; `?` propagates the failure to the caller; `val-else` unwraps or exits the scope; `checked_add` / `checked_sub` / `checked_mul` report integer overflow as `Option::None` |
 | **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop`, `&T` / `&mut T` with flow-sensitive exclusivity, lifetime elision and annotations |
 | **Strings** | Fat-pointer `string` with escapes, `&string` slices, `==`, `+` concatenation, `.len()` / `.clone()` / `.slice(a..b)` |
-| **Modules & visibility** | Multi-file programs: every `.nr` file is a module and `mod.nr` directories nest; inline `module { }` blocks group within one file; `import math::{sqrt}`, `import ./utils`, `as` renames, module aliases, variant imports that make `Some(n)` / `None` read unqualified, and `export import` re-export facades; declarations and struct fields are private until `export` opts them in |
+| **Modules & visibility** | Multi-file programs: every `.nr` file is a module and `mod.nr` directories nest; inline `module { }` blocks group within one file; `import math::{sqrt}`, `import ./utils`, `as` renames, module aliases, variant imports, and `export import` re-export facades; declarations and struct fields are private until `export` opts them in; an implicit prelude puts `Option` / `Result` and `Some` / `None` / `Ok` / `Err` in every module, with `@no_prelude` to opt out |
 | **Toolchain** | Native binaries via inkwell 0.9 / LLVM 20; `neurc check` and `neurc compile`; `panic` / `assert` / `unreachable` runtime, with error paths outlined off the hot path |
 
 ### Current Memory Model
 
 > **⚠️ Alpha memory warning.** Stack values are reclaimed on return and string literals live in `.rodata`, so neither leaks. Move semantics, borrows, deterministic `Drop`, and the owning collections have landed — a `Vec` / `HashMap` / `BTreeMap` frees its buffer at scope exit. Two gaps remain: `+` string concatenation still leaks its heap buffer, and a `string` stored inside a collection is not freed with it, because the growable heap-string type has not landed.
 >
-> This block is removed once that type lands in sub-phase 1G. Until then, do not assume memory-safety semantics beyond what the table above claims.
+> This block is removed once that type lands. Until then, do not assume memory-safety semantics beyond what the table above claims.
 >
 > If memory-safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
 
@@ -511,7 +511,7 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | 1D | Backend plumbing — `neuro-hir` typed IR crate, `melior` integration, AST → HIR lowering, HIR-routed LLVM backend, mlir-backend HIR scaffold | ✅ Complete |
 | 1E | Type system — arrays ✅, tuples ✅, structs ✅, methods ✅, destructuring ✅, type aliases ✅, enums ✅, pattern matching ✅, newtype ✅ | ✅ Complete |
 | 1F | Generics, traits & dispatch — generics, explicit lifetimes, trait declarations, operator traits, static/dynamic dispatch (`impl`/`dyn`), closures | ✅ Complete |
-| 1G | Error handling, modules & prelude — `Option`/`Result` ✅, collections ✅, `checked_*` ✅, `??` ✅, `val-else` ✅, `?` ✅, error-path outlining ✅, multi-file modules ✅, imports ✅, `export` visibility ✅, inline modules & re-exports ✅, prelude | 🔄 In progress |
+| 1G | Error handling, modules & prelude — `Option`/`Result`, collections, `checked_*`, `??`, `val-else`, `?`, error-path outlining, multi-file modules, imports, `export` visibility, inline modules & re-exports, implicit prelude | ✅ Complete |
 | 1H | Language cleanup — string interpolation, triple-quoted strings, nested comments, named arguments | 📋 Planned |
 | **2** | Tensors & MLIR — `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | 📋 Planned |
 | **3** | Automatic differentiation — Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | 📋 Planned |
@@ -522,7 +522,7 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | **8** | Developer experience — Language Server Protocol, diagnostics polish, formatter, `@test` runner | 📋 Planned |
 | **9** | Package manager & distribution — `neurpm`, cross-OS installer / uninstaller / self-updater, signed release binaries, optimization passes (loop unrolling, AD-aware inlining, LTO) | 📋 Planned |
 
-¹ Sub-phase 1C is essentially complete; one flagged item (growable runtime strings) remains, with relocation to 1G pending sign-off.
+¹ Sub-phase 1C is essentially complete; one flagged item (growable runtime strings) remains and needs a decision on where it lands — the sub-phase it was provisionally aimed at has since closed.
 
 ---
 

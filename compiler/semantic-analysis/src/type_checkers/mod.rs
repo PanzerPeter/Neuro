@@ -593,14 +593,15 @@ impl TypeChecker {
                 // Enums, newtypes, and traits carry no directly-checked bodies. Trait
                 // default-method bodies are checked through the impl copies the parser
                 // injects; the trait declaration itself is validated at registration.
-                // Imports and inline `module` blocks are consumed by module resolution and
-                // never reach the checker.
+                // Imports, inline `module` blocks, and the `@no_prelude` marker are
+                // consumed by module resolution and never reach the checker.
                 Item::Struct(_)
                 | Item::Enum(_)
                 | Item::Newtype(_)
                 | Item::Trait(_)
                 | Item::Import(_)
-                | Item::Module(_) => {}
+                | Item::Module(_)
+                | Item::NoPrelude(_) => {}
             }
         }
 
@@ -642,7 +643,8 @@ impl TypeChecker {
                 | Item::Newtype(_)
                 | Item::Trait(_)
                 | Item::Import(_)
-                | Item::Module(_) => {}
+                | Item::Module(_)
+                | Item::NoPrelude(_) => {}
             }
         }
     }

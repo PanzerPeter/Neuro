@@ -82,9 +82,50 @@ func main() -> i32 {
 }
 ```
 
-A variant written without its enum is only readable when an import accounts for it —
-otherwise write `Option::Some`. Imports bind per file, so two modules may bind the same
-name to different things, but one module may not bind one name twice.
+A variant written without its enum is readable when an import accounts for it, or when the
+prelude does — otherwise write `Shape::Circle`. Imports bind per file, so two modules may
+bind the same name to different things, but one module may not bind one name twice.
+
+## The implicit prelude
+
+Every module begins as if it had written
+
+```neuro
+import std::prelude::{Option, Some, None, Result, Ok, Err, println, print}
+```
+
+so the two fallible types, their four variants, and the printing functions are in scope in
+every file without an `import` of any kind:
+
+```neuro
+func halve(n: i32) -> Option<i32> {
+    if n % 2 == 0 { return Some(n / 2) }
+    None
+}
+```
+
+A prelude binding is the weakest one there is, and shadowing it is never an error:
+
+- a **local declaration** of the name wins inside the module that declares it — a module
+  with its own `Option`, or its own `None`, keeps its own meaning;
+- an **explicit import** of the name wins too, so `import Reading::{Some}` binds `Some` to
+  that enum rather than colliding with the prelude's.
+
+A file that wants none of it writes `@no_prelude` on its **first line** — before any
+declaration, and never inside a `module { }` block, which is not a file. An inline block
+inherits the answer of the file that holds it.
+
+```neuro
+@no_prelude
+
+// `Some`, `None`, `Ok`, and `Err` are ordinary names in this file.
+func triangular(n: i32) -> i32 { ... }
+```
+
+On a non-root file `@no_prelude` takes away that file's bindings. On the **root** file it
+also drops the prelude's declarations from the whole program — `Option` and `Result` are
+then declared nowhere — because the merged namespace is flat, so those types are either in
+the program or absent from all of it.
 
 ## How a path is resolved
 
@@ -241,8 +282,11 @@ consequences:
   whether or not you wrote the import, provided it is exported. What an import buys is the
   module load, the check that the name exists where you took it from, and the rename forms.
 
-The implicit prelude import is still ahead: `Option`, `Result`, and `println` are available
-everywhere today because the driver prepends them, not because a prelude module is imported.
+The prelude is not a module you can name: `std::prelude` describes the effect, but the driver
+prepends the declarations and seeds the variant bindings directly, so there is no `std::` path
+to import from and no way to import a *subset* of it. `@no_prelude` on a
+non-root file therefore drops that file's bindings only — its declarations stay in the flat
+namespace, which is the same limitation as above.
 
 An inline block does not lift the flat namespace either — a block buys a private *surface*,
 not a private namespace, so its items still collide with same-named declarations elsewhere in
@@ -253,7 +297,7 @@ the flat namespace makes it reach), a module-qualified trait in `impl`/`dyn` pos
 the functional-update form `mod::Point { x: 1.0, ..base }`.
 
 Panic diagnostics report positions in the root file's coordinate space, since merged
-modules share one span space — the same approximation the implicit prelude already carries.
+modules share one span space — the same approximation the prepended prelude already carries.
 
 ## See also
 
@@ -264,6 +308,10 @@ modules share one span space — the same approximation the implicit prelude alr
   nested, with a private helper, exit code `26`
 - [`examples/modules/reexports.nr`](../../examples/modules/reexports.nr) — an `export import`
   facade over `geometry.nr`, exit code `10`
+- [`examples/modules/prelude.nr`](../../examples/modules/prelude.nr) — `Option`, `Result`, and
+  their variants named with no import at all, exit code `25`
+- [`examples/modules/no_prelude.nr`](../../examples/modules/no_prelude.nr) — the `@no_prelude`
+  opt-out, exit code `36`
 - [`examples/showcase/telemetry/`](../../examples/showcase/telemetry/) — file modules, an inline
-  block, an `export import` re-export, and `export` visibility working alongside structs,
-  generics, `Vec<T>`, `Option`, and enums
+  block, an `export import` re-export, `export` visibility, the implicit prelude, and one module
+  opting out with `@no_prelude`, working alongside structs, generics, `Vec<T>`, `Option`, and enums

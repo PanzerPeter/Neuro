@@ -13,7 +13,7 @@ use ast_types::{
 use shared_types::{Identifier, Literal, Span};
 use tempfile::TempDir;
 
-use crate::{resolve_program, ModuleError, ResolvedProgram};
+use crate::{resolve_program, ModuleError, PreludeVariant, ResolvedProgram};
 
 fn ident(name: &str) -> Identifier {
     Identifier {
@@ -136,7 +136,7 @@ fn import_item(rest: &str, exported: bool) -> Result<Item, String> {
 
 /// The stub parser: each line is `func NAME`, `export func NAME`,
 /// `call QUALIFIER::MEMBER`, `bare NAME`, `param NAME: TYPE`, `import ...`,
-/// `export import ...`, `pat NAME(BIND)`, or `patbare NAME` — enough surface to drive
+/// `export import ...`, `no_prelude`, `pat NAME(BIND)`, or `patbare NAME` — enough surface to drive
 /// every resolution rule. A `module NAME` line opens an inline block that runs to a
 /// matching `end`. `func` without `export` is private to its file, exactly as in real
 /// source.
@@ -183,6 +183,8 @@ fn stub_parse(source: &str) -> Result<Vec<Item>, String> {
                 payload: EnumPatternPayload::Tuple(vec![Pattern::Binding(ident(binding))]),
                 span: Span::new(0, 0),
             }));
+        } else if line == "no_prelude" {
+            items.push(Item::NoPrelude(Span::new(0, 0)));
         } else if let Some(name) = line.strip_prefix("patbare ") {
             calls.push(match_on(Pattern::Binding(ident(name))));
         } else {
@@ -232,7 +234,25 @@ fn write(dir: &Path, rel: &str, source: &str) -> PathBuf {
 }
 
 fn resolve(root: &Path) -> Result<ResolvedProgram, ModuleError> {
-    resolve_program(root, &stub_parse)
+    resolve_program(root, &stub_parse, &[])
+}
+
+/// Resolve with the prelude the driver really supplies, so a fixture can be written the
+/// way source is: `Some` and `Ok` bare, with no import above them.
+fn resolve_with_prelude(root: &Path) -> Result<ResolvedProgram, ModuleError> {
+    let prelude: Vec<PreludeVariant> = [
+        ("Option", "Some"),
+        ("Option", "None"),
+        ("Result", "Ok"),
+        ("Result", "Err"),
+    ]
+    .into_iter()
+    .map(|(owner, variant)| PreludeVariant {
+        owner: owner.to_string(),
+        variant: variant.to_string(),
+    })
+    .collect();
+    resolve_program(root, &stub_parse, &prelude)
 }
 
 /// The name every function item declares, in program order.
@@ -872,5 +892,132 @@ fn a_re_export_may_not_open_a_private_declaration() {
     match resolve(&root) {
         Err(ModuleError::PrivateItem { item, .. }) => assert_eq!(item, "parse"),
         other => panic!("expected PrivateItem, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn the_prelude_binds_a_variant_no_import_mentions() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(dir.path(), "main.nr", "export func main\npat Some(v)\n");
+
+    let program = resolve_with_prelude(&root).expect("resolution succeeds");
+
+    assert!(!program.no_prelude);
+    match first_pattern(&program) {
+        Some(Pattern::Enum {
+            enum_name, variant, ..
+        }) => {
+            assert_eq!(enum_name.name, "Option");
+            assert_eq!(variant.name, "Some");
+        }
+        other => panic!("expected a resolved enum pattern, got {:?}", other),
+    }
+}
+
+#[test]
+fn a_prelude_binding_reaches_a_non_root_module() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "parse.nr", "export func run\npat Ok(v)\n");
+    let root = write(dir.path(), "main.nr", "call parse::run\n");
+
+    let program = resolve_with_prelude(&root).expect("resolution succeeds");
+
+    match first_pattern(&program) {
+        Some(Pattern::Enum {
+            enum_name, variant, ..
+        }) => {
+            assert_eq!(enum_name.name, "Result");
+            assert_eq!(variant.name, "Ok");
+        }
+        other => panic!("expected a resolved enum pattern, got {:?}", other),
+    }
+}
+
+#[test]
+fn an_explicit_import_of_a_prelude_name_wins_over_it() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import Reading::{Some}\nexport func main\npat Some(v)\n",
+    );
+
+    let program = resolve_with_prelude(&root).expect("resolution succeeds");
+
+    match first_pattern(&program) {
+        Some(Pattern::Enum { enum_name, .. }) => assert_eq!(enum_name.name, "Reading"),
+        other => panic!("expected a resolved enum pattern, got {:?}", other),
+    }
+}
+
+#[test]
+fn a_local_declaration_shadows_a_prelude_binding() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(dir.path(), "main.nr", "export func None\npatbare None\n");
+
+    let program = resolve_with_prelude(&root).expect("resolution succeeds");
+
+    match first_pattern(&program) {
+        Some(Pattern::Binding(name)) => assert_eq!(name.name, "None"),
+        other => panic!("expected the name to stay a binding, got {:?}", other),
+    }
+}
+
+#[test]
+fn no_prelude_leaves_a_bare_variant_unbound() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "no_prelude\nexport func main\npat Some(v)\n",
+    );
+
+    match resolve_with_prelude(&root) {
+        Err(ModuleError::UnimportedVariant { variant, .. }) => assert_eq!(variant, "Some"),
+        other => panic!("expected UnimportedVariant, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn no_prelude_on_the_root_is_reported_to_the_driver() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(dir.path(), "main.nr", "no_prelude\nexport func main\n");
+
+    let program = resolve_with_prelude(&root).expect("resolution succeeds");
+
+    assert!(program.no_prelude);
+}
+
+#[test]
+fn an_inline_block_inherits_its_files_opt_out() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "no_prelude\nmodule inner\nexport func run\npat Some(v)\nend\nexport func main\n",
+    );
+
+    match resolve_with_prelude(&root) {
+        Err(ModuleError::UnimportedVariant { variant, .. }) => assert_eq!(variant, "Some"),
+        other => panic!("expected UnimportedVariant, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn a_module_that_kept_the_prelude_still_gets_it_beside_one_that_did_not() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "strict.nr", "no_prelude\nexport func run\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "call strict::run\nexport func main\npat Err(e)\n",
+    );
+
+    let program = resolve_with_prelude(&root).expect("resolution succeeds");
+
+    assert!(!program.no_prelude);
+    match first_pattern(&program) {
+        Some(Pattern::Enum { enum_name, .. }) => assert_eq!(enum_name.name, "Result"),
+        other => panic!("expected a resolved enum pattern, got {:?}", other),
     }
 }

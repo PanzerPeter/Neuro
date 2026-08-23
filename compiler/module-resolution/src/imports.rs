@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use ast_types::{ImportDef, ImportSelection};
 
 use crate::loader::{ModuleGraph, Reexport};
-use crate::ModuleError;
+use crate::{ModuleError, PreludeVariant};
 
 /// What one module's imports bind, ready for the rewriting pass.
 #[derive(Default)]
@@ -96,13 +96,26 @@ impl ImportScope {
         Ok(())
     }
 
+    /// Bind a prelude variant, which no diagnostic can result from: the caller has already
+    /// established that nothing else in this module claims the name.
+    fn seed_variant(&mut self, owner: &str, variant: &str) {
+        self.variants.insert(
+            variant.to_string(),
+            (owner.to_string(), variant.to_string()),
+        );
+    }
+
+    /// Is `name` already bound in this module by an import?
+    fn binds(&self, name: &str) -> bool {
+        self.modules.contains_key(name)
+            || self.renames.contains_key(name)
+            || self.variants.contains_key(name)
+    }
+
     /// One name may be bound once per module. Silently keeping the last import would make
     /// two imports of the same name read as working code that means only one of them.
     fn reject_rebind(&self, name: &str, from: &str) -> Result<(), ModuleError> {
-        let bound = self.modules.contains_key(name)
-            || self.renames.contains_key(name)
-            || self.variants.contains_key(name);
-        if bound {
+        if self.binds(name) {
             return Err(ModuleError::DuplicateImport {
                 name: name.to_string(),
                 from: from.to_string(),
@@ -128,13 +141,38 @@ fn reject_reexport(reexport: bool, name: &str, what: &str, from: &str) -> Result
 }
 
 /// Build one scope per module, in module order, settling re-exports first.
-pub(crate) fn resolve_imports(graph: &mut ModuleGraph) -> Result<Vec<ImportScope>, ModuleError> {
+pub(crate) fn resolve_imports(
+    graph: &mut ModuleGraph,
+    prelude: &[PreludeVariant],
+) -> Result<Vec<ImportScope>, ModuleError> {
     // A re-exported name only becomes reachable once the module re-exporting it has been
     // resolved, and modules resolve in id order — so a chain of re-exports settles one link
     // per round. Errors are held back until the tables stop growing: an import that fails
     // this round may be exactly the one the next round makes resolvable.
     while install_reexports(graph) {}
-    build_scopes(graph, Tolerance::Report)
+    build_scopes(graph, Tolerance::Report, prelude)
+}
+
+/// Add the prelude's variant bindings to a module that did not opt out.
+///
+/// They are the weakest bindings in the language: a name this module declares, or already
+/// imported, keeps its meaning, and neither case is an error — the prelude is a fallback,
+/// so shadowing it is how a module overrides what the prelude offers.
+fn seed_prelude(
+    graph: &ModuleGraph,
+    id: usize,
+    prelude: &[PreludeVariant],
+    scope: &mut ImportScope,
+) {
+    if graph.no_prelude(id) {
+        return;
+    }
+    for entry in prelude {
+        if graph.declares(id, &entry.variant) || scope.binds(&entry.variant) {
+            continue;
+        }
+        scope.seed_variant(&entry.owner, &entry.variant);
+    }
 }
 
 /// Whether an import that cannot be resolved ends the pass or is passed over.
@@ -147,6 +185,7 @@ enum Tolerance {
 fn build_scopes(
     graph: &ModuleGraph,
     tolerance: Tolerance,
+    prelude: &[PreludeVariant],
 ) -> Result<Vec<ImportScope>, ModuleError> {
     let mut scopes = Vec::with_capacity(graph.modules.len());
     for id in 0..graph.modules.len() {
@@ -157,6 +196,7 @@ fn build_scopes(
                 outcome?;
             }
         }
+        seed_prelude(graph, id, prelude, &mut scope);
         scopes.push(scope);
     }
     Ok(scopes)
@@ -164,7 +204,8 @@ fn build_scopes(
 
 /// Copy one round of re-export tables onto the graph, reporting whether anything was new.
 fn install_reexports(graph: &mut ModuleGraph) -> bool {
-    let Ok(scopes) = build_scopes(graph, Tolerance::Skip) else {
+    // A re-export names an item, never a prelude variant, so this round needs no prelude.
+    let Ok(scopes) = build_scopes(graph, Tolerance::Skip, &[]) else {
         return false;
     };
     let mut changed = false;

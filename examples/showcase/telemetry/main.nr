@@ -3,7 +3,9 @@
 // Cumulative integration example combining:
 //   file-based modules: a sibling module (`stats`), a directory module (`report`,
 //   which holds a `mod.nr`), and its child (`report::format`)
-//   · `import` in all its shapes: a name list, a rename, a module alias, and variants
+//   · `import` in all its shapes: a name list, a rename, and a module alias
+//   · the implicit prelude: `Some` / `None` named with no import, in the root module and
+//     in `report` alike, and `stats` opting out of it with `@no_prelude`
 //   · structs with `impl` methods and associated functions
 //   · a generic function, monomorphized per type argument
 //   · fixed-size arrays and `for`-in iteration
@@ -31,8 +33,9 @@ import ./stats::{Summary, summarize, pick as choose}
 import report::{weight_of}
 import report::format as fmt
 
-// Prelude enum variants, so the match arms below need no `Option::` prefix.
-import Option::{Some, None}
+// No import brings `Some` and `None` into scope: the implicit prelude binds them in every
+// module, so the match arms below name them directly. `stats` shows the other side of the
+// rule — a file that wants none of it writes `@no_prelude` on its first line.
 
 // An inline module: a grouping worth a name but not a file. Its items follow the same
 // rule a file's do — private unless written with `export`.

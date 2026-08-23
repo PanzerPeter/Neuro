@@ -192,13 +192,20 @@ fn an_import_of_an_undeclared_name_is_reported() {
 
 #[test]
 fn an_unimported_variant_pattern_is_reported() {
+    // The prelude binds `Option` and `Result`'s variants in every module, so the rule is
+    // shown with an enum of the program's own.
     let files = [(
         "main.nr",
         r#"
+enum Shape {
+    Circle(i32),
+    Square(i32)
+}
+
 func main() -> i32 {
-    match Option::Some(3) {
-        Some(n) => n,
-        _       => 0
+    match Shape::Circle(3) {
+        Circle(n) => n,
+        _         => 0
     }
 }
 "#,

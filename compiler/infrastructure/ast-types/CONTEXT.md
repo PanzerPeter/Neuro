@@ -28,6 +28,10 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-08-23: Implicit prelude. Added `Item::NoPrelude(Span)` for the file-scope `@no_prelude`
+  marker. Like `Item::Import` and `Item::Module` it is parse-only: module resolution reads it off
+  the file it opens and drops it, so no pass after that sees the variant. It carries only its
+  span — everything the marker means is a question for the module graph, not for the tree.
 - 2026-08-23: Inline modules and re-exports. Added `ModuleDef { name, items, span }` and
   `Item::Module(ModuleDef)` for an inline `module Name { ... }` block — a module with no file
   of its own, which module-resolution lifts into a graph module of its own and erases, so no

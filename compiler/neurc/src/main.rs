@@ -99,27 +99,53 @@ fn validate_source_file(path: &Path) -> Result<()> {
     }
 }
 
-/// Expand `input` and every module it reaches through a qualified path into one program.
+/// One program, ready for the type checker: every module's items merged, with the prelude
+/// in front of them.
+struct LoadedProgram {
+    items: Vec<syntax_parsing::Item>,
+    module_count: usize,
+}
+
+/// Expand `input` and every module it reaches into one program, and give it the prelude.
 ///
-/// The parser is passed in rather than imported by `module-resolution`: that slice depends
-/// only on the AST it rewrites, so the driver is the single place the two meet.
-fn resolve_modules(input: &Path) -> Result<module_resolution::ResolvedProgram> {
+/// The parser and the prelude's variant names are passed in rather than imported by
+/// `module-resolution`: that slice depends only on the AST it rewrites, so the driver is
+/// the single place it, the parser, and the prelude source meet.
+fn load_program(input: &Path) -> Result<LoadedProgram> {
+    let prelude = prelude::load()?;
+
     // The resolver's own message names the file, the module, and what was expected, so it
     // is reported as-is rather than wrapped in a context line that would hide it behind
     // `check`'s single-line error rendering.
-    module_resolution::resolve_program(input, &|source| {
-        syntax_parsing::parse(source).map_err(|e| e.to_string())
+    let program = module_resolution::resolve_program(
+        input,
+        &|source| syntax_parsing::parse(source).map_err(|e| e.to_string()),
+        prelude.variants(),
+    )
+    .map_err(|e| anyhow::anyhow!("Module error: {}", e))?;
+
+    let module_count = program.modules.len();
+    // The merged namespace is flat, so the prelude's declarations are either in the program
+    // or absent from all of it; `@no_prelude` on the root file is what decides.
+    let items = if program.no_prelude {
+        program.items
+    } else {
+        prelude.prepend(program.items)
+    };
+    Ok(LoadedProgram {
+        items,
+        module_count,
     })
-    .map_err(|e| anyhow::anyhow!("Module error: {}", e))
 }
 
 /// Check a Neuro source file for syntax and type errors
 fn check_file(path: &PathBuf) -> anyhow::Result<()> {
     validate_source_file(path)?;
 
-    let program = resolve_modules(path)?;
-    let module_count = program.modules.len();
-    let ast = prelude::with_prelude(program.items)?;
+    let LoadedProgram {
+        items: ast,
+        module_count,
+    } = load_program(path)?;
 
     match semantic_analysis::type_check(&ast) {
         Ok(warnings) => {
@@ -170,10 +196,11 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
     log::info!("Using optimization level -O{}", optimization);
 
     log::debug!("Resolving modules and parsing...");
-    let program = resolve_modules(input)?;
-    log::debug!("Resolved {} module(s)", program.modules.len());
-    let ast =
-        prelude::with_prelude(program.items).context("Failed to load the compiler prelude")?;
+    let LoadedProgram {
+        items: ast,
+        module_count,
+    } = load_program(input)?;
+    log::debug!("Resolved {} module(s)", module_count);
 
     log::debug!("Type checking...");
     let warnings = semantic_analysis::type_check(&ast)

@@ -1,5 +1,5 @@
 // End-to-end tests for inline `module { }` blocks and `export import` re-exports: the two
-// halves of §3.16 that need no file of their own.
+// halves of the module system that need no file of their own.
 //
 // The unit tests in the `module-resolution` slice cover resolution against a stub parser;
 // these compile and run the real thing.

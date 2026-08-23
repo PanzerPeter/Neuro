@@ -133,9 +133,10 @@ fn walk_item(item: &mut Item, f: SiteFn) -> Result<(), ModuleError> {
         Item::Newtype(def) => walk_type(&mut def.inner, f),
         // Imports are lifted out of the item list as each module is loaded, so the walk
         // never meets one.
-        // An import is consumed at load time, and an inline block is lifted into a module
-        // of its own there too — neither survives to be walked.
-        Item::Import(_) | Item::Module(_) => Ok(()),
+        // An import is consumed at load time, an inline block is lifted into a module of
+        // its own there too, and the `@no_prelude` marker is dropped there — none survives
+        // to be walked.
+        Item::Import(_) | Item::Module(_) | Item::NoPrelude(_) => Ok(()),
     }
 }
 

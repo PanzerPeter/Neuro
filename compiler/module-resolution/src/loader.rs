@@ -49,6 +49,20 @@ pub(crate) struct Module {
     /// same-named file, so `Point::new` keeps meaning the associated function even when a
     /// `Point.nr` happens to sit next door.
     declared_types: HashSet<String>,
+    /// Whether the file this module came from opted out of the implicit prelude. An inline
+    /// block inherits its file's answer: `@no_prelude` marks a file, and a block is part of
+    /// one.
+    pub(crate) no_prelude: bool,
+}
+
+/// Where a module was found, as the graph needs it to register the module and resolve the
+/// paths written inside it.
+struct ModuleOrigin {
+    path: String,
+    display: String,
+    file: PathBuf,
+    ref_dir: PathBuf,
+    child_dir: Option<PathBuf>,
 }
 
 /// Where a re-exported name really comes from, already followed to the end of any chain
@@ -222,7 +236,14 @@ impl ModuleGraph {
 
         let ref_dir = parent_dir(&file);
         let child_dir = child_dir.map(|d| canonical(&d)).transpose()?;
-        let id = self.push_module(path, display, file.clone(), ref_dir, child_dir, items)?;
+        let origin = ModuleOrigin {
+            path,
+            display,
+            file: file.clone(),
+            ref_dir,
+            child_dir,
+        };
+        let id = self.push_module(origin, items, false)?;
         self.by_file.insert(file, id);
         Ok(id)
     }
@@ -236,18 +257,16 @@ impl ModuleGraph {
     /// visibility rule, the collision check, and the `ModuleId` stamp apply unchanged.
     fn push_module(
         &mut self,
-        path: String,
-        display: String,
-        file: PathBuf,
-        ref_dir: PathBuf,
-        child_dir: Option<PathBuf>,
+        origin: ModuleOrigin,
         mut items: Vec<Item>,
+        inherited_no_prelude: bool,
     ) -> Result<usize, ModuleError> {
-        // Imports and inline blocks are consumed here rather than carried along: after
-        // resolution the program is one flat item list, and neither has anything left to
-        // say to a downstream pass.
+        // Imports, inline blocks, and the `@no_prelude` marker are consumed here rather
+        // than carried along: after resolution the program is one flat item list, and none
+        // of the three has anything left to say to a downstream pass.
         let mut imports = Vec::new();
         let mut blocks: Vec<ModuleDef> = Vec::new();
+        let mut no_prelude = inherited_no_prelude;
         items.retain(|item| match item {
             Item::Import(def) => {
                 imports.push(def.clone());
@@ -255,6 +274,10 @@ impl ModuleGraph {
             }
             Item::Module(def) => {
                 blocks.push(def.clone());
+                false
+            }
+            Item::NoPrelude(_) => {
+                no_prelude = true;
                 false
             }
             _ => true,
@@ -277,11 +300,11 @@ impl ModuleGraph {
 
         let id = self.modules.len();
         self.modules.push(Module {
-            path,
-            display,
-            file,
-            ref_dir,
-            child_dir,
+            path: origin.path,
+            display: origin.display,
+            file: origin.file,
+            ref_dir: origin.ref_dir,
+            child_dir: origin.child_dir,
             inline_children: HashMap::new(),
             items,
             imports,
@@ -289,6 +312,7 @@ impl ModuleGraph {
             reexports: HashMap::new(),
             exported,
             declared_types,
+            no_prelude,
         });
 
         for block in blocks {
@@ -304,8 +328,14 @@ impl ModuleGraph {
             let file = parent.file.clone();
             // A block has no directory of its own, so it takes no file children: reaching
             // `outer::inner::item` through a block stops exactly where `math.nr` does.
-            let child =
-                self.push_module(child_path, child_display, file, ref_dir, None, block.items)?;
+            let origin = ModuleOrigin {
+                path: child_path,
+                display: child_display,
+                file,
+                ref_dir,
+                child_dir: None,
+            };
+            let child = self.push_module(origin, block.items, no_prelude)?;
             if self.modules[id]
                 .inline_children
                 .insert(name.clone(), child)
@@ -429,6 +459,11 @@ impl ModuleGraph {
         })
     }
 
+    /// Did this module's file opt out of the implicit prelude?
+    pub(crate) fn no_prelude(&self, id: usize) -> bool {
+        self.modules[id].no_prelude
+    }
+
     /// The file a module is read from, as diagnostics name it.
     pub(crate) fn display(&self, id: usize) -> &str {
         &self.modules[id].display
@@ -466,6 +501,10 @@ impl ModuleGraph {
     }
 
     pub(crate) fn into_program(self) -> crate::ResolvedProgram {
+        // The prelude's declarations join one flat namespace, so opting out of them is a
+        // decision for the program rather than for a file — and the root is the file that
+        // makes it.
+        let no_prelude = self.modules.first().is_some_and(|root| root.no_prelude);
         let mut items = Vec::new();
         let mut modules = Vec::new();
         for (id, module) in self.modules.into_iter().enumerate() {
@@ -481,7 +520,11 @@ impl ModuleGraph {
                 items.push(item);
             }
         }
-        crate::ResolvedProgram { items, modules }
+        crate::ResolvedProgram {
+            items,
+            modules,
+            no_prelude,
+        }
     }
 }
 
@@ -552,7 +595,12 @@ fn stamp_module(item: &mut Item, module: ModuleId) {
         // the parser injects.
         // An inline block is lifted into a module of its own before this runs, so none
         // reaches the merge.
-        Item::Enum(_) | Item::Newtype(_) | Item::Trait(_) | Item::Import(_) | Item::Module(_) => {}
+        Item::Enum(_)
+        | Item::Newtype(_)
+        | Item::Trait(_)
+        | Item::Import(_)
+        | Item::Module(_)
+        | Item::NoPrelude(_) => {}
     }
 }
 
@@ -565,7 +613,7 @@ fn is_exported(item: &Item) -> bool {
         Item::Trait(def) => def.exported,
         Item::Const(def) => def.exported,
         Item::Newtype(def) => def.exported,
-        Item::Impl(_) | Item::Import(_) | Item::Module(_) => false,
+        Item::Impl(_) | Item::Import(_) | Item::Module(_) | Item::NoPrelude(_) => false,
     }
 }
 
@@ -577,7 +625,7 @@ fn item_name(item: &Item) -> Option<&str> {
         Item::Trait(def) => Some(&def.name.name),
         Item::Const(def) => Some(&def.name.name),
         Item::Newtype(def) => Some(&def.name.name),
-        Item::Impl(_) | Item::Import(_) | Item::Module(_) => None,
+        Item::Impl(_) | Item::Import(_) | Item::Module(_) | Item::NoPrelude(_) => None,
     }
 }
 
@@ -587,8 +635,11 @@ fn type_name(item: &Item) -> Option<&str> {
         Item::Enum(def) => Some(&def.name.name),
         Item::Trait(def) => Some(&def.name.name),
         Item::Newtype(def) => Some(&def.name.name),
-        Item::Function(_) | Item::Const(_) | Item::Impl(_) | Item::Import(_) | Item::Module(_) => {
-            None
-        }
+        Item::Function(_)
+        | Item::Const(_)
+        | Item::Impl(_)
+        | Item::Import(_)
+        | Item::Module(_)
+        | Item::NoPrelude(_) => None,
     }
 }

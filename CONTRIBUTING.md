@@ -4,7 +4,7 @@ Thank you for your interest in contributing to the Neuro programming language co
 
 ## Project Status
 
-Neuro is in **Phase 1 — Core Language** (v1.x), the umbrella phase covering the full general-purpose language. It is divided into lettered sub-phases, implemented strictly in dependency order. **Sub-phase 1G (Error Handling, Modules & Prelude) is the active sub-phase.** Completed so far: 1A (core MVP), 1B (syntax & semantics stabilization — casts, bitwise ops, literal suffixes, if/block expressions, builtin-method dispatch, integer overflow, etc.), 1C (ownership & borrow checker — move semantics, `Copy`, `&T`/`&mut T`, borrow exclusivity, lifetime elision, `&mut self`, deterministic `Drop`; one flagged item remains), 1D (HIR / MLIR plumbing — typed HIR, AST→HIR lowering, HIR-routed LLVM backend, `mlir-backend` scaffold), 1E (type system — structs, methods, arrays, tuples, destructuring, type aliases, enums, pattern matching, and newtypes), and 1F (generics, traits & dispatch — generic functions/structs/impls, const generics, `where`, turbofish, explicit lifetimes, trait declarations, operator overloading, static & dynamic dispatch, and closures). Completing all of Phase 1 (1A–1H) ships **v2.0.0** and opens Phase 2 (Tensors). We welcome contributions, but note:
+Neuro is in **Phase 1 — Core Language** (v1.x), the umbrella phase covering the full general-purpose language. It is divided into lettered sub-phases, implemented strictly in dependency order. **Sub-phase 1H (Language Cleanup) is the active sub-phase.** Completed so far: 1A (core MVP), 1B (syntax & semantics stabilization — casts, bitwise ops, literal suffixes, if/block expressions, builtin-method dispatch, integer overflow, etc.), 1C (ownership & borrow checker — move semantics, `Copy`, `&T`/`&mut T`, borrow exclusivity, lifetime elision, `&mut self`, deterministic `Drop`; one flagged item remains), 1D (HIR / MLIR plumbing — typed HIR, AST→HIR lowering, HIR-routed LLVM backend, `mlir-backend` scaffold), 1E (type system — structs, methods, arrays, tuples, destructuring, type aliases, enums, pattern matching, and newtypes), 1F (generics, traits & dispatch — generic functions/structs/impls, const generics, `where`, turbofish, explicit lifetimes, trait declarations, operator overloading, static & dynamic dispatch, and closures), and 1G (error handling, modules & prelude — `Option`/`Result`, the standard collections, `checked_*`, `??`, `val-else`, `?`, error-path outlining, multi-file compilation, `import`, `export` visibility, inline modules with re-exports, and the implicit prelude). Completing all of Phase 1 (1A–1H) ships **v2.0.0** and opens Phase 2 (Tensors). We welcome contributions, but note:
 
 - Architecture and design are still evolving
 - Breaking changes are expected between minor versions
@@ -275,8 +275,7 @@ cargo run -p neurc -- compile examples/basics/hello.nr
 
 ### Phase 1 — Core Language: current priorities
 
-The active sub-phase is **1G (Error Handling, Modules & Prelude)** — sub-phase 1F is
-complete. The roadmap is dependency-ordered, so pick the **topmost open item** — its
+The active sub-phase is **1H (Language Cleanup)** — sub-phase 1G is complete. The roadmap is dependency-ordered, so pick the **topmost open item** — its
 prerequisites are already done. Coordinate on an issue before starting a large item.
 
 **Recently completed — 1F (Generics, Traits & Dispatch):** generic *functions* landed
@@ -299,7 +298,7 @@ and *closures and lambdas* in v1.63.0 (`|params| body` literals with `move`, Cop
 capture, the function type `(T) -> R`, and higher-order functions — each closure lifted to
 a `{ fn_ptr, env_ptr }` value with no heap allocation). Completes 1F.
 
-**In progress — 1G (Error Handling, Modules & Prelude):** `Option<T>` and
+**Recently completed — 1G (Error Handling, Modules & Prelude):** `Option<T>` and
 `Result<T, E>` landed in v1.64.0, together with the generic enums they are built
 from (monomorphized per type-argument set) and an implicit prelude that makes both
 available in every program without a declaration. The **standard collections**
@@ -361,10 +360,17 @@ the importing module, so a facade offers a flatter API than its internals — a 
 undone on the way through, and facades chain. Only an item can be re-exported: a module
 and an enum variant are each reached through something else, so `export import` on one is
 an error rather than a silent no-op.
+**The implicit prelude** landed in v1.75.0, completing 1G. Every module now begins with the
+prelude's names in scope — `Option`, `Result`, their variants `Some` / `None` / `Ok` / `Err`,
+and `println` / `print` — with no `import` of any kind, so a bare `Some(n)` reads as a value
+and as a pattern in every file. The binding is the weakest one there is: a local declaration
+of the name, or an explicit import of it, wins inside that module rather than colliding.
+A file opts out with `@no_prelude` on its first line; on a non-root file that drops its
+bindings, and on the root it drops the prelude's declarations from the whole program, since
+the merged namespace is flat.
 
-**Next, in dependency order:** the rest of 1G (the full prelude) → 1H (string interpolation,
-triple-quoted strings, nested comments, named arguments). See the
-[Quick Roadmap](README.md#quick-roadmap).
+**Next, in dependency order:** 1H (string interpolation, triple-quoted strings, nested
+comments, named arguments). See the [Quick Roadmap](README.md#quick-roadmap).
 
 `[x]` = landed · `[ ]` = open. See [CHANGELOG.md](CHANGELOG.md) and the README
 capabilities table for full behavior.
@@ -390,8 +396,9 @@ capabilities table for full behavior.
 
 ⚑ **One flagged 1C item remains:** growable runtime string ops (`String::new` /
 `.push_str` / `.clear`) are blocked by the immutable-`string` spec contradiction.
-Recommendation pending sign-off: relocate to **1G** alongside the heap-backed
-collections. It does not block 1E onward.
+Recommendation pending sign-off, and now overdue: 1G — the sub-phase it was
+provisionally aimed at — has closed, so the item needs a new home before the growable
+`String` type can be scheduled. It does not block 1H.
 
 Explicit lifetime annotations `<'a>` landed in **1F** (v1.59.0): a `'a` lifetime
 token, a `lifetimes` list on function/struct/impl definitions kept separate from

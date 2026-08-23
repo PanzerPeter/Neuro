@@ -38,6 +38,9 @@ pub enum ParseError {
     #[error("`export` cannot be applied to {what}")]
     ExportNotAllowed { what: String, span: Span },
 
+    #[error("`@no_prelude` must be the first thing in a file; it opts that file out of the implicit prelude, so it cannot follow a declaration or sit inside a `module` block")]
+    MisplacedNoPrelude { span: Span },
+
     #[error("lexical error: {0}")]
     LexError(#[from] LexError),
 }

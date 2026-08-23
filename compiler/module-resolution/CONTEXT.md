@@ -1,12 +1,12 @@
 # module-resolution
 
 ## Purpose
-Expand a root `.nr` file into the single item list its program is built from, loading every module a qualified path reaches into — file, directory, or inline `module { }` block — enforcing what each module exports, and erasing the qualifier.
+Expand a root `.nr` file into the single item list its program is built from, loading every module a qualified path reaches into — file, directory, or inline `module { }` block — enforcing what each module exports, binding the implicit prelude's variant names, and erasing the qualifier.
 
 ## Entry Point
 - Type: Library function
-- Input: `root: &Path`, plus a `&dyn Fn(&str) -> Result<Vec<Item>, String>` parser supplied by the caller
-- Output: `Result<ResolvedProgram, ModuleError>` — `items: Vec<ast_types::Item>`, each stamped with the module it came from, and one `ResolvedModule` per loaded file
+- Input: `root: &Path`, a `&dyn Fn(&str) -> Result<Vec<Item>, String>` parser supplied by the caller, and `prelude: &[PreludeVariant]` — the enum variants every module may write bare
+- Output: `Result<ResolvedProgram, ModuleError>` — `items: Vec<ast_types::Item>`, each stamped with the module it came from, one `ResolvedModule` per loaded file, and `no_prelude`, the root file's opt-out
 
 ## Data Ownership
 - Tables / Events Published / Events Consumed / Public Read Model: none
@@ -71,6 +71,20 @@ Expand a root `.nr` file into the single item list its program is built from, lo
   type checker compares the access site's module against the struct's. That stamp is the one
   thing about modules that survives this slice; HIR lowering and both backends still see none
   of it.
+- **The prelude is the weakest binding there is.** Every module's scope is seeded with the
+  variants the caller names — `Some`, `None`, `Ok`, `Err` — *after* its own imports, and a name
+  the module already bound or declares itself is skipped rather than reported. That is what makes
+  shadowing the prelude a non-error: `import Reading::{Some}` and a local `func None` each keep
+  their meaning, exactly as the module system's rule says they should. The variant list is an
+  input rather than a constant here because the prelude's contents belong to the driver, which
+  owns the prelude source — the same reason the parser is injected.
+- **`@no_prelude` marks a file, and the root decides for the program.** The loader consumes
+  `Item::NoPrelude` into the module's own flag, an inline block inherits the file that holds it,
+  and a module with the flag is seeded with nothing. The prelude's *declarations* are a different
+  question: they join one flat namespace, so they are either in the program or absent from all of
+  it, and the root file's flag — reported back as `ResolvedProgram.no_prelude` — is what the
+  driver reads to decide. A non-root file's `@no_prelude` therefore takes its bindings, not its
+  access to `Option`.
 - **An import binds names, it does not gate them.** `imports.rs` turns each file's
   declarations into one `ImportScope` — module aliases, item renames, and variant bindings —
   and the rewriting pass consults the scope of the module it is walking. This is the one
@@ -81,7 +95,8 @@ Expand a root `.nr` file into the single item list its program is built from, lo
   the renaming and variant forms, none of which the flat namespace gives for free.
 - **A variant import is what is left when nothing named a module.** `import Option::{Some}`
   cannot be verified here: `Option` comes from the prelude, which the driver prepends *after*
-  this pass. A single-segment path that names no module is therefore read as an enum and its
+  this pass — the same reason the prelude's own bindings arrive as an argument rather than being
+  read off the program. A single-segment path that names no module is therefore read as an enum and its
   listed names as variants, left for the type checker to reject if the enum is bogus. A
   multi-segment head that names no module can only have been meant as a module path and is
   an error.
