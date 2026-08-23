@@ -1,5 +1,11 @@
 // Module `report`: a directory module, so `report/format.nr` is its child.
 
+// A re-export: `clamp` is declared in the child, and this line makes it reachable as
+// `report::clamp` too, so a caller needs no route to the child at all. A plain `import`
+// would bind the name here without opening it to anyone else.
+export import ./format::{clamp}
+
+
 enum Band {
     Quiet,
     Normal,

@@ -655,8 +655,9 @@ impl Lowerer {
                 Item::Const(def) => hir_items.push(HirItem::Const(self.lower_const(def)?)),
                 // A newtype is transparent at runtime and produces no HIR item; it
                 // survives only as the `HirType::Newtype` its annotations resolve to.
-                // An import is consumed by module resolution well before lowering.
-                Item::Newtype(_) | Item::Import(_) => {}
+                // An import and an inline `module` block are both consumed by module
+                // resolution well before lowering.
+                Item::Newtype(_) | Item::Import(_) | Item::Module(_) => {}
                 // A trait emits no code of its own: each `impl Trait for Type`
                 // lowers via the ordinary impl path above, with any omitted default
                 // method already injected by the parser. The item carries only the

@@ -17,7 +17,11 @@ impl Parser {
     /// segment *names* — a module file, an item inside one, an enum — is a question
     /// about the file system, so the parser records the syntax and module resolution
     /// answers it.
-    pub(crate) fn parse_import(&mut self) -> ParseResult<ImportDef> {
+    ///
+    /// `exported` records a leading `export`, the re-export form: which of the bound
+    /// names may be re-exported is again a file-system question, so it is settled during
+    /// module resolution rather than here.
+    pub(crate) fn parse_import(&mut self, exported: bool) -> ParseResult<ImportDef> {
         let start = self.consume(TokenKind::Import, "'import'")?;
         self.skip_newlines();
 
@@ -55,6 +59,7 @@ impl Parser {
             relative,
             path,
             selection,
+            exported,
             span: start.span.merge(end_span),
         })
     }

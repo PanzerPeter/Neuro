@@ -88,9 +88,9 @@ impl TypeChecker {
                 }
                 Item::Const(def) => self.reject_reserved(&def.name),
                 Item::Newtype(def) => self.reject_reserved(&def.name),
-                // Module resolution consumes every import before the checker runs, so an
-                // import introduces no name of its own here.
-                Item::Import(_) => {}
+                // Module resolution consumes every import and inline `module` block before
+                // the checker runs, so neither introduces a name of its own here.
+                Item::Import(_) | Item::Module(_) => {}
             }
         }
     }

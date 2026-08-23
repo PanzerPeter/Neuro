@@ -137,12 +137,77 @@ Two rules follow from a private field, and both are enforced:
 - another module cannot **construct** the struct at all, whether by listing the field or by
   reaching it through `..base` — the update form supplies every field you did not list.
 
-There is no `export` on an `impl` block, a `type` alias, or an `import`. An `impl` declares no
-name of its own; an alias is expanded at parse time, so nothing of it survives to be reached;
-and `export import` re-export is not implemented yet. Each is rejected with a message saying so.
+There is no `export` on an `impl` block, a `type` alias, or an inline `module` block. An `impl`
+declares no name of its own; an alias is expanded at parse time, so nothing of it survives to be
+reached; and a block's name is reached only from the file that declares it, so there is no
+outside to open it to. Each is rejected with a message saying so. An `import` *does* take
+`export` — that is the re-export form, below.
 
 Item visibility is settled while modules are resolved, so it is reported before type checking.
 Field visibility needs the receiver's type and is reported by the type checker.
+
+## Inline modules
+
+For a grouping that belongs with the code around it, write a `module` block instead of a file:
+
+```neuro
+module geometry {
+    export struct Circle { export radius: i32 }
+
+    export func area(c: &Circle) -> i32 { c.radius * c.radius }
+
+    // Private to the block — `main` below cannot name it, same file or not.
+    func validate(r: i32) -> bool { r > 0 }
+}
+
+func main() -> i32 {
+    val c = geometry::Circle { radius: 3 }
+    geometry::area(&c)
+}
+```
+
+A block is a module in every sense a file is one, and the same rules reach it: its items are
+private unless written with `export`, an `import` binds from it (`import geometry::{Circle}`),
+and blocks nest (`outer::inner::deep()`). Three consequences are worth stating outright:
+
+- The file that declares a block is **outside** it. `export` is the only way in, exactly as
+  for a file module.
+- A block has **no file children**. A path through one stops where a leaf `.nr` file's does.
+- A block **wins over a same-named file**, on the rule that a locally declared type follows:
+  adding a file must never silently re-point a path that already resolved.
+
+Use a block for logical grouping within one file. For an independent, separately compilable
+unit, prefer a file module.
+
+## Re-exporting
+
+`export import` binds names locally like any import *and* makes them reachable through the
+importing module, so a facade can offer a flatter public API than its internals:
+
+```neuro
+// api.nr — declares nothing of its own
+export import ./geometry::{Point, ORIGIN_SHIFT as SHIFT}
+```
+
+```neuro
+// reexports.nr
+import api::{Point}
+
+func main() -> i32 {
+    val corner: api::Point = api::Point::new(3, 4)   // through the facade
+    val start = Point::new(1, 1)                     // imported from the facade
+    (corner.manhattan() - start.manhattan()) * api::SHIFT
+}
+```
+
+A rename rides along and is undone on the way through: what `api` calls `SHIFT` is
+`geometry`'s `ORIGIN_SHIFT`, and that is the name the program is built with. Facades chain —
+a module may re-export what another re-exported.
+
+Only an **item** can be re-exported. A module and an enum variant are each reached through
+something else, so `export import ./utils` and `export import Option::{Some}` are errors
+rather than silent no-ops. A re-export also cannot open a private declaration: `export`
+still has to be written where the declaration lives.
 
 ## Diagnostics
 
@@ -157,7 +222,9 @@ Field visibility needs the receiver's type and is reported by the type checker.
 | `Some(n)` in a pattern with no import behind it | ``variant `Some` is used without its enum … write `Enum::Some` or add `import Enum::{Some}`` |
 | Reaching a declaration with no `export` | ``internal` is private to module `lib` … write `export` before its declaration` |
 | Reaching a field with no `export` | ``field 'timeout' of struct 'Config' is private to the module that declares it`` |
-| `export` on an `impl`, a `type` alias, or an `import` | ``export` cannot be applied to …` |
+| `export` on an `impl`, a `type` alias, or a `module` block | ``export` cannot be applied to …` |
+| `export import` naming a module or a variant | ``export import` … would re-export `x`, which names a module rather than an item` |
+| Two inline blocks in one module sharing a name | ``m` is declared twice as an inline module … rename one of them` |
 
 ## What has not landed yet
 
@@ -174,8 +241,12 @@ consequences:
   whether or not you wrote the import, provided it is exported. What an import buys is the
   module load, the check that the name exists where you took it from, and the rename forms.
 
-Inline `module { }` blocks, `export import` re-exports, and the implicit prelude import are
-still ahead.
+The implicit prelude import is still ahead: `Option`, `Result`, and `println` are available
+everywhere today because the driver prepends them, not because a prelude module is imported.
+
+An inline block does not lift the flat namespace either — a block buys a private *surface*,
+not a private namespace, so its items still collide with same-named declarations elsewhere in
+the program.
 
 Also not yet available: a qualified name in a `match` pattern (write the bare enum name —
 the flat namespace makes it reach), a module-qualified trait in `impl`/`dyn` position, and
@@ -189,5 +260,10 @@ modules share one span space — the same approximation the implicit prelude alr
 - [`examples/modules/main.nr`](../../examples/modules/main.nr) — qualified paths, exit code `40`
 - [`examples/modules/imports.nr`](../../examples/modules/imports.nr) — every import form
   over the same modules, exit code `40`
-- [`examples/showcase/telemetry/`](../../examples/showcase/telemetry/) — modules, imports, and
-  `export` working alongside structs, generics, `Vec<T>`, `Option`, and enums
+- [`examples/modules/inline.nr`](../../examples/modules/inline.nr) — inline `module` blocks,
+  nested, with a private helper, exit code `26`
+- [`examples/modules/reexports.nr`](../../examples/modules/reexports.nr) — an `export import`
+  facade over `geometry.nr`, exit code `10`
+- [`examples/showcase/telemetry/`](../../examples/showcase/telemetry/) — file modules, an inline
+  block, an `export import` re-export, and `export` visibility working alongside structs,
+  generics, `Vec<T>`, `Option`, and enums

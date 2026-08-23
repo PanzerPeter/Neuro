@@ -55,7 +55,7 @@ fn stamp_prelude_module(mut item: Item) -> Item {
         Item::Struct(def) => def.module = PRELUDE_MODULE,
         Item::Impl(def) => def.module = PRELUDE_MODULE,
         Item::Const(def) => def.module = PRELUDE_MODULE,
-        Item::Enum(_) | Item::Newtype(_) | Item::Trait(_) | Item::Import(_) => {}
+        Item::Enum(_) | Item::Newtype(_) | Item::Trait(_) | Item::Import(_) | Item::Module(_) => {}
     }
     item
 }
@@ -70,7 +70,8 @@ fn item_name(item: &Item) -> Option<&str> {
         Item::Const(def) => Some(&def.name.name),
         Item::Newtype(def) => Some(&def.name.name),
         // An `impl` block extends a type declared elsewhere, and module resolution has
-        // already consumed every import — neither declares a name that could shadow.
-        Item::Impl(_) | Item::Import(_) => None,
+        // already consumed every import and inline block — none declares a name that could
+        // shadow.
+        Item::Impl(_) | Item::Import(_) | Item::Module(_) => None,
     }
 }

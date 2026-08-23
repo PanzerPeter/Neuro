@@ -145,7 +145,9 @@ fn resolve_qualified(
                 });
             }
             graph.check_visible(from, module, item)?;
-            rewrite_bare(site, item);
+            // A re-exported name may have been renamed on the way through, so the flat
+            // namespace is reached by what the declaration is really called.
+            rewrite_bare(site, graph.flat_name(module, item));
             Ok(())
         }
         [ty, member] => {
@@ -159,7 +161,13 @@ fn resolve_qualified(
             // The member is a method or a variant, which carry the type's visibility —
             // only the type itself is gated.
             graph.check_visible(from, module, ty)?;
-            rewrite_member(site, ty, member, &path, graph.display(from))
+            rewrite_member(
+                site,
+                graph.flat_name(module, ty),
+                member,
+                &path,
+                graph.display(from),
+            )
         }
         _ => Err(ModuleError::PathTooDeep {
             path,

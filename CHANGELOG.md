@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.74.0] - 2026-08-23
+
+### Added
+- `parser`: inline `module Name { ... }` blocks. A block groups items inside one
+  file and is a module in every sense a `.nr` file is one — its items are private
+  unless written with `export`, a qualified path reaches into it, an `import` binds
+  from it, and blocks nest. `parse_program` now delegates to a shared item-list
+  parse that runs to end of input at file level and to the closing brace inside a
+  block, so a block's body is parsed by exactly the code the file around it is.
+- `parser`: `export import` re-exports. `export` before an `import` marks the
+  declaration as a re-export instead of being rejected, and is now rejected on a
+  `module` block instead — an inline module's name is reached only from the file
+  that declares it.
+- `infra`: `ast-types` gains `ModuleDef` / `Item::Module` and `ImportDef.exported`.
+  Both are consumed by module resolution, so no pass after it sees either.
+- `semantic`: a re-exported name is reachable *through* the module that re-exported
+  it. A facade may re-export what another facade re-exported, and an `as` rename is
+  undone on the way through — the program is built with the declaration's own name.
+
+### Changed
+- `semantic`: module resolution registers each inline block as a module of its own
+  rather than special-casing it, so the visibility rule, the flat merge, the
+  collision check, and the `ModuleId` stamp reach a block unchanged. A block
+  resolves paths against the containing file's directory, holds no file children,
+  and wins over a same-named file beside it — the rule a locally declared type
+  already follows.
+
+### Fixed
+- `parser`: a `type` alias declared beside an inline block is expanded inside it,
+  and a trait's default methods are injected into impls written inside one. Both
+  are parse-time erasures, so they stay file-scoped rather than stopping at a brace.
+
+### Known limitations
+- An inline block buys a private *surface*, not a private namespace: its items
+  still collide with same-named declarations elsewhere in the program, because the
+  merge is still flat.
+- Only an item can be re-exported. `export import` naming a module or an enum
+  variant is an error rather than a silent no-op.
+- A nested block reaches its own children and the declaring file's siblings, not
+  its parent's other blocks — there is no `super`.
+
 ## [1.73.0] - 2026-08-22
 
 ### Added

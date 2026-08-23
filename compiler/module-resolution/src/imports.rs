@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use ast_types::{ImportDef, ImportSelection};
 
-use crate::loader::ModuleGraph;
+use crate::loader::{ModuleGraph, Reexport};
 use crate::ModuleError;
 
 /// What one module's imports bind, ready for the rewriting pass.
@@ -22,6 +22,9 @@ pub(crate) struct ImportScope {
     renames: HashMap<String, String>,
     /// A bare name → the `(enum, variant)` it stands for.
     variants: HashMap<String, (String, String)>,
+    /// The subset of `renames` written with `export import`, which this module makes
+    /// reachable through itself as well as binding locally.
+    pub(crate) reexports: HashMap<String, Reexport>,
 }
 
 impl ImportScope {
@@ -39,15 +42,42 @@ impl ImportScope {
             .map(|(owner, variant)| (owner.as_str(), variant.as_str()))
     }
 
-    fn bind_module(&mut self, name: &str, id: usize, from: &str) -> Result<(), ModuleError> {
+    fn bind_module(
+        &mut self,
+        name: &str,
+        id: usize,
+        from: &str,
+        reexport: bool,
+    ) -> Result<(), ModuleError> {
+        reject_reexport(reexport, name, "a module", from)?;
         self.reject_rebind(name, from)?;
         self.modules.insert(name.to_string(), id);
         Ok(())
     }
 
-    fn bind_item(&mut self, name: &str, item: &str, from: &str) -> Result<(), ModuleError> {
+    /// Bind `name` to the flat-namespace item `item` declared in module `origin`.
+    ///
+    /// Under `export import` the binding is also recorded as a re-export: the name then
+    /// reaches through this module too, which is the whole of what the form buys.
+    fn bind_item(
+        &mut self,
+        name: &str,
+        item: &str,
+        origin: usize,
+        from: &str,
+        reexport: bool,
+    ) -> Result<(), ModuleError> {
         self.reject_rebind(name, from)?;
         self.renames.insert(name.to_string(), item.to_string());
+        if reexport {
+            self.reexports.insert(
+                name.to_string(),
+                Reexport {
+                    module: origin,
+                    item: item.to_string(),
+                },
+            );
+        }
         Ok(())
     }
 
@@ -57,7 +87,9 @@ impl ImportScope {
         owner: &str,
         variant: &str,
         from: &str,
+        reexport: bool,
     ) -> Result<(), ModuleError> {
+        reject_reexport(reexport, name, "an enum variant", from)?;
         self.reject_rebind(name, from)?;
         self.variants
             .insert(name.to_string(), (owner.to_string(), variant.to_string()));
@@ -80,17 +112,68 @@ impl ImportScope {
     }
 }
 
-/// Build one scope per module, in module order.
-pub(crate) fn resolve_imports(graph: &ModuleGraph) -> Result<Vec<ImportScope>, ModuleError> {
+/// Reject an `export import` whose bound name is not an item.
+///
+/// A module and a variant are both reached through something else — a deeper path, or the
+/// enum that owns them — so neither has a name this module could stand in front of.
+fn reject_reexport(reexport: bool, name: &str, what: &str, from: &str) -> Result<(), ModuleError> {
+    if !reexport {
+        return Ok(());
+    }
+    Err(ModuleError::ExportImportNotItem {
+        name: name.to_string(),
+        what: what.to_string(),
+        from: from.to_string(),
+    })
+}
+
+/// Build one scope per module, in module order, settling re-exports first.
+pub(crate) fn resolve_imports(graph: &mut ModuleGraph) -> Result<Vec<ImportScope>, ModuleError> {
+    // A re-exported name only becomes reachable once the module re-exporting it has been
+    // resolved, and modules resolve in id order — so a chain of re-exports settles one link
+    // per round. Errors are held back until the tables stop growing: an import that fails
+    // this round may be exactly the one the next round makes resolvable.
+    while install_reexports(graph) {}
+    build_scopes(graph, Tolerance::Report)
+}
+
+/// Whether an import that cannot be resolved ends the pass or is passed over.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tolerance {
+    Report,
+    Skip,
+}
+
+fn build_scopes(
+    graph: &ModuleGraph,
+    tolerance: Tolerance,
+) -> Result<Vec<ImportScope>, ModuleError> {
     let mut scopes = Vec::with_capacity(graph.modules.len());
     for id in 0..graph.modules.len() {
         let mut scope = ImportScope::default();
         for import in &graph.modules[id].imports {
-            resolve_one(graph, id, import, &mut scope)?;
+            let outcome = resolve_one(graph, id, import, &mut scope);
+            if tolerance == Tolerance::Report {
+                outcome?;
+            }
         }
         scopes.push(scope);
     }
     Ok(scopes)
+}
+
+/// Copy one round of re-export tables onto the graph, reporting whether anything was new.
+fn install_reexports(graph: &mut ModuleGraph) -> bool {
+    let Ok(scopes) = build_scopes(graph, Tolerance::Skip) else {
+        return false;
+    };
+    let mut changed = false;
+    for (id, scope) in scopes.into_iter().enumerate() {
+        for (name, target) in scope.reexports {
+            changed |= graph.add_reexport(id, name, target);
+        }
+    }
+    changed
 }
 
 fn resolve_one(
@@ -121,7 +204,13 @@ fn resolve_one(
         if let ImportSelection::List(names) = &import.selection {
             for entry in names {
                 let bound = entry.alias.as_ref().unwrap_or(&entry.name);
-                scope.bind_variant(&bound.name, segments[0], &entry.name.name, &owner)?;
+                scope.bind_variant(
+                    &bound.name,
+                    segments[0],
+                    &entry.name.name,
+                    &owner,
+                    import.exported,
+                )?;
             }
             return Ok(());
         }
@@ -145,8 +234,10 @@ fn bind_from_module(
     let owner = graph.display(from).to_string();
     let last = &import.path[import.path.len() - 1].name;
     match &import.selection {
-        ImportSelection::Module => scope.bind_module(last, module, &owner),
-        ImportSelection::Alias(alias) => scope.bind_module(&alias.name, module, &owner),
+        ImportSelection::Module => scope.bind_module(last, module, &owner, import.exported),
+        ImportSelection::Alias(alias) => {
+            scope.bind_module(&alias.name, module, &owner, import.exported)
+        }
         ImportSelection::List(names) => {
             for entry in names {
                 let bound = entry.alias.as_ref().unwrap_or(&entry.name);
@@ -154,10 +245,13 @@ fn bind_from_module(
                 // A listed name is a child module (`import ./utils::{io}`) or an item the
                 // module declares — the file system settles which.
                 match graph.resolve_segment(from, Some(module), name) {
-                    Some(child) => scope.bind_module(&bound.name, child, &owner)?,
+                    Some(child) => {
+                        scope.bind_module(&bound.name, child, &owner, import.exported)?
+                    }
                     None if graph.declares(module, name) => {
                         graph.check_visible(from, module, name)?;
-                        scope.bind_item(&bound.name, name, &owner)?
+                        let (origin, flat) = graph.flat_origin(module, name);
+                        scope.bind_item(&bound.name, &flat, origin, &owner, import.exported)?
                     }
                     None => {
                         return Err(ModuleError::UndeclaredItem {
@@ -199,7 +293,8 @@ fn bind_from_item(
                 ImportSelection::Alias(alias) => &alias.name,
                 _ => item,
             };
-            scope.bind_item(bound, item, &owner)
+            let (origin, flat) = graph.flat_origin(module, item);
+            scope.bind_item(bound, &flat, origin, &owner, import.exported)
         }
         // `import geometry::Shape::{Circle, Square}` — the tail is a type in the module,
         // so the listed names are its variants.
@@ -212,7 +307,7 @@ fn bind_from_item(
             graph.check_visible(from, module, item)?;
             for entry in names {
                 let bound = entry.alias.as_ref().unwrap_or(&entry.name);
-                scope.bind_variant(&bound.name, item, &entry.name.name, &owner)?;
+                scope.bind_variant(&bound.name, item, &entry.name.name, &owner, import.exported)?;
             }
             Ok(())
         }

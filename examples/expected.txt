@@ -89,6 +89,9 @@ structs/struct_update.nr  14
 # --- modules (multi-file programs) ----------------------------------------
 modules/main.nr             40
 modules/imports.nr          40
+modules/inline.nr           26
+modules/reexports.nr        10
+modules/api.nr              module
 modules/geometry.nr         module
 modules/shapes/mod.nr       module
 modules/shapes/area.nr      module

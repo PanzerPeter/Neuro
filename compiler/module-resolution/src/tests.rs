@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use ast_types::{
     EnumPatternPayload, Expr, FunctionDef, ImportDef, ImportName, ImportSelection, Item, MatchArm,
-    Parameter, Pattern, Stmt, Type,
+    ModuleDef, Parameter, Pattern, Stmt, Type,
 };
 use shared_types::{Identifier, Literal, Span};
 use tempfile::TempDir;
@@ -91,7 +91,7 @@ fn match_on(pattern: Pattern) -> Stmt {
 }
 
 /// Build one `import` item from the stub's `import <rest>` line.
-fn import_item(rest: &str) -> Result<Item, String> {
+fn import_item(rest: &str, exported: bool) -> Result<Item, String> {
     let (relative, rest) = match rest.strip_prefix("./") {
         Some(stripped) => (true, stripped),
         None => (false, rest),
@@ -129,19 +129,29 @@ fn import_item(rest: &str) -> Result<Item, String> {
         relative,
         path,
         selection,
+        exported,
         span: Span::new(0, 0),
     }))
 }
 
 /// The stub parser: each line is `func NAME`, `export func NAME`,
 /// `call QUALIFIER::MEMBER`, `bare NAME`, `param NAME: TYPE`, `import ...`,
-/// `pat NAME(BIND)`, or `patbare NAME` — enough surface to drive every resolution rule.
-/// `func` without `export` is private to its file, exactly as in real source.
+/// `export import ...`, `pat NAME(BIND)`, or `patbare NAME` — enough surface to drive
+/// every resolution rule. A `module NAME` line opens an inline block that runs to a
+/// matching `end`. `func` without `export` is private to its file, exactly as in real
+/// source.
 fn stub_parse(source: &str) -> Result<Vec<Item>, String> {
     let mut items = Vec::new();
     let mut calls = Vec::new();
-    for line in source.lines().map(str::trim).filter(|l| !l.is_empty()) {
-        if let Some(name) = line.strip_prefix("export func ") {
+    let mut lines = source.lines().map(str::trim).filter(|l| !l.is_empty());
+    while let Some(line) = lines.next() {
+        if let Some(name) = line.strip_prefix("module ") {
+            items.push(Item::Module(ModuleDef {
+                name: ident(name),
+                items: stub_parse(&stub_block(&mut lines, name)?)?,
+                span: Span::new(0, 0),
+            }));
+        } else if let Some(name) = line.strip_prefix("export func ") {
             items.push(function(name, true, Vec::new()));
         } else if let Some(name) = line.strip_prefix("func ") {
             items.push(function(name, false, Vec::new()));
@@ -157,8 +167,10 @@ fn stub_parse(source: &str) -> Result<Vec<Item>, String> {
                 .split_once(": ")
                 .ok_or_else(|| format!("bad param line: {}", line))?;
             items.push(function_taking(name, ty));
+        } else if let Some(rest) = line.strip_prefix("export import ") {
+            items.push(import_item(rest, true)?);
         } else if let Some(rest) = line.strip_prefix("import ") {
-            items.push(import_item(rest)?);
+            items.push(import_item(rest, false)?);
         } else if let Some(rest) = line.strip_prefix("pat ") {
             let (variant, binding) = rest
                 .split_once('(')
@@ -189,6 +201,25 @@ fn stub_parse(source: &str) -> Result<Vec<Item>, String> {
         }
     }
     Ok(items)
+}
+
+/// Collect the body of a `module NAME` block, up to its matching `end`.
+fn stub_block<'a>(lines: &mut impl Iterator<Item = &'a str>, name: &str) -> Result<String, String> {
+    let mut depth = 1;
+    let mut body = String::new();
+    for line in lines {
+        if line.starts_with("module ") {
+            depth += 1;
+        } else if line == "end" {
+            depth -= 1;
+            if depth == 0 {
+                return Ok(body);
+            }
+        }
+        body.push_str(line);
+        body.push('\n');
+    }
+    Err(format!("unterminated module block: {}", name))
 }
 
 fn write(dir: &Path, rel: &str, source: &str) -> PathBuf {
@@ -670,4 +701,176 @@ fn every_item_carries_the_module_it_was_loaded_from() {
     // checker measures a private field against.
     assert_eq!(module_of("entry"), Some(0));
     assert_eq!(module_of("sqrt"), Some(1));
+}
+
+#[test]
+fn an_inline_block_is_reached_like_any_other_module() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "module geometry\nexport func area\nend\ncall geometry::area\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+
+    // The block's items join the same flat namespace, so the qualifier is gone.
+    assert_eq!(first_callee(&program).as_deref(), Some("area"));
+    assert!(declared_names(&program).contains(&"area".to_string()));
+}
+
+#[test]
+fn an_inline_block_item_is_private_to_the_block() {
+    let dir = TempDir::new().expect("temp dir");
+    // The file declaring the block is still outside it: `export` is the only way in.
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "module geometry\nfunc scale\nend\ncall geometry::scale\n",
+    );
+
+    match resolve(&root) {
+        Err(ModuleError::PrivateItem { item, .. }) => assert_eq!(item, "scale"),
+        other => panic!("expected PrivateItem, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn an_inline_block_wins_over_a_same_named_file() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "geometry.nr", "export func area\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "module geometry\nexport func inline_area\nend\ncall geometry::inline_area\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+
+    assert_eq!(first_callee(&program).as_deref(), Some("inline_area"));
+    // The sibling file was never a candidate, so it was never loaded.
+    assert!(!declared_names(&program).contains(&"area".to_string()));
+}
+
+#[test]
+fn inline_blocks_nest() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "module outer\nmodule inner\nexport func deep\nend\nend\ncall outer::inner::deep\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+    assert_eq!(first_callee(&program).as_deref(), Some("deep"));
+}
+
+#[test]
+fn two_inline_blocks_may_not_share_a_name() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "module m\nexport func first\nend\nmodule m\nexport func second\nend\n",
+    );
+
+    match resolve(&root) {
+        Err(ModuleError::DuplicateInlineModule { name, .. }) => assert_eq!(name, "m"),
+        other => panic!(
+            "expected DuplicateInlineModule, got {:?}",
+            other.map(|_| ())
+        ),
+    }
+}
+
+#[test]
+fn export_import_makes_a_name_reachable_through_the_importer() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "internal.nr", "export func parse\n");
+    write(
+        dir.path(),
+        "facade.nr",
+        "export import ./internal::{parse}\n",
+    );
+    let root = write(dir.path(), "main.nr", "call facade::parse\n");
+
+    let program = resolve(&root).expect("resolution succeeds");
+    assert_eq!(first_callee(&program).as_deref(), Some("parse"));
+}
+
+#[test]
+fn a_plain_import_does_not_re_export() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "internal.nr", "export func parse\n");
+    write(dir.path(), "facade.nr", "import ./internal::{parse}\n");
+    let root = write(dir.path(), "main.nr", "call facade::parse\n");
+
+    match resolve(&root) {
+        Err(ModuleError::UndeclaredItem { item, .. }) => assert_eq!(item, "parse"),
+        other => panic!("expected UndeclaredItem, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn export_import_carries_the_rename_back_to_the_declaration() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "internal.nr", "export func parse_config\n");
+    write(
+        dir.path(),
+        "facade.nr",
+        "export import ./internal::{parse_config as build}\n",
+    );
+    let root = write(dir.path(), "main.nr", "call facade::build\n");
+
+    let program = resolve(&root).expect("resolution succeeds");
+    // The flat namespace holds the declaration's own name; only the route was renamed.
+    assert_eq!(first_callee(&program).as_deref(), Some("parse_config"));
+}
+
+#[test]
+fn a_chain_of_re_exports_resolves_to_the_declaration() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "deep.nr", "export func value\n");
+    write(dir.path(), "mid.nr", "export import ./deep::{value}\n");
+    write(dir.path(), "top.nr", "export import ./mid::{value as v}\n");
+    let root = write(dir.path(), "main.nr", "call top::v\n");
+
+    let program = resolve(&root).expect("resolution succeeds");
+    assert_eq!(first_callee(&program).as_deref(), Some("value"));
+}
+
+#[test]
+fn export_import_of_a_module_is_rejected() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "internal.nr", "export func parse\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "export import ./internal\ncall internal::parse\n",
+    );
+
+    match resolve(&root) {
+        Err(ModuleError::ExportImportNotItem { name, what, .. }) => {
+            assert_eq!(name, "internal");
+            assert_eq!(what, "a module");
+        }
+        other => panic!("expected ExportImportNotItem, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn a_re_export_may_not_open_a_private_declaration() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "internal.nr", "func parse\n");
+    write(
+        dir.path(),
+        "facade.nr",
+        "export import ./internal::{parse}\n",
+    );
+    let root = write(dir.path(), "main.nr", "call facade::parse\n");
+
+    match resolve(&root) {
+        Err(ModuleError::PrivateItem { item, .. }) => assert_eq!(item, "parse"),
+        other => panic!("expected PrivateItem, got {:?}", other.map(|_| ())),
+    }
 }

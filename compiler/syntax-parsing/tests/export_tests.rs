@@ -110,8 +110,21 @@ fn export_is_rejected_on_a_type_alias() {
 }
 
 #[test]
-fn export_is_rejected_on_an_import() {
-    let message = parse_error("export import math\n");
+fn export_marks_an_import_as_a_re_export() {
+    let items = items("export import math::{sqrt}\nimport geometry\n");
+    let exported: Vec<bool> = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Import(def) => Some(def.exported),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(exported, vec![true, false]);
+}
+
+#[test]
+fn export_is_rejected_on_an_inline_module_block() {
+    let message = parse_error("export module geometry { }\n");
     assert!(
         message.contains("`export` cannot be applied to"),
         "{}",

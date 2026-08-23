@@ -351,9 +351,18 @@ needs the receiver's type, so each item now carries the module it came from and 
 type checker enforces reads, writes, literals, destructuring, and `..base` updates
 against it. Methods take no marker — an `impl` declares no name, so they follow the
 type they extend. A single-file program is one module, so none of this changes it.
+**Inline `module { }` blocks and `export import` re-exports** landed in v1.74.0. A
+block is a module with no file of its own: it is lifted into the module graph like any
+file, so the visibility rule, the flat merge, and the collision check reach it unchanged
+and blocks nest. The file declaring a block is outside it, so `export` is the only way
+in; a block holds no file children, and it wins over a same-named file beside it.
+`export import` binds names locally like any import *and* makes them reachable through
+the importing module, so a facade offers a flatter API than its internals — a rename is
+undone on the way through, and facades chain. Only an item can be re-exported: a module
+and an enum variant are each reached through something else, so `export import` on one is
+an error rather than a silent no-op.
 
-**Next, in dependency order:** the rest of 1G (inline `module { }` blocks with
-`export import` re-export, the full prelude) → 1H (string interpolation,
+**Next, in dependency order:** the rest of 1G (the full prelude) → 1H (string interpolation,
 triple-quoted strings, nested comments, named arguments). See the
 [Quick Roadmap](README.md#quick-roadmap).
 

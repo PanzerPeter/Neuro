@@ -12,9 +12,13 @@
 //   · enums with pattern matching
 //   · `export` visibility: each module publishes a surface and keeps the rest private —
 //     `Summary.total` and `report`'s `Band` never leave the file that declares them
+//   · an inline `module { }` block: logical grouping inside one file, under the same
+//     visibility rule a file module follows
+//   · `export import`: `report` re-exports its child's `clamp`, so a caller reaches it as
+//     `report::clamp` without ever naming `report::format`
 //
 //   examples/showcase/telemetry/
-//     main.nr            <- the root module
+//     main.nr            <- the root module, plus the inline module `scoring`
 //     stats.nr           <- module `stats`
 //     report/
 //       mod.nr           <- module `report`
@@ -29,6 +33,26 @@ import report::format as fmt
 
 // Prelude enum variants, so the match arms below need no `Option::` prefix.
 import Option::{Some, None}
+
+// An inline module: a grouping worth a name but not a file. Its items follow the same
+// rule a file's do — private unless written with `export`.
+module scoring {
+    export const BONUS: i32 = 2
+
+    export func combine(weighted: i32, louder: i32, count: i32, flagged: bool) -> i32 {
+        weighted + louder + count + adjust(flagged)
+    }
+
+    // No `export`: how the bonus is decided stays inside the block, so `main` below
+    // cannot name it even though it is written in the same file.
+    func adjust(flagged: bool) -> i32 {
+        if flagged {
+            BONUS
+        } else {
+            0
+        }
+    }
+}
 
 func main() -> i32 {
     val samples: [i32; 5] = [12, 40, 7, 33, 18]
@@ -56,6 +80,10 @@ func main() -> i32 {
     // A grandchild module, reached through the alias its import bound.
     val weighted = fmt::scale(score, 4)                          // 28
 
-    val bonus = if flagged { 2 } else { 0 }
-    weighted + louder + summary.count + bonus            // 28 + 40 + 5 + 2 = 75
+    // `clamp` lives in that same grandchild, but `report` re-exports it — so this route
+    // stops one level short and never mentions `format`.
+    val capped = report::clamp(weighted, 30)                     // 28
+
+    // The inline module does the final tally; its private `adjust` supplies the bonus.
+    scoring::combine(capped, louder, summary.count, flagged)     // 28 + 40 + 5 + 2 = 75
 }

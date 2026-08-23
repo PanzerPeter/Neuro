@@ -15,6 +15,11 @@
 //! type, so each item carries the module it came from and the type checker settles it.
 //! The namespace underneath stays flat, which is why two modules still cannot each declare
 //! `helper` even when both keep it private.
+//!
+//! An inline `module Name { ... }` block is a module with no file of its own and is loaded
+//! as one, so every rule above reaches it unchanged. `export import` is the one way a name
+//! reaches *through* a module it was not declared in: the importing module records where
+//! the declaration really lives, and a qualified path lands on it in a single step.
 
 use std::path::Path;
 
@@ -112,6 +117,22 @@ pub enum ModuleError {
         item: String,
         from: String,
     },
+
+    #[error(
+        "`{name}` is declared twice as an inline module in `{from}`; one module name can \
+         stand for one block — rename one of them"
+    )]
+    DuplicateInlineModule { name: String, from: String },
+
+    #[error(
+        "`export import` in `{from}` would re-export `{name}`, which names {what} rather \
+         than an item; only an item can be re-exported — drop the `export`"
+    )]
+    ExportImportNotItem {
+        name: String,
+        what: String,
+        from: String,
+    },
 }
 
 /// Expand `root` and every module it reaches into one item list.
@@ -123,15 +144,15 @@ pub enum ModuleError {
 ///
 /// Returns a [`ModuleError`] when a module file cannot be read or parsed, when an import or
 /// a qualified path names a module or an item that does not exist, when a name it reaches
-/// for is private to the module that declares it, or when two modules declare the same
-/// name.
+/// for is private to the module that declares it, when an `export import` names something
+/// other than an item, or when two modules declare the same name.
 pub fn resolve_program(
     root: &Path,
     parse_module: &dyn Fn(&str) -> Result<Vec<Item>, String>,
 ) -> Result<ResolvedProgram, ModuleError> {
     let mut graph = loader::ModuleGraph::load(root, parse_module)?;
     graph.check_name_collisions()?;
-    let scopes = imports::resolve_imports(&graph)?;
+    let scopes = imports::resolve_imports(&mut graph)?;
     rewriter::strip_qualifiers(&mut graph, &scopes)?;
     Ok(graph.into_program())
 }

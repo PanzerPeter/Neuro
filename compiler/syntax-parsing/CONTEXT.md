@@ -64,15 +64,26 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-08-23: Inline `module { }` blocks and `export import`. `parse_program` now delegates to
+  `parse_item_list`, which runs to end of input at file level and to the closing brace inside a
+  block, so a `module Name { ... }` body is parsed by the same code as the file around it and
+  blocks nest for free. The block becomes `Item::Module(ModuleDef)`, a new `ast-types` node and
+  a new public re-export. Type-alias declarations from every nesting level are collected into one
+  list and expanded in a single pass, and trait-default injection walks blocks too — both are
+  erased at parse time, so keeping them file-scoped is what makes an alias declared beside a
+  block still read inside it. `export` is now *accepted* on an `import`, setting the new
+  `ImportDef.exported`, and is rejected on a `module` block instead: an inline module's name is
+  reached only from the file that declares it. Which names an `export import` may re-export is a
+  file-system question and stays with module-resolution.
 - 2026-08-22: `export` visibility. `parse_program` consumes an optional `export` marker between
   the attributes and the item keyword — the position `pub` takes in Rust, so `@derive(Copy)`
   still reads as attached to the declaration — and sets `exported` on the item it parses.
   `parse_struct_def` reads the same marker per field, since an exported struct may still keep
   a field to itself. `export` is rejected on an `impl` block (it declares no name), on a
   `type` alias (expanded at parse time, so nothing of it survives to reach another module),
-  and on an `import` (`export import` re-export is a later item), all through the new
-  `ParseError::ExportNotAllowed`. An enum struct-variant's fields are marked exported: a
-  variant is reached through a pattern naming its enum. Nothing here *enforces* visibility —
+  and (until 2026-08-23) on an `import`, all through the new `ParseError::ExportNotAllowed`.
+  An enum struct-variant's fields are marked exported: a variant is reached through a
+  pattern naming its enum. Nothing here *enforces* visibility —
   the parser only records what was written.
 - 2026-08-18: `import` declarations. New `parser/item_imports.rs`: `parse_import` reads all five
   surface forms into one `Item::Import` — an optional leading `./`, a `::`-separated path, then an
