@@ -64,6 +64,13 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-08-23: `@no_prelude`. `parse_item_list` checks for the marker *before* the attribute list,
+  because an attribute list is claimed by the declaration that follows it and this one has none:
+  `@` followed by the identifier `no_prelude` is consumed into `Item::NoPrelude(Span)`, a new
+  `ast-types` node. It is accepted only as the first thing in a file — not after a declaration,
+  and not inside a `module { }` block, which is not a file — reported as the new
+  `ParseError::MisplacedNoPrelude`. What the marker then *means* is module resolution's question;
+  the parser only records where it was written.
 - 2026-08-23: Inline `module { }` blocks and `export import`. `parse_program` now delegates to
   `parse_item_list`, which runs to end of input at file level and to the closing brace inside a
   block, so a `module Name { ... }` body is parsed by the same code as the file around it and

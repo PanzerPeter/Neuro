@@ -20,8 +20,10 @@ import shapes::area as region
 // The whole module, still written with its qualifier below.
 import ./shapes
 
-// Enum variants, so `Some` and `None` need no `Option::` prefix. `Option` comes from the
-// prelude rather than from a file, which is why no path leads to it.
+// Enum variants, spelled out. The implicit prelude already binds `Option`'s variants in
+// every module (see `prelude.nr`), so this line is redundant here — it is the form to
+// write when the variants belong to an enum of your own, and an explicit import of a
+// prelude name takes precedence over the implicit one rather than colliding with it.
 import Option::{Some, None}
 
 // Absence is a value: a rectangle with no extent has no area worth reporting.

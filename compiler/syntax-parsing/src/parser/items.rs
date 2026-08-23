@@ -21,6 +21,9 @@ enum Nesting {
 const ITEM_EXPECTED: &str =
     "function, struct, enum, impl, const, type, newtype, module, or import definition";
 
+/// The one attribute that is written at file scope rather than on a declaration.
+const NO_PRELUDE: &str = "no_prelude";
+
 impl Parser {
     /// Parse top-level items: function, struct, impl, const, type-alias, inline
     /// `module` block, or import definitions.
@@ -59,6 +62,17 @@ impl Parser {
             if nesting == Nesting::Block && self.check(&TokenKind::RightBrace) {
                 break;
             }
+
+            // `@no_prelude` governs the whole file, so it is read before the attribute
+            // list rather than through it: an attribute list is claimed by the
+            // declaration that follows, and this one has none.
+            if self.at_no_prelude() {
+                let span = self.parse_no_prelude(nesting, items.is_empty())?;
+                items.push(Item::NoPrelude(span));
+                self.skip_newlines();
+                continue;
+            }
+
             let attributes = self.parse_attributes()?;
             self.skip_newlines();
 
@@ -156,6 +170,36 @@ impl Parser {
             items,
             span: start.span.merge(close.span),
         })
+    }
+
+    /// Is the parser looking at the `@no_prelude` file marker?
+    fn at_no_prelude(&self) -> bool {
+        if !self.check(&TokenKind::At) {
+            return false;
+        }
+        matches!(
+            self.tokens.get(self.current + 1).map(|token| &token.kind),
+            Some(TokenKind::Identifier(name)) if name == NO_PRELUDE
+        )
+    }
+
+    /// Consume `@no_prelude`, rejecting it anywhere but the top of a file.
+    ///
+    /// The marker opts a *file* out of the implicit prelude, so it is meaningless after a
+    /// declaration — everything above it would already have been compiled with the
+    /// prelude — and meaningless inside a `module` block, which is not a file.
+    fn parse_no_prelude(
+        &mut self,
+        nesting: Nesting,
+        first: bool,
+    ) -> ParseResult<shared_types::Span> {
+        let at = self.consume(TokenKind::At, "'@'")?;
+        let name = self.consume(TokenKind::Identifier(String::new()), "'no_prelude'")?;
+        let span = at.span.merge(name.span);
+        if nesting == Nesting::Block || !first {
+            return Err(ParseError::MisplacedNoPrelude { span });
+        }
+        Ok(span)
     }
 
     /// Consume a leading `export` marker, yielding the span it was written at.

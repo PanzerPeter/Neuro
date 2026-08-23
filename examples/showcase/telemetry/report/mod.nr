@@ -25,12 +25,13 @@ func band_for(mean: i32) -> Band {
 // `Band` and `band_for` carry no `export`: they are how this module decides, not part
 // of what it offers, so only `weight_of` crosses the module boundary.
 //
-// Absence is a value: a batch that read nothing has no band to weigh.
+// Absence is a value: a batch that read nothing has no band to weigh. `Some` and `None`
+// need no import here either — the prelude binds them in every module, not just the root.
 export func weight_of(mean: i32) -> Option<i32> {
     if mean == 0 {
-        return Option::None
+        return None
     }
-    Option::Some(match band_for(mean) {
+    Some(match band_for(mean) {
         Band::Quiet => 1,
         Band::Normal => 2,
         Band::Loud => 3

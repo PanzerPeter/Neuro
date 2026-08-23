@@ -375,4 +375,7 @@ pub enum Item {
     Newtype(NewtypeDef),
     Import(ImportDef),
     Module(ModuleDef),
+    /// A file-scope `@no_prelude` marker. Carries only where it was written: module
+    /// resolution reads it off the file it opens and drops it, so no later pass sees it.
+    NoPrelude(Span),
 }

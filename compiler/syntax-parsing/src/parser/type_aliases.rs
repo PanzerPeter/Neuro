@@ -246,8 +246,8 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
         }
         // A newtype's inner may itself be written via a `type` alias, so expand it.
         Item::Newtype(def) => rewrite_type(&mut def.inner, resolved),
-        // An import names modules and items, never a type annotation.
-        Item::Import(_) => {}
+        // Neither an import nor the `@no_prelude` marker names a type annotation.
+        Item::Import(_) | Item::NoPrelude(_) => {}
         // Aliases stay file-scoped: they are expanded at parse time, so one declared
         // beside a `module` block still reads inside it.
         Item::Module(def) => {

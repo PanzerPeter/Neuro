@@ -239,7 +239,7 @@ This shows:
 
 ## Current Feature Summary
 
-Phase 1 (Core Language) sub-phases 1A–1F are complete; 1G (error handling, modules & prelude) is next. The current compiler supports:
+Phase 1 (Core Language) sub-phases 1A–1G are complete; 1H (language cleanup) is next. The current compiler supports:
 
 ### Types
 - Integers: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
@@ -295,8 +295,14 @@ Phase 1 (Core Language) sub-phases 1A–1F are complete; 1G (error handling, mod
 - Coalescing: `??` unwraps an `Option` / `Result`, else evaluates a lazy fallback
 - Propagation: `expr?` unwraps an `Option` / `Result`, else returns the failure to the caller
 
+### Modules
+- A program may span several files: every `.nr` file is a module, and a directory holding a `mod.nr` is a module with children. You compile the root
+- `import math`, `import ./utils::io`, `import math::{sqrt, sin}`, `as` renames, module aliases, variant imports, and `export import` re-export facades
+- Inline `module Name { ... }` blocks group items inside one file, under the same rules
+- Declarations and struct fields are private to their module until `export` opts them in
+- An implicit prelude puts `Option`, `Result`, `Some` / `None` / `Ok` / `Err`, and `println` / `print` in scope in every file with no `import`; `@no_prelude` on a file's first line opts out
+
 ### Not Yet Implemented (later in Phase 1)
-- Module system and imports (1G)
 - String interpolation, triple-quoted strings, nested comments, named arguments (1H)
 
 ## Common Issues

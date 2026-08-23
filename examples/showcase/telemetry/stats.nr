@@ -1,4 +1,10 @@
+@no_prelude
+
 // Module `stats`: turns a batch of raw readings into a summary value.
+//
+// Nothing here is fallible — a batch always has a count, a total, and a peak — so this
+// file opts out of the implicit prelude entirely. `Some` and `None` are ordinary names
+// again inside it, while `main.nr` and `report/mod.nr` beside it still get them bound.
 //
 // Visibility is per declaration and, for a struct, per field: `total` is the running
 // sum this module keeps for itself, readable only through `mean()`.

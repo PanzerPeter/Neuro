@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.75.0] - 2026-08-23
+
+### Added
+- `semantic`: the implicit prelude. Every module now begins with `Option`,
+  `Result`, their variants `Some` / `None` / `Ok` / `Err`, and `println` / `print`
+  in scope with no `import` of any kind, so `Some(n)` and `Err(e)` read bare in
+  value and pattern position alike. Module resolution seeds each module's import
+  scope with the prelude's variants — the same table an explicit
+  `import Option::{Some}` fills — so nothing after that pass learns a new concept.
+- `parser`: `@no_prelude`, written on a file's first line, opts that file out of
+  the prelude. It is rejected after a declaration and inside a `module { }` block,
+  which is not a file (`ParseError::MisplacedNoPrelude`). On a non-root file it
+  drops that file's bindings; on the root it also drops the prelude's declarations
+  from the whole program, since the merged namespace is flat.
+- `infra`: `ast-types` gains `Item::NoPrelude`, a parse-only marker consumed by
+  module resolution like `Item::Import` and `Item::Module`.
+- `semantic`: `module-resolution` gains the public `PreludeVariant` input and
+  reports the root file's opt-out as `ResolvedProgram.no_prelude`. The prelude's
+  contents are injected by the driver for the same reason the parser is — a
+  feature slice may not reach into another one.
+
+### Changed
+- `infra`: `neurc`'s prelude module became a `Prelude` value: one parse supplies
+  both the declarations it prepends and the variant names it hands to module
+  resolution, so `prelude.nr` stays the single place the prelude's contents are
+  stated.
+- `docs`: a variant import of a prelude name is now redundant rather than
+  required. An explicit import of one still wins over the implicit binding, as
+  does a local declaration of the same name — neither is a collision.
+
 ## [1.74.0] - 2026-08-23
 
 ### Added

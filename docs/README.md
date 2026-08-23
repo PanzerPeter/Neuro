@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) underway with `Option` / `Result`, the standard collections, `val-else`, the `?` propagation operator, error-path outlining, multi-file compilation, `import`, and inline modules with re-exports landed — Alpha Development
+**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1G complete, with `Option` / `Result`, the standard collections, `val-else`, the `?` propagation operator, error-path outlining, multi-file compilation, `import`, `export` visibility, inline modules with re-exports, and the implicit prelude landed; 1H (language cleanup) next — Alpha Development
 
 ## Quick Links
 
@@ -175,8 +175,9 @@ Key design goals:
 - Type arguments come from the expected type, the payload (`Slot::Filled(4)` → `T = i32`), or the
   enclosing function's return type (which is what a tail `if` branch relies on)
 - A `match` pattern names the base enum and binds payloads at the scrutinee instance's types
-- `Option<T> { Some(T), None }` and `Result<T, E> { Ok(T), Err(E) }` come from an implicit prelude:
-  available in every program with no declaration, shadowed by a local type of the same name
+- `Option<T> { Some(T), None }` and `Result<T, E> { Ok(T), Err(E) }` come from the implicit prelude:
+  available in every program with no declaration and no import — the four variants included, so
+  `Some(n)` and `Err(e)` read bare — and shadowed by a local declaration of the same name
 - `checked_add` / `checked_sub` / `checked_mul` on any integer type return `Option<T>` over the
   receiver's type: `Option::Some(result)` when it fits, `Option::None` on overflow. Branchless —
   the LLVM `*.with.overflow` overflow bit picks the variant
@@ -220,7 +221,7 @@ Key design goals:
   `math::sqrt`, `utils::io::read`, `geometry::Point` — in value position and in type annotations
   alike
 - `import math`, `import ./utils::io`, `import math::{sqrt, sin}`, `import math::sin as sine`,
-  `import math::matrix as mat`, and `import Option::{Some, None}` are all available. An imported
+  `import math::matrix as mat`, and `import Shape::{Circle, Square}` are all available. An imported
   variant reads unqualified as a value and as a `match` pattern
 - Only referenced modules load, so a directory of unrelated single-file programs still compiles one
   at a time. A leaf `math.nr` has no children; only a `mod.nr` directory opens a level
@@ -243,8 +244,13 @@ Key design goals:
   enum variant is an error rather than a silent no-op
 - Modules still share one flat namespace, so qualification is checked but never required, and a
   name declared by two loaded modules is a reported collision rather than a silent winner — even
-  when both keep it private, and a block buys a private surface rather than a private namespace.
-  The implicit prelude import is still ahead
+  when both keep it private, and a block buys a private surface rather than a private namespace
+- Every module begins with an **implicit prelude**: `Option`, `Result`, their variants `Some` /
+  `None` / `Ok` / `Err`, and `println` / `print` are in scope with no `import` of any kind. A local
+  declaration of one of those names, or an explicit import of it, wins inside that module rather
+  than colliding. A file opts out with **`@no_prelude`** on its first line — on a non-root file that
+  drops its bindings; on the root it drops the prelude's declarations from the whole program, since
+  the merged namespace is flat
 - See the [modules reference](language-reference/modules.md) for the resolution rules and
   diagnostics
 

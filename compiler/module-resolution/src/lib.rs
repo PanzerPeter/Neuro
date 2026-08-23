@@ -20,6 +20,11 @@
 //! as one, so every rule above reaches it unchanged. `export import` is the one way a name
 //! reaches *through* a module it was not declared in: the importing module records where
 //! the declaration really lives, and a qualified path lands on it in a single step.
+//!
+//! Every module also starts with the implicit prelude's variant bindings, so `Some` and
+//! `Ok` read as themselves without an import. They are the weakest binding there is: an
+//! explicit import of the same name wins, and so does a local declaration of it. A file
+//! written with `@no_prelude` gets none of them.
 
 use std::path::Path;
 
@@ -42,6 +47,23 @@ pub struct ResolvedProgram {
     pub items: Vec<Item>,
     /// One entry per loaded module, for diagnostics and driver reporting.
     pub modules: Vec<ResolvedModule>,
+    /// Whether the root file was written with `@no_prelude`. The merged namespace is
+    /// flat, so the prelude's *declarations* are a property of the program rather than of
+    /// any one file: the root is the file that decides for it.
+    pub no_prelude: bool,
+}
+
+/// One enum variant the implicit prelude binds in every module that did not opt out.
+///
+/// The prelude's contents belong to the driver, which owns the prelude source; this slice
+/// is told what to bind for the same reason it is handed a parser — it may not reach into
+/// another slice to find out.
+#[derive(Debug, Clone)]
+pub struct PreludeVariant {
+    /// The enum the variant belongs to, as the flat namespace names it.
+    pub owner: String,
+    /// The variant's own name, which is also the bare name a module may write.
+    pub variant: String,
 }
 
 /// Everything that can go wrong turning a root file into one program.
@@ -138,7 +160,9 @@ pub enum ModuleError {
 /// Expand `root` and every module it reaches into one item list.
 ///
 /// Parsing is supplied by the caller rather than imported: this slice depends only on the
-/// AST it rewrites, so the parser stays on the driver's side of the boundary.
+/// AST it rewrites, so the parser stays on the driver's side of the boundary. `prelude`
+/// names the enum variants every module may write bare — `Some`, `None`, `Ok`, `Err` —
+/// and comes from the caller for the same reason.
 ///
 /// # Errors
 ///
@@ -149,10 +173,11 @@ pub enum ModuleError {
 pub fn resolve_program(
     root: &Path,
     parse_module: &dyn Fn(&str) -> Result<Vec<Item>, String>,
+    prelude: &[PreludeVariant],
 ) -> Result<ResolvedProgram, ModuleError> {
     let mut graph = loader::ModuleGraph::load(root, parse_module)?;
     graph.check_name_collisions()?;
-    let scopes = imports::resolve_imports(&mut graph)?;
+    let scopes = imports::resolve_imports(&mut graph, prelude)?;
     rewriter::strip_qualifiers(&mut graph, &scopes)?;
     Ok(graph.into_program())
 }
