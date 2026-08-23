@@ -1,6 +1,6 @@
 # Neuro Programming Language
 
-> A modern, compiled language designed for high-performance AI development.
+> An AOT-compiled language for high-performance AI development.
 
 <p align="center">
   <img src="assets/demo.gif" alt="Compile and run a Neuro program in under a second" width="820">
@@ -10,7 +10,7 @@
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
 [![CI](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml)
 
-**Status:** Alpha — Phase 1 (Core Language) in progress; completing it ships v2.0.0. Per-sub-phase status lives in one place: the [Quick Roadmap](#quick-roadmap).
+**Status:** Alpha. Phase 1 (Core Language) is in progress, and finishing it ships v2.0.0. Per-sub-phase status lives in one place: the [Quick Roadmap](#quick-roadmap).
 
 ---
 
@@ -38,11 +38,11 @@
 
 ## Overview
 
-Neuro is an Ahead-of-Time (AOT) compiled language built from the ground up for AI workloads. Unlike Python — an interpreted glue language — Neuro generates native code through an LLVM 20 backend, with a roadmap toward:
+Neuro is an Ahead-of-Time (AOT) compiled language for AI workloads. Python is interpreted and leans on C libraries for anything fast; Neuro compiles to native code through an LLVM 20 backend instead. Planned on top of that backend:
 
-- **MLIR-based tensor operations** for static, shape-verified tensor types
-- **IR-level automatic differentiation** via Enzyme
-- **GPU acceleration** via MLIR GPU dialects (nvgpu, rocdl, Triton)
+- MLIR-based tensor operations, for static shape-verified tensor types
+- IR-level automatic differentiation via Enzyme
+- GPU acceleration via MLIR GPU dialects (nvgpu, rocdl, Triton)
 
 ---
 
@@ -92,16 +92,16 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 
 | Feature | Summary |
 |---|---|
-| **Types & inference** | `i8`–`u64`, `f16`/`bf16`/`f32`/`f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, type aliases |
+| **Types & inference** | `i8` through `u64`, `f16`/`bf16`/`f32`/`f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, type aliases |
 | **Functions & control flow** | Recursion, forward refs, implicit returns; `if`/`elif`/`else`, `while`, `loop`, range-`for`, labelled `break`/`continue`, block-as-value |
-| **Generics** | Generic functions, structs, and impls plus const generics, `where` clauses, and turbofish — fully monomorphized, zero runtime cost |
+| **Generics** | Generic functions, structs, and impls plus const generics, `where` clauses, and turbofish, all fully monomorphized at zero runtime cost |
 | **Traits & dispatch** | Required and default methods, operator traits, `impl Trait` (static) and `dyn Trait` (vtable) dispatch with object-safety checks |
 | **Closures & lambdas** | `\|x: i32\| x * x`, `move` closures, `(T) -> R` function types, higher-order functions; compiled to `{ fn_ptr, env_ptr }`, no heap |
 | **Structs & methods** | Fields, shorthand init, functional update `..base`, `impl` blocks with `&self` / `&mut self` methods and associated functions |
 | **Enums & newtypes** | Unit, tuple, and struct-field variants; generic enums monomorphized per type argument; `newtype` for distinct nominal wrappers |
 | **Arrays, tuples & collections** | Fixed-size `[T; N]` and anonymous tuples over `Copy` elements; heap-backed `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>` that move on assignment and free at scope exit |
 | **Pattern matching** | Exhaustive `match` expressions over variant / literal / or / range / wildcard patterns with `if` guards, plus `val Point { x, y } = p` and `val [a, ..rest] = arr` destructuring |
-| **`Option` / `Result`** | `Option<T>` and `Result<T, E>` from the implicit prelude — ordinary generic enums, available with no declaration and no import, variants included; `??` unwraps either with a lazy fallback; `?` propagates the failure to the caller; `val-else` unwraps or exits the scope; `checked_add` / `checked_sub` / `checked_mul` report integer overflow as `Option::None` |
+| **`Option` / `Result`** | `Option<T>` and `Result<T, E>` from the implicit prelude. They are ordinary generic enums, available with no declaration and no import, variants included; `??` unwraps either with a lazy fallback; `?` propagates the failure to the caller; `val-else` unwraps or exits the scope; `checked_add` / `checked_sub` / `checked_mul` report integer overflow as `Option::None` |
 | **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop`, `&T` / `&mut T` with flow-sensitive exclusivity, lifetime elision and annotations |
 | **Strings** | Fat-pointer `string` with escapes, `&string` slices, `==`, `+` concatenation, `.len()` / `.clone()` / `.slice(a..b)` |
 | **Modules & visibility** | Multi-file programs: every `.nr` file is a module and `mod.nr` directories nest; inline `module { }` blocks group within one file; `import math::{sqrt}`, `import ./utils`, `as` renames, module aliases, variant imports, and `export import` re-export facades; declarations and struct fields are private until `export` opts them in; an implicit prelude puts `Option` / `Result` and `Some` / `None` / `Ok` / `Err` in every module, with `@no_prelude` to opt out |
@@ -109,7 +109,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 
 ### Current Memory Model
 
-> **⚠️ Alpha memory warning.** Stack values are reclaimed on return and string literals live in `.rodata`, so neither leaks. Move semantics, borrows, deterministic `Drop`, and the owning collections have landed — a `Vec` / `HashMap` / `BTreeMap` frees its buffer at scope exit. Two gaps remain: `+` string concatenation still leaks its heap buffer, and a `string` stored inside a collection is not freed with it, because the growable heap-string type has not landed.
+> **Alpha memory warning.** Stack values are reclaimed on return and string literals live in `.rodata`, so neither leaks. Move semantics, borrows, deterministic `Drop`, and the owning collections have landed, so a `Vec`, `HashMap`, or `BTreeMap` frees its buffer at scope exit. Two gaps remain: `+` string concatenation still leaks its heap buffer, and a `string` stored inside a collection is not freed with it, because the growable heap-string type has not landed.
 >
 > This block is removed once that type lands. Until then, do not assume memory-safety semantics beyond what the table above claims.
 >
@@ -214,13 +214,13 @@ Windows requires the **MSVC toolchain** (not GNU). Make sure Visual Studio Build
 Tools 2019 or later are installed with the **C++ build tools** workload before
 proceeding.
 
-**Step 1 — Install Visual Studio Build Tools**
+**Step 1. Install Visual Studio Build Tools**
 
 Download from [visualstudio.microsoft.com/downloads](https://visualstudio.microsoft.com/downloads/)
 → *Tools for Visual Studio* → *Build Tools for Visual Studio 2022*.
 Select the **Desktop development with C++** workload.
 
-**Step 2 — Install Rust**
+**Step 2. Install Rust**
 
 Download and run `rustup-init.exe` from [rustup.rs](https://rustup.rs/).
 When prompted, choose *1) Proceed with standard installation*. Rustup will
@@ -229,12 +229,12 @@ automatically select the `stable-x86_64-pc-windows-msvc` default toolchain.
 Open a **new** PowerShell window after installation so the `cargo` and `rustc`
 commands are on your `PATH`.
 
-**Step 3 — Install LLVM 20**
+**Step 3. Install LLVM 20**
 
 Download the official Windows installer from the LLVM GitHub releases page:
 
 ```powershell
-# PowerShell — download and run the installer silently
+# PowerShell: download and run the installer silently
 $version = "20.1.8"
 $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/LLVM-$version-win64.exe"
 curl.exe -fsSL -o "$env:TEMP\llvm-installer.exe" $url
@@ -242,10 +242,10 @@ Start-Process "$env:TEMP\llvm-installer.exe" -ArgumentList "/S /D=C:\LLVM" -Wait
 ```
 
 Or download and run the installer manually from the
-[LLVM GitHub releases page](https://github.com/llvm/llvm-project/releases) — install to `C:\LLVM`
+[LLVM GitHub releases page](https://github.com/llvm/llvm-project/releases), installing to `C:\LLVM`
 (the path must not contain spaces; the NSIS installer enforces this).
 
-**Step 4 — Set the LLVM environment variable**
+**Step 4. Set the LLVM environment variable**
 
 ```powershell
 # Set permanently for your user account (no admin required)
@@ -264,7 +264,7 @@ Close and reopen PowerShell so the changes take effect, then verify:
 llvm-config --version   # should print 20.x.y
 ```
 
-**Step 5 — Clone and build**
+**Step 5. Clone and build**
 
 ```powershell
 git clone https://github.com/PanzerPeter/Neuro.git
@@ -272,13 +272,13 @@ cd Neuro
 cargo build --release
 ```
 
-**Step 6 — Run the test suite**
+**Step 6. Run the test suite**
 
 ```powershell
 cargo test --workspace
 ```
 
-**Step 7 — (Optional) Install the compiler globally**
+**Step 7. (Optional) Install the compiler globally**
 
 ```powershell
 cargo install --path compiler/neurc
@@ -399,7 +399,7 @@ func main() -> i32 {
 
 ### Closures and Higher-Order Functions
 
-Verbatim from [examples/showcase/closures.nr](examples/showcase/closures.nr) — it compiles, links, and exits with code 90.
+Verbatim from [examples/showcase/closures.nr](examples/showcase/closures.nr). It compiles, links, and exits with code 90.
 
 ```neuro
 // Apply `f` to each element of a 4-element array and sum the results.
@@ -445,13 +445,13 @@ func main() -> i32 {
 }
 ```
 
-Every runnable program in [examples/showcase/](examples/showcase/) combines several features at once and is pinned to an expected exit code in [examples/expected.txt](examples/expected.txt). Tensor types, `@grad`, and GPU kernels are not shown here because they do not exist yet — see the [Quick Roadmap](#quick-roadmap).
+Every runnable program in [examples/showcase/](examples/showcase/) combines several features at once and is pinned to an expected exit code in [examples/expected.txt](examples/expected.txt). Tensor types, `@grad`, and GPU kernels are not shown here because they do not exist yet. See the [Quick Roadmap](#quick-roadmap).
 
 ---
 
 ## Architecture
 
-Neuro follows **Vertical Slice Architecture (VSA)** — organized by language feature, not technical layer.
+Neuro follows Vertical Slice Architecture (VSA): the code is organized by language feature, not by technical layer.
 
 ### Workspace Layout
 
@@ -482,7 +482,7 @@ Source (.nr)
   → Lexical Analysis   (tokens)
   → Syntax Parsing     (AST)
   → Semantic Analysis  (type-checked AST)
-  → HIR Lowering       (typed High-Level IR — neuro-hir)
+  → HIR Lowering       (typed High-Level IR, neuro-hir)
   → LLVM Backend       (object code via inkwell / LLVM 20)
   → System Linker      (native executable)
 ```
@@ -504,25 +504,25 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 
 | Phase | Goal | Status |
 |:---:|---|:---:|
-| **1** | **Core Language** — the full general-purpose language; completing it ships **v2.0.0** | 🔄 In progress |
-| 1A | Core MVP — types, functions, control flow, LLVM backend | ✅ Complete |
-| 1B | Syntax & semantics stabilization — parser fixes, `const`, `as` casts, compound assignment, bitwise ops, integer suffixes, if/block expressions, `while true` lint, IEEE-754 float comparisons, string fat pointers | ✅ Complete |
-| 1C | Ownership & borrow checker — move semantics, `Copy`, `&T`, `&mut T`, borrow exclusivity, lifetime elision / returned-reference outlives, `&mut self` methods, deterministic `Drop` | ✅ Complete ¹ |
-| 1D | Backend plumbing — `neuro-hir` typed IR crate, `melior` integration, AST → HIR lowering, HIR-routed LLVM backend, mlir-backend HIR scaffold | ✅ Complete |
-| 1E | Type system — arrays ✅, tuples ✅, structs ✅, methods ✅, destructuring ✅, type aliases ✅, enums ✅, pattern matching ✅, newtype ✅ | ✅ Complete |
-| 1F | Generics, traits & dispatch — generics, explicit lifetimes, trait declarations, operator traits, static/dynamic dispatch (`impl`/`dyn`), closures | ✅ Complete |
-| 1G | Error handling, modules & prelude — `Option`/`Result`, collections, `checked_*`, `??`, `val-else`, `?`, error-path outlining, multi-file modules, imports, `export` visibility, inline modules & re-exports, implicit prelude | ✅ Complete |
-| 1H | Language cleanup — string interpolation, triple-quoted strings, nested comments, named arguments | 📋 Planned |
-| **2** | Tensors & MLIR — `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | 📋 Planned |
-| **3** | Automatic differentiation — Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | 📋 Planned |
-| **4** | GPU acceleration — MLIR GPU dialects (nvgpu / rocdl / Triton), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | 📋 Planned |
-| **5** | Neural network standard library — `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | 📋 Planned |
-| **6** | Async runtime — `async func`, `Future<T>`, `spawn`, `JoinHandle`, `join` / `race`, executor for data-loader / I/O overlap | 📋 Planned |
-| **7** | Interop & advanced features — Python FFI via DLPack, spread operator, advanced pattern matching, custom attributes, `defer` | 📋 Planned |
-| **8** | Developer experience — Language Server Protocol, diagnostics polish, formatter, `@test` runner | 📋 Planned |
-| **9** | Package manager & distribution — `neurpm`, cross-OS installer / uninstaller / self-updater, signed release binaries, optimization passes (loop unrolling, AD-aware inlining, LTO) | 📋 Planned |
+| **1** | **Core Language**: the full general-purpose language. Finishing it ships **v2.0.0** | In progress |
+| 1A | Core MVP: types, functions, control flow, LLVM backend | Complete |
+| 1B | Syntax and semantics stabilization: parser fixes, `const`, `as` casts, compound assignment, bitwise ops, integer suffixes, if/block expressions, `while true` lint, IEEE-754 float comparisons, string fat pointers | Complete |
+| 1C | Ownership and borrow checker: move semantics, `Copy`, `&T`, `&mut T`, borrow exclusivity, lifetime elision / returned-reference outlives, `&mut self` methods, deterministic `Drop` | Complete ¹ |
+| 1D | Backend plumbing: `neuro-hir` typed IR crate, `melior` integration, AST → HIR lowering, HIR-routed LLVM backend, mlir-backend HIR scaffold | Complete |
+| 1E | Type system: arrays, tuples, structs, methods, destructuring, type aliases, enums, pattern matching, newtypes | Complete |
+| 1F | Generics, traits and dispatch: generics, explicit lifetimes, trait declarations, operator traits, static/dynamic dispatch (`impl`/`dyn`), closures | Complete |
+| 1G | Error handling, modules and prelude: `Option`/`Result`, collections, `checked_*`, `??`, `val-else`, `?`, error-path outlining, multi-file modules, imports, `export` visibility, inline modules & re-exports, implicit prelude | Complete |
+| 1H | Language cleanup: string interpolation, triple-quoted strings, nested comments, named arguments | Planned |
+| **2** | Tensors and MLIR: `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | Planned |
+| **3** | Automatic differentiation: Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | Planned |
+| **4** | GPU acceleration: MLIR GPU dialects (nvgpu / rocdl / Triton), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | Planned |
+| **5** | Neural network standard library: `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | Planned |
+| **6** | Async runtime: `async func`, `Future<T>`, `spawn`, `JoinHandle`, `join` / `race`, executor for data-loader / I/O overlap | Planned |
+| **7** | Interop and advanced features: Python FFI via DLPack, spread operator, advanced pattern matching, custom attributes, `defer` | Planned |
+| **8** | Developer experience: Language Server Protocol, diagnostics polish, formatter, `@test` runner | Planned |
+| **9** | Package manager and distribution: `neurpm`, cross-OS installer / uninstaller / self-updater, signed release binaries, optimization passes (loop unrolling, AD-aware inlining, LTO) | Planned |
 
-¹ Sub-phase 1C is essentially complete; one flagged item (growable runtime strings) remains and needs a decision on where it lands — the sub-phase it was provisionally aimed at has since closed.
+¹ Sub-phase 1C is essentially complete; one flagged item (growable runtime strings) remains and needs a decision on where it lands, because the sub-phase it was provisionally aimed at has since closed.
 
 ---
 
@@ -586,7 +586,7 @@ vsce package
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture guidelines, coding standards, and the pull request process.
 
-The project is in early alpha — breaking changes are expected. Contributions should focus on **Phase 1 (Core Language)**; the [Quick Roadmap](#quick-roadmap) marks which sub-phase is currently open.
+The project is in early alpha, so breaking changes are expected. Contributions should focus on **Phase 1 (Core Language)**; the [Quick Roadmap](#quick-roadmap) marks which sub-phase is currently open.
 
 ---
 
@@ -595,7 +595,7 @@ The project is in early alpha — breaking changes are expected. Contributions s
 AI development is stuck in a fragmented paradigm: developers iterate in an interpreted glue language (Python), while underlying libraries are written in unmanaged, safety-critical systems languages (C++/CUDA). 
 
 Neuro is built to unify this stack:
-1. **True Native Performance:** Compiled AOT via LLVM 20—no heavy runtime interpreter, no global interpreter lock (GIL).
+1. **True native performance.** Compiled AOT via LLVM 20, with no heavy runtime interpreter and no global interpreter lock (GIL).
 2. **AI-First Type System:** Native compile-time shape verification for tensors using MLIR (Phase 2), preventing runtime dimension mismatches before a single line of training executes.
 3. **Immutability by Default:** A modern `val`/`mut` paradigm to ensure highly parallelized tensor computations are thread-safe by design.
 

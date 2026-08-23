@@ -429,15 +429,22 @@ impl Lowerer {
                 else_if_blocks,
                 else_block,
                 span,
-            } => self.lower_if_expr(condition, then_block, else_if_blocks, else_block, *span),
+            } => self.lower_if_expr(
+                condition,
+                then_block,
+                else_if_blocks,
+                else_block,
+                expected,
+                *span,
+            ),
 
             Expr::Block { stmts, span } => {
-                let (stmts, ty) = self.lower_block_value(stmts)?;
+                let (stmts, ty) = self.lower_block_value(stmts, expected)?;
                 Ok(HirExpr::new(HirExprKind::Block { stmts }, ty, *span))
             }
 
             Expr::Unsafe { stmts, span } => {
-                let (stmts, ty) = self.lower_block_value(stmts)?;
+                let (stmts, ty) = self.lower_block_value(stmts, expected)?;
                 Ok(HirExpr::new(HirExprKind::Unsafe { stmts }, ty, *span))
             }
 
@@ -484,10 +491,6 @@ impl Lowerer {
         }
     }
 
-    /// Lower a block in value position (a bare/`unsafe` block or an `if` arm),
-    /// returning the lowered statements and the block's value type — the type of the
-    /// trailing expression, or `void`. The tail is typed with no contextual hint,
-    /// matching the checker's `check_block_expr_type`.
     /// Lower an `if` in value position, from either `Expr::If` or a block's trailing
     /// `Stmt::If`. An `if` is a value only with an `else`; otherwise it yields unit.
     pub(super) fn lower_if_expr(
@@ -496,19 +499,28 @@ impl Lowerer {
         then_block: &[ast_types::Stmt],
         else_if_blocks: &[(ast_types::Expr, Vec<ast_types::Stmt>)],
         else_block: &Option<Vec<ast_types::Stmt>>,
+        expected: Option<&HirType>,
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
         let condition = self.lower_expr(condition, Some(&HirType::Bool))?;
-        let (then_stmts, then_ty) = self.lower_block_value(then_block)?;
+
+        // Arm-type hint, mirroring `lower_match`: the expected type if any, else the
+        // first arm's type, so a later arm carrying no type of its own resolves against
+        // its siblings rather than against nothing.
+        let mut hint: Option<HirType> = expected.cloned();
+        let (then_stmts, then_ty) = self.lower_block_value(then_block, hint.as_ref())?;
+        if hint.is_none() {
+            hint = Some(then_ty.clone());
+        }
         let mut elifs = Vec::with_capacity(else_if_blocks.len());
         for (cond, block) in else_if_blocks {
             let cond = self.lower_expr(cond, Some(&HirType::Bool))?;
-            let (block, _) = self.lower_block_value(block)?;
+            let (block, _) = self.lower_block_value(block, hint.as_ref())?;
             elifs.push((cond, block));
         }
         let (else_block, ty) = match else_block {
             Some(block) => {
-                let (block, _) = self.lower_block_value(block)?;
+                let (block, _) = self.lower_block_value(block, hint.as_ref())?;
                 (Some(block), then_ty)
             }
             None => (None, HirType::Void),
@@ -525,12 +537,17 @@ impl Lowerer {
         ))
     }
 
+    /// Lower a block in value position (a bare/`unsafe` block or an `if` arm),
+    /// returning the lowered statements and the block's value type — the type of the
+    /// trailing expression, or `void`. The tail is typed under `expected`, matching the
+    /// checker's `check_block_expr_type`.
     pub(super) fn lower_block_value(
         &mut self,
         stmts: &[ast_types::Stmt],
+        expected: Option<&HirType>,
     ) -> Result<(Vec<HirStmt>, HirType), LoweringError> {
         self.push_scope();
-        let result = self.lower_block_value_inner(stmts);
+        let result = self.lower_block_value_inner(stmts, expected);
         self.pop_scope();
         result
     }
@@ -538,6 +555,7 @@ impl Lowerer {
     pub(super) fn lower_block_value_inner(
         &mut self,
         stmts: &[ast_types::Stmt],
+        expected: Option<&HirType>,
     ) -> Result<(Vec<HirStmt>, HirType), LoweringError> {
         let mut out = Vec::with_capacity(stmts.len());
         let mut ty = HirType::Void;
@@ -548,7 +566,7 @@ impl Lowerer {
                 // `Stmt::Expr(Expr::If)`, so a trailing `if/else` has to be recognized
                 // here to carry the block's value.
                 let tail = match stmt {
-                    ast_types::Stmt::Expr(expr) => Some(self.lower_expr(expr, None)?),
+                    ast_types::Stmt::Expr(expr) => Some(self.lower_expr(expr, expected)?),
                     ast_types::Stmt::If {
                         condition,
                         then_block,
@@ -560,6 +578,7 @@ impl Lowerer {
                         then_block,
                         else_if_blocks,
                         else_block,
+                        expected,
                         *span,
                     )?),
                     _ => None,

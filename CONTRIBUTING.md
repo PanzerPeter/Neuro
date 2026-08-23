@@ -4,7 +4,19 @@ Thank you for your interest in contributing to the Neuro programming language co
 
 ## Project Status
 
-Neuro is in **Phase 1 — Core Language** (v1.x), the umbrella phase covering the full general-purpose language. It is divided into lettered sub-phases, implemented strictly in dependency order. **Sub-phase 1H (Language Cleanup) is the active sub-phase.** Completed so far: 1A (core MVP), 1B (syntax & semantics stabilization — casts, bitwise ops, literal suffixes, if/block expressions, builtin-method dispatch, integer overflow, etc.), 1C (ownership & borrow checker — move semantics, `Copy`, `&T`/`&mut T`, borrow exclusivity, lifetime elision, `&mut self`, deterministic `Drop`; one flagged item remains), 1D (HIR / MLIR plumbing — typed HIR, AST→HIR lowering, HIR-routed LLVM backend, `mlir-backend` scaffold), 1E (type system — structs, methods, arrays, tuples, destructuring, type aliases, enums, pattern matching, and newtypes), 1F (generics, traits & dispatch — generic functions/structs/impls, const generics, `where`, turbofish, explicit lifetimes, trait declarations, operator overloading, static & dynamic dispatch, and closures), and 1G (error handling, modules & prelude — `Option`/`Result`, the standard collections, `checked_*`, `??`, `val-else`, `?`, error-path outlining, multi-file compilation, `import`, `export` visibility, inline modules with re-exports, and the implicit prelude). Completing all of Phase 1 (1A–1H) ships **v2.0.0** and opens Phase 2 (Tensors). We welcome contributions, but note:
+Neuro is in Phase 1 (Core Language, v1.x), the umbrella phase covering the full general-purpose language. It is divided into lettered sub-phases, implemented strictly in dependency order. **Sub-phase 1H (Language Cleanup) is the active sub-phase.** Finishing all of Phase 1 (1A through 1H) ships **v2.0.0** and opens Phase 2 (Tensors).
+
+Complete so far:
+
+- 1A, core MVP.
+- 1B, syntax and semantics stabilization: casts, bitwise ops, literal suffixes, if/block expressions, builtin-method dispatch, integer overflow.
+- 1C, ownership and borrow checker: move semantics, `Copy`, `&T`/`&mut T`, borrow exclusivity, lifetime elision, `&mut self`, deterministic `Drop`. One flagged item remains.
+- 1D, HIR and MLIR plumbing: typed HIR, AST to HIR lowering, HIR-routed LLVM backend, `mlir-backend` scaffold.
+- 1E, type system: structs, methods, arrays, tuples, destructuring, type aliases, enums, pattern matching, newtypes.
+- 1F, generics, traits and dispatch: generic functions, structs and impls, const generics, `where`, turbofish, explicit lifetimes, trait declarations, operator overloading, static and dynamic dispatch, closures.
+- 1G, error handling, modules and prelude: `Option`/`Result`, the standard collections, `checked_*`, `??`, `val-else`, `?`, error-path outlining, multi-file compilation, `import`, `export` visibility, inline modules with re-exports, the implicit prelude.
+
+We welcome contributions, but note:
 
 - Architecture and design are still evolving
 - Breaking changes are expected between minor versions
@@ -44,7 +56,7 @@ brew install llvm@20
 export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)
 ```
 
-> **Optional — MLIR backend (sub-phase 1D+):** the `mlir-backend` slice is gated
+> **Optional: the MLIR backend (sub-phase 1D+).** the `mlir-backend` slice is gated
 > behind the off-by-default `mlir` cargo feature, so a normal build needs only
 > LLVM 20. To work on it you need an LLVM 20 install that includes MLIR plus a
 > matching libclang 20 (`MLIR_SYS_200_PREFIX` / `TABLEGEN_200_PREFIX` /
@@ -64,11 +76,11 @@ cargo fmt --all -- --check
 
 Before contributing, read:
 
-1. [README.md](README.md) — project overview and installation
-2. [DESIGN.md](DESIGN.md) — language design principles and non-goals
-3. [docs/README.md](docs/README.md) — technical documentation index
-4. [CHANGELOG.md](CHANGELOG.md) — recent changes
-5. Each slice's `CONTEXT.md` — purpose, entry point, and dependency contract
+1. [README.md](README.md): project overview and installation
+2. [DESIGN.md](DESIGN.md): language design principles and non-goals
+3. [docs/README.md](docs/README.md): technical documentation index
+4. [CHANGELOG.md](CHANGELOG.md): recent changes
+5. Each slice's `CONTEXT.md`: purpose, entry point, and dependency contract
 
 ## Development Workflow
 
@@ -112,10 +124,10 @@ below for the legal effect and the `git commit -s` workflow.
 
 ### Rust Rules
 
-- **No `unwrap()`/`expect()` in production paths** — use `Result<T, E>` with actionable errors
+- **No `unwrap()`/`expect()` in production paths.** Use `Result<T, E>` with actionable errors.
 - **Explicit integer widths** on public-facing APIs (`u32`, `i64`, not `usize` for domain values)
-- **`pub(crate)` by default** — only slice entry points are `pub`
-- **Borrowing over cloning** — avoid unnecessary `.clone()`
+- **`pub(crate)` by default.** Only slice entry points are `pub`.
+- **Borrowing over cloning.** Avoid unnecessary `.clone()`.
 - **Document public APIs** with `///` doc comments; document every `unsafe` block with a safety rationale
 
 ### Quality Gates
@@ -136,9 +148,9 @@ Neuro uses **Vertical Slice Architecture (VSA)**. Each compiler feature is a sel
 
 ```
 compiler/
-├── infrastructure/          # Shared utilities — no business logic
+├── infrastructure/          # Shared utilities, no business logic
 │   ├── ast-types/           # AST node definitions (owned here, not in syntax-parsing)
-│   ├── neuro-hir/           # Typed HIR — backend-agnostic frontend↔backend contract (1D)
+│   ├── neuro-hir/           # Typed HIR, the backend-agnostic frontend/backend contract (1D)
 │   ├── shared-types/        # Span, Identifier, Literal
 │   ├── diagnostics/         # Error type infrastructure
 │   ├── source-location/     # Source mapping
@@ -152,14 +164,14 @@ compiler/
 ├── llvm-backend/            # LLVM 20 / inkwell 0.9 codegen slice
 ├── mlir-backend/            # MLIR / melior slice (1D+, off-by-default `mlir` feature)
 │
-└── neurc/                   # Compiler driver — the only crate that depends on all slices
+└── neurc/                   # Compiler driver, the only crate depending on all slices
 ```
 
 ### VSA Rules
 
 **Do:**
 - Organize by features, not layers
-- Keep slices independent — duplication is preferred over coupling
+- Keep slices independent. Duplication is preferred over coupling.
 - Use `pub(crate)` as default visibility; `pub` only for the slice entry point
 - Accept infrastructure dependencies (`shared-types`, `diagnostics`, `ast-types`)
 - Keep each slice's `CONTEXT.md` up to date when entry points or dependencies change
@@ -186,7 +198,7 @@ All contributions must include:
 
 - **Unit tests** for individual functions (`#[cfg(test)] mod tests { ... }` in source file)
 - **Integration tests** in the crate's `tests/` directory for slice entry points
-- **Edge cases** — boundary conditions and error paths
+- **Edge cases:** boundary conditions and error paths
 - **Regression tests** for bug fixes
 
 ### Test Organization
@@ -207,8 +219,8 @@ cargo test -- --nocapture
 
 ### Test Quality
 
-- Tests must be isolated — no shared mutable state between tests
-- Tests must be deterministic — same input always produces the same result
+- Tests must be isolated, with no shared mutable state between them
+- Tests must be deterministic, so the same input always produces the same result
 - Test names must be descriptive and self-documenting
 - Avoid testing implementation details; test observable behavior
 
@@ -396,15 +408,15 @@ capabilities table for full behavior.
 
 ⚑ **One flagged 1C item remains:** growable runtime string ops (`String::new` /
 `.push_str` / `.clear`) are blocked by the immutable-`string` spec contradiction.
-Recommendation pending sign-off, and now overdue: 1G — the sub-phase it was
-provisionally aimed at — has closed, so the item needs a new home before the growable
+Recommendation pending sign-off, and now overdue: 1G, the sub-phase it was
+provisionally aimed at, has closed, so the item needs a new home before the growable
 `String` type can be scheduled. It does not block 1H.
 
 Explicit lifetime annotations `<'a>` landed in **1F** (v1.59.0): a `'a` lifetime
 token, a `lifetimes` list on function/struct/impl definitions kept separate from
 monomorphizable generics, and `&'a T` / `&'a mut T` reference annotations. They are
 validated against the in-scope lifetime parameters (`UndeclaredLifetime`) then erased
-— `&'a T` is the same type as `&T`. Lifetime *elision* (v1.40.0) still covers the
+`&'a T` is the same type as `&T`. Lifetime *elision* (v1.40.0) still covers the
 common cases and does the real outlives checking.
 
 ### Non-Code Contributions
@@ -415,7 +427,7 @@ common cases and does the real outlives checking.
 
 ## Developer Certificate of Origin (DCO)
 
-Neuro uses the **Developer Certificate of Origin** ([developercertificate.org](https://developercertificate.org/)) — the same lightweight, no-paperwork mechanism used by the Linux kernel, Git, Docker, and many other open projects — instead of a separate CLA.
+Neuro uses the **Developer Certificate of Origin** ([developercertificate.org](https://developercertificate.org/)) instead of a separate CLA. It is the same lightweight, no-paperwork mechanism the Linux kernel, Git, and Docker use.
 
 By signing off on a commit, you certify that:
 
@@ -424,7 +436,7 @@ By signing off on a commit, you certify that:
 > 3. The contribution was provided directly to you by some other person who certified (1), (2), or (3) and you have not modified it.
 > 4. You understand and agree that this project and the contribution are public and that a record of the contribution (including all personal information you submit with it, including the sign-off) is maintained indefinitely and may be redistributed consistent with this project and the open source license(s) involved.
 
-In addition, by signing off you **explicitly accept the relicensing terms of § 12.3 of the [LICENSE](LICENSE)**: your contribution may be redistributed under (a) a future version of the Neuro Shared Source License, (b) the Apache License 2.0, or (c) a license mutually agreed upon in writing between the Neuro Project and you. Relicensing under any other license — including strong-copyleft licenses such as the GPL — requires your individual written consent.
+In addition, by signing off you **explicitly accept the relicensing terms of § 12.3 of the [LICENSE](LICENSE)**: your contribution may be redistributed under (a) a future version of the Neuro Shared Source License, (b) the Apache License 2.0, or (c) a license mutually agreed upon in writing between the Neuro Project and you. Relicensing under any other license, including strong-copyleft licenses such as the GPL, requires your individual written consent.
 
 ### How to sign off
 

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.75.1] - 2026-08-23
+
+### Fixed
+- `semantic`, `codegen`: an `if`/`else` in value position now carries its context
+  into its arms, the way a `match` always has. The arms were typed against
+  nothing, so an arm naming no type of its own — a bare `None`, an untyped
+  integer literal — had nothing to resolve against even when the `val` it
+  initialized was annotated or the parameter it was passed to was typed. The two
+  spellings of one computation disagreed: `match n { 0 => None, _ => Some(4) }`
+  compiled where `if n > 0 { Some(4) } else { None }` did not, and the diagnostic
+  advised annotating the target, which did not help. The type checker and HIR
+  lowering both mirror `match` now — the arm hint is the caller's expected type
+  if there is one, else the first arm's type once known.
+
 ## [1.75.0] - 2026-08-23
 
 ### Added

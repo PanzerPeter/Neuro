@@ -145,9 +145,16 @@ impl TypeChecker {
                 else_if_blocks,
                 else_block,
                 span,
-            } => self.check_if_expr(condition, then_block, else_if_blocks, else_block, span),
+            } => self.check_if_expr(
+                condition,
+                then_block,
+                else_if_blocks,
+                else_block,
+                span,
+                expected,
+            ),
 
-            Expr::Block { stmts, .. } => self.check_bare_block_expr(stmts),
+            Expr::Block { stmts, .. } => self.check_bare_block_expr(stmts, expected),
 
             // A `loop` evaluates to the value carried by its value-producing
             // `break`s (which must all agree on type); with only plain `break`s it
@@ -161,7 +168,7 @@ impl TypeChecker {
 
             // `unsafe` is inert in Phase 1.7: it introduces a scope and yields
             // its trailing expression's type, exactly like a bare block.
-            Expr::Unsafe { stmts, .. } => self.check_unsafe_block_expr(stmts),
+            Expr::Unsafe { stmts, .. } => self.check_unsafe_block_expr(stmts, expected),
 
             // Borrow `&place` / `&mut place`. The result type is `&T`
             // (or `&mut T`). Checking the operand reads its type without consuming it:
