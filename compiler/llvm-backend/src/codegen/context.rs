@@ -523,7 +523,10 @@ mod tests {
     #[test]
     fn slice_resolves_through_a_string_borrow() {
         // A `&string` receiver auto-derefs, so `.slice` resolves on it too.
-        let recv = Type::Reference(Box::new(Type::String));
+        let recv = Type::Reference {
+            inner: Box::new(Type::String),
+            mutable: false,
+        };
         assert!(matches!(
             resolve_builtin_method(&recv, "slice"),
             Some(BuiltinMethod::StringSlice)

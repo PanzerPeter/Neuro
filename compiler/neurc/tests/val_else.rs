@@ -195,3 +195,55 @@ func main() -> i32 {
         "diagnostic should explain the empty variant; got: {message}"
     );
 }
+
+#[test]
+fn val_else_takes_an_unqualified_prelude_variant() {
+    let test = CompileTest::new();
+    // The prelude makes `Some(v)` the idiomatic spelling in value position, `match`
+    // arms, and here — the qualified form must not be the only one that parses.
+    let source = r#"
+func half(n: i32) -> Option<i32> {
+    if n % 2 == 0 {
+        Some(n / 2)
+    } else {
+        None
+    }
+}
+
+func main() -> i32 {
+    val Some(v) = half(24) else { return 1 }
+    v + 1
+}
+"#;
+    let exit = test
+        .compile_and_run("val_else_unqualified.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 13);
+}
+
+#[test]
+fn val_else_takes_an_unqualified_variant_with_an_else_binding() {
+    let test = CompileTest::new();
+    let source = r#"
+func parse(n: i32) -> Result<i32, i32> {
+    if n > 0 {
+        Ok(n * 2)
+    } else {
+        Err(7)
+    }
+}
+
+func handle(n: i32) -> i32 {
+    val Ok(doubled) = parse(n) else |err| { return err }
+    doubled + 1
+}
+
+func main() -> i32 {
+    handle(5) + handle(-1)
+}
+"#;
+    let exit = test
+        .compile_and_run("val_else_unqualified_binding.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 18);
+}

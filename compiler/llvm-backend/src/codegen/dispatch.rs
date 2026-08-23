@@ -195,7 +195,7 @@ impl<'ctx> CodegenContext<'ctx> {
         value: &HirExpr,
         target_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let Type::Reference(inner) = target_ty else {
+        let Type::Reference { inner, .. } = target_ty else {
             return Err(CodegenError::InternalError(
                 "trait-object coercion target is not a reference".into(),
             ));

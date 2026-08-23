@@ -173,9 +173,10 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(fat_ptr.into_struct_value().into())
     }
 
-    /// Normalize a string operand to its `{ ptr, len }` fat-pointer struct value,
-    /// auto-dereferencing a `&string` slice — a borrow lowers to a pointer
-    /// to the fat pointer, so it is loaded; an owned `string` is already the struct.
+    /// Normalize a string operand to its `{ ptr, len }` fat-pointer struct value.
+    ///
+    /// An owned `string` and an immutable `&string` are both already the struct; only a
+    /// `&mut string`, which is the referent's address, has to be loaded through.
     fn load_string_fatptr(
         &self,
         value: BasicValueEnum<'ctx>,

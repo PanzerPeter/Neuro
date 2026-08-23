@@ -318,3 +318,113 @@ func main() -> i32 {
 "#;
     run_expecting(source, 16);
 }
+
+#[test]
+fn a_returned_slice_survives_a_later_call() {
+    // The slice is computed in `head`'s frame; returning it must hand the caller a
+    // value, not a pointer into a frame that has already been reclaimed. `clobber`
+    // is there to reuse that stack region before the slice is read.
+    let source = r#"
+func head(s: &string) -> &string {
+    s.slice(0..2)
+}
+
+func clobber(x: i32) -> i32 {
+    val a = "aaaaaaaaaaaaaaaaaaaa"
+    val b = a.slice(0..9)
+    b.len() as i32 + x
+}
+
+func main() -> i32 {
+    val right = "spectrum"
+    val prefix = head(&right)
+    val j = clobber(0)
+    prefix.len() as i32 + (j - j)
+}
+"#;
+    run_expecting(source, 2);
+}
+
+#[test]
+fn a_returned_slice_keeps_its_bytes_not_just_its_length() {
+    // Length alone would survive a stale pointer by luck; comparing the bytes proves
+    // the pointer half of the fat pointer is still the borrowee's, not reclaimed stack.
+    let source = r#"
+func head(s: &string) -> &string {
+    s.slice(0..4)
+}
+
+func clobber() -> i32 {
+    val a = "zzzzzzzzzzzzzzzzzzzz"
+    val b = a.slice(0..17)
+    b.len() as i32
+}
+
+func main() -> i32 {
+    val right = "spectrum"
+    val prefix = head(&right)
+    val junk = clobber()
+    if prefix == "spec" { return 0 }
+    return junk
+}
+"#;
+    run_expecting(source, 0);
+}
+
+#[test]
+fn a_slice_is_computed_afresh_on_every_loop_iteration() {
+    // The slice slot was the one alloca left at the builder position rather than the
+    // function entry, so a slice inside a loop grew the stack. With the slice returned
+    // by value there is no slot at all.
+    let source = r#"
+func main() -> i32 {
+    val text = "abcdefghij"
+    mut total = 0
+    mut i = 0
+    while i < 100000 {
+        val part = text.slice(0..3)
+        total = total + (part.len() as i32)
+        i = i + 1
+    }
+    total / 100000
+}
+"#;
+    run_expecting(source, 3);
+}
+
+#[test]
+fn a_mutable_string_borrow_still_reaches_the_referent() {
+    // `&string` is the fat pointer by value; `&mut string` is *not*, because a store
+    // through it has to land on the caller's binding. The two halves of that split
+    // must not drift.
+    let source = r#"
+func replace(s: &mut string) {
+    *s = "worlds"
+}
+
+func main() -> i32 {
+    mut a = "hello"
+    replace(&mut a)
+    a.len() as i32
+}
+"#;
+    run_expecting(source, 6);
+}
+
+#[test]
+fn a_slice_of_a_slice_keeps_borrowing_the_original_bytes() {
+    let source = r#"
+func mid(s: &string) -> &string {
+    s.slice(1..4)
+}
+
+func main() -> i32 {
+    val a = "abcdefgh"
+    val m = mid(&a)
+    val n = m.slice(1..3)
+    if n == "cd" { return 0 }
+    return 1
+}
+"#;
+    run_expecting(source, 0);
+}

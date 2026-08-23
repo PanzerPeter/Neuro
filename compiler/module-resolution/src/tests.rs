@@ -7,8 +7,8 @@
 use std::path::{Path, PathBuf};
 
 use ast_types::{
-    EnumPatternPayload, Expr, FunctionDef, ImportDef, ImportName, ImportSelection, Item, MatchArm,
-    ModuleDef, Parameter, Pattern, Stmt, Type,
+    EnumDef, EnumPatternPayload, Expr, FunctionDef, ImportDef, ImportName, ImportSelection, Item,
+    MatchArm, ModuleDef, Parameter, Pattern, Stmt, Type,
 };
 use shared_types::{Identifier, Literal, Span};
 use tempfile::TempDir;
@@ -35,6 +35,18 @@ fn function(name: &str, exported: bool, body: Vec<Stmt>) -> Item {
         return_type: None,
         body,
         attributes: Vec::new(),
+        span: Span::new(0, 0),
+    })
+}
+
+/// A variant-less enum declaration. Import resolution only asks whether an enum by this
+/// name exists, so the fixture never needs its variants.
+fn enum_decl(name: &str, exported: bool) -> Item {
+    Item::Enum(EnumDef {
+        name: ident(name),
+        exported,
+        generics: Vec::new(),
+        variants: Vec::new(),
         span: Span::new(0, 0),
     })
 }
@@ -151,6 +163,10 @@ fn stub_parse(source: &str) -> Result<Vec<Item>, String> {
                 items: stub_parse(&stub_block(&mut lines, name)?)?,
                 span: Span::new(0, 0),
             }));
+        } else if let Some(name) = line.strip_prefix("export enum ") {
+            items.push(enum_decl(name, true));
+        } else if let Some(name) = line.strip_prefix("enum ") {
+            items.push(enum_decl(name, false));
         } else if let Some(name) = line.strip_prefix("export func ") {
             items.push(function(name, true, Vec::new()));
         } else if let Some(name) = line.strip_prefix("func ") {
@@ -548,7 +564,7 @@ fn an_imported_variant_resolves_in_expression_position() {
 
     // `Option` names no module — it is an enum the prelude supplies, invisible to this
     // pass — so the variant is qualified for the type checker rather than resolved here.
-    let program = resolve(&root).expect("resolution succeeds");
+    let program = resolve_with_prelude(&root).expect("resolution succeeds");
     assert_eq!(first_callee(&program).as_deref(), Some("Option::None"));
 }
 
@@ -561,7 +577,7 @@ fn an_imported_variant_resolves_in_pattern_position() {
         "import Option::{Some}\nfunc main\npat Some(v)\n",
     );
 
-    let program = resolve(&root).expect("resolution succeeds");
+    let program = resolve_with_prelude(&root).expect("resolution succeeds");
 
     match first_pattern(&program) {
         Some(Pattern::Enum {
@@ -583,7 +599,7 @@ fn a_payloadless_imported_variant_stops_reading_as_a_binding() {
         "import Option::{None}\nfunc main\npatbare None\n",
     );
 
-    let program = resolve(&root).expect("resolution succeeds");
+    let program = resolve_with_prelude(&root).expect("resolution succeeds");
 
     match first_pattern(&program) {
         Some(Pattern::Enum { variant, .. }) => assert_eq!(variant.name, "None"),
@@ -622,6 +638,43 @@ fn an_import_of_a_name_the_module_does_not_declare_is_rejected() {
 }
 
 #[test]
+fn a_variant_import_whose_head_names_no_enum_is_rejected() {
+    let dir = TempDir::new().expect("temp dir");
+    // The single-segment fallback exists for enums the prelude supplies. A head that
+    // names no module and no enum used to fall through it as a binding meaning nothing.
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import Nothing::{AtAll}\nfunc main\n",
+    );
+
+    match resolve_with_prelude(&root) {
+        Err(ModuleError::UnknownImportHead { head, .. }) => assert_eq!(head, "Nothing"),
+        other => panic!("expected UnknownImportHead, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn an_import_reaching_a_sibling_inline_block_names_the_block() {
+    let dir = TempDir::new().expect("temp dir");
+    // A block sees its own children and its file's siblings, not the file's other
+    // blocks — so this resolves no module, and must say so rather than inventing an enum.
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "module leaf\n  export func base\nend\nmodule facade\n  export import leaf::{base}\nend\nfunc main\n",
+    );
+
+    match resolve_with_prelude(&root) {
+        Err(ModuleError::UnreachableInlineModule { head, .. }) => assert_eq!(head, "leaf"),
+        other => panic!(
+            "expected UnreachableInlineModule, got {:?}",
+            other.map(|_| ())
+        ),
+    }
+}
+
+#[test]
 fn an_import_naming_no_module_is_rejected() {
     let dir = TempDir::new().expect("temp dir");
     let root = write(dir.path(), "main.nr", "import nosuch\nexport func main\n");
@@ -638,11 +691,11 @@ fn one_name_may_not_be_imported_twice() {
     let root = write(
         dir.path(),
         "main.nr",
-        "import Option::{Some}\nimport Maybe::{Some}\nfunc main\n",
+        "enum Maybe\nimport Option::{Some}\nimport Maybe::{Some}\nfunc main\n",
     );
 
     // Two imports binding `Some` would leave the name meaning whichever came last.
-    match resolve(&root) {
+    match resolve_with_prelude(&root) {
         Err(ModuleError::DuplicateImport { name, .. }) => assert_eq!(name, "Some"),
         other => panic!("expected DuplicateImport, got {:?}", other.map(|_| ())),
     }
@@ -939,7 +992,7 @@ fn an_explicit_import_of_a_prelude_name_wins_over_it() {
     let root = write(
         dir.path(),
         "main.nr",
-        "import Reading::{Some}\nexport func main\npat Some(v)\n",
+        "enum Reading\nimport Reading::{Some}\nexport func main\npat Some(v)\n",
     );
 
     let program = resolve_with_prelude(&root).expect("resolution succeeds");

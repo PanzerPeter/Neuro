@@ -155,6 +155,28 @@ pub enum ModuleError {
         what: String,
         from: String,
     },
+
+    #[error(
+        "`{path}` in `{from}` names neither a module nor an enum: there is no `{head}.nr`, \
+         no `{head}/mod.nr`, no inline `module {head}` in scope, and no `enum {head}` — so \
+         the import brings nothing into scope"
+    )]
+    UnknownImportHead {
+        path: String,
+        from: String,
+        head: String,
+    },
+
+    #[error(
+        "`{path}` in `{from}` cannot reach the inline module `{head}`: a block sees its own \
+         children and its file's sibling files, not the file's other blocks — move `{head}` \
+         into a `{head}.nr` beside it and import it as `./{head}`"
+    )]
+    UnreachableInlineModule {
+        path: String,
+        from: String,
+        head: String,
+    },
 }
 
 /// Expand `root` and every module it reaches into one item list.

@@ -64,6 +64,14 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-08-23: `val-else` takes an unqualified variant pattern (BUG-010). `starts_val_else` widened
+  from `val Name::` to also accept `val Name(`: a binding name after `val` is only ever followed by
+  `:`, `=`, or a newline, so a payload makes the reading unambiguous, and the prelude had made
+  `val Some(v) = ... else { }` the idiomatic spelling everywhere the marker did not reach.
+  Parse-only — `parse_pattern` already produced `Pattern::UnqualifiedEnum`, which module resolution
+  already rewrites. `val Name {` stays a struct destructure and a payload-less `val None = ...`
+  stays a binding, both for the reason a bare `None` pattern is ambiguous. A missing `else` now
+  reports the missing `else` rather than an unexpected `=`.
 - 2026-08-23: `@no_prelude`. `parse_item_list` checks for the marker *before* the attribute list,
   because an attribute list is claimed by the declaration that follows it and this one has none:
   `@` followed by the identifier `no_prelude` is consumed into `Item::NoPrelude(Span)`, a new
@@ -106,7 +114,8 @@ only (var/const/param/return/field/cast); alias as value constructor or path nam
   of it. No new precedence level is needed (Appendix B row 1). The type-alias rewrite walker gained
   the `Expr::Try` arm.
 - 2026-07-31: `val-else`. New `stmt_val_else.rs`: `parse_stmt`'s `Val` arm consults
-  `starts_val_else` (an `Identifier` followed by `ColonColon` after the keyword) before falling
+  `starts_val_else` (an `Identifier` followed by `ColonColon` or `LeftParen` after the keyword — see
+  the 2026-08-23 entry, which added the second marker) before falling
   through to `parse_var_decl`. That two-token marker is unambiguous — a binding name is followed by
   `:`, `=`, or a newline — and it is checked ahead of `starts_destructure_pattern`, so
   `val Point { x, y } = p` still desugars as a struct destructure while `val Shape::Circle { r } = s

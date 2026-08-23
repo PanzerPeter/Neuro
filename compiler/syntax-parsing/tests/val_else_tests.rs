@@ -158,3 +158,87 @@ fn rejects_a_val_else_without_an_else_branch() {
     );
     assert!(err.is_err(), "a `val-else` pattern requires an `else`");
 }
+
+#[test]
+fn parses_an_unqualified_variant_pattern() {
+    // `Name(` is the second `val-else` marker: a binding name is never followed by
+    // `(`, so the unqualified spelling the prelude makes idiomatic is unambiguous.
+    let stmt = only_val_else(
+        r#"
+        func test() {
+            val Some(v) = load() else { return 1 }
+        }
+    "#,
+    );
+
+    let Stmt::ValElse { pattern, .. } = stmt else {
+        panic!("expected a val-else");
+    };
+    let Pattern::UnqualifiedEnum {
+        variant, payload, ..
+    } = pattern
+    else {
+        panic!("expected an unqualified enum pattern");
+    };
+    assert_eq!(variant.name, "Some");
+    assert!(matches!(payload, EnumPatternPayload::Tuple(subs) if subs.len() == 1));
+}
+
+#[test]
+fn parses_an_unqualified_variant_pattern_with_an_else_binding() {
+    let stmt = only_val_else(
+        r#"
+        func test() {
+            val Ok(data) = parse(raw) else |err| { return err }
+        }
+    "#,
+    );
+
+    let Stmt::ValElse {
+        pattern,
+        else_binding,
+        ..
+    } = stmt
+    else {
+        panic!("expected a val-else");
+    };
+    assert!(matches!(
+        pattern,
+        Pattern::UnqualifiedEnum { ref variant, .. } if variant.name == "Ok"
+    ));
+    assert_eq!(else_binding.map(|b| b.name), Some("err".to_string()));
+}
+
+#[test]
+fn rejects_an_unqualified_val_else_without_an_else_branch() {
+    // Widening the marker to `Name(` means this now reaches the `val-else` parser,
+    // so the diagnostic must name the missing `else` rather than the `=`.
+    let err = parse(
+        r#"
+        func test() {
+            val Some(v) = load()
+        }
+    "#,
+    )
+    .expect_err("a `val-else` pattern requires an `else`");
+    let message = err.to_string();
+    assert!(
+        message.contains("else"),
+        "diagnostic should name the missing `else`, got: {message}"
+    );
+}
+
+#[test]
+fn a_payload_less_val_is_still_a_var_decl() {
+    // `val None = ...` stays a binding: without a payload it is indistinguishable
+    // from a name, exactly as a bare `None` pattern is.
+    let body = first_fn_body(
+        r#"
+        func test() {
+            val None = 1
+        }
+    "#,
+    );
+    assert_eq!(body.len(), 1);
+    assert!(matches!(body[0], Stmt::VarDecl { .. }));
+}
