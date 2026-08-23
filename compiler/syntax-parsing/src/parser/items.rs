@@ -2,8 +2,8 @@ use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
 use crate::ast::{
-    Attribute, ConstDef, GenericParam, GenericParamKind, Item, MethodDef, NewtypeDef, TraitMethod,
-    Type,
+    Attribute, ConstDef, GenericParam, GenericParamKind, Item, MethodDef, ModuleDef, NewtypeDef,
+    TraitMethod, Type,
 };
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
@@ -11,22 +11,54 @@ use crate::precedence::Precedence;
 use super::type_aliases::{expand_type_aliases, TypeAliasDecl};
 use super::Parser;
 
+/// Whether an item list runs to end of input or to the `}` of an inline `module` block.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Nesting {
+    File,
+    Block,
+}
+
 const ITEM_EXPECTED: &str =
-    "function, struct, enum, impl, const, type, newtype, or import definition";
+    "function, struct, enum, impl, const, type, newtype, module, or import definition";
 
 impl Parser {
-    /// Parse top-level items: function, struct, impl, const, or type-alias definitions.
+    /// Parse top-level items: function, struct, impl, const, type-alias, inline
+    /// `module` block, or import definitions.
     ///
     /// Type aliases are transparent and are resolved here: each declaration
     /// is collected, then every aliased type annotation in the remaining items is
     /// rewritten to its target type before the program is returned. No alias item
     /// reaches semantic analysis or codegen.
     pub(crate) fn parse_program(&mut self) -> ParseResult<Vec<Item>> {
-        let mut items = Vec::new();
         let mut alias_decls: Vec<TypeAliasDecl> = Vec::new();
+        let mut items = self.parse_item_list(&mut alias_decls, Nesting::File)?;
+
+        // Inject trait default methods before alias expansion so the copied bodies are
+        // alias-expanded along with the rest of each impl.
+        inject_trait_defaults(&mut items);
+        expand_type_aliases(&mut items, alias_decls)?;
+        Ok(items)
+    }
+
+    /// Parse items until the input runs out, or — inside an inline `module` block —
+    /// until the closing brace.
+    ///
+    /// Alias declarations are collected into the caller's list rather than expanded per
+    /// level: an alias and a trait default are both erased at parse time, so keeping them
+    /// file-scoped means one expansion covers every nesting depth and an alias declared
+    /// beside a `module` block still reads inside it.
+    fn parse_item_list(
+        &mut self,
+        alias_decls: &mut Vec<TypeAliasDecl>,
+        nesting: Nesting,
+    ) -> ParseResult<Vec<Item>> {
+        let mut items = Vec::new();
 
         self.skip_newlines();
         while !self.is_at_end() {
+            if nesting == Nesting::Block && self.check(&TokenKind::RightBrace) {
+                break;
+            }
             let attributes = self.parse_attributes()?;
             self.skip_newlines();
 
@@ -81,9 +113,12 @@ impl Parser {
                 let mut nt = self.parse_newtype_def()?;
                 nt.exported = export.is_some();
                 items.push(Item::Newtype(nt));
+            } else if self.check(&TokenKind::Module) {
+                reject_export(export, "an inline `module` block (its name is reached only from the file that declares it, so there is no outside to open it to)")?;
+                let module = self.parse_module_block(alias_decls)?;
+                items.push(Item::Module(module));
             } else if self.check(&TokenKind::Import) {
-                reject_export(export, "an `import` (re-exporting an imported name with `export import` is not supported yet)")?;
-                let import = self.parse_import()?;
+                let import = self.parse_import(export.is_some())?;
                 items.push(Item::Import(import));
             } else {
                 let token = self.peek().ok_or(ParseError::UnexpectedEof {
@@ -98,11 +133,29 @@ impl Parser {
             self.skip_newlines();
         }
 
-        // Inject trait default methods before alias expansion so the copied bodies are
-        // alias-expanded along with the rest of each impl.
-        inject_trait_defaults(&mut items);
-        expand_type_aliases(&mut items, alias_decls)?;
         Ok(items)
+    }
+
+    /// Parse one `module Name { ... }` block. The `module` keyword is the current token.
+    fn parse_module_block(
+        &mut self,
+        alias_decls: &mut Vec<TypeAliasDecl>,
+    ) -> ParseResult<ModuleDef> {
+        let start = self.consume(TokenKind::Module, "'module'")?;
+        self.skip_newlines();
+
+        let name = self.consume_identifier("module name after 'module'")?;
+        self.skip_newlines();
+        self.consume(TokenKind::LeftBrace, "'{' to open a module block")?;
+
+        let items = self.parse_item_list(alias_decls, Nesting::Block)?;
+
+        let close = self.consume(TokenKind::RightBrace, "'}' to close the module block")?;
+        Ok(ModuleDef {
+            name,
+            items,
+            span: start.span.merge(close.span),
+        })
     }
 
     /// Consume a leading `export` marker, yielding the span it was written at.
@@ -284,22 +337,45 @@ fn inject_trait_defaults(items: &mut [Item]) {
 
     // Map trait name -> its default (bodied) methods.
     let mut defaults: HashMap<String, Vec<TraitMethod>> = HashMap::new();
-    for item in items.iter() {
-        if let Item::Trait(def) = item {
-            let bodied: Vec<TraitMethod> = def
-                .methods
-                .iter()
-                .filter(|m| m.default_body.is_some())
-                .cloned()
-                .collect();
-            defaults.insert(def.name.name.clone(), bodied);
-        }
-    }
+    collect_trait_defaults(items, &mut defaults);
     if defaults.is_empty() {
         return;
     }
+    apply_trait_defaults(items, &defaults);
+}
 
+/// Gather every trait's bodied methods, inline `module` blocks included. Traits are erased
+/// at parse time, so a trait declared beside a block still supplies defaults inside it.
+fn collect_trait_defaults(
+    items: &[Item],
+    defaults: &mut std::collections::HashMap<String, Vec<TraitMethod>>,
+) {
+    for item in items.iter() {
+        match item {
+            Item::Trait(def) => {
+                let bodied: Vec<TraitMethod> = def
+                    .methods
+                    .iter()
+                    .filter(|m| m.default_body.is_some())
+                    .cloned()
+                    .collect();
+                defaults.insert(def.name.name.clone(), bodied);
+            }
+            Item::Module(def) => collect_trait_defaults(&def.items, defaults),
+            _ => {}
+        }
+    }
+}
+
+fn apply_trait_defaults(
+    items: &mut [Item],
+    defaults: &std::collections::HashMap<String, Vec<TraitMethod>>,
+) {
     for item in items.iter_mut() {
+        if let Item::Module(def) = item {
+            apply_trait_defaults(&mut def.items, defaults);
+            continue;
+        }
         let Item::Impl(imp) = item else { continue };
         let Some(trait_name) = &imp.trait_name else {
             continue;

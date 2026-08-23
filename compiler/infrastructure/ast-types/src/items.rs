@@ -344,6 +344,22 @@ pub struct ImportDef {
     /// The `::`-separated segments before any `{...}` list or `as` alias.
     pub path: Vec<Identifier>,
     pub selection: ImportSelection,
+    /// `true` for the `export import` re-export form: the names this declaration binds
+    /// are also reachable *through* the importing module, as `importer::name`.
+    pub exported: bool,
+    pub span: Span,
+}
+
+/// An inline `module Name { ... }` block.
+///
+/// A block is a module in every sense a file is one — its items are private unless
+/// written with `export`, and a qualified path reaches into it — so module resolution
+/// treats it as a module that happens to have no file of its own, and nothing about the
+/// block survives that pass.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModuleDef {
+    pub name: Identifier,
+    pub items: Vec<Item>,
     pub span: Span,
 }
 
@@ -358,4 +374,5 @@ pub enum Item {
     Const(ConstDef),
     Newtype(NewtypeDef),
     Import(ImportDef),
+    Module(ModuleDef),
 }

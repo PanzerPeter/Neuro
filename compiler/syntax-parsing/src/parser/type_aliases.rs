@@ -248,6 +248,13 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
         Item::Newtype(def) => rewrite_type(&mut def.inner, resolved),
         // An import names modules and items, never a type annotation.
         Item::Import(_) => {}
+        // Aliases stay file-scoped: they are expanded at parse time, so one declared
+        // beside a `module` block still reads inside it.
+        Item::Module(def) => {
+            for item in &mut def.items {
+                rewrite_item(item, resolved);
+            }
+        }
     }
 }
 

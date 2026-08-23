@@ -28,6 +28,12 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-08-23: Inline modules and re-exports. Added `ModuleDef { name, items, span }` and
+  `Item::Module(ModuleDef)` for an inline `module Name { ... }` block — a module with no file
+  of its own, which module-resolution lifts into a graph module of its own and erases, so no
+  pass after it sees the variant. Added `exported: bool` to `ImportDef` for the `export import`
+  re-export form; which of the bound names may actually be re-exported is a file-system
+  question and is settled during module resolution.
 - 2026-08-22: Visibility. Added `exported: bool` to `FunctionDef`, `StructDef`, `EnumDef`,
   `TraitDef`, `ConstDef`, `NewtypeDef`, and `FieldDef` — `false` is the private default, and
   the parser sets it from a leading `export`. An enum struct-variant's `FieldDef` is always

@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) underway with `Option` / `Result`, the standard collections, `val-else`, the `?` propagation operator, error-path outlining, multi-file compilation, and `import` landed — Alpha Development
+**Status**: Phase 1 (Core Language) in progress — sub-phases 1A–1F complete, 1G (error handling, modules & prelude) underway with `Option` / `Result`, the standard collections, `val-else`, the `?` propagation operator, error-path outlining, multi-file compilation, `import`, and inline modules with re-exports landed — Alpha Development
 
 ## Quick Links
 
@@ -26,7 +26,7 @@
 - [Control Flow](language-reference/control-flow.md) — if/else, while, loop, range-for, break/continue
 - [Operators](language-reference/operators.md) — Arithmetic, comparison, logical, bitwise, cast operators
 - [Structs](language-reference/structs.md) — User-defined types, methods, associated functions
-- [Modules](language-reference/modules.md) — Multi-file programs, `mod.nr` directories, qualified paths, `import`, `export` visibility
+- [Modules](language-reference/modules.md) — Multi-file programs, `mod.nr` directories, qualified paths, `import`, inline `module` blocks, `export import` re-exports, `export` visibility
 
 ### User Guides
 
@@ -233,10 +233,18 @@ Key design goals:
 - Item visibility is reported while modules resolve; field visibility needs the receiver's type and
   is reported by the type checker. Neither rule is visible in a single-file program — one file is
   one module
+- An inline **`module Name { ... }` block** is a module with no file of its own: same visibility
+  rule, reached by the same qualified path, and blocks nest. The file declaring a block is outside
+  it, so `export` is the only way in; a block has no file children, and it wins over a same-named
+  file beside it
+- **`export import`** re-exports: it binds names locally like any import *and* makes them reachable
+  through the importing module, so a facade offers a flatter API than its internals. A rename is
+  undone on the way through, and facades chain. Only an item can be re-exported — a module or an
+  enum variant is an error rather than a silent no-op
 - Modules still share one flat namespace, so qualification is checked but never required, and a
   name declared by two loaded modules is a reported collision rather than a silent winner — even
-  when both keep it private. Inline `module { }`, re-exports, and the implicit prelude import are
-  still ahead
+  when both keep it private, and a block buys a private surface rather than a private namespace.
+  The implicit prelude import is still ahead
 - See the [modules reference](language-reference/modules.md) for the resolution rules and
   diagnostics
 

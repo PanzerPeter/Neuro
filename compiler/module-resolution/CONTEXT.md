@@ -1,7 +1,7 @@
 # module-resolution
 
 ## Purpose
-Expand a root `.nr` file into the single item list its program is built from, loading every module a qualified path reaches into, enforcing what each module exports, and erasing the qualifier.
+Expand a root `.nr` file into the single item list its program is built from, loading every module a qualified path reaches into — file, directory, or inline `module { }` block — enforcing what each module exports, and erasing the qualifier.
 
 ## Entry Point
 - Type: Library function
@@ -32,6 +32,26 @@ Expand a root `.nr` file into the single item list its program is built from, lo
   `io.nr` beside `math.nr`; only a directory with a `mod.nr` opens a level. A directory
   named in a path but *missing* its `mod.nr` is an error rather than a silent miss —
   that is the one case where "no file" is certainly a mistake.
+- **An inline `module { }` block is a module with no file.** The loader lifts each block out
+  of its parent's items and registers it as an ordinary graph module, so the visibility rule,
+  the flat merge, the collision check, and the `ModuleId` stamp all reach it without a special
+  case, and blocks nest for free. Consequences that follow rather than being decided
+  separately: a block's items are private to the *block*, so the file declaring it is outside
+  it and needs `export` like anyone else; a block resolves a path against the containing
+  file's directory, so `import ./utils` reads the same written inside a block or beside it;
+  and a block holds no file children, so a path through one stops exactly where `math.nr`
+  does. A block wins over a same-named file, for the reason a locally declared type does:
+  adding a file must never silently re-point a path that already resolved. Two blocks in one
+  module may not share a name.
+- **`export import` is the one way a name reaches through a module it was not declared in.**
+  The importing module records where the declaration really lives, so `facade::Config` lands
+  on `internal`'s `Config` in a single step and any `as` rename is undone on the way — the
+  flat namespace holds the declaration's own name. Only an *item* can be re-exported: a
+  module and an enum variant are each reached through something else, so `export import` on
+  one is an error rather than a silent no-op. Re-exports settle to a fixpoint before the
+  import scopes are built, because a chain resolves one link per round and modules resolve in
+  id order; errors are held back until the tables stop growing, so an import that only becomes
+  resolvable in a later round is not reported on an earlier one.
 - **A locally declared type wins over a same-named file.** `Point::new` keeps meaning the
   associated function even when a `Point.nr` sits next door, so adding a file can never
   silently re-point an existing path.
@@ -71,7 +91,8 @@ Expand a root `.nr` file into the single item list its program is built from, lo
   table tells them apart — which is why pattern rewriting lives here rather than in the
   parser.
 - **The merge is flat, and collisions are reported.** Every module's items join one
-  namespace; qualifiers are verified against the owning module and then stripped, so
+  namespace — an inline block's items included, so a block does not buy a private namespace,
+  only a private *surface*; qualifiers are verified against the owning module and then stripped, so
   semantic analysis, HIR lowering, and both backends never learn that modules exist. The
   cost is that two modules cannot each declare `helper` — that is a hard error naming both
   files, not a silent winner. Per-module private namespaces need the `export` visibility
