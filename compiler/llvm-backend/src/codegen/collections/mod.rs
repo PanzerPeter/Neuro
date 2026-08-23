@@ -184,7 +184,7 @@ impl<'ctx> CodegenContext<'ctx> {
         object: &HirExpr,
         obj_ty: &Type,
     ) -> CodegenResult<PointerValue<'ctx>> {
-        if matches!(obj_ty, Type::Reference(_)) {
+        if matches!(obj_ty, Type::Reference { .. }) {
             return Ok(self.codegen_expr(object)?.into_pointer_value());
         }
         if let neuro_hir::HirExprKind::Variable(name) = &object.kind {

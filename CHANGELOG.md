@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.75.2] - 2026-08-23
+
+### Fixed
+- `codegen`: a `&string` returned from a function no longer points into the dead
+  callee frame. `&string` is now the `{ ptr, i64 }` fat pointer **by value** — the
+  representation the string ABI already documented — rather than a pointer to one.
+  A borrow of a live binding was always fine, but `s.slice(a..b)` computes a fat
+  pointer with no home, so it was spilled to a function-local stack slot whose
+  address was handed back; the value survived only until the next call reused that
+  region, making the result pure frame-layout luck. By value there is no slot: a
+  slice is returned like any other aggregate and `.len()` is an `extractvalue`.
+  `&mut string` keeps the referent's address, since a store through it has to reach
+  the caller's binding, so the backend's reference type now carries its mutability.
+  This also removes the last stack slot allocated outside the entry block, so a
+  `.slice()` inside a loop stops growing the stack.
+- `parser`: `val Some(v) = f() else { ... }` parses. The `val-else` marker was
+  `val Name::`, so only the qualified spelling reached it, while the implicit
+  prelude had made the unqualified variant idiomatic in value position, in `match`
+  arms, and in every other pattern. `val Name(` is now a second marker — a binding
+  name is never followed by `(` — and a `val-else` missing its `else` reports the
+  missing `else` instead of an unexpected `=`. `val Name { ... }` remains a struct
+  destructure and a payload-less `val None = ...` remains a binding, both because
+  they cannot be told from the alternative without an import table.
+- `infra`: an `import` whose path names no module is no longer read as an enum
+  regardless of whether one exists. The single-segment fallback is what lets
+  `import Option::{Some}` resolve before the prelude is prepended; it now requires
+  the head to be a declared `enum` or a prelude enum, so `import Nothing::{AtAll}`
+  is reported rather than silently bound to nothing. A path naming a sibling inline
+  `module { }` block — which a block cannot see — says exactly that, instead of
+  claiming the imported name is an enum variant. Under `export import` that claim
+  was doubly wrong: it named a `const` or a `func` as a variant, and advised
+  dropping the `export`, which only exchanged the error for the silence.
+
 ## [1.75.1] - 2026-08-23
 
 ### Fixed

@@ -12,13 +12,23 @@ use super::Parser;
 impl Parser {
     /// Whether the statement starting at the current `val` keyword is a `val-else`.
     ///
-    /// `Name::` after `val` cannot begin an ordinary declaration — a binding name is
-    /// followed by `:`, `=`, or a newline — so the qualified head of a variant
-    /// pattern is an unambiguous marker and needs no further lookahead.
+    /// Two markers, both unambiguous without further lookahead, because a binding
+    /// name after `val` is only ever followed by `:`, `=`, or a newline:
+    ///
+    /// - `Name::` — the qualified head of a variant pattern.
+    /// - `Name(`  — the unqualified head, which an import (the prelude included)
+    ///   brings into scope. Its payload is what settles the reading.
+    ///
+    /// `Name {` is deliberately absent: it stays a struct destructure. So does a
+    /// payload-less `val None = ...`, which cannot be told from a binding here for
+    /// the same reason a bare `None` pattern cannot.
     pub(super) fn starts_val_else(&self) -> bool {
         let (first, second) = self.peek_two_after_keyword();
         matches!(first, Some(TokenKind::Identifier(_)))
-            && matches!(second, Some(TokenKind::ColonColon))
+            && matches!(
+                second,
+                Some(TokenKind::ColonColon) | Some(TokenKind::LeftParen)
+            )
     }
 
     /// Parse `PATTERN = value else |binding|? { ... }`. The `val` keyword is already

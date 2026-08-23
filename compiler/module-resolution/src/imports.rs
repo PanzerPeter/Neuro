@@ -149,7 +149,7 @@ pub(crate) fn resolve_imports(
     // resolved, and modules resolve in id order — so a chain of re-exports settles one link
     // per round. Errors are held back until the tables stop growing: an import that fails
     // this round may be exactly the one the next round makes resolvable.
-    while install_reexports(graph) {}
+    while install_reexports(graph, prelude) {}
     build_scopes(graph, Tolerance::Report, prelude)
 }
 
@@ -191,7 +191,7 @@ fn build_scopes(
     for id in 0..graph.modules.len() {
         let mut scope = ImportScope::default();
         for import in &graph.modules[id].imports {
-            let outcome = resolve_one(graph, id, import, &mut scope);
+            let outcome = resolve_one(graph, id, import, prelude, &mut scope);
             if tolerance == Tolerance::Report {
                 outcome?;
             }
@@ -203,9 +203,11 @@ fn build_scopes(
 }
 
 /// Copy one round of re-export tables onto the graph, reporting whether anything was new.
-fn install_reexports(graph: &mut ModuleGraph) -> bool {
-    // A re-export names an item, never a prelude variant, so this round needs no prelude.
-    let Ok(scopes) = build_scopes(graph, Tolerance::Skip, &[]) else {
+fn install_reexports(graph: &mut ModuleGraph, prelude: &[PreludeVariant]) -> bool {
+    // A re-export names an item, never a prelude variant, so nothing here reads the
+    // seeded bindings — but `resolve_one` consults the prelude to decide whether an
+    // unresolvable head could be an enum, and must reach the same verdict either round.
+    let Ok(scopes) = build_scopes(graph, Tolerance::Skip, prelude) else {
         return false;
     };
     let mut changed = false;
@@ -221,6 +223,7 @@ fn resolve_one(
     graph: &ModuleGraph,
     from: usize,
     import: &ImportDef,
+    prelude: &[PreludeVariant],
     scope: &mut ImportScope,
 ) -> Result<(), ModuleError> {
     let segments: Vec<&str> = import.path.iter().map(|s| s.name.as_str()).collect();
@@ -239,9 +242,10 @@ fn resolve_one(
     }
 
     // No segment named a module. A single segment can still be an enum whose variants are
-    // being imported — including one from the prelude, which is prepended after this pass
-    // and is therefore invisible here, so the enum itself is left for the type checker.
-    if consumed == 0 && segments.len() == 1 {
+    // being imported — but only if an enum by that name exists: a head that names neither
+    // a module nor an enum used to be read as an enum regardless, which turned a typo, and
+    // any path to an out-of-scope module, into a binding that quietly meant nothing.
+    if consumed == 0 && segments.len() == 1 && names_an_enum(graph, prelude, segments[0]) {
         if let ImportSelection::List(names) = &import.selection {
             for entry in names {
                 let bound = entry.alias.as_ref().unwrap_or(&entry.name);
@@ -257,11 +261,51 @@ fn resolve_one(
         }
     }
 
-    Err(ModuleError::UnknownModule {
-        path: segments.join("::"),
+    Err(unresolved_head(graph, &segments, import, owner))
+}
+
+/// Could `head` name an enum reachable from anywhere in the program?
+///
+/// The prelude is checked separately from the graph because it is prepended *after* this
+/// pass: `Option` is declared in no loaded module yet, so only the caller's prelude list
+/// accounts for it.
+fn names_an_enum(graph: &ModuleGraph, prelude: &[PreludeVariant], head: &str) -> bool {
+    graph.declares_enum_anywhere(head) || prelude.iter().any(|entry| entry.owner == head)
+}
+
+/// The error for an import path that reached no module.
+///
+/// Three readings, narrowest first: a module by that name exists but is out of scope; the
+/// import was shaped like a variant list, so the enum reading was tried and also failed;
+/// or the head simply named no module.
+fn unresolved_head(
+    graph: &ModuleGraph,
+    segments: &[&str],
+    import: &ImportDef,
+    owner: String,
+) -> ModuleError {
+    let head = segments[0].to_string();
+    let path = segments.join("::");
+    if graph.has_inline_block_named(&head) {
+        return ModuleError::UnreachableInlineModule {
+            path,
+            from: owner,
+            head,
+        };
+    }
+    let variant_list = segments.len() == 1 && matches!(import.selection, ImportSelection::List(_));
+    if variant_list {
+        return ModuleError::UnknownImportHead {
+            path,
+            from: owner,
+            head,
+        };
+    }
+    ModuleError::UnknownModule {
+        path,
         from: owner,
-        head: segments[0].to_string(),
-    })
+        head,
+    }
 }
 
 /// Bind the selection of an import whose whole path resolved to `module`.

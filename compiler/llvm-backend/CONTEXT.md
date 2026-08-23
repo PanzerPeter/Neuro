@@ -50,12 +50,25 @@ NUL-terminated. 1C heap strings share this exact ABI (indistinguishable to consu
 Passed/returned by value. On x86-64 SysV this fits two registers, so no sret indirection.
 The semantic `Type::String` is unchanged — the fat-pointer layout is a backend-only detail.
 
+### `&string`
+An **immutable** `&string` is the `{ ptr, i64 }` fat pointer itself, held by value — it is not a
+pointer to one. `string` is immutable, so the referent's address carries nothing the fat pointer
+does not, and demanding one forces every computed slice (`s.slice(a..b)`, which has no home) into a
+stack slot whose address then outlives the frame it was taken in. By value, a slice is returned like
+any other aggregate, `.len()` is an `extractvalue`, and no slot exists to dangle.
+
+`&mut string` is the exception: a store through it has to reach the referent, so it stays the
+referent's address (an opaque `ptr`), exactly like every other `&mut T`. `&&string` is likewise a
+pointer — the outer reference borrows a reference, not a string. The backend `Type::Reference`
+therefore carries `mutable`, which is the only thing that distinguishes the two lowerings;
+`TypeMapper::map_type` matches one reference level, never `referent()`.
+
 `==`/`!=` on strings lower to a length check + libc `memcmp` (universally available). The length
-check uses `select` to pass `n=0` to `memcmp` when lengths differ (safe, no extra blocks). A
-`&string` slice is just a pointer to the fat pointer, so `codegen_binary` handles string
-`Equal`/`NotEqual` *before* the numeric coercion: each operand is run through `load_string_fatptr`
-(load through the pointer for a borrow, pass through an owned struct value) and then `codegen_string_eq`.
-Detection keys off `left_ty.referent() == String`, covering owned, borrowed, and mixed operands.
+check uses `select` to pass `n=0` to `memcmp` when lengths differ (safe, no extra blocks).
+`codegen_binary` handles string `Equal`/`NotEqual` *before* the numeric coercion: each operand is run
+through `load_string_fatptr` (an owned `string` and a `&string` are already the struct; only a
+`&mut string` is loaded through) and then `codegen_string_eq`. Detection keys off
+`left_ty.referent() == String`, covering owned, borrowed, and mixed operands.
 
 `+` on strings is concatenation. `codegen_binary` routes `Add` with a `String` referent to
 `codegen_string_concat` *before* the numeric coercion: both operands are normalized with
@@ -115,11 +128,10 @@ result type into `codegen_builtin_method` (`expressions/methods.rs`).
   `codegen_string_slice` (`expressions/methods.rs`). Computes a `(ptr+start, end-start)` fat pointer
   (`end` = `b+1` for `..=`); runtime bounds (`0 <= start <= end <= len`) and UTF-8 codepoint-boundary
   checks at both endpoints route through `codegen_guard_or_panic` (`panic.rs`) — abort, no unwinding,
-  in every build. Result is a `&string`: the computed fat pointer is spilled to an `alloca` and its
-  address returned, matching the `&place` opaque-pointer ABI. That slot is function-local, so a
-  slice **returned** from a function points into a frame that is gone (BUG-008); consuming a slice
-  where it is produced is correct. The `Expr::Range` argument is consumed
-  here; reaching it through general `codegen_expr` is an internal error.
+  in every build. Result is a `&string`, which is the computed fat pointer itself — returned by
+  value, with no stack slot involved, so a slice returned across a call boundary stays valid. The
+  `Expr::Range` argument is consumed here; reaching it through general `codegen_expr` is an internal
+  error.
 - `struct.clone()` → handled in the struct method-call arm (not `resolve_builtin_method`, which is
   keyed by `Type`): when receiver is a struct, field is `clone`, and no `StructName__clone` exists,
   it passes `BuiltinMethod::StructClone`. Semantic analysis already verified the `Clone` derive.
@@ -314,6 +326,15 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-08-23: `&string` is passed by value (BUG-008). Backend `Type::Reference` became
+  `{ inner, mutable }` (`types.rs`), and `map_type` lowers an **immutable** `&string` to the
+  `{ ptr, i64 }` fat pointer instead of a `ptr` to one; `&mut string`, `&&string`, and every other
+  reference are unchanged. `codegen_string_slice` drops its `slice.slot` alloca and returns the
+  computed fat pointer, which is what cures the dangling returned slice — and removes the last
+  non-entry-block alloca, so a slice in a loop no longer grows the stack. `codegen_reference` reads
+  the place instead of taking its address when the borrow's own type is `&string`; `codegen_deref`
+  is the identity on one. `mangle()` still ignores `mutable`: it distinguishes no two
+  monomorphizations today, and honouring it would rename every existing symbol.
 - 2026-08-13: Error-path outlining. New `codegen/outlining.rs`; `panic.rs` and every
   `codegen_guard_or_panic` caller now leave one `call @neuro.cold.panic.N` at the failure site
   instead of the inline diagnostic sequence, and guard branches carry `!prof` weights. `abort` gains
@@ -335,9 +356,9 @@ emission layer in all paths.
   `-O` level, since `mem2reg` only promotes entry-block allocas. The initializing store stays where
   it was; sharing one slot across iterations is sound because each is written before it is read, and
   a fresh frame per call keeps recursion correct. Parameter/`self` allocas in `functions.rs` are
-  already in the entry block by construction and stay as they are. The single exception is
-  `slice.slot` in `expressions/methods.rs`, whose address escapes to the caller (BUG-008); the
-  comment there records why it is left positional.
+  already in the entry block by construction and stay as they are. The one exception at the time was
+  `slice.slot` in `expressions/methods.rs`, left positional because its address escaped to the caller
+  (BUG-008); the 2026-08-23 `&string` ABI change deleted that slot outright, so no exception remains.
 - 2026-07-31: A nested tail `if` yielded garbage. Same shape as BUG-005, one level down:
   `codegen_body` recognised a trailing `HirStmt::If` as the implicit return, but nothing recognised
   one nested inside another block, so its branches' values were discarded. hir-lowering now promotes

@@ -331,7 +331,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         // A borrow yields the array's address directly; an owned identifier uses its
         // alloca; any other owned array value is stored into a temporary first.
-        if matches!(obj_ty, Type::Reference(_)) {
+        if matches!(obj_ty, Type::Reference { .. }) {
             let ptr = self.codegen_expr(object)?.into_pointer_value();
             return Ok((ptr, element_ty, size));
         }

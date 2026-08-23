@@ -49,6 +49,9 @@ pub(crate) struct Module {
     /// same-named file, so `Point::new` keeps meaning the associated function even when a
     /// `Point.nr` happens to sit next door.
     declared_types: HashSet<String>,
+    /// The enum subset of `declared_types`. An import whose path resolves to no module is
+    /// only legitimately an enum's variant list, so settling that needs enums alone.
+    declared_enums: HashSet<String>,
     /// Whether the file this module came from opted out of the implicit prelude. An inline
     /// block inherits its file's answer: `@no_prelude` marks a file, and a block is part of
     /// one.
@@ -286,6 +289,7 @@ impl ModuleGraph {
         let mut declared = HashSet::new();
         let mut exported = HashSet::new();
         let mut declared_types = HashSet::new();
+        let mut declared_enums = HashSet::new();
         for item in &items {
             if let Some(name) = item_name(item) {
                 declared.insert(name.to_string());
@@ -295,6 +299,9 @@ impl ModuleGraph {
             }
             if let Some(name) = type_name(item) {
                 declared_types.insert(name.to_string());
+            }
+            if let Item::Enum(def) = item {
+                declared_enums.insert(def.name.name.clone());
             }
         }
 
@@ -312,6 +319,7 @@ impl ModuleGraph {
             reexports: HashMap::new(),
             exported,
             declared_types,
+            declared_enums,
             no_prelude,
         });
 
@@ -397,6 +405,28 @@ impl ModuleGraph {
                 .contains(&target.item),
             None => false,
         }
+    }
+
+    /// Does any module in the graph declare an enum called `name`?
+    ///
+    /// Graph-wide rather than per-module because items share one flat namespace once
+    /// resolution finishes, so `import Shape::{Circle}` is legitimate wherever `Shape`
+    /// was declared. The prelude's enums are not here — they are prepended after this
+    /// pass, so the caller adds them from the prelude list it already holds.
+    pub(crate) fn declares_enum_anywhere(&self, name: &str) -> bool {
+        self.modules
+            .iter()
+            .any(|module| module.declared_enums.contains(name))
+    }
+
+    /// Does any module in the graph hold an inline `module {name} { ... }` block?
+    ///
+    /// Used only to explain an import that resolved nothing: a block is invisible to its
+    /// parent's *other* blocks, which is the one way a real module can fail to be found.
+    pub(crate) fn has_inline_block_named(&self, name: &str) -> bool {
+        self.modules
+            .iter()
+            .any(|module| module.inline_children.contains_key(name))
     }
 
     /// Is `name` reachable from outside module `id`?

@@ -163,12 +163,28 @@ impl<'ctx> TypeMapper<'ctx> {
             // A reference to a trait object is a fat pointer `{ data ptr, vtable ptr }`
             // `dyn Trait` is unsized, so the reference must additionally carry
             // the method table that selects the concrete implementation at runtime.
-            Type::Reference(inner) if matches!(**inner, Type::DynObject(_)) => {
+            Type::Reference { inner, .. } if matches!(**inner, Type::DynObject(_)) => {
                 Ok(self.dyn_ref_type().into())
             }
-            // An immutable borrow `&T` is an opaque pointer to the referent's storage.
-            // LLVM 20 pointers are untyped, so every reference maps to the same `ptr`.
-            Type::Reference(_) => Ok(self
+            // An immutable borrow of a string is the `{ ptr, i64 }` fat pointer itself,
+            // held by value — the string ABI, not a pointer to it.
+            //
+            // `string` is immutable, so the referent's address carries no information the
+            // fat pointer does not, and requiring one forces every computed slice
+            // (`s.slice(a..b)`, which has no home) into a stack slot whose address then
+            // outlives the frame it was taken in. By value, a slice is returned like any
+            // other aggregate and `.len()` is an `extractvalue`.
+            //
+            // `&mut string` is excluded: a store through it has to reach the referent, so
+            // it stays the referent's address. `&&string` is excluded for the same reason
+            // this arm matches one level only — the outer reference borrows a reference.
+            Type::Reference {
+                inner,
+                mutable: false,
+            } if matches!(**inner, Type::String) => self.map_type_at_depth(inner, depth),
+            // Every other borrow `&T` / `&mut T` is an opaque pointer to the referent's
+            // storage. LLVM 20 pointers are untyped, so they all map to the same `ptr`.
+            Type::Reference { .. } => Ok(self
                 .context
                 .ptr_type(inkwell::AddressSpace::default())
                 .into()),

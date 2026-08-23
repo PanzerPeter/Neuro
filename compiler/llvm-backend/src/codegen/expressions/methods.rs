@@ -103,8 +103,8 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Computes a `(base + start, end - start)` fat pointer into the receiver's UTF-8
     /// data — zero copy, since strings are immutable. Both bounds and the two endpoint
     /// UTF-8 codepoint boundaries are validated at runtime in every build; a violation
-    /// routes through the panic runtime (abort, no unwinding). The result `&string`
-    /// lowers to a pointer to the computed fat pointer, matching the `&place` ABI.
+    /// routes through the panic runtime (abort, no unwinding). The result `&string` is the
+    /// computed fat pointer itself, so it is returned by value like any other aggregate.
     fn codegen_string_slice(
         &mut self,
         receiver: &HirExpr,
@@ -209,25 +209,9 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?
             .into_struct_value();
 
-        // `&string` is an opaque pointer to a fat pointer (the `&place` ABI), so spill the
-        // computed slice to a stack slot and yield its address.
-        //
-        // Deliberately NOT an `entry_alloca`, unlike every other slot in this backend.
-        // This slot's address escapes: `func head(s: &string) -> &string { s.slice(0..2) }`
-        // hands the caller a pointer into a frame that is already gone, so the value
-        // survives only until the next call reuses that stack region. Moving the slot to
-        // the entry block does not create or cure that defect, but it does change the
-        // frame layout enough to turn it from latent into observable. The real fix is to
-        // give `&string` the by-value `{ ptr, i64 }` representation the ABI documents, at
-        // which point this slot disappears entirely; until then it stays put.
-        let slot = self
-            .builder
-            .build_alloca(fat_ty, "slice.slot")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_store(slot, fat_val)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        Ok(slot.into())
+        // `&string` is the `{ ptr, i64 }` fat pointer by value, so the computed slice is
+        // the result — no stack slot, and nothing whose address could outlive this frame.
+        Ok(fat_val.into())
     }
 
     /// Lower a slice bound expression to an `i64` index, sign-extending or truncating a
@@ -315,9 +299,10 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))
     }
 
-    /// Lower a string receiver to its `{ ptr, len }` fat-pointer value, auto-dereferencing
-    /// an immutable borrow `&string`: a borrowed receiver lowers to a pointer to the
-    /// fat pointer, so the struct is loaded; an owned receiver is already the struct value.
+    /// Lower a string receiver to its `{ ptr, len }` fat-pointer value.
+    ///
+    /// An owned `string` and an immutable `&string` are both already the struct. A `&mut
+    /// string` receiver is the referent's address, so it is loaded through.
     fn string_receiver_struct(&mut self, receiver: &HirExpr) -> CodegenResult<StructValue<'ctx>> {
         let recv_val = self.codegen_expr(receiver)?;
         match recv_val {

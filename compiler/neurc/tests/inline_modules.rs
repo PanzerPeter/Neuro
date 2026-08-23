@@ -199,3 +199,85 @@ fn export_is_rejected_on_a_block() {
         .expect_err("expected a parse error");
     assert!(error.contains("`export` cannot be applied to"), "{}", error);
 }
+
+#[test]
+fn a_sibling_block_in_an_import_path_is_reported_as_an_invisible_module() {
+    // A block sees its own children and the file's siblings, not its parent's other
+    // blocks. The path therefore resolves no module — but it must not be silently
+    // re-read as an enum whose variants are being imported.
+    let error = run_single(
+        "module leaf   { export const BASE: i32 = 8 }\n\
+         module facade { export import leaf::{BASE} }\n\
+         func main() -> i32 { facade::BASE }\n",
+    )
+    .expect_err("expected a module error");
+    assert!(
+        !error.contains("enum variant"),
+        "`BASE` is a const, not a variant; got: {}",
+        error
+    );
+    assert!(
+        error.contains("inline module"),
+        "diagnostic should name the invisible block; got: {}",
+        error
+    );
+}
+
+#[test]
+fn a_plain_import_of_a_sibling_block_is_reported_the_same_way() {
+    // Dropping the `export` must not make the error go away: the plain form was
+    // silently accepted as a variant binding of an enum that does not exist.
+    let error = run_single(
+        "module leaf   { export const BASE: i32 = 8 }\n\
+         module facade { import leaf::{BASE}\n export func get() -> i32 { BASE } }\n\
+         func main() -> i32 { facade::get() }\n",
+    )
+    .expect_err("expected a module error");
+    assert!(
+        error.contains("inline module"),
+        "diagnostic should name the invisible block; got: {}",
+        error
+    );
+}
+
+#[test]
+fn an_import_whose_head_names_nothing_is_reported() {
+    // The single-segment fallback exists for enums — `import Option::{Some}`, whose
+    // enum the prelude supplies later. A head that names no module and no enum
+    // anywhere must not slip through it unnoticed.
+    let error = run_single("import Nothing::{AtAll}\nfunc main() -> i32 { 0 }\n")
+        .expect_err("expected a module error");
+    assert!(
+        error.contains("Nothing"),
+        "diagnostic should name the unresolvable head; got: {}",
+        error
+    );
+}
+
+#[test]
+fn an_explicit_import_of_a_prelude_enum_still_resolves() {
+    // The reason the fallback exists: the prelude is prepended after import
+    // resolution, so `Option` names no module and no *declared* enum at this point.
+    let exit = run_single(
+        "import Option::{Some as Just}\n\
+         func main() -> i32 {\n\
+         \x20   val v = Just(4)\n\
+         \x20   match v { Option::Some(n) => n, Option::None => 0 }\n\
+         }\n",
+    )
+    .expect("compile/run failed");
+    assert_eq!(exit, 4);
+}
+
+#[test]
+fn an_import_of_a_locally_declared_enum_still_resolves() {
+    let exit = run_single(
+        "enum Color { Red, Green }\n\
+         import Color::{Red}\n\
+         func main() -> i32 {\n\
+         \x20   match Red { Color::Red => 5, Color::Green => 0 }\n\
+         }\n",
+    )
+    .expect("compile/run failed");
+    assert_eq!(exit, 5);
+}

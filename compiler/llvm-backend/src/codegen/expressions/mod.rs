@@ -114,8 +114,11 @@ impl<'ctx> CodegenContext<'ctx> {
             // Borrow `&place` / `&mut place`: the value of the borrow is
             // the storage pointer of the place. Every local/parameter is an alloca, so
             // its address is exactly the pointer already held in `variables`. Mutability
-            // is a compile-time-only distinction — both lower to the same pointer.
-            HirExprKind::Reference { operand, .. } => self.codegen_reference(operand),
+            // is a compile-time-only distinction for every referent but `string`, whose
+            // immutable borrow is the fat pointer by value (see `TypeMapper::map_type`).
+            HirExprKind::Reference { operand, .. } => {
+                self.codegen_reference(operand, &Type::from_hir(&expr.ty))
+            }
             // Unsizing coercion `&T` → `&dyn Trait`: build the fat pointer that
             // pairs the concrete reference with that type's vtable for the trait.
             HirExprKind::DynCoerce { value } => {
@@ -299,6 +302,12 @@ impl<'ctx> CodegenContext<'ctx> {
         referent_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let ptr_val = self.codegen_expr(operand)?;
+        // A `&string` is already the referent's value, so there is nothing to load
+        // through. `*s` on one is the identity. Keyed on the lowered value rather than
+        // the operand's type so an auto-deref that reached here by another route agrees.
+        if matches!(referent_ty, Type::String) && !ptr_val.is_pointer_value() {
+            return Ok(ptr_val);
+        }
         let ptr = ptr_val.into_pointer_value();
         let llvm_ty = self.get_any_llvm_type(referent_ty)?;
         self.builder.build_load(llvm_ty, ptr, "deref").map_err(|e| {
@@ -306,9 +315,27 @@ impl<'ctx> CodegenContext<'ctx> {
         })
     }
 
-    /// Lower an immutable borrow `&place` to the storage pointer of the place.
+    /// Lower a borrow `&place` / `&mut place` to the storage pointer of the place.
     /// Semantic analysis guarantees the operand is a live binding (identifier).
-    fn codegen_reference(&self, operand: &HirExpr) -> CodegenResult<BasicValueEnum<'ctx>> {
+    ///
+    /// `&string` is the exception: it is the fat pointer by value, so the borrow reads
+    /// the place rather than taking its address. `borrow_ty` is the borrow's own type,
+    /// which is what settles that — the operand's type cannot, since `&s` and `&mut s`
+    /// name the same place.
+    fn codegen_reference(
+        &mut self,
+        operand: &HirExpr,
+        borrow_ty: &Type,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        if matches!(
+            borrow_ty,
+            Type::Reference {
+                inner,
+                mutable: false,
+            } if matches!(**inner, Type::String)
+        ) {
+            return self.codegen_expr(operand);
+        }
         match &operand.kind {
             HirExprKind::Variable(name) => {
                 let ptr = self

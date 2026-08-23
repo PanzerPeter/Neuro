@@ -93,13 +93,20 @@ Expand a root `.nr` file into the single item list its program is built from, lo
   unrenamed item import is an identity binding: the name already reaches. What the import
   buys is the module load, the validation that the name exists where it was taken from, and
   the renaming and variant forms, none of which the flat namespace gives for free.
-- **A variant import is what is left when nothing named a module.** `import Option::{Some}`
-  cannot be verified here: `Option` comes from the prelude, which the driver prepends *after*
-  this pass — the same reason the prelude's own bindings arrive as an argument rather than being
-  read off the program. A single-segment path that names no module is therefore read as an enum and its
-  listed names as variants, left for the type checker to reject if the enum is bogus. A
-  multi-segment head that names no module can only have been meant as a module path and is
-  an error.
+- **A variant import is what is left when nothing named a module — and only if an enum by that
+  name exists.** `import Option::{Some}` cannot be verified against the loaded modules: `Option`
+  comes from the prelude, which the driver prepends *after* this pass — the same reason the
+  prelude's own bindings arrive as an argument rather than being read off the program. So a
+  single-segment path that names no module is read as an enum and its listed names as variants,
+  but `resolve_one` first asks `names_an_enum`: the head must be declared as an `enum` somewhere in
+  the graph (the namespace is flat, so anywhere counts) or own a variant in the prelude list.
+  Otherwise it is `UnknownImportHead` — the fallback used to swallow a typo, and any path to a
+  module that is out of scope, as a binding that quietly meant nothing. A multi-segment head that
+  names no module can only have been meant as a module path and is an error.
+- **A path that names an invisible block says so.** An inline block sees its own children and its
+  file's sibling files, never the file's *other* blocks, so `import leaf::{X}` from a sibling block
+  resolves no module. `unresolved_head` checks the graph for an inline block of that name and reports
+  `UnreachableInlineModule`, which names the real obstacle instead of guessing at an enum.
 - **A bare `None` is a binding until an import says otherwise.** `Some(n)` carries a payload
   and parses as `Pattern::UnqualifiedEnum`, so it is unambiguous and an error when no import
   accounts for it. `None` is written exactly like a catch-all binding, so only the import

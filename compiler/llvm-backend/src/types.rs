@@ -32,10 +32,20 @@ pub(crate) enum Type {
     /// `{ i32 tag, [W x i64] payload }`; `W` is resolved from the enum-word table
     /// the `TypeMapper` holds, so the type need not carry the layout itself.
     Enum(std::string::String),
-    /// Immutable borrow `&T`. Lowered to an opaque LLVM pointer; the
-    /// referent type drives auto-deref of method/field receivers. The one exception
-    /// is a reference to a [`Type::DynObject`], which is a two-word fat pointer.
-    Reference(Box<Type>),
+    /// Borrow `&T` / `&mut T`. Lowered to an opaque LLVM pointer to the referent's
+    /// storage; the referent type drives auto-deref of method/field receivers.
+    ///
+    /// `mutable` is carried because it changes the lowering, not just the checking:
+    /// `&mut T` must be the referent's address so a store reaches it, while a `&string`
+    /// is lowered to the `{ ptr, i64 }` fat pointer *by value* — the referent is
+    /// immutable, so its address buys nothing and outlives nothing.
+    ///
+    /// The other exception is a reference to a [`Type::DynObject`], which is a
+    /// two-word `{ data, vtable }` fat pointer whether or not it is mutable.
+    Reference {
+        inner: Box<Type>,
+        mutable: bool,
+    },
     /// A dynamic-dispatch trait object `dyn Trait`, identified by trait name.
     /// Unsized on its own: it is lowered only as the referent of a [`Type::Reference`],
     /// which becomes a `{ data pointer, vtable pointer }` fat pointer.
@@ -112,7 +122,10 @@ impl Type {
             // so codegen never needs to know a newtype exists.
             HirType::Newtype { inner, .. } => Type::from_hir(inner),
             HirType::DynObject(name) => Type::DynObject(name.clone()),
-            HirType::Reference { inner, .. } => Type::Reference(Box::new(Type::from_hir(inner))),
+            HirType::Reference { inner, mutable } => Type::Reference {
+                inner: Box::new(Type::from_hir(inner)),
+                mutable: *mutable,
+            },
             HirType::Array { element, size } => Type::Array {
                 element: Box::new(Type::from_hir(element)),
                 size: *size,
@@ -150,7 +163,9 @@ impl Type {
             Type::String => "string".to_string(),
             Type::Void => "void".to_string(),
             Type::Struct(name) | Type::Enum(name) | Type::DynObject(name) => name.clone(),
-            Type::Reference(inner) => format!("ref{}", inner.mangle()),
+            // Mutability is deliberately absent: it distinguishes no two monomorphizations
+            // today, and adding it would rename every existing mangled symbol.
+            Type::Reference { inner, .. } => format!("ref{}", inner.mangle()),
             Type::Array { element, size } => format!("arr{}x{}", size, element.mangle()),
             Type::Tuple(elements) => {
                 let parts: Vec<String> = elements.iter().map(Type::mangle).collect();
@@ -168,7 +183,7 @@ impl Type {
     /// auto-deref `&T` receivers when resolving builtin methods.
     pub(crate) fn referent(&self) -> &Type {
         match self {
-            Type::Reference(inner) => inner,
+            Type::Reference { inner, .. } => inner,
             other => other,
         }
     }
