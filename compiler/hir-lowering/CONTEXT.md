@@ -169,6 +169,12 @@ Generic structs & impls: monomorphized the same way. A generic `StructDef` is st
   unaffected — every instance reaching HIR has concrete `usize` array lengths.
 
 ## Recent Updates
+- 2026-08-24: Divergent arms no longer decide a lowered expression's type. `lower_if_expr`
+  and `lower_match` take the result type from the first arm that is not `HirType::Void`,
+  mirroring the checker. A `panic` / `unreachable` with no context type lowers to `void`, so
+  taking the first arm unconditionally made the whole `if` or `match` void and the backend
+  rejected it as "void type cannot be used as a value" — but only when the divergent arm was
+  written first.
 - 2026-08-18: `import` declarations. Lowering is unchanged in substance: `Item::Import` is
   consumed by module-resolution long before this pass, and an imported name arrives already
   rewritten to what it stands for. A `Pattern::UnqualifiedEnum` reaching `pattern_test` means

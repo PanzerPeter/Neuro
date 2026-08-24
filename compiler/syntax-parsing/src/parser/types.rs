@@ -1,5 +1,5 @@
 use lexical_analysis::TokenKind;
-use shared_types::Identifier;
+use shared_types::{Identifier, Span};
 
 use crate::ast::{ArraySize, GenericArg, Type};
 use crate::errors::{ParseError, ParseResult};
@@ -168,12 +168,11 @@ impl Parser {
                 // following `<`, this is a plain named type. Arguments may be types or
                 // const (integer) values, as in `Ring<i32, 4>`.
                 if self.check(&TokenKind::Less) {
-                    let args = self.parse_generic_type_args()?;
-                    let end = args.last().map(|a| a.span()).unwrap_or(span);
+                    let (args, close_span) = self.parse_generic_type_args()?;
                     return Ok(Type::Generic {
                         name: ident,
                         args,
-                        span: span.merge(end),
+                        span: span.merge(close_span),
                     });
                 }
                 Ok(Type::Named(ident))
@@ -208,7 +207,10 @@ impl Parser {
 
     /// Parse a `<T1, N, ...>` generic-argument list in a type application. Each
     /// argument is a type or a non-negative integer const value (`Ring<i32, 4>`).
-    fn parse_generic_type_args(&mut self) -> ParseResult<Vec<GenericArg>> {
+    /// Returns the arguments and the span of the closing `>`, so the caller can
+    /// span the whole application: ending at the last argument leaves the `>` out
+    /// of every diagnostic that points at the type.
+    fn parse_generic_type_args(&mut self) -> ParseResult<(Vec<GenericArg>, Span)> {
         self.consume(TokenKind::Less, "'<'")?;
         self.skip_newlines();
         let mut args = Vec::new();
@@ -242,7 +244,51 @@ impl Parser {
             self.advance(); // consume ','
             self.skip_newlines();
         }
-        self.consume(TokenKind::Greater, "'>' to close type arguments")?;
-        Ok(args)
+        let close = self.consume(TokenKind::Greater, "'>' to close type arguments")?;
+        Ok((args, close.span))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::{Item, Stmt, Type};
+    use crate::parse;
+
+    /// The declared type of the first `val` in the first function body.
+    fn first_var_type(items: &[Item]) -> Option<Type> {
+        for item in items {
+            if let Item::Function(func) = item {
+                for stmt in &func.body {
+                    if let Stmt::VarDecl { ty, .. } = stmt {
+                        return ty.clone();
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Regression: the span of a generic type application ended at its last argument,
+    /// leaving the closing `>` out of every diagnostic that pointed at the type.
+    #[test]
+    fn generic_type_span_covers_the_closing_angle_bracket() {
+        let src = "func main() -> i32 { val b: Box<i32> = 0\n return 0 }";
+        let items = parse(src).expect("parses");
+        let ty = first_var_type(&items).expect("has a var decl");
+        let Type::Generic { span, .. } = ty else {
+            panic!("expected a generic type application, got {ty:?}");
+        };
+        assert_eq!(&src[span.start..span.end], "Box<i32>");
+    }
+
+    #[test]
+    fn multi_argument_generic_type_span_covers_the_closing_angle_bracket() {
+        let src = "func main() -> i32 { val p: Pair<i32, bool> = 0\n return 0 }";
+        let items = parse(src).expect("parses");
+        let ty = first_var_type(&items).expect("has a var decl");
+        let Type::Generic { span, .. } = ty else {
+            panic!("expected a generic type application, got {ty:?}");
+        };
+        assert_eq!(&src[span.start..span.end], "Pair<i32, bool>");
     }
 }

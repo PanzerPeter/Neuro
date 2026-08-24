@@ -133,3 +133,43 @@ func main() -> i32 {
         "Expected empty stdout on compile failure, got: {stdout}"
     );
 }
+
+/// Regression: a program with no `main` is a compiler error, not a linker error.
+///
+/// The pipeline used to run to completion and hand a `main`-less object file to the
+/// system linker, so the user saw `undefined reference to 'main'` naming the C runtime's
+/// `Scrt1.o` rather than their own program.
+#[test]
+fn compile_reports_a_missing_main_itself() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let source_path = temp_dir.path().join("no_main.nr");
+    fs::write(&source_path, "func helper() -> i32 { 1 }\n").expect("Failed to write source");
+
+    let output_path = source_path.with_extension(if cfg!(target_os = "windows") {
+        "exe"
+    } else {
+        ""
+    });
+
+    let output = Command::new(neurc_path())
+        .arg("compile")
+        .arg(&source_path)
+        .arg("-o")
+        .arg(&output_path)
+        .output()
+        .expect("Failed to execute neurc compile");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "Expected non-zero exit when `main` is missing"
+    );
+    assert!(
+        stderr.contains("no `main` function found"),
+        "Expected a missing-entry-point diagnostic, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("undefined reference"),
+        "The linker was reached despite the missing `main`: {stderr}"
+    );
+}

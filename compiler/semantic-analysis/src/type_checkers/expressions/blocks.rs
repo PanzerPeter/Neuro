@@ -10,7 +10,7 @@ use ast_types::Expr;
 use shared_types::{Identifier, Span};
 
 impl TypeChecker {
-    pub(super) fn check_if_expr(
+    pub(crate) fn check_if_expr(
         &mut self,
         condition: &Expr,
         then_block: &[ast_types::Stmt],
@@ -76,9 +76,17 @@ impl TypeChecker {
             return Some(Type::Void);
         }
 
-        // All arms must agree on type
-        let result_ty = arm_types[0].clone();
-        for arm_ty in &arm_types[1..] {
+        // All arms must agree on type. The result is the first arm that carries one:
+        // a divergent arm — a `panic` or an `unreachable` — is `Unknown`, the
+        // compatible-with-everything type, so it says nothing about what the `if`
+        // evaluates to. Taking it as the result left the whole expression untyped and
+        // its binding undefined, purely because of the order the arms were written in.
+        let result_ty = arm_types
+            .iter()
+            .find(|ty| !matches!(ty, Type::Unknown))
+            .cloned()
+            .unwrap_or(Type::Unknown);
+        for arm_ty in &arm_types {
             if !arm_ty.is_compatible_with(&result_ty) {
                 self.record_error(TypeError::Mismatch {
                     expected: result_ty.clone(),

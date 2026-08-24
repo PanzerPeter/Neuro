@@ -644,3 +644,26 @@ fn stress_test_large_input() {
     // Plus one EOF at the end
     assert_eq!(tokens.len(), 1000 * 5 + 1);
 }
+
+/// Regression: `/*` with no `*/` reported "unexpected character '/'".
+///
+/// The block-comment regex consumes to EOF without completing, so logos fails sitting on
+/// the opening slash. `LexError::UnterminatedBlockComment` existed but nothing built it.
+#[test]
+fn unterminated_block_comment_is_named_as_such() {
+    let err = tokenize("func main() -> i32 {\n/* never closed\n    0\n}\n")
+        .expect_err("an unterminated block comment must not lex");
+    assert!(
+        matches!(err, LexError::UnterminatedBlockComment { .. }),
+        "expected UnterminatedBlockComment, got {err:?}"
+    );
+}
+
+#[test]
+fn a_closed_block_comment_and_division_still_lex() {
+    let tokens = tokenize("/* fine */ 8 / 2").expect("closed comment and division lex");
+    assert!(
+        tokens.iter().any(|t| t.kind == TokenKind::Slash),
+        "division was swallowed: {tokens:?}"
+    );
+}

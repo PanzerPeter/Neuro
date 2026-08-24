@@ -512,18 +512,32 @@ impl Lowerer {
         if hint.is_none() {
             hint = Some(then_ty.clone());
         }
+        // The first arm that carries a type decides the `if`'s, mirroring the checker.
+        // A divergent arm — a `panic` or an `unreachable` with no context type — lowers
+        // to `void` and describes nothing, so taking the `then` arm unconditionally made
+        // the whole `if` void purely because of the order the arms were written in.
+        let mut ty = then_ty;
         let mut elifs = Vec::with_capacity(else_if_blocks.len());
         for (cond, block) in else_if_blocks {
             let cond = self.lower_expr(cond, Some(&HirType::Bool))?;
-            let (block, _) = self.lower_block_value(block, hint.as_ref())?;
+            let (block, block_ty) = self.lower_block_value(block, hint.as_ref())?;
+            if matches!(ty, HirType::Void) {
+                ty = block_ty;
+            }
             elifs.push((cond, block));
         }
-        let (else_block, ty) = match else_block {
+        let else_block = match else_block {
             Some(block) => {
-                let (block, _) = self.lower_block_value(block, hint.as_ref())?;
-                (Some(block), then_ty)
+                let (block, block_ty) = self.lower_block_value(block, hint.as_ref())?;
+                if matches!(ty, HirType::Void) {
+                    ty = block_ty;
+                }
+                Some(block)
             }
-            None => (None, HirType::Void),
+            None => {
+                ty = HirType::Void;
+                None
+            }
         };
         Ok(HirExpr::new(
             HirExprKind::If {

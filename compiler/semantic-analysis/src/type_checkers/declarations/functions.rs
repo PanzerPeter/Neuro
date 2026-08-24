@@ -5,6 +5,7 @@
 //! to the same `impl TypeChecker` block.
 
 use crate::errors::TypeError;
+use crate::type_checkers::val_else::{stmt_diverges, stmts_diverge};
 use crate::type_checkers::{GenericFnSig, TypeChecker};
 use crate::types::Type;
 use ast_types::{Expr, FunctionDef, Stmt};
@@ -179,13 +180,12 @@ impl TypeChecker {
             }
         }
 
-        // Check function body. A trailing bare expression is the implicit return and
-        // is checked once, below, against the declared return type — checking it here
-        // as well would run its effects twice: a by-value argument would be recorded
-        // as moved a second time (and then reported as a use of the value it moved
-        // itself), and any diagnostic it produced would be recorded twice.
-        let tail_returns =
-            !matches!(return_type, Type::Void) && matches!(func.body.last(), Some(Stmt::Expr(_)));
+        // Check function body. The implicit return is checked once, below, against the
+        // declared return type — checking it here as well would run its effects twice:
+        // a by-value argument would be recorded as moved a second time (and then
+        // reported as a use of the value it moved itself), and any diagnostic it
+        // produced would be recorded twice.
+        let tail_returns = Self::tail_is_implicit_return(&func.body, &return_type);
         let leading = if tail_returns {
             &func.body[..func.body.len() - 1]
         } else {
@@ -198,9 +198,58 @@ impl TypeChecker {
         // A trailing expression acts as an expression-based return, so it must
         // match the declared return type.
         if tail_returns {
-            if let Some(Stmt::Expr(expr)) = func.body.last() {
-                if let Some(expr_type) = self.check_expr(expr, Some(&return_type)) {
-                    if !self.assignable(&expr_type, &return_type) {
+            self.check_implicit_return(&func.body, &return_type);
+        } else if !matches!(return_type, Type::Void) && !stmts_diverge(&func.body) {
+            // Nothing produces the declared value and control can reach the end of the
+            // body. The backend leaves that block without a return, LLVM terminates it
+            // with `unreachable` — a legal terminator, so the verifier stays silent —
+            // and the program runs off the end of the function at runtime.
+            self.record_error(TypeError::MissingReturn {
+                expected: return_type.clone(),
+                span: func.name.span,
+            });
+        }
+
+        // Exit function scope
+        self.symbols.pop_scope();
+        self.current_function_return_type = None;
+        self.current_fn_outliving.clear();
+        self.exit_generic_scope();
+
+        Some(())
+    }
+
+    /// Whether the last statement of a body is its implicit return.
+    ///
+    /// A trailing bare expression is one. So is a trailing `if`/`else`: the parser
+    /// always shapes an `if` in statement position as `Stmt::If`, and HIR lowering
+    /// already lowers a trailing one as the body's value, so leaving it out here meant
+    /// the declared return type was never checked against it at all. An `if` whose
+    /// every arm leaves the function carries no value of its own — it is a statement,
+    /// and the caller's return-path check is what covers it.
+    pub(super) fn tail_is_implicit_return(body: &[Stmt], return_type: &Type) -> bool {
+        if matches!(return_type, Type::Void) {
+            return false;
+        }
+        match body.last() {
+            Some(Stmt::Expr(_)) => true,
+            Some(
+                stmt @ Stmt::If {
+                    else_block: Some(_),
+                    ..
+                },
+            ) => !stmt_diverges(stmt),
+            _ => false,
+        }
+    }
+
+    /// Check a body's implicit return against the declared return type. Call only
+    /// when [`Self::tail_is_implicit_return`] holds, and only once per body.
+    pub(super) fn check_implicit_return(&mut self, body: &[Stmt], return_type: &Type) {
+        match body.last() {
+            Some(Stmt::Expr(expr)) => {
+                if let Some(expr_type) = self.check_expr(expr, Some(return_type)) {
+                    if !self.assignable(&expr_type, return_type) {
                         self.record_error(TypeError::ReturnTypeMismatch {
                             expected: return_type.clone(),
                             found: expr_type,
@@ -214,18 +263,35 @@ impl TypeChecker {
                 if matches!(return_type, Type::Reference { .. }) {
                     self.check_returned_reference(expr);
                 }
-                // Note: If check_expr failed, the error is already recorded
             }
-            // Note: Other statement types at the end are allowed - LLVM will catch missing returns
+            Some(Stmt::If {
+                condition,
+                then_block,
+                else_if_blocks,
+                else_block,
+                span,
+            }) => {
+                let ty = self
+                    .check_if_expr(
+                        condition,
+                        then_block,
+                        else_if_blocks,
+                        else_block,
+                        span,
+                        Some(return_type),
+                    )
+                    .unwrap_or(Type::Unknown);
+                if !self.assignable(&ty, return_type) {
+                    self.record_error(TypeError::ReturnTypeMismatch {
+                        expected: return_type.clone(),
+                        found: ty,
+                        span: *span,
+                    });
+                }
+                self.symbols.clear_transient_borrows();
+            }
+            _ => {}
         }
-
-        // Exit function scope
-        self.symbols.pop_scope();
-        self.current_function_return_type = None;
-        self.current_fn_outliving.clear();
-        self.exit_generic_scope();
-
-        Some(())
     }
 
     /// The `(parameter types, return type)` recorded for `func` by the signature pass,

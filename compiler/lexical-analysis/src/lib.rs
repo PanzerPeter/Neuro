@@ -42,6 +42,15 @@ impl<'source> Lexer<'source> {
                             span: Span::new(start, end),
                         };
                     }
+
+                    // `/*` with no `*/` after it: the comment regex consumes to EOF
+                    // without completing, so logos reports a failure sitting on the
+                    // opening `/` and the reader is told a slash is unexpected.
+                    if remaining.starts_with("/*") {
+                        return LexError::UnterminatedBlockComment {
+                            span: Span::new(start, self.source.len()),
+                        };
+                    }
                 }
 
                 let character = self.inner.slice().chars().next().unwrap_or('\0');

@@ -110,11 +110,11 @@ impl TypeChecker {
 ///
 /// Any diverging statement suffices — everything after it is unreachable, so the list
 /// as a whole cannot fall through.
-fn stmts_diverge(stmts: &[Stmt]) -> bool {
+pub(crate) fn stmts_diverge(stmts: &[Stmt]) -> bool {
     stmts.iter().any(stmt_diverges)
 }
 
-fn stmt_diverges(stmt: &Stmt) -> bool {
+pub(crate) fn stmt_diverges(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Return { .. } | Stmt::Break { .. } | Stmt::Continue { .. } => true,
         Stmt::If {

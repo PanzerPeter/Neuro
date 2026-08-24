@@ -67,12 +67,18 @@ impl TypeChecker {
             self.check_exhaustive(arms, &scrut_ty, span);
         }
 
-        // Unify arm body types, mirroring the `if`-expression rule.
-        let Some((first, rest)) = arm_types.split_first() else {
+        // Unify arm body types, mirroring the `if`-expression rule: the result is the
+        // first arm that carries a type. A divergent arm is `Unknown`, which is
+        // compatible with everything and so describes nothing.
+        if arm_types.is_empty() {
             return Type::Void;
-        };
-        let result_ty = first.clone();
-        for arm_ty in rest {
+        }
+        let result_ty = arm_types
+            .iter()
+            .find(|ty| !matches!(ty, Type::Unknown))
+            .cloned()
+            .unwrap_or(Type::Unknown);
+        for arm_ty in &arm_types {
             if !arm_ty.is_compatible_with(&result_ty) {
                 self.record_error(TypeError::MatchArmTypeMismatch {
                     expected: result_ty.clone(),
