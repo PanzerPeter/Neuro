@@ -47,6 +47,11 @@ one-to-one token counterpart (string bodies and escapes above all) still need up
 matters for the planned stateful-lexer rewrite behind string interpolation.
 
 ## Recent Updates
+- 2026-08-24: `/*` with no `*/` is reported as an unterminated block comment.
+  `classify_error` already rewrote a logos failure sitting on an opening `"` into
+  `UnterminatedString`; the same rewrite now covers `/*`, which previously surfaced as
+  "unexpected character '/'". `LexError::UnterminatedBlockComment` existed but had no
+  constructor.
 - 2026-08-03: Added `TokenKind::Question` (`?`) for the error-propagation operator `expr?`. Declared directly after `QuestionQuestion`; logos' longest-match rule keeps `??` a single coalescing token, so `a ?? b` never lexes as two propagations. Operator token, not a keyword — no TextMate grammar change (`tests/tmlanguage_sync.rs` covers keyword words only).
 - 2026-07-24: Added `TokenKind::Move` keyword token for the `move` closure-capture prefix (`move |x| ...`). Reserves the word so it cannot be an identifier. Sits directly after `Unsafe` in declaration order. The word was already present in the editor's TextMate grammar keyword pattern, so `tests/tmlanguage_sync.rs` needed no update.
 - 2026-07-19: Added `tests/tmlanguage_sync.rs`, asserting every `#[token("…")]` keyword appears in the editor's TextMate grammar. It caught real drift on introduction: `dyn` was missing from the grammar's keyword pattern, and `f16`/`bf16` from its primitive-type and numeric-suffix patterns.

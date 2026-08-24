@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.75.3] - 2026-08-24
+
+### Fixed
+- `semantic`: a non-void function or method that falls off the end of its body is now a
+  compile error instead of undefined behaviour. The checker recognised only a trailing
+  bare expression as the implicit return, so a body ending in anything else — a trailing
+  `if` (which the parser always shapes as a statement), a loop, a binding, nothing at all
+  — was neither checked against the declared return type nor checked for producing a
+  value. The backend left the exit block without a return, LLVM terminated it with
+  `unreachable`, and the verifier stayed silent because `unreachable` is a legal
+  terminator; the compiled program then ran off the end of the function and crashed. The
+  same body checked out and ran correctly whenever the input happened to take a path that
+  did return, so the crash depended on the argument, not the program. Inherent methods and
+  trait default methods had the same hole.
+- `semantic`: a trailing `if`/`else` is now checked against the declared return type. It is
+  the function's implicit return and always was — lowering has treated it as one all along
+  — but nothing type-checked it, so `func f(n: i32) -> i32 { if n > 0 { true } else { false } }`
+  reached the LLVM verifier and failed there as an internal error. Mixing a `return` and a
+  value across the arms (`if n > 0 { return 1 } else { 2 }`) silently evaluated to `0` on
+  the else path; it is now the same type error the identical expression already was when
+  bound to a `val`.
+- `semantic`, `codegen`: a divergent arm no longer decides an `if`'s or a `match`'s type.
+  `panic` and `unreachable` never return, so they adopt whatever type their context
+  demands and describe nothing about the expression around them — yet both the checker and
+  HIR lowering took the first arm's type unconditionally. With the divergent arm written
+  first, `val v = if c { panic("x") } else { 2 }` was rejected as an undefined variable,
+  while the same two arms in the other order compiled. Both now take the type from the
+  first arm that carries one.
+- `parser`: the span of a generic type application covers its closing `>`. It ended at the
+  last type argument, so every diagnostic pointing at one underlined a byte short —
+  `Box<i32, i32` for `Box<i32, i32>`.
+- `lexer`: `/*` with no closing `*/` reports an unterminated block comment. The comment
+  regex consumes to end-of-file without completing, so logos failed sitting on the opening
+  slash and the reader was told a `/` was unexpected. `LexError::UnterminatedBlockComment`
+  already existed; nothing constructed it.
+- `infra`: compiling a program with no `main` reports a missing entry point instead of
+  reaching the system linker, which answered with `undefined reference to 'main'` naming
+  the C runtime's startup object rather than the user's program. `check` is unaffected:
+  type-checking a module with no `main` is legitimate.
+
 ## [1.75.2] - 2026-08-23
 
 ### Fixed

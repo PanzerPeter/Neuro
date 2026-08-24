@@ -29,7 +29,7 @@ impl Lowerer {
         let mut hint: Option<HirType> = expected.cloned();
         let mut hir_arms = Vec::with_capacity(arms.len());
         let mut result_ty = HirType::Void;
-        for (i, arm) in arms.iter().enumerate() {
+        for arm in arms {
             let mut tests = Vec::with_capacity(arm.patterns.len());
             for pat in &arm.patterns {
                 tests.push(self.pattern_test(pat, &scrut_ty)?);
@@ -55,7 +55,11 @@ impl Lowerer {
             if hint.is_none() {
                 hint = Some(body.ty.clone());
             }
-            if i == 0 {
+            // The first arm that carries a type decides the match's, mirroring the
+            // checker. A divergent arm — a `panic` or an `unreachable` with no context
+            // type — lowers to `void` and describes nothing, so taking it made the whole
+            // match void purely because of the order the arms were written in.
+            if matches!(result_ty, HirType::Void) {
                 result_ty = body.ty.clone();
             }
             hir_arms.push(neuro_hir::HirMatchArm {

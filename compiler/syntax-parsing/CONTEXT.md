@@ -64,6 +64,10 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-08-24: `Type::Generic`'s span covers its closing `>`. `parse_generic_type_args` returns
+  the closing token's span alongside the arguments; the span used to end at the last argument,
+  so every diagnostic pointing at a generic type application underlined one byte short
+  (`Box<i32, i32` for `Box<i32, i32>`).
 - 2026-08-23: `val-else` takes an unqualified variant pattern (BUG-010). `starts_val_else` widened
   from `val Name::` to also accept `val Name(`: a binding name after `val` is only ever followed by
   `:`, `=`, or a newline, so a payload makes the reading unambiguous, and the prelude had made

@@ -20,6 +20,11 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 - source-location — source span resolution for error display
 
 ## Notes
+- 2026-08-24: Missing entry point. `compile_file` checks the lowered HIR for a function named
+  `main` before it writes an object file. Without it the pipeline ran to completion and handed
+  a `main`-less object to the system linker, so the user was shown `undefined reference to
+  'main'` naming the C runtime's startup object rather than their own program. `check` is
+  unaffected: type-checking a module that has no `main` is legitimate.
 - 2026-08-23: Implicit prelude. `prelude.rs` became a `Prelude` value: `prelude::load()` parses
   `prelude.nr` once and answers both `variants()` — every variant of every enum it declares,
   handed to `module_resolution::resolve_program` so each module may write `Some` / `Ok` bare —

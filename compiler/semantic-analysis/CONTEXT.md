@@ -165,6 +165,23 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-08-24: Return-path checking. A non-void function or method must produce a value on
+  every path, and `check_function` / the `impl` method loop now say so with
+  `TypeError::MissingReturn`. Two shared helpers in `declarations/functions.rs` state the
+  rule once: `tail_is_implicit_return` recognises the implicit return — a trailing bare
+  expression, or a trailing `if`/`else`, which the parser always shapes as `Stmt::If` and
+  which was therefore never checked against the declared return type at all — and
+  `check_implicit_return` checks it. An `if` whose every arm leaves the function
+  (`val_else::stmt_diverges`, now `pub(crate)`) carries no value and is a statement, so the
+  divergence check covers it instead. Without the rule the backend left the exit block
+  without a return, LLVM terminated it with `unreachable` (a legal terminator, so the
+  verifier stayed silent), and the program ran off the end of the function at runtime.
+  `check_if_expr` is `pub(crate)` so the declaration modules can reach it.
+- 2026-08-24: Divergent arms no longer decide an expression's type. `check_if_expr` and
+  `check_match` take the result from the first arm that is not `Type::Unknown`, and compare
+  every arm against it. A `panic` / `unreachable` arm is `Unknown` — the
+  compatible-with-everything type — so taking it made the whole expression untyped and its
+  binding vanish, purely because of the order the arms were written in.
 - 2026-08-22: Struct field visibility. A field is private to its declaring module unless it
   carries `export`, and this slice is where that is enforced — the rule needs the receiver's
   type, so module-resolution (which runs before type checking) cannot state it. `register_struct`

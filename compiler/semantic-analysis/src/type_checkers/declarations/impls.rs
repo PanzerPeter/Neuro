@@ -8,9 +8,10 @@ use super::{DROP_METHOD, DROP_TRAIT};
 use crate::errors::TypeError;
 use crate::type_checkers::collections::{HASHABLE_TRAIT, HASH_METHOD};
 use crate::type_checkers::operator_traits::{is_operator_trait, operator_trait_spec};
+use crate::type_checkers::val_else::stmts_diverge;
 use crate::type_checkers::TypeChecker;
 use crate::types::Type;
-use ast_types::{ImplDef, SelfParam, Stmt};
+use ast_types::{ImplDef, SelfParam};
 
 impl TypeChecker {
     /// Register all method signatures from an `impl` block into the global
@@ -397,8 +398,7 @@ impl TypeChecker {
 
             // The implicit-return tail is checked once, below — see the same rule in
             // `check_function`, where checking it twice moved a by-value argument twice.
-            let tail_returns = !matches!(return_type, Type::Void)
-                && matches!(method.body.last(), Some(Stmt::Expr(_)));
+            let tail_returns = Self::tail_is_implicit_return(&method.body, &return_type);
             let leading = if tail_returns {
                 &method.body[..method.body.len() - 1]
             } else {
@@ -408,23 +408,16 @@ impl TypeChecker {
                 let _ = self.check_stmt(stmt);
             }
 
-            // Validate trailing expression return (same rule as free functions).
+            // Validate the implicit return (same rule as free functions), or report that
+            // the method has none: without this the backend emits a body that runs off
+            // its own end at runtime.
             if tail_returns {
-                if let Some(Stmt::Expr(expr)) = method.body.last() {
-                    if let Some(expr_type) = self.check_expr(expr, Some(&return_type)) {
-                        if !expr_type.is_compatible_with(&return_type) {
-                            self.record_error(TypeError::ReturnTypeMismatch {
-                                expected: return_type.clone(),
-                                found: expr_type,
-                                span: expr.span(),
-                            });
-                        }
-                    }
-                    self.symbols.clear_transient_borrows();
-                    if matches!(return_type, Type::Reference { .. }) {
-                        self.check_returned_reference(expr);
-                    }
-                }
+                self.check_implicit_return(&method.body, &return_type);
+            } else if !matches!(return_type, Type::Void) && !stmts_diverge(&method.body) {
+                self.record_error(TypeError::MissingReturn {
+                    expected: return_type.clone(),
+                    span: method.name.span,
+                });
             }
 
             self.symbols.pop_scope();

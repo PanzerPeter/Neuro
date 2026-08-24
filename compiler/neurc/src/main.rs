@@ -6,6 +6,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
+/// The entry point every compiled executable must define.
+const MAIN_FUNCTION: &str = "main";
+
 mod prelude;
 
 #[derive(Parser)]
@@ -222,6 +225,21 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
         .map_err(|e| anyhow::anyhow!("HIR lowering error: {}", e))
         .context("Failed to lower to HIR")?;
     log::debug!("Lowered {} HIR items", hir.items.len());
+
+    // An executable needs an entry point. Without this the pipeline runs to
+    // completion and the failure surfaces as the system linker's `undefined
+    // reference to 'main'`, which names the C runtime rather than the program.
+    if !hir
+        .items
+        .iter()
+        .any(|item| matches!(item, neuro_hir::HirItem::Function(f) if f.name == MAIN_FUNCTION))
+    {
+        anyhow::bail!(
+            "no `{}` function found in {}: an executable needs an entry point",
+            MAIN_FUNCTION,
+            input.display()
+        );
+    }
 
     log::debug!("Generating LLVM IR and object code...");
     let optimization =
