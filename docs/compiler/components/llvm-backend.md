@@ -29,49 +29,53 @@ bounds, slice boundaries).
 - **All internals**: `pub(crate)` — `CodegenContext`, `TypeMapper`, `codegen_*` helpers
 - **Output**: platform object code (`.o`) passed to the system linker by `neurc`
 
-## Supported Features (Phase 1)
+## Supported Features
 
 ### Types
 
 | Neuro | LLVM |
 |---|---|
-| `i8` | `i8` |
-| `i16` | `i16` |
-| `i32` | `i32` |
-| `i64` | `i64` |
-| `u8` | `i8` (unsigned semantics) |
-| `u16` | `i16` (unsigned semantics) |
-| `u32` | `i32` (unsigned semantics) |
-| `u64` | `i64` (unsigned semantics) |
-| `f32` | `float` |
-| `f64` | `double` |
+| `i8` / `i16` / `i32` / `i64` | `i8` / `i16` / `i32` / `i64` |
+| `u8` / `u16` / `u32` / `u64` | the same widths, with unsigned instruction selection |
+| `f16` / `bf16` | `half` / `bfloat` (conversions via the soft-float builtins) |
+| `f32` / `f64` | `float` / `double` |
 | `bool` | `i1` |
-| `string` | anonymous struct `{ ptr, i64 }` (fat pointer: data ptr + byte length) |
-| user struct | anonymous LLVM struct `{ T0, T1, ... }` with fields in declaration order |
+| `char` | `i32` (a Unicode scalar value) |
+| `string` | anonymous struct `{ ptr, i64 }` — a fat pointer: data pointer + byte length |
+| `&string` | the `{ ptr, i64 }` fat pointer **by value**; `&mut string` is the referent's address |
+| `&T` / `&mut T` (other `T`) | `ptr` (opaque, LLVM 20) |
+| `&dyn Trait` | `{ data ptr, vtable ptr }` fat pointer |
+| user struct | anonymous LLVM struct `{ T0, T1, ... }`, fields in declaration order |
+| tuple | anonymous LLVM struct, elements in position order |
+| `[T; N]` | `[N x T]` |
+| enum | tagged union `{ i32 tag, [W x i64] payload }`, `W` sized to the widest variant |
+| closure | `{ fn_ptr, env_ptr }` fat pointer, no heap allocation |
 | `void` | `void` |
+
+The full ABI contract — string, struct, method, builtin-method, overflow, panic, drop,
+collections, constants, and soft-float — is documented in the slice's
+[CONTEXT.md](../../../compiler/llvm-backend/CONTEXT.md), which is authoritative.
 
 ### Expressions
 
-- Integer, float, bool, and string literals
-- Variable loads from stack
-- Binary operators: arithmetic (`+`, `-`, `*`, `/`, `%`), comparison (`==`, `!=`, `<`, `>`, `<=`, `>=`), logical (`&&`, `||`)
-- Unary operators: `-`, `!`
-- Function calls (value-returning and void)
-- Parenthesized expressions
-- Struct literals — `alloca` + field-by-field `insertvalue`
-- Field access — `getelementptr` + `load`
-- Path expressions (`TypeName::func(args)`) — associated function calls
+Literals; variable loads; arithmetic, comparison, logical, and bitwise operators; unary
+`-`, `!`, `~`; calls (free functions, associated functions, methods, and indirect calls
+through a closure or a vtable); struct, enum, tuple, and array literals; field, index, and
+tuple-element access; casts; ranges (as `.slice` arguments and `for` bounds); `if`, `match`,
+`loop`, and block expressions in value position; and the `?` / `??` fallible operators,
+both of which are already desugared to a `match` in HIR.
 
 ### Statements
 
-- Variable declarations (`val`, `mut`) — stack-allocated via `alloca`
-- Variable reassignment
-- `return` statements (explicit and expression-based implicit returns)
-- `if` / `else` — basic block management with merge blocks
-- `while` loops — `while.cond` / `while.body` / `while.exit` blocks
-- Range-for loops (`for i in start..end`) — dedicated step block so `continue` advances correctly
-- `break` and `continue` — branch to loop exit/step blocks
-- Field assignment (`obj.field = value`) — `getelementptr` + `store`
+- Bindings (`val`, `mut`) — `alloca` in the **entry block**, never inside a loop
+- Assignment, field / index / dereference assignment
+- `return`, explicit and as a block's trailing expression
+- `if` / `else` — basic blocks with a merge block; a branch that returns contributes no
+  edge to the merge
+- `while`, `for` (a dedicated step block, so `continue` advances the induction variable),
+  and `loop` (whose value comes from its `break v` edges)
+- `break` / `continue`, including labelled forms — branches to the loop's exit / step block
+- Scope-exit `Drop` calls and collection frees
 
 ### Signedness
 

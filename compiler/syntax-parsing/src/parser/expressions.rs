@@ -32,14 +32,20 @@ impl Parser {
         let mut left = self.parse_prefix()?;
 
         while !self.is_at_end() {
-            // A new line beginning with `*` is a dereference statement (`*r = v` or
-            // `*r`), not a continued multiplication. The no-semicolon rule only
-            // continues an expression across a newline when the *previous* line ends
-            // with an operator (a trailing `*`, handled without skipping here), so a
-            // leading `*` must end the current expression and fall to the statement
-            // parser.
+            // A new line beginning with `*`, `(`, or `[` starts a statement — a
+            // dereference (`*r = v`), a parenthesized expression, an array literal —
+            // not a continuation of this one. The no-semicolon rule only continues an
+            // expression across a newline when the *previous* line ends with an
+            // operator, a comma, or an opening delimiter, and every one of those
+            // reaches here with the newline already behind it. Skipping the newline
+            // first instead let the NEXT line decide: `val a = f()` followed by a line
+            // `(2 + 3)` parsed as a call of `f()`'s result, and a following `[1, 2]` as
+            // an index of it.
             if matches!(self.peek_kind(), Some(TokenKind::Newline))
-                && matches!(self.peek_next_nonnewline_kind(), Some(TokenKind::Star))
+                && matches!(
+                    self.peek_next_nonnewline_kind(),
+                    Some(TokenKind::Star | TokenKind::LeftParen | TokenKind::LeftBracket)
+                )
             {
                 break;
             }

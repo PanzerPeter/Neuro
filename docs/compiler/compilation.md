@@ -1,8 +1,8 @@
 # End-to-End Compilation
 
-**Status**: Implemented · 1D backend pipeline (AST → typed HIR → LLVM)
+**Status**: Implemented · AST → typed HIR → LLVM
 **Slice**: `compiler/neurc` (orchestrator)
-**Dependencies**: `lexical-analysis`, `syntax-parsing`, `semantic-analysis`, `hir-lowering`, `llvm-backend`
+**Dependencies**: `lexical-analysis`, `syntax-parsing`, `module-resolution`, `semantic-analysis`, `hir-lowering`, `llvm-backend`
 
 ---
 
@@ -26,23 +26,32 @@ Source File (.nr)
 │    - Tokenization (logos)                                     │
 │    - AST construction (Pratt + statement parser)             │
 ├──────────────────────────────────────────────────────────────┤
-│ 3. Semantic Analysis (semantic_analysis::type_check)         │
+│ 3. Module Resolution (module_resolution::resolve_program)    │
+│    - Expands every module the root file reaches into one     │
+│      program: `.nr` files, `mod.nr` directories, inline      │
+│      `module { }` blocks, imports and re-exports             │
+│    - Verifies qualified paths and item/field visibility,     │
+│      then erases the qualifiers into one flat namespace      │
+│    - The driver prepends the prelude here, unless the root    │
+│      file opted out with `@no_prelude`                       │
+├──────────────────────────────────────────────────────────────┤
+│ 4. Semantic Analysis (semantic_analysis::type_check)         │
 │    - Type checking, scope resolution                         │
 │    - Emits warnings (e.g. lints)                             │
 ├──────────────────────────────────────────────────────────────┤
-│ 4. HIR Lowering (hir_lowering::lower_program)                 │
+│ 5. HIR Lowering (hir_lowering::lower_program)                 │
 │    - AST → typed High-Level IR (neuro-hir)                   │
 │    - Every expression carries its resolved type             │
 ├──────────────────────────────────────────────────────────────┤
-│ 5. Code Generation (llvm_backend::compile)                   │
+│ 6. Code Generation (llvm_backend::compile)                   │
 │    - Consumes the typed HIR directly                         │
 │    - LLVM IR generation (inkwell / LLVM 20)                  │
 │    - Object code emission                                     │
 ├──────────────────────────────────────────────────────────────┤
-│ 6. Write Object File (NamedTempFile)                         │
+│ 7. Write Object File (NamedTempFile)                         │
 │    - Temporary `.o` file; cleaned up via RAII               │
 ├──────────────────────────────────────────────────────────────┤
-│ 7. Link Executable (cc::Build)                               │
+│ 8. Link Executable (cc::Build)                               │
 │    - System linker invocation + C runtime linking           │
 └──────────────────────────────────────────────────────────────┘
     ↓
@@ -127,9 +136,9 @@ RUST_LOG=debug neurc compile examples/hello.nr   # debug logging
 
 End-to-end coverage lives in `compiler/neurc/tests/` — e.g. `hir_lowering.rs` exercises the
 AST → HIR step, and per-feature suites (`arrays.rs`, `drop_destructors.rs`, `string_concat.rs`,
-`string_slice.rs`, …) compile and run real programs, asserting exit codes and output. The full
-`cargo test --workspace` suite is green at 806 tests (the `mlir`-feature tests are additional and
-feature-gated).
+`string_slice.rs`, …) compile and run real programs, asserting exit codes and output.
+`cargo test --workspace` runs the whole suite; the `mlir`-feature tests are additional and
+feature-gated.
 
 ## Known Limitations
 

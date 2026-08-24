@@ -54,7 +54,7 @@ structure already encodes grouping.
 
 ## Testing
 
-11 slice unit tests cover the lowering rules; `neurc/tests/hir_lowering.rs` provides end-to-end
+Slice unit tests cover the lowering rules; `neurc/tests/hir_lowering.rs` provides end-to-end
 coverage. The workspace architecture test enforces the slice's infrastructure-only dependencies.
 
 ## Resources

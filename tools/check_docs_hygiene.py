@@ -38,6 +38,11 @@ TEST_COUNT_PATTERNS = [
     re.compile(r"tests-\d+%20passing"),
     re.compile(r"\b\d{2,}\s+[Tt]ests\s+[Pp]assing\b"),
     re.compile(r"\b\d{2,}\s+tests\s+pass\b", re.IGNORECASE),
+    # Any written-down total, however it is phrased: "78 tests", "green at 806
+    # tests", "11 slice unit tests". Each was true on the day it was typed. Two
+    # digits minimum, so prose about an indexed arm ("arm 0 tests the tag") is
+    # not swept up with it.
+    re.compile(r"\b\d{2,}\s+(?:\w+\s+){0,2}tests\b", re.IGNORECASE),
 ]
 
 # Gitignored or otherwise local-only paths. A committed file must not cite them.

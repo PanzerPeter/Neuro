@@ -660,6 +660,10 @@ func parse_digit(c: i32) -> i32 {
 A user-defined function whose name is `panic`, `assert`, or `unreachable` shadows the builtin
 within the program.
 
+`return`, `break`, and `continue` diverge the same way, so an `if` or `match` arm that
+uses one takes its type from its siblings rather than imposing one on them — see
+[expressions.md](expressions.md#if-expressions).
+
 ## Generic Functions
 
 A function may declare **type parameters** in angle brackets after its name. Each type

@@ -6,6 +6,7 @@ use shared_types::{IntSuffix, Literal, Span};
 
 use super::{TypeChecker, VariantForm};
 use crate::errors::TypeError;
+use crate::type_checkers::val_else::expr_diverges;
 use crate::types::Type;
 
 /// What a single guardless pattern proves about coverage of the scrutinee.
@@ -68,8 +69,8 @@ impl TypeChecker {
         }
 
         // Unify arm body types, mirroring the `if`-expression rule: the result is the
-        // first arm that carries a type. A divergent arm is `Unknown`, which is
-        // compatible with everything and so describes nothing.
+        // first arm that carries a type. A divergent arm — one that panics or leaves
+        // the scope — is `Unknown`, compatible with everything, and describes nothing.
         if arm_types.is_empty() {
             return Type::Void;
         }
@@ -132,6 +133,12 @@ impl TypeChecker {
             .check_expr(&arm.body, expected)
             .unwrap_or(Type::Unknown);
         self.symbols.pop_scope();
+        // An arm that leaves the enclosing scope never reaches the point where the
+        // `match` has a value, so it says nothing about that value and must not
+        // constrain its siblings — the contract `panic` / `unreachable` already have.
+        if expr_diverges(&arm.body) {
+            return Type::Unknown;
+        }
         body_ty
     }
 

@@ -20,177 +20,69 @@ This slice follows the **Vertical Slice Architecture** pattern:
 
 ### AST Node Types
 
-#### Items (Top-level declarations)
+The node set itself lives in the `ast-types` infrastructure crate, not here — that is what
+lets semantic analysis, module resolution, and HIR lowering read the tree without depending
+on this slice. Reproducing the definitions in prose only guarantees they drift, so this
+section describes the shape and points at the source:
+[`compiler/infrastructure/ast-types/src/`](../../../compiler/infrastructure/ast-types/src/).
 
-```rust
-pub enum Item {
-    Function(FunctionDef),
-    Struct(StructDef),
-    Impl(ImplDef),
-}
+**Items** (`Item`) — the top level of a file: `Function`, `Struct`, `Enum`, `Trait`, `Impl`,
+`Const`, `Newtype`, `Import`, `Module` (an inline `module { }` block), and `NoPrelude` (the
+file-scope `@no_prelude` marker, consumed by module resolution). A function or struct carries
+its generic parameters and lifetimes; an `impl` carries an optional trait name, so the
+inherent and trait forms are one node. A method's receiver is `Option<SelfParam>` — absent for
+an associated function, otherwise `&self`, `&mut self`, or owned `self`.
 
-pub struct FunctionDef {
-    pub name: Identifier,
-    pub params: Vec<Parameter>,
-    pub return_type: Option<Type>,
-    pub body: Vec<Stmt>,
-    pub span: Span,
-}
+**Statements** (`Stmt`) — bindings (`val` / `mut`), assignment and compound assignment, field
+and index assignment, dereference assignment, `return`, `break`, `continue`, `if`, `while`,
+`for`, `loop`, `match`, destructuring bindings, `val-else`, and a bare expression. An `if` in
+statement position always parses to `Stmt::If`, never `Stmt::Expr(Expr::If)`, which is why the
+type checker and HIR lowering each recognise a trailing `Stmt::If` as a block's value.
 
-pub struct StructDef {
-    pub name: Identifier,
-    pub fields: Vec<FieldDef>,
-    pub span: Span,
-}
-
-pub struct FieldDef {
-    pub name: Identifier,
-    pub ty: Type,
-    pub span: Span,
-}
-
-pub struct ImplDef {
-    pub type_name: Identifier,
-    pub methods: Vec<MethodDef>,
-    pub span: Span,
-}
-
-pub struct MethodDef {
-    pub name: Identifier,
-    /// None = associated function; Some = instance method
-    pub self_param: Option<SelfParam>,
-    pub params: Vec<Parameter>,
-    pub return_type: Option<Type>,
-    pub body: Vec<Stmt>,
-    pub span: Span,
-}
-
-pub enum SelfParam {
-    Ref,    // &self — supported (by value, read-only)
-    RefMut, // &mut self — supported (by pointer, mutates in place)
-    Owned,  // self — rejected (needs the by-value struct ABI)
-}
-```
-
-#### Statements
-
-```rust
-pub enum Stmt {
-    VarDecl {
-        name: Identifier,
-        ty: Option<Type>,
-        init: Option<Expr>,
-        mutable: bool,
-        span: Span,
-    },
-    Assign {
-        name: Identifier,
-        value: Expr,
-        span: Span,
-    },
-    FieldAssignment {
-        object: Expr,
-        field: Identifier,
-        value: Expr,
-        span: Span,
-    },
-    Return {
-        value: Option<Expr>,
-        span: Span,
-    },
-    If {
-        condition: Expr,
-        then_block: Vec<Stmt>,
-        else_if_blocks: Vec<(Expr, Vec<Stmt>)>,
-        else_block: Option<Vec<Stmt>>,
-        span: Span,
-    },
-    While {
-        condition: Expr,
-        body: Vec<Stmt>,
-        span: Span,
-    },
-    ForRange {
-        var: Identifier,
-        start: Expr,
-        end: Expr,
-        body: Vec<Stmt>,
-        span: Span,
-    },
-    Break {
-        span: Span,
-    },
-    Continue {
-        span: Span,
-    },
-    Expr(Expr),
-}
-```
-
-#### Expressions
-
-```rust
-pub enum Expr {
-    Literal(Literal, Span),
-    Identifier(Identifier),
-    Binary {
-        left: Box<Expr>,
-        op: BinaryOp,
-        right: Box<Expr>,
-        span: Span,
-    },
-    Unary {
-        op: UnaryOp,
-        operand: Box<Expr>,
-        span: Span,
-    },
-    Call {
-        func: Box<Expr>,
-        args: Vec<Expr>,
-        span: Span,
-    },
-    Paren(Box<Expr>, Span),
-    /// Struct literal: `Point { x: 1.0, y: 2.0 }`
-    StructLiteral {
-        name: Identifier,
-        fields: Vec<FieldInit>,
-        span: Span,
-    },
-    /// Field access: `expr.field_name`
-    FieldAccess {
-        object: Box<Expr>,
-        field: Identifier,
-        span: Span,
-    },
-    /// Path expression: `TypeName::member` — callee of associated function calls
-    Path {
-        type_name: Identifier,
-        member: Identifier,
-        span: Span,
-    },
-}
-```
+**Expressions** (`Expr`) — literals, identifiers, unary and binary operators, calls (with
+optional turbofish type arguments), index, field access, `Type::member` paths, struct and enum
+literals, tuples and arrays, ranges, casts, closures, blocks, `unsafe` blocks, `if`, `match`,
+`loop`, the `?` propagation operator, and `Paren` grouping (dropped during lowering).
 
 ### Operator Precedence
 
-The parser uses **Pratt parsing** (precedence climbing) for correct operator precedence:
+The parser is a **Pratt parser** (precedence climbing). The ladder, loosest first:
 
 | Precedence | Operators | Associativity |
 |------------|-----------|---------------|
-| 1 (Lowest) | `\|\|` | Left |
-| 2 | `&&` | Left |
-| 3 | `==`, `!=` | Left |
-| 4 | `<`, `>`, `<=`, `>=` | Left |
-| 5 | `+`, `-` | Left |
-| 6 | `*`, `/`, `%` | Left |
-| 7 (Highest) | `-` (unary), `!` | Right |
+| 1 (loosest) | `..`, `..=` (range) | Left |
+| 2 | `??` (null-coalescing) | Right |
+| 3 | `\|\|` | Left |
+| 4 | `&&` | Left |
+| 5 | `\|` (bitwise or) | Left |
+| 6 | `^` | Left |
+| 7 | `&` (bitwise and) | Left |
+| 8 | `==`, `!=` | Left |
+| 9 | `<`, `>`, `<=`, `>=` | Left |
+| 10 | `<<` | Left |
+| 11 | `+`, `-` | Left |
+| 12 | `*`, `/`, `%` | Left |
+| 13 | `as` (cast) | Left |
+| 14 | `-`, `!`, `~` (unary) | Right |
+| 15 | call `f(...)`, index `a[i]`, `?`, turbofish `::<...>` | Left |
+| 16 (tightest) | `.` (field / method access) | Left |
 
-Example:
+There is no `>>` operator: right shift is the `.shr(n)` method, because `>>` is reserved for
+function composition. `??` associates right-to-left so `a ?? b ?? c` evaluates each fallback
+only when every left-hand side before it was absent.
+
 ```neuro
-a + b * c       // Parsed as: a + (b * c)
-a < b == c < d  // Parsed as: (a < b) == (c < d)
-!a && b         // Parsed as: (!a) && b
+a + b * c       // a + (b * c)
+a < b == c < d  // (a < b) == (c < d)
+!a && b         // (!a) && b
+f(x)? + 1       // (f(x)?) + 1
 ```
+
+**Statement boundaries.** A newline ends a statement unless the line that just ended asks to
+continue — it ends with a binary operator, a comma, or an opening delimiter, or the expression
+is inside an unclosed `(`, `[`, or `{`. The decision belongs to the line that ended, so a line
+*starting* with `(`, `[`, or `*` opens a new statement rather than continuing the one above as
+a call, an index, or a multiplication.
 
 ## Usage
 
@@ -286,26 +178,20 @@ Statements are parsed using traditional recursive descent:
 
 ### Error Types
 
-```rust
-pub enum ParseError {
-    UnexpectedToken {
-        found: TokenKind,
-        expected: String,
-        span: Span,
-    },
-    UnexpectedEof {
-        expected: String,
-    },
-    LexError(LexError),  // Propagated from lexer
-}
-```
+`ParseError` (see [`errors.rs`](../../../compiler/syntax-parsing/src/errors.rs)) covers the
+token-level failures — `UnexpectedToken`, `UnexpectedEof`, a wrapped `LexError`, and
+`MaxDepthExceeded`, which stops runaway nesting rather than overflowing the stack — plus the
+grammar rules that are cheapest to enforce while parsing: `DuplicateParameter`,
+`DuplicateTypeAlias`, `TypeAliasShadowsBuiltin`, `CyclicTypeAlias`, `EnumLifetimeParam`,
+`ExportNotAllowed`, and `MisplacedNoPrelude`. Each carries the span of the offending token,
+not the start of the enclosing construct.
 
 ### Error Recovery
 
-Current implementation (Phase 1):
-- **Fail-fast**: Stop at first error
-- **Precise error messages**: Include what was expected
-- **Span information**: Exact location of error
+- **Fail-fast**: parsing stops at the first error. Multiple-error reporting is the type
+  checker's job — it collects diagnostics and keeps going.
+- **Precise error messages**: each names what was expected
+- **Span information**: the exact location of the offending token
 
 Example error:
 ```
@@ -349,8 +235,6 @@ let binary_expr = Expr::Binary {
 ```
 
 ### Testing
-
-**Test coverage**: 122 comprehensive tests
 
 Test categories:
 - Expression parsing (all operators, precedence)
@@ -427,6 +311,9 @@ fn test_operator_precedence() {
 ```rust
 /// Parse Neuro source code into an AST
 pub fn parse(source: &str) -> Result<Vec<Item>, ParseError>
+
+/// Parse a single expression — used by tests and tooling, not by the driver
+pub fn parse_expr(source: &str) -> Result<Expr, ParseError>
 ```
 
 ### Public Types
@@ -456,63 +343,38 @@ pub struct Parameter { ... }
 
 ### Downstream Consumers
 
-- **semantic-analysis**: Type checking the AST
-- **llvm-backend**: Code generation from AST
+- **module-resolution**: expands the parsed root file into a whole program (the driver
+  injects `parse` into it, so that slice does not depend on this one)
+- **semantic-analysis**: type checking the AST
+- **hir-lowering**: AST → typed HIR, which is what the backends consume
 - **LSP server** (Phase 8): AST-based features
 
 ## Grammar Reference
 
-### EBNF Grammar (Phase 1, incl. structs/methods)
+### Grammar
 
-Structs and `impl` blocks are now supported as top-level items.
+The language surface is documented feature by feature in the
+[language reference](../../language-reference/), where every construct is shown in a program
+that compiles. That is the grammar's source of truth; a second copy here would only drift
+from it.
 
-```ebnf
-program        ::= item*
-item           ::= function_def
-                 | struct_def
-                 | impl_def
+What belongs in this document is the mapping from grammar to code:
 
-struct_def     ::= "struct" IDENTIFIER "{" field_list? "}"
-field_list     ::= field_def ("," field_def)* ","?
-field_def      ::= IDENTIFIER ":" type
-
-impl_def       ::= "impl" IDENTIFIER "{" method_def* "}"
-method_def     ::= "func" IDENTIFIER "(" self_param? params? ")" ("->" type)? "{" statement* "}"
-self_param     ::= "&" "self" | "&" "mut" "self" | "self"
-
-function_def   ::= "func" IDENTIFIER "(" parameters? ")" ("->" type)? "{" statement* "}"
-parameters     ::= parameter ("," parameter)*
-parameter      ::= IDENTIFIER ":" type
-
-statement      ::= var_decl
-                 | return_stmt
-                 | if_stmt
-                 | expr_stmt
-
-var_decl       ::= ("val" | "mut") IDENTIFIER (":" type)? ("=" expression)? ";"
-return_stmt    ::= "return" expression? ";"
-if_stmt        ::= "if" expression "{" statement* "}"
-                   ("else" "if" expression "{" statement* "}")*
-                   ("else" "{" statement* "}")?
-expr_stmt      ::= expression ";"
-
-expression     ::= assignment
-assignment     ::= logical_or (("=") logical_or)*
-logical_or     ::= logical_and (("||") logical_and)*
-logical_and    ::= equality (("&&") equality)*
-equality       ::= comparison (("==" | "!=") comparison)*
-comparison     ::= term (("<" | ">" | "<=" | ">=") term)*
-term           ::= factor (("+" | "-") factor)*
-factor         ::= unary (("*" | "/" | "%") unary)*
-unary          ::= ("!" | "-") unary | call
-call           ::= primary ("(" arguments? ")")*
-primary        ::= INTEGER | FLOAT | BOOLEAN | STRING
-                 | IDENTIFIER
-                 | "(" expression ")"
-
-arguments      ::= expression ("," expression)*
-type           ::= IDENTIFIER
-```
+| Construct | Parsed by |
+|---|---|
+| Top-level dispatch (`func`, `struct`, `enum`, `trait`, `impl`, `const`, `newtype`, `type`, `import`, `module`, `@no_prelude`) | `parser/items.rs` |
+| Functions, parameters, generic and lifetime lists | `parser/item_functions.rs` |
+| Structs and their fields | `parser/item_structs.rs` |
+| Enums and their variants | `parser/item_enums.rs` |
+| Traits, `impl` blocks, methods, associated types | `parser/item_impls.rs` |
+| `import` / `export import` forms | `parser/item_imports.rs` |
+| Statements, bindings, control flow | `parser/statements.rs`, `stmt_loops.rs`, `stmt_assignments.rs` |
+| `val PATTERN = expr else { ... }` | `parser/stmt_val_else.rs` |
+| Destructuring bindings | `parser/stmt_destructure.rs` |
+| Match patterns | `parser/patterns.rs` |
+| Expressions (Pratt) | `parser/expressions.rs` |
+| Type syntax | `parser/types.rs` |
+| `type` aliases | `parser/type_aliases.rs` |
 
 ## Examples
 
@@ -572,15 +434,13 @@ Binary(Subtract)
 └─ right: Binary(Divide, "d", Literal(2))
 ```
 
-## Future Enhancements (Post-Phase 1)
+## Future Enhancements
 
-- [ ] **Better error recovery**: Continue parsing after errors
-- [ ] **Error messages**: "Did you mean?" suggestions
-- [ ] **Attributes**: `@gpu`, `@inline`, etc.
-- [ ] **Pattern matching**: `match` expressions (Phase 1)
-- [ ] **Loops**: `while`, `for` (Phase 1)
-- [ ] **Structs**: Type definitions (Phase 1)
-- [ ] **Macros**: Procedural and declarative (Phase 7)
+- [ ] **Error recovery**: continue parsing after an error so a run can report more than one
+- [ ] **Suggestions**: "did you mean?" for near-miss identifiers and keywords
+- [ ] **String interpolation and triple-quoted strings**: need the stateful lexer of 1H
+- [ ] **Named arguments**: the `external internal: T` parameter form (1H)
+- [ ] **Macros**: procedural and declarative (Phase 7)
 
 ## Troubleshooting
 

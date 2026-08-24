@@ -121,11 +121,25 @@ val sign: i32  = if n < 0 { -1 } else if n == 0 { 0 } else { 1 }
 
 All arms must produce the same type. An `if` without `else` has type `Void` and cannot be used as a value.
 
+An arm that **leaves the scope** rather than producing a value — `return`, `break`,
+`continue`, `panic(...)`, or `unreachable()` — is exempt: it never reaches the point
+where the `if` has a value, so it neither supplies the type nor has to match it. The
+remaining arms decide:
+
+```neuro
+func first_positive(n: i32) -> i32 {
+    val v = if n > 0 { return 1 } else { 2 }   // the `if` is an i32; the then-arm returns
+    v
+}
+```
+
 ### Match Expressions
 
 `match` is an expression that exhaustively deconstructs a value. The first arm
 whose pattern matches — and whose optional `if` guard holds — supplies the
-value; all arm bodies must have the same type.
+value; all arm bodies must have the same type, except those that leave the scope
+(`{ return ... }`, `{ break }`, `{ continue }`, `panic(...)`, `unreachable()`), which
+supply no type at all.
 
 ```neuro
 enum Shape { Circle(i32), Rect { w: i32, h: i32 }, Unit }
@@ -263,6 +277,38 @@ func example() -> i32 {
     val x: i32 = 42  // Statement (binding)
     x  // Last expression — implicit return
 }
+```
+
+## Statement Boundaries
+
+There are no semicolons: a newline ends a statement. An expression continues onto the
+next line only when the line that just ended asks it to — it ends with a binary
+operator, a comma, or an opening delimiter, or the expression is still inside an
+unclosed `(`, `[`, or `{`:
+
+```neuro
+val total: i32 = 1 +
+    2 +
+    3                    // continues: each line ends with `+`
+
+val sum: i32 = add3(
+    1,
+    2,
+    3
+)                        // continues: inside an unclosed `(`
+
+val chained: i32 = cell
+    .get()               // continues: a leading `.` cannot start a statement
+```
+
+The decision belongs to the line that ended, never to the line that follows. A line
+*starting* with `(`, `[`, or `*` is therefore a new statement — a parenthesized
+expression, an array literal, a dereference — not a call, an index, or a
+multiplication continuing the line above:
+
+```neuro
+val a: i32 = f()
+(2 + 3)                  // a new statement, not `f()(2 + 3)`
 ```
 
 ## Type Checking

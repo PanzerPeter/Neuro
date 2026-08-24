@@ -177,6 +177,19 @@ expression context.
   without a return, LLVM terminated it with `unreachable` (a legal terminator, so the
   verifier stayed silent), and the program ran off the end of the function at runtime.
   `check_if_expr` is `pub(crate)` so the declaration modules can reach it.
+- 2026-08-24: A parameter whose type failed to resolve is still bound, at `Type::Unknown`.
+  `check_function` skipped defining it, which turned every use of it in the body into a second
+  "undefined variable" report chasing an error already given. `Unknown` is compatible with
+  everything, so binding it is what actually stops the cascade.
+- 2026-08-24: An arm that LEAVES the scope contributes no type. `check_if_expr` routes every
+  arm through `arm_value_type`, and `check_arm` checks `expr_diverges` on the arm body: a block
+  ending in `return` / `break` / `continue` reports `Type::Unknown` instead of the `Void` its
+  trailing statement gives it, so it neither supplies the expression's type nor has to match
+  it. Without the rule `if n > 0 { return 1 } else { 2 }` was "expected void, found i32" — the
+  diverging arm named as the EXPECTED type — while the same shape written with `panic` compiled,
+  because the panic family was already `Unknown`. `val_else::expr_diverges` is now `pub(crate)`;
+  the analysis itself is unchanged and still owned by `val_else.rs`, which needs it for the
+  `else`-must-diverge rule.
 - 2026-08-24: Divergent arms no longer decide an expression's type. `check_if_expr` and
   `check_match` take the result from the first arm that is not `Type::Unknown`, and compare
   every arm against it. A `panic` / `unreachable` arm is `Unknown` — the

@@ -88,6 +88,11 @@ An `if`/`else` is an expression: its value is the trailing expression of the tak
 branch. It can be a function's implicit return value or be bound to a variable. Both
 branches must yield the same type, so an `else` is required when the value is used.
 
+A branch that leaves the scope instead of producing a value — `return`, `break`,
+`continue`, `panic(...)`, `unreachable()` — is exempt from that agreement: it never
+reaches the point where the `if` has a value, so the other branch decides the type.
+`if n > 0 { return 1 } else { 2 }` is an `i32`. The same rule applies to `match` arms.
+
 ```neuro
 func abs(x: i32) -> i32 {
     if x >= 0 {

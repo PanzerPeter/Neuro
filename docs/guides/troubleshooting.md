@@ -545,12 +545,19 @@ Include in bug reports:
 
 ## Known Limitations (current)
 
-These are not bugs, but current limitations of Phase 1 (Core Language):
+These are not bugs, but current limitations. See the
+[Quick Roadmap](../../README.md#quick-roadmap) for what is landed and what is planned.
 
 1. **Type inference**: bare numeric literals default to `i32` / `f64` unless a type is in scope
-2. **Generics, traits, enums, pattern matching**: not yet implemented (sub-phases 1E / 1F)
-3. **Modules / imports**: single-file compilation only for now (sub-phase 1G)
-4. **Optimization**: `-O0` through `-O3` supported (higher levels may increase compile time)
+2. **Generic type arguments**: restricted to `Copy` types, and a generic may not be
+   instantiated with an enclosing type parameter (no `Option<T>` inside a `func f<T>`)
+3. **Strings are immutable**: `+`, `.slice(a..b)`, `.len()`, `.clone()` — there is no
+   growable `String` with `.push_str` yet
+4. **String interpolation, triple-quoted strings, nested block comments, and named
+   arguments**: not yet implemented
+5. **Ranges**: `a..b` and `a..=b` drive `for` loops and `.slice()`; `.rev()` and
+   `.step(n)` are not implemented yet
+6. **Optimization**: `-O0` through `-O3` supported (higher levels may increase compile time)
 
 Planned features are tracked through project issues and changelog updates.
 
@@ -589,7 +596,8 @@ Check that `main` returns the expected exit code and performs desired operations
 
 ### Why can't I mix i32 and i64?
 
-Neuro uses strict typing with no implicit conversions. Explicit conversion operators coming in Phase 1.
+Neuro uses strict typing with no implicit conversions. Convert explicitly with an `as`
+cast: `val wide: i64 = narrow as i64`.
 
 ### Why is compilation slow?
 

@@ -163,24 +163,26 @@ func main() -> i32 { f(0 - 1) }
 }
 
 #[test]
-fn regression_tail_if_mixing_return_and_value_is_rejected() {
-    // `if n > 0 { return 1 } else { 2 }` silently evaluated to 0 on the else path: the
-    // arm's value was dropped because the tail `if` was never a value position.
-    // Expression position already rejected the same shape, so the tail now agrees.
-    let out = expect_rejected(
-        "tail_if_mixed_arms.nr",
-        r#"
+fn regression_tail_if_mixing_return_and_value_carries_the_other_arm() {
+    // `if n > 0 { return 1 } else { 2 }` first evaluated to 0 on the else path (the arm's
+    // value was dropped, because a tail `if` was not a value position), then was rejected
+    // outright once it became one: the returning arm typed as `void` and forced its
+    // sibling to be `void` too. A returning arm never reaches the point where the `if`
+    // has a value, so it constrains nothing — each path now yields its own arm's value.
+    let test = CompileTest::new();
+    let exit = test
+        .compile_and_run(
+            "tail_if_mixed_arms.nr",
+            r#"
 func f(n: i32) -> i32 {
     if n > 0 { return 1 } else { 2 }
 }
 
-func main() -> i32 { f(0 - 1) }
+func main() -> i32 { f(0 - 1) * 10 + f(1) }
 "#,
-    );
-    assert!(
-        out.contains("mismatch"),
-        "expected a type-mismatch diagnostic, got: {out}"
-    );
+        )
+        .expect("compile/run failed");
+    assert_eq!(exit, 21);
 }
 
 #[test]

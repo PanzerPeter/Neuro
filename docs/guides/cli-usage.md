@@ -52,7 +52,8 @@ neurc compile <file.nr> [options]
 ```
 
 **Options**:
-- `-o, --output <FILE>` - Specify output executable path (default: same as input filename)
+- `-o, --output <FILE>` - Specify output executable path (default: the input filename without its extension)
+- `-O, --optimization <0-3>` - Optimization level (default: `0`); see [Optimization](#optimization)
 
 **Examples**:
 ```bash

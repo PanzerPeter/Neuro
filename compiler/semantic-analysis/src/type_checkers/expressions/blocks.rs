@@ -5,6 +5,7 @@
 
 use super::TypeChecker;
 use crate::errors::TypeError;
+use crate::type_checkers::val_else::stmts_diverge;
 use crate::types::Type;
 use ast_types::Expr;
 use shared_types::{Identifier, Span};
@@ -42,7 +43,7 @@ impl TypeChecker {
         let mut hint: Option<Type> = expected.cloned();
 
         // Collect arm types: then + each else-if + optional else
-        let then_ty = self.check_block_expr_type(then_block, hint.as_ref());
+        let then_ty = self.arm_value_type(then_block, hint.as_ref());
         if hint.is_none() && !matches!(then_ty, Type::Unknown) {
             hint = Some(then_ty.clone());
         }
@@ -61,7 +62,7 @@ impl TypeChecker {
                     span: elif_cond.span(),
                 });
             }
-            let elif_ty = self.check_block_expr_type(elif_block, hint.as_ref());
+            let elif_ty = self.arm_value_type(elif_block, hint.as_ref());
             if hint.is_none() && !matches!(elif_ty, Type::Unknown) {
                 hint = Some(elif_ty.clone());
             }
@@ -70,14 +71,14 @@ impl TypeChecker {
 
         self.symbols.restore_moves(&move_snapshot);
         if let Some(else_stmts) = else_block {
-            arm_types.push(self.check_block_expr_type(else_stmts, hint.as_ref()));
+            arm_types.push(self.arm_value_type(else_stmts, hint.as_ref()));
             self.symbols.restore_moves(&move_snapshot);
         } else {
             return Some(Type::Void);
         }
 
         // All arms must agree on type. The result is the first arm that carries one:
-        // a divergent arm — a `panic` or an `unreachable` — is `Unknown`, the
+        // a divergent arm — a `panic`, an `unreachable`, a `return` — is `Unknown`, the
         // compatible-with-everything type, so it says nothing about what the `if`
         // evaluates to. Taking it as the result left the whole expression untyped and
         // its binding undefined, purely because of the order the arms were written in.
@@ -97,6 +98,21 @@ impl TypeChecker {
             }
         }
         Some(result_ty)
+    }
+
+    /// The type an `if` arm contributes to unification.
+    ///
+    /// An arm that leaves the enclosing scope — `return`, `break`, `continue`, or a
+    /// diverging call — never reaches the point where the `if` has a value, so it
+    /// describes nothing about that value and must not constrain its siblings. Its
+    /// statements are still checked; only the type it reports is dropped, to `Unknown`,
+    /// the compatible-with-everything type the panic family already carries.
+    fn arm_value_type(&mut self, stmts: &[ast_types::Stmt], expected: Option<&Type>) -> Type {
+        let ty = self.check_block_expr_type(stmts, expected);
+        if stmts_diverge(stmts) {
+            return Type::Unknown;
+        }
+        ty
     }
 
     pub(super) fn check_bare_block_expr(

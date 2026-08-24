@@ -161,13 +161,11 @@ impl TypeChecker {
             .map(|(param, _)| param.name.name.clone())
             .collect();
 
-        // Define parameters in function scope (parameters are immutable by default)
+        // Define parameters in function scope (parameters are immutable by default).
+        // A parameter whose type failed to resolve is still bound, at `Unknown` — the
+        // error is already reported, and leaving the name undefined turns every use of
+        // it in the body into a second, misleading "undefined variable" report.
         for (param, param_ty) in func.params.iter().zip(param_types.iter()) {
-            // Skip Unknown types to avoid cascading errors
-            if matches!(param_ty, Type::Unknown) {
-                continue;
-            }
-
             if let Err(duplicate_name) = self.symbols.define(
                 param.name.name.clone(),
                 param_ty.clone(),

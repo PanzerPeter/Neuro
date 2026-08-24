@@ -21,25 +21,36 @@ This slice follows the **Vertical Slice Architecture** pattern:
 ### Token Types Supported
 
 #### Keywords
-- `func` - Function definitions
-- `val` - Immutable variable declarations
-- `mut` - Mutable variable declarations
-- `if` / `else` - Conditional statements
-- `return` - Return statements
-- `true` / `false` - Boolean literals
+
+`func` · `val` · `mut` · `const` · `as` · `if` · `else` · `return` · `true` · `false` ·
+`while` · `loop` · `for` · `in` · `break` · `continue` · `struct` · `enum` · `impl` ·
+`trait` · `dyn` · `import` · `export` · `module` · `match` · `where` · `type` · `newtype` ·
+`unsafe` · `move` · `self` · `Self`
+
+Type names (`i32`, `f64`, `bool`, `string`, `char`, …) are ordinary identifiers, not
+keywords: they are resolved by the type checker, which is what lets a `newtype` or a
+`type` alias introduce one.
 
 #### Operators
+
 - **Arithmetic**: `+`, `-`, `*`, `/`, `%`
+- **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`
 - **Comparison**: `==`, `!=`, `<`, `>`, `<=`, `>=`
 - **Logical**: `&&`, `||`, `!`
+- **Bitwise**: `&`, `|`, `^`, `~`, `<<` (there is no `>>` token — right shift is the
+  `.shr(n)` method, because `>>` is reserved for function composition)
+- **Fallible**: `??` (coalesce), `?` (propagate)
 - **Assignment**: `=`
+- **Other**: `@` (attributes), `->` (return type), `=>` (match arm), `::` (path and
+  turbofish), `..` / `..=` (ranges), `.` (member access)
 
 #### Delimiters
-- `(`, `)` - Parentheses
-- `{`, `}` - Braces
-- `,` - Comma
-- `:` - Colon
-- `->` - Arrow (function return type)
+
+`(` `)` · `{` `}` · `[` `]` · `,` · `:` · `;`
+
+`;` is tokenized only so a stray semicolon can be reported as an unexpected token — Neuro
+statements are newline-terminated. Newlines are themselves tokens (`TokenKind::Newline`),
+because the parser needs them to find statement boundaries.
 
 #### Literals
 
@@ -168,8 +179,6 @@ All errors include span information for precise error reporting.
 
 ### Testing
 
-**Test coverage**: 28 comprehensive tests
-
 Test categories:
 - Keywords and identifiers
 - All operator types
@@ -266,51 +275,17 @@ pub enum TokenKind {
 - **shared-types**: `Span` type for source locations
 - No dependencies on other feature slices (maintains slice independence)
 
-## Future Enhancements (Post-Phase 1)
+## Future Enhancements
 
+- [ ] **String interpolation** (1H): `"Hello, {name}!"` with a format mini-language. This is
+      the stateful-lexer rewrite — the scanner needs a mode stack to reopen expression
+      scanning inside a string literal
+- [ ] **Triple-quoted strings with dedent** (1H): `"""..."""`
+- [ ] **Nested block comments** (1H): `/* outer /* inner */ still outer */`, which needs a
+      hand-written comment scanner because `logos` longest-match cannot nest
 - [ ] Token stream caching for incremental compilation
-- [ ] Better error recovery (continue lexing after errors)
-- [ ] Preprocessor directives (if needed)
-- [ ] Attribute tokens (`@gpu`, `@inline`, etc.)
+- [ ] Better error recovery (continue lexing after an error)
 - [ ] Documentation comment tokens (`///`, `/**`)
 
-## Maintenance
-
-### Adding New Keywords
-
-1. Add keyword to `TokenKind` enum
-2. Add logos pattern in lexer implementation
-3. Update tests
-4. Update documentation
-
-### Adding New Operators
-
-1. Add operator variant to `TokenKind`
-2. Add logos pattern (ensure correct precedence)
-3. Update operator precedence in parser (downstream)
-4. Add tests
-
-## Troubleshooting
-
-### "Unexpected character" errors
-
-**Problem**: Source contains character not recognized by lexer
-
-**Solution**:
-- Check for invisible Unicode characters
-- Ensure file encoding is UTF-8
-- Verify character is valid in Neuro syntax
-
-### "Invalid escape sequence" in strings
-
-**Problem**: String contains unrecognized escape like `\q`
-
-**Solution**:
-- Use supported escapes: `\n \r \t \" \\ \0 \xNN \u{NNNN}`
-- Or use raw strings (future feature)
-
-## References
-
-- [Logos documentation](https://docs.rs/logos/)
-- [Unicode UAX#31](https://unicode.org/reports/tr31/)
-- Source: [compiler/lexical-analysis/src/lib.rs](../../compiler/lexical-analysis/src/lib.rs)
+Nothing links `TokenKind` to `neuro-language-support/syntaxes/neuro.tmLanguage.json`, so any
+change to the token set has to update that editor grammar by hand in the same commit.
