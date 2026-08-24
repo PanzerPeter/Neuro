@@ -239,7 +239,8 @@ This shows:
 
 ## Current Feature Summary
 
-Phase 1 (Core Language) sub-phases 1A–1G are complete; 1H (language cleanup) is next. The current compiler supports:
+Per-sub-phase status lives in the [Quick Roadmap](../../README.md#quick-roadmap). The
+current compiler supports:
 
 ### Types
 - Integers: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`

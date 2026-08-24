@@ -134,7 +134,7 @@ pub(crate) fn stmt_diverges(stmt: &Stmt) -> bool {
     }
 }
 
-fn expr_diverges(expr: &Expr) -> bool {
+pub(crate) fn expr_diverges(expr: &Expr) -> bool {
     match expr {
         Expr::Paren(inner, _) => expr_diverges(inner),
         Expr::Call { func, .. } => match func.as_ref() {

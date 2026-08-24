@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Alpha. Phase 1 (Core Language) is in progress. Sub-phases 1A through 1G are complete, with `Option` / `Result`, the standard collections, `val-else`, the `?` propagation operator, error-path outlining, multi-file compilation, `import`, `export` visibility, inline modules with re-exports, and the implicit prelude all landed. Sub-phase 1H (language cleanup) is next.
+**Status**: Alpha. Phase 1 (Core Language) is in progress. Per-sub-phase status lives in one place — the [Quick Roadmap](../README.md#quick-roadmap); what each release changed is in [CHANGELOG.md](../CHANGELOG.md). The feature list below describes what the compiler accepts today.
 
 ## Quick Links
 
@@ -38,6 +38,7 @@
 - [Compilation Pipeline](compiler/compilation.md): End-to-end compilation process
 - [Lexical Analysis](compiler/components/lexical-analysis.md): Tokenizer
 - [Syntax Parsing](compiler/components/syntax-parsing.md): AST generation
+- [Module Resolution](compiler/components/module-resolution.md): Multi-file expansion, imports, visibility
 - [Semantic Analysis](compiler/components/semantic-analysis.md): Type checking
 - [HIR Lowering](compiler/components/hir-lowering.md): AST → typed High-Level IR (`neuro-hir`)
 - [LLVM Backend](compiler/components/llvm-backend.md): Native code generation (from HIR)
@@ -391,7 +392,7 @@ See [Installation Guide](getting-started/installation.md) for other distribution
 
 ## Roadmap
 
-See the [Quick Roadmap in the project README](../README.md#quick-roadmap) for the phase-by-phase status, and [CONTRIBUTING.md](../CONTRIBUTING.md#current-contribution-priorities) for the active Phase 1 (sub-phase 1G) priorities.
+See the [Quick Roadmap in the project README](../README.md#quick-roadmap) for the phase-by-phase status, and [CONTRIBUTING.md](../CONTRIBUTING.md#current-contribution-priorities) for the active Phase 1 priorities.
 
 ## Architecture
 
@@ -423,6 +424,5 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 
 ---
 
-**Last Updated**: 2026-07-27
-**Version**: Phase 1 (Core Language) in progress. Sub-phases 1A through 1G are complete; 1H is next.
+**Status**: see the [Quick Roadmap](../README.md#quick-roadmap)
 **Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.9.0

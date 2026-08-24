@@ -15,7 +15,8 @@ Neuro is a statically typed language with explicit type annotations and planned 
 - Implemented: fixed-size arrays `[T; N]` of `Copy` elements
 - Implemented: tuples `(T1, T2, ...)` of `Copy` elements, with destructuring
 - Implemented: generic functions, structs, and impls, monomorphized
-- Planned (1F): traits
+- Implemented: traits, operator traits, and `impl` / `dyn` dispatch
+- Implemented: enums, generic enums, `Option<T>` / `Result<T, E>`, and the standard collections
 
 ## Primitive Types
 

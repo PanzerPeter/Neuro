@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.75.4] - 2026-08-24
+
+### Fixed
+- `semantic`: an `if` or `match` arm that leaves the scope no longer forces its type on the
+  arms that stay. `if n > 0 { return 1 } else { 2 }` was rejected as `expected void, found
+  i32` — the returning arm typed as `void`, so the arm carrying the actual value became the
+  error, and the diagnostic named the diverging arm as what was expected. A `return`,
+  `break`, or `continue` never reaches the point where the expression has a value, so it
+  describes nothing about it: such an arm now contributes no type at all, which is the
+  contract `panic` and `unreachable` already had. The rule reuses the existing divergence
+  analysis and applies to `match` arms and to expression position (`val v = if c { return 1 }
+  else { 2 }`) alike; a body whose every arm returns is still a statement, and a non-void
+  function that can fall off the end is still an error.
+- `parser`: a newline before a line beginning with `(` or `[` ends the statement. The
+  expression parser skipped newlines before consulting the next token's precedence, so the
+  *following* line decided whether the expression continued, inverting the documented rule
+  that the line which just *ended* decides — by ending with an operator, a comma, or an
+  opening delimiter. `val a = f()` followed by a line `(2 + 3)` therefore parsed as
+  `f()(2 + 3)`, and a following `[1, 2]` as an index into it. When the value on the left was
+  callable — a closure binding — the misparse type-checked, and the program silently computed
+  something its source never asked for. A leading `.` still continues a method chain, and a
+  leading `*` was already handled.
+- `semantic`: a parameter whose type failed to resolve is still bound, so its uses in the
+  body no longer produce a second round of "undefined variable" errors chasing the one that
+  was already reported.
+
+### Changed
+- `docs`: the compiler-architecture documents now describe the pipeline that exists — module
+  resolution has its own component document and appears in the compilation pipeline, the
+  parser and semantic-analysis documents no longer reproduce AST and type definitions that
+  had drifted from the source, the operator-precedence table covers the whole ladder, and the
+  backend's type table covers the aggregates, references, and trait objects it lowers.
+  Statement boundaries and arm divergence are documented in the language reference.
+- `docs`: `CONTRIBUTING.md` states the active sub-phase's four tasks as the contribution
+  priorities instead of restating the changelog; per-sub-phase status now has one home.
+- `build`: `tools/check_docs_hygiene.py` rejects any written-down test total, not only the
+  three phrasings it recognised before.
+
 ## [1.75.3] - 2026-08-24
 
 ### Fixed

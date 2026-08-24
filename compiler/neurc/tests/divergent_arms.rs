@@ -1,5 +1,8 @@
 // A divergent arm must not decide an `if`'s or a `match`'s type.
 //
+// The same rule covers an arm that leaves the scope by `return`, `break`, or
+// `continue`: it never reaches the point where the expression has a value.
+//
 // `panic` and `unreachable` never return, so they take on whatever type their context
 // demands and describe nothing about the expression around them. Both the checker and
 // HIR lowering took the FIRST arm's type unconditionally, so putting the divergent arm
@@ -116,4 +119,52 @@ func main() -> i32 { f(5) }
         exit, 0,
         "the panicking arm exited cleanly instead of aborting"
     );
+}
+
+#[test]
+fn regression_match_arm_that_returns_does_not_type_its_siblings() {
+    // The `match` mirror of the tail-`if` rule above: a `{ return .. }` arm typed as
+    // `void` and made every other arm a type error.
+    let test = CompileTest::new();
+    let exit = test
+        .compile_and_run(
+            "match_arm_returns.nr",
+            r#"
+func f(n: i32) -> i32 {
+    match n {
+        0 => 2,
+        _ => { return 1 }
+    }
+}
+
+func main() -> i32 { f(0) * 10 + f(5) }
+"#,
+        )
+        .expect("compile/run failed");
+    assert_eq!(exit, 21);
+}
+
+#[test]
+fn regression_returning_arm_in_expression_position_types_from_its_sibling() {
+    // The same rule where the `if` initializes a binding rather than tailing the body.
+    let test = CompileTest::new();
+    let exit = test
+        .compile_and_run(
+            "val_if_mixed_arms.nr",
+            r#"
+func f(n: i32) -> Option<i32> {
+    val v = if n > 0 { return Option::None } else { 2 }
+    Option::Some(v)
+}
+
+func main() -> i32 {
+    match f(0 - 1) {
+        Option::Some(v) => v,
+        Option::None => 9
+    }
+}
+"#,
+        )
+        .expect("compile/run failed");
+    assert_eq!(exit, 2);
 }

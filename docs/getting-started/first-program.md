@@ -392,7 +392,8 @@ counter = counter + 1
 
 ### 2. Use Explicit Types
 
-While type inference is planned, currently explicit types are clearer:
+Type inference works — `val count = 42` is an `i32` — but an annotation documents intent
+at a binding a reader has to trust:
 
 ```neuro
 // Explicit and clear

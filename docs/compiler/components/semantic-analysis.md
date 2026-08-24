@@ -2,7 +2,7 @@
 
 **Status**: Complete (Phase 1)
 **Crate**: `compiler/semantic-analysis`
-**Entry Point**: `pub fn type_check(items: &[Item]) -> Result<(), Vec<TypeError>>`
+**Entry Point**: `pub fn type_check(items: &[Item]) -> Result<Vec<Warning>, Vec<TypeError>>`
 
 ## Overview
 
@@ -20,47 +20,30 @@ This slice follows the **Vertical Slice Architecture** pattern:
 
 ### Type System (Phase 1)
 
-#### Primitive Types
+#### The Type Lattice
 
-```rust
-pub enum Type {
-    // Signed integers
-    I8, I16, I32, I64,
-    // Unsigned integers
-    U8, U16, U32, U64,
-    // Floating point
-    F32, F64,
-    Bool,
-    String,
-    Void,
-    /// Named struct type — nominal: two Struct values are equal iff names match
-    Struct(String),
-    Function {
-        params: Vec<Type>,
-        ret: Box<Type>,
-    },
-    Unknown, // Error recovery
-}
-```
+`Type` (see [`types.rs`](../../../compiler/semantic-analysis/src/types.rs)) covers:
+
+- **Integers**: `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`
+- **Floats**: `F16`, `BF16`, `F32`, `F64`
+- **Other scalars**: `Bool`, `Char` (a 32-bit Unicode scalar — ordered and castable, but not
+  arithmetic), `String`, `Void`
+- **Nominal user types**: `Struct(name)`, `Enum(name)`, `Newtype(name)` — two values share a
+  type only when the names match. A monomorphized generic is an ordinary nominal type with a
+  mangled name, which is what keeps generics invisible to everything downstream
+- **Compound**: `Array { element, size }` (length is part of the type), `Tuple`,
+  `Reference { inner, mutable }`, `Function { params, ret }`, `DynObject` (a `&dyn Trait`
+  receiver)
+- **`Unknown`**: the error-recovery type. It is compatible with everything, so one reported
+  error does not cascade into a second. Divergent expressions — `panic`, `unreachable`, and
+  an `if`/`match` arm that `return`s, `break`s, or `continue`s — carry it for the same
+  reason: they never produce a value, so they must not constrain the arms that do
 
 #### Type Compatibility
 
-```rust
-impl Type {
-    pub fn is_compatible_with(&self, other: &Type) -> bool {
-        // Exact type matching (no implicit conversions in Phase 1)
-        // Function types must match parameters and return type
-    }
-
-    pub fn is_numeric(&self) -> bool {
-        matches!(self, Type::I32 | Type::I64 | Type::F32 | Type::F64)
-    }
-
-    pub fn is_bool(&self) -> bool {
-        matches!(self, Type::Bool)
-    }
-}
-```
+There are **no implicit conversions**: compatibility is name-and-shape equality, with `as`
+the only widening or narrowing mechanism. `Unknown` is the single exception, and is
+compatible in both directions.
 
 ### Semantic Checks
 
@@ -265,8 +248,6 @@ No inference for:
 
 ## Testing
 
-**Test coverage**: 78 tests
-
 Test categories:
 - **Positive tests**: Valid programs that should type check
 - **Negative tests**: Invalid programs with specific error types
@@ -401,8 +382,8 @@ fn check_expr(&mut self, expr: &Expr) -> Result<Type, ()> {
 ### Public Functions
 
 ```rust
-/// Type check a Neuro program
-pub fn type_check(items: &[Item]) -> Result<(), Vec<TypeError>>
+/// Type check a Neuro program, returning the lint warnings it collected
+pub fn type_check(items: &[Item]) -> Result<Vec<Warning>, Vec<TypeError>>
 ```
 
 ### Public Types
@@ -460,13 +441,17 @@ func bad_example() -> i32 {
 ## Future Enhancements
 
 ### Remaining Phase 1 (Core Language) work
-- [x] **Structs / Methods**: user-defined types with nominal typing; `impl` blocks
-- [x] **Arrays**: fixed-size `[T; N]`
-- [x] **Explicit conversions**: `as i64`, `as f32`
-- [x] **Lifetime analysis / borrow checker**: move semantics, borrows, lifetime elision, `Drop` (sub-phase 1C)
-- [ ] **Enums + pattern matching** (1E)
-- [ ] **Generics**: monomorphization (1F)
-- [ ] **Traits + associated types**: type classes for polymorphism (1F)
+
+Structs, methods, arrays, tuples, `as` conversions, the borrow checker, enums and pattern
+matching, generics, traits, and dispatch have all landed — see the
+[Quick Roadmap](../../../README.md#quick-roadmap) for what is left. The checker's own open
+items:
+
+- [ ] **Generic type arguments beyond `Copy`**: type arguments are `Copy`-restricted, and a
+      generic may not be instantiated with an enclosing type parameter
+- [ ] **A `never` type**: divergence is modelled with `Unknown` today, which is compatible
+      with everything by design; a dedicated bottom type would let the checker distinguish
+      "diverges" from "unknown because an error was already reported"
 
 ### Phase 2: Tensor Types
 - [ ] **Static tensor types**: `Tensor<f32, [3, 3]>`
