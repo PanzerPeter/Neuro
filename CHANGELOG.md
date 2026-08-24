@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.75.5] - 2026-08-24
+
+### Changed
+- `docs`: the README demo GIF is re-recorded against the current compiler. The old
+  recording compiled `examples/neuron.nr`, a path that no longer exists, and showed only
+  compile-and-run. The new one type-checks (`neurc check`, reporting modules and lowered
+  HIR items), compiles with `-O2`, runs the binary, and times it, on
+  `examples/showcase/perceptron.nr`.
+- `docs`: the README badge row links the documentation site.
+
+### Added
+- `docs`: `assets/demo.tape` — the VHS script the demo GIF is recorded from, so the
+  recording is reproducible instead of hand-made. Regenerate with `vhs assets/demo.tape`
+  from the repository root after `cargo build --release -p neurc`.
+
 ## [1.75.4] - 2026-08-24
 
 ### Fixed
