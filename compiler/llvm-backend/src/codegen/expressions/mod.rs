@@ -6,6 +6,10 @@ mod arrays;
 mod binary;
 mod control_flow;
 mod enums;
+mod format_float;
+mod format_helpers;
+mod format_layout;
+mod interp;
 mod literals;
 mod matches;
 mod methods;
@@ -31,6 +35,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.codegen_cast(value, &target_ty)
             }
             HirExprKind::Literal(lit) => self.codegen_literal(lit, &Type::from_hir(&expr.ty)),
+            HirExprKind::InterpString { parts } => self.codegen_interp_string(parts),
             HirExprKind::Variable(name) => self.codegen_identifier(name),
             HirExprKind::Binary { op, left, right } => {
                 // `codegen_binary` dispatches on the left-operand type (instruction

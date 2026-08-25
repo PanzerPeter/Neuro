@@ -30,6 +30,9 @@ differences that make it the *typed* contract:
    span lives on the enclosing node.
 
 ## Recent Updates
+- 2026-08-25: Added `HirExprKind::InterpString { parts }` with `HirInterpPart::{Text,
+  Formatted}`. A hole written without a spec carries `FormatSpec::default()`, so
+  backends see one uniform shape for every hole.
 - 2026-07-31: `val-else`. Added `HirStmt::ValElse { scrutinee, test, bindings, else_binding,
   else_block, span }`, reusing `HirMatchTest` / `HirMatchBinding` verbatim rather than introducing a
   parallel vocabulary. It is a statement, not a `Match` variant, because its `bindings` belong to the

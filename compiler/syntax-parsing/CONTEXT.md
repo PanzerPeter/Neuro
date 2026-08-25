@@ -64,6 +64,15 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-08-25: String interpolation. `parser/interpolation.rs` turns the lexer's text/hole
+  chunks into `Expr::InterpString`: each hole's raw source is re-lexed, its token spans
+  shifted onto absolute file coordinates, and parsed by a nested `Parser` at
+  `Precedence::Lowest` — so a hole may hold a call, a struct literal, or an `if`, and any
+  diagnostic inside it points at the real file column. Anything after the expression must
+  be `:` plus a specifier, read from the raw text (`.2`, `08d`, `<10` are not well-formed
+  token sequences) and parsed into a `FormatSpec`. New errors:
+  `EmptyInterpolationHole`, `InvalidFormatSpec`, `InterpolationInPattern` — an
+  interpolated literal is not a constant, so it cannot be a pattern.
 - 2026-08-24: `Type::Generic`'s span covers its closing `>`. `parse_generic_type_args` returns
   the closing token's span alongside the arguments; the span used to end at the last argument,
   so every diagnostic pointing at a generic type application underlined one byte short

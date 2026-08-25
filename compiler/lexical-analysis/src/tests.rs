@@ -352,17 +352,16 @@ fn tokenize_strings() {
     let result = tokenize(r#""hello" "world" "with spaces""#).unwrap();
     assert_eq!(result.len(), 4); // 3 strings + EOF
 
-    match &result[0].kind {
-        TokenKind::String(s) => assert_eq!(s, "hello"),
-        _ => panic!("Expected string"),
-    }
-    match &result[1].kind {
-        TokenKind::String(s) => assert_eq!(s, "world"),
-        _ => panic!("Expected string"),
-    }
-    match &result[2].kind {
-        TokenKind::String(s) => assert_eq!(s, "with spaces"),
-        _ => panic!("Expected string"),
+    assert_eq!(plain_string(&result[0].kind), "hello");
+    assert_eq!(plain_string(&result[1].kind), "world");
+    assert_eq!(plain_string(&result[2].kind), "with spaces");
+}
+
+/// The decoded text of a plain (non-interpolated) string token; panics otherwise.
+fn plain_string(kind: &TokenKind) -> &str {
+    match kind {
+        TokenKind::String(StringValue::Plain(s)) => s,
+        other => panic!("expected plain string token, got {:?}", other),
     }
 }
 
@@ -370,26 +369,112 @@ fn tokenize_strings() {
 fn tokenize_string_escapes() {
     let result = tokenize(r#""hello\nworld" "tab\there" "quote\"here""#).unwrap();
 
-    match &result[0].kind {
-        TokenKind::String(s) => assert_eq!(s, "hello\nworld"),
-        _ => panic!("Expected string"),
-    }
-    match &result[1].kind {
-        TokenKind::String(s) => assert_eq!(s, "tab\there"),
-        _ => panic!("Expected string"),
-    }
-    match &result[2].kind {
-        TokenKind::String(s) => assert_eq!(s, "quote\"here"),
-        _ => panic!("Expected string"),
-    }
+    assert_eq!(plain_string(&result[0].kind), "hello\nworld");
+    assert_eq!(plain_string(&result[1].kind), "tab\there");
+    assert_eq!(plain_string(&result[2].kind), "quote\"here");
 }
 
 #[test]
 fn tokenize_string_unicode_escape() {
     let result = tokenize(r#""unicode: \u{1F600}""#).unwrap();
-    match &result[0].kind {
-        TokenKind::String(s) => assert_eq!(s, "unicode: 😀"),
-        _ => panic!("Expected string"),
+    assert_eq!(plain_string(&result[0].kind), "unicode: \u{1F600}");
+}
+
+/// The chunks of an interpolated string token; panics otherwise.
+fn interp_chunks(kind: &TokenKind) -> &[InterpChunk] {
+    match kind {
+        TokenKind::String(StringValue::Interp(chunks)) => chunks,
+        other => panic!("expected interpolated string token, got {:?}", other),
+    }
+}
+
+#[test]
+fn tokenize_interpolation_splits_text_and_holes() {
+    //             0123456789012345678901
+    let src = r#""Sum: {a + b}, n: {n}""#;
+    let result = tokenize(src).unwrap();
+    let chunks = interp_chunks(&result[0].kind);
+
+    assert_eq!(chunks.len(), 4);
+    assert_eq!(chunks[0], InterpChunk::Text("Sum: ".to_string()));
+    assert_eq!(
+        chunks[1],
+        InterpChunk::Hole {
+            source: "a + b".to_string(),
+            // Absolute file span: the hole text sits at bytes 7..12, braces excluded.
+            span: Span::new(7, 12),
+        }
+    );
+    assert_eq!(chunks[2], InterpChunk::Text(", n: ".to_string()));
+    assert_eq!(
+        chunks[3],
+        InterpChunk::Hole {
+            source: "n".to_string(),
+            span: Span::new(19, 20),
+        }
+    );
+}
+
+#[test]
+fn adjacent_holes_produce_no_empty_text() {
+    let result = tokenize(r#""{a}{b}""#).unwrap();
+    let chunks = interp_chunks(&result[0].kind);
+
+    assert_eq!(chunks.len(), 2);
+    assert!(chunks.iter().all(|c| matches!(c, InterpChunk::Hole { .. })));
+}
+
+#[test]
+fn escaped_brace_is_plain_text() {
+    // `\{` suppresses the hole; the trailing bare `}` stays literal too.
+    let result = tokenize(r#""\{not a hole}""#).unwrap();
+    assert_eq!(plain_string(&result[0].kind), "{not a hole}");
+}
+
+#[test]
+fn lone_closing_brace_stays_literal() {
+    // The language defines `\{` but no `\}`, so an unpaired `}` must survive as itself.
+    let result = tokenize(r#""a}b""#).unwrap();
+    assert_eq!(plain_string(&result[0].kind), "a}b");
+}
+
+#[test]
+fn unterminated_hole_is_lex_error() {
+    let err = tokenize(r#""x {a""#).unwrap_err();
+    assert!(matches!(err, LexError::UnterminatedInterpolation { .. }));
+}
+
+#[test]
+fn nested_string_inside_hole_is_rejected() {
+    // A `"` inside a hole closes the enclosing literal, leaving the hole open.
+    // Reported as an unterminated hole rather than silently mis-lexed.
+    let err = tokenize(r#""pre {"inner"} post""#).unwrap_err();
+    assert!(matches!(err, LexError::UnterminatedInterpolation { .. }));
+}
+
+#[test]
+fn char_literal_unicode_braces_do_not_count_as_depth() {
+    // The `}` inside `'\u{7D}'` belongs to the escape payload, not the hole.
+    let result = tokenize(r#""{'\u{7D}'} tail}""#).unwrap();
+    let chunks = interp_chunks(&result[0].kind);
+
+    assert_eq!(chunks.len(), 2);
+    match &chunks[0] {
+        InterpChunk::Hole { source, .. } => assert_eq!(source, r"'\u{7D}'"),
+        other => panic!("expected hole chunk, got {:?}", other),
+    }
+    assert_eq!(chunks[1], InterpChunk::Text(" tail}".to_string()));
+}
+
+#[test]
+fn struct_literal_braces_nest_inside_hole() {
+    let result = tokenize(r#""{Point { x: 1 }}""#).unwrap();
+    let chunks = interp_chunks(&result[0].kind);
+
+    assert_eq!(chunks.len(), 1);
+    match &chunks[0] {
+        InterpChunk::Hole { source, .. } => assert_eq!(source, "Point { x: 1 }"),
+        other => panic!("expected hole chunk, got {:?}", other),
     }
 }
 

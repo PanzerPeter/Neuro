@@ -126,9 +126,11 @@ Expand a root `.nr` file into the single item list its program is built from, lo
   brace form is ambiguous until the qualifier is known) and is rewritten into a plain
   struct literal here.
 - **One walk, two passes.** `walk.rs` visits every place a qualified or imported name can
-  be written — including bare identifiers and `match` / `val-else` patterns, both of which
-  imports made significant; discovery and rewriting are the same traversal with different
-  callbacks, so a new position cannot be handled by one and forgotten by the other.
+  be written — including bare identifiers, `match` / `val-else` patterns (both of which
+  imports made significant), and the holes of an interpolated string literal, whose
+  expressions are ordinary code and may name imported items; discovery and rewriting are
+  the same traversal with different callbacks, so a new position cannot be handled by one
+  and forgotten by the other.
 - **Rewriting does not track locals.** A bare name is replaced when an import bound it,
   whether or not a local of the same name is in scope. Shadowing an imported name is
   therefore not supported: rename the import with `as`.

@@ -306,25 +306,21 @@ confirmed defects get filed into `docs/BUGS.md` from there.
 The roadmap is dependency-ordered, so pick the **topmost open item**: its prerequisites
 are already done. Coordinate on an issue before starting a large one.
 
-**Sub-phase 1H — Language Cleanup** is the active sub-phase. Its four items, in order:
+**Sub-phase 1H — Language Cleanup** is the active sub-phase. String interpolation is
+done; the three remaining items, in order:
 
-1. **String interpolation** — `"Hello, {name}!"`, with a format mini-language for width,
-   fill, alignment, and precision (`{x:.2}`, `{n:08d}`, `{s:^10}`). The largest of the
-   four: the lexer is a stateless `logos` scanner today, and an interpolated literal needs
-   a mode stack to reopen expression scanning inside a string. Lands in
-   `lexical-analysis` and `syntax-parsing`, with codegen for the formatting itself.
-   Nothing links `TokenKind` to the editor grammar, so
-   `neuro-language-support/syntaxes/neuro.tmLanguage.json` has to be updated by hand in
-   the same change.
-2. **Triple-quoted strings with dedent** — a `"""..."""` block whose closing delimiter's
+1. **Triple-quoted strings with dedent** — a `"""..."""` block whose closing delimiter's
    column determines how much indentation is stripped from every line. Builds on the
-   lexer work above.
-3. **Nested block comments** — `/* outer /* inner */ still outer */`. Needs a
+   string-literal decoder that interpolation added.
+2. **Nested block comments** — `/* outer /* inner */ still outer */`. Needs a
    hand-written comment scanner; `logos` longest-match cannot nest. Self-contained, and
-   the smallest of the four — a good first compiler change.
-4. **Named arguments** — the `external internal: T` parameter form, with callers free to
+   the smallest of the three — a good first compiler change.
+3. **Named arguments** — the `external internal: T` parameter form, with callers free to
    pass positionally or by name. Lowers to identical IR, so it is a parser plus
    argument-resolution change with no runtime cost.
+
+Nothing links `TokenKind` to the editor grammar, so any lexer change must also update
+`neuro-language-support/syntaxes/neuro.tmLanguage.json` by hand in the same commit.
 
 Every item ships with integration tests, a `CHANGELOG.md` entry, and its slice's
 `CONTEXT.md` updated in the same commit — see [Acceptance Criteria](#acceptance-criteria).

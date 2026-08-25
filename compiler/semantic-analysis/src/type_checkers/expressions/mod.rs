@@ -7,6 +7,7 @@ mod builtins;
 mod calls;
 mod const_predicates;
 mod enum_exprs;
+mod interpolation;
 mod operators;
 mod places;
 mod sequences;
@@ -57,6 +58,8 @@ impl TypeChecker {
                 Literal::Char(_) => Some(Type::Char), // Char literals have char type
                 Literal::String(_) => Some(Type::String), // String literals have string type
             },
+
+            Expr::InterpString { parts, .. } => self.check_interp_string(parts),
 
             Expr::Identifier(ident) => {
                 // Variables take priority; constants are a fallback so locals can shadow consts.

@@ -277,9 +277,6 @@ pub enum TokenKind {
 
 ## Future Enhancements
 
-- [ ] **String interpolation** (1H): `"Hello, {name}!"` with a format mini-language. This is
-      the stateful-lexer rewrite — the scanner needs a mode stack to reopen expression
-      scanning inside a string literal
 - [ ] **Triple-quoted strings with dedent** (1H): `"""..."""`
 - [ ] **Nested block comments** (1H): `/* outer /* inner */ still outer */`, which needs a
       hand-written comment scanner because `logos` longest-match cannot nest

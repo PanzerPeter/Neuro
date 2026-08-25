@@ -29,8 +29,8 @@ pub mod statements;
 pub mod types;
 
 pub use expressions::{
-    HirBindingSource, HirExpr, HirExprKind, HirFieldInit, HirMatchArm, HirMatchBinding,
-    HirMatchTest,
+    HirBindingSource, HirExpr, HirExprKind, HirFieldInit, HirInterpPart, HirMatchArm,
+    HirMatchBinding, HirMatchTest,
 };
 pub use items::{
     HirCapture, HirClosure, HirConst, HirEnum, HirEnumField, HirEnumVariant, HirField, HirFunction,

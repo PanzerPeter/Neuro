@@ -304,7 +304,7 @@ current compiler supports:
 - An implicit prelude puts `Option`, `Result`, `Some` / `None` / `Ok` / `Err`, and `println` / `print` in scope in every file with no `import`; `@no_prelude` on a file's first line opts out
 
 ### Not Yet Implemented (later in Phase 1)
-- String interpolation, triple-quoted strings, nested comments, named arguments (1H)
+- Triple-quoted strings, nested comments, named arguments (1H)
 
 ## Common Issues
 

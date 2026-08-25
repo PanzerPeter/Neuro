@@ -1,6 +1,6 @@
 use std::fmt;
 
-use shared_types::{Identifier, Literal, Span};
+use shared_types::{FormatSpec, Identifier, Literal, Span};
 
 use super::statements::Stmt;
 use super::types::GenericArg;
@@ -225,6 +225,30 @@ pub enum Expr {
         operand: Box<Expr>,
         span: Span,
     },
+    /// String interpolation `"Sum: {a + b}, Product: {pi:.2}"`.
+    ///
+    /// The lexer splits the literal into [`InterpPart`]s — decoded text chunks and
+    /// raw hole sources — and the parser re-parses each hole as a full expression
+    /// plus an optional format spec, so holes carry ordinary typed expressions.
+    /// The whole node has type `string`; the result is a fresh owned string.
+    InterpString {
+        parts: Vec<InterpPart>,
+        span: Span,
+    },
+}
+
+/// One segment of an interpolated string literal.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InterpPart {
+    /// Literal text with escapes (`\n`, `\{`, …) already decoded.
+    Text(String),
+    /// A `{expr}` hole, optionally `:{spec}`-formatted. `span` covers the hole's
+    /// source text (inside the braces) in absolute file coordinates.
+    Formatted {
+        expr: Box<Expr>,
+        spec: Option<FormatSpec>,
+        span: Span,
+    },
 }
 
 /// One parameter of a closure literal: a binding name and an optional type
@@ -387,6 +411,7 @@ impl Expr {
             Expr::Match { span, .. } => *span,
             Expr::Closure { span, .. } => *span,
             Expr::Try { span, .. } => *span,
+            Expr::InterpString { span, .. } => *span,
         }
     }
 }

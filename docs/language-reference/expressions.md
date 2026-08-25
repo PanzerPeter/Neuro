@@ -16,6 +16,50 @@ false           // Boolean literal
 "hello"         // String literal (type: string)
 ```
 
+### String Interpolation
+
+A string literal may embed expressions in `{...}` holes. The whole literal is an
+expression of type `string`, evaluated to a fresh owned string each time it is
+reached:
+
+```neuro
+val message = "Welcome to {name} v{version}"
+val report  = "Sum: {a + b}, Product: {a * b}"
+```
+
+A hole holds any expression — a call, a field access, a struct literal, an `if`,
+a nested block — because the lexer only finds the hole's bounds and the parser
+re-parses its text as an ordinary expression. Write a literal `{` as `\{`; an
+unpaired `}` needs no escape.
+
+An optional `:spec` after the expression chooses the rendering. The full
+specifier table lives in the language specification; the shape is
+`[< > ^] [+] [0] [width] [.precision] [kind]`, where *kind* is one of
+`? e d x X b o`:
+
+```neuro
+"{pi:.2}"      // 3.14        — fixed-point, 2 decimals
+"{pi:e}"       // 3.14159e0   — scientific
+"{n:x}"        // ff          — lowercase hex (n = 255)
+"{n:08d}"      // 00000255    — zero-padded to width 8
+"{s:^10}"      // centred in a field of width 10
+"{delta:+d}"   // +42 or -42  — always show the sign
+```
+
+Which specifiers a value accepts depends on its type, and a mismatch is a
+compile error rather than a surprising rendering: radix kinds (`d x X b o`)
+require an integer, fixed-point and scientific (`.N`, `e`) require a float, and
+the `+` flag requires a signed integer or a float. Interpolation renders
+integers, floats, `bool`, `char`, and `string`; aggregates await
+`@derive(Debug)`.
+
+Two limits are worth knowing. A hole may not contain a `"` string literal — the
+quote ends the enclosing literal, and the hole is reported as unterminated. And
+an interpolated literal is not a constant, so it cannot appear in a pattern.
+
+See [`examples/types/string_interpolation.nr`](../../examples/types/string_interpolation.nr)
+for every specifier checked against its expected output.
+
 ### Identifiers
 
 Variable and function names:

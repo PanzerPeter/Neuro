@@ -28,6 +28,10 @@ inherent block (`impl T`). Each `MethodDef` holds an
 the callee of associated-function calls (`Point::new(args)`).
 
 ## Recent Updates
+- 2026-08-25: Added `Expr::InterpString { parts, span }` and `InterpPart::{Text, Formatted}`
+  for interpolated string literals. A `Formatted` hole carries an already-parsed `Expr`
+  and an optional `FormatSpec` from shared-types, so consumers see ordinary typed
+  expressions rather than raw text.
 - 2026-08-23: Implicit prelude. Added `Item::NoPrelude(Span)` for the file-scope `@no_prelude`
   marker. Like `Item::Import` and `Item::Module` it is parse-only: module resolution reads it off
   the file it opens and drops it, so no pass after that sees the variant. It carries only its

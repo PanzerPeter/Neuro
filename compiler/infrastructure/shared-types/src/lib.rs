@@ -118,6 +118,88 @@ pub enum FloatSuffix {
     F64,
 }
 
+/// Alignment inside a padded interpolation field: `:<10`, `:>10`, `:^10`.
+///
+/// The language's specifier table has no fill character — padding fills with
+/// spaces (or zeros under the `0` flag), so alignment is the whole story.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatAlign {
+    Left,
+    Right,
+    Center,
+}
+
+/// The base rendering an interpolation hole selects with its format kind letter
+/// (`{pi:.2}`, `{n:x}`, `{s:?}`). The letters mirror the language's specifier table;
+/// applicability to a value's type is checked later, against the resolved type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatKind {
+    /// No kind letter — Display-style default per type.
+    Default,
+    /// `?` — debug rendering. Scalars only this phase; aggregate support awaits
+    /// `@derive(Debug)`.
+    Debug,
+    /// `.N` — fixed-point, N decimal places (floats).
+    Fixed,
+    /// `e` / `.Ne` — scientific notation with the exponent normalized to
+    /// `3.14e0` form (floats).
+    Scientific,
+    /// `d` — decimal (integers).
+    Decimal,
+    /// `x` — lowercase hexadecimal (integers).
+    LowerHex,
+    /// `X` — uppercase hexadecimal (integers).
+    UpperHex,
+    /// `b` — binary (integers).
+    Binary,
+    /// `o` — octal (integers).
+    Octal,
+}
+
+/// The parsed `spec` half of an interpolated hole `{expr:spec}`.
+///
+/// Pure data: the grammar shape is validated where the spec is written into the
+/// AST (the parser), and applicability to the value's type where the type is
+/// known (semantic analysis). Every pass between them only reads fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormatSpec {
+    pub align: Option<FormatAlign>,
+    /// `0` flag — zero-pad to `width`. Rejected together with [`FormatAlign::Left`]
+    /// (one forces digits left, the other right).
+    pub zero_pad: bool,
+    /// `+` flag — always render the sign for numeric values.
+    pub plus_sign: bool,
+    /// Field width; shorter renders are padded to it.
+    pub width: Option<u32>,
+    /// `.N` precision. Meaningful only for [`FormatKind::Fixed`] /
+    /// [`FormatKind::Scientific`]; the checker rejects it elsewhere.
+    pub precision: Option<u32>,
+    pub kind: FormatKind,
+}
+
+impl Default for FormatSpec {
+    fn default() -> Self {
+        Self {
+            align: None,
+            zero_pad: false,
+            plus_sign: false,
+            width: None,
+            precision: None,
+            kind: FormatKind::Default,
+        }
+    }
+}
+
+/// Sanity ceiling on a written field width (`{x:<99999}` is legal source but a
+/// program that pads to megabytes per evaluation is almost certainly a typo).
+/// Checked in semantic analysis so the error carries a span.
+pub const MAX_FORMAT_WIDTH: u32 = 4096;
+
+/// Sanity ceiling on `.N` precision. Comfortably above what an `f64` can even
+/// express (fixed notation of the smallest subnormal needs ~324 places), so the
+/// cap only rejects absurd requests, never legitimate ones.
+pub const MAX_FORMAT_PRECISION: u32 = 1024;
+
 /// Literal value types supported in the language.
 ///
 /// These represent constant values that appear directly in the source code.
@@ -197,6 +279,17 @@ mod tests {
         let lit = Literal::Integer(42, None);
         assert_eq!(lit, Literal::Integer(42, None));
         assert_ne!(lit, Literal::Integer(43, None));
+    }
+
+    #[test]
+    fn format_spec_default_is_display() {
+        let spec = FormatSpec::default();
+        assert_eq!(spec.kind, FormatKind::Default);
+        assert_eq!(spec.align, None);
+        assert!(!spec.zero_pad);
+        assert!(!spec.plus_sign);
+        assert_eq!(spec.width, None);
+        assert_eq!(spec.precision, None);
     }
 
     #[test]

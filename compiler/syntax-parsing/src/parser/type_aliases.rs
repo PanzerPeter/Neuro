@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
-use crate::ast::{Expr, Item, Stmt, Type};
+use crate::ast::{Expr, InterpPart, Item, Stmt, Type};
 use crate::errors::{ParseError, ParseResult};
 
 use super::Parser;
@@ -367,6 +367,13 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
             }
         }
         Expr::FieldAccess { object, .. } => rewrite_expr(object, resolved),
+        Expr::InterpString { parts, .. } => {
+            for part in parts.iter_mut() {
+                if let InterpPart::Formatted { expr, .. } = part {
+                    rewrite_expr(expr, resolved);
+                }
+            }
+        }
         Expr::EnumStructLiteral { fields, .. } => {
             for field in fields.iter_mut() {
                 rewrite_expr(&mut field.value, resolved);

@@ -326,6 +326,15 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-08-25: String-interpolation codegen. `codegen/expressions/interp.rs` renders each part
+  to a `{ ptr, len }` fat pointer and concatenates them into one fresh `malloc`'d buffer
+  (the result leaks like `+` concatenation does, until a heap-string type lands). The
+  rendering helpers live in `format_helpers.rs` (`snprintf`-backed integer/float
+  conversion, hand-written binary digits), `format_layout.rs` (sign-aware field padding,
+  debug quoting, UTF-8 encoding of a `char`), and `format_float.rs` (restoring the point
+  `%g` drops, normalizing C's `e+00` exponent). Each is emitted once per module with
+  internal linkage rather than inlined at every hole. `snprintf` is the one new external
+  declaration.
 - 2026-08-23: `&string` is passed by value (BUG-008). Backend `Type::Reference` became
   `{ inner, mutable }` (`types.rs`), and `map_type` lowers an **immutable** `&string` to the
   `{ ptr, i64 }` fat pointer instead of a `ptr` to one; `&mut string`, `&&string`, and every other

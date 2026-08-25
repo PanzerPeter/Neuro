@@ -5,7 +5,9 @@ mod errors;
 mod tokens;
 
 pub use errors::{LexError, LexResult};
-pub use tokens::{FloatSuffixToken, IntegerSuffixToken, Token, TokenKind};
+pub use tokens::{
+    FloatSuffixToken, IntegerSuffixToken, InterpChunk, StringValue, Token, TokenKind,
+};
 
 use logos::Logos;
 use shared_types::Span;

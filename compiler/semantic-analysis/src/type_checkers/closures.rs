@@ -7,7 +7,7 @@
 
 use std::collections::HashSet;
 
-use ast_types::{ClosureParam, EnumPatternPayload, Expr, Pattern, Stmt};
+use ast_types::{ClosureParam, EnumPatternPayload, Expr, InterpPart, Pattern, Stmt};
 use shared_types::Span;
 
 use super::TypeChecker;
@@ -322,6 +322,13 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
             }
         }
         Expr::Unary { operand, .. } => collect_expr(operand, fv),
+        Expr::InterpString { parts, .. } => {
+            for part in parts {
+                if let InterpPart::Formatted { expr, .. } = part {
+                    collect_expr(expr, fv);
+                }
+            }
+        }
         Expr::Paren(inner, _) => collect_expr(inner, fv),
         Expr::StructLiteral { fields, base, .. } => {
             for field in fields {

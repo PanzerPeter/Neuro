@@ -27,6 +27,38 @@ pub struct FloatSuffixToken {
     pub suffix: FloatSuffix,
 }
 
+/// The decoded content of a string literal token: a plain literal, or the
+/// text/hole chunks of an interpolated one.
+///
+/// One token variant for both shapes because a logos callback picks the
+/// variant's *payload*, never the variant — the decoder decides plain-vs-
+/// interpolated after it has walked the content.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StringValue {
+    /// No interpolation holes — the whole literal's decoded text.
+    Plain(String),
+    /// At least one `{expr}` hole; see [`InterpChunk`].
+    Interp(Vec<InterpChunk>),
+}
+
+/// One segment of an interpolated string literal, as split by the lexer.
+///
+/// The lexer only locates the `{...}` holes — brace matching that skips char
+/// literals — and hands each hole's raw source text to the parser, which
+/// re-lexes and parses it as an expression. Keeping expression parsing out of
+/// the lexer is what lets a hole contain calls, struct literals, and nested
+/// blocks. A hole may not contain a `"` string literal: the quote ends the
+/// enclosing token, so such a literal reports as an unterminated hole.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InterpChunk {
+    /// Literal text with escapes (`\n`, `\{`, …) already decoded.
+    Text(String),
+    /// A `{...}` hole: its raw source text and the absolute file span of that
+    /// text (the braces themselves excluded), so diagnostics inside the hole
+    /// point at the right column of the real file.
+    Hole { source: String, span: Span },
+}
+
 /// Token types in the Neuro language
 #[derive(Debug, Clone, PartialEq, Logos)]
 #[logos(skip r"[ \t\r]+")]
@@ -157,14 +189,16 @@ pub enum TokenKind {
     #[regex(r"[0-9][0-9_]*", parse_decimal)]
     Integer(i64),
 
-    // String literals (including potentially malformed ones for better error messages)
+    // String literals (including potentially malformed ones for better error messages).
+    // Both patterns route through the same decoder: a literal with no `{...}` hole
+    // carries `StringValue::Plain`, one with holes carries `StringValue::Interp`.
     #[regex(
-        r#""([^"\\\n]|\\[nrt\\"0xu]|\\u\{[0-9a-fA-F]+\}|\\x[0-9a-fA-F]{2})*""#,
-        parse_string,
+        r#""([^"\\\n]|\\[nrt\\"0{xu]|\\u\{[0-9a-fA-F]+\}|\\x[0-9a-fA-F]{2})*""#,
+        decode_string_literal,
         priority = 2
     )]
-    #[regex(r#""([^"\\]|\\.)*""#, parse_string_catch_all, priority = 1)]
-    String(String),
+    #[regex(r#""([^"\\]|\\.)*""#, decode_string_literal, priority = 1)]
+    String(StringValue),
 
     // Character literals: a single Unicode scalar value between single
     // quotes, e.g. `'a'`, `'\n'`, `'\u{1F44D}'`. The regex admits exactly one
@@ -410,6 +444,205 @@ impl Token {
 
 // Literal parsing helper functions (tightly coupled to TokenKind)
 
+/// Decode a string literal token, splitting interpolated literals into chunks.
+///
+/// This is the stateful half of string lexing: logos matches the literal's
+/// shape, but finding where each `{...}` hole opens and closes requires walking
+/// the content with a brace depth that skips over nested string/char literals —
+/// beyond what a regular expression can express. A literal without any unescaped
+/// `{` decodes exactly like the pre-interpolation lexer did ([`StringValue::Plain`]);
+/// one with holes yields [`StringValue::Interp`] with raw hole sources for
+/// the parser to re-parse.
+fn decode_string_literal(lex: &mut logos::Lexer<TokenKind>) -> Result<StringValue, LexError> {
+    let raw = lex.slice();
+    let base = lex.span().start;
+    let whole = Span::new(base, base + raw.len());
+    let content = &raw[1..raw.len() - 1]; // Strip quotes
+    let indexed: Vec<(usize, char)> = content.char_indices().collect();
+
+    let mut parts: Vec<InterpChunk> = Vec::new();
+    let mut text = String::new();
+    let mut has_hole = false;
+    let invalid_escape = |escape: String| LexError::InvalidEscape {
+        escape,
+        span: whole,
+    };
+
+    let mut i = 0usize;
+    while i < indexed.len() {
+        let (byte_off, ch) = indexed[i];
+
+        if ch == '\\' {
+            let Some((_, esc)) = indexed.get(i + 1).copied() else {
+                return Err(LexError::UnterminatedString { span: whole });
+            };
+            match esc {
+                'n' => {
+                    text.push('\n');
+                    i += 2;
+                }
+                'r' => {
+                    text.push('\r');
+                    i += 2;
+                }
+                't' => {
+                    text.push('\t');
+                    i += 2;
+                }
+                '\\' => {
+                    text.push('\\');
+                    i += 2;
+                }
+                '"' => {
+                    text.push('"');
+                    i += 2;
+                }
+                '0' => {
+                    text.push('\0');
+                    i += 2;
+                }
+                // Literal `{`: the interpolation delimiter's only escape form.
+                '{' => {
+                    text.push('{');
+                    i += 2;
+                }
+                'x' => {
+                    let hex: Option<String> = indexed
+                        .get(i + 2..i + 4)
+                        .map(|pair| pair.iter().map(|(_, c)| c).collect());
+                    let Some(hex) = hex.filter(|h| h.len() == 2) else {
+                        return Err(invalid_escape("\\x".to_string()));
+                    };
+                    let code = u8::from_str_radix(&hex, 16)
+                        .map_err(|_| invalid_escape(format!("\\x{}", hex)))?;
+                    text.push(code as char);
+                    i += 4;
+                }
+                'u' => {
+                    if indexed.get(i + 2).map(|(_, c)| *c) != Some('{') {
+                        return Err(invalid_escape("\\u".to_string()));
+                    }
+                    let mut hex = String::new();
+                    let mut j = i + 3;
+                    loop {
+                        match indexed.get(j) {
+                            Some((_, '}')) => break,
+                            Some((_, c)) if c.is_ascii_hexdigit() => {
+                                hex.push(*c);
+                                j += 1;
+                            }
+                            _ => {
+                                return Err(invalid_escape(format!("\\u{{{}}}", hex)));
+                            }
+                        }
+                    }
+                    let code = u32::from_str_radix(&hex, 16)
+                        .map_err(|_| invalid_escape(format!("\\u{{{}}}", hex)))?;
+                    let unicode_char = char::from_u32(code)
+                        .ok_or_else(|| invalid_escape(format!("\\u{{{}}}", hex)))?;
+                    text.push(unicode_char);
+                    i = j + 1;
+                }
+                other => {
+                    return Err(invalid_escape(format!("\\{}", other)));
+                }
+            }
+            continue;
+        }
+
+        if ch == '{' {
+            has_hole = true;
+            let close_j = scan_hole_close(&indexed, i)
+                .ok_or(LexError::UnterminatedInterpolation { span: whole })?;
+
+            if !text.is_empty() {
+                parts.push(InterpChunk::Text(std::mem::take(&mut text)));
+            }
+            // `byte_off + 1` skips the `{`; the hole's span excludes both braces.
+            let hole_rel_start = byte_off + 1;
+            let hole_rel_end = indexed[close_j].0;
+            parts.push(InterpChunk::Hole {
+                source: content[hole_rel_start..hole_rel_end].to_string(),
+                span: Span::new(base + 1 + hole_rel_start, base + 1 + hole_rel_end),
+            });
+            i = close_j + 1;
+            continue;
+        }
+
+        // A bare `}` stays literal: the language defines `\{` for a literal `{` but lists
+        // no `\}` escape, so an unpaired `}` must remain representable as itself.
+        text.push(ch);
+        i += 1;
+    }
+
+    if !has_hole {
+        return Ok(StringValue::Plain(text));
+    }
+    if !text.is_empty() {
+        parts.push(InterpChunk::Text(text));
+    }
+    Ok(StringValue::Interp(parts))
+}
+
+/// Find the index of the `}` closing the hole whose `{` sits at `open`, tracking
+/// brace depth and skipping char literals so their escape braces do not count
+/// (`"{'\u{7D}'}"`). Returns `None` when the hole never closes.
+fn scan_hole_close(indexed: &[(usize, char)], open: usize) -> Option<usize> {
+    let mut depth = 1usize;
+    let mut j = open + 1;
+    while j < indexed.len() {
+        match indexed[j].1 {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(j);
+                }
+            }
+            // A char literal's braces are data, not structure (`'\u{7D}'`).
+            // Only `'` is reachable here: an unescaped `"` ends the string token
+            // itself, so it never survives into a hole's content.
+            '\'' => {
+                // `skip_nested_literal` already lands one past the closing quote,
+                // so re-enter the loop without the trailing bump.
+                j = skip_nested_literal(indexed, j);
+                continue;
+            }
+            _ => {}
+        }
+        j += 1;
+    }
+    None
+}
+
+/// Return the index just past the closing `'` of the char literal starting at
+/// `open`. Backslash-skips honor escapes; a `\u{...}` payload may itself contain
+/// quotes or braces (`'\u{7D}'`), so the whole escape is jumped rather than two
+/// characters. An unterminated literal consumes the remainder — the caller
+/// reports the enclosing hole as unterminated, which is the correct diagnosis
+/// regardless.
+fn skip_nested_literal(indexed: &[(usize, char)], open: usize) -> usize {
+    let mut k = open + 1;
+    while k < indexed.len() {
+        let c = indexed[k].1;
+        if c == '\\' {
+            k += 2;
+            if indexed.get(k - 1).map(|(_, c)| *c) == Some('u') {
+                while k < indexed.len() && indexed[k].1 != '}' {
+                    k += 1;
+                }
+                k += 1;
+            }
+            continue;
+        }
+        if c == '\'' {
+            return k + 1;
+        }
+        k += 1;
+    }
+    indexed.len()
+}
+
 /// Helper function to parse float literals
 fn parse_float(lex: &mut logos::Lexer<TokenKind>) -> Result<f64, LexError> {
     let slice = lex.slice().replace('_', "");
@@ -453,99 +686,6 @@ fn parse_hex(lex: &mut logos::Lexer<TokenKind>) -> Result<i64, LexError> {
         text: lex.slice().to_string(),
         span: Span::new(lex.span().start, lex.span().end),
     })
-}
-
-/// Helper function to parse string literals with escape sequences
-fn parse_string(lex: &mut logos::Lexer<TokenKind>) -> Result<String, LexError> {
-    let slice = lex.slice();
-    let content = &slice[1..slice.len() - 1]; // Strip quotes
-
-    let mut result = String::new();
-    let mut chars = content.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '\\' {
-            match chars.next() {
-                Some('n') => result.push('\n'),
-                Some('r') => result.push('\r'),
-                Some('t') => result.push('\t'),
-                Some('\\') => result.push('\\'),
-                Some('"') => result.push('"'),
-                Some('0') => result.push('\0'),
-                Some('x') => {
-                    // Hex escape: \xNN
-                    let hex: String = chars.by_ref().take(2).collect();
-                    if hex.len() != 2 {
-                        return Err(LexError::InvalidEscape {
-                            escape: format!("\\x{}", hex),
-                            span: Span::new(lex.span().start, lex.span().end),
-                        });
-                    }
-                    let code =
-                        u8::from_str_radix(&hex, 16).map_err(|_| LexError::InvalidEscape {
-                            escape: format!("\\x{}", hex),
-                            span: Span::new(lex.span().start, lex.span().end),
-                        })?;
-                    result.push(code as char);
-                }
-                Some('u') => {
-                    // Unicode escape: \u{NNNN}
-                    if chars.next() != Some('{') {
-                        return Err(LexError::InvalidEscape {
-                            escape: "\\u".to_string(),
-                            span: Span::new(lex.span().start, lex.span().end),
-                        });
-                    }
-                    let mut hex = String::new();
-                    loop {
-                        match chars.next() {
-                            Some('}') => break,
-                            Some(ch) if ch.is_ascii_hexdigit() => hex.push(ch),
-                            _ => {
-                                return Err(LexError::InvalidEscape {
-                                    escape: format!("\\u{{{}}}", hex),
-                                    span: Span::new(lex.span().start, lex.span().end),
-                                })
-                            }
-                        }
-                    }
-                    let code =
-                        u32::from_str_radix(&hex, 16).map_err(|_| LexError::InvalidEscape {
-                            escape: format!("\\u{{{}}}", hex),
-                            span: Span::new(lex.span().start, lex.span().end),
-                        })?;
-                    let unicode_char =
-                        char::from_u32(code).ok_or_else(|| LexError::InvalidEscape {
-                            escape: format!("\\u{{{}}}", hex),
-                            span: Span::new(lex.span().start, lex.span().end),
-                        })?;
-                    result.push(unicode_char);
-                }
-                Some(other) => {
-                    return Err(LexError::InvalidEscape {
-                        escape: format!("\\{}", other),
-                        span: Span::new(lex.span().start, lex.span().end),
-                    })
-                }
-                None => {
-                    return Err(LexError::UnterminatedString {
-                        span: Span::new(lex.span().start, lex.span().end),
-                    })
-                }
-            }
-        } else {
-            result.push(ch);
-        }
-    }
-
-    Ok(result)
-}
-
-/// Catch-all parser for strings that may have invalid escape sequences
-/// This pattern only matches strings with closing quotes
-fn parse_string_catch_all(lex: &mut logos::Lexer<TokenKind>) -> Result<String, LexError> {
-    // Try to parse the string, which will report any invalid escapes
-    parse_string(lex)
 }
 
 /// Parse a character literal into its single Unicode scalar value. The
