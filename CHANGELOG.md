@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.75.6] - 2026-08-25
+
+### Changed
+- `docs`: the open-defect register is now public and tracked at `docs/BUGS.md` instead of
+  living in internal notes. Each entry is a self-contained task — minimal reproduction,
+  known root cause, workaround, fix sketch — so contributors can pick up bug fixes
+  without reading compiler internals first. Entries are removed once fixed; ids are never
+  reused.
+- `docs`: CONTRIBUTING.md now leads its contribution priorities with "fix a known bug"
+  and points at `docs/BUGS.md`, ahead of the roadmap features section; README.md links
+  the register from its Contributing line.
+
+### Added
+- `docs`: BUG-013 filed in `docs/BUGS.md` — using a named function as a value where a
+  closure-typed parameter is expected fails with a misleading `undefined variable`
+  diagnostic (no fn-item-to-fn-pointer coercion exists, and nothing says so). Workaround:
+  wrap it in a closure literal.
+
 ## [1.75.5] - 2026-08-24
 
 ### Changed

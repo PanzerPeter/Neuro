@@ -585,7 +585,7 @@ vsce package
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture guidelines, coding standards, and the pull request process.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture guidelines, coding standards, and the pull request process. Confirmed open defects live in [docs/BUGS.md](docs/BUGS.md) — fixing one is the best way to start.
 
 The project is in early alpha, so breaking changes are expected. Contributions should focus on **Phase 1 (Core Language)**; the [Quick Roadmap](#quick-roadmap) marks which sub-phase is currently open.
 
