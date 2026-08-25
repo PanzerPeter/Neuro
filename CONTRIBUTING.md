@@ -83,8 +83,10 @@ Before contributing, read:
 ### Before You Start
 
 1. Check open issues and discuss major changes before starting work
-2. Verify your contribution aligns with the current roadmap phase
-3. For architectural changes, open an issue first
+2. For a bug fix, check whether it is already registered in [docs/BUGS.md](docs/BUGS.md)
+   and claim the `BUG-NNN` id in an issue
+3. Verify your contribution aligns with the current roadmap phase
+4. For architectural changes, open an issue first
 
 ### Working on a Feature
 
@@ -281,7 +283,25 @@ cargo run -p neurc -- compile examples/basics/hello.nr
 
 ## Current Contribution Priorities
 
-### Phase 1 — Core Language
+### Fix a known bug — start here
+
+The highest-value first contribution is a bug fix, and the queue already exists:
+[docs/BUGS.md](docs/BUGS.md) is the register of open, confirmed defects. Every entry is a
+self-contained task with a minimal reproduction, the known root cause, a workaround, and
+a fix sketch — several are sized for a first-time compiler contributor.
+
+How to take one on:
+
+1. Claim it in an issue naming the `BUG-NNN` id so work isn't duplicated.
+2. Some entries are language-design decisions rather than patches — those say so, and
+   need a maintainer ruling in the issue before any code changes.
+3. Ship the fix with a regression test that fails without it (see
+   [Testing Requirements](#testing-requirements)) and follow the normal workflow above.
+
+Found a new bug? Open an issue with a minimal reproducible example instead of a PR —
+confirmed defects get filed into `docs/BUGS.md` from there.
+
+### Phase 1 — Core Language features
 
 The roadmap is dependency-ordered, so pick the **topmost open item**: its prerequisites
 are already done. Coordinate on an issue before starting a large one.
