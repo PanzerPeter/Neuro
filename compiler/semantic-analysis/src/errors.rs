@@ -572,4 +572,27 @@ pub enum TypeError {
 
     #[error("a block-bodied closure needs an explicit return type at {span:?}: write `|params| -> R {{ ... }}` (only single-expression closures `|x| expr` infer their return type)")]
     ClosureBlockNeedsReturnType { span: Span },
+
+    #[error("a value of type {ty} cannot be interpolated into a string at {span:?}: interpolation renders integers, floats, `bool`, `char`, and `string`")]
+    UnformattableType { ty: Type, span: Span },
+
+    #[error(
+        "format specifier `{spec}` does not apply to a value of type {ty} at {span:?}: {hint}"
+    )]
+    FormatSpecMismatch {
+        spec: String,
+        ty: Type,
+        hint: String,
+        span: Span,
+    },
+
+    #[error("format field width {width} at {span:?} exceeds the maximum of {max}")]
+    FormatWidthTooLarge { width: u32, max: u32, span: Span },
+
+    #[error("format precision {precision} at {span:?} exceeds the maximum of {max}")]
+    FormatPrecisionTooLarge {
+        precision: u32,
+        max: u32,
+        span: Span,
+    },
 }

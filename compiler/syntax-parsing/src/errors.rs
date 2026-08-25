@@ -41,6 +41,19 @@ pub enum ParseError {
     #[error("`@no_prelude` must be the first thing in a file; it opts that file out of the implicit prelude, so it cannot follow a declaration or sit inside a `module` block")]
     MisplacedNoPrelude { span: Span },
 
+    #[error("an interpolation hole `{{}}` must contain an expression")]
+    EmptyInterpolationHole { span: Span },
+
+    #[error("invalid format specifier `{spec}`: {reason}")]
+    InvalidFormatSpec {
+        spec: String,
+        reason: String,
+        span: Span,
+    },
+
+    #[error("string interpolation is not allowed in a pattern; a pattern must be a constant")]
+    InterpolationInPattern { span: Span },
+
     #[error("lexical error: {0}")]
     LexError(#[from] LexError),
 }

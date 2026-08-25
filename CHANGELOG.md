@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.76.0] - 2026-08-25
+
+### Added
+- `lexer`, `parser`, `semantic`, `codegen`: string interpolation with the format
+  mini-language — sub-phase 1H, item 1. A string literal may embed expressions in `{...}`
+  holes and render each through an optional `:spec`:
+
+  ```neuro
+  val message = "Welcome to {name} v{version}"
+  val report  = "pi to 2dp is {pi:.2}, flags are {n:08b}"
+  ```
+
+  The whole specifier table is supported: `?` debug, `.N` fixed-point, `e` / `.Ne`
+  scientific, `d` / `x` / `X` / `b` / `o` radix, `W` field width with `<` / `>` / `^`
+  alignment, `0W` zero fill, and the `+` sign flag. Interpolation renders integers,
+  floats, `bool`, `char`, and `string`.
+
+  A hole holds any expression — a call, a field access, a struct literal, an `if`, a
+  nested block — because the lexer only locates the hole's bounds by brace matching and
+  the parser re-parses its text as ordinary code, with spans shifted onto real file
+  coordinates so diagnostics inside a hole point at the right column. Write a literal `{`
+  as `\{`; an unpaired `}` needs no escape.
+
+  Which specifiers a value accepts is checked against its type, so a mismatch is a
+  compile error rather than a surprising rendering: radix kinds require an integer,
+  fixed-point and scientific require a float, `+` requires a signed integer or a float,
+  and zero fill does not combine with `<` or `^`. Field width and precision are bounded.
+
+  Runtime rendering is emitted once per module as internal helper functions rather than
+  inlined at every hole: `snprintf`-backed integer and float conversion, hand-written
+  binary digits, sign-aware field padding (`-42` to width 6 is `-00042`), UTF-8 encoding
+  of a `char`, and the two fix-ups that reconcile C's float output with the specifier
+  table — restoring the point `%g` drops (`2.0`, not `2`) and normalizing `e+00` to `e0`.
+
+  Two limits, both documented and diagnosed: a hole may not contain a `"` string literal,
+  because the quote ends the enclosing token (reported as an unterminated hole); and an
+  interpolated literal is not a constant, so it cannot appear in a pattern.
+
+- `tests`: `compiler/neurc/tests/string_interpolation.rs` covers every specifier
+  end-to-end plus the rejection paths; `examples/types/string_interpolation.nr` checks
+  each row of the table against its exact output, and `examples/showcase/status_report.nr`
+  combines interpolation with a `@derive(Copy)` struct, `impl` methods, an enum matched by
+  `match`, a fixed-size array walked by `for`-in, and `+` concatenation.
+
+### Fixed
+- `lexer`: brace-depth scanning inside an interpolation hole advanced twice past a nested
+  char literal, so `"{'\u{7D}'} tail}"` ran the hole on to the final `}`. The escape
+  payload's brace no longer closes the hole it sits in.
+
 ## [1.75.6] - 2026-08-25
 
 ### Changed

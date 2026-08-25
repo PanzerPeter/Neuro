@@ -24,6 +24,11 @@ No upstream dependencies within the Neuro workspace. This is the lowest-level in
 `FloatSuffix` is a `Copy` enum (`F16`, `BF16`, `F32`, `F64`) carried by `Literal::Float(f64, Option<FloatSuffix>)` with the same semantics: `None` means contextual inference (default `f64`); `Some(s)` pins the float type. Half-precision (`F16`/`BF16`) literals must always carry the suffix — they have no contextual default.
 
 ## Recent Updates
+- 2026-08-25: Added `FormatSpec` (with `FormatAlign` and `FormatKind`) — the parsed `spec`
+  half of a string-interpolation hole `{expr:spec}` — plus the `MAX_FORMAT_WIDTH` and
+  `MAX_FORMAT_PRECISION` ceilings semantic analysis enforces. Pure data: the parser
+  validates the written grammar, the type checker validates it against the value's type,
+  and every pass between them only reads fields.
 - 2026-04-18: Added `IntSuffix` enum; changed `Literal::Integer(i64)` → `Literal::Integer(i64, Option<IntSuffix>)` to carry explicit type suffixes from the lexer through to semantic analysis.
 - 2026-05-25: Added `FloatSuffix` enum; changed `Literal::Float(f64)` → `Literal::Float(f64, Option<FloatSuffix>)` mirroring the integer-suffix encoding for `1.5f32`/`2.0f64` literals.
 - 2026-06-15: Added `Literal::Char(char)` for the `char` primitive type.

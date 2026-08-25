@@ -23,6 +23,9 @@ pub enum LexError {
 
     #[error("unterminated block comment starting at position {}", span.start)]
     UnterminatedBlockComment { span: Span },
+
+    #[error("interpolation hole opened with `{{` is never closed at position {}: add the matching `}}` (or escape the brace as `\\{{`)", span.start)]
+    UnterminatedInterpolation { span: Span },
 }
 
 impl Default for LexError {

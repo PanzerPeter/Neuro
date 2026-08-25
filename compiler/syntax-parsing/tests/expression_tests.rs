@@ -1,7 +1,7 @@
 // Expression parsing tests
 
-use shared_types::{FloatSuffix, Literal};
-use syntax_parsing::{parse_expr, BinaryOp, Expr, UnaryOp};
+use shared_types::{FloatSuffix, FormatAlign, FormatKind, Literal};
+use syntax_parsing::{parse_expr, BinaryOp, Expr, InterpPart, UnaryOp};
 
 #[test]
 fn test_parse_integer_literal() {
@@ -644,5 +644,54 @@ fn test_parse_slice_call_with_range_argument() {
             assert!(matches!(args[0], Expr::Range { .. }));
         }
         other => panic!("Expected call expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_interpolated_string_splits_text_and_holes() {
+    let expr = parse_expr(r#""Sum: {a + b}!""#).expect("interpolated literal should parse");
+    match expr {
+        Expr::InterpString { parts, .. } => {
+            assert_eq!(parts.len(), 3);
+            assert_eq!(parts[0], InterpPart::Text("Sum: ".to_string()));
+            match &parts[1] {
+                InterpPart::Formatted { expr, spec, .. } => {
+                    assert!(matches!(**expr, Expr::Binary { .. }));
+                    assert!(spec.is_none());
+                }
+                other => panic!("Expected a formatted hole, got {:?}", other),
+            }
+            assert_eq!(parts[2], InterpPart::Text("!".to_string()));
+        }
+        other => panic!("Expected interpolated string expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_interpolation_spec_is_attached_to_its_hole() {
+    let expr = parse_expr(r#""{pi:^+08.2e}""#).expect("specifier should parse");
+    match expr {
+        Expr::InterpString { parts, .. } => match &parts[0] {
+            InterpPart::Formatted { spec, .. } => {
+                let spec = spec.as_ref().expect("hole carries a spec");
+                assert_eq!(spec.align, Some(FormatAlign::Center));
+                assert!(spec.plus_sign);
+                assert!(spec.zero_pad);
+                assert_eq!(spec.width, Some(8));
+                assert_eq!(spec.precision, Some(2));
+                assert_eq!(spec.kind, FormatKind::Scientific);
+            }
+            other => panic!("Expected a formatted hole, got {:?}", other),
+        },
+        other => panic!("Expected interpolated string expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_literal_without_holes_stays_a_plain_string() {
+    let expr = parse_expr(r#""no holes \{here}""#).expect("escaped brace should parse");
+    match expr {
+        Expr::Literal(Literal::String(text), _) => assert_eq!(text, "no holes {here}"),
+        other => panic!("Expected a plain string literal, got {:?}", other),
     }
 }

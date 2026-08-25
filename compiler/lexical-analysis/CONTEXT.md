@@ -38,15 +38,32 @@ a `\u{...}` unicode escape, or a `\xNN` byte escape — so `''`, `'ab'`, and an 
 `'a` never match and become lex errors. `parse_char` decodes the escape and validates the
 `\u{...}` scalar range, emitting `LexError::InvalidCharLiteral` on an out-of-range code point.
 
+`TokenKind::String` carries a `StringValue`, not a bare `String`: a literal with no
+`{...}` hole decodes to `StringValue::Plain`, one with holes to `StringValue::Interp`
+carrying `InterpChunk`s. One token variant covers both because a logos callback picks a
+variant's *payload*, never the variant — the decoder decides plain-vs-interpolated only
+after walking the content. `decode_string_literal` splits text from holes, decoding
+escapes (`\{` writes a literal brace) and recording each hole's raw source with its
+**absolute** file span so the parser's sub-parse of the hole reports at real columns.
+Hole bounds are found by brace-depth matching that skips char literals, so a `\u{...}`
+payload's brace does not close the hole. A `"` inside a hole is not supported: the quote
+ends the string token, and the result reports as `LexError::UnterminatedInterpolation`.
+
 ### Editor grammar sync
 `neuro-language-support/syntaxes/neuro.tmLanguage.json` re-describes this lexer as TextMate
 regexes for editor highlighting. Nothing in the build links the two, so `tests/tmlanguage_sync.rs`
 is the link: it scans this crate's own `tokens.rs` for `#[token("…")]` literals and fails when a
 keyword is missing from the grammar. It covers keyword *words* only — grammar rules with no
-one-to-one token counterpart (string bodies and escapes above all) still need updating by hand, which
-matters for the planned stateful-lexer rewrite behind string interpolation.
+one-to-one token counterpart (string bodies and escapes above all) still need updating by hand.
+The grammar's `meta.interpolation.neuro` rule already covered `{...}` holes when
+interpolation landed, and its `\\.` escape rule already made `\{` an escape, so that
+change needed no grammar edit — but a future string-literal change may.
 
 ## Recent Updates
+- 2026-08-25: String interpolation. `TokenKind::String` now carries `StringValue::{Plain, Interp}`
+  (see Notes), with `InterpChunk::{Text, Hole}` and the new
+  `LexError::UnterminatedInterpolation`. `decode_string_literal` replaced the old
+  escape-only decoder; the strict string regex gained `\{` to its escape set.
 - 2026-08-24: `/*` with no `*/` is reported as an unterminated block comment.
   `classify_error` already rewrote a logos failure sitting on an opening `"` into
   `UnterminatedString`; the same rewrite now covers `/*`, which previously surfaced as

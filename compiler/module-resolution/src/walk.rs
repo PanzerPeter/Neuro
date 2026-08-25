@@ -5,8 +5,8 @@
 //! grammar nobody re-checked.
 
 use ast_types::{
-    ClosureParam, EnumPatternPayload, Expr, GenericArg, GenericParamKind, Item, MatchArm,
-    MethodDef, Pattern, Stmt, Type, VariantPayload,
+    ClosureParam, EnumPatternPayload, Expr, GenericArg, GenericParamKind, InterpPart, Item,
+    MatchArm, MethodDef, Pattern, Stmt, Type, VariantPayload,
 };
 use shared_types::Identifier;
 
@@ -310,6 +310,14 @@ fn walk_expr(expr: &mut Expr, f: SiteFn) -> Result<(), ModuleError> {
             Ok(())
         }
         Expr::Unary { operand, .. } => walk_expr(operand, f),
+        Expr::InterpString { parts, .. } => {
+            for part in parts {
+                if let InterpPart::Formatted { expr, .. } = part {
+                    walk_expr(expr, f)?;
+                }
+            }
+            Ok(())
+        }
         Expr::Paren(inner, _) => walk_expr(inner, f),
         Expr::StructLiteral { fields, base, .. } => {
             for field in fields {

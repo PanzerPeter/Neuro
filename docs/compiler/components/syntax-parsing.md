@@ -438,7 +438,7 @@ Binary(Subtract)
 
 - [ ] **Error recovery**: continue parsing after an error so a run can report more than one
 - [ ] **Suggestions**: "did you mean?" for near-miss identifiers and keywords
-- [ ] **String interpolation and triple-quoted strings**: need the stateful lexer of 1H
+- [ ] **Triple-quoted strings**: the `"""..."""` block form (1H)
 - [ ] **Named arguments**: the `external internal: T` parameter form (1H)
 - [ ] **Macros**: procedural and declarative (Phase 7)
 

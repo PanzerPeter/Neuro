@@ -165,6 +165,13 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-08-25: String interpolation checking (`type_checkers/expressions/interpolation.rs`).
+  Each hole's expression is checked, its type auto-dereferenced through a borrow, and its
+  written spec validated against that type — radix kinds need an integer, fixed-point and
+  scientific need a float, `+` needs a signed integer or float, zero fill cannot combine
+  with `<`/`^`, and width/precision are bounded. The literal always types as `string`, so
+  a rejected hole does not cascade. New errors: `UnformattableType`,
+  `FormatSpecMismatch`, `FormatWidthTooLarge`, `FormatPrecisionTooLarge`.
 - 2026-08-24: Return-path checking. A non-void function or method must produce a value on
   every path, and `check_function` / the `impl` method loop now say so with
   `TypeError::MissingReturn`. Two shared helpers in `declarations/functions.rs` state the

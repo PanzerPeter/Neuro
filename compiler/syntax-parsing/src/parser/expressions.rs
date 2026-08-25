@@ -1,10 +1,11 @@
-use lexical_analysis::{Token, TokenKind};
+use lexical_analysis::{StringValue, Token, TokenKind};
 use shared_types::{Identifier, Literal, Span};
 
 use crate::ast::{BinaryOp, ClosureParam, Expr, GenericArg, Stmt, UnaryOp};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 
+use super::interpolation::parse_interp_string;
 use super::statements::stmt_span;
 use super::Parser;
 
@@ -83,7 +84,12 @@ impl Parser {
                 Literal::Float(tok.value, Some(tok.suffix)),
                 token.span,
             )),
-            TokenKind::String(s) => Ok(Expr::Literal(Literal::String(s), token.span)),
+            TokenKind::String(StringValue::Plain(s)) => {
+                Ok(Expr::Literal(Literal::String(s), token.span))
+            }
+            TokenKind::String(StringValue::Interp(chunks)) => {
+                parse_interp_string(&chunks, token.span)
+            }
             TokenKind::Char(c) => Ok(Expr::Literal(Literal::Char(c), token.span)),
             TokenKind::True => Ok(Expr::Literal(Literal::Boolean(true), token.span)),
             TokenKind::False => Ok(Expr::Literal(Literal::Boolean(false), token.span)),

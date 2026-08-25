@@ -7,6 +7,7 @@ mod calls;
 mod coalesce;
 mod coercion;
 mod enums;
+mod interpolation;
 mod matches;
 mod sequences;
 mod structs;
@@ -65,6 +66,8 @@ impl Lowerer {
                 let ty = literal_type(lit, expected);
                 Ok(HirExpr::new(HirExprKind::Literal(lit.clone()), ty, *span))
             }
+
+            Expr::InterpString { parts, span } => self.lower_interp_string(parts, *span),
 
             // A const generic parameter used as a value inside a monomorphized body
             // lowers to its concrete integer literal, typed by its declared int type.

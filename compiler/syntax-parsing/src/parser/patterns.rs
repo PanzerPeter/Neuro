@@ -1,6 +1,6 @@
 // Parsing for `match` expressions and their patterns.
 
-use lexical_analysis::TokenKind;
+use lexical_analysis::{StringValue, TokenKind};
 use shared_types::{Identifier, Literal, Span};
 
 use crate::ast::{EnumPatternPayload, Expr, FieldPattern, MatchArm, Pattern};
@@ -249,7 +249,12 @@ impl Parser {
                 Ok((Literal::Float(tok.value, Some(tok.suffix)), token.span))
             }
             TokenKind::Char(c) => Ok((Literal::Char(c), token.span)),
-            TokenKind::String(s) => Ok((Literal::String(s), token.span)),
+            TokenKind::String(StringValue::Plain(s)) => Ok((Literal::String(s), token.span)),
+            // A hole evaluates at runtime, so an interpolated literal has no
+            // constant value to match against.
+            TokenKind::String(StringValue::Interp(_)) => {
+                Err(ParseError::InterpolationInPattern { span: token.span })
+            }
             TokenKind::True => Ok((Literal::Boolean(true), token.span)),
             TokenKind::False => Ok((Literal::Boolean(false), token.span)),
             other => Err(ParseError::UnexpectedToken {

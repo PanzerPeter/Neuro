@@ -1,6 +1,6 @@
 // Expression nodes
 
-use shared_types::{Literal, Span};
+use shared_types::{FormatSpec, Literal, Span};
 
 use ast_types::{BinaryOp, UnaryOp};
 
@@ -198,6 +198,22 @@ pub enum HirExprKind {
         name: String,
         captures: Vec<crate::HirCapture>,
     },
+    /// Interpolated string literal `"Sum: {a + b}"`. Backends render each
+    /// [`HirInterpPart::Formatted`] hole per its spec and concatenate the parts
+    /// into one fresh owned string; the expression's `ty` is [`HirType::String`].
+    InterpString {
+        parts: Vec<HirInterpPart>,
+    },
+}
+
+/// One segment of a lowered interpolated string literal.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HirInterpPart {
+    /// Literal text, escapes already decoded.
+    Text(String),
+    /// A hole and the specifier that renders it. A hole written without a spec
+    /// carries [`FormatSpec::default`], so backends have one uniform shape.
+    Formatted { expr: HirExpr, spec: FormatSpec },
 }
 
 /// One resolved arm of a [`HirExprKind::Match`].
