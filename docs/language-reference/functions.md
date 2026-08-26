@@ -74,7 +74,7 @@ func complex(a: i32, b: i32, c: i32, d: i32) -> i32 {
 ### Parameter Passing
 
 A parameter of scalar type is passed by value (copied). Reference parameters (`&T` / `&mut T`)
-pass a borrow instead — see [Borrows](types.md); a non-`Copy` value passed by value is *moved*
+pass a borrow instead, see [Borrows](types.md); a non-`Copy` value passed by value is *moved*
 rather than copied.
 
 ```neuro
@@ -649,7 +649,7 @@ func main() -> i32 {
 | `unreachable` | `unreachable()` | Print `internal error: entered unreachable code at <loc>` and abort. |
 
 Because these builtins **diverge** (they never return), a call may appear anywhere a value is
-expected — including the implicit-return (tail) position of a non-`void` function:
+expected, including the implicit-return (tail) position of a non-`void` function:
 
 ```neuro
 func parse_digit(c: i32) -> i32 {
@@ -661,7 +661,7 @@ A user-defined function whose name is `panic`, `assert`, or `unreachable` shadow
 within the program.
 
 `return`, `break`, and `continue` diverge the same way, so an `if` or `match` arm that
-uses one takes its type from its siblings rather than imposing one on them — see
+uses one takes its type from its siblings rather than imposing one on them, see
 [expressions.md](expressions.md#if-expressions).
 
 ## Generic Functions
@@ -684,7 +684,7 @@ func second<T, U>(a: T, b: U) -> U {
 
 func main() -> i32 {
     val a = identity(41)     // identity<i32>
-    val f = identity(2.5)    // identity<f64> — a separate specialized copy
+    val f = identity(2.5)    // identity<f64>, a separate specialized copy
     val s = second(1.5, 7)   // second<f64, i32> -> 7
     return a + s             // 41 + 7 = 48
 }
@@ -696,8 +696,8 @@ supplied explicitly with a turbofish (`identity::<i32>(x)`).
 
 **What a generic body may do.** On an *unbounded* type parameter the body may use only operations
 valid for *any* type: binding a value, returning it, passing it to another function, and building
-or observing tuples. Operations that need a known concrete type — arithmetic, comparison, field
-access, method calls — are rejected on a bare type parameter:
+or observing tuples. Operations that need a known concrete type (arithmetic, comparison,
+field access, method calls) are rejected on a bare type parameter:
 
 ```neuro
 func bad<T>(a: T, b: T) -> T {
@@ -722,7 +722,7 @@ func scaled_area<T: Shape>(s: &T, factor: i32) -> i32 {
 
 ### Const (value) parameters
 
-A generic parameter list may also declare a **const parameter** — a compile-time *value* (of an
+A generic parameter list may also declare a **const parameter**, a compile-time *value* (of an
 integer type), written `const NAME: T`. A const parameter is usable as an array length and as a
 value in the body, and each distinct value is monomorphized into its own specialized code (zero
 runtime cost). Const parameters are inferred from array-argument lengths:
@@ -744,7 +744,7 @@ val s = sum(xs)    // sum<3>  ->  42
 
 For a readable signature, constraints may move into a `where` clause after the return type. A
 `where` clause carries trait bounds (parsed, still unenforced) and **value predicates** over const
-parameters — a boolean expression checked at every instantiation and reported at the offending call:
+parameters, a boolean expression checked at every instantiation and reported at the offending call:
 
 ```neuro
 func head<const N: u32>(a: [i32; N]) -> i32 where N > 0 {
@@ -752,7 +752,7 @@ func head<const N: u32>(a: [i32; N]) -> i32 where N > 0 {
 }
 ```
 
-### Turbofish — explicit generic arguments
+### Turbofish, explicit generic arguments
 
 When inference cannot reach a parameter (or you want to be explicit), supply the arguments at the
 call with a **turbofish** `::<...>`. This is the only call-site form for explicit generic arguments;
@@ -767,7 +767,7 @@ val b = zeros::<4>()         // explicit const argument
 
 A trait bound can be satisfied two ways, and the keyword chooses which.
 
-### `impl Trait` — static dispatch
+### `impl Trait`, static dispatch
 
 `impl Trait` is anonymous-generic sugar. Each concrete type flowing through it produces a
 specialized copy of the function, exactly as a named type parameter does, so it carries
@@ -780,7 +780,7 @@ func train<T: Model>(model: &T) -> i32 { model.step() }
 ```
 
 Each `impl Trait` parameter is its *own* anonymous parameter, so one call may bind two
-different concrete types — unlike a single shared `<T>`:
+different concrete types, unlike a single shared `<T>`:
 
 ```neuro
 func total(a: &impl Shape, b: &impl Shape) -> i32 { a.area() + b.area() }
@@ -798,13 +798,13 @@ func make() -> impl Shape { Square { side: 3 } }
 The body's result must be a direct constructor (a struct literal or enum value) for the
 concrete type to be inferable; richer forms arrive with closures and iterators.
 
-### `dyn Trait` — dynamic dispatch
+### `dyn Trait`, dynamic dispatch
 
 `dyn Trait` is a single *runtime* type that can hold any implementor. Method calls go
 through a **vtable**: the reference carries a pointer to the value plus a pointer to that
 concrete type's method table, and the call jumps through a fixed slot.
 
-A trait object is **unsized**, so it only appears behind a reference — `&dyn Trait` or
+A trait object is **unsized**, so it only appears behind a reference, `&dyn Trait` or
 `&mut dyn Trait`. A bare `dyn Trait` is a compile error.
 
 ```neuro
@@ -864,7 +864,7 @@ val tagged = move |x: i32| x + label
 
 ### Capture
 
-A closure captures each free variable its body reads **by value** — the variable
+A closure captures each free variable its body reads **by value**; the variable
 must be `Copy` this phase, and it remains usable after the closure is created
 because it was copied, not moved:
 

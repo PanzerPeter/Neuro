@@ -7,7 +7,7 @@
 
 ## Overview
 
-The LLVM backend slice generates native object code from the typed High-Level IR (`neuro-hir`) — not the AST. Since 1D the frontend lowers the type-checked AST to HIR (`hir-lowering`), where every expression already carries its resolved type, so the backend reads types inline instead of re-deriving them. It uses [inkwell](https://github.com/TheDan64/inkwell) (safe Rust bindings to LLVM 20) to produce optimized machine code for the host platform.
+The LLVM backend slice generates native object code from the typed High-Level IR (`neuro-hir`), not the AST. Since 1D the frontend lowers the type-checked AST to HIR (`hir-lowering`), where every expression already carries its resolved type, so the backend reads types inline instead of re-deriving them. It uses [inkwell](https://github.com/TheDan64/inkwell) (safe Rust bindings to LLVM 20) to produce optimized machine code for the host platform.
 
 **Entry point:**
 ```rust
@@ -26,7 +26,7 @@ bounds, slice boundaries).
 
 - **Dependencies**: `neuro-hir` (the typed HIR it consumes), `ast-types`, `shared-types`, `source-location`, `diagnostics`, `inkwell 0.9.0`; `hir-lowering` is a dev-dependency (tests/benches lower before compiling)
 - **Public API**: single `compile()` function returning object code bytes
-- **All internals**: `pub(crate)` — `CodegenContext`, `TypeMapper`, `codegen_*` helpers
+- **All internals**: `pub(crate)`, `CodegenContext`, `TypeMapper`, `codegen_*` helpers
 - **Output**: platform object code (`.o`) passed to the system linker by `neurc`
 
 ## Supported Features
@@ -41,7 +41,7 @@ bounds, slice boundaries).
 | `f32` / `f64` | `float` / `double` |
 | `bool` | `i1` |
 | `char` | `i32` (a Unicode scalar value) |
-| `string` | anonymous struct `{ ptr, i64 }` — a fat pointer: data pointer + byte length |
+| `string` | anonymous struct `{ ptr, i64 }`, a fat pointer: data pointer + byte length |
 | `&string` | the `{ ptr, i64 }` fat pointer **by value**; `&mut string` is the referent's address |
 | `&T` / `&mut T` (other `T`) | `ptr` (opaque, LLVM 20) |
 | `&dyn Trait` | `{ data ptr, vtable ptr }` fat pointer |
@@ -52,8 +52,8 @@ bounds, slice boundaries).
 | closure | `{ fn_ptr, env_ptr }` fat pointer, no heap allocation |
 | `void` | `void` |
 
-The full ABI contract — string, struct, method, builtin-method, overflow, panic, drop,
-collections, constants, and soft-float — is documented in the slice's
+The full ABI contract (string, struct, method, builtin-method, overflow, panic, drop,
+collections, constants, and soft-float) is documented in the slice's
 [CONTEXT.md](../../../compiler/llvm-backend/CONTEXT.md), which is authoritative.
 
 ### Expressions
@@ -67,14 +67,14 @@ both of which are already desugared to a `match` in HIR.
 
 ### Statements
 
-- Bindings (`val`, `mut`) — `alloca` in the **entry block**, never inside a loop
+- Bindings (`val`, `mut`), `alloca` in the **entry block**, never inside a loop
 - Assignment, field / index / dereference assignment
 - `return`, explicit and as a block's trailing expression
-- `if` / `else` — basic blocks with a merge block; a branch that returns contributes no
+- `if` / `else`, basic blocks with a merge block; a branch that returns contributes no
   edge to the merge
 - `while`, `for` (a dedicated step block, so `continue` advances the induction variable),
   and `loop` (whose value comes from its `break v` edges)
-- `break` / `continue`, including labelled forms — branches to the loop's exit / step block
+- `break` / `continue`, including labelled forms; these branch to the loop's exit / step block
 - Scope-exit `Drop` calls and collection frees
 
 ### Signedness
@@ -119,8 +119,8 @@ User-defined structs are lowered to anonymous LLVM struct types `{ T0, T1, ... }
 
 ## Error-Path Outlining
 
-Every panic-family failure path — `panic` / `assert` / `unreachable`, the array and `Vec`
-bounds guards, and the string-slice bounds and UTF-8 boundary checks — is emitted into a
+Every panic-family failure path (`panic` / `assert` / `unreachable`, the array and `Vec`
+bounds guards, and the string-slice bounds and UTF-8 boundary checks) is emitted into a
 module-private cold function rather than inline in the function that can fail:
 
 ```llvm
@@ -137,7 +137,7 @@ entry:
 }
 ```
 
-The diagnostic machinery — one `write(2, …)` per message fragment plus the `abort()` —
+The diagnostic machinery, one `write(2, …)` per message fragment plus the `abort()`
 otherwise occupies cache lines between the guard branch and the code that follows it, at
 every check. `noinline` is what holds the split in place; without it the inliner folds a
 single-call-site function straight back in. Thunks are deduplicated by their rendered
@@ -149,7 +149,7 @@ constant fragments are baked in, and the fat pointer travels as two arguments.
 
 Each guard branch also carries `!prof` branch weights (`2000 : 1`) marking the failure edge
 as the improbable one, so block placement keeps it off the fall-through path. The `-O0`
-integer-overflow check is weighted but *not* outlined — its trap block is a single
+integer-overflow check is weighted but *not* outlined, its trap block is a single
 `llvm.trap`, so moving it behind a call would trade one instruction for another.
 
 ## Error Types
@@ -215,12 +215,11 @@ entry:
 
 ## Testing
 
-5 unit/integration tests:
-1. `test_type_mapper_primitives` — all primitive types map without error
-2. `test_type_predicates` — float/unsigned-int predicates
-3. `test_compile_simple_function` — basic arithmetic function compiles to non-empty object code
-4. `test_compile_milestone_program` — multi-function program with variable declarations and calls
-5. `test_optimization_level_parsing` — `OptimizationLevelSetting::from_u8` accepts 0–3 and rejects 4+
+The crate's tests cover, at a glance: primitive type mapping, the signedness/float type
+predicates, compiling a simple arithmetic function to non-empty object code, a multi-function
+program with variable declarations and calls, and `OptimizationLevelSetting::from_u8` (accepts
+0 to 3, rejects anything higher). The full list lives beside the source in
+[`compiler/llvm-backend/src/`](../../../compiler/llvm-backend/src/).
 
 Run with:
 ```bash
@@ -231,7 +230,7 @@ LLVM_SYS_201_PREFIX=/usr/lib/llvm20 cargo test -p llvm-backend
 
 ### Why inkwell?
 
-inkwell provides safe, type-checked Rust bindings to the LLVM C API. The alternative — calling `llvm-sys` (raw unsafe bindings) directly — would require manual lifetime management and is significantly more error-prone. inkwell compiles against the exact LLVM version specified by the feature flag (`llvm20-1`), preventing version mismatch at link time.
+inkwell provides safe, type-checked Rust bindings to the LLVM C API. The alternative, calling `llvm-sys` (raw unsafe bindings) directly, would require manual lifetime management and is significantly more error-prone. inkwell compiles against the exact LLVM version specified by the feature flag (`llvm20-1`), preventing version mismatch at link time.
 
 ### Stack Allocation for All Locals
 
@@ -243,7 +242,7 @@ The `OptimizationLevelSetting` enum maps to LLVM's optimization levels:
 
 | Setting | LLVM | Use |
 |---|---|---|
-| `O0` | None | Debugging — preserves all allocas |
+| `O0` | None | Debugging, preserves all allocas |
 | `O1` | Less | Light optimization + mem2reg |
 | `O2` | Default | Standard release build |
 | `O3` | Aggressive | Maximum optimization |

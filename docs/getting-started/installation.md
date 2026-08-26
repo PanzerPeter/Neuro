@@ -1,6 +1,6 @@
 # Installation Guide
 
-This guide covers installation of the Neuro compiler on Linux, macOS, and Windows —
+This guide covers installation of the Neuro compiler on Linux, macOS, and Windows:
 the three platforms CI builds, tests, and ships release binaries for.
 
 ## Prerequisites
@@ -12,7 +12,7 @@ the three platforms CI builds, tests, and ships release binaries for.
 | C linker | any | `clang`, `gcc`, or the MSVC linker from Visual Studio Build Tools |
 
 **Optional:**
-- MLIR 20 + a matching libclang 20 for the experimental MLIR backend (1D+) — see [MLIR Backend](#optional-mlir-backend-phase-18) below. Not needed for a normal build.
+- MLIR 20 + a matching libclang 20 for the experimental MLIR backend; see [MLIR Backend](#optional-mlir-backend) below. Not needed for a normal build.
 - CUDA Toolkit 12+ for GPU support (Phase 4+, not yet implemented)
 
 ---
@@ -110,8 +110,8 @@ cargo test --workspace
 ## Windows (MSVC)
 
 Windows needs a **full LLVM 20 development build**. The official LLVM Windows
-installer ships only Clang and `LLVM-C.dll` — no `llvm-config.exe`, no headers,
-no static libraries — so `llvm-sys` cannot build against it. Use a packaged dev
+installer ships only Clang and `LLVM-C.dll`, no `llvm-config.exe`, no headers,
+no static libraries, so `llvm-sys` cannot build against it. Use a packaged dev
 build instead; CI uses [vovkos/llvm-package-windows](https://github.com/vovkos/llvm-package-windows).
 
 ```powershell
@@ -156,12 +156,12 @@ which is why the workspace pins inkwell to the `target-x86` feature rather than
 
 ---
 
-## Optional: MLIR Backend (1D+)
+## Optional: MLIR Backend
 
 The MLIR lowering path (tensor / autodiff / GPU, Phase 2+) is being built out via
 the `melior` Rust MLIR bindings in the `mlir-backend` slice. It is **off by
 default** behind the `mlir` cargo feature, so nothing here is required for a
-normal Neuro build — the default `cargo build/test --workspace` compiles a
+normal Neuro build, the default `cargo build/test --workspace` compiles a
 placeholder and needs only LLVM 20.
 
 To build the MLIR path you need an LLVM 20 install that **includes MLIR** (the
@@ -231,7 +231,7 @@ ls $LLVM_SYS_201_PREFIX/lib/cmake/llvm/LLVMConfig.cmake
 
 Make sure the export is in your shell rc file and that you have sourced it in the current session.
 
-On Windows the same error means the prefix has no `llvm-config.exe` — you
+On Windows the same error means the prefix has no `llvm-config.exe`: you
 installed the official LLVM installer rather than a development build:
 
 ```powershell
@@ -241,7 +241,7 @@ Test-Path "$env:LLVM_SYS_201_PREFIX\bin\llvm-config.exe"   # must be True
 
 ### Windows: unresolved `__imp___acrt_*` / `libcmt` conflicts at link time
 
-CRT mismatch — you unpacked the `libcmt` (`/MT`) LLVM variant. Replace it with
+CRT mismatch: you unpacked the `libcmt` (`/MT`) LLVM variant. Replace it with
 the `msvcrt` (`/MD`) build and rebuild from clean:
 
 ```powershell

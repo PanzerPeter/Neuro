@@ -20,26 +20,26 @@ This slice follows the **Vertical Slice Architecture** pattern:
 
 ### AST Node Types
 
-The node set itself lives in the `ast-types` infrastructure crate, not here — that is what
+The node set itself lives in the `ast-types` infrastructure crate, not here: that is what
 lets semantic analysis, module resolution, and HIR lowering read the tree without depending
 on this slice. Reproducing the definitions in prose only guarantees they drift, so this
 section describes the shape and points at the source:
 [`compiler/infrastructure/ast-types/src/`](../../../compiler/infrastructure/ast-types/src/).
 
-**Items** (`Item`) — the top level of a file: `Function`, `Struct`, `Enum`, `Trait`, `Impl`,
+**Items** (`Item`), the top level of a file: `Function`, `Struct`, `Enum`, `Trait`, `Impl`,
 `Const`, `Newtype`, `Import`, `Module` (an inline `module { }` block), and `NoPrelude` (the
 file-scope `@no_prelude` marker, consumed by module resolution). A function or struct carries
 its generic parameters and lifetimes; an `impl` carries an optional trait name, so the
-inherent and trait forms are one node. A method's receiver is `Option<SelfParam>` — absent for
+inherent and trait forms are one node. A method's receiver is `Option<SelfParam>`, absent for
 an associated function, otherwise `&self`, `&mut self`, or owned `self`.
 
-**Statements** (`Stmt`) — bindings (`val` / `mut`), assignment and compound assignment, field
+**Statements** (`Stmt`), bindings (`val` / `mut`), assignment and compound assignment, field
 and index assignment, dereference assignment, `return`, `break`, `continue`, `if`, `while`,
 `for`, `loop`, `match`, destructuring bindings, `val-else`, and a bare expression. An `if` in
 statement position always parses to `Stmt::If`, never `Stmt::Expr(Expr::If)`, which is why the
 type checker and HIR lowering each recognise a trailing `Stmt::If` as a block's value.
 
-**Expressions** (`Expr`) — literals, identifiers, unary and binary operators, calls (with
+**Expressions** (`Expr`), literals, identifiers, unary and binary operators, calls (with
 optional turbofish type arguments), index, field access, `Type::member` paths, struct and enum
 literals, tuples and arrays, ranges, casts, closures, blocks, `unsafe` blocks, `if`, `match`,
 `loop`, the `?` propagation operator, and `Paren` grouping (dropped during lowering).
@@ -79,7 +79,7 @@ f(x)? + 1       // (f(x)?) + 1
 ```
 
 **Statement boundaries.** A newline ends a statement unless the line that just ended asks to
-continue — it ends with a binary operator, a comma, or an opening delimiter, or the expression
+continue, it ends with a binary operator, a comma, or an opening delimiter, or the expression
 is inside an unclosed `(`, `[`, or `{`. The decision belongs to the line that ended, so a line
 *starting* with `(`, `[`, or `*` opens a new statement rather than continuing the one above as
 a call, an index, or a multiplication.
@@ -179,8 +179,8 @@ Statements are parsed using traditional recursive descent:
 ### Error Types
 
 `ParseError` (see [`errors.rs`](../../../compiler/syntax-parsing/src/errors.rs)) covers the
-token-level failures — `UnexpectedToken`, `UnexpectedEof`, a wrapped `LexError`, and
-`MaxDepthExceeded`, which stops runaway nesting rather than overflowing the stack — plus the
+token-level failures, `UnexpectedToken`, `UnexpectedEof`, a wrapped `LexError`, and
+`MaxDepthExceeded`, which stops runaway nesting rather than overflowing the stack, plus the
 grammar rules that are cheapest to enforce while parsing: `DuplicateParameter`,
 `DuplicateTypeAlias`, `TypeAliasShadowsBuiltin`, `CyclicTypeAlias`, `EnumLifetimeParam`,
 `ExportNotAllowed`, and `MisplacedNoPrelude`. Each carries the span of the offending token,
@@ -189,7 +189,7 @@ not the start of the enclosing construct.
 ### Error Recovery
 
 - **Fail-fast**: parsing stops at the first error. Multiple-error reporting is the type
-  checker's job — it collects diagnostics and keeps going.
+  checker's job; it collects diagnostics and keeps going.
 - **Precise error messages**: each names what was expected
 - **Span information**: the exact location of the offending token
 
@@ -312,7 +312,7 @@ fn test_operator_precedence() {
 /// Parse Neuro source code into an AST
 pub fn parse(source: &str) -> Result<Vec<Item>, ParseError>
 
-/// Parse a single expression — used by tests and tooling, not by the driver
+/// Parse a single expression, used by tests and tooling, not by the driver
 pub fn parse_expr(source: &str) -> Result<Expr, ParseError>
 ```
 

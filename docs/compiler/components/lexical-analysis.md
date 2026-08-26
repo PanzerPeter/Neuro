@@ -31,13 +31,24 @@ Type names (`i32`, `f64`, `bool`, `string`, `char`, …) are ordinary identifier
 keywords: they are resolved by the type checker, which is what lets a `newtype` or a
 `type` alias introduce one.
 
+#### String Literals and Interpolation
+
+A string token carries a [`StringValue`](../../../compiler/lexical-analysis/src/tokens.rs):
+`Plain(String)` for a literal without holes, `Interp(Vec<InterpChunk>)` when it contains at
+least one `{expr}` hole. Each chunk is either `Text(String)` (already unescaped) or
+`Hole { source, span }` (the raw expression text plus its location). The parser hands the
+chunks to expression parsing; see
+[string interpolation](../../language-reference/expressions.md#string-interpolation) for the
+user-facing syntax and format mini-language. An unterminated `{` hole is the lexer's
+`UnterminatedInterpolation` error.
+
 #### Operators
 
 - **Arithmetic**: `+`, `-`, `*`, `/`, `%`
 - **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`
 - **Comparison**: `==`, `!=`, `<`, `>`, `<=`, `>=`
 - **Logical**: `&&`, `||`, `!`
-- **Bitwise**: `&`, `|`, `^`, `~`, `<<` (there is no `>>` token — right shift is the
+- **Bitwise**: `&`, `|`, `^`, `~`, `<<` (there is no `>>` token; right shift is the
   `.shr(n)` method, because `>>` is reserved for function composition)
 - **Fallible**: `??` (coalesce), `?` (propagate)
 - **Assignment**: `=`
@@ -48,7 +59,7 @@ keywords: they are resolved by the type checker, which is what lets a `newtype` 
 
 `(` `)` · `{` `}` · `[` `]` · `,` · `:` · `;`
 
-`;` is tokenized only so a stray semicolon can be reported as an unexpected token — Neuro
+`;` is tokenized only so a stray semicolon can be reported as an unexpected token; Neuro
 statements are newline-terminated. Newlines are themselves tokens (`TokenKind::Newline`),
 because the parser needs them to find statement boundaries.
 
@@ -152,11 +163,13 @@ match tokenize(source) {
 
 ```rust
 pub enum LexError {
-    UnexpectedCharacter { ch: char, span: Span },
+    UnexpectedChar { character: char, span: Span },
     UnterminatedString { span: Span },
-    InvalidEscape { escape: String, span: Span },
     InvalidNumber { text: String, span: Span },
-    InvalidUnicodeEscape { value: String, span: Span },
+    InvalidEscape { escape: String, span: Span },
+    InvalidCharLiteral { literal: String, span: Span },
+    UnterminatedBlockComment { span: Span },
+    UnterminatedInterpolation { span: Span },
 }
 ```
 
@@ -250,18 +263,23 @@ pub enum TokenKind {
     // Keywords
     Func, Val, Mut, If, Else, Return,
 
-    // Literals
+    // Literals (integer and float also have suffixed forms)
     Integer(i64),
     Float(f64),
-    String(String),
+    String(StringValue),   // Plain(..) or Interp(..), see above
+    Char(char),
     Boolean(bool),
 
-    // Identifiers
+    // Identifiers and lifetimes
     Identifier(String),
+    Lifetime(String),
 
     // Operators (many variants)...
 }
 ```
+
+The excerpt above shows representative variants; the full set lives in
+[`tokens.rs`](../../../compiler/lexical-analysis/src/tokens.rs).
 
 ## Integration Points
 

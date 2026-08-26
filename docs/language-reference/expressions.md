@@ -27,23 +27,22 @@ val message = "Welcome to {name} v{version}"
 val report  = "Sum: {a + b}, Product: {a * b}"
 ```
 
-A hole holds any expression — a call, a field access, a struct literal, an `if`,
-a nested block — because the lexer only finds the hole's bounds and the parser
+A hole holds any expression (a call, a field access, a struct literal, an `if`,
+a nested block): the lexer only finds the hole's bounds and the parser
 re-parses its text as an ordinary expression. Write a literal `{` as `\{`; an
 unpaired `}` needs no escape.
 
-An optional `:spec` after the expression chooses the rendering. The full
-specifier table lives in the language specification; the shape is
+An optional `:spec` after the expression chooses the rendering. The shape is
 `[< > ^] [+] [0] [width] [.precision] [kind]`, where *kind* is one of
 `? e d x X b o`:
 
 ```neuro
-"{pi:.2}"      // 3.14        — fixed-point, 2 decimals
-"{pi:e}"       // 3.14159e0   — scientific
-"{n:x}"        // ff          — lowercase hex (n = 255)
-"{n:08d}"      // 00000255    — zero-padded to width 8
-"{s:^10}"      // centred in a field of width 10
-"{delta:+d}"   // +42 or -42  — always show the sign
+"{pi:.2}"     // 3.14        (fixed point, 2 decimals)
+"{pi:e}"      // 3.14159e0   (scientific)
+"{n:x}"       // ff          (lowercase hex, n = 255)
+"{n:08d}"     // 00000255    (zero-padded to width 8)
+"{s:^10}"     // centred in a field of width 10
+"{delta:+d}"  // +42 or -42  (always show the sign)
 ```
 
 Which specifiers a value accepts depends on its type, and a mismatch is a
@@ -53,7 +52,7 @@ the `+` flag requires a signed integer or a float. Interpolation renders
 integers, floats, `bool`, `char`, and `string`; aggregates await
 `@derive(Debug)`.
 
-Two limits are worth knowing. A hole may not contain a `"` string literal — the
+Two limits are worth knowing. A hole may not contain a `"` string literal: the
 quote ends the enclosing literal, and the hole is reported as unterminated. And
 an interpolated literal is not a constant, so it cannot appear in a pattern.
 
@@ -113,8 +112,9 @@ Point::new(1, 2)            // Associated function call
 
 Method-call syntax `receiver.method(args)` resolves against user-defined `impl` methods
 when the receiver is a struct, and against a fixed, compiler-known set of intrinsic methods
-when the receiver is a builtin (primitive or string) type. The first builtin intrinsic is
-`string.len()` — see [types.md](types.md#string-methods).
+when the receiver is a builtin type (`string.len()` and `.clone()`, the integer overflow
+methods, `.slice()`, and more). See [types.md](types.md#string-methods) for the string set
+and [types.md](types.md#integer-methods) for the integer set.
 
 ### Struct Literal Expressions
 
@@ -132,7 +132,7 @@ All fields must be present; duplicate or unknown fields are compile errors.
 Read a field from a struct value:
 
 ```neuro
-val x = p.x          // reads field x — type is f64
+val x = p.x          // reads field x, type is f64
 val total = c.value + c.step
 ```
 
@@ -165,8 +165,8 @@ val sign: i32  = if n < 0 { -1 } else if n == 0 { 0 } else { 1 }
 
 All arms must produce the same type. An `if` without `else` has type `Void` and cannot be used as a value.
 
-An arm that **leaves the scope** rather than producing a value — `return`, `break`,
-`continue`, `panic(...)`, or `unreachable()` — is exempt: it never reaches the point
+An arm that **leaves the scope** rather than producing a value, `return`, `break`,
+`continue`, `panic(...)`, or `unreachable()`, is exempt: it never reaches the point
 where the `if` has a value, so it neither supplies the type nor has to match it. The
 remaining arms decide:
 
@@ -180,7 +180,7 @@ func first_positive(n: i32) -> i32 {
 ### Match Expressions
 
 `match` is an expression that exhaustively deconstructs a value. The first arm
-whose pattern matches — and whose optional `if` guard holds — supplies the
+whose pattern matches, and whose optional `if` guard holds, supplies the
 value; all arm bodies must have the same type, except those that leave the scope
 (`{ return ... }`, `{ break }`, `{ continue }`, `panic(...)`, `unreachable()`), which
 supply no type at all.
@@ -190,8 +190,8 @@ enum Shape { Circle(i32), Rect { w: i32, h: i32 }, Unit }
 
 func area(s: Shape) -> i32 {
     match s {
-        Shape::Circle(r)       => r * r * 3,   // tuple variant — binds `r`
-        Shape::Rect { w, h }   => w * h,        // struct variant — binds `w`, `h`
+        Shape::Circle(r)       => r * r * 3,   // tuple variant, binds `r`
+        Shape::Rect { w, h }   => w * h,        // struct variant, binds `w`, `h`
         Shape::Unit            => 0
     }
 }
@@ -229,7 +229,7 @@ A `{ … }` block is an expression whose value is its final (trailing) expressio
 val area: i32 = {
     val w: i32 = 6
     val h: i32 = 7
-    w * h           // trailing expression — this is the block's value
+    w * h           // trailing expression, this is the block's value
 }
 ```
 
@@ -238,13 +238,13 @@ Locals declared inside a block are scoped to that block.
 ### Unsafe Block Expressions
 
 An `unsafe { … }` block is a block expression prefixed with the reserved
-`unsafe` keyword. It evaluates exactly like a bare block — its value is the
+`unsafe` keyword. It evaluates exactly like a bare block, its value is the
 trailing expression, and its locals are block-scoped:
 
 ```neuro
 val x: i32 = unsafe {
     val a: i32 = 20
-    a + 22          // trailing expression — this is the block's value
+    a + 22          // trailing expression, this is the block's value
 }
 ```
 
@@ -264,34 +264,43 @@ x / (y + z)     // Force addition before division
 
 ## Operator Precedence
 
-Higher precedence operators evaluate first. Full table from highest to lowest:
+Higher precedence operators bind first. Full table from highest to lowest, matching the
+Pratt parser's ladder exactly:
 
 | Level | Operators | Associativity | Description |
 |-------|-----------|---------------|-------------|
-| (highest) | `.` | Left | Field access |
-| | `(…)` | Left | Function call / method call |
-| 2 | `-` (unary), `!`, `~` | Right | Negation, logical NOT, bitwise NOT |
-| 3 | `as` | Left | Type cast |
-| 5 | `*`, `/`, `%` | Left | Multiply, divide, modulo |
-| 6 | `+`, `-` | Left | Addition, subtraction |
-| 7 | `<<` | Left | Left shift |
-| 8 | `&` | Left | Bitwise AND |
-| 9 | `^` | Left | Bitwise XOR |
-| 10 | `\|` | Left | Bitwise OR |
-| 11 | `<`, `>`, `<=`, `>=`, `==`, `!=` | None | Comparison / equality |
-| 12 | `&&` | Left | Logical AND |
-| 13 (lowest) | `\|\|` | Left | Logical OR |
+| 16 (highest) | `.` | Left | Field / method access |
+| 15 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | Left | Postfix forms |
+| 14 | `-` (unary), `!`, `~` | Right | Negation, logical NOT, bitwise NOT |
+| 13 | `as` | Left | Type cast |
+| 12 | `*`, `/`, `%` | Left | Multiply, divide, modulo |
+| 11 | `+`, `-` | Left | Addition, subtraction |
+| 10 | `<<` | Left | Left shift |
+| 9 | `<`, `>`, `<=`, `>=` | Left | Comparison |
+| 8 | `==`, `!=` | Left | Equality |
+| 7 | `&` | Left | Bitwise AND |
+| 6 | `^` | Left | Bitwise XOR |
+| 5 | `\|` | Left | Bitwise OR |
+| 4 | `&&` | Left | Logical AND |
+| 3 | `\|\|` | Left | Logical OR |
+| 2 | `??` | Right | Null/error coalescing |
+| 1 (lowest) | `..`, `..=` | Left | Ranges |
+
+Comparison binds tighter than equality: `x < y == z` parses as `(x < y) == z`. There is no
+`>>` operator; right shift is the `.shr(n)` method because `>>` is reserved for function
+composition.
 
 **Examples**:
 
 ```neuro
 a + b * c         // Parsed as: a + (b * c)
-a & b + c         // Parsed as: a & (b + c)   — arithmetic before bitwise
-a | b & c         // Parsed as: a | (b & c)   — AND before OR
+a & b + c         // Parsed as: a & (b + c)   (arithmetic before bitwise)
+a | b & c         // Parsed as: a | (b & c)   (AND before OR)
 a < b == c < d    // Parsed as: (a < b) == (c < d)
 !a && b           // Parsed as: (!a) && b
 a || b && c       // Parsed as: a || (b && c)
 n as f64 + 1.0    // Parsed as: (n as f64) + 1.0
+f(x)? + 1         // Parsed as: (f(x)?) + 1
 ```
 
 ## Expression-Based Returns
@@ -312,21 +321,21 @@ func max(a: i32, b: i32) -> i32 {
 }
 ```
 
-**Key distinction** — it is positional, not punctuation-based:
+**Key distinction**: it is positional, not punctuation-based:
 - A bare expression in the **last** position of a block is its return value
 - Any earlier line (a `val`/`mut` binding, assignment, or non-final expression) is a statement evaluated for its effect
 
 ```neuro
 func example() -> i32 {
     val x: i32 = 42  // Statement (binding)
-    x  // Last expression — implicit return
+    x  // Last expression, implicit return
 }
 ```
 
 ## Statement Boundaries
 
 There are no semicolons: a newline ends a statement. An expression continues onto the
-next line only when the line that just ended asks it to — it ends with a binary
+next line only when the line that just ended asks it to: it ends with a binary
 operator, a comma, or an opening delimiter, or the expression is still inside an
 unclosed `(`, `[`, or `{`:
 
@@ -346,9 +355,9 @@ val chained: i32 = cell
 ```
 
 The decision belongs to the line that ended, never to the line that follows. A line
-*starting* with `(`, `[`, or `*` is therefore a new statement — a parenthesized
-expression, an array literal, a dereference — not a call, an index, or a
-multiplication continuing the line above:
+*starting* with `(`, `[`, or `*` therefore begins a new statement: a parenthesized
+expression, an array literal, or a dereference. It can never be a call, an index,
+or a multiplication continuing the line above:
 
 ```neuro
 val a: i32 = f()

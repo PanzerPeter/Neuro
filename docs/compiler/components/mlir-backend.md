@@ -1,6 +1,6 @@
 # MLIR Backend (Experimental)
 
-**Status**: 1D scaffold — off by default behind the `mlir` cargo feature
+**Status**: 1D scaffold, off by default behind the `mlir` cargo feature
 **Crate**: `compiler/mlir-backend`
 **Library**: melior 0.25.1 (Rust MLIR bindings, LLVM/MLIR 20)
 
@@ -8,8 +8,8 @@
 
 The MLIR backend is the future tensor / autodiff / GPU lowering path (Phase 2+). It consumes the
 same typed High-Level IR ([`neuro-hir`](hir-lowering.md)) the LLVM backend consumes. As of the
-1D scaffold it emits a trivial, verifier-clean MLIR module — one `func.func` *declaration* per
-function and `impl` method — proving the HIR → `melior` → verified-MLIR pipeline end-to-end. Real
+1D scaffold it emits a trivial, verifier-clean MLIR module, one `func.func` *declaration* per
+function and `impl` method, proving the HIR → `melior` → verified-MLIR pipeline end-to-end. Real
 body lowering (linalg / tensor dialects) is Phase 2+.
 
 ## Feature Gate
@@ -25,7 +25,7 @@ The path is opt-in behind the off-by-default `mlir` feature
   `cargo test -p mlir-backend --features mlir` smoke step exercise the gated code; the Windows/macOS
   legs build the placeholder.
 
-See [Installation → Optional: MLIR Backend](../../getting-started/installation.md#optional-mlir-backend-phase-18)
+See [Installation → Optional: MLIR Backend](../../getting-started/installation.md#optional-mlir-backend)
 for the MLIR 20 + libclang 20 toolchain setup.
 
 ## Entry Points (feature `mlir`)
@@ -35,23 +35,23 @@ pub fn lower_program(program: &HirProgram) -> Result<String, MlirError>;
 pub fn emit_smoke_module() -> Result<String, MlirError>;
 ```
 
-- `lower_program` — the HIR → MLIR scaffold: registers all dialects, walks the typed HIR, and returns
+- `lower_program`, the HIR → MLIR scaffold: registers all dialects, walks the typed HIR, and returns
   the textual form of a **verified** module of `func.func` declarations.
-- `emit_smoke_module` — the HIR-independent `melior` wiring check: builds + verifies
+- `emit_smoke_module`, the HIR-independent `melior` wiring check: builds + verifies
   `func.func @neuro_smoke(index, index) -> index` with an `arith.addi` body.
 
 ## Lowering Rules (scaffold)
 
 - Free functions and `impl` methods become `func.func` *declarations* (empty region, private
-  visibility — external symbols, not definitions). A method receiver lowers to a pointer parameter.
+  visibility, external symbols, not definitions). A method receiver lowers to a pointer parameter.
   Structs and constants are skipped.
-- HIR scalar types map to MLIR scalars: `i8`–`i64`, `i1` for `bool`, `i32` for `char`,
+- HIR scalar types map to MLIR scalars: `i8` to `i64`, `i1` for `bool`, `i32` for `char`,
   `f16` / `bf16` / `f32` / `f64`.
 - Every aggregate / reference / string type maps to an opaque `!llvm.ptr` until real tensor and
   struct lowering lands (Phase 2+).
 - `void` is the empty result list in return position; anywhere else it is a
   `MlirError::UnsupportedType`.
-- Function bodies are intentionally **not** lowered yet — that is the Phase 2 linalg/tensor work. The
+- Function bodies are intentionally **not** lowered yet; that is the Phase 2 linalg/tensor work. The
   module is run through the MLIR verifier before its textual form is returned.
 
 ## Coexistence with inkwell
@@ -67,6 +67,6 @@ to MLIR 21/22.
 
 ## Resources
 
-- [mlir-backend CONTEXT](../../../compiler/mlir-backend/CONTEXT.md) — slice contract
-- [melior](https://github.com/raviqqe/melior) — Rust MLIR bindings
-- [MLIR](https://mlir.llvm.org/) — Multi-Level Intermediate Representation
+- [mlir-backend CONTEXT](../../../compiler/mlir-backend/CONTEXT.md), slice contract
+- [melior](https://github.com/raviqqe/melior), Rust MLIR bindings
+- [MLIR](https://mlir.llvm.org/), Multi-Level Intermediate Representation
