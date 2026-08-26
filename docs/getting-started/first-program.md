@@ -43,7 +43,7 @@ cargo run -p neurc -- check hello.nr
 
 Expected output:
 ```
-Type checking passed!
+Type checking passed for "hello.nr" (1 module(s), 9 HIR items)
 ```
 
 ## Step 4: Compile the Program
@@ -56,8 +56,10 @@ cargo run -p neurc -- compile hello.nr
 
 Expected output:
 ```
-Compilation successful: hello.exe
+Successfully compiled hello.nr -> hello
 ```
+
+On Windows the executable is `hello.exe`.
 
 ## Step 5: Run the Program
 
@@ -392,7 +394,7 @@ counter = counter + 1
 
 ### 2. Use Explicit Types
 
-Type inference works — `val count = 42` is an `i32` — but an annotation documents intent
+Inference works (`val count = 42` is an `i32`), but an annotation documents intent
 at a binding a reader has to trust:
 
 ```neuro
@@ -490,7 +492,7 @@ func good() -> i32 {
 
 ### 4. Statements vs Implicit Return
 
-Neuro has **no semicolons** — statements are terminated by a newline. A trailing
+Neuro has no semicolons: statements are terminated by a newline. A trailing
 `;` is a parse error. The final expression in a function body (no `return`
 keyword) becomes its return value:
 

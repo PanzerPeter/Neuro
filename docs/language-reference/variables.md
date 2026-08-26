@@ -19,7 +19,7 @@ const DOUBLED: i32 = BASE * 2   // arithmetic on other consts is allowed
 - RHS must be a constant expression: literals, arithmetic/unary/cast on literals,
   or identifiers that refer to previously declared `const` names
 - Function calls and runtime values are not allowed as `const` initializers
-- No ownership or lifetime — consts do not participate in the borrow checker
+- No ownership or lifetime, consts do not participate in the borrow checker
 - Module-level consts are visible to all functions regardless of source order
 - Function-body consts are scoped to the enclosing function
 
@@ -77,7 +77,7 @@ Use `val` to declare immutable variables:
 
 ```neuro
 val x: i32 = 42
-val name: string = "Neuro"  // String type pending
+val name: string = "Neuro"
 val pi: f64 = 3.14159
 ```
 
@@ -212,17 +212,57 @@ func counter() -> i32 {
 }
 ```
 
+## Destructuring
+
+A `val` or `mut` binding may take a pattern instead of a single name:
+
+```neuro
+// Tuple destructuring
+val (x, y) = get_point()
+
+// Struct destructuring, binds each named field by its own name
+val Point { x, y } = point
+
+// Array destructuring, binds positionally
+val [a, b, c] = triple
+
+// Array destructuring with a trailing rest: `rest` is a fresh `[T; N - 2]` array
+val [first, second, ..rest] = numbers
+
+// A bare `..` ignores the remainder; `_` discards a single element
+val [head, ..] = numbers
+val [_, mid, _] = triple
+```
+
+A rest-less array pattern must bind every element; `val [a, b] = arr` where `arr`
+has more than two elements is a compile error. Add a `..rest` (or `..`) to capture
+the remainder. `mut` patterns make every binding mutable. Patterns nest, so an
+element may itself be a tuple, struct, or array pattern.
+
+### Pattern Matching in Declarations
+
+```neuro
+val Some(value) = optional else {
+    return 0
+}
+```
+
+The `else` branch runs when the value does not match the pattern; see
+[`val-else`](control-flow.md#val-else-unwrap-or-leave-the-scope) for the full form,
+including the optional `|binding|`.
+
 ## Move Semantics (Ownership)
 
-Every binding owns its value. For **non-`Copy`** types — today that is `string` —
-placing the value somewhere new *moves* ownership out of the source binding, and the
-source becomes invalid. Reading a moved binding is a compile error:
+Every binding owns its value. For **non-`Copy`** types (`string`, the collections,
+structs without `@derive(Copy)`), placing the value somewhere new *moves* ownership out
+of the source binding, and the source becomes invalid. Reading a moved binding is a
+compile error:
 
 ```neuro
 val s1: string = "Hello"
 val s2: string = s1        // s1 is MOVED into s2
 // val n: u64 = s1.len()   // ERROR: use of moved value 's1'
-val n: u64 = s2.len()      // OK — s2 owns the value now
+val n: u64 = s2.len()      // OK, s2 owns the value now
 ```
 
 A move happens whenever a non-`Copy` value is handed to a new owner: a `val`/`mut`
@@ -247,7 +287,7 @@ val c: i32 = a + b         // both a and b still valid
 ```
 
 **`.clone()` is the opt-out.** When you need an independent copy of a non-`Copy`
-value, clone it — the receiver is borrowed, not moved:
+value, clone it, the receiver is borrowed, not moved:
 
 ```neuro
 val a: string = "hello"
@@ -264,12 +304,13 @@ val msg: string = "hi"
 if ready {
     val r: u64 = consume(msg)   // moves msg only on this path
 }
-val n: u64 = msg.len()          // OK — the move above was conditional
+val n: u64 = msg.len()          // OK, the move above was conditional
 ```
 
-> Move tracking currently applies only to `string`, the one non-`Copy` type the
-> language can construct. Structs become move-tracked once the `Copy` trait and
-> `@derive(Copy)` land; until then they are freely duplicable. `mut` bindings that
+> Move tracking covers every non-`Copy` type: `string`, the collections
+> (`Vec`, `HashMap`, `BTreeMap`), and any struct without `@derive(Copy)`. Scalars,
+> arrays and tuples of `Copy` elements, references, and `@derive(Copy)` structs are
+> freely duplicable. A type with a `Drop` impl cannot be `Copy`. `mut` bindings that
 > were moved can be revived by reassigning them a fresh value.
 
 ## Type Annotations
@@ -588,50 +629,6 @@ val x: i32 = 20  // Creates new variable (shadowing), doesn't reassign
 // If you meant reassignment:
 mut y: i32 = 10
 y = 20  // Reassigns existing variable
-```
-
-## Future Features (Phase 1+)
-
-### Type Inference
-
-```neuro
-// Will infer types from initializers
-val x = 42          // Infers i32
-val pi = 3.14       // Infers f64
-val flag = true     // Infers bool
-```
-
-### Destructuring
-
-```neuro
-// Tuple destructuring
-val (x, y) = get_point()
-
-// Struct destructuring — binds each named field by its own name
-val Point { x, y } = point
-
-// Array destructuring — binds positionally
-val [a, b, c] = triple
-
-// Array destructuring with a trailing rest: `rest` is a fresh `[T; N - 2]` array
-val [first, second, ..rest] = numbers
-
-// A bare `..` ignores the remainder; `_` discards a single element
-val [head, ..] = numbers
-val [_, mid, _] = triple
-```
-
-A rest-less array pattern must bind every element — `val [a, b] = arr` where `arr`
-has more than two elements is a compile error; add a `..rest` (or `..`) to capture
-the remainder. `mut` patterns make every binding mutable. Patterns nest, so an
-element may itself be a tuple, struct, or array pattern.
-
-### Pattern Matching in Declarations
-
-```neuro
-val Some(value) = optional else {
-    return 0
-}
 ```
 
 ## References

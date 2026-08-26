@@ -28,12 +28,12 @@ begins to matter once a second file reads your code:
 export struct Config {
     export host: string,
     export port: i32,
-    timeout: i32          // private — internal implementation detail
+    timeout: i32          // private, internal implementation detail
 }
 ```
 
 `export` is per field, so an exported struct can still hold something back. Another module
-cannot read `c.timeout`, assign to it, list it in a literal, or reach it through `..base` —
+cannot read `c.timeout`, assign to it, list it in a literal, or reach it through `..base`
 which is what makes a constructor like `Config::new` the only way in. See
 [Modules → Visibility](modules.md#visibility).
 
@@ -70,7 +70,7 @@ val shifted = Point { x: 10.0, ..p }   // x = 10.0, y inherited from p (2.0)
 val copy = Point { ..p }               // all fields copied from p
 ```
 
-The base must be the same struct type as the literal (otherwise a type `Mismatch` error). When a base is present, omitting fields is **not** a `MissingStructField` error — the base fills them in. The base is evaluated and its fields are copied into the new value; no allocation is introduced.
+The base must be the same struct type as the literal (otherwise a type `Mismatch` error). When a base is present, omitting fields is **not** a `MissingStructField` error, the base fills them in. The base is evaluated and its fields are copied into the new value; no allocation is introduced.
 
 ## Field Access
 
@@ -114,7 +114,7 @@ func main() -> i32 {
 }
 ```
 
-> **Phase 1 limitation**: A *free* function may not return a struct — the by-value struct ABI
+> **Phase 1 limitation**: A *free* function may not return a struct; the by-value struct ABI
 > is not implemented for them. Associated functions and methods declared in an `impl` block
 > may return structs (this is what makes the `Type::new(...)` constructor pattern work).
 
@@ -259,18 +259,18 @@ func main() -> i32 {
 
 Rules:
 
-- Destructors run **only on normal scope exit** — fall-through, `return`,
+- Destructors run **only on normal scope exit**: fall-through, `return`,
   `break`, and `continue`. A panic aborts the process without running any
   destructor (there is no stack unwinding).
 - When several owned values leave the same scope, they are dropped in **reverse
   declaration order** (LIFO).
 - A value that has been **moved** out (rebound, returned, passed by value, or
-  stored into a struct) is dropped exactly once, by its final owner — never
+  stored into a struct) is dropped exactly once, by its final owner, never
   twice. Reading a moved value is already a compile error.
 - A `Copy` type may **not** implement `Drop` (a type with a destructor is moved,
   not duplicated). `@derive(Copy)` together with `impl Drop` is a compile error.
-- The `drop` method must be exactly `drop(&mut self)` — no extra parameters and
-  no return type — and an `impl Drop` block may contain no other methods.
+- The `drop` method must be exactly `drop(&mut self)`: no extra parameters and
+  no return type, and an `impl Drop` block may contain no other methods.
 
 Not yet supported: reassigning a `Drop` binding does not run the prior value's
 destructor, and a struct's `Drop`-typed fields are not dropped automatically
@@ -328,20 +328,20 @@ func first_of(p: &Pair<i32, i32>) -> i32 {
 func main() -> i32 {
     val p = Pair { first: 40, second: 2 }   // Pair<i32, i32> inferred
     val w = Wrapper { value: 30 }           // Wrapper<i32>
-    val flag = Wrapper { value: true }      // Wrapper<bool> — distinct instance
+    val flag = Wrapper { value: true }      // Wrapper<bool>, distinct instance
     return first_of(&p) + w.get()           // 40 + 30 = 70
 }
 ```
 
 **Restrictions (this phase).** Type arguments are restricted to `Copy` types (a bare type
-parameter has no move semantics yet). A generic struct is usable only *with* type arguments
-— its bare name is rejected. A generic instantiated with an enclosing type parameter (a
+parameter has no move semantics yet). A generic struct is usable only *with* type arguments;
+its bare name is rejected. A generic instantiated with an enclosing type parameter (a
 `Wrapper<T>` field inside another generic struct) is a documented limitation, deferred with
 broader generic support.
 
 ### Const (value) parameters
 
-A generic struct may also declare a **const parameter** — a compile-time value used as an array
+A generic struct may also declare a **const parameter**, a compile-time value used as an array
 length, so `[T; CAP]` is sized concretely per instance:
 
 ```neuro
@@ -364,7 +364,7 @@ over a struct's const parameter is a documented limitation deferred to broader g
 
 A `trait` defines shared behaviour that many types can implement. Traits are Neuro's
 mechanism for bounded polymorphism. A trait method is either **required** (a signature
-with no body — implementors must provide one) or a **default** method (a signature with a
+with no body, implementors must provide one) or a **default** method (a signature with a
 body that implementors inherit unless they override it).
 
 ```neuro
@@ -416,7 +416,7 @@ landed. Associated types beyond the operator traits' `type Output` are still out
 
 The following are not yet implemented and will be rejected at compile time:
 
-- `self` (consuming) on a **non-`Copy`** struct — needs the by-value struct ABI. On a `Copy`
+- `self` (consuming) on a **non-`Copy`** struct (needs the by-value struct ABI). On a `Copy`
   struct an owned `self` is accepted, because copying by value is ABI-identical to `&self`
   (this is what lets an operator-trait method `func add(self, ...)` work)
 - Struct return types from free functions (backend limitation; associated functions and methods may return structs)
@@ -454,6 +454,6 @@ Neuro uses nominal typing for structs: two struct types are compatible only if t
 
 ## References
 
-- [Types](types.md) — type system overview
-- [Variables](variables.md) — `val` and `mut` bindings
-- [Functions](functions.md) — function definitions
+- [Types](types.md), type system overview
+- [Variables](variables.md), `val` and `mut` bindings
+- [Functions](functions.md), function definitions

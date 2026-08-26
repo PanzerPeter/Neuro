@@ -35,8 +35,8 @@ RUST_LOG=debug neurc check examples/basics/milestone.nr
 ```
 
 **Output**:
-- Success: "Type checking passed!"
-- Failure: Detailed error messages with locations
+- Success: `Type checking passed for "examples/basics/hello.nr" (1 module(s), 11 HIR items)`
+- Failure: `Type errors found in "<file>":` followed by a numbered error list, then `Error: N type error(s) found`
 
 **Exit codes**:
 - 0: No errors found
@@ -74,8 +74,8 @@ RUST_LOG=debug neurc compile examples/basics/hello.nr
 ```
 
 **Output**:
-- Success: "Compilation successful: <output_path>"
-- Failure: Detailed error messages
+- Success: `Successfully compiled <input.nr> -> <output_path>`
+- Failure: the failing stage's errors, then `Compilation failed: <reason>` plus a numbered `Caused by (n):` chain
 
 **Exit codes**:
 - 0: Compilation successful
@@ -185,69 +185,60 @@ neurc compile program.nr -o bin/release/app
 
 ### Temporary Files
 
-Temporary object files are created during compilation but automatically deleted:
-- Location: System temp directory
-- Format: `.o` object files
-- Cleanup: Automatic via RAII
+A temporary object file is written during compilation and deleted after linking:
+- Location: system temp directory
+- Format: `.o` on Unix, `.obj` on Windows
+- Cleanup: removed once the linker finishes
 
 ## Error Handling
+
+Errors go to stderr with exit code `1`. `compile` wraps the failing stage's message in a
+`Compilation failed:` line followed by a numbered `Caused by (n):` chain.
 
 ### Parse Errors
 
 Example:
 ```
-Parse error: unexpected token `}`, expected expression
-  at examples/bad.nr:5:12
+Error: Module error: failed to parse module `bad.nr`: unexpected token RightBrace, expected expression
 ```
 
 **Information provided**:
-- Error type (Parse error)
-- What went wrong (unexpected token)
-- What was expected
-- Exact location (file:line:column)
+- The module that failed to parse
+- The offending token and what the parser expected
 
 ### Type Errors
 
 Example:
 ```
-Type error: Type mismatch
-  expected: i32
-  found: bool
-  at examples/bad.nr:8:18
+Type errors found in "bad.nr":
+  1. type mismatch at Span { start: 25, end: 42 }: expected i32, found bool
+Error: 1 type error(s) found
 ```
 
 **Information provided**:
-- Error type (Type error)
-- Expected type
-- Found type
-- Exact location
+- A numbered list of every type error (the type checker keeps going after the first)
+- Each error's kind, its byte range in the source (`Span`), and the expected/found types
 
-### Code Generation Errors
+### Code Generation and Link Errors
 
-Example:
+Codegen failures print as `Compilation failed: Code generation error: ...`; link failures
+name the linker invocation, for example:
+
 ```
-Code generation error: undefined variable 'x'
-  at examples/bad.nr:10:12
-```
-
-### Link Errors
-
-Example:
-```
-Failed to link object file temp.o to executable program.exe
-  Caused by: linker error: cannot find -lmsvcrt
+Compilation failed: Failed to link object file /tmp/neuro.o to executable program
+Caused by (1): Failed to execute cc - ensure a C compiler (gcc/clang) is installed
 ```
 
 **Common causes**:
-- Missing C toolchain
+- Missing C toolchain (MSVC or clang on Windows, gcc/clang on Unix)
 - Missing system libraries
-- Incorrect linker configuration
 
 ## Performance
 
 ### Compilation Times
 
-Typical compilation times (Phase 1):
+Rough figures for a release-build compiler on a modern desktop; a debug build of `neurc`
+itself is slower:
 
 | Program Size | Check Time | Compile Time |
 |--------------|------------|--------------|
@@ -349,7 +340,7 @@ echo "Build complete!"
   run: |
     wget https://apt.llvm.org/llvm.sh
     chmod +x llvm.sh
-    sudo ./llvm.sh 18
+    sudo ./llvm.sh 20
 
 - name: Build Neuro compiler
   run: cargo build --release -p neurc
@@ -375,10 +366,8 @@ See [Troubleshooting Guide](troubleshooting.md) for common issues and solutions.
 - Quiet mode: `-q` flag
 - Color output control: `--color` option
 
-### Planned for Phase 1+
+### Planned
 
-- Multiple file compilation
-- Module system support
 - Incremental compilation
 - Build caching
 - Cross-compilation targets

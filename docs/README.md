@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Alpha. Phase 1 (Core Language) is in progress. Per-sub-phase status lives in one place — the [Quick Roadmap](../README.md#quick-roadmap); what each release changed is in [CHANGELOG.md](../CHANGELOG.md). The feature list below describes what the compiler accepts today.
+**Status**: Alpha. Phase 1 (Core Language) is in progress. Per-sub-phase status lives in one place, the [Quick Roadmap](../README.md#quick-roadmap); what each release changed is in [CHANGELOG.md](../CHANGELOG.md). The feature list below describes what the compiler accepts today.
 
 ## Quick Links
 
@@ -90,8 +90,10 @@ Key design goals:
 - **Traits** (1F): `trait` declarations with required and default (provided)
   methods; `impl Trait for Type` checked for conformance; trait-bounded generics
   `func f<T: Shape>(x: &T)` dispatch trait methods on the type parameter, checked at the
-  call site. Fully monomorphized and erased, so there is no vtable and no runtime cost. Associated
-  types land later in 1F
+  call site. Fully monomorphized and erased, so there is no vtable and no runtime cost.
+  A `trait` declaration itself carries no generic parameters, supertraits, or associated
+  types yet; only the compiler-known operator traits have associated-type bindings
+  (`type Output = T`) in their `impl` blocks
 - **Static & dynamic dispatch** (1F): `impl Trait` in argument position
   (`func train(m: &impl Model)`) and return position (`func make() -> impl Shape`) is
   anonymous-generic sugar: monomorphized at zero cost, and each `impl Trait` parameter is its
@@ -134,7 +136,7 @@ Key design goals:
 - Null-coalescing `??`: unwraps an `Option<T>` / `Result<T, E>` to its payload, else evaluates the fallback (R-to-L associativity, lazy fallback, `Err` payload discarded)
 - String equality: `==` and `!=` via length-check + `memcmp`
 - Builtin method dispatch on primitive & string receivers: `string.len() -> u64` (O(1) fat-pointer read), `.clone()`, and `.slice(a..b) -> &string` (zero-copy sub-slice; panics on out-of-bounds or mid-codepoint boundary)
-- String interpolation `"Hello, {name}!"` with the format mini-language (`{x:.2}`, `{n:08d}`, `{s:^10}`, `{n:x}`, `{n:b}`, `{d:+d}`, `{v:?}`) — see [expressions.md](language-reference/expressions.md#string-interpolation)
+- String interpolation `"Hello, {name}!"` with the format mini-language (`{x:.2}`, `{n:08d}`, `{s:^10}`, `{n:x}`, `{n:b}`, `{d:+d}`, `{v:?}`), see [expressions.md](language-reference/expressions.md#string-interpolation)
 
 ### Structs and Methods (1E)
 
@@ -271,7 +273,8 @@ Key design goals:
 - Not interchangeable with the inner type (unlike a transparent `type` alias)
 - Construct with `Meters(30)`; read the wrapped value with `.0`; forwards `Copy`/`Clone`
 - Usable as a binding, function parameter/return, and struct field
-- Phase-1E limit: the inner type must be `Copy`; operator/trait impls on a newtype await 1F+
+- Limits: the inner type must be `Copy`; an `impl` block cannot target a newtype, so
+  operator and trait impls are not available on one
 
 ### Compilation
 
@@ -312,48 +315,76 @@ Tensor/AI path (lowers the same typed HIR):
 
 ## Example Programs
 
-### Hello World (returns 0)
+Every snippet below is taken verbatim from a runnable file in [examples/](../examples/).
+
+### Arithmetic ([examples/basics/hello.nr](../examples/basics/hello.nr); compiles to a binary that exits 26)
 
 ```neuro
+func add(a: i32, b: i32) -> i32 {
+    return a + b
+}
+
+func calculate(x: i32) -> i32 {
+    val doubled: i32 = x * 2
+    val result: i32 = doubled + 10
+    return result
+}
+
 func main() -> i32 {
-    return 0
+    val x: i32 = 5
+    val y: i32 = 3
+    val sum: i32 = add(x, y)
+    val calculated: i32 = calculate(sum)
+    return calculated
 }
 ```
 
-### Factorial (recursive, implicit return)
+### Recursion ([examples/basics/factorial.nr](../examples/basics/factorial.nr))
 
 ```neuro
 func factorial(n: i32) -> i32 {
+    val result: i32 = 0
     if n <= 1 {
-        1
+        val result: i32 = 1
+        return result
     } else {
-        n * factorial(n - 1)
+        val prev: i32 = factorial(n - 1)
+        val result: i32 = n * prev
+        return result
     }
+    return result
 }
 
 func main() -> i32 {
-    factorial(10)
+    val result: i32 = factorial(5)
+    return result
 }
 ```
 
-### Range-For Loop
+### Range-For Loop ([examples/control_flow/for_range.nr](../examples/control_flow/for_range.nr))
 
 ```neuro
-func sum_to(n: i32) -> i32 {
-    mut total: i32 = 0
-    for i in 0..n {
-        total += i
+func sum_range(start: i32, end: i32) -> i32 {
+    mut sum: i32 = 0
+
+    for i in start..end {
+        sum = sum + i
     }
-    total
+
+    return sum
+}
+
+func main() -> i32 {
+    return sum_range(0, 5)
 }
 ```
 
-### Neuron (structs + methods + if-expression)
+### Structs and Methods ([examples/structs/neuron.nr](../examples/structs/neuron.nr))
 
 ```neuro
 struct Neuron {
     weight: f64,
-    bias:   f64
+    bias: f64
 }
 
 impl Neuron {
@@ -361,18 +392,15 @@ impl Neuron {
         Neuron { weight: weight, bias: bias }
     }
 
+    // ReLU activation: pass-through if positive, clamp to zero otherwise
     func activate(&self, input: f64) -> f64 {
         val z = (input * self.weight) + self.bias
-        if z > 0.0 { z } else { 0.0 }  // ReLU
+        if z > 0.0 { z } else { 0.0 }
     }
 }
-
-func main() -> i32 {
-    val n = Neuron::new(0.5, -0.1)
-    val out = n.activate(1.0)   // 0.4
-    return 0
-}
 ```
+
+The full file adds an `is_active` method and a `main` that scales the activation into its exit code.
 
 More examples in [examples/](../examples/).
 

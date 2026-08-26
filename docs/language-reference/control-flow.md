@@ -88,8 +88,8 @@ An `if`/`else` is an expression: its value is the trailing expression of the tak
 branch. It can be a function's implicit return value or be bound to a variable. Both
 branches must yield the same type, so an `else` is required when the value is used.
 
-A branch that leaves the scope instead of producing a value — `return`, `break`,
-`continue`, `panic(...)`, `unreachable()` — is exempt from that agreement: it never
+A branch that leaves the scope instead of producing a value (`return`, `break`,
+`continue`, `panic(...)`, `unreachable()`) is exempt from that agreement: it never
 reaches the point where the `if` has a value, so the other branch decides the type.
 `if n > 0 { return 1 } else { 2 }` is an `i32`. The same rule applies to `match` arms.
 
@@ -179,7 +179,7 @@ be written as `loop { ... }`; silence with `@allow(prefer_loop_over_while_true)`
 on the enclosing function
 ```
 
-The motivation is style, not safety — both forms produce identical machine
+The motivation is style, not safety; both forms produce identical machine
 code. To silence the warning on a function (typically when transcribing code
 from C, Python, or JavaScript), attach the `@allow` attribute:
 
@@ -237,7 +237,7 @@ All value-carrying `break`s for one loop must agree on type. With a label,
 `break outer value` carries the value out of an outer loop, and the labeled loop
 may itself be used in value position (`val x = outer: loop { ... }`).
 
-Only `loop` can yield a value — it is the one loop guaranteed (by the absence of
+Only `loop` can yield a value: it is the one loop guaranteed (by the absence of
 a fall-through exit) to leave solely via a `break`. `while` and `for` always
 evaluate to unit `()`, so a `break value` targeting one is a compile error.
 
@@ -315,7 +315,7 @@ func valid() -> i32 {
 
 ### Loop Labels
 
-A `for`, `while`, or `loop` may be prefixed with a label — an identifier
+A `for`, `while`, or `loop` may be prefixed with a label, an identifier
 followed by a colon (`outer:`). `break label` and `continue label` then target
 the labeled loop rather than the innermost one, so an inner loop can exit or
 re-enter an outer loop directly:
@@ -466,11 +466,11 @@ Enum variants deconstruct and bind their payloads (`E::Tuple(a)`,
 [Expressions → Match Expressions](expressions.md) for the full pattern grammar,
 exhaustiveness rules, and current Phase-1E limits.
 
-## `val-else` — Unwrap or Leave the Scope
+## `val-else`, Unwrap or Leave the Scope
 
 `val PATTERN = value else { ... }` binds a refutable pattern and hands the failure to
 an `else` branch. The bindings are live for the **rest of the enclosing block**, not
-just one arm — which is what makes it the straight-line alternative to a `match` whose
+just one arm, which is what makes it the straight-line alternative to a `match` whose
 success arm would otherwise swallow the whole function:
 
 ```neuro
@@ -480,7 +480,7 @@ func doubled_or_error(raw: i32) -> i32 {
 }
 ```
 
-The `else` branch **must exit the scope** — `return`, `break`, `continue`,
+The `else` branch **must exit the scope**: `return`, `break`, `continue`,
 `panic(...)`, or `unreachable()`. A branch that can fall through is rejected, so the
 binding is guaranteed initialized on the path that continues:
 
@@ -498,7 +498,7 @@ decided by the scrutinee's type:
 | Scrutinee type | `else \|name\|` binds |
 | --- | --- |
 | `Result<T, E>` | the `Err` payload (`Result::Err(e)` → `e: E`) |
-| `Option<T>` | nothing — `None` is empty, so only `\|_\|` (or a bare `else`) is accepted |
+| `Option<T>` | nothing, `None` is empty, so only `\|_\|` (or a bare `else`) is accepted |
 | any other enum | the original scrutinee, unmodified, for a nested `match` |
 
 `Option` and `Result` have exactly one "other" variant, so the payload to unwrap is

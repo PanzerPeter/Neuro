@@ -22,7 +22,7 @@ error: No suitable version of LLVM was found system-wide or pointed
 [System.Environment]::SetEnvironmentVariable('LLVM_SYS_201_PREFIX', 'C:\LLVM-20', 'Machine')
 
 # Restart terminal and verify
-echo %LLVM_SYS_201_PREFIX%
+$env:LLVM_SYS_201_PREFIX
 ```
 
 **Unix**:
@@ -107,10 +107,9 @@ xcode-select --install
 
 **Symptoms**:
 ```
-Type error: Type mismatch
-  expected: i32
-  found: f64
-  at program.nr:5:18
+Type errors found in "program.nr":
+  1. type mismatch at Span { start: 25, end: 42 }: expected i32, found f64
+Error: 1 type error(s) found
 ```
 
 **Causes**:
@@ -152,8 +151,9 @@ takes_i32(x)  // OK
 
 **Symptoms**:
 ```
-Type error: Undefined variable 'x'
-  at program.nr:8:12
+Type errors found in "program.nr":
+  1. undefined variable 'z' at Span { start: 32, end: 33 }
+Error: 1 type error(s) found
 ```
 
 **Causes**:
@@ -194,8 +194,9 @@ func scoped() -> i32 {
 
 **Symptoms**:
 ```
-Type error: Cannot assign to immutable variable 'x'
-  at program.nr:6:5
+Type errors found in "program.nr":
+  1. cannot assign to immutable variable 'x' at Span { start: 55, end: 61 }
+Error: 1 type error(s) found
 ```
 
 **Cause**: Trying to reassign `val` variable.
@@ -218,9 +219,9 @@ y = 20  // OK
 
 **Symptoms**:
 ```
-Type error: Missing return statement
-  expected return type: i32
-  at program.nr:5:1
+Type errors found in "program.nr":
+  1. missing return statement in function returning i32 at Span { start: 0, end: 120 }
+Error: 1 type error(s) found
 ```
 
 **Cause**: Function doesn't return a value on all code paths.
@@ -262,18 +263,19 @@ func good_implicit(x: i32) -> i32 {
 
 **Symptoms**:
 ```
-Parse error: unexpected token `}`, expected expression
-  at program.nr:10:5
+Error: Module error: failed to parse module `program.nr`: unexpected token RightBrace, expected expression
 ```
 
+Parse errors stop the run at the first one; only the type checker reports a list.
+
 **Common causes**:
-1. A stray semicolon (Neuro has none — see below)
+1. A stray semicolon (Neuro has none, see below)
 2. Unbalanced brackets/braces
 3. Syntax errors
 
 **Solutions**:
 
-**Remove semicolons** — Neuro statements are terminated by a newline, not `;`.
+**Remove semicolons**: Neuro statements are terminated by a newline, not `;`.
 A trailing semicolon is an `unexpected token Semicolon` parse error:
 ```neuro
 // Error: semicolons are not valid tokens
@@ -339,15 +341,16 @@ chmod +x ./program
 ./program
 ```
 
-### Segmentation Fault
+### Runtime Crash (signal)
 
 **Symptoms**:
-Program crashes with segmentation fault.
+The compiled program dies on an OS signal instead of exiting normally.
 
-**Causes** (rare in Phase 1):
-1. Integer overflow
-2. Division by zero
-3. Compiler bug
+**Causes** (rare):
+1. Division by zero raises a hardware exception (`SIGFPE`); there is no checked division yet
+2. Integer overflow with `-O0` traps deliberately (the overflow check aborts the process);
+   release builds wrap silently
+3. A compiler bug (codegen producing invalid memory accesses)
 
 **Solutions**:
 
@@ -516,8 +519,8 @@ Include in bug reports:
 ## Environment
 - OS: Windows 11 / Ubuntu 22.04 / macOS 13
 - Neuro: Phase 1 (commit hash)
-- LLVM: 18.1.8
-- Rust: 1.70+
+- LLVM: 20.x
+- Rust: 1.85+
 
 ## Issue
 [Description]
@@ -551,7 +554,7 @@ These are not bugs, but current limitations. See the
 1. **Type inference**: bare numeric literals default to `i32` / `f64` unless a type is in scope
 2. **Generic type arguments**: restricted to `Copy` types, and a generic may not be
    instantiated with an enclosing type parameter (no `Option<T>` inside a `func f<T>`)
-3. **Strings are immutable**: `+`, `.slice(a..b)`, `.len()`, `.clone()` — there is no
+3. **Strings are immutable**: `+`, `.slice(a..b)`, `.len()`, `.clone()`; there is no
    growable `String` with `.push_str` yet
 4. **Triple-quoted strings, nested block comments, and named arguments**: not yet
    implemented. String interpolation *is* available; a hole may not contain a `"`
@@ -564,30 +567,33 @@ Planned features are tracked through project issues and changelog updates.
 
 ## Common Warnings
 
-### Unreachable Code
+The compiler currently emits one lint:
+
+### `prefer-loop-over-while-true`
 
 **Message**:
 ```
-warning: unreachable code
-  at program.nr:8:5
+warning[prefer-loop-over-while-true] at 24..28: `while true { ... }` should be written as `loop { ... }`; silence with `@allow(prefer_loop_over_while_true)` on the enclosing function
 ```
 
-**Cause**: Code after return statement.
+**Cause**: A `while` loop whose condition is the literal `true`. `loop { ... }` says the same
+thing and is the idiomatic form.
 
 **Solution**:
 ```neuro
-// Warning: unreachable
-func example() -> i32 {
-    return 42
-    val x: i32 = 10  // Warning: unreachable
+// Triggers the lint
+while true {
+    break
 }
 
-// Fix: remove or move code
-func example() -> i32 {
-    val x: i32 = 10  // Execute before return
-    return 42
+// Preferred
+loop {
+    break
 }
 ```
+
+Silence it with `@allow(prefer_loop_over_while_true)` on the enclosing function when the literal
+form reads better. Warnings never block compilation.
 
 ## FAQ
 

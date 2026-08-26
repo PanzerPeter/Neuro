@@ -26,17 +26,17 @@ This slice follows the **Vertical Slice Architecture** pattern:
 
 - **Integers**: `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`
 - **Floats**: `F16`, `BF16`, `F32`, `F64`
-- **Other scalars**: `Bool`, `Char` (a 32-bit Unicode scalar — ordered and castable, but not
+- **Other scalars**: `Bool`, `Char` (a 32-bit Unicode scalar, ordered and castable, but not
   arithmetic), `String`, `Void`
-- **Nominal user types**: `Struct(name)`, `Enum(name)`, `Newtype(name)` — two values share a
+- **Nominal user types**: `Struct(name)`, `Enum(name)`, `Newtype(name)`, two values share a
   type only when the names match. A monomorphized generic is an ordinary nominal type with a
   mangled name, which is what keeps generics invisible to everything downstream
 - **Compound**: `Array { element, size }` (length is part of the type), `Tuple`,
   `Reference { inner, mutable }`, `Function { params, ret }`, `DynObject` (a `&dyn Trait`
   receiver)
 - **`Unknown`**: the error-recovery type. It is compatible with everything, so one reported
-  error does not cascade into a second. Divergent expressions — `panic`, `unreachable`, and
-  an `if`/`match` arm that `return`s, `break`s, or `continue`s — carry it for the same
+  error does not cascade into a second. Divergent expressions, `panic`, `unreachable`, and
+  an `if`/`match` arm that `return`s, `break`s, or `continue`s, carry it for the same
   reason: they never produce a value, so they must not constrain the arms that do
 
 #### Type Compatibility
@@ -142,92 +142,27 @@ assert_eq!(errors.len(), 2);
 
 ## Error Types
 
-### Comprehensive Error Reporting
-
-```rust
-pub enum TypeError {
-    Mismatch { expected: Type, found: Type, span: Span },
-    UndefinedVariable { name: String, span: Span },
-    UndefinedFunction { name: String, span: Span },
-    VariableAlreadyDefined { name: String, span: Span },
-    FunctionAlreadyDefined { name: String, span: Span },
-    ArgumentCountMismatch { expected: usize, found: usize, span: Span },
-    InvalidOperator { op: String, ty: Type, span: Span },
-    InvalidBinaryOperator { op: String, left: Type, right: Type, span: Span },
-    ReturnTypeMismatch { expected: Type, found: Type, span: Span },
-    MissingReturn { expected: Type, span: Span },
-    UnknownTypeName { name: String, span: Span },
-    NotCallable { ty: Type, span: Span },
-    UninitializedVariable { name: String, span: Span },
-    // Mutability
-    AssignToImmutable { name: String, span: Span },
-    AssignToImmutableField { var_name: String, field_name: String, span: Span },
-    // Integer literals
-    IntegerLiteralOutOfRange { value: i64, ty: Type, span: Span },
-    // Control flow
-    BreakOutsideLoop { span: Span },
-    ContinueOutsideLoop { span: Span },
-    InvalidForRangeType { found: Type, span: Span },
-    // Structs
-    StructAlreadyDefined { name: String, span: Span },
-    UnknownStruct { name: String, span: Span },
-    UnknownField { struct_name: String, field_name: String, span: Span },
-    MissingStructField { struct_name: String, field_name: String, span: Span },
-    DuplicateStructField { field_name: String, span: Span },
-    // Methods
-    MethodNotFound { struct_name: String, method_name: String, span: Span },
-    UnsupportedSelfParam { type_name: String, self_param: String, span: Span },
-    // Path expressions
-    UnknownPathType { type_name: String, member: String, span: Span },
-    UnknownAssociatedFunction { type_name: String, member: String, span: Span },
-}
-```
-
-All errors include span information for precise error reporting.
+Every diagnostic is a `TypeError` variant carrying the span of the offending expression or item;
+the checker collects them and keeps going, so one run reports every error it finds. The set is
+large (core mismatches and undefined names; mutability; generics, turbofish, and trait bounds;
+`Copy`/`Drop`/operator-trait rules; control flow) and grows with each feature, so this document
+does not reproduce it. The authoritative list, with its user-facing messages, is
+[`compiler/semantic-analysis/src/errors.rs`](../../../compiler/semantic-analysis/src/errors.rs).
 
 ## Implementation Details
 
 ### Type Checker State
 
-```rust
-struct TypeChecker {
-    /// Symbol table for variables (with lexical scoping)
-    symbols: SymbolTable,
-    /// All function signatures including mangled method names
-    functions: HashMap<String, Type>,
-    /// Struct definitions: name → ordered [(field_name, field_type)]
-    struct_defs: HashMap<String, Vec<(String, Type)>>,
-    /// Methods per struct: struct_name → method_name → mangled key
-    impl_methods: HashMap<String, HashMap<String, String>>,
-    /// Collected errors (fail-slow approach)
-    errors: Vec<TypeError>,
-    /// Current function's return type (for return validation)
-    current_function_return_type: Option<Type>,
-    /// Active loop nesting depth (for break/continue validation)
-    loop_depth: u32,
-}
-```
+The checker holds a scope stack of bindings (each with its type, mutability, and move state),
+maps of registered functions, structs, methods, traits, generic enums, and newtypes, the
+accumulated `TypeError` and `Warning` lists, and per-function context (return type, loop depth)
+for validation. Field-level detail belongs to
+[`type_checkers/mod.rs`](../../../compiler/semantic-analysis/src/type_checkers/mod.rs); a pasted
+copy here would only drift.
 
-### Symbol Table
-
-```rust
-struct SymbolTable {
-    /// Stack of scopes (innermost scope is last)
-    scopes: Vec<HashMap<String, SymbolInfo>>,
-}
-
-struct SymbolInfo {
-    ty: Type,
-    mutable: bool,
-}
-
-impl SymbolTable {
-    fn push_scope(&mut self);
-    fn pop_scope(&mut self);
-    fn define(&mut self, name: String, info: SymbolInfo);
-    fn lookup(&self, name: &str) -> Option<&SymbolInfo>;
-}
-```
+The symbol table tracks lexical scopes plus ownership: whether a binding still owns its value,
+which is what drives use-after-move detection in
+[`type_checkers/moves.rs`](../../../compiler/semantic-analysis/src/type_checkers/moves.rs).
 
 ### Type Inference (Simple)
 
@@ -329,7 +264,7 @@ where a later requirement was slotted between two existing ones.
 | 0 | Register enum definitions (generic ones via `register_generic_enum`, which keeps the template under its base name for construction-site inference) | an enum may be a struct field type, and vice versa |
 | 1 | Register struct definitions (generic ones via `register_generic_struct`); record `Copy`/`Clone` derive intent | type names must resolve in method signatures |
 | 1c | Resolve and validate newtype inner types | every nominal name is known by now; enforces the `Copy`-inner rule and rejects cycles |
-| 1b | Validate `@derive(Copy)` — every field of a `Copy` struct is itself `Copy` | runs after 1c so a newtype field reports its real `Copy`-ness |
+| 1b | Validate `@derive(Copy)`, every field of a `Copy` struct is itself `Copy` | runs after 1c so a newtype field reports its real `Copy`-ness |
 | 1d | Register trait declarations | `impl Trait for T` conformance and generic trait bounds need the trait's method signatures |
 | 2 | Register `impl` method signatures (generic ones via `register_generic_impl`) | uses the struct types from pass 1 |
 | 2b | Operator-trait supertrait check (`check_operator_supertraits`) | all impls are registered, so `Comparable: PartialEq` is order-independent |
@@ -337,7 +272,7 @@ where a later requirement was slotted between two existing ones.
 | 4 | Check function, method, and const **bodies** | every signature is known, so forward references and mutual recursion resolve |
 | 5 | Lints (`run_lints`) | run independently of type errors so style guidance always reaches the developer |
 
-Pass 2 registers each method under a mangled key — see
+Pass 2 registers each method under a mangled key, see
 [Method Name Mangling](#method-name-mangling) below.
 
 The ordering guarantees that all type names are known before any signature is read, and
@@ -353,9 +288,9 @@ generated name may introduce a second `__`.
 
 Two consequences:
 
-- Monomorphized instance names use a single-underscore marker — `_g_` for a generic
+- Monomorphized instance names use a single-underscore marker, `_g_` for a generic
   struct instance (`Pair_g_i32_f64`) and for a generic function instance
-  (`identity_g_i32`) — never `__`.
+  (`identity_g_i32`), never `__`.
 - User-declared identifiers may not contain `__`. A declaration that does is rejected
   with `TypeError::ReservedNameSeparator`, which keeps a user method from ever colliding
   with a generated instance or vtable-thunk symbol.
@@ -443,7 +378,7 @@ func bad_example() -> i32 {
 ### Remaining Phase 1 (Core Language) work
 
 Structs, methods, arrays, tuples, `as` conversions, the borrow checker, enums and pattern
-matching, generics, traits, and dispatch have all landed — see the
+matching, generics, traits, and dispatch have all landed, see the
 [Quick Roadmap](../../../README.md#quick-roadmap) for what is left. The checker's own open
 items:
 

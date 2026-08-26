@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.76.1] - 2026-08-26
+
+### Fixed
+- `docs`: full documentation audit against the compiler. Corrected the operator
+  precedence tables in [operators.md](docs/language-reference/operators.md) and
+  [expressions.md](docs/language-reference/expressions.md) to match the parser's
+  ladder (comparison binds tighter than equality; ranges loosest; no merged level),
+  removed a duplicated Operator Overloading section, and replaced stale pasted
+  definitions (lexer error variants, type-error list, checker state) with prose and
+  source links. Captured real CLI output for check/compile/error examples, documented
+  the actual `prefer-loop-over-while-true` lint in place of an unreachable-code warning
+  that never existed, rewrote the docs index example programs to quote runnable
+  `examples/` files verbatim, and fixed broken anchors plus sweep punctuation.
+
 ## [1.76.0] - 2026-08-25
 
 ### Added

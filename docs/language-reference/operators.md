@@ -25,7 +25,7 @@ val b: string = "cd"
 val joined: string = a + &b                   // "abcd"; a and b still valid
 ```
 
-> The concatenated buffer is heap-allocated and not yet freed — runtime heap strings leak until
+> The concatenated buffer is heap-allocated and not yet freed, runtime heap strings leak until
 > `Drop` / deterministic destruction lands (1C). See the alpha memory warning in the README.
 
 ### Subtraction (`-`)
@@ -117,7 +117,7 @@ val at_least: bool = x >= min
 
 **Types**: Work with numeric types, booleans, and strings (`==`/`!=` only)
 **Requirement**: Both operands must be the same type
-**Chaining**: Comparison operators cannot be chained. `a < b < c` is a compile error — write `a < b && b < c` instead.
+**Chaining**: Comparison operators cannot be chained. `a < b < c` is a compile error, write `a < b && b < c` instead.
 
 ## Logical Operators
 
@@ -177,7 +177,7 @@ val not_flag: bool = !flag
 
 ## Bitwise Operators
 
-Work with integer values only (`i8`–`i64`, `u8`–`u64`). Cannot be used with floats or bools.
+Work with integer values only (`i8` to `i64`, `u8` to `u64`). Cannot be used with floats or bools.
 
 ### Bitwise AND (`&`)
 
@@ -309,29 +309,29 @@ while i <= 10 {
 
 ## Null/Error Coalescing Operator (`??`)
 
-`??` is the read-site equivalent of `unwrap_or(default)` — it returns the unwrapped value of an `Option<T>` or `Result<T, E>` when present, and falls back to the right-hand expression when absent (`None`) or failed (`Err`). The expression's type is the unwrapped payload `T`.
+`??` is the read-site equivalent of `unwrap_or(default)`, it returns the unwrapped value of an `Option<T>` or `Result<T, E>` when present, and falls back to the right-hand expression when absent (`None`) or failed (`Err`). The expression's type is the unwrapped payload `T`.
 
 ```neuro
 val present = lookup(1) ?? 0        // the Some payload
-val absent  = lookup(7) ?? 5        // 5 — the fallback
+val absent  = lookup(7) ?? 5        // 5, the fallback
 
 val ok     = divide(24, 4) ?? 0     // the Ok payload
-val failed = divide(1, 0)  ?? 4     // 4 — the Err payload is discarded
+val failed = divide(1, 0)  ?? 4     // 4, the Err payload is discarded
 ```
 
 For a `Result`, the error payload is **discarded**: `??` states "I do not care why it failed, use this instead". When the reason matters, `match` on the value instead.
 
 **Laziness**: the fallback is only evaluated when the left-hand side is absent or failed. A fallback that calls a function, panics, or does real work is skipped entirely when the value is present.
 
-**Fallback type**: the right-hand side must produce the payload type `T` — not another `Option`/`Result`. A mismatch is an ordinary type error.
+**Fallback type**: the right-hand side must produce the payload type `T`, not another `Option`/`Result`. A mismatch is an ordinary type error.
 
-**Associativity**: right-to-left. `a ?? b ?? c` parses as `a ?? (b ?? c)`, so each fallback is evaluated only when every left-hand side up to it has produced the absent / error variant. Left-to-right would force the middle fallback even when the chain succeeds early — defeating the short-circuit contract. In a chain, every operand but the last must itself be fallible:
+**Associativity**: right-to-left. `a ?? b ?? c` parses as `a ?? (b ?? c)`, so each fallback is evaluated only when every left-hand side up to it has produced the absent / error variant. Left-to-right would force the middle fallback even when the chain succeeds early, defeating the short-circuit contract. In a chain, every operand but the last must itself be fallible:
 
 ```neuro
 val chained = lookup(7) ?? lookup(1) ?? 99
 ```
 
-**Precedence**: level 14 — looser than `||` (so `a ?? b || c` means `a ?? (b || c)`), tighter than range operators.
+**Precedence**: level 14, looser than `||` (so `a ?? b || c` means `a ?? (b || c)`), tighter than range operators.
 
 Applying `??` to anything that is not an `Option<T>` or `Result<T, E>` is rejected:
 
@@ -362,7 +362,7 @@ val half = match halve(n) {
 }
 ```
 
-**Enclosing function**: the function containing the `?` must return the same fallible enum — a `Result` propagates only out of a `-> Result<_, _>` function, an `Option` only out of a `-> Option<_>` one. Otherwise the failure has nowhere to go:
+**Enclosing function**: the function containing the `?` must return the same fallible enum, a `Result` propagates only out of a `-> Result<_, _>` function, an `Option` only out of a `-> Option<_>` one. Otherwise the failure has nowhere to go:
 
 ```
 error: `?` on a Option<i32> has nowhere to propagate: the enclosing function returns i32
@@ -370,35 +370,42 @@ error: `?` on a Option<i32> has nowhere to propagate: the enclosing function ret
 
 **No conversion**: the error travels as-is. There is no `From`/`Into` trait system, so the callee's `E` must already be the caller's `E`; a mismatch is an ordinary type error. Convert first with `.map_err(...)` when the types differ.
 
-**Payload types are independent**: only the error types must agree. `?` on a `Result<bool, E>` inside a `-> Result<i32, E>` function is fine — the unwrapped `bool` is used locally, not returned.
+**Payload types are independent**: only the error types must agree. `?` on a `Result<bool, E>` inside a `-> Result<i32, E>` function is fine, the unwrapped `bool` is used locally, not returned.
 
-**Short-circuiting**: nothing after a failing `?` runs, including the rest of a loop body — `?` returns from the *function*, not from the iteration.
+**Short-circuiting**: nothing after a failing `?` runs, including the rest of a loop body, `?` returns from the *function*, not from the iteration.
 
 **Precedence**: postfix, binding as tightly as a call or index. `f(x)? + 1` adds to the unwrapped payload, and `parse(s)?.field` reads a field of the unwrapped value.
 
 Runnable program: [`examples/operators/error_propagation.nr`](../../examples/operators/error_propagation.nr).
 
-When the reason for a failure should be handled rather than forwarded, use [`match`](control-flow.md), `??` for a fallback, or [`val-else`](control-flow.md#val-else--unwrap-or-leave-the-scope) to unwrap or leave the scope.
+When the reason for a failure should be handled rather than forwarded, use [`match`](control-flow.md), `??` for a fallback, or [`val-else`](control-flow.md#val-else-unwrap-or-leave-the-scope) to unwrap or leave the scope.
 
 ## Operator Precedence
 
-From highest to lowest (Appendix B):
+From highest to lowest, matching the parser's Pratt ladder:
 
 | Level | Operators | Associativity | Example |
 |-------|-----------|---------------|---------|
-| 1 | `()`, `[]`, `.`, `::`, `?` (postfix) | L-to-R | `f(x)?`, `arr[i]`, `p.x` |
-| 2 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
-| 3 | `as` | L-to-R | `n as f64` |
-| 5 | `*`, `/`, `%` | L-to-R | `a * b`, `n % 2` |
-| 6 | `+`, `-` | L-to-R | `a + b`, `x - y` |
-| 7 | `<<` | L-to-R | `a << 4` |
-| 8 | `&` | L-to-R | `a & mask` |
-| 9 | `^` | L-to-R | `a ^ b` |
-| 10 | `\|` | L-to-R | `a \| b` |
-| 11 | `<`, `>`, `<=`, `>=`, `==`, `!=` | none | `x < y` |
-| 12 | `&&` | L-to-R | `a && b` |
-| 13 | `\|\|` | L-to-R | `a \|\| b` |
-| 14 | `??` | R-to-L | `a ?? b ?? c` parses as `a ?? (b ?? c)` |
+| 16 (highest) | `.` | L-to-R | `p.x` |
+| 15 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | L-to-R | `f(x)?`, `arr[i]` |
+| 14 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
+| 13 | `as` | L-to-R | `n as f64` |
+| 12 | `*`, `/`, `%` | L-to-R | `a * b`, `n % 2` |
+| 11 | `+`, `-` | L-to-R | `a + b`, `x - y` |
+| 10 | `<<` | L-to-R | `a << 4` |
+| 9 | `<`, `>`, `<=`, `>=` | L-to-R | `x < y` |
+| 8 | `==`, `!=` | L-to-R | `x == y` |
+| 7 | `&` | L-to-R | `a & mask` |
+| 6 | `^` | L-to-R | `a ^ b` |
+| 5 | `\|` | L-to-R | `a \| b` |
+| 4 | `&&` | L-to-R | `a && b` |
+| 3 | `\|\|` | L-to-R | `a \|\| b` |
+| 2 | `??` | R-to-L | `a ?? b ?? c` parses as `a ?? (b ?? c)` |
+| 1 (lowest) | `..`, `..=` | L-to-R | `1..=n` |
+
+Comparison binds tighter than equality: `x < y == z` parses as `(x < y) == z`. There is no
+`>>` operator; right shift is the `.shr(n)` method because `>>` is reserved for function
+composition. |
 
 ### Precedence Examples
 
@@ -444,7 +451,7 @@ Both operands must be the same type.
 - All numeric types (same type required)
   - *Note:* Float comparison (`f32`, `f64`) utilizes native IEEE-754 ordered predicates. Comparisons involving `NaN` will naturally return `false`.
 - `bool` (only `==` and `!=`)
-- `string` (only `==` and `!=`) — byte-level equality via length check + `memcmp`
+- `string` (only `==` and `!=`), byte-level equality via length check + `memcmp`
 
 ### Logical Operators
 
@@ -476,46 +483,6 @@ val sign: i32 = if x > 0 { 1 } else if x < 0 { -1 } else { 0 }
 ```neuro
 val abs: i32 = if x >= 0 { x } else { -x }
 ```
-
-## Operator Overloading
-
-Operators on a `Copy` struct are sugar for method calls. Implement the relevant compiler-known
-trait and the operator becomes available on that type — you write only the `impl`, never a
-declaration of the trait itself.
-
-| Trait | Operator |
-|---|---|
-| `Add` / `Sub` / `Mul` / `Div` / `Rem` | `+` `-` `*` `/` `%` |
-| `Neg` / `Not` | unary `-a` / `~a` |
-| `BitAnd` / `BitOr` / `BitXor` / `Shl` | `&` `\|` `^` `<<` |
-| `PartialEq` | `==` `!=` |
-| `Comparable` (supertrait: requires `PartialEq`) | `<` `<=` `>` `>=` |
-
-Arithmetic and bitwise traits declare their result via `type Output = T`.
-
-```neuro
-@derive(Copy, Clone)
-struct Vec2 { x: i32, y: i32 }
-
-impl Add for Vec2 {
-    type Output = Vec2
-    func add(self, rhs: Vec2) -> Vec2 {
-        Vec2 { x: self.x + rhs.x, y: self.y + rhs.y }
-    }
-}
-
-impl PartialEq for Vec2 {
-    func eq(&self, rhs: &Vec2) -> bool { self.x == rhs.x && self.y == rhs.y }
-    func ne(&self, rhs: &Vec2) -> bool { self.x != rhs.x || self.y != rhs.y }
-}
-```
-
-The arithmetic and bitwise traits take `self` by value; `PartialEq` and `Comparable` take
-`&self`. See [`examples/operators/operator_overloading.nr`](../../examples/operators/operator_overloading.nr)
-for a complete program.
-
-Each operator desugars to its method and is monomorphized to a plain call — there is no vtable
-and no runtime cost. Compound assignment (`v += w`) flows through the by-value operator.
 
 ## Common Mistakes
 
@@ -551,7 +518,7 @@ if flag { }             // Better
 
 Operators on a custom type are sugar for method calls. Implement the corresponding
 **operator trait** to make an operator work on your type. The operator traits are
-built into the compiler — you write only the `impl`, never a `trait` declaration.
+built into the compiler: you write only the `impl`, never a `trait` declaration.
 
 An arithmetic, bitwise, or unary operator trait declares its result type with
 `type Output = T`:
@@ -607,14 +574,17 @@ if Vec2 { x: 1, y: 2 } == Vec2 { x: 1, y: 2 } { }   // via PartialEq::eq
 Rules and limits:
 
 - The receiver type must be `Copy` (the scalar path). Each operator dispatches to its own
-  method — implement the method for every operator you use.
+  method; implement the method for every operator you use.
 - A declared `type Output` must match the method's return type.
-- The logical `!a` (boolean NOT) is **not** overloadable — it is always boolean negation.
+- The logical `!a` (boolean NOT) is **not** overloadable: it is always boolean negation.
 - Compound assignment (`v += w`) works when the type implements the matching by-value
   operator: it desugars to `v = v + w`. Dedicated in-place `*Assign` traits, matrix
   multiply `@`, and auto-derived comparison defaults are planned for later phases.
-- Operator overloading is fully monomorphized and erased — each operator becomes the
+- Operator overloading is fully monomorphized and erased: each operator becomes the
   method call it stands for, with no vtable and no runtime cost.
+
+See [`examples/operators/operator_overloading.nr`](../../examples/operators/operator_overloading.nr)
+for a complete program.
 
 ## References
 

@@ -19,15 +19,15 @@ not expose them, so the lowerer **re-derives** each expression's type while walk
 
 - **Dependencies**: `ast-types` (read-only AST traversal), `neuro-hir` (output node set),
   `shared-types`, `thiserror` (`LoweringError`). `syntax-parsing` is a **dev-dependency only**
-  (tests build ASTs through the parser) — never a production cross-slice dependency.
+  (tests build ASTs through the parser), never a production cross-slice dependency.
 - **Public API**: single `lower_program` entry point + `LoweringError`.
 - **No semantic coupling**: lowering re-derives types rather than importing
-  `semantic_analysis::Type` — importing it would couple two feature slices, which VSA forbids
+  `semantic_analysis::Type`, importing it would couple two feature slices, which VSA forbids
   (duplicate over couple).
 
 ## Behavior
 
-Lowering **assumes well-typedness** — it computes types, it does not validate them. A shape the
+Lowering **assumes well-typedness**, it computes types, it does not validate them. A shape the
 checker should have rejected surfaces as a `LoweringError`, never a panic.
 
 A registration pre-pass mirrors the checker's: struct field tables (plus `@derive(Copy/Clone)`
@@ -45,11 +45,11 @@ Three nodes carry a deliberately-chosen type the source has no first-class form 
 
 - a `loop` value-expression takes its `break v` type (or `void`);
 - a method-name callee (`FieldAccess`) carries the call's result type (there is no method value);
-- a `Range` carries `void` (valid only as a `string.slice` argument — slice lowering reads its bounds
+- a `Range` carries `void` (valid only as a `string.slice` argument, slice lowering reads its bounds
   directly).
 
 Divergent panic-family calls (`panic` / `assert` / `unreachable`) adopt their context's expected
-type, or `void` in statement position. The AST's `Expr::Paren` grouping node is dropped — tree
+type, or `void` in statement position. The AST's `Expr::Paren` grouping node is dropped, tree
 structure already encodes grouping.
 
 ## Testing
@@ -59,5 +59,5 @@ coverage. The workspace architecture test enforces the slice's infrastructure-on
 
 ## Resources
 
-- [neuro-hir CONTEXT](../../../compiler/infrastructure/neuro-hir/CONTEXT.md) — the HIR node set
-- [hir-lowering CONTEXT](../../../compiler/hir-lowering/CONTEXT.md) — slice contract
+- [neuro-hir CONTEXT](../../../compiler/infrastructure/neuro-hir/CONTEXT.md), the HIR node set
+- [hir-lowering CONTEXT](../../../compiler/hir-lowering/CONTEXT.md), slice contract

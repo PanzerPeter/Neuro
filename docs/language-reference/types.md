@@ -1,6 +1,8 @@
 # Type System
 
-Neuro is a statically typed language with explicit type annotations and planned type inference.
+Neuro is statically typed. Annotations are explicit by default and optional where the
+initializer's type is unambiguous: literals take their type from context, and every other
+expression already carries the type the checker resolved for it.
 
 ## Current Status
 
@@ -71,7 +73,7 @@ val c = 0xFFu8     // hex literal with suffix
 val d = 0b1010i32  // binary literal with suffix
 ```
 
-Valid suffixes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`. The value is range-checked against the suffix type at compile time — `300u8` is a compile error.
+Valid suffixes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`. The value is range-checked against the suffix type at compile time; `300u8` is a compile error.
 
 #### Integer Overflow
 
@@ -104,7 +106,7 @@ When the overflow behavior matters, request it explicitly with a builtin intrins
 | `.wrapping_add(rhs)` / `.wrapping_sub(rhs)` / `.wrapping_mul(rhs)` | receiver type | Two's-complement wrap on overflow. Never traps, regardless of build profile. |
 | `.saturating_add(rhs)` / `.saturating_sub(rhs)` / `.saturating_mul(rhs)` | receiver type | Clamp to the type's `MIN` / `MAX` instead of overflowing. |
 | `.checked_add(rhs)` / `.checked_sub(rhs)` / `.checked_mul(rhs)` | `Option<T>` | `Option::Some(result)` when it fits, `Option::None` when it would overflow. |
-| `.shr(n)` | receiver type | Right shift by `n`. Arithmetic (sign-preserving) for signed types, logical for unsigned. Right shift is a method rather than an operator — see [operators.md](operators.md). |
+| `.shr(n)` | receiver type | Right shift by `n`. Arithmetic (sign-preserving) for signed types, logical for unsigned. Right shift is a method rather than an operator (see [operators.md](operators.md)). |
 
 ```neuro
 val a: u8 = 200
@@ -140,7 +142,7 @@ happy path.
 | `f32` | 32-bit | ~7 decimal digits | ±1.18e-38 to ±3.40e38 |
 | `f64` | 64-bit | ~15 decimal digits | ±2.23e-308 to ±1.80e308 |
 
-`f16` is the IEEE-754 half float; `bf16` is bfloat16, which trades mantissa bits for an `f32`-sized exponent range. Both are full scalar primitives with a deliberately **narrow contract** — see [Half-Precision Types](#half-precision-types-f16--bf16) below.
+`f16` is the IEEE-754 half float; `bf16` is bfloat16, which trades mantissa bits for an `f32`-sized exponent range. Both are full scalar primitives with a deliberately **narrow contract** (see [Half-Precision Types](#half-precision-types-f16--bf16) below).
 
 **Examples**:
 
@@ -165,7 +167,7 @@ val c = 1e10f32       // exponent form with suffix
 val d = 1.5e-5f64     // fractional + exponent with suffix
 ```
 
-Valid suffixes: `f16`, `bf16`, `f32`, `f64`. The suffix attaches directly to the literal — no whitespace is permitted between the digits and the suffix. The exponent form (`1e10f32`) and the fractional form (`1.5f32`) both accept a suffix.
+Valid suffixes: `f16`, `bf16`, `f32`, `f64`. The suffix attaches directly to the literal; no whitespace is permitted between the digits and the suffix. The exponent form (`1e10f32`) and the fractional form (`1.5f32`) both accept a suffix.
 
 ### Half-Precision Types (`f16` / `bf16`)
 
@@ -180,7 +182,7 @@ Modern AI relies on half-precision for mixed-precision training, so `f16` and `b
 | Arithmetic (`+`, `-`, `*`, `/`, `%`) | ❌ compile error |
 | Ordering (`<`, `>`, `<=`, `>=`) | ❌ compile error |
 
-Half-precision literals **must** carry their suffix — there is no contextual default, so `val x: f16 = 1.5` is an error; write `1.5f16`.
+Half-precision literals **must** carry their suffix; there is no contextual default, so `val x: f16 = 1.5` is an error. Write `1.5f16`.
 
 Scalar arithmetic is intentionally undefined: half-precision math is not portably specified across hardware. Compute in `f32` and cast back:
 
@@ -198,11 +200,11 @@ func main() -> i32 {
 }
 ```
 
-As **tensor element types** (`Tensor<bf16, [...]>`, Phase 2) the restriction lifts entirely: elementwise math, matmul, and reductions lower through MLIR to the accelerator's native half-precision units. The split keeps half-precision where it pays off — bulk tensor compute — without committing the scalar layer to non-portable semantics.
+As **tensor element types** (`Tensor<bf16, [...]>`, Phase 2) the restriction lifts entirely: elementwise math, matmul, and reductions lower through MLIR to the accelerator's native half-precision units. The split keeps half-precision where it pays off (bulk tensor compute) without committing the scalar layer to non-portable semantics.
 
 ### Digit Separators
 
-Underscores may be placed between digits of any numeric literal to improve readability. They carry no value — the compiler strips them before parsing — and work in every base, in floats, in exponents, and alongside type suffixes.
+Underscores may be placed between digits of any numeric literal to improve readability. They carry no value (the compiler strips them before parsing) and work in every base, in floats, in exponents, and alongside type suffixes.
 
 ```neuro
 val million = 1_000_000      // decimal grouping
@@ -262,17 +264,17 @@ func demo_chars() -> i32 {
 |---|---|
 | **Width** | 32-bit Unicode scalar value |
 | **Literals** | `'a'`, `'\n'`, `'\t'`, `'\r'`, `'\\'`, `'\''`, `'\0'`, `'\xNN'`, `'\u{...}'` |
-| **Copy** | Yes — binding a `char` copies it; the source remains valid |
+| **Copy** | Yes, binding a `char` copies it; the source remains valid |
 | **Comparison** | Built-in `==`, `!=`, `<`, `>`, `<=`, `>=` (ordered by code point) |
 | **Casts** | `as` to/from any integer type (`'A' as i32`, `97 as char`); **not** to/from `float`/`bool` |
-| **Arithmetic** | None — `'a' + 1` is a compile error; cast to an integer and compute there |
+| **Arithmetic** | None, `'a' + 1` is a compile error; cast to an integer and compute there |
 
 An empty literal (`''`), a multi-character literal (`'ab'`), and an unterminated literal
 (`'a`) are all lexer errors.
 
 ## String Type
 
-The `string` type is an immutable, UTF-8 encoded fat pointer `{ ptr, i64 }` — a pointer to
+The `string` type is an immutable, UTF-8 encoded fat pointer `{ ptr, i64 }`, a pointer to
 the bytes plus a stored byte length. Equality (`==`, `!=`) compares byte content; the `+`
 operator concatenates two strings into a new owned `string`.
 
@@ -283,13 +285,13 @@ program; they are **not** heap-allocated, so a program that only reads literals 
 **Concatenation** (`a + b`) is the first runtime heap-backed string: it `malloc`s a fresh buffer
 and copies both operands' bytes in, yielding a new owned `string`. Both literal and heap-backed
 forms share the same `{ ptr, i64 }` ABI, so consumers cannot tell them apart. Until `Drop` /
-deterministic destruction lands (1C), concatenated buffers leak — see the alpha memory
-warning in the README. (Growable builders — `String::new` / `.push_str` — also await that work.)
+deterministic destruction lands (1C), concatenated buffers leak, see the alpha memory
+warning in the README. (Growable builders, `String::new` / `.push_str`, also await that work.)
 
 The pointer addresses a NUL-terminated byte sequence so it doubles as a valid C string for
 future FFI, but the stored `len` field **excludes** that trailing NUL. `len` is the
 **authoritative** length: it is the exact UTF-8 byte count of the content. Consumers must use
-`len` and **must not** scan for a NUL terminator, because interior NUL bytes are legal content —
+`len` and **must not** scan for a NUL terminator, because interior NUL bytes are legal content
 `"a\0b".len()` is `3`, not `1`.
 
 ### String Methods
@@ -299,34 +301,34 @@ syntax:
 
 ```neuro
 val s: string = "hello, world"
-val n: u64 = s.len()    // 12 — O(1) read of the stored byte length
+val n: u64 = s.len()    // 12, O(1) read of the stored byte length
 val copy: string = s.clone()   // a fresh string equal to s
-val hello: &string = s.slice(0..5)    // "hello" — borrowed, zero copy
-val world: &string = s.slice(7..=11)  // "world" — inclusive upper bound
+val hello: &string = s.slice(0..5)    // "hello", borrowed, zero copy
+val world: &string = s.slice(7..=11)  // "world", inclusive upper bound
 ```
 
-**`.len() -> u64`** — returns the number of UTF-8 bytes, read directly from the fat pointer
+**`.len() -> u64`**, returns the number of UTF-8 bytes, read directly from the fat pointer
 in O(1) with no scan. The length **excludes** the null terminator. Because the index is a
 byte count, a multi-byte code point contributes more than one to the length.
 
-**`.clone() -> string`** — returns a fresh `string` equal to its receiver. It is the
+**`.clone() -> string`**, returns a fresh `string` equal to its receiver. It is the
 canonical explicit deep copy for non-`Copy` owned types and, now that move-by-default has
-landed (1C — see [variables](variables.md#move-semantics-ownership)), the way to
+landed (1C, see [variables](variables.md#move-semantics-ownership)), the way to
 keep using a value after it would otherwise be moved. Today strings
 are immutable and `.rodata`-backed (no heap string type exists yet), so the clone copies the
-`(ptr, len)` fat pointer — observationally a deep copy because the pointee bytes are
+`(ptr, len)` fat pointer, observationally a deep copy because the pointee bytes are
 immutable and shared safely. `.clone()` takes no arguments and returns a `string`, so it
 chains with other builtin methods (`"hi".clone().len()`). `Copy` scalar types
 (`i8`..`u64`, `f32`/`f64`, `bool`) do not provide `.clone()`: assignment already duplicates
 them.
 
-**`.slice(range) -> &string`** — returns a borrowed `&string` view into the receiver's UTF-8
+**`.slice(range) -> &string`**, returns a borrowed `&string` view into the receiver's UTF-8
 data, with no allocation: since strings are immutable, a sub-range is just a `(ptr + start,
 len)` fat pointer (the analogue of Rust's `&str`). The range is exclusive (`s.slice(a..b)`)
 or inclusive (`s.slice(a..=b)`). **Indices are byte offsets**, not character offsets. The
 slice is itself a `&string`, so it chains (`s.slice(0..5).len()`) and compares byte-wise
 (`s.slice(0..5) == "hello"`). Two boundary rules are enforced at runtime in **both** debug and
-release builds and **panic** (abort, no unwinding — see [control flow](control-flow.md)) on
+release builds and **panic** (abort, no unwinding, see [control flow](control-flow.md)) on
 violation:
 
 - **Bounds:** the range must satisfy `0 <= start <= end <= len`. An out-of-bounds or reversed
@@ -339,7 +341,7 @@ else it is a compile error.
 
 ## Struct Types
 
-Structs are user-defined types that group named fields. They use nominal typing — two structs with identical fields are distinct types.
+Structs are user-defined types that group named fields. They use nominal typing, two structs with identical fields are distinct types.
 
 ### Definition
 
@@ -389,7 +391,7 @@ fixed.x = 3.0    // Error: AssignToImmutableField
 
 ### Definition Order
 
-Structs can be used before they are defined in the source file — the compiler performs a pre-registration pass:
+Structs can be used before they are defined in the source file, the compiler performs a pre-registration pass:
 
 ```neuro
 func main() -> i32 {
@@ -420,10 +422,10 @@ val s = a.x + b.y  // a is still valid here
 Rules:
 
 - A struct may derive `Copy` only when **every field is `Copy`**. Primitive scalars
-  (`i8`–`u64`, `f32`, `f64`, `bool`) are `Copy`; `string` is not; a struct field is `Copy`
+  (`i8` to `u64`, `f32`, `f64`, `bool`) are `Copy`; `string` is not; a struct field is `Copy`
   only when its type also derives `Copy`. Violating this is a `CopyDeriveNonCopyField` error.
 - `Copy` implies `Clone`.
-- `@derive(Clone)` (or `Copy`) enables `struct.clone()` — an explicit deep copy that returns a
+- `@derive(Clone)` (or `Copy`) enables `struct.clone()`, an explicit deep copy that returns a
   fresh value without moving the receiver. A user-defined `clone` method in an `impl` block
   shadows the builtin.
 - Unknown derive arguments (e.g. `@derive(Debug)`) are accepted and ignored for now.
@@ -449,7 +451,7 @@ val w = v.clone()  // independent copy; v stays usable
 
 ## Enum Types
 
-Enums are user-defined types that hold exactly one of several named **variants**. A variant may be a bare tag, carry a positional **tuple** payload, or carry **named fields** — all three may appear in one enum. Like structs, enums use nominal typing.
+Enums are user-defined types that hold exactly one of several named **variants**. A variant may be a bare tag, carry a positional **tuple** payload, or carry **named fields**, all three may appear in one enum. Like structs, enums use nominal typing.
 
 ### Definition
 
@@ -485,7 +487,7 @@ val m = Message::Move(1, 2)              // tuple variant
 val s = Shape::Circle { radius: 5.0 }    // struct variant
 ```
 
-An enum value can be bound to a `val`/`mut`, passed to and returned from functions, and stored in a struct field. Enums are **`Copy`** (their payloads are scalar `Copy` primitives — see below), so binding or passing one duplicates it rather than moving it.
+An enum value can be bound to a `val`/`mut`, passed to and returned from functions, and stored in a struct field. Enums are **`Copy`** (their payloads are scalar `Copy` primitives, see below), so binding or passing one duplicates it rather than moving it.
 
 ### Memory Layout
 
@@ -493,7 +495,7 @@ An enum is a tagged union: a discriminant identifying the active variant, plus s
 
 ### Generic Enums
 
-An enum may take type parameters. Each distinct set of type arguments is **monomorphized** into its own nominal tagged union, exactly as a generic struct is — so `Slot<i32>` and `Slot<i64>` are different types, each with its own payload width, and there is no runtime cost.
+An enum may take type parameters. Each distinct set of type arguments is **monomorphized** into its own nominal tagged union, exactly as a generic struct is, so `Slot<i32>` and `Slot<i64>` are different types, each with its own payload width, and there is no runtime cost.
 
 ```neuro
 enum Slot<T> { Filled(T), Vacant }
@@ -505,8 +507,8 @@ val b: Slot<bool> = Slot::Vacant         // no payload, so the annotation fixes 
 
 Where the type arguments come from, in order:
 
-1. **The expected type** — an annotated binding, a parameter, a struct field, a `return`.
-2. **The payload** — `Slot::Filled(4)` determines `T = i32` by unifying `4`'s type against the variant's declared payload.
+1. **The expected type**, an annotated binding, a parameter, a struct field, a `return`.
+2. **The payload**, `Slot::Filled(4)` determines `T = i32` by unifying `4`'s type against the variant's declared payload.
 3. **The enclosing function's return type**, when it is an instance of the same enum. This is what makes the common fallible-function shape work, because a tail `if` branch has no other context:
 
 ```neuro
@@ -519,7 +521,7 @@ func divide(a: i32, b: i32) -> Result<i32, i32> {
 }
 ```
 
-If none of the three determines an argument, the construction is rejected with `GenericEnumNotInferable` — annotate the target. Using the bare name as a type (`func f(o: Slot) -> i32`) is `GenericEnumNeedsArgs`.
+If none of the three determines an argument, the construction is rejected with `GenericEnumNotInferable`, annotate the target. Using the bare name as a type (`func f(o: Slot) -> i32`) is `GenericEnumNeedsArgs`.
 
 A `match` pattern is written with the **base** name; it matches whatever instance the scrutinee has, and its payload binds at that instance's concrete type:
 
@@ -532,7 +534,7 @@ match a {
 
 ### `Option<T>` and `Result<T, E>`
 
-These two generic enums are the standard library's absence and failure types. They are available in **every program without a declaration** — the compiler prepends an implicit prelude:
+These two generic enums are the standard library's absence and failure types. They are available in **every program without a declaration**, the compiler prepends an implicit prelude:
 
 ```neuro
 enum Option<T> { Some(T), None }
@@ -553,14 +555,14 @@ val present = Option::Some(30)
 val absent: Option<i32> = Option::None
 ```
 
-Variants are written qualified (`Option::Some`, `Result::Err`). Unqualified names (`Some(x)`) arrive with the module system and its implicit-prelude imports. The [`??` operator](operators.md#nullerror-coalescing-operator-) unwraps either type with a fallback, the [`?` operator](operators.md#error-propagation-operator-) unwraps one or hands the failure to the caller, and [`val-else`](control-flow.md#val-else--unwrap-or-leave-the-scope) unwraps one or exits the scope.
+Variants may be written qualified (`Option::Some`, `Result::Err`) or, because the implicit prelude imports `Some`, `None`, `Ok`, and `Err` into every file without `@no_prelude`, unqualified (`Some(x)`). The [`??` operator](operators.md#nullerror-coalescing-operator-) unwraps either type with a fallback, the [`?` operator](operators.md#error-propagation-operator-) unwraps one or hands the failure to the caller, and [`val-else`](control-flow.md#val-else-unwrap-or-leave-the-scope) unwraps one or exits the scope.
 
 ### Phase 1 Limitations
 
-- **Payloads are scalar `Copy` primitives only** — integers, floats, `bool`, `char`. A payload of `string`, a struct, an array, a tuple, or a reference is rejected (`UnsupportedEnumPayload`); broader payloads arrive with heap support. The rule is enforced **per instance**, so `Option<i32>` is available while `Option<string>` is not yet.
-- **Type arguments are `Copy`** — the same restriction generic functions and structs carry this phase.
-- **No `impl` blocks on enums** — methods (and therefore `Option`/`Result` helpers such as `.map_err`) need impls over enums, which are struct-only today.
-- **No lifetime parameters on an enum** — with scalar-only payloads there is nothing to annotate; `enum E<'a, T>` is a parse error.
+- **Payloads are scalar `Copy` primitives only**, integers, floats, `bool`, `char`. A payload of `string`, a struct, an array, a tuple, or a reference is rejected (`UnsupportedEnumPayload`); broader payloads arrive with heap support. The rule is enforced **per instance**, so `Option<i32>` is available while `Option<string>` is not yet.
+- **Type arguments are `Copy`**, the same restriction generic functions and structs carry this phase.
+- **No `impl` blocks on enums**, methods (and therefore `Option`/`Result` helpers such as `.map_err`) need impls over enums, which are struct-only today.
+- **No lifetime parameters on an enum**, with scalar-only payloads there is nothing to annotate; `enum E<'a, T>` is a parse error.
 
 ### Type Errors
 
@@ -574,11 +576,11 @@ Variants are written qualified (`Option::Some`, `Result::Err`). Unqualified name
 | `UnsupportedEnumPayload` | A variant payload is not a scalar `Copy` primitive |
 | `GenericEnumNeedsArgs` | A generic enum's bare name used as a type |
 | `GenericEnumNotInferable` | A construction whose type arguments no context determines |
-| `GenericArgCountMismatch` | `Option<i32, bool>` — wrong number of type arguments |
+| `GenericArgCountMismatch` | `Option<i32, bool>`, wrong number of type arguments |
 
 ## Newtype Declarations
 
-A `newtype` creates a **distinct nominal type** that wraps an inner type. Unlike a `type` alias — which is transparent, so the alias and its target are interchangeable — a newtype and its inner type are *different types*. This buys unit-of-measure and domain-identifier safety at zero runtime cost.
+A `newtype` creates a **distinct nominal type** that wraps an inner type. Unlike a `type` alias, which is transparent, so the alias and its target are interchangeable, a newtype and its inner type are *different types*. This buys unit-of-measure and domain-identifier safety at zero runtime cost.
 
 ```neuro
 newtype Meters = i32
@@ -609,8 +611,8 @@ A newtype forwards `Copy`/`Clone` from its inner type, so a `Copy`-inner newtype
 
 ### Phase 1E Limitations
 
-- **Inner type must be `Copy`** — integers, floats, `bool`, `char`, and other `Copy` aggregates. A non-Copy inner such as `string` is rejected (`NewtypeInnerNotCopy`); non-Copy wrappers arrive with broader move/heap support.
-- **No inherent methods or operator traits yet** — arithmetic and other operators on a newtype await the trait system (1F). Use `.0` to compute on the inner value.
+- **Inner type must be `Copy`**, integers, floats, `bool`, `char`, and other `Copy` aggregates. A non-Copy inner such as `string` is rejected (`NewtypeInnerNotCopy`); non-Copy wrappers arrive with broader move/heap support.
+- **No inherent methods or operator traits yet**, arithmetic and other operators on a newtype await the trait system (1F). Use `.0` to compute on the inner value.
 
 ### Type Errors
 
@@ -620,7 +622,7 @@ A newtype forwards `Copy`/`Clone` from its inner type, so a `Copy`-inner newtype
 | `NewtypeInnerNotCopy` | The wrapped inner type is not `Copy` |
 | `CyclicNewtype` | A newtype wraps itself directly or transitively |
 
-## References — Immutable Borrows (`&T`)
+## References, Immutable Borrows (`&T`)
 
 An **immutable borrow** `&T` is a non-owning reference to a value. It lets a
 function read a value without taking ownership, so the caller keeps using its binding
@@ -633,7 +635,7 @@ func describe(s: &string) -> u64 {
 
 func main() -> i32 {
     val msg: string = "Neuro"
-    val n: u64 = describe(&msg)   // borrow — msg is NOT moved
+    val n: u64 = describe(&msg)   // borrow, msg is NOT moved
     val again: u64 = msg.len()    // still valid: borrowing never consumes
     return 0
 }
@@ -642,15 +644,14 @@ func main() -> i32 {
 **Rules:**
 
 - A reference type `&T` may appear on parameters, return types, and local bindings.
-- Borrowing **does not move** the borrowed value — that is the whole point of a reference.
+- Borrowing **does not move** the borrowed value; that is the whole point of a reference.
   A non-`Copy` value such as `string` stays usable after being borrowed.
 - `&T` is itself `Copy`: passing or re-borrowing a reference duplicates the pointer.
 - Method and field access **auto-deref** through a borrow: `r.len()` / `r.clone()` on a
   `&string`, and `r.field` / `r.method()` on a `&Struct`, behave as if applied to the
   referent.
 - Only a **place** (a `val`/`mut`/parameter binding) can be borrowed. Borrowing a
-  temporary (a literal or a call result) or a `const` (an inlined value, not a memory
-  location —) is a `CannotBorrowValue` error.
+  temporary (a literal or a call result) or a `const` (an inlined value, not a memory location) is a `CannotBorrowValue` error.
 
 ```neuro
 struct Point { x: i64, y: i64 }
@@ -663,12 +664,12 @@ func read_sum(p: &Point) -> i64 { p.sum() }   // borrow a struct, call through i
 
 > **Not yet lifetime-verified:** a returned `&T` is not yet checked against the lifetime of
 > the value it points into; that check lands with lifetime inference. Integer intrinsics
-> (`r.wrapping_add(..)`) still require a value receiver — read through `*r` first.
+> (`r.wrapping_add(..)`) still require a value receiver, read through `*r` first.
 
-### References — Mutable Borrows (`&mut T`)
+### References, Mutable Borrows (`&mut T`)
 
 A **mutable borrow** `&mut T` is a non-owning reference that grants **write** access to a
-value. The borrow expression `&mut x` requires `x` to be a `mut` binding — you
+value. The borrow expression `&mut x` requires `x` to be a `mut` binding, you
 cannot acquire write access through a reference to a value you may not write directly.
 
 Values are read and written through the prefix **dereference operator** `*`:
@@ -680,7 +681,7 @@ func increment(n: &mut i32) {
 
 func main() -> i32 {
     mut counter: i32 = 40
-    increment(&mut counter)       // mutate in place — counter is borrowed, not moved
+    increment(&mut counter)       // mutate in place, counter is borrowed, not moved
     increment(&mut counter)
     return counter                // 42
 }
@@ -693,7 +694,7 @@ func main() -> i32 {
 - `*r` reads the referent; dereferencing a non-reference is an error (`cannot dereference`).
 - `*r = value` writes through the reference and requires `r: &mut T`; writing through an
   immutable `&T` is an error (`cannot assign through an immutable reference`).
-- `&mut T` and `&T` are **distinct types** — there is no implicit `&mut T → &T` coercion
+- `&mut T` and `&T` are **distinct types**, there is no implicit `&mut T → &T` coercion
   (explicit over implicit).
 
 ```neuro
@@ -710,8 +711,8 @@ func main() -> i32 {
 The borrow checker enforces two coexistence rules at compile time:
 
 - **Any number of shared `&T` borrows** of a place may be live at the same time.
-- **A `&mut T` borrow is exclusive**: while it is live, no other borrow of that place —
-  shared or mutable — may exist.
+- **A `&mut T` borrow is exclusive**: while it is live, no other borrow of that place
+  shared or mutable, may exist.
 
 A borrow's region is **lexical**. A borrow held by a binding (`val r = &x`) lives until that
 binding leaves scope; a borrow passed to a function, used in a condition, or returned ends
@@ -722,8 +723,8 @@ and a borrow taken inside a block is released at the block's closing brace.
 func main() -> i32 {
     mut x: i32 = 5
     val a: &i32 = &x
-    val b: &i32 = &x          // ok — shared borrows coexist
-    val c: &mut i32 = &mut x  // ERROR: cannot borrow 'x' as mutable — it is already borrowed
+    val b: &i32 = &x          // ok, shared borrows coexist
+    val c: &mut i32 = &mut x  // ERROR: cannot borrow 'x' as mutable, it is already borrowed
     return 0
 }
 ```
@@ -734,7 +735,7 @@ func inc(n: &mut i32) { *n = *n + 1 }
 func main() -> i32 {
     mut x: i32 = 0
     inc(&mut x)               // the &mut ends with this call
-    inc(&mut x)               // ok — the previous borrow is no longer live
+    inc(&mut x)               // ok, the previous borrow is no longer live
     return x                  // 2
 }
 ```
@@ -746,7 +747,7 @@ The diagnostics are `cannot borrow '<name>' as mutable` (a `&mut` while any borr
 > value while it is borrowed lands with full **lifetime inference**, which extends the same
 > borrow-region analysis.
 
-### Lifetimes — Returned References
+### Lifetimes, Returned References
 
 Lifetimes are **inferred** in the vast majority of cases. The elision rules match Rust: a
 single input reference lifetime is applied to the outputs, and the `&self` lifetime is applied to
@@ -756,17 +757,17 @@ as long as the caller's borrow.
 
 ```neuro
 func first(a: &i32, b: &i32) -> &i32 {
-    a                       // ok — the returned borrow outlives the call
+    a                       // ok, the returned borrow outlives the call
 }
 ```
 
-The borrow checker rejects returning a reference to a value that dies when the function returns —
-a body-local or a by-value parameter — because the reference would dangle:
+The borrow checker rejects returning a reference to a value that dies when the function returns
+a body-local or a by-value parameter, because the reference would dangle:
 
 ```neuro
 func dangle() -> &i32 {
     val local: i32 = 5
-    return &local           // ERROR: cannot return a reference to 'local' — it is local to
+    return &local           // ERROR: cannot return a reference to 'local', it is local to
                             //        this function and does not outlive the call
 }
 ```
@@ -788,7 +789,7 @@ func longest<'a>(a: &'a string, b: &'a string) -> &'a string {
 
 An annotation is a **well-formedness surface only**: every lifetime used on a reference must be
 declared in the enclosing `<...>` list (an undeclared `'b` is the `undeclared lifetime` error), and
-the annotation is then **erased** — `&'a T` and `&T` are the same type, so a lifetime costs nothing
+the annotation is then **erased**, `&'a T` and `&T` are the same type, so a lifetime costs nothing
 at runtime and never changes which values a signature accepts. The elision rules above still do the
 real outlives checking; explicit lifetimes do not tighten or relax it. Lifetime parameters may be
 mixed with type and const parameters (`func f<'a, T>(...)`); only the type/const parameters drive
@@ -798,7 +799,7 @@ surface yet.
 ### String Slices (`&string`)
 
 `&string` is the **borrowed string slice**: a non-owning `(ptr, len)` view into
-UTF-8 data. There is no separate slice type — `&string` is both "a borrow of an owned
+UTF-8 data. There is no separate slice type, `&string` is both "a borrow of an owned
 `string`" and "a string slice," the analogue of Rust's `&str`.
 
 A slice is read-only, so its fundamental operation is **equality**. The operators `==`
@@ -815,7 +816,7 @@ func main() -> i32 {
     val lang: string = "Neuro"
     val same: string = "Neuro"
     val eq: bool = slices_equal(&lang, &same)   // true
-    val lit: bool = (&lang == "Neuro")          // true — slice vs owned literal
+    val lit: bool = (&lang == "Neuro")          // true, slice vs owned literal
     if eq && lit { return 0 }
     return 1
 }
@@ -823,12 +824,8 @@ func main() -> i32 {
 
 Comparing through borrows never moves: `lang` stays usable after each `&lang`. Reference
 peeling for equality is **string-only**, so comparing a non-string reference to its value
-(`&n == n` on an `i32`) or mixing types (`i32 == &string`) is still a type error — reading
+(`&n == n` on an `i32`) or mixing types (`i32 == &string`) is still a type error; reading
 other `&T` through `==` needs the `*` deref operator.
-
-> **Not yet available:** the slicing methods `.slice(range)` / `.char_slice(range)` that
-> produce a `&string` view into the interior of a string arrive in a later phase; today a
-> `&string` is obtained only by borrowing an owned `string` with `&`.
 
 ## Void Type
 
@@ -937,7 +934,7 @@ func returns_i32() -> i32 {
 
 ## Type System Features
 
-### Phase 1 — Core Language
+### Phase 1, Core Language
 
 **Landed (✅):**
 - Primitive types (i8-i64, u8-u64, f32, f64, bool, char, f16/bf16)
@@ -951,15 +948,14 @@ func returns_i32() -> i32 {
 - Generics + monomorphization, traits, operator traits, static/dynamic dispatch, closures
 - `Option<T>` / `Result<T, E>` from the implicit prelude, the `??` coalescing and `?` propagation operators, `val-else` binding
 - Collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, `checked_*` integer methods
-
-- String interpolation with the format mini-language (`"{x:.2}"`) — see
+- Modules and imports: multi-file programs, inline `module` blocks, re-exports, and the implicit prelude (see [modules.md](modules.md))
+- String interpolation with the format mini-language (`"{x:.2}"`), see
   [expressions.md](expressions.md#string-interpolation)
 
-**In progress / planned (still Phase 1):**
-- Modules and imports (1G)
+**Remaining Phase 1 work:**
 - Triple-quoted strings, nested block comments, named arguments (1H)
 
-### Phase 2 — Tensors (Planned)
+### Phase 2, Tensors (Planned)
 
 - Static tensor types: `Tensor<f32, [3, 3]>`
 - Compile-time shape checking
@@ -1139,7 +1135,7 @@ func compose() -> i32 {
 ## Type Aliases
 
 A `type` declaration introduces a **transparent** alias for an existing type. The
-alias and its target are fully interchangeable — no new nominal type is created,
+alias and its target are fully interchangeable, no new nominal type is created,
 so a value of the alias type and a value of the target type are the same type to
 the compiler (contrast with `newtype`, which is a distinct type).
 
@@ -1188,8 +1184,8 @@ this feature.
 ## Arrays
 
 A fixed-size array `[T; N]` holds exactly `N` values of element type `T`, with
-`N` fixed at compile time and part of the type — `[i32; 3]` and `[i32; 4]` are
-distinct types. `N` is an integer literal, or — inside a generic definition — a
+`N` fixed at compile time and part of the type, `[i32; 3]` and `[i32; 4]` are
+distinct types. `N` is an integer literal, or, inside a generic definition, a
 `const` generic parameter (`[T; CAP]`), resolved to a concrete length by
 monomorphization.
 
@@ -1216,7 +1212,7 @@ for x in &a {  }                     // iterate over a borrow
   builds (`-O0`); release builds omit the check (matching the integer-overflow
   policy).
 - **Iteration**: `for x in arr` / `for x in &arr` bind each element in order;
-  the indexed form `for (i, x) in arr.enumerate()` arrives with tuples.
+  an indexed form (`enumerate`) is not available yet.
 
 ## Tuples
 
@@ -1245,7 +1241,7 @@ val ((p, q), r) = ((1, 2), 3)       // nested destructuring
   index is a compile error. (Because `t.0.1` lexes as the float `0.1`, write a
   nested access as `(t.0).1`.)
 - **Destructuring**: `val (a, b) = t` binds each position; `_` is a wildcard, and
-  patterns nest. It is a binding form, not a new value — it desugars to ordinary
+  patterns nest. It is a binding form, not a new value, it desugars to ordinary
   bindings.
 - **Function boundaries**: tuples may be passed as parameters and returned, e.g.
   `func min_max(a: i32, b: i32) -> (i32, i32)`.
@@ -1259,7 +1255,7 @@ exactly. See [Variables → Destructuring](variables.md#destructuring).
 ## Standard Collections
 
 Beyond the fixed-size `[T; N]`, the standard library provides three heap-backed
-collections. They are library types, not language primitives — but because the
+collections. They are library types, not language primitives, but because the
 language exposes no allocator, the compiler knows all three by name and lowers
 their operations directly.
 
@@ -1288,16 +1284,16 @@ val b: Vec<i32> = a       // moves; `a` is invalid from here
 
 | Operation | Result | Notes |
 | --- | --- | --- |
-| `v.push(x)` | — | Appends; grows the buffer as needed |
+| `v.push(x)` |, | Appends; grows the buffer as needed |
 | `v.pop()` | `Option<T>` | `None` when empty |
 | `v.get(i)` | `Option<T>` | The checked read |
-| `v[i]` / `v[i] = x` | `T` / — | Panics out of range, in **every** build |
+| `v[i]` / `v[i] = x` | `T` /, | Panics out of range, in **every** build |
 | `v.len()` | `u64` | Live element count |
-| `v.clear()` | — | Empties without releasing the buffer |
-| `for x in v` | — | Iterates the live elements in order |
+| `v.clear()` |, | Empties without releasing the buffer |
+| `for x in v` |, | Iterates the live elements in order |
 
 Unlike `[T; N]`, whose length is a compile-time constant, a `Vec`'s length is
-only known at run time — so its bounds check is never elided in release builds.
+only known at run time, so its bounds check is never elided in release builds.
 
 ### `HashMap<K, V>` and `BTreeMap<K, V>`
 
@@ -1305,17 +1301,17 @@ Both share one surface:
 
 | Operation | Result | Notes |
 | --- | --- | --- |
-| `m.insert(k, v)` | — | Overwrites the value of an existing key |
+| `m.insert(k, v)` |, | Overwrites the value of an existing key |
 | `m.get(k)` | `Option<V>` | `None` when absent |
 | `m.contains_key(k)` | `bool` | |
 | `m.remove(k)` | `bool` | `true` when a key was removed |
 | `m.len()` | `u64` | Live entry count |
-| `m.clear()` | — | |
+| `m.clear()` |, | |
 | `m.keys()` | `Vec<K>` | A fresh `Vec`, so a map is iterated via `for k in m.keys()` |
 
 `HashMap` is open-addressed with linear probing and average-O(1) lookup.
-`BTreeMap` keeps its entries ordered by key, so `keys()` comes back **ascending**
-— that ordering is the reason to choose it.
+`BTreeMap` keeps its entries ordered by key, so `keys()` comes back **ascending**:
+that ordering is the reason to choose it.
 
 ### Element and key types
 
@@ -1325,8 +1321,8 @@ Both share one surface:
   compiler supplies both for integer, `bool`, `char`, and `string` keys. A
   struct key supplies them itself: `impl PartialEq` plus `impl Hashable`
   (`HashMap`) or `impl Comparable` (`BTreeMap`).
-- **Float keys are rejected.** IEEE-754 comparison is a partial order — NaN
-  compares false against everything, including itself — so a map keyed on a raw
+- **Float keys are rejected.** IEEE-754 comparison is a partial order, NaN
+  compares false against everything, including itself, so a map keyed on a raw
   float could hold a key it can never find again. Use the prelude's validating
   wrappers, which reject NaN at construction:
 
@@ -1341,7 +1337,7 @@ float has no representation-independent answer, so they are ordered-map keys.
 ### `Hashable`
 
 `Hashable` is a compiler-known lang-item trait, like `Drop` and the operator
-traits — write the `impl`, never a `trait` declaration:
+traits, write the `impl`, never a `trait` declaration:
 
 ```neuro
 impl Hashable for Point {
@@ -1357,7 +1353,7 @@ equally; the map only needs that much.
 ### Current limits
 
 - `pop()` and `get()` build an `Option<T>`, so they are available only for
-  element types `Option` can carry — scalar `Copy` primitives in this phase.
+  element types `Option` can carry, scalar `Copy` primitives in this phase.
   Index a `Vec` of structs or strings with `v[i]` instead.
 - A `string` stored in a collection is not freed when the collection is dropped;
   only the collection's own buffer is. This matches the existing string-concat

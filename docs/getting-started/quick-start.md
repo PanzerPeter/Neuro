@@ -30,7 +30,7 @@ cargo run -p neurc -- check examples/basics/hello.nr
 
 Expected output:
 ```
-Type checking passed!
+Type checking passed for "examples/basics/hello.nr" (1 module(s), 11 HIR items)
 ```
 
 ## Compiling a Program
@@ -41,8 +41,13 @@ Compile a Neuro program to a native executable:
 cargo run -p neurc -- compile examples/basics/hello.nr
 ```
 
-On Windows, this creates `examples\hello.exe`.
-On Unix, this creates `examples/hello`.
+The compiler prints the paths it produced:
+
+```
+Successfully compiled examples/basics/hello.nr -> examples/basics/hello
+```
+
+On Windows the executable is `examples\basics\hello.exe`; on Unix it is `examples/basics/hello`.
 
 ## Running the Executable
 
@@ -72,25 +77,38 @@ The hello.nr program returns 26.
 
 ### hello.nr
 
-A minimal Neuro program:
+The source of [`examples/basics/hello.nr`](../../examples/basics/hello.nr):
 
 ```neuro
+func add(a: i32, b: i32) -> i32 {
+    return a + b
+}
+
+func calculate(x: i32) -> i32 {
+    val doubled: i32 = x * 2
+    val result: i32 = doubled + 10
+    return result
+}
+
 func main() -> i32 {
-    val x: i32 = 10
-    val y: i32 = 16
-    return x + y  // Returns 26
+    val x: i32 = 5
+    val y: i32 = 3
+    val sum: i32 = add(x, y)
+    val calculated: i32 = calculate(sum)
+    return calculated
 }
 ```
 
 **Features demonstrated**:
-- Function definition with return type
-- Immutable variables (val)
+- Function definitions with parameters and return types
+- Calling functions and chaining their results
+- Immutable variables (`val`)
 - Integer arithmetic
-- Return statements
+- `return` statements (the program exits with the value `main` returns, here `26`)
 
 ### milestone.nr
 
-A more complex program demonstrating Phase 1 capabilities:
+The source of [`examples/basics/milestone.nr`](../../examples/basics/milestone.nr):
 
 ```neuro
 func add(a: i32, b: i32) -> i32 {
@@ -98,21 +116,15 @@ func add(a: i32, b: i32) -> i32 {
 }
 
 func main() -> i32 {
-    val result: i32 = add(3, 5)
-    if result > 5 {
-        return result
-    } else {
-        return 0
-    }
+    val result = add(5, 3)
+    return result
 }
 ```
 
 **Features demonstrated**:
-- Multiple functions
-- Function calls with parameters
-- Local variables
-- If/else control flow
-- Comparison operators
+- Multiple functions in one file
+- Function calls with arguments
+- Type inference: `result` gets its type from the call's return type
 
 Compile and run:
 
@@ -145,7 +157,8 @@ neurc compile <file.nr> [options]
 ```
 
 **Options**:
-- `-o, --output <FILE>` - Specify output executable path
+- `-o, --output <FILE>` - Specify output executable path (default: the input filename without its extension, `.exe` on Windows)
+- `-O, --optimization <0-3>` - Optimization level (default: `0`)
 
 **Examples**:
 
@@ -156,45 +169,46 @@ neurc compile examples/basics/hello.nr
 # Custom output path
 neurc compile examples/basics/hello.nr -o bin/my_program
 
-# Compile from different directory
+# Optimized build
+neurc compile -O2 examples/basics/hello.nr
+
+# Compile from a different directory
 neurc compile ../path/to/program.nr
 ```
 
 ## Error Messages
 
-Neuro provides detailed error messages with source locations.
+Errors print to stderr and the compiler exits with code `1`.
 
 ### Syntax Error Example
 
-Source:
+Source (`bad.nr`):
 ```neuro
-func bad() -> i32 {
-    return   // Missing return value
+func main() -> i32 {
+    val x: i32 =
 }
 ```
 
 Error output:
 ```
-Parse error: unexpected token `}`, expected expression
-  at examples/bad.nr:2:12
+Error: Module error: failed to parse module `bad.nr`: unexpected token RightBrace, expected expression
 ```
 
 ### Type Error Example
 
-Source:
+Source (`mismatch.nr`):
 ```neuro
-func mismatch() -> i32 {
-    val x: i32 = true  // Type mismatch
+func main() -> i32 {
+    val x: i32 = true
     return x
 }
 ```
 
 Error output:
 ```
-Type error: Type mismatch
-  expected: i32
-  found: bool
-  at examples/mismatch.nr:2:18
+Type errors found in "mismatch.nr":
+  1. type mismatch at Span { start: 25, end: 42 }: expected i32, found bool
+Error: 1 type error(s) found
 ```
 
 ## Development Workflow
@@ -230,12 +244,7 @@ neurc compile examples/basics/hello.nr
 RUST_LOG=debug neurc compile examples/basics/hello.nr
 ```
 
-This shows:
-- Lexical analysis progress
-- Parse tree structure
-- Type checking steps
-- LLVM IR generation
-- Linking process
+This shows each stage as it runs: module resolution and parsing, type checking, HIR lowering, LLVM IR and object-code generation, and linking.
 
 ## Current Feature Summary
 
