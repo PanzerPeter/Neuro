@@ -2,7 +2,7 @@
   "name": "neuro-language-support",
   "displayName": "Neuro Language Support",
   "description": "Syntax highlighting and editor configuration for the Neuro programming language.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "NeuroTeam",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {

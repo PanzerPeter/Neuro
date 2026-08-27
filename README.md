@@ -565,10 +565,14 @@ Syntax highlighting for `.nr` files is included in `neuro-language-support/`.
 
 ```bash
 cd neuro-language-support
-npm install -g @vscode/vsce
-vsce package
-# Install the generated .vsix via: VSCode → Extensions → Install from VSIX
+npm install -g @vscode/vsce      # once
+vsce package                     # -> neuro-language-support-<version>.vsix
+code --install-extension neuro-language-support-*.vsix --force
 ```
+
+Reload the VS Code window afterwards (`Developer: Reload Window`) — a grammar change
+does not apply to already-open editors. During grammar work, symlinking the folder into
+`~/.vscode/extensions/` avoids repackaging: a window reload then picks up every edit.
 
 ---
 
