@@ -433,8 +433,11 @@ Install Neuro VSCode extension:
 cd neuro-language-support
 npm install -g @vscode/vsce
 vsce package
-# Install .vsix file in VSCode
+code --install-extension neuro-language-support-*.vsix --force
 ```
+
+Then reload the window (`Developer: Reload Window`). Highlighting in an editor that was
+already open does not refresh on its own.
 
 ### Git Line Ending Issues (Windows)
 
