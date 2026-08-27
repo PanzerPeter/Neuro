@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.78.2] - 2026-08-27
+
+### Fixed
+- `lexer`: triple-quoted block strings leaked the `\r` of a CRLF source into their value,
+  and read the CRLF trailing the opening delimiter as content rather than punctuation, so
+  a block string gained a leading blank line and a `\r` on every line. Windows checkouts
+  get CRLF from git's `core.autocrlf`, which made every block-string comparison fail there
+  while passing on Linux and macOS. `dedent_block_body` now drops a line's trailing `\r`
+  with its newline, so a block string's value is identical under either line ending.
+
 ## [1.78.1] - 2026-08-27
 
 ### Fixed

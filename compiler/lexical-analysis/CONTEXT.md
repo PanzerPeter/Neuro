@@ -53,8 +53,10 @@ of the original source by absolute offset. Rules: the newline after the opening 
 punctuation and is dropped; text trailing the opening `"""` on the same line is content
 and is exempt from the dedent check (it sits flush against the delimiter and cannot carry
 indentation); a whitespace-only line normalizes to empty without an indent check; any other
-line not starting with the closing prefix is `TripleQuoteUnderIndented`. A closing `"""`
-that is not alone on its line is `TripleQuoteClosingNotOnOwnLine`, and a body with no
+line not starting with the closing prefix is `TripleQuoteUnderIndented`. A line's trailing
+`\r` is line-ending punctuation and is dropped with its newline, so a CRLF source (a
+Windows checkout under git's `core.autocrlf`) yields byte-identical values to an LF one.
+A closing `"""` that is not alone on its line is `TripleQuoteClosingNotOnOwnLine`, and a body with no
 closing delimiter is `UnterminatedTripleQuotedString`.
 
 `TokenKind::String` carries a `StringValue`, not a bare `String`: a literal with no
@@ -122,6 +124,11 @@ not do.
   interpolation holes, and exponent-only floats (`1e10`) matching nothing. Vocabulary the
   lexer does not tokenize (`async`, `await`, `spawn`, `defer`, `pool`, `>>`, `|>`, `@` as
   matmul, `Tensor` and the other Phase-2 type names) was removed. No lexer change.
+- 2026-08-27: Block strings normalize CRLF. `dedent_block_body` now strips a trailing
+  `\r` from each line before the empty/blank/indent checks, so a Windows checkout no
+  longer leaks `\r` into block-string values, and the CRLF after the opening delimiter is
+  no longer read as content prepending a blank line. Lexer-local: no new error variant, no
+  signature change, nothing downstream touched.
 - 2026-08-27: Block comments nest. `_BlockComment` moved from a regex to
   `#[token("/*", lex_nested_block_comment)]` with a depth-counting scanner (see Notes).
   No new `LexError` variant — `UnterminatedBlockComment` already existed and is now

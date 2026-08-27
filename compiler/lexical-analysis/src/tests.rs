@@ -860,6 +860,26 @@ fn triple_quoted_string_dedents_to_the_closing_delimiter() {
 }
 
 /// The whole literal is one token: the lexer must not resume scanning inside the body.
+/// A CRLF source file must produce the same value as an LF one: the carriage
+/// return is line-ending punctuation, not content. Windows checkouts (git's
+/// `core.autocrlf`) hand the lexer CRLF, and a leaked `\r` would silently change
+/// every block string's value.
+#[test]
+fn triple_quoted_string_normalizes_crlf_line_endings() {
+    let src = "\"\"\"\r\n    Hello\r\n\r\n    World\r\n    \"\"\"";
+    let result = tokenize(src).expect("block string lexes");
+    assert_eq!(plain_string(&result[0].kind), "Hello\n\nWorld\n");
+}
+
+/// Text trailing the opening delimiter is content, but the CRLF that ends that
+/// line is not.
+#[test]
+fn triple_quoted_string_opening_line_drops_its_carriage_return() {
+    let src = "\"\"\"lead\r\n    tail\r\n    \"\"\"";
+    let result = tokenize(src).expect("block string lexes");
+    assert_eq!(plain_string(&result[0].kind), "lead\ntail\n");
+}
+
 #[test]
 fn triple_quoted_string_is_a_single_token() {
     let src = "val a = \"\"\"\n  func val 1 + 2\n  \"\"\"\nval b = 1";
