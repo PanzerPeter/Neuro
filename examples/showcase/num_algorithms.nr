@@ -3,7 +3,8 @@
 // Integration example combining several control-flow and operator features:
 //   recursion · while loops · modulo (%) · compound assignment (+=)
 //   · saturating and checked overflow methods · Option + match deconstruction
-//   · tuples · loop-as-value · nested if/else · early return.
+//   · tuples · loop-as-value · nested if/else · early return
+//   · nesting block comments.
 //
 // Five classic routines are computed and composed into a single exit code.
 
@@ -15,6 +16,24 @@ func isqrt(n: i32) -> i32 {
     }
     return r
 }
+
+/* Shelved: Newton's method converges in far fewer steps, but it needs a
+   division-by-zero guard the linear scan above does not, so it stays parked
+   here until the guard is worth writing. The whole block is inert — including
+   the ordinary comment inside it, which is why the outer comment has to nest.
+
+func isqrt_newton(n: i32) -> i32 {
+    if n == 0 { return 0 }
+    mut r: i32 = n
+    loop {
+        /* Averaging r and n/r halves the error each round. */
+        val next = (r + n / r) / 2
+        if next >= r { break }
+        r = next
+    }
+    return r
+}
+*/
 
 // Greatest common divisor — Euclid's algorithm, recursive.
 func gcd(a: i32, b: i32) -> i32 {

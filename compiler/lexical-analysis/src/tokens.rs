@@ -337,7 +337,11 @@ pub enum TokenKind {
     // Comments and whitespace
     #[regex(r"//[^\n]*", logos::skip)]
     _LineComment,
-    #[regex(r"/\*([^*]|\*[^/])*\*/", logos::skip)]
+    // Block comments NEST, which no regex can express: logos matches the
+    // longest run its DFA accepts, so `/* a /* b */ c */` would close at the first
+    // `*/` and leave ` c */` to lex as garbage. Matching only the opening delimiter
+    // hands the body to a depth-counting scanner, the same shape `"""` uses.
+    #[token("/*", lex_nested_block_comment)]
     _BlockComment,
     #[regex(r"\n+")]
     Newline,
@@ -455,6 +459,50 @@ impl Token {
 
 /// Opening and closing delimiter of a block string literal.
 const TRIPLE_QUOTE: &str = "\"\"\"";
+
+/// Opening and closing delimiter of a block comment.
+const BLOCK_COMMENT_OPEN: &[u8] = b"/*";
+const BLOCK_COMMENT_CLOSE: &[u8] = b"*/";
+
+/// Consume a nesting block comment, bumping the lexer past its closing delimiter.
+///
+/// Logos matched only the opening `/*`, so this counts depth over the remainder:
+/// every further `/*` deepens it and every `*/` unwinds it, and the comment ends
+/// when depth returns to zero. Delimiters inside string and char literals are NOT
+/// exempt — a comment is scanned as raw text, matching how `//` already swallows a
+/// quote to end of line.
+fn lex_nested_block_comment(
+    lex: &mut logos::Lexer<TokenKind>,
+) -> logos::FilterResult<(), LexError> {
+    let open = lex.span().start;
+    let rest = lex.remainder().as_bytes();
+
+    let mut depth = 1usize;
+    let mut at = 0usize;
+    while at < rest.len() {
+        // Delimiters are two bytes and every non-ASCII UTF-8 byte is >= 0x80, so a
+        // byte scan can never split a multi-byte character into a false `/` or `*`.
+        if rest[at..].starts_with(BLOCK_COMMENT_OPEN) {
+            depth += 1;
+            at += BLOCK_COMMENT_OPEN.len();
+            continue;
+        }
+        if rest[at..].starts_with(BLOCK_COMMENT_CLOSE) {
+            at += BLOCK_COMMENT_CLOSE.len();
+            depth -= 1;
+            if depth == 0 {
+                lex.bump(at);
+                return logos::FilterResult::Skip;
+            }
+            continue;
+        }
+        at += 1;
+    }
+
+    logos::FilterResult::Error(LexError::UnterminatedBlockComment {
+        span: Span::new(open, lex.source().len()),
+    })
+}
 
 /// Decode a `"…"` string literal token, splitting interpolated literals into chunks.
 ///

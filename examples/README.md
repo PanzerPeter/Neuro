@@ -34,8 +34,9 @@ isolation:
 - [`showcase/num_algorithms.nr`](showcase/num_algorithms.nr) — `isqrt`, `gcd`
   (recursion), `is_prime`, `ipow` (saturating multiply), `pow_checked`
   (`checked_mul` reporting overflow as `Option::None`). Loops + recursion +
-  modulo + compound assignment + `Option`/`match` + tuples + loop-as-value.
-  Exit `33`.
+  modulo + compound assignment + `Option`/`match` + tuples + loop-as-value,
+  plus a **nesting block comment** shelving an alternative `isqrt` whose body
+  carries a `/* */` comment of its own. Exit `33`.
 - [`showcase/running_stats.nr`](showcase/running_stats.nr) — an online mean
   accumulator. Struct state, direct field mutation, `&self` query method, `f64`
   division, `as` casts. Exit `5`.

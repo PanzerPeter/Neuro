@@ -954,7 +954,7 @@ func returns_i32() -> i32 {
   [expressions.md](expressions.md#string-interpolation)
 
 **Remaining Phase 1 work:**
-- Nested block comments, named arguments (1H)
+- Named arguments (1H)
 
 ### Phase 2, Tensors (Planned)
 

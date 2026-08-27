@@ -58,6 +58,13 @@ Key design goals:
 
 ## Current Features
 
+### Comments
+
+- Line comments `// ...` to end of line
+- Block comments `/* ... */`, which **nest**: `/* outer /* inner */ still outer */`.
+  Each `/*` needs its own `*/`, so a block already containing a comment can be
+  commented out wholesale; a file ending with a comment still open is a lex error
+
 ### Types
 
 - Primitive integers: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
