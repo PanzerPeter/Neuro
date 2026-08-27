@@ -1,12 +1,24 @@
 {
   "comments": {
     "lineComment": "//",
-    "blockComment": ["/*", "*/"]
+    "blockComment": [
+      "/*",
+      "*/"
+    ]
   },
   "brackets": [
-    ["{", "}"],
-    ["[", "]"],
-    ["(", ")"]
+    [
+      "{",
+      "}"
+    ],
+    [
+      "[",
+      "]"
+    ],
+    [
+      "(",
+      ")"
+    ]
   ],
   "autoClosingPairs": [
     {
@@ -24,23 +36,73 @@
     {
       "open": "\"",
       "close": "\"",
-      "notIn": ["string"]
-    },
-    {
-      "open": "'",
-      "close": "'",
-      "notIn": ["string", "comment"]
+      "notIn": [
+        "string"
+      ]
     }
   ],
   "surroundingPairs": [
-    ["{", "}"],
-    ["[", "]"],
-    ["(", ")"],
-    ["\"", "\""],
-    ["'", "'"]
+    [
+      "{",
+      "}"
+    ],
+    [
+      "[",
+      "]"
+    ],
+    [
+      "(",
+      ")"
+    ],
+    [
+      "\"",
+      "\""
+    ],
+    [
+      "'",
+      "'"
+    ]
   ],
+  "wordPattern": "(-?\\d*\\.\\d\\w*)|([^`~!@#%^&*()\\-=+\\[{\\]}\\\\|;:'\\\",.<>/?\\s]+)",
   "indentationRules": {
-    "increaseIndentPattern": "^.*(\\{[^}\"]*|\\([^)\"]*|\\[[^\\]\"]*)(\\s*//.*)?$",
+    "increaseIndentPattern": "^.*(\\{[^}\\\"]*|\\([^)\\\"]*|\\[[^\\]\\\"]*)(\\s*//.*)?$",
     "decreaseIndentPattern": "^\\s*(\\}|\\]|\\))"
+  },
+  "onEnterRules": [
+    {
+      "beforeText": "^\\s*/\\*(?!\\*/)([^*]|\\*(?!/))*$",
+      "afterText": "^\\s*\\*/$",
+      "action": {
+        "indent": "indentOutdent",
+        "appendText": " * "
+      }
+    },
+    {
+      "beforeText": "^\\s*/\\*(?!\\*/)([^*]|\\*(?!/))*$",
+      "action": {
+        "indent": "none",
+        "appendText": " * "
+      }
+    },
+    {
+      "beforeText": "^(\\t|[ ])*[ ]\\*([ ]([^*]|\\*(?!/))*)?$",
+      "action": {
+        "indent": "none",
+        "appendText": "* "
+      }
+    },
+    {
+      "beforeText": "^(\\t|[ ])*[ ]\\*/\\s*$",
+      "action": {
+        "indent": "none",
+        "removeText": 1
+      }
+    }
+  ],
+  "folding": {
+    "markers": {
+      "start": "^\\s*//\\s*#?region\\b",
+      "end": "^\\s*//\\s*#?endregion\\b"
+    }
   }
 }

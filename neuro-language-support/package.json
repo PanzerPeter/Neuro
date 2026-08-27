@@ -1,7 +1,7 @@
 {
   "name": "neuro-language-support",
   "displayName": "Neuro Language Support",
-  "description": "Syntax highlighting for the Neuro programming language, designed for AI-optimized workloads.",
+  "description": "Syntax highlighting and editor configuration for the Neuro programming language.",
   "version": "1.0.0",
   "publisher": "NeuroTeam",
   "license": "SEE LICENSE IN LICENSE",
@@ -36,5 +36,18 @@
         "path": "./syntaxes/neuro.tmLanguage.json"
       }
     ]
-  }
+  },
+  "keywords": [
+    "neuro",
+    "nr",
+    "language",
+    "syntax",
+    "highlighting",
+    "llvm",
+    "compiler"
+  ],
+  "bugs": {
+    "url": "https://github.com/PanzerPeter/Neuro/issues"
+  },
+  "homepage": "https://github.com/PanzerPeter/Neuro"
 }

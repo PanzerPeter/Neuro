@@ -2,19 +2,32 @@
 //!
 //! `neuro-language-support/syntaxes/neuro.tmLanguage.json` is a hand-written regex
 //! grammar with no structural link to `TokenKind` — nothing else in the workspace
-//! fails when a keyword is added to the lexer and not to the grammar. This test is
-//! that link: it re-reads the lexer's own source, extracts every keyword literal
-//! declared with `#[token("...")]`, and asserts each one is matched by the grammar.
+//! fails when a keyword is added to the lexer and not to the grammar. These tests are
+//! that link.
 //!
-//! Reading the source text (rather than reflecting over `TokenKind`) is deliberate —
-//! logos consumes the attributes at compile time, so the literals are not observable
-//! at runtime any other way, and a source scan needs no upkeep when a keyword lands.
+//! Three properties are asserted, each standing for a bug class the grammar has
+//! actually shipped:
 //!
-//! Scope note: this covers keyword *words* only. Grammar rules with no one-to-one
-//! token counterpart — string bodies and their escapes above all — must still be
-//! updated by hand. That matters for the planned stateful-lexer rewrite behind
-//! string interpolation, which changes how a string literal is tokenized without
-//! adding a single keyword.
+//! 1. **Coverage** — every `#[token("word")]` keyword appears in the grammar.
+//! 2. **No invention** — the grammar's `#keywords` rule lists *only* words the lexer
+//!    tokenizes, so a keyword planned for a later phase cannot be highlighted as if
+//!    the compiler already accepted it.
+//! 3. **Reachability** — the rules that name a declaration precede `#keywords` in the
+//!    top-level `patterns` array. TextMate breaks a tie between two rules matching at
+//!    the same offset by array position, never by match length, so `#keywords` listed
+//!    first silently makes every `func f` / `struct S` rule dead code. Nothing about
+//!    such a grammar looks wrong on inspection; only the order gives it away.
+//!
+//! Reading the lexer's source text (rather than reflecting over `TokenKind`) is
+//! deliberate — logos consumes the attributes at compile time, so the literals are not
+//! observable at runtime any other way, and a source scan needs no upkeep when a
+//! keyword lands.
+//!
+//! Scope note: these cover keyword *words* and rule order. Grammar rules with no
+//! one-to-one token counterpart — string bodies, escapes, interpolation holes, number
+//! literal shapes — must still be updated by hand, and the names in `#types` and
+//! `#constants` answer to the prelude and the type checker rather than to the lexer.
+//! To inspect what the grammar actually produces, run `tools/tmlanguage_scopes.mjs`.
 
 use std::path::PathBuf;
 
@@ -28,6 +41,13 @@ fn workspace_file(relative: &str) -> PathBuf {
 fn read(relative: &str) -> String {
     let path = workspace_file(relative);
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+}
+
+const GRAMMAR_PATH: &str = "neuro-language-support/syntaxes/neuro.tmLanguage.json";
+const TOKENS_PATH: &str = "compiler/lexical-analysis/src/tokens.rs";
+
+fn grammar_json() -> serde_json::Value {
+    serde_json::from_str(&read(GRAMMAR_PATH)).expect("the TextMate grammar is valid JSON")
 }
 
 /// Every `#[token("word")]` literal in the lexer that is a bare identifier-shaped
@@ -61,10 +81,54 @@ fn grammar_matches(grammar: &str, keyword: &str) -> bool {
     })
 }
 
+/// The identifier-shaped alternatives of every `match` regex under `repository.<rule>`,
+/// e.g. `\b(if|else|while)\b` yields `if`, `else`, `while`.
+fn words_in_rule(grammar: &serde_json::Value, rule: &str) -> Vec<String> {
+    let patterns = grammar["repository"][rule]["patterns"]
+        .as_array()
+        .unwrap_or_else(|| panic!("grammar repository has no `{rule}` rule with `patterns`"));
+
+    let mut out = Vec::new();
+    for pattern in patterns {
+        let Some(regex) = pattern["match"].as_str() else {
+            continue;
+        };
+        for word in regex.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+            // `b` is the `\b` word-boundary escape, not an alternative.
+            if word.len() > 1 && word.chars().all(|c| c.is_ascii_alphabetic() || c == '_') {
+                out.push(word.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// The order of `{ "include": "#name" }` entries in the grammar's top-level
+/// `patterns` array. Position in this array is what decides which of two rules
+/// matching at the same offset wins.
+fn top_level_include_order(grammar: &serde_json::Value) -> Vec<String> {
+    grammar["patterns"]
+        .as_array()
+        .expect("the grammar has a top-level `patterns` array")
+        .iter()
+        .filter_map(|p| p["include"].as_str())
+        .map(str::to_string)
+        .collect()
+}
+
+fn position_of(order: &[String], include: &str) -> usize {
+    order
+        .iter()
+        .position(|entry| entry == include)
+        .unwrap_or_else(|| {
+            panic!("the grammar's top-level `patterns` no longer includes `{include}`")
+        })
+}
+
 #[test]
 fn textmate_grammar_covers_every_lexer_keyword() {
-    let tokens = read("compiler/lexical-analysis/src/tokens.rs");
-    let grammar = read("neuro-language-support/syntaxes/neuro.tmLanguage.json");
+    let tokens = read(TOKENS_PATH);
+    let grammar = read(GRAMMAR_PATH);
 
     let keywords = lexer_keywords(&tokens);
     assert!(
@@ -81,9 +145,64 @@ fn textmate_grammar_covers_every_lexer_keyword() {
 
     assert!(
         missing.is_empty(),
-        "lexer keywords absent from neuro-language-support/syntaxes/neuro.tmLanguage.json: \
-         {missing:?}\nAdd them to the matching `keywords` or `constants` pattern — editor \
-         highlighting has no other link to the lexer."
+        "lexer keywords absent from {GRAMMAR_PATH}: {missing:?}\nAdd them to the matching \
+         `keywords` or `constants` pattern — editor highlighting has no other link to the lexer."
+    );
+}
+
+#[test]
+fn textmate_keywords_rule_invents_nothing() {
+    let tokens = read(TOKENS_PATH);
+    let grammar = grammar_json();
+
+    let lexed = lexer_keywords(&tokens);
+    let invented: Vec<String> = words_in_rule(&grammar, "keywords")
+        .into_iter()
+        .filter(|word| !lexed.contains(word))
+        .collect();
+
+    assert!(
+        invented.is_empty(),
+        "the grammar's `#keywords` rule highlights words the lexer does not tokenize: \
+         {invented:?}\nA word highlighted as a keyword tells the reader the compiler accepts \
+         it. Reserve a future phase's vocabulary in the roadmap, not in the editor."
+    );
+}
+
+#[test]
+fn declaration_rules_outrank_the_keyword_rule() {
+    let grammar = grammar_json();
+    let order = top_level_include_order(&grammar);
+    let keywords_at = position_of(&order, "#keywords");
+
+    // Each of these begins with a keyword the `#keywords` rule also matches, at the same
+    // offset. Listed after `#keywords`, it becomes unreachable and the declared name
+    // loses its scope entirely.
+    for rule in ["#function_declaration", "#type_declarations", "#imports"] {
+        assert!(
+            position_of(&order, rule) < keywords_at,
+            "`{rule}` is listed after `#keywords` in the grammar's top-level `patterns`. \
+             TextMate resolves a same-offset tie by array position, so `#keywords` claims \
+             the leading keyword and `{rule}` never runs."
+        );
+    }
+
+    // `'a'` and `'a` start identically; `#lifetimes` listed first swallows the opening
+    // quote of every character literal.
+    assert!(
+        position_of(&order, "#chars") < position_of(&order, "#lifetimes"),
+        "`#chars` must precede `#lifetimes`, or a character literal is scoped as a lifetime."
+    );
+
+    // A capitalised name is a type before it is a call target, and an all-caps name is a
+    // constant before it is a type.
+    assert!(
+        position_of(&order, "#pascal_types") < position_of(&order, "#function_calls"),
+        "`#pascal_types` must precede `#function_calls`."
+    );
+    assert!(
+        position_of(&order, "#screaming_constants") < position_of(&order, "#pascal_types"),
+        "`#screaming_constants` must precede `#pascal_types`."
     );
 }
 

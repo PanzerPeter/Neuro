@@ -9,6 +9,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.78.1] - 2026-08-27
+
+### Fixed
+- `infra`: seven rules in the editor TextMate grammar were unreachable. TextMate breaks a
+  tie between two rules matching at the same offset by their position in the top-level
+  `patterns` array, never by match length, so `#keywords` — listed ahead of every
+  declaration rule — claimed the leading `func` / `struct` / `enum` / `trait` / `impl` /
+  `type` / `newtype` and the rule naming the declared symbol never ran. Declared type
+  names were left unscoped entirely; a declared function name was picked up by the
+  call rule and coloured as a call. The declaration rules now precede `#keywords`.
+- `infra`: character literals had no rule at all, so `#lifetimes` claimed the opening
+  quote of `'a'` and left the closing quote stranded. Added `#chars`, ordered ahead of
+  `#lifetimes`, matching the one-scalar forms the lexer accepts.
+- `infra`: the grammar's `\\.` escape rule matched `\u` and left `{1F600}` to the
+  interpolation rule, which scoped a Unicode escape as a `{expr}` hole. Escapes are now
+  matched whole (`\u{...}`, `\xNN`, and the single-character forms), and an escape the
+  lexer rejects scopes as `invalid.illegal` instead of as a valid one.
+- `infra`: exponent-only float literals (`1e10`, `2e3f32`) matched no numeric rule and
+  went unhighlighted; the grammar required a decimal point. Integer literals no longer
+  accept float suffixes, and floats no longer accept integer suffixes, matching the lexer.
+- `infra`: `#attributes` began on a bare `@`, so it claimed every `@` in the file and the
+  matmul operator rule behind it could never run. It now requires an identifier after the
+  `@`. The `&mut` and dereference rules were likewise unreachable behind the bitwise and
+  arithmetic rules.
+- `infra`: interpolation holes included `$self`, which admitted a `"` string literal the
+  lexer rejects — a quote ends the enclosing token. Holes now use a restricted rule set,
+  balance nested braces, and scope a `{value:>8.2}` format specifier as one, rather than
+  as a comparison operator followed by a float.
+- `infra`: the grammar matched ASCII identifiers only, while the lexer accepts
+  `XID_Start`/`XID_Continue`. A function named `számol` went unscoped. All identifier
+  patterns are now Unicode.
+- `infra`: `=>` scoped as an assignment followed by a comparison; `void` was missing from
+  the primitive types; a loop label's scope covered the trailing colon and whitespace.
+
+### Added
+- `infra`: the editor grammar now scopes user-defined types at their *use* sites, not just
+  their declarations, along with `SCREAMING_SNAKE` constants, function parameters, import
+  path segments, the prelude's types and variants, the compiler-known collections, and the
+  `panic` / `assert` / `unreachable` builtins.
+- `tests`: `tmlanguage_sync.rs` grew from one test to three. Beyond asserting every lexer
+  keyword appears in the grammar, it now asserts the grammar's keyword rule contains *only*
+  words the lexer tokenizes, and that the declaration rules stay ordered ahead of
+  `#keywords`. Both new tests were confirmed to fail when their bug is reintroduced.
+- `infra`: `tools/tmlanguage_scopes.mjs` prints the scopes the grammar assigns to a source
+  file, driving the same tokenizer VS Code runs. Outside CI, so the workspace keeps no
+  Node dependency.
+- `infra`: the extension's `language-configuration.json` gained a Unicode-aware
+  `wordPattern`, block-comment continuation on Enter, and `//#region` folding markers.
+  `'` was removed from `autoClosingPairs`: it opens a lifetime far more often than a
+  character literal, and auto-closing turned every `<'a>` into `<'a'>`.
+
+### Removed
+- `infra`: vocabulary the compiler does not accept is no longer highlighted as though it
+  did — the keywords `async`, `await`, `spawn`, `defer` and `pool`, the operators `>>`
+  (compose), `|>` (pipeline) and `@` (matmul), the type names `Tensor`, `Future`,
+  `ParameterList`, `KernelOut` and `Device`, and the constants `NaN` and `Inf`. None of
+  them is a token the lexer produces. `Option`, `Result`, `Some`, `None`, `Ok` and `Err`
+  stay: the prelude declares them in every program.
+
 ## [1.78.0] - 2026-08-27
 
 ### Added

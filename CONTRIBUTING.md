@@ -315,6 +315,9 @@ triple-quoted strings, and nesting block comments are done; one item remains:
 
 Nothing links `TokenKind` to the editor grammar, so any lexer change must also update
 `neuro-language-support/syntaxes/neuro.tmLanguage.json` by hand in the same commit.
+`cargo test -p lexical-analysis --test tmlanguage_sync` catches a missing keyword, an
+invented one, and a declaration rule ordered behind the keyword rule; run
+`tools/tmlanguage_scopes.mjs <file.nr>` to see the scopes the grammar really produces.
 
 Every item ships with integration tests, a `CHANGELOG.md` entry, and its slice's
 `CONTEXT.md` updated in the same commit — see [Acceptance Criteria](#acceptance-criteria).
