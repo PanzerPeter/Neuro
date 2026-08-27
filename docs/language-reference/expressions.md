@@ -59,6 +59,40 @@ an interpolated literal is not a constant, so it cannot appear in a pattern.
 See [`examples/types/string_interpolation.nr`](../../examples/types/string_interpolation.nr)
 for every specifier checked against its expected output.
 
+### Triple-Quoted Strings
+
+A `"""…"""` literal spans lines. Its value is dedented to the column the closing
+`"""` sits at, so a block can be indented to match the code around it without
+that indentation ending up in the string:
+
+```neuro
+val block = """
+    Hello from {name}.
+    This spans multiple lines.
+    """
+// "Hello from Neuro.\nThis spans multiple lines.\n"
+```
+
+The rules:
+
+- The newline directly after the opening `"""` is punctuation and is dropped.
+  Text trailing the opening delimiter on the same line is content, and is exempt
+  from the dedent rule — it sits flush against the delimiter and cannot be
+  indented.
+- The closing `"""` must be alone on its line. The whitespace before it is the
+  prefix stripped from every content line; indentation beyond that prefix
+  survives, so nested structure inside the block is preserved.
+- A blank line needs no indentation of its own and normalizes to empty.
+- A non-blank line indented less than the closing delimiter is a compile error.
+- A single `"` or `""` inside the block needs no escape; only `"""` ends it.
+
+Escapes and `{...}` interpolation holes work exactly as in a `"…"` literal — a
+block string produces the same `string` value and carries no runtime cost of its
+own.
+
+See [`examples/types/triple_quoted.nr`](../../examples/types/triple_quoted.nr)
+for each rule checked against its expected text.
+
 ### Identifiers
 
 Variable and function names:

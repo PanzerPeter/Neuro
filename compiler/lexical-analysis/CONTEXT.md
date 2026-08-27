@@ -38,6 +38,25 @@ a `\u{...}` unicode escape, or a `\xNN` byte escape — so `''`, `'ab'`, and an 
 `'a` never match and become lex errors. `parse_char` decodes the escape and validates the
 `\u{...}` scalar range, emitting `LexError::InvalidCharLiteral` on an out-of-range code point.
 
+A triple-quoted (block) string `"""…"""` produces the same `TokenKind::String` payload
+as an ordinary literal, so nothing downstream of the lexer distinguishes the two forms.
+It is declared as a bare `#[token("\"\"\"")]` whose callback scans and `bump`s the body
+itself: logos has no non-greedy repetition, so a regex ending in `"""` would run to the
+LAST `"""` in the file. Three quotes always outrank the two-quote empty-string match under
+logos' longest-match rule, so `""` and `"""` never collide.
+
+`dedent_block_body` strips the closing delimiter's whitespace prefix from every content
+line. It does so by dropping characters from the indexed `(absolute_offset, char)` vector
+rather than by rebuilding a `String`, which is why interpolation holes inside a block
+string still report at real source columns — `decode_chunks` slices each hole straight out
+of the original source by absolute offset. Rules: the newline after the opening `"""` is
+punctuation and is dropped; text trailing the opening `"""` on the same line is content
+and is exempt from the dedent check (it sits flush against the delimiter and cannot carry
+indentation); a whitespace-only line normalizes to empty without an indent check; any other
+line not starting with the closing prefix is `TripleQuoteUnderIndented`. A closing `"""`
+that is not alone on its line is `TripleQuoteClosingNotOnOwnLine`, and a body with no
+closing delimiter is `UnterminatedTripleQuotedString`.
+
 `TokenKind::String` carries a `StringValue`, not a bare `String`: a literal with no
 `{...}` hole decodes to `StringValue::Plain`, one with holes to `StringValue::Interp`
 carrying `InterpChunk`s. One token variant covers both because a logos callback picks a
@@ -60,6 +79,14 @@ interpolation landed, and its `\\.` escape rule already made `\{` an escape, so 
 change needed no grammar edit — but a future string-literal change may.
 
 ## Recent Updates
+- 2026-08-27: Triple-quoted block strings (`"""…"""`) with dedent. `decode_string_literal`
+  now delegates to a shared `decode_chunks` that walks `(absolute_offset, char)` pairs, so
+  the new `decode_triple_quoted_string` can dedent by omitting characters while every hole
+  keeps a true source span. Three new `LexError` variants:
+  `UnterminatedTripleQuotedString`, `TripleQuoteClosingNotOnOwnLine`,
+  `TripleQuoteUnderIndented`. No parser, semantic, or codegen change — the token payload is
+  unchanged. The editor grammar already carried a `triple_strings` rule ahead of `strings`,
+  so it needed no edit.
 - 2026-08-25: String interpolation. `TokenKind::String` now carries `StringValue::{Plain, Interp}`
   (see Notes), with `InterpChunk::{Text, Hole}` and the new
   `LexError::UnterminatedInterpolation`. `decode_string_literal` replaced the old

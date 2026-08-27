@@ -42,6 +42,16 @@ chunks to expression parsing; see
 user-facing syntax and format mini-language. An unterminated `{` hole is the lexer's
 `UnterminatedInterpolation` error.
 
+A triple-quoted `"""…"""` block string decodes to the same `StringValue`, so nothing
+downstream of the lexer distinguishes the two forms. Logos matches only the opening
+delimiter — it has no non-greedy repetition, so a regex ending in `"""` would run to the
+last one in the file — and a callback scans the body, strips the closing delimiter's
+indentation, and reuses the ordinary chunk decoder. Dedent drops characters from an
+indexed `(offset, char)` view rather than rebuilding the text, which is how holes inside a
+block string keep true source spans. See
+[triple-quoted strings](../../language-reference/expressions.md#triple-quoted-strings) for
+the dedent rules and their errors.
+
 #### Operators
 
 - **Arithmetic**: `+`, `-`, `*`, `/`, `%`

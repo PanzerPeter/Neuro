@@ -26,6 +26,15 @@ pub enum LexError {
 
     #[error("interpolation hole opened with `{{` is never closed at position {}: add the matching `}}` (or escape the brace as `\\{{`)", span.start)]
     UnterminatedInterpolation { span: Span },
+
+    #[error("unterminated triple-quoted string starting at position {}: add a closing `\"\"\"` on its own line", span.start)]
+    UnterminatedTripleQuotedString { span: Span },
+
+    #[error("closing `\"\"\"` at position {} must be on its own line: move it to the next line and indent it to the level you want stripped", span.start)]
+    TripleQuoteClosingNotOnOwnLine { span: Span },
+
+    #[error("line in triple-quoted string at position {} is indented less than the closing `\"\"\"` ({indent} columns): indent every content line to at least the closing delimiter", span.start)]
+    TripleQuoteUnderIndented { indent: usize, span: Span },
 }
 
 impl Default for LexError {

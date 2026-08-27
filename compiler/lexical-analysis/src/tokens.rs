@@ -190,8 +190,17 @@ pub enum TokenKind {
     Integer(i64),
 
     // String literals (including potentially malformed ones for better error messages).
-    // Both patterns route through the same decoder: a literal with no `{...}` hole
-    // carries `StringValue::Plain`, one with holes carries `StringValue::Interp`.
+    // All three patterns route through the same chunk decoder: a literal with no
+    // `{...}` hole carries `StringValue::Plain`, one with holes carries
+    // `StringValue::Interp`.
+    //
+    // The triple-quoted form is a bare `"""` token whose callback scans and bumps the
+    // body itself. A regex cannot express it: logos has no non-greedy repetition, so a
+    // pattern ending in `"""` would run to the LAST `"""` in the file. Matching only
+    // the opening delimiter keeps the DFA trivial and hands the body to a hand-written
+    // scanner. Three quotes always beat the two-quote empty-string match under logos'
+    // longest-match rule, so `""` and `"""` never collide.
+    #[token("\"\"\"", decode_triple_quoted_string)]
     #[regex(
         r#""([^"\\\n]|\\[nrt\\"0{xu]|\\u\{[0-9a-fA-F]+\}|\\x[0-9a-fA-F]{2})*""#,
         decode_string_literal,
@@ -444,7 +453,10 @@ impl Token {
 
 // Literal parsing helper functions (tightly coupled to TokenKind)
 
-/// Decode a string literal token, splitting interpolated literals into chunks.
+/// Opening and closing delimiter of a block string literal.
+const TRIPLE_QUOTE: &str = "\"\"\"";
+
+/// Decode a `"…"` string literal token, splitting interpolated literals into chunks.
 ///
 /// This is the stateful half of string lexing: logos matches the literal's
 /// shape, but finding where each `{...}` hole opens and closes requires walking
@@ -458,8 +470,141 @@ fn decode_string_literal(lex: &mut logos::Lexer<TokenKind>) -> Result<StringValu
     let base = lex.span().start;
     let whole = Span::new(base, base + raw.len());
     let content = &raw[1..raw.len() - 1]; // Strip quotes
-    let indexed: Vec<(usize, char)> = content.char_indices().collect();
+    let content_base = base + 1;
+    let indexed: Vec<(usize, char)> = content
+        .char_indices()
+        .map(|(offset, ch)| (content_base + offset, ch))
+        .collect();
 
+    decode_chunks(lex.source(), &indexed, whole)
+}
+
+/// Scan, dedent, and decode a `"""…"""` block string literal.
+///
+/// Logos matched only the opening delimiter, so this walks the remainder for the
+/// closing `"""`, bumps the lexer past it, applies the dedent rule, and hands the
+/// surviving characters to the same chunk decoder ordinary literals use — escapes
+/// and `{...}` holes therefore behave identically in both forms.
+fn decode_triple_quoted_string(lex: &mut logos::Lexer<TokenKind>) -> Result<StringValue, LexError> {
+    let source = lex.source();
+    let open = lex.span().start;
+    let body_start = lex.span().end;
+    let rest = lex.remainder();
+
+    let Some(close_offset) = find_triple_quote_close(rest) else {
+        return Err(LexError::UnterminatedTripleQuotedString {
+            span: Span::new(open, source.len()),
+        });
+    };
+    lex.bump(close_offset + TRIPLE_QUOTE.len());
+
+    let whole = Span::new(open, body_start + close_offset + TRIPLE_QUOTE.len());
+    let indexed = dedent_block_body(&rest[..close_offset], body_start, whole)?;
+
+    decode_chunks(source, &indexed, whole)
+}
+
+/// Byte offset of the `"""` that closes a block string, or `None` when it never closes.
+///
+/// Scanning bytes rather than chars is sound because every non-ASCII UTF-8 byte is
+/// `>= 0x80` and so can never be mistaken for `\` or `"`.
+fn find_triple_quote_close(body: &str) -> Option<usize> {
+    let bytes = body.as_bytes();
+    let mut at = 0usize;
+    while at < bytes.len() {
+        // An escape is opaque: `\"""` is a quote followed by the delimiter, not a
+        // delimiter, and `\\` must not shield the quote that follows it.
+        if bytes[at] == b'\\' {
+            at += 2;
+            continue;
+        }
+        if bytes[at..].starts_with(TRIPLE_QUOTE.as_bytes()) {
+            return Some(at);
+        }
+        at += 1;
+    }
+    None
+}
+
+/// Strip the closing delimiter's indentation from every content line of a block
+/// string, returning the surviving characters tagged with absolute source offsets.
+///
+/// Dedenting by dropping characters from the indexed vector — rather than by
+/// rebuilding a `String` — is what keeps every remaining character's true offset, so
+/// interpolation holes inside a block string still report at real source columns.
+fn dedent_block_body(
+    body: &str,
+    body_start: usize,
+    whole: Span,
+) -> Result<Vec<(usize, char)>, LexError> {
+    let Some(last_newline) = body.rfind('\n') else {
+        return Err(LexError::TripleQuoteClosingNotOnOwnLine { span: whole });
+    };
+    let indent = &body[last_newline + 1..];
+    if !indent.chars().all(is_horizontal_space) {
+        return Err(LexError::TripleQuoteClosingNotOnOwnLine { span: whole });
+    }
+
+    let mut out: Vec<(usize, char)> = Vec::new();
+    let mut offset = 0usize;
+    let mut on_opening_line = true;
+
+    while offset <= last_newline {
+        let line_end = body[offset..]
+            .find('\n')
+            .map(|at| offset + at)
+            .unwrap_or(last_newline);
+        let line = &body[offset..line_end];
+
+        if on_opening_line {
+            // Whatever trails the opening `"""` sits flush against the delimiter and
+            // cannot carry the closing indentation, so it is exempt from the dedent
+            // rule. An empty remainder is punctuation: the newline goes with it.
+            if !line.is_empty() {
+                push_chars(&mut out, line, body_start + offset);
+                out.push((body_start + line_end, '\n'));
+            }
+        } else if line.chars().all(is_horizontal_space) {
+            // A blank line carries no indentation to check and normalizes to empty,
+            // so a paragraph break never has to be padded out to the delimiter.
+            out.push((body_start + line_end, '\n'));
+        } else {
+            let Some(stripped) = line.strip_prefix(indent) else {
+                return Err(LexError::TripleQuoteUnderIndented {
+                    indent: indent.chars().count(),
+                    span: Span::new(body_start + offset, body_start + line_end),
+                });
+            };
+            push_chars(&mut out, stripped, body_start + offset + indent.len());
+            out.push((body_start + line_end, '\n'));
+        }
+
+        on_opening_line = false;
+        offset = line_end + 1;
+    }
+
+    Ok(out)
+}
+
+fn push_chars(out: &mut Vec<(usize, char)>, text: &str, base: usize) {
+    out.extend(text.char_indices().map(|(at, ch)| (base + at, ch)));
+}
+
+fn is_horizontal_space(ch: char) -> bool {
+    matches!(ch, ' ' | '\t' | '\r')
+}
+
+/// Split decoded string content into literal text and interpolation holes.
+///
+/// `indexed` carries each content character with its **absolute** offset in `source`,
+/// so hole sources are sliced straight out of the file and their spans point at real
+/// columns. Block strings exploit that: dedent simply omits the indentation
+/// characters from `indexed`, leaving every survivor correctly located.
+fn decode_chunks(
+    source: &str,
+    indexed: &[(usize, char)],
+    whole: Span,
+) -> Result<StringValue, LexError> {
     let mut parts: Vec<InterpChunk> = Vec::new();
     let mut text = String::new();
     let mut has_hole = false;
@@ -470,7 +615,7 @@ fn decode_string_literal(lex: &mut logos::Lexer<TokenKind>) -> Result<StringValu
 
     let mut i = 0usize;
     while i < indexed.len() {
-        let (byte_off, ch) = indexed[i];
+        let (abs_off, ch) = indexed[i];
 
         if ch == '\\' {
             let Some((_, esc)) = indexed.get(i + 1).copied() else {
@@ -552,18 +697,18 @@ fn decode_string_literal(lex: &mut logos::Lexer<TokenKind>) -> Result<StringValu
 
         if ch == '{' {
             has_hole = true;
-            let close_j = scan_hole_close(&indexed, i)
+            let close_j = scan_hole_close(indexed, i)
                 .ok_or(LexError::UnterminatedInterpolation { span: whole })?;
 
             if !text.is_empty() {
                 parts.push(InterpChunk::Text(std::mem::take(&mut text)));
             }
-            // `byte_off + 1` skips the `{`; the hole's span excludes both braces.
-            let hole_rel_start = byte_off + 1;
-            let hole_rel_end = indexed[close_j].0;
+            // `abs_off + 1` skips the `{`; the hole's span excludes both braces.
+            let hole_start = abs_off + 1;
+            let hole_end = indexed[close_j].0;
             parts.push(InterpChunk::Hole {
-                source: content[hole_rel_start..hole_rel_end].to_string(),
-                span: Span::new(base + 1 + hole_rel_start, base + 1 + hole_rel_end),
+                source: source[hole_start..hole_end].to_string(),
+                span: Span::new(hole_start, hole_end),
             });
             i = close_j + 1;
             continue;

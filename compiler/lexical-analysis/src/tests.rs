@@ -752,3 +752,119 @@ fn a_closed_block_comment_and_division_still_lex() {
         "division was swallowed: {tokens:?}"
     );
 }
+
+#[test]
+fn triple_quoted_string_dedents_to_the_closing_delimiter() {
+    let src = "\"\"\"\n    Hello\n    World\n    \"\"\"";
+    let result = tokenize(src).expect("block string lexes");
+    assert_eq!(plain_string(&result[0].kind), "Hello\nWorld\n");
+    assert!(matches!(result[1].kind, TokenKind::Eof));
+}
+
+/// The whole literal is one token: the lexer must not resume scanning inside the body.
+#[test]
+fn triple_quoted_string_is_a_single_token() {
+    let src = "val a = \"\"\"\n  func val 1 + 2\n  \"\"\"\nval b = 1";
+    let result = tokenize(src).expect("block string lexes");
+    assert_eq!(plain_string(&result[3].kind), "func val 1 + 2\n");
+    // A newline token separates the two bindings; `val b` must survive intact.
+    assert!(matches!(result[5].kind, TokenKind::Val));
+}
+
+#[test]
+fn triple_quoted_string_keeps_interior_quotes() {
+    let src = "\"\"\"\n    say \"hi\" and \"\" too\n    \"\"\"";
+    let result = tokenize(src).expect("block string lexes");
+    assert_eq!(plain_string(&result[0].kind), "say \"hi\" and \"\" too\n");
+}
+
+#[test]
+fn triple_quoted_string_blank_lines_need_no_indentation() {
+    let src = "\"\"\"\n    first\n\n    last\n    \"\"\"";
+    let result = tokenize(src).expect("block string lexes");
+    assert_eq!(plain_string(&result[0].kind), "first\n\nlast\n");
+}
+
+#[test]
+fn triple_quoted_string_keeps_indentation_beyond_the_delimiter() {
+    let src = "\"\"\"\n  root\n      nested\n  \"\"\"";
+    let result = tokenize(src).expect("block string lexes");
+    assert_eq!(plain_string(&result[0].kind), "root\n    nested\n");
+}
+
+#[test]
+fn triple_quoted_string_decodes_escapes() {
+    let src = "\"\"\"\n    a\\tb\\u{21}\n    \"\"\"";
+    let result = tokenize(src).expect("block string lexes");
+    assert_eq!(plain_string(&result[0].kind), "a\tb!\n");
+}
+
+/// Text after the opening `"""` is content, and is exempt from the dedent rule —
+/// it sits flush against the delimiter and cannot carry the closing indentation.
+#[test]
+fn triple_quoted_string_keeps_text_on_the_opening_line() {
+    let src = "\"\"\"lead\n    tail\n    \"\"\"";
+    let result = tokenize(src).expect("block string lexes");
+    assert_eq!(plain_string(&result[0].kind), "lead\ntail\n");
+}
+
+/// Dedent drops indentation characters from the indexed content rather than
+/// rebuilding the text, so a hole's span still points at its real source offsets.
+#[test]
+fn triple_quoted_string_holes_report_real_spans() {
+    //         0   1234  5678901234
+    let src = "\"\"\"\n    v={value}\n    \"\"\"";
+    let result = tokenize(src).expect("block string lexes");
+    let chunks = interp_chunks(&result[0].kind);
+    assert_eq!(chunks[0], InterpChunk::Text("v=".to_string()));
+    match &chunks[1] {
+        InterpChunk::Hole { source, span } => {
+            assert_eq!(source, "value");
+            assert_eq!(&src[span.start..span.end], "value");
+        }
+        other => panic!("expected a hole, got {other:?}"),
+    }
+    assert_eq!(chunks[2], InterpChunk::Text("\n".to_string()));
+}
+
+#[test]
+fn triple_quoted_string_without_a_close_is_named_as_such() {
+    let err = tokenize("\"\"\"\n    never closed\n")
+        .expect_err("an unterminated block string must not lex");
+    assert!(
+        matches!(err, LexError::UnterminatedTripleQuotedString { .. }),
+        "expected UnterminatedTripleQuotedString, got {err:?}"
+    );
+}
+
+#[test]
+fn triple_quoted_string_closing_delimiter_must_stand_alone() {
+    let err =
+        tokenize("\"\"\"\n    text \"\"\"").expect_err("a trailing closing delimiter must not lex");
+    assert!(
+        matches!(err, LexError::TripleQuoteClosingNotOnOwnLine { .. }),
+        "expected TripleQuoteClosingNotOnOwnLine, got {err:?}"
+    );
+}
+
+#[test]
+fn triple_quoted_string_rejects_under_indented_lines() {
+    let err = tokenize("\"\"\"\n    deep\n  shallow\n    \"\"\"")
+        .expect_err("an under-indented content line must not lex");
+    match err {
+        LexError::TripleQuoteUnderIndented { indent, span } => {
+            assert_eq!(indent, 4);
+            assert_eq!(span.start, 13);
+        }
+        other => panic!("expected TripleQuoteUnderIndented, got {other:?}"),
+    }
+}
+
+/// `""` must keep lexing as the empty string: logos' longest-match rule is the only
+/// thing separating it from the three-quote delimiter.
+#[test]
+fn empty_string_still_lexes_next_to_block_strings() {
+    let result = tokenize(r#""" "a""#).expect("empty string lexes");
+    assert_eq!(plain_string(&result[0].kind), "");
+    assert_eq!(plain_string(&result[1].kind), "a");
+}
