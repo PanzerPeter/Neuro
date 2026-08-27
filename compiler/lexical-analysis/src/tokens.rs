@@ -602,7 +602,11 @@ fn dedent_block_body(
             .find('\n')
             .map(|at| offset + at)
             .unwrap_or(last_newline);
+        // A CRLF source ends each line with `\r\n`. The carriage return is line-ending
+        // punctuation, not content: dropping it here is what makes a block string's
+        // value identical whether the file was checked out with LF or CRLF endings.
         let line = &body[offset..line_end];
+        let line = line.strip_suffix('\r').unwrap_or(line);
 
         if on_opening_line {
             // Whatever trails the opening `"""` sits flush against the delimiter and
