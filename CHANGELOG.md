@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.77.0] - 2026-08-27
+
+### Added
+- `lexer`: triple-quoted (block) string literals `"""…"""` (roadmap 1H, spec §1.7).
+  A block spans lines and is dedented to the column its closing `"""` sits at, so a
+  literal can be indented with the code around it without that indentation reaching
+  the value. The newline after the opening delimiter is punctuation and is dropped;
+  text trailing the opening delimiter on the same line is content and is exempt from
+  the dedent rule; blank lines normalize to empty without an indent check;
+  indentation deeper than the closing prefix survives. A single `"` or `""` inside
+  the block needs no escape, and escapes plus `{...}` interpolation holes behave
+  exactly as in a `"…"` literal.
+
+  Implemented as a bare `"""` token whose callback scans and bumps the body itself:
+  logos has no non-greedy repetition, so a regex ending in `"""` would run to the
+  last one in the file. `decode_string_literal` now delegates to a shared
+  `decode_chunks` over `(absolute_offset, char)` pairs, which lets dedent work by
+  omitting characters rather than rebuilding text — so interpolation holes inside a
+  block string still report at real source columns. The token payload is an ordinary
+  `StringValue`, so the parser, type checker, and backend are unchanged.
+
+  Three new `LexError` variants carry the failures: `UnterminatedTripleQuotedString`,
+  `TripleQuoteClosingNotOnOwnLine`, and `TripleQuoteUnderIndented`.
+
+  New examples: [`examples/types/triple_quoted.nr`](examples/types/triple_quoted.nr)
+  checks each rule against its expected text, and
+  [`examples/showcase/config_manifest.nr`](examples/showcase/config_manifest.nr)
+  renders a config manifest combining block strings with a `@derive(Copy)` struct +
+  `impl` methods, an enum + `match`, a fixed-size array + `for`-in, `+` concatenation,
+  and interpolation format specs.
+
 ## [1.76.1] - 2026-08-26
 
 ### Fixed

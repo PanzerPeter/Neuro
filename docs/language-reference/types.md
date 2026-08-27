@@ -949,11 +949,12 @@ func returns_i32() -> i32 {
 - `Option<T>` / `Result<T, E>` from the implicit prelude, the `??` coalescing and `?` propagation operators, `val-else` binding
 - Collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, `checked_*` integer methods
 - Modules and imports: multi-file programs, inline `module` blocks, re-exports, and the implicit prelude (see [modules.md](modules.md))
-- String interpolation with the format mini-language (`"{x:.2}"`), see
+- String interpolation with the format mini-language (`"{x:.2}"`) and triple-quoted
+  block strings with dedent, see
   [expressions.md](expressions.md#string-interpolation)
 
 **Remaining Phase 1 work:**
-- Triple-quoted strings, nested block comments, named arguments (1H)
+- Nested block comments, named arguments (1H)
 
 ### Phase 2, Tensors (Planned)
 
