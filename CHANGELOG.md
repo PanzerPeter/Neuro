@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.78.0] - 2026-08-27
+
+### Added
+- `lexer`: block comments now **nest** (roadmap 1H, spec §1.1). `/* outer /* inner */
+  still outer */` is one comment: the first `*/` closes only the inner one, so a block
+  that already contains a comment can be commented out wholesale. Each `/*` needs its
+  own `*/`, and a file that ends while a comment is still open is
+  `LexError::UnterminatedBlockComment` spanning from the opening delimiter to EOF.
+  A comment body is scanned as raw text — `/*` and `*/` inside a string or char literal
+  within a comment still count toward depth, matching how `//` already swallows a quote
+  to end of line.
+
+### Changed
+- `lexer`: `_BlockComment` is no longer a regex. Nesting is not a regular language, and
+  logos matches the longest run its DFA accepts, so the old pattern closed at the first
+  `*/` and left the remaining body to lex as garbage. It is now a bare `#[token("/*")]`
+  whose callback counts depth over the remainder and returns `FilterResult::Skip` or
+  `FilterResult::Error` — the same "match the opener, hand the body to a scanner" shape
+  triple-quoted strings use. Comments still produce no tokens, so no parser, semantic,
+  or codegen behavior changed.
+- `lexer`: `Lexer::classify_error` no longer rewrites a lex failure sitting on `/*` into
+  `UnterminatedBlockComment`. The scanner raises that error itself with a precise span,
+  making the reclassification branch unreachable; it was removed.
+- `infra`: the editor TextMate grammar's block-comment rule became its own
+  `#block_comment` repository entry that recurses only into itself. Recursing through
+  `#comments` let the line-comment rule consume a `*/` inside a block comment, which the
+  lexer does not do.
+
+### Fixed
+- `codegen`: `format_float` tripped clippy's `byte_char_slices` lint on
+  `[b'.', b'e', b'n', b'i']`, failing the `-D warnings` CI gate. Written as `*b".eni"`.
+
 ## [1.77.0] - 2026-08-27
 
 ### Added

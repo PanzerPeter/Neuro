@@ -30,14 +30,15 @@
           "name": "comment.line.double-slash.neuro",
           "match": "//.*$"
         },
-        {
-          "name": "comment.block.neuro",
-          "begin": "/\\*",
-          "end": "\\*/",
-          "patterns": [
-            { "include": "#comments" }
-          ]
-        }
+        { "include": "#block_comment" }
+      ]
+    },
+    "block_comment": {
+      "name": "comment.block.neuro",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "patterns": [
+        { "include": "#block_comment" }
       ]
     },
     "triple_strings": {

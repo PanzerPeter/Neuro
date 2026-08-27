@@ -68,6 +68,17 @@ Hole bounds are found by brace-depth matching that skips char literals, so a `\u
 payload's brace does not close the hole. A `"` inside a hole is not supported: the quote
 ends the string token, and the result reports as `LexError::UnterminatedInterpolation`.
 
+A block comment is a bare `#[token("/*")]` whose callback counts nesting depth over
+`lex.remainder()` and returns `logos::FilterResult::Skip` once depth returns to zero, or
+`FilterResult::Error(UnterminatedBlockComment)` when the source ends first. A regex cannot
+express nesting at all — logos matches the longest run its DFA accepts, so
+`/* a /* b */ c */` would close at the FIRST `*/` and leave ` c */` to lex as garbage.
+This is why `Lexer::classify_error` no longer rewrites a failure sitting on `/*`: the
+callback raises the error itself, with the span running from the opening delimiter to EOF.
+A comment body is scanned as raw text — a `/*` or `*/` inside a string or char literal
+within the comment still counts toward depth, the same way `//` already swallows a quote
+to end of line.
+
 ### Editor grammar sync
 `neuro-language-support/syntaxes/neuro.tmLanguage.json` re-describes this lexer as TextMate
 regexes for editor highlighting. Nothing in the build links the two, so `tests/tmlanguage_sync.rs`
@@ -77,8 +88,18 @@ one-to-one token counterpart (string bodies and escapes above all) still need up
 The grammar's `meta.interpolation.neuro` rule already covered `{...}` holes when
 interpolation landed, and its `\\.` escape rule already made `\{` an escape, so that
 change needed no grammar edit — but a future string-literal change may.
+The grammar's block-comment rule is its own `#block_comment` repository entry that
+includes only itself, not `#comments`: recursing through `#comments` would let the line
+rule `//.*$` inside a block comment consume the `*/` that closes it, which the lexer does
+not do.
 
 ## Recent Updates
+- 2026-08-27: Block comments nest. `_BlockComment` moved from a regex to
+  `#[token("/*", lex_nested_block_comment)]` with a depth-counting scanner (see Notes).
+  No new `LexError` variant — `UnterminatedBlockComment` already existed and is now
+  raised by the callback rather than reconstructed in `Lexer::classify_error`, whose `/*`
+  branch was deleted as unreachable. No parser, semantic, or codegen change: comments
+  still produce no tokens. The editor grammar needed a hand edit (see Editor grammar sync).
 - 2026-08-27: Triple-quoted block strings (`"""…"""`) with dedent. `decode_string_literal`
   now delegates to a shared `decode_chunks` that walks `(absolute_offset, char)` pairs, so
   the new `decode_triple_quoted_string` can dedent by omitting characters while every hole

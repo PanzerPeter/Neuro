@@ -118,7 +118,16 @@ false
  * Block comment
  * Can span multiple lines
  */
+
+/* Block comments nest: /* this inner one */ and the outer is still open. */
 ```
+
+Nesting means a block comment ends only at the `*/` that unwinds it to depth zero,
+so a block already containing a comment can be commented out wholesale. Each `/*`
+therefore needs its own `*/`; a file that ends while a comment is still open is
+`LexError::UnterminatedBlockComment`. A comment body is raw text — `/*` and `*/`
+inside a string or char literal within it are still counted, exactly as `//`
+already swallows a quote to end of line.
 
 ### Span Tracking
 
@@ -305,9 +314,6 @@ The excerpt above shows representative variants; the full set lives in
 
 ## Future Enhancements
 
-- [ ] **Triple-quoted strings with dedent** (1H): `"""..."""`
-- [ ] **Nested block comments** (1H): `/* outer /* inner */ still outer */`, which needs a
-      hand-written comment scanner because `logos` longest-match cannot nest
 - [ ] Token stream caching for incremental compilation
 - [ ] Better error recovery (continue lexing after an error)
 - [ ] Documentation comment tokens (`///`, `/**`)

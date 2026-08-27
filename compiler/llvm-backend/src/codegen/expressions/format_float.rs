@@ -68,7 +68,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // `.` and `e` mean a fraction or exponent is already present; `n`/`i` catch
         // `nan` and `inf`, which must not grow a fraction.
         let mut already = None;
-        for marker in [b'.', b'e', b'n', b'i'] {
+        for marker in *b".eni" {
             let hit = self
                 .builder
                 .build_int_compare(

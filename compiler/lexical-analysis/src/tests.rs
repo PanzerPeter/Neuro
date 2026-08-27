@@ -731,9 +731,6 @@ fn stress_test_large_input() {
 }
 
 /// Regression: `/*` with no `*/` reported "unexpected character '/'".
-///
-/// The block-comment regex consumes to EOF without completing, so logos fails sitting on
-/// the opening slash. `LexError::UnterminatedBlockComment` existed but nothing built it.
 #[test]
 fn unterminated_block_comment_is_named_as_such() {
     let err = tokenize("func main() -> i32 {\n/* never closed\n    0\n}\n")
@@ -751,6 +748,107 @@ fn a_closed_block_comment_and_division_still_lex() {
         tokens.iter().any(|t| t.kind == TokenKind::Slash),
         "division was swallowed: {tokens:?}"
     );
+}
+
+/// The whole point of the depth counter: the FIRST `*/` closes only the inner
+/// comment, so `still outer` must not reach the token stream and the final `*/`
+/// must not lex as `Star` then `Slash`.
+#[test]
+fn block_comments_nest_one_level() {
+    let tokens = tokenize("val /* outer /* inner */ still outer */ x")
+        .expect("a nested block comment lexes");
+    assert_eq!(tokens.len(), 3, "unexpected tokens: {tokens:?}");
+    assert!(matches!(tokens[0].kind, TokenKind::Val));
+    assert_eq!(tokens[1].kind, TokenKind::Identifier("x".to_string()));
+}
+
+#[test]
+fn block_comments_nest_arbitrarily_deep() {
+    let tokens = tokenize("1 /* a /* b /* c /* d */ c */ b */ a */ 2")
+        .expect("a deeply nested block comment lexes");
+    assert_eq!(
+        tokens
+            .iter()
+            .filter(|t| matches!(t.kind, TokenKind::Integer(_)))
+            .count(),
+        2,
+        "nesting swallowed or leaked tokens: {tokens:?}"
+    );
+}
+
+#[test]
+fn nested_block_comment_spanning_lines_lexes() {
+    let tokens = tokenize(
+        "val
+/* outer
+   /* inner
+   */
+   still outer
+*/
+x",
+    )
+    .expect("a multi-line nested comment lexes");
+    assert!(
+        tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Identifier("x".to_string())),
+        "the comment did not close: {tokens:?}"
+    );
+    assert!(
+        !tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Identifier("outer".to_string())),
+        "comment body leaked into the token stream: {tokens:?}"
+    );
+}
+
+/// An inner `/*` needs its own `*/`; one closer for two openers leaves the file
+/// inside a comment at EOF.
+#[test]
+fn an_unclosed_inner_comment_leaves_the_outer_open() {
+    let err =
+        tokenize("val /* outer /* inner */ x").expect_err("one closer cannot close two openers");
+    assert!(
+        matches!(err, LexError::UnterminatedBlockComment { .. }),
+        "expected UnterminatedBlockComment, got {err:?}"
+    );
+}
+
+/// Delimiters may abut without either being mis-split: `/**/` is empty, `/***/`
+/// closes on the second star, and `/*/ */` does not read its `/` as an opener.
+#[test]
+fn adjacent_block_comment_delimiters_lex() {
+    for source in ["/**/ 7", "/***/ 7", "/*/ */ 7", "/* /* */ */ 7"] {
+        let tokens = tokenize(source).unwrap_or_else(|e| panic!("{source:?} failed: {e:?}"));
+        assert_eq!(
+            tokens[0].kind,
+            TokenKind::Integer(7),
+            "{source:?} produced {tokens:?}"
+        );
+    }
+}
+
+/// `/*/*/` opens twice and closes never — the classic maximal-munch trap.
+#[test]
+fn a_lone_opener_pair_is_unterminated() {
+    let err = tokenize("/*/*/").expect_err("`/*/*/` never closes");
+    assert!(
+        matches!(err, LexError::UnterminatedBlockComment { .. }),
+        "expected UnterminatedBlockComment, got {err:?}"
+    );
+}
+
+#[test]
+fn a_nested_comment_holding_non_ascii_text_lexes() {
+    let tokens = tokenize("/* résumé /* 日本語 */ ✓ */ 1").expect("non-ASCII comment body lexes");
+    assert_eq!(tokens[0].kind, TokenKind::Integer(1));
+}
+
+/// A line comment inside a block comment is raw text: its `*/` still closes.
+#[test]
+fn a_line_comment_inside_a_block_comment_is_inert() {
+    let tokens = tokenize("/* // not a line comment */ 5").expect("mixed comment forms lex");
+    assert_eq!(tokens[0].kind, TokenKind::Integer(5));
 }
 
 #[test]

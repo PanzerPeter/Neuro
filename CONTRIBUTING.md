@@ -306,13 +306,10 @@ confirmed defects get filed into `docs/BUGS.md` from there.
 The roadmap is dependency-ordered, so pick the **topmost open item**: its prerequisites
 are already done. Coordinate on an issue before starting a large one.
 
-**Sub-phase 1H — Language Cleanup** is the active sub-phase. String interpolation and
-triple-quoted strings are done; the two remaining items, in order:
+**Sub-phase 1H — Language Cleanup** is the active sub-phase. String interpolation,
+triple-quoted strings, and nesting block comments are done; one item remains:
 
-1. **Nested block comments** — `/* outer /* inner */ still outer */`. Needs a
-   hand-written comment scanner; `logos` longest-match cannot nest. Self-contained, and
-   the smaller of the two — a good first compiler change.
-2. **Named arguments** — the `external internal: T` parameter form, with callers free to
+1. **Named arguments** — the `external internal: T` parameter form, with callers free to
    pass positionally or by name. Lowers to identical IR, so it is a parser plus
    argument-resolution change with no runtime cost.
 

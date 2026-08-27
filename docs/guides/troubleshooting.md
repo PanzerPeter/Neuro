@@ -556,8 +556,8 @@ These are not bugs, but current limitations. See the
    instantiated with an enclosing type parameter (no `Option<T>` inside a `func f<T>`)
 3. **Strings are immutable**: `+`, `.slice(a..b)`, `.len()`, `.clone()`; there is no
    growable `String` with `.push_str` yet
-4. **Nested block comments and named arguments**: not yet implemented. String
-   interpolation and triple-quoted `"""` blocks *are* available; a hole may not contain
+4. **Named arguments**: not yet implemented. String interpolation, triple-quoted
+   `"""` blocks, and nesting block comments *are* available; a hole may not contain
    a `"` string literal, and an interpolated literal is not a constant pattern
 5. **Ranges**: `a..b` and `a..=b` drive `for` loops and `.slice()`; `.rev()` and
    `.step(n)` are not implemented yet
