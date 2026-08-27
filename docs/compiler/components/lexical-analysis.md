@@ -320,3 +320,8 @@ The excerpt above shows representative variants; the full set lives in
 
 Nothing links `TokenKind` to `neuro-language-support/syntaxes/neuro.tmLanguage.json`, so any
 change to the token set has to update that editor grammar by hand in the same commit.
+`tests/tmlanguage_sync.rs` checks what it can without a tokenizer — that every keyword is
+covered, that the grammar's keyword rule invents none of its own, and that the rules
+naming a declaration are ordered ahead of the keyword rule so they stay reachable.
+`tools/tmlanguage_scopes.mjs` prints the scopes the grammar actually assigns to a source
+file, for the rules those checks cannot reach.

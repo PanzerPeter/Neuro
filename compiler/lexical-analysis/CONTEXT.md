@@ -81,19 +81,47 @@ to end of line.
 
 ### Editor grammar sync
 `neuro-language-support/syntaxes/neuro.tmLanguage.json` re-describes this lexer as TextMate
-regexes for editor highlighting. Nothing in the build links the two, so `tests/tmlanguage_sync.rs`
-is the link: it scans this crate's own `tokens.rs` for `#[token("…")]` literals and fails when a
-keyword is missing from the grammar. It covers keyword *words* only — grammar rules with no
-one-to-one token counterpart (string bodies and escapes above all) still need updating by hand.
-The grammar's `meta.interpolation.neuro` rule already covered `{...}` holes when
-interpolation landed, and its `\\.` escape rule already made `\{` an escape, so that
-change needed no grammar edit — but a future string-literal change may.
+regexes for editor highlighting. Nothing in the build links the two, so
+`tests/tmlanguage_sync.rs` is the link. It asserts three properties, each standing for a
+bug class the grammar has shipped:
+
+- **Coverage** — every `#[token("…")]` keyword appears somewhere in the grammar.
+- **No invention** — the grammar's `#keywords` rule lists *only* words this lexer
+  tokenizes, so a later phase's vocabulary cannot be highlighted as if the compiler
+  already accepted it.
+- **Reachability** — the rules that name a declaration (`#function_declaration`,
+  `#type_declarations`, `#imports`) precede `#keywords` in the grammar's top-level
+  `patterns` array, and `#chars` precedes `#lifetimes`. TextMate resolves a tie between
+  two rules matching at the same offset by array position, never by match length, so a
+  declaration rule listed after `#keywords` is dead code that nothing about the file
+  reveals on inspection.
+
+The tests cover keyword words and rule order. Rules with no one-to-one token counterpart
+— string bodies, escape sets, interpolation holes, numeric literal shapes — still need
+updating by hand, and the names in the grammar's `#types` and `#constants` answer to the
+prelude and the type checker rather than to this crate. To see what the grammar actually
+produces for a given source file, run `tools/tmlanguage_scopes.mjs`, which drives the same
+tokenizer VS Code uses; it is deliberately outside CI so the workspace keeps no Node
+dependency.
+
+The escape rule must match `\u{...}` and `\xNN` whole. Matching a bare `\\.` leaves the
+brace of `\u{1F600}` to the interpolation rule, which then reads the codepoint as a
+`{expr}` hole. The interpolation rule likewise does not include `$self`: a hole may not
+contain a `"` string literal, because the quote ends the enclosing token.
+
 The grammar's block-comment rule is its own `#block_comment` repository entry that
 includes only itself, not `#comments`: recursing through `#comments` would let the line
 rule `//.*$` inside a block comment consume the `*/` that closes it, which the lexer does
 not do.
 
 ## Recent Updates
+- 2026-08-27: Editor grammar rewritten against this lexer, and `tests/tmlanguage_sync.rs`
+  extended from one test to three (see Editor grammar sync). The rewrite fixed rules that
+  the array ordering had made unreachable — every declaration-name rule sat behind
+  `#keywords` — plus character literals scoped as lifetimes, `\u{...}` escapes read as
+  interpolation holes, and exponent-only floats (`1e10`) matching nothing. Vocabulary the
+  lexer does not tokenize (`async`, `await`, `spawn`, `defer`, `pool`, `>>`, `|>`, `@` as
+  matmul, `Tensor` and the other Phase-2 type names) was removed. No lexer change.
 - 2026-08-27: Block comments nest. `_BlockComment` moved from a regex to
   `#[token("/*", lex_nested_block_comment)]` with a depth-counting scanner (see Notes).
   No new `LexError` variant — `UnterminatedBlockComment` already existed and is now
