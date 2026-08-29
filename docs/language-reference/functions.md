@@ -743,6 +743,59 @@ within the program.
 uses one takes its type from its siblings rather than imposing one on them, see
 [expressions.md](expressions.md#if-expressions).
 
+## Standard Output Builtins
+
+Two more compiler-known builtins write text to **standard output**. Unlike the panic
+family they return: the result is `void`, so a call is a statement and not a value.
+
+| Builtin | Signature | Behaviour |
+|---|---|---|
+| `print` | `print(text: string)` | Write `text` to stdout. |
+| `println` | `println(text: string)` | Write `text` followed by a newline. |
+
+```neuro
+func main() -> i32 {
+    val name: string = "Neuro"
+    val ratio: f64 = 0.875
+
+    print("hello from ")
+    println(name)
+    println("phase 2 is {ratio:.2} done")
+    return 0
+}
+```
+
+```
+hello from Neuro
+phase 2 is 0.88 done
+```
+
+Each takes **exactly one** argument, and that argument is text: an owned `string` or an
+immutable `&string` sub-slice (`text.slice(1..4)`). There is no variadic form and no
+format string at the call site, because there is no need for one — [string
+interpolation](expressions.md#string-interpolation) has already rendered every hole, with
+its full format mini-language, into one ordinary `string` before the call is reached:
+
+```neuro
+println("{label:>10}: {count} of {total}")
+```
+
+The text is **read, not consumed**, so the value stays usable afterwards:
+
+```neuro
+val text: string = "kept"
+println(text)
+println(text)     // still valid — printing does not move its argument
+```
+
+A user-defined function named `print` or `println` shadows the builtin within the program,
+exactly as one named `panic` does. Both are compiler builtins rather than declarations, so
+`@no_prelude` does not take them away.
+
+Output is **unbuffered**: every call issues the write immediately, which is why a printed
+line appears even if the program later panics, and why printing in a tight loop is slower
+than it will be once a buffered standard-output type lands.
+
 ## Generic Functions
 
 A function may declare **type parameters** in angle brackets after its name. Each type

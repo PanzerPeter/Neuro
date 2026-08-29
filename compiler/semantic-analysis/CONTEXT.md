@@ -92,6 +92,15 @@ arity/type (`ArgumentCountMismatch`/`Mismatch`) and returns `Type::Unknown` — 
 call **diverges** (aborts) and must satisfy any context (unit stmt, non-`void` tail return, value
 binding) until a dedicated `!`/never type lands. Lowering lives in `llvm-backend`.
 
+Standard-output builtins: `check_plain_call` consults `resolve_io_builtin`
+(`expressions/builtins.rs`) after the panic family and under the same shadowing rule.
+Builtins: `print(text: string)`, `println(text: string)`. Both return `Type::Void` — they
+**return**, unlike the panic family, so the result is the real unit type and cannot stand
+in for a value. The argument is an owned `string` or an immutable `&string` (the same fat
+pointer, which is what `.slice(range)` yields); a `&mut string` is a pointer to the fat
+pointer and is rejected as a `Mismatch`. No move is recorded: the text is read, not
+consumed, so the binding stays usable. Lowering lives in `llvm-backend`.
+
 Consuming `self` methods are rejected at registration with `UnsupportedSelfParam` (they need the
 by-value struct ABI). `&mut self` is supported: `register_impl` records its mangled key in
 `mut_self_methods` for the call-site borrow check above.
@@ -165,6 +174,11 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-08-29: Standard-output builtins (2A) — `resolve_io_builtin` (`expressions/builtins.rs`)
+  recognizes `print` / `println` in `check_plain_call` after `resolve_panic_builtin` and behind the
+  same "no user function of this name" guard. One `string` / immutable `&string` argument, result
+  `Type::Void`; wrong arity or a non-string argument reuse `ArgumentCountMismatch` / `Mismatch`. No
+  new error variants, and no `record_move` — printing borrows its text.
 - 2026-08-29: New public error `TypeError::MissingPartialEqImpl` (BUG-015). `==` / `!=` used to
   accept any two operands of compatible type, so a struct with no `impl PartialEq` — and equally an
   array, tuple, enum, collection or non-string reference — type-checked and then aborted the

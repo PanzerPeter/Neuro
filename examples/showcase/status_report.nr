@@ -4,11 +4,13 @@
 // produce the values it renders:
 //   struct + impl methods (&self) · enum with a payload + match · fixed-size
 //   array + for-in loop · f64 math and `as` casts · string concatenation ·
-//   string interpolation with the format mini-language (:.N, :x, :>W, :<W, :+d).
+//   string interpolation with the format mini-language (:.N, :x, :>W, :<W, :+d) ·
+//   `println` writing the finished report to standard output.
 //
-// Every rendered line is checked against the exact text it should produce, and
-// `main` returns the total width of the report's aligned column as its exit
-// code — a number that only comes out right if every field padded correctly.
+// Every rendered line is checked against the exact text it should produce and
+// then printed, and `main` returns the total width of the report's aligned
+// column as its exit code — a number that only comes out right if every field
+// padded correctly.
 
 enum Level {
     Nominal,
@@ -74,10 +76,13 @@ func main() -> i32 {
         Sensor { id: 4095, reading: 91.0 }
     ]
 
+    println("--- sensor report ---")
+
     mut matched: i32 = 0
     mut index: i32 = 0
     for sensor in sensors {
         val rendered = sensor.line() + " | " + describe(sensor.level())
+        println(rendered)
         matched = matched + check(rendered, expected_line(index))
         index += 1
     }
@@ -86,6 +91,7 @@ func main() -> i32 {
     // A hole may not contain a `"` literal, so the label is bound first.
     val label = "checked"
     val summary = "{label:>10}: {matched} of {index}"
+    println(summary)
     matched = matched + check(summary, "   checked: 3 of 3")
 
     if matched != 4 {

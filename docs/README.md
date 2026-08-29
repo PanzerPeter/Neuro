@@ -121,6 +121,14 @@ Key design goals:
   (`func apply(v: i32, f: (i32) -> i32)`). Each closure compiles to a
   `{ fn_ptr, env_ptr }` value with no heap allocation. Parameter-type inference and passing
   a closure to a *generic* higher-order function come later
+- **Standard output** (2A): `print(text: string)` and `println(text: string)` write to stdout and
+  return `void`. Exactly one argument, no variadic form and no call-site format string —
+  interpolation renders every hole into one ordinary `string` first, so `println("{x:.2}")` is a
+  plain one-argument call. An owned `string` or an immutable `&string` slice both work, and the
+  text is read rather than moved. Compiler builtins like the panic family, so a local declaration
+  of the name shadows one and `@no_prelude` does not remove them. Unbuffered: each call issues its
+  write immediately, see
+  [functions.md](language-reference/functions.md#standard-output-builtins)
 
 ### Control Flow
 
@@ -299,6 +307,8 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
+- `print` / `println` lower to unbuffered POSIX `write` on fd 1 through one module-private
+  helper carrying the short-write retry loop, so a large buffer is never truncated on a pipe
 - Error-path outlining: every panic-family failure path (`panic`, `assert`, `unreachable`, and the
   array, `Vec`, string-slice, and UTF-8-boundary guards) is emitted into a module-private cold
   function and called from the failure site, so the diagnostic machinery never sits inline in the

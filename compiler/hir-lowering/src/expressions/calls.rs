@@ -6,7 +6,7 @@
 use ast_types::Expr;
 use neuro_hir::{HirExpr, HirExprKind, HirType};
 
-use super::{CLONE_METHOD, PANIC_BUILTINS};
+use super::{CLONE_METHOD, IO_BUILTINS, PANIC_BUILTINS};
 use crate::{is_integer, Lowerer, LoweringError};
 
 impl Lowerer {
@@ -187,6 +187,27 @@ impl Lowerer {
                     args,
                 },
                 ret,
+                span,
+            ));
+        }
+
+        if IO_BUILTINS.contains(&name) {
+            let params = vec![HirType::String];
+            let args = self.lower_args(args, &params)?;
+            let callee = HirExpr::new(
+                HirExprKind::Variable(name.to_string()),
+                HirType::Function {
+                    params,
+                    ret: Box::new(HirType::Void),
+                },
+                span,
+            );
+            return Ok(HirExpr::new(
+                HirExprKind::Call {
+                    callee: Box::new(callee),
+                    args,
+                },
+                HirType::Void,
                 span,
             ));
         }

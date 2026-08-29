@@ -183,3 +183,35 @@ fn array_rest_remainder_is_sized_subarray() {
         }
     );
 }
+
+#[test]
+fn output_builtins_lower_to_a_unit_call() {
+    // `println` is not a declared function, so lowering must recognize it as a builtin
+    // and give the call the unit type rather than failing to resolve it.
+    let program = lower("func main() -> i32 { println(\"hi\")\n print(\"there\")\n 0 }");
+    let body = function_body(&program, "main");
+
+    for (index, name) in [(0, "println"), (1, "print")] {
+        let HirStmt::Expr(call) = &body[index] else {
+            panic!("statement {index} should be the builtin call");
+        };
+        assert_eq!(call.ty, HirType::Void);
+        let HirExprKind::Call { callee, args } = &call.kind else {
+            panic!("expected a call, got {:?}", call.kind);
+        };
+        assert_eq!(callee.kind, HirExprKind::Variable(name.to_string()));
+        assert_eq!(args.len(), 1);
+        assert_eq!(args[0].ty, HirType::String);
+    }
+}
+
+#[test]
+fn a_user_function_shadows_the_output_builtin() {
+    // A declared `println` wins, so the call carries that function's return type.
+    let program = lower("func println(n: i32) -> i32 { n }\nfunc main() -> i32 { println(3) }");
+    let body = function_body(&program, "main");
+    let HirStmt::Expr(call) = &body[0] else {
+        panic!("expected a trailing expression statement");
+    };
+    assert_eq!(call.ty, HirType::I32);
+}

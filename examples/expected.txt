@@ -20,6 +20,7 @@ basics/division.nr              16
 basics/expression_returns.nr    37
 basics/factorial.nr             120
 basics/fibonacci.nr             55
+basics/greeting.nr              5
 basics/hello.nr                 26
 basics/milestone.nr             8
 basics/named_arguments.nr       40

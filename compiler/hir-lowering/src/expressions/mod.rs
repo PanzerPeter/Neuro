@@ -25,6 +25,10 @@ use crate::{is_integer, LoopCtx, Lowerer, LoweringError};
 /// call takes on whatever type its context demands.
 const PANIC_BUILTINS: &[&str] = &["panic", "assert", "unreachable"];
 
+/// The standard-output builtins. Each takes one `string` and returns unit, so —
+/// unlike the panic family — the call's type is fixed rather than taken from context.
+const IO_BUILTINS: &[&str] = &["print", "println"];
+
 /// The deep-copy method shared by `string` and `Clone`-deriving structs.
 const CLONE_METHOD: &str = "clone";
 
