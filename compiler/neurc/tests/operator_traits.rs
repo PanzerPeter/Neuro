@@ -111,3 +111,84 @@ func main() -> i32 {
         .expect("compile/run failed");
     assert_eq!(exit, 14);
 }
+
+#[test]
+fn equality_without_a_partial_eq_impl_is_rejected() {
+    // Accepting it produced a binary that the backend refused to build, aborting the
+    // compiler with an internal error instead of reporting anything the programmer wrote.
+    let test = CompileTest::new();
+    let source = r#"
+struct V { x: i32 }
+func main() -> i32 {
+    val a = V { x: 1 }
+    val b = V { x: 2 }
+    if a == b { return 1 }
+    return 0
+}
+"#;
+    let path = test.write_source("eq_without_impl.nr", source);
+    let message = test
+        .compile(&path)
+        .expect_err("`==` on a struct with no PartialEq must be rejected");
+    assert!(
+        message.contains("PartialEq"),
+        "the diagnostic must name the missing trait: {message}"
+    );
+    assert!(
+        !message.contains("IntValue"),
+        "the backend must never see the program: {message}"
+    );
+}
+
+#[test]
+fn equality_on_an_aggregate_is_rejected() {
+    // Arrays, tuples and enums have no built-in equality and cannot carry an impl either.
+    for (name, source) in [
+        (
+            "eq_array.nr",
+            "func main() -> i32 {\n    val a = [1, 2]\n    val b = [1, 2]\n    if a == b { return 1 }\n    return 0\n}\n",
+        ),
+        (
+            "eq_tuple.nr",
+            "func main() -> i32 {\n    val a = (1, 2)\n    val b = (1, 2)\n    if a == b { return 1 }\n    return 0\n}\n",
+        ),
+        (
+            "eq_enum.nr",
+            "enum E { A, B }\nfunc main() -> i32 {\n    val a = E::A\n    val b = E::B\n    if a == b { return 1 }\n    return 0\n}\n",
+        ),
+    ] {
+        let test = CompileTest::new();
+        let path = test.write_source(name, source);
+        let message = test.compile(&path).expect_err("expected a rejection");
+        assert!(
+            message.contains("cannot apply binary operator =="),
+            "{name} must be rejected by the type checker: {message}"
+        );
+    }
+}
+
+#[test]
+fn a_generic_body_comparing_an_aggregate_is_rejected_at_its_instantiation() {
+    // A generic body is checked once as a template, so `a == b` on `T` is only known to be
+    // unsupported when `T` arrives; lowering the instantiation is where that is caught.
+    let test = CompileTest::new();
+    let source = r#"
+@derive(Copy, Clone)
+struct V { x: i32 }
+func same<T>(a: T, b: T) -> bool { return a == b }
+func main() -> i32 {
+    if same(V { x: 1 }, V { x: 1 }) { return 0 }
+    return 1
+}
+"#;
+    let path = test.write_source("eq_generic_instance.nr", source);
+    let message = test.compile(&path).expect_err("expected a rejection");
+    assert!(
+        message.contains("cannot apply binary operator =="),
+        "the instantiation must be rejected: {message}"
+    );
+    assert!(
+        !message.contains("IntValue"),
+        "the backend must never be asked to build it: {message}"
+    );
+}

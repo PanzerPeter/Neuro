@@ -283,3 +283,70 @@ fn a_closure_call_rejects_a_named_argument() {
         "unexpected diagnostic: {message}"
     );
 }
+
+#[test]
+fn a_reordered_named_call_evaluates_its_arguments_in_source_order() {
+    // `bump` runs first because it is written first, so `x` is read as 1 and the call is
+    // `combine(first: 1, second: 0)` = 10. Binding the arguments into declaration order
+    // before evaluating them would read `x` as 0 and answer 0. The positional control
+    // proves the two forms agree, which is the property the specification claims.
+    assert_exit(
+        "named_source_order.nr",
+        "func bump(r: &mut i32) -> i32 {\n\
+         \x20   *r = *r + 1\n\
+         \x20   return 0\n\
+         }\n\
+         func combine(first: i32, second: i32) -> i32 {\n\
+         \x20   return first * 10 + second\n\
+         }\n\
+         func main() -> i32 {\n\
+         \x20   mut x = 0\n\
+         \x20   val named = combine(second: bump(&mut x), first: x)\n\
+         \x20   mut y = 0\n\
+         \x20   val positional = combine(bump(&mut y), y)\n\
+         \x20   if named != 10 { return 1 }\n\
+         \x20   if positional != 1 { return 2 }\n\
+         \x20   return 0\n\
+         }\n",
+        0,
+    );
+}
+
+#[test]
+fn a_reordered_named_call_returning_unit_still_runs_in_source_order() {
+    // The rewrite puts a unit call in a block's tail position, which the backend has to
+    // discard rather than ask for a value.
+    assert_exit(
+        "named_source_order_unit.nr",
+        "func tick(r: &mut i32, by: i32) -> i32 {\n\
+         \x20   *r = *r * 10 + by\n\
+         \x20   return 0\n\
+         }\n\
+         func record(first: i32, second: i32) { }\n\
+         func main() -> i32 {\n\
+         \x20   mut log = 0\n\
+         \x20   record(second: tick(&mut log, 2), first: tick(&mut log, 1))\n\
+         \x20   if log != 21 { return 1 }\n\
+         \x20   return 0\n\
+         }\n",
+        0,
+    );
+}
+
+#[test]
+fn a_reordered_named_call_types_its_arguments_by_their_parameters() {
+    // Each reordered argument is bound to a temporary, and a temporary that took its type
+    // from its initializer alone would infer `i32` for the literal and lose `Vec::new()`'s
+    // element type entirely.
+    assert_exit(
+        "named_source_order_inference.nr",
+        "func hold(v: Vec<i32>, wide: i64, n: i32) -> i32 {\n\
+         \x20   return n\n\
+         }\n\
+         func one() -> i32 { return 1 }\n\
+         func main() -> i32 {\n\
+         \x20   return hold(n: one(), wide: 3, v: Vec::new()) - 1\n\
+         }\n",
+        0,
+    );
+}

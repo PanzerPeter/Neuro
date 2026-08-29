@@ -451,7 +451,15 @@ Both operands must be the same type.
 - All numeric types (same type required)
   - *Note:* Float comparison (`f32`, `f64`) utilizes native IEEE-754 ordered predicates. Comparisons involving `NaN` will naturally return `false`.
 - `bool` (only `==` and `!=`)
+- `char`, which has a built-in total order over its Unicode scalar values
 - `string` (only `==` and `!=`), byte-level equality via length check + `memcmp`
+- a newtype over any of the above, which compares as its inner type does
+
+Nothing else has comparison built in. A struct gets `==` / `!=` from `impl PartialEq` and
+the ordering operators from `impl Comparable` (see [Operator Overloading](#operator-overloading));
+comparing one that implements neither is a type error naming the missing trait. Arrays,
+tuples, enums and collections have no equality at all yet, and neither does a reference to
+anything but a string — read through it with `*` first.
 
 ### Logical Operators
 

@@ -421,3 +421,182 @@ fn a_call_nested_in_an_argument_is_bound_too() {
         .collect();
     assert_eq!(values, vec![1, 2]);
 }
+
+/// A call to `target` whose arguments are the given expressions under the given labels.
+fn program_with_args(params: Vec<Parameter>, args: Vec<(Option<Identifier>, Expr)>) -> Vec<Item> {
+    vec![
+        func("target", params, Vec::new()),
+        func(
+            "main",
+            Vec::new(),
+            vec![Stmt::Expr(call(Expr::Identifier(ident("target")), args))],
+        ),
+    ]
+}
+
+/// `effect()` — a call, so an argument that carries one.
+fn effect() -> Expr {
+    Expr::Call {
+        func: Box::new(Expr::Identifier(ident("effect"))),
+        type_args: Vec::new(),
+        args: Vec::new(),
+        arg_labels: Vec::new(),
+        span: span(),
+    }
+}
+
+/// The statements of `main`'s single hoisting block, or a panic when it was not rewritten.
+fn hoisted_block(items: &[Item]) -> Vec<Stmt> {
+    let Some(Item::Function(main)) = items.last() else {
+        panic!("expected a trailing function item");
+    };
+    match main.body.first() {
+        Some(Stmt::Expr(Expr::Block { stmts, .. })) => stmts.clone(),
+        other => panic!("expected a hoisting block, found {other:?}"),
+    }
+}
+
+#[test]
+fn a_reordered_call_with_effects_evaluates_its_arguments_in_source_order() {
+    // `target(b: effect(), a: effect())` must run the argument written first, first —
+    // permuting the two into declaration order would run them the other way round.
+    let mut items = program_with_args(
+        vec![implicit("a"), implicit("b")],
+        vec![
+            (Some(ident("b")), effect()),
+            (Some(ident("a")), Expr::Identifier(ident("x"))),
+        ],
+    );
+    bind_arguments(&mut items).expect("binding failed");
+
+    let stmts = hoisted_block(&items);
+    assert_eq!(stmts.len(), 3, "two temporaries and the call: {stmts:?}");
+    let names: Vec<String> = stmts
+        .iter()
+        .filter_map(|s| match s {
+            Stmt::VarDecl { name, .. } => Some(name.name.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        names,
+        vec!["__narg0".to_string(), "__narg1".to_string()],
+        "temporaries are declared in the order the arguments were written"
+    );
+
+    let Some(Stmt::Expr(Expr::Call {
+        args, arg_labels, ..
+    })) = stmts.last()
+    else {
+        panic!("the block must end in the bound call: {stmts:?}");
+    };
+    assert!(arg_labels.is_empty(), "a label survived binding");
+    let passed: Vec<String> = args
+        .iter()
+        .map(|a| match a {
+            Expr::Identifier(id) => id.name.clone(),
+            other => panic!("expected a temporary, found {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        passed,
+        vec!["__narg1".to_string(), "__narg0".to_string()],
+        "the temporaries are passed in the callee's declaration order"
+    );
+}
+
+#[test]
+fn a_reordered_call_of_plain_values_is_permuted_in_place() {
+    // Nothing can observe when a literal is evaluated, so the call keeps the shape — and
+    // the identical IR — it has always had.
+    let mut items = program_with_args(
+        vec![implicit("a"), implicit("b")],
+        vec![named("b", 2), named("a", 1)],
+    );
+    bind_arguments(&mut items).expect("binding failed");
+    assert_eq!(bound_values(&items), vec![1, 2]);
+}
+
+#[test]
+fn a_call_whose_arguments_keep_their_order_is_not_hoisted() {
+    // `target(1, b: effect())` binds `b` to the argument already written second, so the
+    // permutation moves nothing and there is nothing to hoist.
+    let mut items = program_with_args(
+        vec![implicit("a"), implicit("b")],
+        vec![(None, int(1)), (Some(ident("b")), effect())],
+    );
+    bind_arguments(&mut items).expect("binding failed");
+    let Some(Item::Function(main)) = items.last() else {
+        panic!("expected a trailing function item");
+    };
+    assert!(
+        matches!(main.body.first(), Some(Stmt::Expr(Expr::Call { .. }))),
+        "the call must be left in place: {:?}",
+        main.body.first()
+    );
+}
+
+#[test]
+fn a_hoisted_temporary_carries_its_parameter_type() {
+    let mut items = program_with_args(
+        vec![implicit("a"), implicit("b")],
+        vec![
+            (Some(ident("b")), effect()),
+            (Some(ident("a")), Expr::Identifier(ident("x"))),
+        ],
+    );
+    bind_arguments(&mut items).expect("binding failed");
+    let stmts = hoisted_block(&items);
+    let Some(Stmt::VarDecl { ty, .. }) = stmts.first() else {
+        panic!("expected a temporary: {stmts:?}");
+    };
+    assert_eq!(
+        ty.as_ref(),
+        Some(&Type::Named(ident("i32"))),
+        "the temporary is typed by the parameter it binds to, not by its initializer"
+    );
+}
+
+#[test]
+fn a_call_nested_in_a_hoisted_argument_is_bound_too() {
+    // The walk must keep reaching into the temporaries it just created.
+    let inner = call(
+        Expr::Identifier(ident("inner")),
+        vec![named("q", 2), named("p", 1)],
+    );
+    let mut items = vec![
+        func("inner", vec![implicit("p"), implicit("q")], Vec::new()),
+        func("target", vec![implicit("a"), implicit("b")], Vec::new()),
+        func(
+            "main",
+            Vec::new(),
+            vec![Stmt::Expr(call(
+                Expr::Identifier(ident("target")),
+                vec![
+                    (Some(ident("b")), inner),
+                    (Some(ident("a")), Expr::Identifier(ident("x"))),
+                ],
+            ))],
+        ),
+    ];
+    bind_arguments(&mut items).expect("binding failed");
+    let stmts = hoisted_block(&items);
+    let Some(Stmt::VarDecl {
+        init: Some(Expr::Call {
+            args, arg_labels, ..
+        }),
+        ..
+    }) = stmts.first()
+    else {
+        panic!("expected the nested call in the first temporary: {stmts:?}");
+    };
+    assert!(arg_labels.is_empty(), "a label survived binding");
+    let values: Vec<i64> = args
+        .iter()
+        .map(|a| match a {
+            Expr::Literal(Literal::Integer(v, _), _) => *v,
+            other => panic!("expected an integer, found {other:?}"),
+        })
+        .collect();
+    assert_eq!(values, vec![1, 2]);
+}

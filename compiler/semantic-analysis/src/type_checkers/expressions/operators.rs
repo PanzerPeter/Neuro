@@ -169,6 +169,27 @@ impl TypeChecker {
                     });
                     return Some(Type::Unknown);
                 }
+                // Equality is built in for the scalars and for `string`; every other
+                // operand needs a `PartialEq` impl, and the dispatch above has already
+                // taken that path when one exists. Two operands of the same aggregate
+                // type are compatible, so without this rejection the operator reaches
+                // codegen, which asks the aggregate for its integer variant and aborts.
+                if !self.has_builtin_equality(&left_cmp) {
+                    match left_ty.referent() {
+                        Type::Struct(name) => self.record_error(TypeError::MissingPartialEqImpl {
+                            type_name: name.clone(),
+                            op: op.to_string(),
+                            span: *span,
+                        }),
+                        _ => self.record_error(TypeError::InvalidBinaryOperator {
+                            op: op.to_string(),
+                            left: left_ty.clone(),
+                            right: right_ty,
+                            span: *span,
+                        }),
+                    }
+                    return Some(Type::Unknown);
+                }
                 Some(Type::Bool)
             }
 
@@ -254,6 +275,26 @@ impl TypeChecker {
                     Some(Type::Bool)
                 }
             }
+        }
+    }
+
+    /// Whether `==` / `!=` are defined on `ty` without a `PartialEq` impl.
+    ///
+    /// The scalars the backend compares with a single instruction, `string` (compared
+    /// byte-wise), and a newtype forwarding one of those. A generic parameter answers
+    /// `true`: a generic body is checked once as a template, so the operand's real type
+    /// is only known at the instantiation, which lowering checks instead.
+    fn has_builtin_equality(&self, ty: &Type) -> bool {
+        match ty {
+            // Cycles are rejected when the newtype is registered, so this terminates.
+            Type::Newtype(name) => self
+                .lookup_newtype_inner(name)
+                .cloned()
+                .map(|inner| self.has_builtin_equality(&inner))
+                .unwrap_or(false),
+            Type::Generic(_) | Type::Unknown => true,
+            Type::Bool | Type::Char | Type::String => true,
+            other => other.is_numeric() || other.is_half_float(),
         }
     }
 

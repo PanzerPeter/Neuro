@@ -95,6 +95,18 @@ pub(super) fn binary_result_type(
     left: &HirType,
     right: &HirType,
 ) -> Result<HirType, LoweringError> {
+    // Every operator below is emitted as one scalar instruction, or — for `==`, `!=`
+    // and `+` on strings — as a byte compare or a concatenation. An aggregate operand
+    // has no such lowering; it reaches here only from a monomorphized generic body,
+    // since the checker rejects a concrete one. Refusing it keeps the backend from
+    // asking an aggregate value for its integer variant and aborting the compiler.
+    if !has_operator_lowering(left) {
+        return Err(LoweringError::UnsupportedOperand {
+            op: op.to_string(),
+            ty: left.to_string(),
+        });
+    }
+
     Ok(match op {
         BinaryOp::Equal
         | BinaryOp::NotEqual
@@ -122,4 +134,17 @@ pub(super) fn binary_result_type(
             })
         }
     })
+}
+
+/// Whether the backend has an instruction sequence for a binary operator on `ty`:
+/// the scalars, `string` (and a `&string` slice, which is normalized to it), and a
+/// newtype forwarding one of those. Everything else needs an operator-trait impl,
+/// which is dispatched to a method call before the operand types are ever combined.
+fn has_operator_lowering(ty: &HirType) -> bool {
+    match ty {
+        HirType::Newtype { inner, .. } => has_operator_lowering(inner),
+        HirType::Reference { inner, .. } => matches!(**inner, HirType::String),
+        HirType::Bool | HirType::Char | HirType::String | HirType::F16 | HirType::BF16 => true,
+        other => is_numeric(other),
+    }
 }

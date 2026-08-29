@@ -174,3 +174,106 @@ fn comparison_with_logical_and_accepted() {
         checker.into_errors()
     );
 }
+
+/// `==` on a type with no built-in equality and no `PartialEq` impl is a type error.
+/// Without the rejection the program reaches the backend, which asks a struct value for
+/// its integer variant and aborts the compiler.
+#[test]
+fn equality_on_a_struct_without_partial_eq_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+        struct V { x: i32 }
+        func main() -> i32 {
+            val a = V { x: 1 }
+            val b = V { x: 2 }
+            if a == b { return 1 }
+            return 0
+        }
+        "#,
+    );
+    assert!(
+        errors.iter().any(
+            |e| matches!(e, TypeError::MissingPartialEqImpl { type_name, .. } if type_name == "V")
+        ),
+        "a struct without PartialEq must be rejected, got {errors:?}"
+    );
+}
+
+/// The supported path stays supported: a `Copy` struct with an explicit `impl PartialEq`
+/// dispatches `==` to its `eq` method.
+#[test]
+fn equality_on_a_struct_with_partial_eq_is_accepted() {
+    let errors = semantic_errors(
+        r#"
+        @derive(Copy, Clone)
+        struct V { x: i32 }
+        impl PartialEq for V {
+            func eq(&self, rhs: &V) -> bool { self.x == rhs.x }
+            func ne(&self, rhs: &V) -> bool { self.x != rhs.x }
+        }
+        func main() -> i32 {
+            val a = V { x: 1 }
+            val b = V { x: 2 }
+            if a == b { return 1 }
+            return 0
+        }
+        "#,
+    );
+    assert!(
+        errors.is_empty(),
+        "an explicit PartialEq impl must keep `==` working, got {errors:?}"
+    );
+}
+
+/// Aggregates have no built-in equality either — the same missing rejection crashed the
+/// backend for arrays, tuples, enums and non-string references.
+#[test]
+fn equality_on_an_aggregate_is_rejected() {
+    for (name, program) in [
+        (
+            "array",
+            "func main() -> i32 { val a = [1, 2]\nval b = [1, 2]\nif a == b { return 1 }\nreturn 0 }",
+        ),
+        (
+            "tuple",
+            "func main() -> i32 { val a = (1, 2)\nval b = (1, 2)\nif a == b { return 1 }\nreturn 0 }",
+        ),
+        (
+            "enum",
+            "enum E { A, B }\nfunc main() -> i32 { val a = E::A\nval b = E::B\nif a == b { return 1 }\nreturn 0 }",
+        ),
+        (
+            "reference",
+            "func main() -> i32 { val x = 1\nval y = 2\nval a = &x\nval b = &y\nif a == b { return 1 }\nreturn 0 }",
+        ),
+    ] {
+        let errors = semantic_errors(program);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, TypeError::InvalidBinaryOperator { op, .. } if op == "==")),
+            "`==` on {name} operands must be rejected, got {errors:?}"
+        );
+    }
+}
+
+/// A newtype forwards its inner type's equality, so `==` on a newtype over a scalar keeps
+/// compiling to the scalar compare.
+#[test]
+fn equality_on_a_newtype_over_a_scalar_is_accepted() {
+    let errors = semantic_errors(
+        r#"
+        newtype Id = i32
+        func main() -> i32 {
+            val a = Id(1)
+            val b = Id(2)
+            if a == b { return 1 }
+            return 0
+        }
+        "#,
+    );
+    assert!(
+        errors.is_empty(),
+        "a newtype over i32 compares like its inner type, got {errors:?}"
+    );
+}
