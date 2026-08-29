@@ -39,6 +39,7 @@
 - [Lexical Analysis](compiler/components/lexical-analysis.md): Tokenizer
 - [Syntax Parsing](compiler/components/syntax-parsing.md): AST generation
 - [Module Resolution](compiler/components/module-resolution.md): Multi-file expansion, imports, visibility
+- [Argument Binding](compiler/components/argument-binding.md): Named arguments resolved to declaration order
 - [Semantic Analysis](compiler/components/semantic-analysis.md): Type checking
 - [HIR Lowering](compiler/components/hir-lowering.md): AST → typed High-Level IR (`neuro-hir`)
 - [LLVM Backend](compiler/components/llvm-backend.md): Native code generation (from HIR)
@@ -88,6 +89,12 @@ Key design goals:
 - Typed parameters and return types
 - Explicit `return` and implicit trailing-expression returns
 - Recursion and forward references
+- **Named arguments** (1H): an argument may be passed by name (`connect("localhost", port: 8080)`),
+  in any order, after any number of positional ones. A parameter declared `external internal: T`
+  *requires* the external name at the call site and uses the internal one in the body; one declared
+  `_ internal: T` is positional-only. Free functions, associated functions, and methods all accept
+  them; they are bound before type checking and produce the same IR as the positional call, see
+  [functions.md](language-reference/functions.md#named-arguments)
 - **Generics** (1F): generic functions `func identity<T>(x: T) -> T`, generic
   structs `struct Pair<T, U>`, and generic inherent impls `impl<T> Wrapper<T>`,
   monomorphized (one specialized copy per concrete type-argument set, zero runtime
@@ -302,6 +309,8 @@ Key design goals:
 Source File (.nr)
   → Lexical Analysis   : tokenization
   → Syntax Parsing     : AST generation
+  → Module Resolution  : multi-file expansion, imports, visibility
+  → Argument Binding   : named arguments → declaration order
   → Semantic Analysis  : type checking
   → HIR Lowering       : AST → typed High-Level IR (neuro-hir)
   → LLVM Backend       : object code (consumes HIR; inkwell / LLVM 20)

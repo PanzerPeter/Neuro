@@ -52,6 +52,7 @@ pub(super) fn make_function(
         params: params
             .into_iter()
             .map(|(pname, pty)| Parameter {
+                label: ast_types::ParamLabel::Implicit,
                 name: make_ident(&pname),
                 ty: make_type(&pty),
                 span: Span::new(0, 0),

@@ -306,12 +306,13 @@ confirmed defects get filed into `docs/BUGS.md` from there.
 The roadmap is dependency-ordered, so pick the **topmost open item**: its prerequisites
 are already done. Coordinate on an issue before starting a large one.
 
-**Sub-phase 1H — Language Cleanup** is the active sub-phase. String interpolation,
-triple-quoted strings, and nesting block comments are done; one item remains:
+**Sub-phase 1H — Language Cleanup is complete.** String interpolation, triple-quoted
+strings, nesting block comments, and named arguments have all landed, so **Phase 2 —
+Tensor Foundation & MLIR** holds the next open items. Start at the top of its `2A — Tensor
+Core` list in the roadmap; `Tensor<T, [...]>` static tensor type syntax is first.
 
-1. **Named arguments** — the `external internal: T` parameter form, with callers free to
-   pass positionally or by name. Lowers to identical IR, so it is a parser plus
-   argument-resolution change with no runtime cost.
+Sub-phase 1C's one flagged item (below) is the last thing standing between Phase 1 and
+v2.0.0, and it is a design decision rather than an implementation task.
 
 Nothing links `TokenKind` to the editor grammar, so any lexer change must also update
 `neuro-language-support/syntaxes/neuro.tmLanguage.json` by hand in the same commit.
@@ -324,8 +325,9 @@ Every item ships with integration tests, a `CHANGELOG.md` entry, and its slice's
 
 **One flagged sub-phase 1C item remains open:** growable runtime string operations
 (`String::new` / `.push_str` / `.clear`) are blocked by the immutable-`string` contract
-and need a decision on where they land before they can be scheduled. They do not block
-1H, and the decision is a design question rather than a coding task.
+and need a decision on where they land before they can be scheduled. They did not block
+1H, and the decision is a design question rather than a coding task — but Phase 1 is not
+finished, and v2.0.0 does not ship, until it is settled.
 
 ### Non-Code Contributions
 

@@ -36,6 +36,7 @@ fn panic_builtin_accepts_string_argument() {
 
     let call = Expr::Call {
         func: Box::new(Expr::Identifier(make_ident("panic"))),
+        arg_labels: Vec::new(),
         type_args: Vec::new(),
         args: vec![Expr::Literal(
             Literal::String("boom".to_string()),
@@ -56,6 +57,7 @@ fn assert_builtin_rejects_non_bool_argument() {
 
     let call = Expr::Call {
         func: Box::new(Expr::Identifier(make_ident("assert"))),
+        arg_labels: Vec::new(),
         type_args: Vec::new(),
         args: vec![Expr::Literal(Literal::Integer(1, None), Span::new(7, 8))],
         span: Span::new(0, 9),
@@ -76,6 +78,7 @@ fn unreachable_builtin_rejects_arguments() {
 
     let call = Expr::Call {
         func: Box::new(Expr::Identifier(make_ident("unreachable"))),
+        arg_labels: Vec::new(),
         type_args: Vec::new(),
         args: vec![Expr::Literal(Literal::Integer(1, None), Span::new(12, 13))],
         span: Span::new(0, 14),
@@ -110,6 +113,7 @@ fn user_function_shadows_panic_builtin() {
 
     let call = Expr::Call {
         func: Box::new(Expr::Identifier(make_ident("panic"))),
+        arg_labels: Vec::new(),
         type_args: Vec::new(),
         args: vec![Expr::Literal(Literal::Integer(7, None), Span::new(6, 7))],
         span: Span::new(0, 8),

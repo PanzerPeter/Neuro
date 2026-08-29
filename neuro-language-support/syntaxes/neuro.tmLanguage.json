@@ -56,6 +56,9 @@
       "include": "#pascal_types"
     },
     {
+      "include": "#parameter_labels"
+    },
+    {
       "include": "#parameters"
     },
     {
@@ -471,6 +474,18 @@
       "comment": "Any remaining capitalised name reads as a type. This is what colours user types at every *use* site; declaration sites are handled above.",
       "name": "entity.name.type.neuro",
       "match": "\\b\\p{Lu}[\\p{L}\\p{N}_]*\\b"
+    },
+    "parameter_labels": {
+      "comment": "The `external internal: T` parameter form (named arguments). The plain `#parameters` rule keys on a name sitting directly before the `:`, so it sees neither half of this one \u2014 the label is not before the colon and the internal name is not after a `(` or `,`. Listed ahead of `#parameters` because TextMate breaks a tie by position in the top-level array, never by match length.",
+      "match": "(?<=[(,])\\s*([_\\p{L}][\\p{L}\\p{N}_]*)\\s+([_\\p{L}][\\p{L}\\p{N}_]*)\\s*(?=:(?!:))",
+      "captures": {
+        "1": {
+          "name": "entity.name.label.neuro"
+        },
+        "2": {
+          "name": "variable.parameter.neuro"
+        }
+      }
     },
     "parameters": {
       "comment": "A name introduced by `(` or `,` and annotated with `:` — function parameters, and by extension the trailing fields of a struct definition or literal, which carry the same variable-ish colour.",

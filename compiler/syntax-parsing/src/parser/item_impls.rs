@@ -5,7 +5,7 @@
 use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
-use crate::ast::{ImplDef, Parameter, TraitDef, TraitMethod};
+use crate::ast::{ImplDef, TraitDef, TraitMethod};
 use crate::errors::{ParseError, ParseResult};
 
 use super::statements::stmt_span;
@@ -190,34 +190,7 @@ impl Parser {
             }
         }
 
-        let mut params: Vec<Parameter> = Vec::new();
-        if !self.check(&TokenKind::RightParen) {
-            loop {
-                let param_start = self
-                    .peek()
-                    .ok_or(ParseError::UnexpectedEof {
-                        expected: "parameter".to_string(),
-                    })?
-                    .span;
-                let param_name = self.consume_identifier("parameter name")?;
-                self.skip_newlines();
-                self.consume(TokenKind::Colon, "':'")?;
-                self.skip_newlines();
-                let param_ty = self.parse_type()?;
-                let param_span = param_start.merge(param_ty.span());
-                params.push(Parameter {
-                    name: param_name,
-                    ty: param_ty,
-                    span: param_span,
-                });
-                self.skip_newlines();
-                if !self.check(&TokenKind::Comma) {
-                    break;
-                }
-                self.advance();
-                self.skip_newlines();
-            }
-        }
+        let params = self.parse_parameter_list()?;
         self.consume(TokenKind::RightParen, "')'")?;
 
         let return_type = if self.check(&TokenKind::Arrow) {

@@ -18,6 +18,12 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
 - thiserror — `LoweringError` derivation
 
 ## Notes
+- 2026-08-29: Named arguments. Lowering refuses an `Expr::Call` whose `arg_labels` is
+  non-empty. Every label is bound to a parameter by `argument-binding` before type checking;
+  one surviving to here would mean that pass never reached the call, and the arguments would
+  then lower in the order they were written rather than the callee's — a wrong program rather
+  than a failed build. The check costs one `is_empty` per call and never fires on a
+  well-formed one.
 - 2026-08-03: `?` error propagation. New `expressions/try_op.rs`: `lower_try` desugars `operand?`
   into `HirExprKind::Match` — arm 0 tests the `Some`/`Ok` tag and yields payload slot 0 as
   `__try_N` (named off the new `try_counter`), arm 1 is a `Wildcard` whose body is a

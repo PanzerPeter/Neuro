@@ -57,6 +57,7 @@ fn function_taking(name: &str, ty: &str) -> Item {
         unreachable!("function() builds a function")
     };
     def.params.push(Parameter {
+        label: ast_types::ParamLabel::Implicit,
         name: ident("value"),
         ty: Type::Named(ident(ty)),
         span: Span::new(0, 0),
@@ -74,6 +75,7 @@ fn call_path(qualifier: &str, member: &str) -> Stmt {
         }),
         type_args: Vec::new(),
         args: Vec::new(),
+        arg_labels: Vec::new(),
         span: Span::new(0, 0),
     })
 }
@@ -84,6 +86,7 @@ fn call_bare(callee: &str) -> Stmt {
         func: Box::new(Expr::Identifier(ident(callee))),
         type_args: Vec::new(),
         args: Vec::new(),
+        arg_labels: Vec::new(),
         span: Span::new(0, 0),
     })
 }

@@ -103,11 +103,15 @@ impl TypeChecker {
                 span,
             } => self.check_cast_expr(expr, target_type, span),
 
+            // `arg_labels` is empty by the time the type checker runs: the
+            // argument-binding pass has permuted the arguments into the callee's
+            // declaration order and dropped the names, so a call is positional here.
             Expr::Call {
                 func,
                 type_args,
                 args,
                 span,
+                ..
             } => self.check_call_expr(func, type_args, args, span, expected),
 
             Expr::Path {

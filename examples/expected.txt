@@ -22,6 +22,7 @@ basics/factorial.nr             120
 basics/fibonacci.nr             55
 basics/hello.nr                 26
 basics/milestone.nr             8
+basics/named_arguments.nr       40
 basics/phase1_complete.nr       0
 basics/type_inference.nr        42
 
@@ -111,6 +112,7 @@ showcase/job_queue.nr       139
 showcase/mutable_borrows.nr 47
 showcase/num_algorithms.nr  33
 showcase/perceptron.nr      8
+showcase/render_settings.nr 99
 showcase/running_stats.nr   5
 showcase/sample_audit.nr    177
 showcase/scan_guard.nr      160

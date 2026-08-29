@@ -94,7 +94,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | Feature | Summary |
 |---|---|
 | **Types & inference** | `i8` through `u64`, `f16`/`bf16`/`f32`/`f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, type aliases |
-| **Functions & control flow** | Recursion, forward refs, implicit returns; `if`/`elif`/`else`, `while`, `loop`, range-`for`, labelled `break`/`continue`, block-as-value |
+| **Functions & control flow** | Recursion, forward refs, implicit returns, named arguments with external labels (`clamp(x, min: 0.0)`); `if`/`elif`/`else`, `while`, `loop`, range-`for`, labelled `break`/`continue`, block-as-value |
 | **Generics** | Generic functions, structs, and impls plus const generics, `where` clauses, and turbofish, all fully monomorphized at zero runtime cost |
 | **Traits & dispatch** | Required and default methods, operator traits, `impl Trait` (static) and `dyn Trait` (vtable) dispatch with object-safety checks |
 | **Closures & lambdas** | `\|x: i32\| x * x`, `move` closures, `(T) -> R` function types, higher-order functions; compiled to `{ fn_ptr, env_ptr }`, no heap |
@@ -513,7 +513,7 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | 1E | Type system: arrays, tuples, structs, methods, destructuring, type aliases, enums, pattern matching, newtypes | Complete |
 | 1F | Generics, traits and dispatch: generics, explicit lifetimes, trait declarations, operator traits, static/dynamic dispatch (`impl`/`dyn`), closures | Complete |
 | 1G | Error handling, modules and prelude: `Option`/`Result`, collections, `checked_*`, `??`, `val-else`, `?`, error-path outlining, multi-file modules, imports, `export` visibility, inline modules & re-exports, implicit prelude | Complete |
-| 1H | Language cleanup: string interpolation, triple-quoted strings, nested comments, named arguments | In progress |
+| 1H | Language cleanup: string interpolation, triple-quoted strings, nested comments, named arguments | Complete |
 | **2** | Tensors and MLIR: `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | Planned |
 | **3** | Automatic differentiation: Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | Planned |
 | **4** | GPU acceleration: MLIR GPU dialects (nvgpu / rocdl / Triton), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | Planned |

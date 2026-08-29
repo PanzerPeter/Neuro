@@ -93,6 +93,74 @@ func test() -> i32 {
 }
 ```
 
+## Named Arguments
+
+An argument may be passed by name at the call site. Named arguments may appear in any
+order, and any number of positional arguments may come first.
+
+```neuro
+func connect(host: string, port: i32, timeout: i32) -> i32 {
+    return port + timeout
+}
+
+val a = connect("localhost", 8080, 30)               // all positional
+val b = connect("localhost", port: 8080, timeout: 30)
+val c = connect("localhost", timeout: 30, port: 8080) // same call as b
+```
+
+### External labels
+
+A parameter may be declared with two names — an **external label** the caller writes and
+an **internal name** the body uses — written `external internal: T`. The external label is
+then **required** at every call site.
+
+```neuro
+func clamp(_ value: f32, min lo: f32, max hi: f32) -> f32 {
+    if value < lo { return lo }
+    if value > hi { return hi }
+    return value          // the body says lo / hi, never min / max
+}
+
+val x = clamp(1.5, min: 0.0, max: 1.0)
+// val y = clamp(1.5, 0.0, 1.0)   // error: min and max must be named
+```
+
+An external label of `_` suppresses the call-site name: the argument is positional and
+naming it is an error.
+
+```neuro
+func scale(_ value: f32, _ factor: f32) -> f32 {
+    return value * factor
+}
+
+val r = scale(2.0, 3.0)      // no names accepted
+// val s = scale(value: 2.0, factor: 3.0)   // error: both are positional-only
+```
+
+### Rules
+
+- Positional arguments must precede named arguments.
+- Named arguments may appear in any order relative to each other.
+- A plain `name: T` parameter may be passed positionally *or* as `name: value`.
+- An `external internal: T` parameter must always be named `external:`.
+- A `_ name: T` parameter must always be positional.
+- Two parameters of one function may not answer to the same call-site name.
+- Free functions, associated functions (`Type::f(...)`), and methods (`x.m(...)`) all
+  accept named arguments. Closures, the panic builtins, enum variants, and newtype
+  constructors declare no parameter names, so a label on one is an error.
+
+Arguments are bound to parameters before type checking and produce exactly the IR the
+equivalent positional call produces — a named argument costs nothing at runtime, and the
+arguments are evaluated in the callee's parameter order.
+
+### Limitation
+
+A method call is matched on the method name alone, because the receiver's type is not yet
+known when arguments are bound. If two different types declare a method of the same name
+with *different* parameter names, a named argument on that method is rejected; write the
+call positionally, or rename one of the methods. Positional calls are never affected.
+
+
 ## Return Values
 
 ### Explicit Return
@@ -593,13 +661,6 @@ func right() -> i32 {
 func greet(name: string, greeting: string = "Hello") -> string {
     greeting + ", " + name
 }
-```
-
-### Named Arguments
-
-```neuro
-// Not yet implemented (sub-phase 1H)
-greet(name="Alice", greeting="Hi")
 ```
 
 ### Variadic Functions

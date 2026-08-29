@@ -311,9 +311,11 @@ current compiler supports:
 - Inline `module Name { ... }` blocks group items inside one file, under the same rules
 - Declarations and struct fields are private to their module until `export` opts them in
 - An implicit prelude puts `Option`, `Result`, `Some` / `None` / `Ok` / `Err`, and `println` / `print` in scope in every file with no `import`; `@no_prelude` on a file's first line opts out
-
-### Not Yet Implemented (later in Phase 1)
-- Triple-quoted strings, nested comments, named arguments (1H)
+- Named arguments: `connect("localhost", port: 8080)`, in any order after the positional
+  ones. A parameter declared `external internal: T` *requires* the external name at the
+  call site; one declared `_ internal: T` is positional-only
+- Triple-quoted `"""` block strings dedented to the closing delimiter's column, and block
+  comments that nest
 
 ## Common Issues
 

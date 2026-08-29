@@ -14,6 +14,7 @@ members = [
     "compiler/lexical-analysis",
     "compiler/syntax-parsing",
     "compiler/module-resolution",
+    "compiler/argument-binding",
     "compiler/semantic-analysis",
     "compiler/control-flow",
     "compiler/llvm-backend",
@@ -52,7 +53,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.78.2"
+version = "1.79.0"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Neuro Contributors"]

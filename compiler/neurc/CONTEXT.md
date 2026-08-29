@@ -20,6 +20,11 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 - source-location — source span resolution for error display
 
 ## Notes
+- 2026-08-29: Named arguments. `load_program` runs `argument_binding::bind_arguments` after
+  the modules are merged and the prelude prepended, and before type checking — a call names a
+  callee that may be declared in any file, and the arguments must already sit in declaration
+  order when the type checker pairs them with parameter types. Both `check` and `compile` go
+  through `load_program`, so neither can skip it.
 - 2026-08-24: Missing entry point. `compile_file` checks the lowered HIR for a function named
   `main` before it writes an object file. Without it the pipeline ran to completion and handed
   a `main`-less object to the system linker, so the user was shown `undefined reference to
