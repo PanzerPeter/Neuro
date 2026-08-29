@@ -7,6 +7,7 @@ use crate::ast::{EnumPatternPayload, Expr, FieldPattern, MatchArm, Pattern};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 
+use super::statements::stmt_span;
 use super::Parser;
 
 impl Parser {
@@ -65,7 +66,21 @@ impl Parser {
         self.skip_newlines();
         self.consume(TokenKind::FatArrow, "'=>' after match pattern")?;
         self.skip_newlines();
-        let body = self.parse_expr(Precedence::Lowest)?;
+        // `return` / `break` / `continue` are statements, not expressions, so an
+        // unbraced one has to reach the body as the single-statement block a braced
+        // arm already produces. The braces carry no information and the spec's own
+        // `val-else` example writes bare `return` arm bodies.
+        let body = match self.peek_kind() {
+            Some(TokenKind::Return | TokenKind::Break | TokenKind::Continue) => {
+                let stmt = self.parse_stmt()?;
+                let span = stmt_span(&stmt);
+                Expr::Block {
+                    stmts: vec![stmt],
+                    span,
+                }
+            }
+            _ => self.parse_expr(Precedence::Lowest)?,
+        };
         let span = start_span.merge(body.span());
 
         Ok(MatchArm {

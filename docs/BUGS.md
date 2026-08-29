@@ -20,69 +20,44 @@ sketch. If you want to work on one:
 
 ---
 
-## BUG-013, using a function name as a value fails with a misleading diagnostic
+## BUG-014, a named argument is evaluated in declaration order, not source order
 
-- **Status**: OPEN, good first task (diagnostic-sized; no language change required)
-- **Area**: semantic-analysis (diagnostic quality)
-- **Severity**: minor, loud error, wrong explanation
+- **Status**: OPEN, needs a maintainer decision before code changes (the language does
+  not currently define argument evaluation order)
+- **Area**: argument-binding (`bind`), with the observable consequence in codegen
+- **Severity**: minor today, latent major — two call forms the specification calls
+  equivalent do not evaluate their arguments in the same order
 - **Repro**:
 
   ```neuro
-  func apply_twice(f: (i32) -> i32, x: i32) -> i32 { f(f(x)) }
-  func inc(x: i32) -> i32 { x + 3 }
+  func fail_a() -> i32 { panic("EVAL-A") }
+  func fail_b() -> i32 { panic("EVAL-B") }
+  func combine(first: i32, second: i32) -> i32 { first + second }
 
-  func main() -> i32 {
-      apply_twice(inc, 10)
-  }
+  func main() -> i32 { combine(second: fail_b(), first: fail_a()) }
   ```
 
-  The compiler reports `undefined variable 'inc'`. That message claims the name does not
-  exist, but it does; it just is not usable *as a value*.
-- **Root cause**: functions live in a separate namespace from variables and there is no
-  coercion from a function item to a function-typed value, so resolving `inc` in value
-  position falls through to the ordinary variable lookup and fails with the generic
-  undefined-variable diagnostic.
-- **What should happen**: either (a) a dedicated diagnostic, "`inc` is a function;
-  functions are not first-class values, wrap it: `|x: i32| inc(x)`", which is purely
-  corrective, or (b) minimal fn-item-to-fn-pointer coercion so the call compiles. Option
-  (a) is the right first step and needs a maintainer decision only if (b) is wanted later.
-- **Workaround**: wrap the call in a closure, `apply_twice(|x: i32| inc(x), 10)`.
+  This panics with `EVAL-A` — the argument written *second* runs *first*. The
+  all-positional control `combine(fail_b(), fail_a())` panics with `EVAL-B`, so
+  positional arguments do evaluate left to right; only the named form differs.
+- **Root cause**: `bind` permutes the `args` vector into the callee's declaration
+  order and drops the labels, so by the time any later stage sees the call, the
+  source order of the argument *expressions* is gone. Everything downstream then
+  evaluates them in the order it finds them.
+- **What should happen**: the specification's own example comments a reordered named
+  call as `// same` as the declaration-ordered one, which holds for the parameter
+  each value binds to but not for the order the values are computed in. Every
+  language with named arguments evaluates them in source order. The fix is to bind
+  each argument expression to a temporary in source order at the call site and pass
+  the temporaries in declaration order; that is a lowering change, and it gives up
+  the current property that a named call produces byte-identical IR to the
+  positional one, so it wants a ruling before it is written.
+- **Why it is only minor today**: the exclusivity rule rejects two arguments that
+  both mutably borrow the same place, so the difference is presently observable only
+  through which of two panicking arguments fires first. It becomes an ordinary
+  wrong-answer bug as soon as arguments can carry independent observable effects.
+- **Workaround**: bind the arguments to `val`s in the order they must run, then pass
+  the bindings by name.
 
 ---
 
-## BUG-012, a bare `return` as a `match` arm body does not parse
-
-- **Status**: OPEN, needs a maintainer decision before code changes (spec conflict)
-- **Area**: syntax-parsing (`parse_match_arm`)
-- **Severity**: minor, clean parse error, easy workaround, but the specification itself
-  disagrees with the grammar
-- **Repro**:
-
-  ```neuro
-  func f(n: i32) -> i32 {
-      match n {
-          0 => return 1,
-          _ => 2
-      }
-  }
-  ```
-
-  This fails with `unexpected token Return, expected expression`. The braced form
-  `0 => { return 1 }` parses, type-checks, and runs correctly.
-- **Root cause**: `parse_match_arm` parses the arm body as an expression, and `return`
-  is a statement, not an expression. A braced body reaches the parser as a block, which
-  holds statements, hence the asymmetry.
-- **The conflict**: the specification's own `val-else` example writes bare `return` arm
-  bodies, so the spec is internally inconsistent: the grammar notes list `return` under
-  statements, while the example uses it in expression position.
-- **Two ways to resolve (both cheap; the decision is which one is the language)**:
-  1. **Parser accepts it.** In `parse_match_arm`, when the body starts with `return`,
-     `break`, or `continue`, parse that statement and wrap it in a single-statement
-     block. Purely additive: no existing program changes meaning, and the current
-     arm-divergence rule already types such an arm correctly. Roughly ten lines in one
-     function. This makes the spec's example compile as written.
-  2. **Spec adds the braces.** Fix the example to use `{ return ... }` and leave the
-     grammar alone, keeping the statement/expression split absolute.
-- **Recommendation**: option 1. The braces carry no information, the shape is idiomatic
-  in every language with `match`, and the spec already reaches for it unprompted.
-- **Workaround**: brace the arm body, `0 => { return 1 }`.

@@ -165,6 +165,10 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-08-29: New public error `TypeError::FunctionUsedAsValue` (BUG-013). `Expr::Identifier`
+  resolution consults `functions` and `generic_funcs` before falling through to
+  `UndefinedVariable`, so a function name in value position is told apart from a name that
+  does not exist. No coercion was added — a function is still not a value.
 - 2026-08-29: Growable `String`. `CollectionKind::String` is a fourth, **nullary** collection
   kind (`arity() == 0`), so `Type::Collection { kind: String, args: [] }` reuses every existing
   collection rule — never `Copy`, move-tracked, `Drop`-freed — with no new `Type` variant. Bare

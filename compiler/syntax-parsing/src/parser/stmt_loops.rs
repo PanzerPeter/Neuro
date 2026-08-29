@@ -228,7 +228,9 @@ impl Parser {
         let value = if self.is_at_end()
             || matches!(
                 self.peek_kind(),
-                Some(TokenKind::Newline) | Some(TokenKind::RightBrace)
+                // A comma is here because a match arm body is comma-terminated; no
+                // expression can begin with one, so it never hides a real value.
+                Some(TokenKind::Newline | TokenKind::RightBrace | TokenKind::Comma)
             ) {
             None
         } else {
