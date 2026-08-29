@@ -557,8 +557,9 @@ These are not bugs, but current limitations. See the
 1. **Type inference**: bare numeric literals default to `i32` / `f64` unless a type is in scope
 2. **Generic type arguments**: restricted to `Copy` types, and a generic may not be
    instantiated with an enclosing type parameter (no `Option<T>` inside a `func f<T>`)
-3. **Strings are immutable**: `+`, `.slice(a..b)`, `.len()`, `.clone()`; there is no
-   growable `String` with `.push_str` yet
+3. **Strings are immutable**: `+`, `.slice(a..b)`, `.len()`, `.clone()`. Build text that
+   grows with the `String` buffer (`String::new` / `.push_str` / `.clear` /
+   `.to_string`) instead of chaining `+`
 4. **Named arguments**: not yet implemented. String interpolation, triple-quoted
    `"""` blocks, and nesting block comments *are* available; a hole may not contain
    a `"` string literal, and an interpolated literal is not a constant pattern

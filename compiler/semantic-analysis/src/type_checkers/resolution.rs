@@ -72,8 +72,18 @@ impl TypeChecker {
                 "string" => Some(Type::String),
                 "void" => Some(Type::Void),
                 // A collection's bare name is not a type, exactly like a generic
-                // struct's: `Vec` alone says nothing about what it holds.
-                name if CollectionKind::from_name(name).is_some()
+                // struct's: `Vec` alone says nothing about what it holds. `String` is the
+                // exception — it takes no arguments, so its bare name is already complete.
+                name if CollectionKind::from_name(name).is_some_and(|k| k.arity() == 0)
+                    && !self.generic_scope.contains(name)
+                    && !self.struct_defs.contains_key(name)
+                    && !self.enum_defs.contains_key(name)
+                    && !self.newtype_defs.contains_key(name) =>
+                {
+                    let kind = CollectionKind::from_name(name)?;
+                    self.resolve_collection(kind, Vec::new(), ident.span)
+                }
+                name if CollectionKind::from_name(name).is_some_and(|k| k.arity() > 0)
                     && !self.is_generic_struct(name)
                     && !self.is_generic_enum(name) =>
                 {

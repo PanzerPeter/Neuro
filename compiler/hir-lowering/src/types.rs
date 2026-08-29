@@ -73,6 +73,20 @@ impl Lowerer {
                         inner: Box::new(self.resolve_type(&inner_ast)?),
                     }
                 }
+                // A nullary collection's bare name is a complete type. It is checked
+                // after the user-declaration arms above, so a program's own `String`
+                // shadows the standard one exactly as it does for the prelude enums.
+                name if crate::collections::nullary_collection(name).is_some() => {
+                    let kind = crate::collections::nullary_collection(name).ok_or_else(|| {
+                        LoweringError::UnresolvedType {
+                            name: name.to_string(),
+                        }
+                    })?;
+                    HirType::Collection {
+                        kind,
+                        args: Vec::new(),
+                    }
+                }
                 name => {
                     return Err(LoweringError::UnresolvedType {
                         name: name.to_string(),

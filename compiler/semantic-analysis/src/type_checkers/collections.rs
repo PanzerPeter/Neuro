@@ -1,10 +1,15 @@
-//! The standard collections `Vec<T>`, `HashMap<K, V>`, and `BTreeMap<K, V>`.
+//! The standard collections `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, and the
+//! growable text buffer `String`.
 //!
 //! They are specified as library types, but the language exposes no allocator and no
 //! raw pointers, so nothing in `.nr` source could implement them: the compiler knows
-//! all three by name and lowers their operations directly. Everything user-visible is
+//! them all by name and lowers their operations directly. Everything user-visible is
 //! still ordinary type checking — a collection type is a nominal type with type
 //! arguments, its operations are builtin methods, and it obeys move-by-default.
+//!
+//! `String` joins the family because it is the same machine: one growable heap buffer
+//! behind an owning header. Its element type is fixed (UTF-8 bytes) rather than a type
+//! argument, so it is the one nullary kind.
 
 use ast_types::Expr;
 use shared_types::Span;
@@ -25,9 +30,9 @@ pub(crate) const HASHABLE_TRAIT: &str = "Hashable";
 pub(crate) const HASH_METHOD: &str = "hash";
 
 impl TypeChecker {
-    /// Resolve a `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` annotation, validating
-    /// the argument count and each element/key type. Returns `None` after recording a
-    /// diagnostic when the application is ill-formed.
+    /// Resolve a `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` / `String` annotation,
+    /// validating the argument count and each element/key type. Returns `None` after
+    /// recording a diagnostic when the application is ill-formed.
     pub(crate) fn resolve_collection(
         &mut self,
         kind: CollectionKind,
@@ -44,13 +49,11 @@ impl TypeChecker {
             return None;
         }
 
-        if kind != CollectionKind::Vec {
+        let keyed = matches!(kind, CollectionKind::HashMap | CollectionKind::BTreeMap);
+        if keyed {
             self.check_key_type(kind, &args[0], span)?;
         }
-        for value_ty in args
-            .iter()
-            .skip(if kind == CollectionKind::Vec { 0 } else { 1 })
-        {
+        for value_ty in args.iter().skip(usize::from(keyed)) {
             self.check_storable(kind, value_ty, span)?;
         }
 
@@ -129,7 +132,7 @@ impl TypeChecker {
         match kind {
             CollectionKind::HashMap => required.push(HASHABLE_TRAIT),
             CollectionKind::BTreeMap => required.push("Comparable"),
-            CollectionKind::Vec => {}
+            CollectionKind::Vec | CollectionKind::String => {}
         }
         for trait_name in required {
             if !self.trait_impls_contains(trait_name, &name) {
@@ -142,10 +145,11 @@ impl TypeChecker {
         Some(())
     }
 
-    /// Type-check `Vec::new()` / `HashMap::new()` / `BTreeMap::new()`.
+    /// Type-check `Vec::new()` / `HashMap::new()` / `BTreeMap::new()` / `String::new()`.
     ///
     /// The element types come from the expected type: an empty collection carries no
-    /// value to infer from, so the binding must be annotated.
+    /// value to infer from, so the binding must be annotated. A nullary kind has nothing
+    /// to infer, so it needs no annotation.
     pub(crate) fn check_collection_new(
         &mut self,
         kind: CollectionKind,
@@ -159,6 +163,12 @@ impl TypeChecker {
                 found: args.len(),
                 span,
             });
+        }
+        if kind.arity() == 0 {
+            return Type::Collection {
+                kind,
+                args: Vec::new(),
+            };
         }
         match expected {
             Some(Type::Collection {
@@ -214,10 +224,20 @@ impl TypeChecker {
             // An index argument accepts any integer width, matching `arr[i]`; every
             // other argument is the collection's own key or element type.
             if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
-                let ok = if matches!(spec.params.first(), Some(ParamSlot::Index)) {
-                    matches!(arg_ty, Type::Unknown) || arg_ty.is_integer()
-                } else {
-                    self.assignable(&arg_ty, expected_ty)
+                let ok = match spec.params.first() {
+                    Some(ParamSlot::Index) => {
+                        matches!(arg_ty, Type::Unknown) || arg_ty.is_integer()
+                    }
+                    // Appended text is read, never stored, so an immutable borrow is as
+                    // good as an owned `string` — the same latitude `+` gives its operands.
+                    Some(ParamSlot::Text) => {
+                        matches!(&arg_ty, Type::String | Type::Unknown)
+                            || matches!(
+                                &arg_ty,
+                                Type::Reference { inner, mutable: false } if matches!(**inner, Type::String)
+                            )
+                    }
+                    _ => self.assignable(&arg_ty, expected_ty),
                 };
                 if !ok {
                     self.record_error(TypeError::Mismatch {
@@ -278,6 +298,8 @@ enum ParamSlot {
     Key,
     /// The collection's element/value type — the last type argument.
     Value,
+    /// Borrowed UTF-8 text: a `string` or an immutable `&string` (`String::push_str`).
+    Text,
 }
 
 impl ParamSlot {
@@ -286,6 +308,7 @@ impl ParamSlot {
             ParamSlot::Index => Type::U64,
             ParamSlot::Key => params.first().cloned().unwrap_or(Type::Unknown),
             ParamSlot::Value => params.last().cloned().unwrap_or(Type::Unknown),
+            ParamSlot::Text => Type::String,
         }
     }
 }
@@ -300,6 +323,8 @@ enum ResultShape {
     OptionValue,
     /// A freshly built `Vec<K>` of the map's keys.
     KeyVec,
+    /// A freshly allocated owned immutable `string` (`String::to_string`).
+    OwnedString,
 }
 
 impl ResultShape {
@@ -316,6 +341,7 @@ impl ResultShape {
                 kind: CollectionKind::Vec,
                 args: vec![ParamSlot::Key.resolve(params)],
             },
+            ResultShape::OwnedString => Type::String,
         }
     }
 }
@@ -386,6 +412,18 @@ fn collection_method(kind: CollectionKind, method: &str) -> Option<MethodSpec> {
             params: &[ParamSlot::Key],
             result: ResultShape::Bool,
             mutating: true,
+            stores_args: false,
+        },
+        (CollectionKind::String, "push_str") => MethodSpec {
+            params: &[ParamSlot::Text],
+            result: ResultShape::Unit,
+            mutating: true,
+            stores_args: false,
+        },
+        (CollectionKind::String, "to_string") => MethodSpec {
+            params: &[],
+            result: ResultShape::OwnedString,
+            mutating: false,
             stores_args: false,
         },
         (CollectionKind::HashMap | CollectionKind::BTreeMap, "keys") => MethodSpec {
@@ -542,6 +580,101 @@ mod tests {
                 val hit: bool = m.contains_key(k)
                 val n: u64 = k.len()
                 return 0
+            }
+            "#,
+        );
+        assert!(errs.is_empty(), "expected no errors, got {errs:?}");
+    }
+
+    #[test]
+    fn string_builder_needs_no_annotation() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                mut b = String::new()
+                b.push_str("hi")
+                val n: u64 = b.len()
+                return 0
+            }
+            "#,
+        );
+        assert!(errs.is_empty(), "expected no errors, got {errs:?}");
+    }
+
+    #[test]
+    fn push_str_accepts_a_borrow_and_leaves_it_usable() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                mut b: String = String::new()
+                val piece: string = "text"
+                b.push_str(&piece)
+                b.push_str(piece)
+                val n: u64 = piece.len()
+                return 0
+            }
+            "#,
+        );
+        assert!(errs.is_empty(), "expected no errors, got {errs:?}");
+    }
+
+    #[test]
+    fn to_string_yields_an_owned_string() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                mut b = String::new()
+                b.push_str("a")
+                val out: string = b.to_string() + "!"
+                return 0
+            }
+            "#,
+        );
+        assert!(errs.is_empty(), "expected no errors, got {errs:?}");
+    }
+
+    #[test]
+    fn string_builder_takes_no_type_arguments() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                mut b: String<i32> = String::new()
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("expects 0 type argument")),
+            "expected an arity diagnostic, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn push_str_on_immutable_builder_is_rejected() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                val b = String::new()
+                b.push_str("x")
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("mutably")),
+            "expected a mutability diagnostic, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn a_declared_string_type_shadows_the_builder() {
+        let errs = errors(
+            r#"
+            @derive(Copy, Clone)
+            struct String { n: i32 }
+            func main() -> i32 {
+                val s: String = String { n: 1 }
+                return s.n
             }
             "#,
         );

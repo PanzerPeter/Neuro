@@ -11,7 +11,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | Directory        | What it covers                                                         |
 | ---------------- | ---------------------------------------------------------------------- |
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference |
-| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` |
+| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result`, `?` error propagation |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
@@ -115,6 +115,13 @@ isolation:
   defaulting an absent lookup, a `@derive(Copy)` struct with an associated function and
   `&self` method, an enum + guarded `match`, a fixed-size array, a range-`for`, and
   `for`-in over the collection. Exit `139`.
+- [`showcase/log_builder.nr`](showcase/log_builder.nr) — **the growable `String`**: a run
+  transcript assembled into one buffer that grows in place, instead of the `+` chain that
+  would reallocate and recopy the whole transcript once per event. Each line is appended
+  through a `&mut String` parameter. Combined with a `Vec<Event>` + `for`-in, a
+  `@derive(Copy, Clone)` struct with `&self` methods, an enum with a payload + `match`, and
+  string interpolation with the format mini-language (`:>4`, `:.1`, `:+d`). The finished
+  text is checked exactly, then `.clear()` proves the buffer is reusable. Exit `64`.
 - [`showcase/scan_guard.nr`](showcase/scan_guard.nr) — **deterministic `Drop` +
   labeled breaks**: two `impl Drop` scope guards sharing a `&mut i32` counter while a
   labeled `break` exits *two* nested loops at once, proving the destructors still run
@@ -213,7 +220,7 @@ No Rust edits are needed — discovery is automatic.
   array elements positionally; `val [first, ..rest] = arr` captures the remainder as
   a fresh `[T; N - k]` array, and a bare `..` ignores it. A rest-less array pattern
   must match the array's length exactly.
-- Move semantics, borrows (`&T`/`&mut T`), borrow exclusivity, lifetime elision, and deterministic `Drop` are implemented (sub-phase 1C). The owning collections `Vec<T>`, `HashMap<K, V>`, and `BTreeMap<K, V>` are implemented (1G) — they move on assignment and free their buffers at scope exit. A growable heap string (`String` builder) is still not implemented.
+- Move semantics, borrows (`&T`/`&mut T`), borrow exclusivity, lifetime elision, and deterministic `Drop` are implemented (sub-phase 1C). The owning collections `Vec<T>`, `HashMap<K, V>`, and `BTreeMap<K, V>` are implemented (1G), as is the growable `String` text buffer — all four move on assignment and free their buffers at scope exit. What still leaks is the anonymous heap `string` that `+`, interpolation, and `String::to_string` produce, which no tracked binding owns.
 - `&self` and `&mut self` methods are supported; a `&mut self` method mutates
   struct state in place (see `structs/mut_self_accumulator.nr`). Consuming `self`
   is not yet supported.

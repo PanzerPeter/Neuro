@@ -165,6 +165,16 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-08-29: Growable `String`. `CollectionKind::String` is a fourth, **nullary** collection
+  kind (`arity() == 0`), so `Type::Collection { kind: String, args: [] }` reuses every existing
+  collection rule — never `Copy`, move-tracked, `Drop`-freed — with no new `Type` variant. Bare
+  `String` resolves as a complete type in `resolution.rs` (the "collection needs type arguments"
+  arm now applies only to `arity() > 0`, so a user-declared `struct String` still shadows it), and
+  `check_collection_new` returns the type directly for a nullary kind rather than demanding an
+  annotation. `collections.rs` gains `ParamSlot::Text` (accepts `string` or an immutable `&string`,
+  and does not move it — the latitude `+` gives its operands) and `ResultShape::OwnedString`,
+  backing `push_str` (mutating) and `to_string`; `len` / `clear` fall out of the existing
+  kind-agnostic entries. `Type`'s `Display` omits `<>` for a nullary collection.
 - 2026-08-25: String interpolation checking (`type_checkers/expressions/interpolation.rs`).
   Each hole's expression is checked, its type auto-dereferenced through a borrow, and its
   written spec validated against that type — radix kinds need an integer, fixed-point and

@@ -254,7 +254,7 @@ does not drop its prior value, and a struct's `Drop` fields are not auto-dropped
 
 ## Collections ABI
 
-`Vec<T>`, `HashMap<K, V>`, and `BTreeMap<K, V>` share one by-value header —
+`Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, and `String` share one by-value header —
 `{ ptr buffer, i64 len, i64 cap, i64 used }` (`TypeMapper::collection_header_type`) — held in the
 owner's alloca, with all elements in a single heap buffer. `len` counts live elements/entries,
 `cap` the allocated slots, and `used` the *occupied* slots (live + tombstoned) that the hash map's
@@ -271,10 +271,17 @@ Buffer layouts, per kind:
 - `BTreeMap<K, V>` — `{ K key, V value }` slots kept sorted by key: binary search to look up,
   `memmove` the tail to insert or erase. That gives the ordered iteration the type promises; a
   multi-way tree would change only the insert/erase constant, not this ABI.
+- `String` — a byte run; `len` and `cap` are byte counts and `used` stays zero. It carries no type
+  arguments, so one instantiation serves every program. `push_str` reserves through
+  `__neuro_string_reserve(header, extra)` — capacity becomes `max(cap * 2, len + extra, 8)`, so one
+  large append is a single `realloc` rather than a chain of doublings — then `memcpy`s the
+  argument's bytes at `buffer + len`. `to_string` `malloc`s (at least one byte, so an empty result
+  is never null) and copies out a `{ ptr, i64 }` `string`; a borrowed view into the buffer would
+  dangle after the next `push_str`, which the borrow checker does not yet track.
 
 Loop-shaped operations are emitted once per instantiation as private helpers named
-`__neuro_{hmap,bmap}_{find,insert,keys}_<key>_<value>` (plus `__neuro_vec_reserve` and
-`__neuro_hash_string`), created through `get_or_build_helper`, which saves and restores the
+`__neuro_{hmap,bmap}_{find,insert,keys}_<key>_<value>` (plus `__neuro_vec_reserve`,
+`__neuro_string_reserve`, and `__neuro_hash_string`), created through `get_or_build_helper`, which saves and restores the
 caller's insertion point and `current_function`. A lookup returns the slot index, or `-1`.
 
 Key equality, order, and hash are compiler-supplied for int-like and `string` keys (FNV-1a for
@@ -291,8 +298,10 @@ A collection binding is registered in the drop scope with `DropTarget::Collectio
 `free`s field 0 under the same runtime drop flag that user `Drop` types use — a moved-out
 collection is not freed twice. An unnamed collection *temporary* (`for k in m.keys()`) is
 registered the same way under a synthetic `__`-containing name that no source binding can
-collide with; without that, the only route to map iteration would leak. A `string` *inside* a collection is not freed; that rides with the
-heap-string work.
+collide with; without that, the only route to map iteration would leak. This is also what frees a
+`String` builder's buffer, since it is registered as an ordinary collection. A `string` *inside* a
+collection is not freed, and neither is the heap `string` that `+` or `String::to_string` produces;
+both ride with the heap-string work.
 
 ## Constant Declarations ABI
 Module-level consts emit as `@NAME = internal constant TYPE VALUE` globals before any function defs;
@@ -328,7 +337,8 @@ emission layer in all paths.
 ## Recent Updates
 - 2026-08-25: String-interpolation codegen. `codegen/expressions/interp.rs` renders each part
   to a `{ ptr, len }` fat pointer and concatenates them into one fresh `malloc`'d buffer
-  (the result leaks like `+` concatenation does, until a heap-string type lands). The
+  (the result leaks like `+` concatenation does — an anonymous heap `string` is owned by no
+  tracked binding, which `String` did not change). The
   rendering helpers live in `format_helpers.rs` (`snprintf`-backed integer/float
   conversion, hand-written binary digits), `format_layout.rs` (sign-aware field padding,
   debug quoting, UTF-8 encoding of a `char`), and `format_float.rs` (restoring the point

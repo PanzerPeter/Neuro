@@ -103,8 +103,9 @@ pub enum Type {
     /// template: monomorphization substitutes each `Generic` with a concrete type, so a
     /// `Generic` never reaches the HIR.
     Generic(std::string::String),
-    /// A heap-backed standard collection: `Vec<T>`, `HashMap<K, V>`, or
-    /// `BTreeMap<K, V>`. These are library types rather than language primitives, but
+    /// A heap-backed standard collection: `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`,
+    /// or the growable text buffer `String`. These are library types rather than
+    /// language primitives, but
     /// the compiler knows them by name because the language has no allocator surface
     /// to build them from. They own a heap buffer, so they are never `Copy`: assignment
     /// moves, and the buffer is freed when the owner leaves scope.
@@ -124,6 +125,9 @@ pub enum CollectionKind {
     HashMap,
     /// Key-ordered map `BTreeMap<K, V>`; keys are `Comparable` (a total order).
     BTreeMap,
+    /// Growable UTF-8 text buffer `String` — the mutable counterpart to the immutable
+    /// `string`. It takes no type arguments, so its bare name is already a complete type.
+    String,
 }
 
 impl CollectionKind {
@@ -133,6 +137,7 @@ impl CollectionKind {
             CollectionKind::Vec => "Vec",
             CollectionKind::HashMap => "HashMap",
             CollectionKind::BTreeMap => "BTreeMap",
+            CollectionKind::String => "String",
         }
     }
 
@@ -143,6 +148,7 @@ impl CollectionKind {
             "Vec" => Some(CollectionKind::Vec),
             "HashMap" => Some(CollectionKind::HashMap),
             "BTreeMap" => Some(CollectionKind::BTreeMap),
+            "String" => Some(CollectionKind::String),
             _ => None,
         }
     }
@@ -150,6 +156,7 @@ impl CollectionKind {
     /// How many type arguments the collection takes.
     pub(crate) fn arity(self) -> usize {
         match self {
+            CollectionKind::String => 0,
             CollectionKind::Vec => 1,
             CollectionKind::HashMap | CollectionKind::BTreeMap => 2,
         }
@@ -451,7 +458,13 @@ impl fmt::Display for Type {
                 write!(f, ") -> {}", ret)
             }
             Type::Collection { kind, args } => {
-                write!(f, "{}<", kind.name())?;
+                write!(f, "{}", kind.name())?;
+                // A nullary collection's bare name is the whole type; `String<>` is not
+                // something a program could have written.
+                if args.is_empty() {
+                    return Ok(());
+                }
+                write!(f, "<")?;
                 for (i, arg) in args.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;

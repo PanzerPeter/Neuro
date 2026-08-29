@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.80.0] - 2026-08-29
+
+### Added
+- `semantic`: **growable strings** (§2.8). `String` is the mutable, heap-backed counterpart
+  to the immutable `string` — the same pair `[T; N]` / `Vec<T>` already is — for text that is
+  assembled rather than passed around. Surface: `String::new()`, `.push_str(text)`, `.len()`,
+  `.clear()`, and `.to_string()`. Building an n-piece string with `+` copies everything
+  accumulated so far on every step; a `String` appends in amortized O(1) into one buffer.
+- `semantic`: `String` needs no type annotation. It takes no type arguments, so
+  `mut s = String::new()` infers, unlike `Vec::new()`, and its bare name is a complete type
+  in an annotation. A program that declares its own `String` still shadows the built-in one.
+- `codegen`: new `codegen/collections/strings.rs` and the shared
+  `__neuro_string_reserve(header, extra)` helper, which grows capacity to
+  `max(cap * 2, len + extra, 8)` — so appending one large string is a single `realloc`
+  rather than a chain of doublings, while repeated small appends stay amortized O(1).
+- `tests`: `compiler/neurc/tests/string_builder.rs` covers construction, owned and borrowed
+  appends, byte length, buffer-retaining `clear`, the copy back out, `&mut String`
+  parameters, move-on-assign, use-after-move rejection, growth past the initial capacity,
+  and 2000 builders in a loop completing without unbounded heap growth.
+- `docs`: `examples/types/string_builder.nr` and the `examples/showcase/log_builder.nr`
+  showcase, which assembles a run transcript in one buffer while combining `Vec<T>` + `for`-in,
+  a `@derive(Copy, Clone)` struct with `&self` methods, an enum with a payload + `match`,
+  string interpolation with the format mini-language, and `&mut String` parameters.
+
+### Changed
+- `infra`: `HirCollectionKind` gains a `String` variant plus `arity()` and `mangle_tag()`.
+  `String` is the one **nullary** collection kind, so it reuses the entire standard-collection
+  machine — the shared `{ buffer, len, cap, used }` header, `realloc` growth, move-on-assign,
+  never `Copy`, and the `DropTarget::Collection` scope-exit `free` — and needs no new
+  `Type` / `HirType` variant in any slice. Its buffer is a byte run, so `len` and `clear` fall
+  out of the existing kind-agnostic entries and only appending is new. `String` mangles as
+  `strbuf`, which cannot collide with the primitive `string`.
+- `semantic`: the "a collection's bare name is not a type" rule now applies only to kinds that
+  actually take arguments (`Vec`, `HashMap`, `BTreeMap`); a nullary kind resolves directly.
+  `Type`'s `Display` omits `<>` for a nullary collection, so diagnostics read `String`.
+- `docs`: the README alpha memory warning is narrowed. A `String` builder's buffer is freed at
+  scope exit like any other collection; what still leaks is the *anonymous* heap `string` that
+  `+`, interpolation, and `String::to_string` produce, which no tracked binding owns.
+
+### Notes
+- `.push_str` accepts a `string` or an immutable `&string` and **reads** it rather than moving
+  it, the same latitude `+` gives its operands.
+- `.to_string()` copies. A borrowed view into the builder's buffer would be free, but a later
+  `push_str` may reallocate and leave it dangling, and the borrow checker does not yet track a
+  builder's outstanding views — undefined behavior is not a valid outcome for well-formed input.
+- Deferred and documented in §2.8: `.push(char)`, `String::with_capacity`, `String::from`,
+  `.is_empty()`, a borrowed `.as_str()`, `String` as a collection element or map key, and
+  `String` in an interpolation hole or as a `+` operand (each gives a clean diagnostic today).
+
 ## [1.79.0] - 2026-08-29
 
 ### Added
