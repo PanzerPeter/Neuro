@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-08-29
+
+### Fixed
+
+- **BUG-015: `==` on a type with no equality passed the type checker and crashed the
+  backend.** `a == b` was accepted for any two operands of compatible type, so a struct
+  with no `impl PartialEq` — and equally an array, a tuple, an enum, a collection, or a
+  non-string reference — reached codegen, which asked the aggregate value for its integer
+  variant and aborted the compiler with `Found StructValue ... but expected the IntValue
+  variant`. Equality is now checked against the types that have it: the scalars, `string`
+  (and a `&string` slice), and a newtype forwarding one of those. A struct without the
+  impl is named along with the trait it is missing; every other operand is reported as the
+  operator error the ordering comparisons already gave. The supported path — a `Copy`
+  struct with an explicit `impl PartialEq` — is unchanged, and so is `==` on a newtype
+  over a scalar.
+- A generic body types `a == b` as its type parameter and is checked once as a template,
+  so an instantiation whose argument is an aggregate could still reach the backend. HIR
+  lowering now refuses a binary operator whose operand type has no instruction sequence
+  and no operator-trait impl, and the LLVM backend answers an operand that is neither an
+  integer nor a float with an error rather than panicking — the whole family of
+  `into_int_value` aborts on this path is closed.
+- **BUG-014: a named argument was evaluated in declaration order, not source order.**
+  Binding permuted the arguments into the callee's declaration order, which is also the
+  order every later stage evaluates them in, so `combine(second: b(), first: a())` ran
+  `a()` first — the positional form `combine(b(), a())` ran `b()` first, and the two call
+  forms the specification calls equivalent could compute different answers. A call whose
+  permutation would reorder arguments that carry (or can observe) an effect is now
+  rewritten into a block that binds each of them to a temporary in the order it was
+  written and passes the temporaries in declaration order; each temporary carries its
+  parameter's declared type, so an argument is still typed by the parameter it binds to.
+  A call whose arguments are literals, or whose permutation moves nothing observable, is
+  still permuted in place and still compiles to the same IR as the positional call.
+- A bare block whose last statement calls a unit function aborted code generation with
+  `function call returned void when value expected`: the block's tail was read as its
+  value regardless of type. A `void` tail is now emitted as an ordinary statement, and the
+  block yields unit.
+
 ## [2.0.2] - 2026-08-29
 
 ### Fixed

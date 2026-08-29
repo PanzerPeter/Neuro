@@ -2,7 +2,7 @@
 
 use inkwell::basic_block::BasicBlock;
 use inkwell::values::*;
-use neuro_hir::{HirExpr, HirStmt};
+use neuro_hir::{HirExpr, HirStmt, HirType};
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -170,7 +170,14 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             self.codegen_stmt(stmt)?;
         }
-        let result = if let HirStmt::Expr(expr) = last {
+        // A `void`-typed tail is not a value: a block ending in a call to a unit function
+        // yields unit, and asking `codegen_expr` for its value would fail. It is emitted
+        // as an ordinary statement instead, like any other non-expression tail.
+        let value_tail = match last {
+            HirStmt::Expr(expr) => !matches!(expr.ty, HirType::Void),
+            _ => false,
+        };
+        let result = if let (true, HirStmt::Expr(expr)) = (value_tail, last) {
             let val = self.codegen_expr(expr)?;
             // The yielded place escapes the block, so it is moved out, not dropped here.
             self.mark_moved_for_drop(expr);

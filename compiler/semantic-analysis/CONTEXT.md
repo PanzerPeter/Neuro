@@ -165,6 +165,17 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-08-29: New public error `TypeError::MissingPartialEqImpl` (BUG-015). `==` / `!=` used to
+  accept any two operands of compatible type, so a struct with no `impl PartialEq` — and equally an
+  array, tuple, enum, collection or non-string reference — type-checked and then aborted the
+  backend. `check_binary_expr`'s equality arm now asks the new `has_builtin_equality`
+  (`expressions/operators.rs`) whether the operand type has equality without an impl: the scalars
+  (half-precision included), `string` after `peel_string_ref`, and a newtype forwarding one of those
+  (via `lookup_newtype_inner`, whose cycles are already rejected at registration). A `Type::Generic`
+  answers yes — a generic body is checked once as a template, so the instantiation is `hir-lowering`'s
+  to refuse. A struct operand is reported as the missing trait; every other operand reuses
+  `InvalidBinaryOperator`, which is what the ordering comparisons already gave. The operator-trait
+  dispatch above the arm is untouched, so an explicit `impl PartialEq` still compiles as before.
 - 2026-08-29: New public error `TypeError::FunctionUsedAsValue` (BUG-013). `Expr::Identifier`
   resolution consults `functions` and `generic_funcs` before falling through to
   `UndefinedVariable`, so a function name in value position is told apart from a name that

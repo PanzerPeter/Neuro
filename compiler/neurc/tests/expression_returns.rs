@@ -149,3 +149,24 @@ func main() -> i32 {
     // step1 = 20, step2 = 30, step3 = 15
     assert_eq!(exit_code, 15, "Expected exit code 15");
 }
+
+#[test]
+fn a_block_ending_in_a_unit_call_is_a_statement() {
+    // A block's tail expression is its value, but a call to a unit function has none.
+    // Asking codegen for one aborted the compiler with an internal error.
+    let test = CompileTest::new();
+    let source = r#"
+func note(n: i32) { }
+func main() -> i32 {
+    {
+        val step = 7
+        note(step)
+    }
+    return 0
+}
+"#;
+    let exit_code = test
+        .compile_and_run("block_unit_tail.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 0, "a block ending in a unit call yields unit");
+}

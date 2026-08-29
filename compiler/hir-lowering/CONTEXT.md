@@ -18,6 +18,14 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
 - thiserror — `LoweringError` derivation
 
 ## Notes
+- 2026-08-29: New public error `LoweringError::UnsupportedOperand` (BUG-015). `binary_result_type`
+  (`expressions/coercion.rs`) now refuses an operand type the backend has no instruction sequence
+  for, via the new `has_operator_lowering`: the scalars, `string`, a `&string` slice, and a newtype
+  forwarding one of those. The checker rejects a concrete aggregate operand itself; the path that
+  reaches here is a generic body, which types `a == b` as its type parameter and is checked once as
+  a template, so an instantiation with an aggregate argument used to arrive at codegen and abort it.
+  An operator-trait impl is dispatched to a method call in the `Expr::Binary` arm above, before
+  operand types are ever combined, so a struct with `impl PartialEq` never reaches the check.
 - 2026-08-29: Growable `String`. `collection_kind` recognizes `"String"`; the new
   `nullary_collection` helper lets `resolve_type` accept the bare name as a complete type, checked
   *after* the struct/enum/newtype arms so a user declaration shadows it. `lower_collection_new`

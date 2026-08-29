@@ -149,9 +149,27 @@ val r = scale(2.0, 3.0)      // no names accepted
   accept named arguments. Closures, the panic builtins, enum variants, and newtype
   constructors declare no parameter names, so a label on one is an error.
 
-Arguments are bound to parameters before type checking and produce exactly the IR the
-equivalent positional call produces — a named argument costs nothing at runtime, and the
-arguments are evaluated in the callee's parameter order.
+Arguments are bound to parameters before type checking, and are **evaluated in the order
+they are written**, exactly as a positional call evaluates them left to right. Naming them
+therefore changes which parameter each value reaches, never when it is computed:
+
+```neuro
+func bump(r: &mut i32) -> i32 { *r = *r + 1
+    return 0 }
+func combine(first: i32, second: i32) -> i32 { first * 10 + second }
+
+func main() -> i32 {
+    mut x = 0
+    // `bump` is written first, so it runs first and `x` is read as 1: the call is
+    // `combine(first: 1, second: 0)` and `n` is 10.
+    val n = combine(second: bump(&mut x), first: x)
+    return n - 10
+}
+```
+
+A call that only passes values costs nothing at runtime — it produces exactly the IR the
+equivalent positional call produces. A call that reorders arguments carrying effects binds
+each of them to a temporary first, which is one binding per argument and no other cost.
 
 ### Limitation
 

@@ -335,6 +335,17 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-08-29: Two internal-error aborts closed. `codegen_binary`
+  (`codegen/expressions/binary.rs`) checks that both coerced operands are integer or float values
+  before the operator match — every arm calls `into_int_value` / `into_float_value`, which *panic*
+  on a struct, array or pointer rather than returning an error — and answers one that is not with
+  `CodegenError::InvalidOperandType`. Semantic analysis and HIR lowering both reject such an operand
+  now, so this is the backstop rather than the diagnostic. `codegen_block_expr`
+  (`codegen/expressions/control_flow.rs`) reads a trailing `HirStmt::Expr` as the block's value only
+  when its type is not `HirType::Void`: a block ending in a call to a unit function has no value, and
+  asking for one failed with `function call returned void when value expected`. A `void` tail is
+  emitted through `codegen_stmt` like any other non-expression tail, which is also the shape the
+  named-argument hoisting rewrite produces for a unit call.
 - 2026-08-25: String-interpolation codegen. `codegen/expressions/interp.rs` renders each part
   to a `{ ptr, len }` fat pointer and concatenates them into one fresh `malloc`'d buffer
   (the result leaks like `+` concatenation does — an anonymous heap `string` is owned by no

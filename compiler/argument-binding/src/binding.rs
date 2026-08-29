@@ -1,28 +1,53 @@
 // Binding one call site's arguments to one callee's parameters.
 
 use ast_types::Expr;
-use shared_types::{Identifier, Span};
+use shared_types::Span;
 
 use crate::errors::ArgumentError;
+use crate::hoisting;
 use crate::signatures::Signature;
 
-/// Rewrite `args` into `sig`'s declaration order and empty `labels`.
+/// What binding did to the call expression, which is what the walk needs to know to
+/// carry on through it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Bound {
+    /// The call is still a call: its arguments were permuted in place, or left alone.
+    InPlace,
+    /// The call was replaced by a block binding its arguments to temporaries in source
+    /// order. The trailing call inside it is already bound.
+    Hoisted,
+}
+
+/// Rewrite `call`'s arguments into `sig`'s declaration order and empty its labels.
 ///
 /// A call written entirely positionally against a signature that requires no name is
 /// already in declaration order, so it is left exactly as it was — arity and types stay
 /// the type checker's to report. Everything else is bound here, which is the only place
 /// a label is ever matched against a parameter.
+///
+/// A permutation that would move two effect-carrying arguments past each other is not
+/// applied to the arguments in place: the call is replaced by a block that binds them to
+/// temporaries in source order (`hoisting`), which is reported as [`Bound::Hoisted`] so
+/// the walk knows not to bind the finished call inside it a second time.
 pub(crate) fn bind(
-    args: &mut Vec<Expr>,
-    labels: &mut Vec<Option<Identifier>>,
+    call: &mut Expr,
     sig: &Signature,
     callee: &str,
     span: Span,
-) -> Result<(), ArgumentError> {
+) -> Result<Bound, ArgumentError> {
+    let Expr::Call {
+        func,
+        args,
+        arg_labels: labels,
+        ..
+    } = call
+    else {
+        return Ok(Bound::InPlace);
+    };
     let named_from = labels.iter().position(Option::is_some);
     if named_from.is_none() && !sig.has_required_label() {
         labels.clear();
-        return Ok(());
+        return Ok(Bound::InPlace);
     }
 
     if let Some(first_named) = named_from {
@@ -112,6 +137,15 @@ pub(crate) fn bind(
         }
     }
 
+    // Permuting the arguments also permutes the order they are evaluated in, because
+    // every later stage evaluates them where it finds them. That is invisible while the
+    // arguments only read values; when one of them carries an effect, the call is
+    // rewritten instead into a block that runs them in the order they were written.
+    if hoisting::reorders_effects(&order, args) && hoisting::callee_allows_hoisting(func) {
+        hoisting::hoist(call, &order, sig);
+        return Ok(Bound::Hoisted);
+    }
+
     let mut taken: Vec<Option<Expr>> = args.drain(..).map(Some).collect();
     for from in order {
         if let Some(arg) = taken.get_mut(from).and_then(Option::take) {
@@ -119,5 +153,5 @@ pub(crate) fn bind(
         }
     }
     labels.clear();
-    Ok(())
+    Ok(Bound::InPlace)
 }

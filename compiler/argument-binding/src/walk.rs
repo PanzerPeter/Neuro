@@ -7,11 +7,13 @@
 
 use ast_types::{Expr, Item, MatchArm, Stmt};
 
+use crate::binding::Bound;
 use crate::errors::ArgumentError;
 
 /// The callback shape. `dyn` rather than a generic parameter: the walk is deeply
-/// recursive and every level would otherwise be monomorphized per closure.
-pub(crate) type CallFn<'f> = &'f mut dyn FnMut(&mut Expr, &mut Vec<ArgumentError>);
+/// recursive and every level would otherwise be monomorphized per closure. It answers
+/// with what it did to the call, which decides how the walk continues through it.
+pub(crate) type CallFn<'f> = &'f mut dyn FnMut(&mut Expr, &mut Vec<ArgumentError>) -> Bound;
 
 pub(crate) fn walk_items(items: &mut [Item], f: CallFn, errors: &mut Vec<ArgumentError>) {
     for item in items {
@@ -131,8 +133,22 @@ fn walk_expr(expr: &mut Expr, f: CallFn, errors: &mut Vec<ArgumentError>) {
     // A call is bound before its arguments are walked: binding only reorders them, so a
     // nested call is reached either way, and reporting the outer call first puts the
     // diagnostics in source order.
-    if matches!(expr, Expr::Call { .. }) {
-        f(expr, errors);
+    if matches!(expr, Expr::Call { .. }) && f(expr, errors) == Bound::Hoisted {
+        // The call is now a block binding its arguments to temporaries, and the call it
+        // ends with is already bound. Only the initializers are walked: visiting that
+        // call again would re-bind a call whose labels are gone, which is exactly the
+        // shape a required label rejects.
+        if let Expr::Block { stmts, .. } = expr {
+            for stmt in stmts {
+                if let Stmt::VarDecl {
+                    init: Some(init), ..
+                } = stmt
+                {
+                    walk_expr(init, f, errors);
+                }
+            }
+        }
+        return;
     }
 
     match expr {

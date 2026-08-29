@@ -61,6 +61,13 @@ pub enum LoweringError {
     #[error("unresolved call target '{target}' during lowering")]
     UnresolvedCall { target: String },
 
+    /// A binary operator reached lowering with an operand type no instruction can
+    /// take and no operator-trait impl covers. The checker rejects a concrete operand
+    /// directly; a generic body types `a == b` as its type parameter and is checked once
+    /// as a template, so an instantiation is the path that reaches here.
+    #[error("cannot apply binary operator {op} to operands of type '{ty}': '{ty}' has no built-in {op} and no operator-trait impl providing it")]
+    UnsupportedOperand { op: String, ty: String },
+
     /// An expression appeared in a position whose type the well-typed contract
     /// guarantees against (e.g. a `??` operator the checker rejects, or indexing a
     /// non-array). Carries a short description for diagnosis.

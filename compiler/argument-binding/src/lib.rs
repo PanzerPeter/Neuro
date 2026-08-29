@@ -6,9 +6,15 @@
 //! parameter list, permutes the arguments into declaration order, and clears the labels,
 //! so type checking, HIR lowering, and both backends see the positional call they always
 //! saw and a named argument costs nothing at runtime.
+//!
+//! Permuting the arguments also permutes the order they are evaluated in, which a program
+//! whose arguments carry effects can tell apart from the order it wrote. Such a call is
+//! rewritten into a block that binds its arguments to temporaries in source order and
+//! passes them in declaration order instead — see `hoisting`.
 
 mod binding;
 mod errors;
+mod hoisting;
 mod signatures;
 mod walk;
 
@@ -20,6 +26,7 @@ use shared_types::Identifier;
 
 pub use errors::ArgumentError;
 
+use binding::Bound;
 use signatures::{Lookup, SignatureTable};
 
 /// Rewrite `items` so every call's arguments sit in the callee's declaration order with
@@ -31,9 +38,12 @@ use signatures::{Lookup, SignatureTable};
 pub fn bind_arguments(items: &mut [Item]) -> Result<(), Vec<ArgumentError>> {
     let table = SignatureTable::build(items);
     let mut errors = Vec::new();
-    let mut visit = |expr: &mut Expr, errors: &mut Vec<ArgumentError>| {
-        if let Err(error) = bind_call(expr, &table) {
+    let mut visit = |expr: &mut Expr, errors: &mut Vec<ArgumentError>| match bind_call(expr, &table)
+    {
+        Ok(bound) => bound,
+        Err(error) => {
             errors.push(error);
+            Bound::InPlace
         }
     };
     walk::walk_items(items, &mut visit, &mut errors);
@@ -46,16 +56,15 @@ pub fn bind_arguments(items: &mut [Item]) -> Result<(), Vec<ArgumentError>> {
 }
 
 /// Bind one `Expr::Call`, resolving its callee against the program's declarations.
-fn bind_call(expr: &mut Expr, table: &SignatureTable) -> Result<(), ArgumentError> {
+fn bind_call(expr: &mut Expr, table: &SignatureTable) -> Result<Bound, ArgumentError> {
     let Expr::Call {
         func,
-        args,
         arg_labels,
         span,
         ..
     } = expr
     else {
-        return Ok(());
+        return Ok(Bound::InPlace);
     };
     let (callee, lookup) = match func.as_ref() {
         Expr::Identifier(ident) => (ident.name.clone(), table.function(&ident.name)),
@@ -71,22 +80,20 @@ fn bind_call(expr: &mut Expr, table: &SignatureTable) -> Result<(), ArgumentErro
         _ => ("this call".to_string(), Lookup::Unknown),
     };
 
+    let span = *span;
     match lookup {
-        Lookup::Known(sig) => binding::bind(args, arg_labels, sig, &callee, *span),
+        Lookup::Known(sig) => binding::bind(expr, sig, &callee, span),
         Lookup::Unknown => match first_label(arg_labels) {
-            Some(_) => Err(ArgumentError::LabelsUnsupported {
-                callee,
-                span: *span,
-            }),
-            None => Ok(()),
+            Some(_) => Err(ArgumentError::LabelsUnsupported { callee, span }),
+            None => Ok(Bound::InPlace),
         },
         Lookup::Ambiguous => match first_label(arg_labels) {
             Some(label) => Err(ArgumentError::AmbiguousMethodLabels {
                 callee,
                 label,
-                span: *span,
+                span,
             }),
-            None => Ok(()),
+            None => Ok(Bound::InPlace),
         },
     }
 }

@@ -452,6 +452,17 @@ impl<'ctx> CodegenContext<'ctx> {
         let lhs = self.coerce_if_needed(lhs, target_llvm, left_ty)?;
         let rhs = self.coerce_if_needed(rhs, target_llvm, left_ty)?;
 
+        // Every arm below asks its operands for an integer or float value, and asking a
+        // struct, array or pointer value for one panics rather than returning an error.
+        // Semantic analysis and lowering both reject an aggregate operand, so reaching
+        // here means one slipped through: report it instead of aborting the compiler.
+        if !is_scalar_operand(lhs) || !is_scalar_operand(rhs) {
+            return Err(CodegenError::InvalidOperandType {
+                op: op.to_string(),
+                ty: format!("{:?}", left_ty),
+            });
+        }
+
         match op {
             // Arithmetic operators
             BinaryOp::Add => {
@@ -807,4 +818,11 @@ impl<'ctx> CodegenContext<'ctx> {
             )),
         }
     }
+}
+
+/// Whether an operand is one of the scalar LLVM values the binary instructions take.
+/// A struct (an aggregate or a string fat pointer), an array, or a pointer is not, and
+/// inkwell's `into_int_value` / `into_float_value` panic on one rather than erroring.
+fn is_scalar_operand(value: BasicValueEnum<'_>) -> bool {
+    value.is_int_value() || value.is_float_value()
 }

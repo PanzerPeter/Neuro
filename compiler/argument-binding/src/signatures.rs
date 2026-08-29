@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use ast_types::{ImplDef, Item, Parameter, TraitDef};
+use ast_types::{GenericArg, GenericParam, ImplDef, Item, Parameter, TraitDef, Type};
 
 /// What one parameter accepts at a call site.
 #[derive(Debug, Clone, PartialEq)]
@@ -15,6 +15,11 @@ pub(crate) struct ParamBinding {
     pub(crate) internal: String,
     /// Whether omitting that name is an error (the `external internal:` form).
     pub(crate) required: bool,
+    /// The parameter's declared type, when restating it at a call site is meaningful —
+    /// see [`annotatable_type`]. It annotates a temporary the hoisting rewrite binds an
+    /// argument to, so the argument is still typed by its parameter rather than by
+    /// itself. `None` leaves the temporary to inference, which is always sound.
+    pub(crate) ty: Option<Type>,
 }
 
 /// A callee's parameters in declaration order — the order arguments are bound into.
@@ -24,7 +29,7 @@ pub(crate) struct Signature {
 }
 
 impl Signature {
-    fn from_params(params: &[Parameter]) -> Self {
+    fn from_params(params: &[Parameter], generics: &[GenericParam]) -> Self {
         Signature {
             params: params
                 .iter()
@@ -32,9 +37,24 @@ impl Signature {
                     name: p.label.call_site_name(&p.name).map(str::to_string),
                     internal: p.name.name.clone(),
                     required: p.label.is_required(),
+                    ty: annotatable_type(&p.ty, generics),
                 })
                 .collect(),
         }
+    }
+
+    /// The same signature with every parameter type dropped.
+    ///
+    /// A method is matched by name across every `impl` and `trait` declaring it, and two
+    /// declarations that agree on their parameter *names* need not agree on their types.
+    /// Keeping the types would either make such a pair disagree — rejecting a named
+    /// argument that binds correctly today — or annotate a temporary with the wrong
+    /// type, so a method signature carries none.
+    fn without_types(mut self) -> Self {
+        for param in &mut self.params {
+            param.ty = None;
+        }
+        self
     }
 
     /// Whether any parameter must be named, which is what forces an all-positional
@@ -101,8 +121,10 @@ impl SignatureTable {
         for item in items {
             match item {
                 Item::Function(def) => {
-                    self.functions
-                        .insert(def.name.name.clone(), Signature::from_params(&def.params));
+                    self.functions.insert(
+                        def.name.name.clone(),
+                        Signature::from_params(&def.params, &def.generics),
+                    );
                 }
                 Item::Impl(def) => self.collect_impl(def),
                 Item::Trait(def) => self.collect_trait(def),
@@ -116,13 +138,13 @@ impl SignatureTable {
 
     fn collect_impl(&mut self, def: &ImplDef) {
         for method in &def.methods {
-            let sig = Signature::from_params(&method.params);
+            let sig = Signature::from_params(&method.params, &def.generics);
             match method.self_param {
                 None => {
                     self.assoc
                         .insert((def.type_name.name.clone(), method.name.name.clone()), sig);
                 }
-                Some(_) => self.record_method(&method.name.name, sig),
+                Some(_) => self.record_method(&method.name.name, sig.without_types()),
             }
         }
     }
@@ -130,7 +152,10 @@ impl SignatureTable {
     fn collect_trait(&mut self, def: &TraitDef) {
         for method in &def.methods {
             if method.self_param.is_some() {
-                self.record_method(&method.name.name, Signature::from_params(&method.params));
+                self.record_method(
+                    &method.name.name,
+                    Signature::from_params(&method.params, &[]).without_types(),
+                );
             }
         }
     }
@@ -170,4 +195,49 @@ impl SignatureTable {
             None => Lookup::Unknown,
         }
     }
+}
+
+/// A parameter's declared type, or `None` when restating it at a call site would not mean
+/// the same thing there.
+///
+/// A type parameter of the callee (`T`), `Self`, and an `impl Trait` bound all name
+/// something that exists only inside the declaration. A `dyn Trait` and a function type
+/// are dropped too: an argument reaches them through a coercion the argument position
+/// applies and a binding does not.
+fn annotatable_type(ty: &Type, generics: &[GenericParam]) -> Option<Type> {
+    is_annotatable(ty, generics).then(|| ty.clone())
+}
+
+fn is_annotatable(ty: &Type, generics: &[GenericParam]) -> bool {
+    match ty {
+        Type::Named(name) => names_a_concrete_type(&name.name, generics),
+        Type::Reference { inner, .. } => is_annotatable(inner, generics),
+        Type::Array { element, size, .. } => {
+            is_annotatable(element, generics)
+                && match size {
+                    ast_types::ArraySize::Literal(_) => true,
+                    ast_types::ArraySize::Const(name) => {
+                        names_a_concrete_type(&name.name, generics)
+                    }
+                }
+        }
+        Type::Tuple { elements, .. } => elements.iter().all(|e| is_annotatable(e, generics)),
+        Type::Generic { name, args, .. } => {
+            names_a_concrete_type(&name.name, generics)
+                && args.iter().all(|arg| match arg {
+                    GenericArg::Type(ty) => is_annotatable(ty, generics),
+                    GenericArg::Const { .. } => true,
+                })
+        }
+        Type::ImplTrait { .. }
+        | Type::DynTrait { .. }
+        | Type::Function { .. }
+        | Type::Tensor { .. } => false,
+    }
+}
+
+/// Whether `name` denotes a type the call site can name too, rather than one of the
+/// callee's own type parameters or its `Self`.
+fn names_a_concrete_type(name: &str, generics: &[GenericParam]) -> bool {
+    name != "Self" && !generics.iter().any(|g| g.name.name == name)
 }

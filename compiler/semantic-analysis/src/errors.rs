@@ -190,6 +190,13 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("cannot compare values of type '{type_name}' with `{op}` at {span:?}: '{type_name}' implements no `PartialEq`; add `impl PartialEq for {type_name}` (the struct must derive `Copy`) or compare the fields")]
+    MissingPartialEqImpl {
+        type_name: String,
+        op: String,
+        span: Span,
+    },
+
     #[error("operator trait '{trait_name}' can only be implemented for a `Copy` type; '{type_name}' at {span:?} is not `Copy`")]
     OperatorTraitRequiresCopy {
         trait_name: String,

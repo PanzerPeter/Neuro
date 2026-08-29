@@ -23,6 +23,34 @@ Bind every call site's arguments to the callee's parameters in declaration order
   and empties `arg_labels`. Type checking, HIR lowering, and both backends therefore see the
   positional call they always saw, which is what makes a named argument cost nothing at
   runtime — it produces the same IR as writing the arguments in order.
+- **Permuting the arguments also permutes when they are evaluated, so a call that would
+  notice is rewritten instead** (`hoisting.rs`). Every later stage evaluates an argument
+  where it finds it, so a bare permutation ran `f(second: b(), first: a())` as `a()` then
+  `b()` — the opposite of what was written, and of what the positional form does.
+  `reorders_effects` looks at the arguments the permutation moves past each other and
+  ignores the ones nothing can observe (a literal, a path, and those under `paren`/`as`); a
+  plain variable read counts, since another argument's `&mut` borrow can change it. When two
+  observable arguments would swap, `hoist` replaces the call with
+  `{ val __narg0 = <first written>; …; callee(<in declaration order>) }` — temporaries in
+  source order, the call after them already bound. Each temporary carries its parameter's
+  own type annotation (`ParamBinding::ty`), because a binding is typed by its initializer
+  while an argument is typed by its parameter, and `Vec::new()` or an `i64` literal would
+  otherwise lose that. The annotation is dropped when it would not mean the same thing at a
+  call site — a type parameter of the callee, `Self`, `impl Trait`, `dyn Trait`, a function
+  type — and for every method signature, which is agreed across impls by parameter *name*
+  and so cannot promise a type. Only these calls give up the identical-IR property; a call
+  of literals, or one whose permutation moves nothing observable, is still permuted in place.
+- **The rewrite is skipped when the callee is an expression rather than a name.** A method's
+  receiver is evaluated before its arguments, so hoisting them ahead of a computed receiver
+  (`make().m(b: …, a: …)`) would invert that pair to fix the argument pair.
+  `callee_allows_hoisting` therefore takes an identifier, a `Type::member` path, and a method
+  on a *place* receiver — a place resolves to an address, so when it is read is not
+  observable — and leaves anything else permuted in place.
+- **The walk is told what binding did.** `CallFn` answers `Bound::InPlace` or
+  `Bound::Hoisted`; on the latter `walk_expr` descends only into the temporaries'
+  initializers, since the trailing call is already bound. Visiting that call again would
+  re-bind a call whose labels are gone, which is exactly the shape a required `external`
+  label rejects.
 - **The pass runs on the whole program, after module resolution and before type checking.**
   A call names its callee and the callee may be declared in any file, so the table cannot be
   built until every module is merged; and the permutation must be in place before the type
