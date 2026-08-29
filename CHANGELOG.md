@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-08-29
+
+A stabilisation pass: a combination sweep over the most recently landed features, the two
+fixes it and the open bug register called for, and one new register entry.
+
+### Fixed
+
+- `parser`: `return`, `break`, and `continue` are accepted as an unbraced `match` arm body
+  (BUG-012). `0 => return 1,` failed with `unexpected token Return, expected expression`
+  while `0 => { return 1 }` compiled and ran, so the braces carried no information. The arm
+  body now wraps such a statement in the single-statement block the braced form already
+  produced — the arm-divergence rule types it unchanged, and no existing program changes
+  meaning. A comma additionally terminates a valueless `return` / `break`, which is what a
+  comma-separated arm needs and which no expression can begin with.
+- `semantic`: a function name in value position reports that it is a function (BUG-013).
+  `apply_twice(inc, 10)` claimed `undefined variable 'inc'` — denying a name the program
+  declares — because functions live in their own namespace and resolution fell through to
+  the variable lookup. The new `TypeError::FunctionUsedAsValue` names the function and
+  suggests the closure wrapper. There is still no fn-item-to-fn-pointer coercion; only the
+  diagnostic changed.
+
+### Added
+
+- `tests`: regression coverage for both fixes — four `match` arm bodies in
+  `pattern_matching.rs` (valued and valueless `return`, `break` with a value, `continue`,
+  valueless `break`) and three diagnostics in `functions.rs`, including one asserting that
+  a genuinely undeclared name still reports `undefined variable`.
+- `docs`: BUG-014 filed in `docs/BUGS.md` — a named call evaluates its arguments in the
+  callee's declaration order while the positional form evaluates them in source order,
+  because argument binding permutes the argument expressions themselves. The specification
+  calls the two forms equivalent and does not define evaluation order, so the entry asks
+  for a ruling rather than proposing a patch.
+
 ## [2.0.0] - 2026-08-29
 
 **Phase 1 — Core Language is complete.** Every sub-phase 1A–1H has shipped, so this is the

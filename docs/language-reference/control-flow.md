@@ -461,6 +461,24 @@ func classify(n: i32) -> i32 {
 }
 ```
 
+An arm body is an expression, and may also be a bare `return`, `break`, or
+`continue` — the statement that leaves the enclosing function or loop instead of
+producing a value for the arm:
+
+```neuro
+func first_even(limit: i32) -> i32 {
+    mut i: i32 = 0
+    loop {
+        i = i + 1
+        match i % 2 {
+            0 => break i,
+            _ => continue
+        }
+        if i > limit { return 0 - 1 }
+    }
+}
+```
+
 Enum variants deconstruct and bind their payloads (`E::Tuple(a)`,
 `E::Struct { field }`). A `match` must be exhaustive. See
 [Expressions → Match Expressions](expressions.md) for the full pattern grammar,

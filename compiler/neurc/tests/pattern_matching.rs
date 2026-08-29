@@ -138,3 +138,98 @@ func main() -> i32 { f(E::A) }
         "a non-exhaustive match must fail to compile"
     );
 }
+
+// `return` / `break` / `continue` are statements, not expressions, so an unbraced one
+// in arm position used to fail with "unexpected token Return, expected expression"
+// while the braced form `0 => { return 1 }` compiled and ran.
+
+#[test]
+fn regression_bare_return_as_match_arm_body_parses() {
+    let test = CompileTest::new();
+    let source = r#"
+func f(n: i32) -> i32 {
+    match n {
+        0 => return 1,
+        _ => 2
+    }
+}
+
+func main() -> i32 { f(0) + f(9) }
+"#;
+    let exit = test
+        .compile_and_run("match_arm_return.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 3);
+}
+
+#[test]
+fn regression_bare_break_and_continue_as_match_arm_bodies_parse() {
+    let test = CompileTest::new();
+    let source = r#"
+func first_hit(limit: i32) -> i32 {
+    mut i: i32 = 0
+    val found: i32 = loop {
+        i = i + 1
+        match i {
+            7 => break i * 6,
+            _ => continue
+        }
+    }
+    if found > limit { limit } else { found }
+}
+
+func main() -> i32 { first_hit(100) }
+"#;
+    let exit = test
+        .compile_and_run("match_arm_break.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 42);
+}
+
+#[test]
+fn regression_valueless_return_as_match_arm_body_parses() {
+    let test = CompileTest::new();
+    let source = r#"
+func note(out: &mut String, n: i32) {
+    match n {
+        0 => return,
+        _ => out.push_str("x")
+    }
+}
+
+func main() -> i32 {
+    mut s = String::new()
+    note(&mut s, 0)
+    note(&mut s, 1)
+    note(&mut s, 2)
+    s.len() as i32
+}
+"#;
+    let exit = test
+        .compile_and_run("match_arm_bare_return.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 2);
+}
+
+#[test]
+fn regression_valueless_break_as_match_arm_body_parses() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut total: i32 = 0
+    mut i: i32 = 0
+    while i < 10 {
+        i = i + 1
+        match i {
+            5 => break,
+            _ => { total = total + i }
+        }
+    }
+    total
+}
+"#;
+    let exit = test
+        .compile_and_run("match_arm_bare_break.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 10);
+}

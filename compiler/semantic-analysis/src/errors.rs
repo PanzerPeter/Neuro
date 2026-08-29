@@ -21,6 +21,9 @@ pub enum TypeError {
     #[error("undefined function '{name}' at {span:?}")]
     UndefinedFunction { name: String, span: Span },
 
+    #[error("'{name}' at {span:?} is a function, not a value; functions are not first-class here — wrap it in a closure, e.g. `|x| {name}(x)`")]
+    FunctionUsedAsValue { name: String, span: Span },
+
     #[error("generic type parameter '{name}' at {span:?} shadows a built-in type name")]
     GenericParamShadowsBuiltin { name: String, span: Span },
 

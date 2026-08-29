@@ -76,6 +76,11 @@ them; an unknown target hits the existing `UnknownTypeName` check. Scope: type-a
 only (var/const/param/return/field/cast); alias as value constructor or path name is out of scope.
 
 ## Recent Updates
+- 2026-08-29: `match` arm bodies take a bare statement (BUG-012). `parse_match_arm` dispatches
+  `Return`/`Break`/`Continue` to `parse_stmt` and wraps the result in `Expr::Block`, which is
+  exactly the node a braced arm already produced, so nothing downstream sees a new shape. A
+  `Comma` also ends a valueless `return`/`break` (`parse_return_stmt`, `parse_break_stmt`) —
+  a comma cannot begin an expression, so it never hides a real value.
 - 2026-08-25: String interpolation. `parser/interpolation.rs` turns the lexer's text/hole
   chunks into `Expr::InterpString`: each hole's raw source is re-lexed, its token spans
   shifted onto absolute file coordinates, and parsed by a nested `Parser` at

@@ -79,6 +79,17 @@ impl TypeChecker {
                     // A const generic parameter used as a value in a generic body
                     // has its declared integer type.
                     Some(const_param_ty)
+                } else if self.functions.contains_key(&ident.name)
+                    || self.generic_funcs.contains_key(&ident.name)
+                {
+                    // The name exists, it just is not usable as a value: functions live
+                    // in their own namespace and there is no fn-item-to-value coercion,
+                    // so "undefined variable" would deny a name the program declares.
+                    self.record_error(TypeError::FunctionUsedAsValue {
+                        name: ident.name.clone(),
+                        span: ident.span,
+                    });
+                    None
                 } else {
                     self.record_error(TypeError::UndefinedVariable {
                         name: ident.name.clone(),
