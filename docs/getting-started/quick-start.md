@@ -73,6 +73,12 @@ echo $?
 
 The hello.nr program returns 26.
 
+The exit code is currently the only way a program reports a result. There is no `print`
+or `println` yet — the sole text a compiled binary writes is a panic diagnostic, which
+goes to stderr and then aborts the process. Printing to stdout is the first item of
+Phase 2; until it lands, every example in this repository is verified by its exit code
+(pinned in [`examples/expected.txt`](../../examples/expected.txt)).
+
 ## Understanding the Examples
 
 ### hello.nr
@@ -310,7 +316,7 @@ current compiler supports:
 - `import math`, `import ./utils::io`, `import math::{sqrt, sin}`, `as` renames, module aliases, variant imports, and `export import` re-export facades
 - Inline `module Name { ... }` blocks group items inside one file, under the same rules
 - Declarations and struct fields are private to their module until `export` opts them in
-- An implicit prelude puts `Option`, `Result`, `Some` / `None` / `Ok` / `Err`, and `println` / `print` in scope in every file with no `import`; `@no_prelude` on a file's first line opts out
+- An implicit prelude puts `Option`, `Result`, and `Some` / `None` / `Ok` / `Err` in scope in every file with no `import`; `@no_prelude` on a file's first line opts out
 - Named arguments: `connect("localhost", port: 8080)`, in any order after the positional
   ones. A parameter declared `external internal: T` *requires* the external name at the
   call site; one declared `_ internal: T` is positional-only
