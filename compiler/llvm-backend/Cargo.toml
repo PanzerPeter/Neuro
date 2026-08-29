@@ -14,7 +14,6 @@ neuro-hir = { path = "../infrastructure/neuro-hir" }
 diagnostics = { path = "../infrastructure/diagnostics" }
 source-location = { path = "../infrastructure/source-location" }
 inkwell = { workspace = true }
-anyhow = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-29
+
+**Phase 1 — Core Language is complete.** Every sub-phase 1A–1H has shipped, so this is the
+milestone release that closes the phase and opens Phase 2 (Tensors). The language surface a
+general-purpose program needs is in: primitives and casts, ownership with a borrow checker,
+arrays, tuples, structs, enums and pattern matching, generics, traits with static and dynamic
+dispatch, closures, `Option` / `Result` with `?` and `??`, the standard collections, multi-file
+modules with an implicit prelude, string interpolation, and named arguments. No language feature
+is added here — the version number is the deliverable, alongside the cleanup below.
+
+### Removed
+
+- `build`: twenty dependencies that no crate referenced. `shared-types` and `source-location`
+  dropped `serde`, `shared-types` also `thiserror`; `diagnostics` dropped `miette` and
+  `source-location`; `project-config` and `semantic-analysis` dropped `anyhow`, as did
+  `llvm-backend`; `lexical-analysis` dropped `unicode-segmentation` and `source-location`;
+  `syntax-parsing` and `semantic-analysis` dropped `source-location`; `control-flow` dropped
+  `shared-types` and `diagnostics`; `neurc` dropped `shared-types`, `source-location`,
+  `project-config`, `lexical-analysis`, `control-flow`, and `clap_complete`. `neurc` reaches the
+  lexer through `syntax-parsing::parse`, which is why it never named the lexer itself.
+- `build`: eleven `[workspace.dependencies]` declarations no member ever claimed — `miette`,
+  `unicode-segmentation`, `clap_complete`, `proptest`, and the whole Concurrency (`rayon`,
+  `crossbeam`), Utilities (`itertools`, `once_cell`, `parking_lot`), and LSP (`tower-lsp`,
+  `lsp-types`) blocks. A phase that needs one declares it then.
+
+### Changed
+
+- `docs`: `compiler/control-flow/CONTEXT.md` now states what the slice is. It claimed to enable
+  unreachable-code detection and return-path analysis; both actually live in `semantic-analysis`
+  and neither waits on it. The slice has no caller, `build_cfg()` returns an empty graph, and the
+  file says so.
+- `docs`: `compiler/neurc/CONTEXT.md` Shared Kernel matches its manifest again after the
+  dependency removals.
+- `docs`: `docs/compiler/components/lexical-analysis.md` dropped two claims the slice does not
+  make good on — a `unicode-segmentation` dependency it no longer has, and string interning for
+  identifiers, which it has never done.
+
 ## [1.80.0] - 2026-08-29
 
 ### Added

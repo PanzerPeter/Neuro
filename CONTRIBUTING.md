@@ -4,11 +4,11 @@ Thank you for your interest in contributing to the Neuro programming language co
 
 ## Project Status
 
-Neuro is in Phase 1 (Core Language, v1.x), the umbrella phase covering the full
-general-purpose language. It is divided into lettered sub-phases implemented strictly in
-dependency order; finishing all of them ships **v2.0.0** and opens Phase 2 (Tensors).
+Phase 1 (Core Language) is complete: the full general-purpose language surface shipped as
+**v2.0.0**. Neuro is now in Phase 2 (Tensors, v2.x). A phase is divided into lettered
+sub-phases implemented strictly in dependency order; finishing all of Phase 2 ships v3.0.0.
 
-Per-sub-phase status lives in exactly one place — the
+Per-phase status lives in exactly one place — the
 [Quick Roadmap](README.md#quick-roadmap). What each release changed is in
 [CHANGELOG.md](CHANGELOG.md); neither is restated here, so neither can go stale here.
 
@@ -158,7 +158,7 @@ compiler/
 ├── syntax-parsing/          # Parser slice (depends on lexical-analysis by design)
 ├── semantic-analysis/       # Type checker slice
 ├── hir-lowering/            # AST → typed HIR lowering slice (1D)
-├── control-flow/            # CFG analysis slice (not yet active)
+├── control-flow/            # CFG data structures; no caller yet
 ├── llvm-backend/            # LLVM 20 / inkwell 0.9 codegen slice
 ├── mlir-backend/            # MLIR / melior slice (1D+, off-by-default `mlir` feature)
 │

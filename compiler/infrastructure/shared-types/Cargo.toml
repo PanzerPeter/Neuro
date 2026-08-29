@@ -7,9 +7,5 @@ authors.workspace = true
 license-file.workspace = true
 publish.workspace = true
 
-[dependencies]
-serde = { workspace = true }
-thiserror = { workspace = true }
-
 [lib]
 path = "src/lib.rs"

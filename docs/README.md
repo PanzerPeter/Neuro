@@ -1,6 +1,6 @@
 # Neuro Documentation
 
-**Status**: Alpha. Phase 1 (Core Language) is in progress. Per-sub-phase status lives in one place, the [Quick Roadmap](../README.md#quick-roadmap); what each release changed is in [CHANGELOG.md](../CHANGELOG.md). The feature list below describes what the compiler accepts today.
+**Status**: Alpha. Phase 1 (Core Language) is complete; Phase 2 (Tensors and MLIR) is open. Per-phase status lives in one place, the [Quick Roadmap](../README.md#quick-roadmap); what each release changed is in [CHANGELOG.md](../CHANGELOG.md). The feature list below describes what the compiler accepts today.
 
 ## Quick Links
 

@@ -10,7 +10,6 @@ publish.workspace = true
 [dependencies]
 serde = { workspace = true }
 toml = { workspace = true }
-anyhow = { workspace = true }
 thiserror = { workspace = true }
 
 [lib]
