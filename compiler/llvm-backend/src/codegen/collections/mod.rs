@@ -1,11 +1,11 @@
-// Code generation for the standard collections `Vec<T>`, `HashMap<K, V>`, and
-// `BTreeMap<K, V>`.
+// Code generation for the standard collections `Vec<T>`, `HashMap<K, V>`,
+// `BTreeMap<K, V>`, and the growable text buffer `String`.
 //
-// All three are values of one header type — `{ ptr buffer, i64 len, i64 cap, i64 used }`
+// All are values of one header type — `{ ptr buffer, i64 len, i64 cap, i64 used }`
 // — held in the owner's stack slot, with the elements in a single heap buffer. The
 // buffer's layout is per kind: a plain element array for `Vec`, an array of
-// `{ i8 state, K key, V value }` probe slots for `HashMap`, and a key-sorted array of
-// `{ K key, V value }` slots for `BTreeMap`.
+// `{ i8 state, K key, V value }` probe slots for `HashMap`, a key-sorted array of
+// `{ K key, V value }` slots for `BTreeMap`, and a byte run for `String`.
 //
 // Operations that need a loop (probing, binary search, growth) are emitted once per
 // concrete instantiation as a private helper function rather than inlined at every call
@@ -13,6 +13,7 @@
 
 mod keys;
 mod maps;
+mod strings;
 mod vectors;
 
 use inkwell::types::{BasicType, BasicTypeEnum, StructType};
@@ -41,9 +42,9 @@ const TEMPORARY_BINDING: &str = "__collection_temporary";
 const INITIAL_CAPACITY: u64 = 8;
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// Lower `Vec::new()` / `HashMap::new()` / `BTreeMap::new()`: a header with a null
-    /// buffer and zero counts. Nothing is allocated until the first insertion, so an
-    /// empty collection costs no heap traffic.
+    /// Lower `Vec::new()` / `HashMap::new()` / `BTreeMap::new()` / `String::new()`: a
+    /// header with a null buffer and zero counts. Nothing is allocated until the first
+    /// insertion, so an empty collection costs no heap traffic.
     pub(crate) fn codegen_collection_new(&mut self) -> CodegenResult<BasicValueEnum<'ctx>> {
         Ok(self.collection_header_type().const_zero().into())
     }
@@ -94,6 +95,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 result_ty,
                 args,
             )?)),
+            (CollectionKind::String, "push_str") => {
+                self.codegen_string_push_str(header, args)?;
+                Ok(None)
+            }
+            (CollectionKind::String, "to_string") => {
+                Ok(Some(self.codegen_string_to_owned(header)?))
+            }
             (CollectionKind::HashMap | CollectionKind::BTreeMap, _) => {
                 self.codegen_map_method(kind, method, header, &params, result_ty, args)
             }
@@ -117,7 +125,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// `collection.clear()` — reset the counts and wipe the allocated slots. The buffer
     /// is retained so refilling does not reallocate, and the elements themselves are
-    /// `Copy`-or-`string` values with nothing of their own to release.
+    /// `Copy`-or-`string`-or-byte values with nothing of their own to release.
     ///
     /// The wipe matters for the hash map: a stale `FULL` slot state would still answer
     /// lookups after the length reached zero. `EMPTY` is state zero, so zeroing the
@@ -153,13 +161,15 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// The byte size of one buffer slot: the element for a `Vec`, the whole
-    /// key/value/state record for a map.
+    /// key/value/state record for a map, one byte for a `String`.
     fn collection_slot_stride(
         &mut self,
         kind: CollectionKind,
         params: &[Type],
     ) -> CodegenResult<IntValue<'ctx>> {
         let slot_ty = match kind {
+            // A `String`'s buffer is a byte run, so its slot is one byte.
+            CollectionKind::String => self.context.i8_type().into(),
             CollectionKind::Vec => self.collection_value_type(&collection_arg(params, 0)?)?,
             CollectionKind::HashMap | CollectionKind::BTreeMap => self
                 .map_slot_type(

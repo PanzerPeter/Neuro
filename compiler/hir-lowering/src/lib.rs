@@ -517,9 +517,10 @@ fn mangle_type(ty: &HirType) -> String {
         }
         HirType::DynObject(name) => format!("dyn_{}", name),
         HirType::Function { .. } => "fn".to_string(),
+        HirType::Collection { kind, args } if args.is_empty() => kind.mangle_tag().to_string(),
         HirType::Collection { kind, args } => {
             let parts: Vec<String> = args.iter().map(mangle_type).collect();
-            format!("{}_{}", kind.name().to_lowercase(), parts.join("_"))
+            format!("{}_{}", kind.mangle_tag(), parts.join("_"))
         }
     }
 }

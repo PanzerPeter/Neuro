@@ -1,4 +1,5 @@
-//! Lowering for the standard collections `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`.
+//! Lowering for the standard collections `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`,
+//! and the growable text buffer `String`.
 //!
 //! The type checker has already validated element/key types and method arity, so this
 //! only re-derives the resolved types the HIR must carry. The method table is
@@ -22,19 +23,37 @@ pub(crate) fn collection_kind(name: &str) -> Option<HirCollectionKind> {
         "Vec" => Some(HirCollectionKind::Vec),
         "HashMap" => Some(HirCollectionKind::HashMap),
         "BTreeMap" => Some(HirCollectionKind::BTreeMap),
+        "String" => Some(HirCollectionKind::String),
+        _ => None,
+    }
+}
+
+/// The collection named by `name` when it takes no type arguments, so its bare name is
+/// already a complete type annotation.
+pub(crate) fn nullary_collection(name: &str) -> Option<HirCollectionKind> {
+    match collection_kind(name) {
+        Some(HirCollectionKind::String) => Some(HirCollectionKind::String),
         _ => None,
     }
 }
 
 impl Lowerer {
-    /// Lower `Vec::new()` / `HashMap::new()` / `BTreeMap::new()`. The collection's
-    /// element types come from the annotated target, which the checker required.
+    /// Lower `Vec::new()` / `HashMap::new()` / `BTreeMap::new()` / `String::new()`. The
+    /// collection's element types come from the annotated target, which the checker
+    /// required; a nullary kind has none to carry, so it builds its own type.
     pub(crate) fn lower_collection_new(
         &mut self,
         kind: HirCollectionKind,
         expected: Option<&HirType>,
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
+        if kind.arity() == 0 {
+            let ty = HirType::Collection {
+                kind,
+                args: Vec::new(),
+            };
+            return Ok(HirExpr::new(HirExprKind::CollectionNew, ty, span));
+        }
         match expected {
             Some(ty @ HirType::Collection { kind: k, .. }) if *k == kind => {
                 Ok(HirExpr::new(HirExprKind::CollectionNew, ty.clone(), span))
@@ -81,6 +100,8 @@ impl Lowerer {
             (HirCollectionKind::HashMap | HirCollectionKind::BTreeMap, "remove") => {
                 (vec![key], HirType::Bool)
             }
+            (HirCollectionKind::String, "push_str") => (vec![HirType::String], HirType::Void),
+            (HirCollectionKind::String, "to_string") => (vec![], HirType::String),
             (HirCollectionKind::HashMap | HirCollectionKind::BTreeMap, "keys") => (
                 vec![],
                 HirType::Collection {

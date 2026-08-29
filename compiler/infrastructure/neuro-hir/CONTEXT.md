@@ -30,6 +30,11 @@ differences that make it the *typed* contract:
    span lives on the enclosing node.
 
 ## Recent Updates
+- 2026-08-29: Growable `String`. Added `HirCollectionKind::String`, the one **nullary** collection
+  kind — its buffer is a byte run, so it carries no type arguments. `HirCollectionKind` gained
+  `arity()` (0/1/2) and `mangle_tag()`; the tag for `String` is `strbuf` rather than the lowercased
+  surface name, which would collide with the primitive `string` in a mangled instance name. No new
+  `HirType` variant: `HirType::Collection { kind: String, args: [] }` is the whole representation.
 - 2026-08-25: Added `HirExprKind::InterpString { parts }` with `HirInterpPart::{Text,
   Formatted}`. A hole written without a spec carries `FormatSpec::default()`, so
   backends see one uniform shape for every hole.

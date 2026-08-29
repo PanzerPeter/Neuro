@@ -18,6 +18,13 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
 - thiserror — `LoweringError` derivation
 
 ## Notes
+- 2026-08-29: Growable `String`. `collection_kind` recognizes `"String"`; the new
+  `nullary_collection` helper lets `resolve_type` accept the bare name as a complete type, checked
+  *after* the struct/enum/newtype arms so a user declaration shadows it. `lower_collection_new`
+  builds a nullary kind's type itself instead of requiring an annotated target, and
+  `lower_collection_method` gains `push_str` (`string` parameter) and `to_string` (`string` result).
+  `mangle_type` now uses `HirCollectionKind::mangle_tag()` — `String` mangles as `strbuf`, which the
+  primitive `string` cannot collide with — and yields the bare tag when there are no arguments.
 - 2026-08-29: Named arguments. Lowering refuses an `Expr::Call` whose `arg_labels` is
   non-empty. Every label is bound to a parameter by `argument-binding` before type checking;
   one surviving to here would mean that pass never reached the call, and the arguments would

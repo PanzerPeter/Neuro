@@ -152,6 +152,7 @@ Key design goals:
 - Builtin method dispatch on primitive & string receivers: `string.len() -> u64` (O(1) fat-pointer read), `.clone()`, and `.slice(a..b) -> &string` (zero-copy sub-slice; panics on out-of-bounds or mid-codepoint boundary)
 - String interpolation `"Hello, {name}!"` with the format mini-language (`{x:.2}`, `{n:08d}`, `{s:^10}`, `{n:x}`, `{n:b}`, `{d:+d}`, `{v:?}`), see [expressions.md](language-reference/expressions.md#string-interpolation)
 - Triple-quoted block strings `"""…"""`: multi-line text dedented to the column of the closing delimiter, with the same escapes and interpolation holes as a `"…"` literal, see [expressions.md](language-reference/expressions.md#triple-quoted-strings)
+- Growable `String` buffer for building text incrementally, the mutable counterpart to the immutable `string`: `String::new()` / `.push_str(text)` / `.len()` / `.clear()` / `.to_string()`, see [types.md](language-reference/types.md#growable-strings-string)
 
 ### Structs and Methods (1E)
 
@@ -217,8 +218,8 @@ Key design goals:
 
 ### Standard Collections (1G)
 
-- `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>` are heap-backed library types the compiler knows by
-  name, since the language exposes no allocator to build them from
+- `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, and `String` are heap-backed library types the
+  compiler knows by name, since the language exposes no allocator to build them from
 - Not `Copy`: they move on assignment and free their buffer at scope exit; a mutating method needs
   a `mut` binding
 - `Vec`: `push` / `pop` / `get` / `len` / `clear`, `v[i]` read+write (bounds-checked in every
@@ -229,6 +230,8 @@ Key design goals:
   `impl Hashable` (hashed) or `impl Comparable` (ordered). Raw float keys are rejected, because the
   prelude's `OrderedF32` / `OrderedF64` wrappers reject NaN and provide the total order
 - `Hashable` is a compiler-known lang-item trait: `func hash(&self) -> u64`
+- `String` is the same machinery over a byte buffer and takes no type arguments, so its bare name
+  is a complete type: `push_str` / `len` / `clear` / `to_string` (see the strings section above)
 - Limits: `pop` / `get` build an `Option<T>`, so they need an `Option`-carryable element type;
   a `string` inside a collection is not freed with it
 

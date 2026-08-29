@@ -29,7 +29,7 @@ Neuro will eventually adopt an ownership and borrow-checker model similar to Rus
 - A GC would make it harder to reason about memory layout, which matters for MLIR lowering and GPU memory management.
 - Ownership makes memory behavior auditable at the type level. That matters for a language meant to give you confidence in what your model is doing.
 
-The ownership system is being layered on progressively as the type system matures: move-by-default, borrows (`&T` / `&mut T`), and deterministic `Drop` (scope-exit destructors) have landed. The remaining alpha gap is broader heap support: until the growable-string builder and owning collections land, `+` string concatenation still leaks its heap buffer (see README).
+The ownership system is being layered on progressively as the type system matures: move-by-default, borrows (`&T` / `&mut T`), deterministic `Drop` (scope-exit destructors), the owning collections, and the growable `String` builder have all landed — each frees its buffer at scope exit. The remaining alpha gap is the *anonymous* heap `string` that `+`, interpolation, and `String::to_string` produce: no tracked binding owns it, so nothing frees it (see README).
 
 ### 4. Zero-cost abstractions
 

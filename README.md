@@ -100,19 +100,19 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | **Closures & lambdas** | `\|x: i32\| x * x`, `move` closures, `(T) -> R` function types, higher-order functions; compiled to `{ fn_ptr, env_ptr }`, no heap |
 | **Structs & methods** | Fields, shorthand init, functional update `..base`, `impl` blocks with `&self` / `&mut self` methods and associated functions |
 | **Enums & newtypes** | Unit, tuple, and struct-field variants; generic enums monomorphized per type argument; `newtype` for distinct nominal wrappers |
-| **Arrays, tuples & collections** | Fixed-size `[T; N]` and anonymous tuples over `Copy` elements; heap-backed `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>` that move on assignment and free at scope exit |
+| **Arrays, tuples & collections** | Fixed-size `[T; N]` and anonymous tuples over `Copy` elements; heap-backed `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, `String` that move on assignment and free at scope exit |
 | **Pattern matching** | Exhaustive `match` expressions over variant / literal / or / range / wildcard patterns with `if` guards, plus `val Point { x, y } = p` and `val [a, ..rest] = arr` destructuring |
 | **`Option` / `Result`** | `Option<T>` and `Result<T, E>` from the implicit prelude. They are ordinary generic enums, available with no declaration and no import, variants included; `??` unwraps either with a lazy fallback; `?` propagates the failure to the caller; `val-else` unwraps or exits the scope; `checked_add` / `checked_sub` / `checked_mul` report integer overflow as `Option::None` |
 | **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop`, `&T` / `&mut T` with flow-sensitive exclusivity, lifetime elision and annotations |
-| **Strings** | Fat-pointer `string` with escapes, `&string` slices, `==`, `+` concatenation, `.len()` / `.clone()` / `.slice(a..b)`, interpolation `"{x:.2}"`, triple-quoted `"""` blocks with dedent |
+| **Strings** | Immutable fat-pointer `string` with escapes, `&string` slices, `==`, `+` concatenation, `.len()` / `.clone()` / `.slice(a..b)`, interpolation `"{x:.2}"`, triple-quoted `"""` blocks with dedent; growable `String` buffer for building text — `push_str` / `clear` / `to_string` |
 | **Modules & visibility** | Multi-file programs: every `.nr` file is a module and `mod.nr` directories nest; inline `module { }` blocks group within one file; `import math::{sqrt}`, `import ./utils`, `as` renames, module aliases, variant imports, and `export import` re-export facades; declarations and struct fields are private until `export` opts them in; an implicit prelude puts `Option` / `Result` and `Some` / `None` / `Ok` / `Err` in every module, with `@no_prelude` to opt out |
 | **Toolchain** | Native binaries via inkwell 0.9 / LLVM 20; `neurc check` and `neurc compile`; `panic` / `assert` / `unreachable` runtime, with error paths outlined off the hot path |
 
 ### Current Memory Model
 
-> **Alpha memory warning.** Stack values are reclaimed on return and string literals live in `.rodata`, so neither leaks. Move semantics, borrows, deterministic `Drop`, and the owning collections have landed, so a `Vec`, `HashMap`, or `BTreeMap` frees its buffer at scope exit. Two gaps remain: `+` string concatenation still leaks its heap buffer, and a `string` stored inside a collection is not freed with it, because the growable heap-string type has not landed.
+> **Alpha memory warning.** Stack values are reclaimed on return and string literals live in `.rodata`, so neither leaks. Move semantics, borrows, deterministic `Drop`, and the owning collections have landed, so a `Vec`, `HashMap`, `BTreeMap`, or `String` frees its buffer at scope exit. What still leaks is the *anonymous* heap `string` — the one `+` concatenation, interpolation, and `String::to_string` produce. It is not owned by a binding the drop machinery tracks, so nothing frees it.
 >
-> This block is removed once that type lands. Until then, do not assume memory-safety semantics beyond what the table above claims.
+> This block is removed once those results are tracked too. Until then, do not assume memory-safety semantics beyond what the table above claims.
 >
 > If memory-safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
 
@@ -505,10 +505,10 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 
 | Phase | Goal | Status |
 |:---:|---|:---:|
-| **1** | **Core Language**: the full general-purpose language. Finishing it ships **v2.0.0** | In progress |
+| **1** | **Core Language**: the full general-purpose language. Finishing it ships **v2.0.0** | In progress ¹ |
 | 1A | Core MVP: types, functions, control flow, LLVM backend | Complete |
 | 1B | Syntax and semantics stabilization: parser fixes, `const`, `as` casts, compound assignment, bitwise ops, integer suffixes, if/block expressions, `while true` lint, IEEE-754 float comparisons, string fat pointers | Complete |
-| 1C | Ownership and borrow checker: move semantics, `Copy`, `&T`, `&mut T`, borrow exclusivity, lifetime elision / returned-reference outlives, `&mut self` methods, deterministic `Drop` | Complete ¹ |
+| 1C | Ownership and borrow checker: move semantics, `Copy`, `&T`, `&mut T`, borrow exclusivity, lifetime elision / returned-reference outlives, `&mut self` methods, deterministic `Drop`, growable `String` | Complete |
 | 1D | Backend plumbing: `neuro-hir` typed IR crate, `melior` integration, AST → HIR lowering, HIR-routed LLVM backend, mlir-backend HIR scaffold | Complete |
 | 1E | Type system: arrays, tuples, structs, methods, destructuring, type aliases, enums, pattern matching, newtypes | Complete |
 | 1F | Generics, traits and dispatch: generics, explicit lifetimes, trait declarations, operator traits, static/dynamic dispatch (`impl`/`dyn`), closures | Complete |
@@ -523,7 +523,7 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | **8** | Developer experience: Language Server Protocol, diagnostics polish, formatter, `@test` runner | Planned |
 | **9** | Package manager and distribution: `neurpm`, cross-OS installer / uninstaller / self-updater, signed release binaries, optimization passes (loop unrolling, AD-aware inlining, LTO) | Planned |
 
-¹ Sub-phase 1C is essentially complete; one flagged item (growable runtime strings) remains and needs a decision on where it lands, because the sub-phase it was provisionally aimed at has since closed.
+¹ Every sub-phase 1A–1H is now complete. The **v2.0.0** milestone release that closes Phase 1 and opens Phase 2 has not been cut yet.
 
 ---
 
