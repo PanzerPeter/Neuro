@@ -9,8 +9,6 @@ publish.workspace = true
 
 [dependencies]
 shared-types = { path = "../shared-types" }
-source-location = { path = "../source-location" }
-miette = { workspace = true }
 thiserror = { workspace = true }
 
 [lib]

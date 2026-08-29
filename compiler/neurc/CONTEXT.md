@@ -16,8 +16,8 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 
 ## Shared Kernel
 - diagnostics — pipeline error formatting
-- project-config — reads `neurc.toml` workspace configuration
-- source-location — source span resolution for error display
+- ast-types — the parsed item list handed between the resolution, binding, and checking steps
+- neuro-hir — the lowered program handed to the backend
 
 ## Notes
 - 2026-08-29: Named arguments. `load_program` runs `argument_binding::bind_arguments` after

@@ -11,7 +11,7 @@
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
 [![CI](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml)
 
-**Status:** Alpha. Phase 1 (Core Language) is in progress, and finishing it ships v2.0.0. Per-sub-phase status lives in one place: the [Quick Roadmap](#quick-roadmap).
+**Status:** Alpha. Phase 1 (Core Language) is complete — the full general-purpose language surface compiles and runs. Phase 2 (Tensors and MLIR) is now open. Per-phase status lives in one place: the [Quick Roadmap](#quick-roadmap).
 
 ---
 
@@ -468,7 +468,7 @@ compiler/
 ├── lexical-analysis/        # Tokenizer (logos, Unicode XID)
 ├── syntax-parsing/          # Pratt + statement parser → AST
 ├── semantic-analysis/       # Type checker, scope analysis
-├── control-flow/            # CFG builder (not yet active)
+├── control-flow/            # CFG data structures; no caller yet
 ├── hir-lowering/            # Type-checked AST → typed HIR
 ├── llvm-backend/            # HIR → object code (inkwell 0.9 / LLVM 20)
 ├── mlir-backend/            # HIR → MLIR scaffold (off-by-default `mlir` feature)
@@ -501,11 +501,11 @@ Tensor/AI path: typed High-Level IR (neuro-hir)
 
 ## Quick Roadmap
 
-Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships **v(N+1).0.0**. We are in **Phase 1** (v1.x), divided into lettered sub-phases.
+Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships **v(N+1).0.0**. Phase 1 is complete and we are now in **Phase 2**. A phase is divided into lettered sub-phases.
 
 | Phase | Goal | Status |
 |:---:|---|:---:|
-| **1** | **Core Language**: the full general-purpose language. Finishing it ships **v2.0.0** | In progress ¹ |
+| **1** | **Core Language**: the full general-purpose language | Complete |
 | 1A | Core MVP: types, functions, control flow, LLVM backend | Complete |
 | 1B | Syntax and semantics stabilization: parser fixes, `const`, `as` casts, compound assignment, bitwise ops, integer suffixes, if/block expressions, `while true` lint, IEEE-754 float comparisons, string fat pointers | Complete |
 | 1C | Ownership and borrow checker: move semantics, `Copy`, `&T`, `&mut T`, borrow exclusivity, lifetime elision / returned-reference outlives, `&mut self` methods, deterministic `Drop`, growable `String` | Complete |
@@ -514,7 +514,7 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | 1F | Generics, traits and dispatch: generics, explicit lifetimes, trait declarations, operator traits, static/dynamic dispatch (`impl`/`dyn`), closures | Complete |
 | 1G | Error handling, modules and prelude: `Option`/`Result`, collections, `checked_*`, `??`, `val-else`, `?`, error-path outlining, multi-file modules, imports, `export` visibility, inline modules & re-exports, implicit prelude | Complete |
 | 1H | Language cleanup: string interpolation, triple-quoted strings, nested comments, named arguments | Complete |
-| **2** | Tensors and MLIR: `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation | Planned |
+| **2** | Tensors and MLIR: `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation. Finishing it ships **v3.0.0** | In progress |
 | **3** | Automatic differentiation: Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | Planned |
 | **4** | GPU acceleration: MLIR GPU dialects (nvgpu / rocdl / Triton), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | Planned |
 | **5** | Neural network standard library: `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | Planned |
@@ -522,8 +522,6 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | **7** | Interop and advanced features: Python FFI via DLPack, spread operator, advanced pattern matching, custom attributes, `defer` | Planned |
 | **8** | Developer experience: Language Server Protocol, diagnostics polish, formatter, `@test` runner | Planned |
 | **9** | Package manager and distribution: `neurpm`, cross-OS installer / uninstaller / self-updater, signed release binaries, optimization passes (loop unrolling, AD-aware inlining, LTO) | Planned |
-
-¹ Every sub-phase 1A–1H is now complete. The **v2.0.0** milestone release that closes Phase 1 and opens Phase 2 has not been cut yet.
 
 ---
 
@@ -591,7 +589,7 @@ does not apply to already-open editors. During grammar work, symlinking the fold
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture guidelines, coding standards, and the pull request process. Confirmed open defects live in [docs/BUGS.md](docs/BUGS.md) — fixing one is the best way to start.
 
-The project is in early alpha, so breaking changes are expected. Contributions should focus on **Phase 1 (Core Language)**; the [Quick Roadmap](#quick-roadmap) marks which sub-phase is currently open.
+The project is in early alpha, so breaking changes are expected. Contributions should focus on **Phase 2 (Tensors and MLIR)**; the [Quick Roadmap](#quick-roadmap) marks which phase is currently open.
 
 ---
 

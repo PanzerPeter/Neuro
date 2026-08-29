@@ -199,15 +199,12 @@ All errors include span information for precise error reporting.
 ### Technology
 
 - **Lexer generator**: [logos](https://crates.io/crates/logos) 0.14
-- **Unicode support**:
-  - `unicode-ident` for identifier validation
-  - `unicode-segmentation` for string processing
+- **Unicode support**: `unicode-ident` for identifier validation
 
 ### Performance
 
 - Zero-copy tokenization where possible
 - Lazy evaluation of token values
-- Efficient string interning for identifiers
 
 ### Testing
 
