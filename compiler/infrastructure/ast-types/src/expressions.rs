@@ -31,6 +31,16 @@ pub enum Expr {
         /// callee's generic parameter list.
         type_args: Vec<GenericArg>,
         args: Vec<Expr>,
+        /// The call-site names of named arguments, one entry per argument —
+        /// or empty when nothing was named, which is every call in a program that does
+        /// not use the feature.
+        ///
+        /// A label is surface syntax with no meaning of its own: matching one against a
+        /// parameter needs the callee, which the parser does not know. The
+        /// `argument-binding` pass permutes `args` into the callee's declaration order
+        /// and empties this, so type checking, HIR lowering, and the backends only ever
+        /// see the positional call — which is why a named argument costs nothing.
+        arg_labels: Vec<Option<Identifier>>,
         span: Span,
     },
     Unary {

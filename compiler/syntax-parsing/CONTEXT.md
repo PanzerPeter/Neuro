@@ -18,6 +18,18 @@ Transform a Neuro token stream into a typed Abstract Syntax Tree for later compi
 - lexical-analysis — direct consumer; `parse()` calls `tokenize()` internally (callers need one entry)
 
 ## Notes
+- 2026-08-29: Named arguments. The three parameter loops (`parse_function`,
+  `parse_method_def`, `parse_trait_method_def`) collapsed into one `parse_parameter_list`,
+  which accepts the external-label forms: a second identifier before the `:` is the internal
+  name, making the first the call-site label, and a first identifier of `_` suppresses the
+  call-site name entirely. Two parameters answering to one call-site name is a new
+  `ParseError::DuplicateParameterLabel` — a named argument must identify exactly one
+  parameter. `parse_call_arguments` returns the argument expressions plus a parallel label
+  list, reading `ident :` at the start of an argument as a label (`::` is one token, so a
+  qualified path cannot be mistaken for one) and clearing the list when nothing was named.
+  The parser records what was written and matches nothing: resolving a label needs the
+  callee, which is `argument-binding`'s job. Extracting the shared loop also gave methods and
+  trait methods the duplicate-parameter-name check that only free functions had.
 The lexical-analysis dependency is deliberate intra-pipeline coupling, not a VSA violation:
 syntax-parsing is the sole token-stream consumer, and externalising tokenisation would add an
 unnecessary neurc coordination step. The architecture test allowlists this pairing.

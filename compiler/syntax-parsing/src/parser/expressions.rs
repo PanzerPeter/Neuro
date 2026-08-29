@@ -9,6 +9,10 @@ use super::interpolation::parse_interp_string;
 use super::statements::stmt_span;
 use super::Parser;
 
+/// A parsed call argument list: the argument expressions, plus the call-site names of
+/// any named arguments — empty when the call named none.
+type CallArguments = (Vec<Expr>, Vec<Option<Identifier>>);
+
 /// Maximum expression nesting depth to prevent stack overflow
 const MAX_EXPR_DEPTH: usize = 256;
 
@@ -534,13 +538,16 @@ impl Parser {
     /// caller consumes). The opening `(` is already consumed. Arguments sit inside a
     /// delimiter pair, so a struct literal is unambiguous here even when the call
     /// appears in a guarded header (`if f(Point { x: 1 }) { ... }`).
-    fn parse_call_arguments(&mut self) -> ParseResult<Vec<Expr>> {
+    fn parse_call_arguments(&mut self) -> ParseResult<CallArguments> {
         self.inside_delimiters(|p| {
             let mut args = Vec::new();
+            let mut labels: Vec<Option<Identifier>> = Vec::new();
             p.skip_newlines();
             if !p.check(&TokenKind::RightParen) {
                 loop {
-                    args.push(p.parse_expr(Precedence::Lowest)?);
+                    let (label, value) = p.parse_call_argument()?;
+                    labels.push(label);
+                    args.push(value);
                     p.skip_newlines();
                     if !p.check(&TokenKind::Comma) {
                         break;
@@ -549,8 +556,33 @@ impl Parser {
                     p.skip_newlines();
                 }
             }
-            Ok(args)
+            // A call that named nothing carries no label list at all, so the overwhelmingly
+            // common case costs neither an allocation nor a downstream special case.
+            if labels.iter().all(Option::is_none) {
+                labels.clear();
+            }
+            Ok((args, labels))
         })
+    }
+
+    /// Parse one call argument: `expr`, or `label: expr` for a named argument.
+    ///
+    /// An identifier immediately followed by `:` can only be a label here — a bare `:`
+    /// is not an expression operator in any other argument position, and a qualified
+    /// path uses `::`, a single token.
+    fn parse_call_argument(&mut self) -> ParseResult<(Option<Identifier>, Expr)> {
+        let named = matches!(self.peek_kind(), Some(TokenKind::Identifier(_)))
+            && matches!(
+                self.tokens.get(self.current + 1).map(|t| &t.kind),
+                Some(TokenKind::Colon)
+            );
+        if !named {
+            return Ok((None, self.parse_expr(Precedence::Lowest)?));
+        }
+        let label = self.consume_identifier("argument label")?;
+        self.consume(TokenKind::Colon, "':'")?;
+        self.skip_newlines();
+        Ok((Some(label), self.parse_expr(Precedence::Lowest)?))
     }
 
     /// Parse an infix expression (binary operators, function calls, field access, casts)
@@ -562,7 +594,7 @@ impl Parser {
         match &token.kind {
             TokenKind::LeftParen => {
                 self.advance(); // consume '('
-                let args = self.parse_call_arguments()?;
+                let (args, arg_labels) = self.parse_call_arguments()?;
                 let close = self.consume(TokenKind::RightParen, "')'")?;
                 let span = left.span().merge(close.span);
 
@@ -570,6 +602,7 @@ impl Parser {
                     func: Box::new(left),
                     type_args: Vec::new(),
                     args,
+                    arg_labels,
                     span,
                 })
             }
@@ -581,13 +614,14 @@ impl Parser {
                 self.advance(); // consume '::'
                 let type_args = self.parse_turbofish_args()?;
                 self.consume(TokenKind::LeftParen, "'(' after turbofish `::<...>`")?;
-                let args = self.parse_call_arguments()?;
+                let (args, arg_labels) = self.parse_call_arguments()?;
                 let close = self.consume(TokenKind::RightParen, "')'")?;
                 let span = left.span().merge(close.span);
                 Ok(Expr::Call {
                     func: Box::new(left),
                     type_args,
                     args,
+                    arg_labels,
                     span,
                 })
             }

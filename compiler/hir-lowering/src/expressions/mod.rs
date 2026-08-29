@@ -184,8 +184,21 @@ impl Lowerer {
                 func,
                 type_args,
                 args,
+                arg_labels,
                 span,
-            } => self.lower_call(func, type_args, args, expected, *span),
+            } => {
+                // Every named argument was bound to a parameter before type checking.
+                // A label surviving to here means the binding pass never reached this
+                // call, which would silently bind arguments in the order they were
+                // written; refusing is the difference between a loud bug and a wrong
+                // program.
+                if !arg_labels.is_empty() {
+                    return Err(LoweringError::Malformed {
+                        detail: "a named argument reached lowering unbound".to_string(),
+                    });
+                }
+                self.lower_call(func, type_args, args, expected, *span)
+            }
 
             Expr::Closure {
                 params,

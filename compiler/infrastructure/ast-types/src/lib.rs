@@ -14,7 +14,8 @@ pub use expressions::{
 pub use items::{
     Attribute, ConstDef, EnumDef, EnumVariant, FieldDef, FunctionDef, GenericParam,
     GenericParamKind, ImplDef, ImportDef, ImportName, ImportSelection, Item, MethodDef, ModuleDef,
-    ModuleId, NewtypeDef, Parameter, SelfParam, StructDef, TraitDef, TraitMethod, VariantPayload,
+    ModuleId, NewtypeDef, ParamLabel, Parameter, SelfParam, StructDef, TraitDef, TraitMethod,
+    VariantPayload,
 };
 pub use statements::Stmt;
 pub use types::{ArraySize, GenericArg, Type};

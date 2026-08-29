@@ -91,9 +91,44 @@ pub struct Attribute {
     pub span: Span,
 }
 
+/// How a parameter may be named at the call site.
+///
+/// The external label is what a caller writes; the internal name is what the body uses.
+/// The three forms are syntactically distinct at the declaration, so a call site's
+/// obligations are fixed by the signature alone.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ParamLabel {
+    /// `name: T` — the caller may pass positionally *or* write `name: value`.
+    Implicit,
+    /// `external name: T` — the caller MUST write `external: value`.
+    External(Identifier),
+    /// `_ name: T` — the caller MUST pass positionally; the name is not accepted.
+    Suppressed,
+}
+
+impl ParamLabel {
+    /// The name a caller is allowed to write for this parameter, given the parameter's
+    /// internal name. `None` means the call site accepts no name at all.
+    pub fn call_site_name<'a>(&'a self, internal: &'a Identifier) -> Option<&'a str> {
+        match self {
+            ParamLabel::Implicit => Some(internal.name.as_str()),
+            ParamLabel::External(label) => Some(label.name.as_str()),
+            ParamLabel::Suppressed => None,
+        }
+    }
+
+    /// Whether omitting the name is an error at every call site.
+    pub fn is_required(&self) -> bool {
+        matches!(self, ParamLabel::External(_))
+    }
+}
+
 /// Function parameter
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
+    /// The call-site naming rule for this parameter. Defaults to
+    /// [`ParamLabel::Implicit`] for the ordinary `name: T` form.
+    pub label: ParamLabel,
     pub name: Identifier,
     pub ty: Type,
     pub span: Span,

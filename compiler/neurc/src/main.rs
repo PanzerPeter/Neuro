@@ -130,11 +130,23 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
     let module_count = program.modules.len();
     // The merged namespace is flat, so the prelude's declarations are either in the program
     // or absent from all of it; `@no_prelude` on the root file is what decides.
-    let items = if program.no_prelude {
+    let mut items = if program.no_prelude {
         program.items
     } else {
         prelude.prepend(program.items)
     };
+
+    // Named arguments are resolved against the whole program, so this runs only once the
+    // prelude and every module are in one list — and before type checking, which is what
+    // lets every later pass see an ordinary positional call.
+    argument_binding::bind_arguments(&mut items).map_err(|errors| {
+        eprintln!("Argument errors found:");
+        for (i, error) in errors.iter().enumerate() {
+            eprintln!("  {}. {}", i + 1, error);
+        }
+        anyhow::anyhow!("{} argument error(s) found", errors.len())
+    })?;
+
     Ok(LoadedProgram {
         items,
         module_count,

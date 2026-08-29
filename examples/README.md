@@ -142,6 +142,17 @@ isolation:
   a surface with `export` and keeps the rest private — `Summary.total` and `report`'s `Band`
   never leave the file that declares them. Exit `75`.
 
+- [`showcase/render_settings.nr`](showcase/render_settings.nr) — **the sub-phase 1H
+  language-cleanup features together**: **named arguments** with external labels
+  (`quality q:`, `min floor:`) and a positional-only `_ factor`, **string interpolation**
+  with the format mini-language (`{w:>4}`), a **triple-quoted `"""` block** dedented
+  against its closing delimiter, and a **nested block comment**. Every named call is
+  written in an order that differs from the declaration, so the program's answer is only
+  right if the labels — not the positions — decided the binding. Combined with a
+  `@derive(Copy)` struct + `&self` / `&mut self` methods, an associated function, an enum
+  with a payload + `match`, a fixed-size array + `for`-in loop, and `??` defaulting an
+  `Option`. Exit `99`.
+
 ## Compiling and running
 
 ```bash

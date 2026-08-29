@@ -9,6 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.79.0] - 2026-08-29
+
+### Added
+- `parser`: **named arguments** (§3.13). An argument may be passed by name —
+  `connect("localhost", port: 8080)` — in any order, after any number of positional ones.
+  A parameter may be declared with two names, `external internal: T`: the caller writes the
+  external label, the body uses the internal name, and the label is **required** at every
+  call site. An external label of `_` (`_ value: f32`) is the opposite — the argument is
+  positional and naming it is an error. Free functions, associated functions, and instance
+  methods all accept named arguments; closures, the panic builtins, enum variants, and
+  newtype constructors declare no parameter names, so a label on one is rejected.
+- `infra`: new slice `compiler/argument-binding`. It builds a callee → parameter-names table
+  from the whole program, then permutes every call's arguments into the callee's declaration
+  order and drops the labels. It runs after module resolution has merged every file and the
+  prelude is in place (a callee may be declared anywhere in that list) and before type
+  checking (which would otherwise pair the wrong argument with the wrong parameter), so
+  semantic analysis, HIR lowering, and both backends are unchanged — a named argument
+  produces exactly the IR the positional call produces. A call that named nothing, and whose
+  callee requires no label, is left byte-identical.
+- `docs`: `docs/compiler/components/argument-binding.md`; a Named Arguments section in
+  `docs/language-reference/functions.md` replacing its stale "Not Yet Implemented" entry;
+  `examples/basics/named_arguments.nr` and the 1H showcase
+  `examples/showcase/render_settings.nr`, which combines named arguments with string
+  interpolation, a triple-quoted block, a nested block comment, `&self` / `&mut self`
+  methods, an enum + `match`, an array + `for`-in loop, and `??`.
+
+### Changed
+- `parser`: the three duplicated parameter-list loops (free function, method, trait method)
+  collapsed into one `parse_parameter_list`. Methods and trait methods consequently gained
+  the duplicate-parameter-name check that only free functions had. Two parameters answering
+  to one call-site name is a new `DuplicateParameterLabel` error — a named argument must
+  identify exactly one parameter.
+- `infra`: `ast_types::Parameter` gains `label: ParamLabel`; `Expr::Call` gains
+  `arg_labels: Vec<Option<Identifier>>` beside `args`, empty when the call named nothing.
+  The labels sit beside the arguments rather than wrapping each one because they are
+  parse-only surface that `argument-binding` erases before type checking, so every pass
+  downstream keeps reading `args` as the positional list it always was.
+- `codegen`: HIR lowering refuses a call whose `arg_labels` survived. A label reaching
+  lowering would mean the binding pass never visited that call, and the arguments would then
+  lower in the order they were written rather than the callee's — a wrong program instead of
+  a failed build.
+- `infra`: the editor TextMate grammar gained a `parameter_labels` rule so the
+  `external internal: T` form is coloured. The existing `#parameters` rule keys on a name
+  sitting directly before the `:` and matched neither half of it. The packaged `.vsix` is
+  still 1.1.0 and does not carry the new rule.
+
 ## [1.78.2] - 2026-08-27
 
 ### Fixed

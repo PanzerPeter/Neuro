@@ -50,6 +50,7 @@ fn test_integer_literal_infers_from_function_parameter() {
     // Call with literal
     let call_expr = Expr::Call {
         func: Box::new(Expr::Identifier(make_ident("foo"))),
+        arg_labels: Vec::new(),
         type_args: Vec::new(),
         args: vec![Expr::Literal(Literal::Integer(42, None), Span::new(0, 2))],
         span: Span::new(0, 10),

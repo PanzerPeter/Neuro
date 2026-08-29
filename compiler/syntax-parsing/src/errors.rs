@@ -23,6 +23,9 @@ pub enum ParseError {
     #[error("duplicate parameter name '{name}' in function definition")]
     DuplicateParameter { name: String, span: Span },
 
+    #[error("two parameters share the call-site name '{label}'; a named argument must identify exactly one parameter")]
+    DuplicateParameterLabel { label: String, span: Span },
+
     #[error("duplicate type alias '{name}'")]
     DuplicateTypeAlias { name: String, span: Span },
 

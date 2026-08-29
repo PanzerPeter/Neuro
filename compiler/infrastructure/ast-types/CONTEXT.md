@@ -15,6 +15,14 @@ Provide the canonical Abstract Syntax Tree (AST) node definitions shared by all 
 - shared-types — `Span`, `Identifier`, `Literal` embedded in every AST node
 
 ## Notes
+- 2026-08-29: Named arguments. `Parameter` gains `label: ParamLabel` — `Implicit` for the
+  ordinary `name: T`, `External(label)` for `external internal: T` (the caller must write the
+  label), `Suppressed` for `_ internal: T` (the caller must not). `Expr::Call` gains
+  `arg_labels: Vec<Option<Identifier>>` beside `args`, one entry per argument or empty when
+  the call named none. The label list is deliberately a sibling of `args` rather than a
+  wrapper struct around each argument: it is parse-only surface that the `argument-binding`
+  pass empties before type checking, so every pass downstream keeps reading `args` as the
+  positional `Vec<Expr>` it always was.
 Extracted from `syntax-parsing` to eliminate the cross-slice dependency that `semantic-analysis` and `llvm-backend` previously had on `syntax-parsing`. All three consumer slices now depend only on this infrastructure crate, not on each other. `syntax-parsing/src/ast/mod.rs` re-exports all types from here for backwards compatibility.
 
 `Item::Impl` carries an `ImplDef` (optional `trait_name` + type name + list of `MethodDef`).

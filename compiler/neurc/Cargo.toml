@@ -20,6 +20,7 @@ ast-types = { path = "../infrastructure/ast-types" }
 lexical-analysis = { path = "../lexical-analysis" }
 syntax-parsing = { path = "../syntax-parsing" }
 module-resolution = { path = "../module-resolution" }
+argument-binding = { path = "../argument-binding" }
 semantic-analysis = { path = "../semantic-analysis" }
 hir-lowering = { path = "../hir-lowering" }
 control-flow = { path = "../control-flow" }

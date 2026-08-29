@@ -1,0 +1,123 @@
+// Binding one call site's arguments to one callee's parameters.
+
+use ast_types::Expr;
+use shared_types::{Identifier, Span};
+
+use crate::errors::ArgumentError;
+use crate::signatures::Signature;
+
+/// Rewrite `args` into `sig`'s declaration order and empty `labels`.
+///
+/// A call written entirely positionally against a signature that requires no name is
+/// already in declaration order, so it is left exactly as it was — arity and types stay
+/// the type checker's to report. Everything else is bound here, which is the only place
+/// a label is ever matched against a parameter.
+pub(crate) fn bind(
+    args: &mut Vec<Expr>,
+    labels: &mut Vec<Option<Identifier>>,
+    sig: &Signature,
+    callee: &str,
+    span: Span,
+) -> Result<(), ArgumentError> {
+    let named_from = labels.iter().position(Option::is_some);
+    if named_from.is_none() && !sig.has_required_label() {
+        labels.clear();
+        return Ok(());
+    }
+
+    if let Some(first_named) = named_from {
+        if let Some(stray) = labels[first_named..].iter().position(Option::is_none) {
+            let label = labels[first_named]
+                .as_ref()
+                .map(|l| l.name.clone())
+                .unwrap_or_default();
+            let at = first_named + stray;
+            return Err(ArgumentError::PositionalAfterNamed {
+                callee: callee.to_string(),
+                label,
+                span: args.get(at).map(Expr::span).unwrap_or(span),
+            });
+        }
+    }
+
+    // A permutation needs one argument per parameter. Reporting the mismatch here rather
+    // than deferring to the type checker keeps the failure on the call that caused it —
+    // this pass returns before type checking runs at all.
+    if args.len() != sig.params.len() {
+        return Err(ArgumentError::ArgumentCountMismatch {
+            callee: callee.to_string(),
+            expected: sig.params.len(),
+            found: args.len(),
+            span,
+        });
+    }
+
+    let positional = named_from.unwrap_or(args.len());
+    let mut slots: Vec<Option<usize>> = vec![None; sig.params.len()];
+
+    for (index, param) in sig.params.iter().enumerate().take(positional) {
+        if param.required {
+            return Err(ArgumentError::MissingArgumentLabel {
+                callee: callee.to_string(),
+                label: param.name.clone().unwrap_or_default(),
+                span: args.get(index).map(Expr::span).unwrap_or(span),
+            });
+        }
+        slots[index] = Some(index);
+    }
+
+    for (index, label) in labels.iter().enumerate().skip(positional) {
+        let Some(label) = label.as_ref() else {
+            continue;
+        };
+        let arg_span = args.get(index).map(Expr::span).unwrap_or(span);
+        let Some(target) = sig.position_of(&label.name) else {
+            if sig.is_suppressed(&label.name) {
+                return Err(ArgumentError::SuppressedLabel {
+                    callee: callee.to_string(),
+                    label: label.name.clone(),
+                    span: arg_span,
+                });
+            }
+            return Err(ArgumentError::UnknownArgumentLabel {
+                callee: callee.to_string(),
+                label: label.name.clone(),
+                span: arg_span,
+            });
+        };
+        if slots[target].is_some() {
+            return Err(ArgumentError::DuplicateArgumentLabel {
+                callee: callee.to_string(),
+                label: label.name.clone(),
+                span: arg_span,
+            });
+        }
+        slots[target] = Some(index);
+    }
+
+    // Equal counts plus distinct targets fill every slot; an unfilled one means a
+    // parameter went unmentioned while some other took two names, and naming it is more
+    // useful than the count.
+    let mut order = Vec::with_capacity(slots.len());
+    for (index, slot) in slots.iter().enumerate() {
+        match slot {
+            Some(from) => order.push(*from),
+            None => {
+                return Err(ArgumentError::MissingArgumentLabel {
+                    callee: callee.to_string(),
+                    label: sig.params[index].name.clone().unwrap_or_default(),
+                    span,
+                })
+            }
+        }
+    }
+
+    let mut taken: Vec<Option<Expr>> = args.drain(..).map(Some).collect();
+    for from in order {
+        if let Some(arg) = taken.get_mut(from).and_then(Option::take) {
+            args.push(arg);
+        }
+    }
+    labels.clear();
+    Ok(())
+}

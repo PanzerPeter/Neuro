@@ -6,7 +6,8 @@ use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
 use crate::ast::{
-    Attribute, Expr, FunctionDef, GenericParam, GenericParamKind, MethodDef, Parameter, SelfParam,
+    Attribute, Expr, FunctionDef, GenericParam, GenericParamKind, MethodDef, ParamLabel, Parameter,
+    SelfParam,
 };
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
@@ -14,6 +15,9 @@ use crate::precedence::Precedence;
 use super::items::desugar_impl_trait_params;
 use super::statements::stmt_span;
 use super::Parser;
+
+/// The external label that suppresses a call-site name entirely (`_ value: f32`).
+const WILDCARD_LABEL: &str = "_";
 
 impl Parser {
     /// Parse a function definition
@@ -44,61 +48,7 @@ impl Parser {
         self.consume(TokenKind::LeftParen, "'('")?;
         self.skip_newlines();
 
-        let mut params: Vec<Parameter> = Vec::new();
-        if !self.check(&TokenKind::RightParen) {
-            loop {
-                let param_start = self
-                    .peek()
-                    .ok_or(ParseError::UnexpectedEof {
-                        expected: "parameter".to_string(),
-                    })?
-                    .span;
-
-                let param_name_token =
-                    self.consume(TokenKind::Identifier(String::new()), "parameter name")?;
-                let param_name = if let TokenKind::Identifier(n) = param_name_token.kind {
-                    Identifier {
-                        name: n,
-                        span: param_name_token.span,
-                    }
-                } else {
-                    return Err(ParseError::UnexpectedToken {
-                        found: param_name_token.kind,
-                        expected: "parameter name".to_string(),
-                        span: param_name_token.span,
-                    });
-                };
-
-                self.skip_newlines();
-                self.consume(TokenKind::Colon, "':'")?;
-                self.skip_newlines();
-
-                let param_ty = self.parse_type()?;
-                let param_span = param_start.merge(param_ty.span());
-
-                for existing_param in &params {
-                    if existing_param.name.name == param_name.name {
-                        return Err(ParseError::DuplicateParameter {
-                            name: param_name.name.clone(),
-                            span: param_name.span,
-                        });
-                    }
-                }
-
-                params.push(Parameter {
-                    name: param_name,
-                    ty: param_ty,
-                    span: param_span,
-                });
-
-                self.skip_newlines();
-                if !self.check(&TokenKind::Comma) {
-                    break;
-                }
-                self.advance(); // consume ','
-                self.skip_newlines();
-            }
-        }
+        let mut params = self.parse_parameter_list()?;
 
         self.consume(TokenKind::RightParen, "')'")?;
         self.skip_newlines();
@@ -147,6 +97,91 @@ impl Parser {
             attributes,
             span: start.span.merge(end_span),
         })
+    }
+
+    /// Parse a comma-separated parameter list up to (not including) the closing `)`.
+    ///
+    /// Each parameter is `name: T`, `external name: T`, or `_ name: T`; the
+    /// external-label forms are told apart from the plain one by a second identifier
+    /// before the colon. Shared by free functions, inherent/trait-impl methods, and
+    /// trait method declarations so a labelled parameter cannot be accepted in one
+    /// position and rejected in another.
+    pub(super) fn parse_parameter_list(&mut self) -> ParseResult<Vec<Parameter>> {
+        let mut params: Vec<Parameter> = Vec::new();
+        if self.check(&TokenKind::RightParen) {
+            return Ok(params);
+        }
+        loop {
+            let param_start = self
+                .peek()
+                .ok_or(ParseError::UnexpectedEof {
+                    expected: "parameter".to_string(),
+                })?
+                .span;
+
+            let first = self.consume_identifier("parameter name")?;
+            self.skip_newlines();
+
+            // `external internal:` — a second identifier before the colon is the
+            // internal name, which makes the first one the call-site label.
+            let (label, param_name) = if matches!(self.peek_kind(), Some(TokenKind::Identifier(_)))
+            {
+                let internal = self.consume_identifier("parameter name")?;
+                let label = if first.name == WILDCARD_LABEL {
+                    ParamLabel::Suppressed
+                } else {
+                    ParamLabel::External(first)
+                };
+                (label, internal)
+            } else {
+                (ParamLabel::Implicit, first)
+            };
+
+            self.skip_newlines();
+            self.consume(TokenKind::Colon, "':'")?;
+            self.skip_newlines();
+
+            let param_ty = self.parse_type()?;
+            let param_span = param_start.merge(param_ty.span());
+
+            for existing in &params {
+                if existing.name.name == param_name.name {
+                    return Err(ParseError::DuplicateParameter {
+                        name: param_name.name.clone(),
+                        span: param_name.span,
+                    });
+                }
+            }
+            // Two parameters sharing one call-site name would make a named argument
+            // ambiguous, so the clash is rejected at the declaration rather than at
+            // every call.
+            if let Some(name) = label.call_site_name(&param_name) {
+                let clash = params
+                    .iter()
+                    .any(|p| p.label.call_site_name(&p.name) == Some(name));
+                if clash {
+                    return Err(ParseError::DuplicateParameterLabel {
+                        label: name.to_string(),
+                        span: param_name.span,
+                    });
+                }
+            }
+
+            params.push(Parameter {
+                label,
+                name: param_name,
+                ty: param_ty,
+                span: param_span,
+            });
+
+            self.skip_newlines();
+            if !self.check(&TokenKind::Comma) {
+                break;
+            }
+            self.advance(); // consume ','
+            self.skip_newlines();
+        }
+        Ok(params)
     }
 
     /// Parse an optional generic parameter list `<'a, T, U: Bound + Bound, const N: u32>`.
@@ -416,52 +451,7 @@ impl Parser {
             }
         }
 
-        let mut params: Vec<Parameter> = Vec::new();
-        if !self.check(&TokenKind::RightParen) {
-            loop {
-                let param_start = self
-                    .peek()
-                    .ok_or(ParseError::UnexpectedEof {
-                        expected: "parameter".to_string(),
-                    })?
-                    .span;
-
-                let param_name_token =
-                    self.consume(TokenKind::Identifier(String::new()), "parameter name")?;
-                let param_name = if let TokenKind::Identifier(n) = param_name_token.kind {
-                    Identifier {
-                        name: n,
-                        span: param_name_token.span,
-                    }
-                } else {
-                    return Err(ParseError::UnexpectedToken {
-                        found: param_name_token.kind,
-                        expected: "parameter name".to_string(),
-                        span: param_name_token.span,
-                    });
-                };
-
-                self.skip_newlines();
-                self.consume(TokenKind::Colon, "':'")?;
-                self.skip_newlines();
-
-                let param_ty = self.parse_type()?;
-                let param_span = param_start.merge(param_ty.span());
-
-                params.push(Parameter {
-                    name: param_name,
-                    ty: param_ty,
-                    span: param_span,
-                });
-
-                self.skip_newlines();
-                if !self.check(&TokenKind::Comma) {
-                    break;
-                }
-                self.advance(); // consume ','
-                self.skip_newlines();
-            }
-        }
+        let params = self.parse_parameter_list()?;
 
         self.consume(TokenKind::RightParen, "')'")?;
         self.skip_newlines();

@@ -952,9 +952,12 @@ func returns_i32() -> i32 {
 - String interpolation with the format mini-language (`"{x:.2}"`) and triple-quoted
   block strings with dedent, see
   [expressions.md](expressions.md#string-interpolation)
+- Named arguments with external labels, see
+  [functions.md](functions.md#named-arguments)
 
 **Remaining Phase 1 work:**
-- Named arguments (1H)
+- Growable runtime strings (`String::new` / `.push_str` / `.clear`), still awaiting a
+  decision on where a mutable growable string type belongs
 
 ### Phase 2, Tensors (Planned)
 
