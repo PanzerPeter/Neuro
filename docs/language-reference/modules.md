@@ -91,11 +91,11 @@ bind the same name to different things, but one module may not bind one name twi
 Every module begins as if it had written
 
 ```neuro
-import std::prelude::{Option, Some, None, Result, Ok, Err, println, print}
+import std::prelude::{Option, Some, None, Result, Ok, Err}
 ```
 
-so the two fallible types, their four variants, and the printing functions are in scope in
-every file without an `import` of any kind:
+so the two fallible types and their four variants are in scope in every file without an
+`import` of any kind:
 
 ```neuro
 func halve(n: i32) -> Option<i32> {

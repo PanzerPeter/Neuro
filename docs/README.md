@@ -267,8 +267,8 @@ Key design goals:
 - Modules still share one flat namespace, so qualification is checked but never required, and a
   name declared by two loaded modules is a reported collision rather than a silent winner, even
   when both keep it private, and a block buys a private surface rather than a private namespace
-- Every module begins with an **implicit prelude**: `Option`, `Result`, their variants `Some` /
-  `None` / `Ok` / `Err`, and `println` / `print` are in scope with no `import` of any kind. A local
+- Every module begins with an **implicit prelude**: `Option`, `Result`, and their variants `Some` /
+  `None` / `Ok` / `Err` are in scope with no `import` of any kind. A local
   declaration of one of those names, or an explicit import of it, wins inside that module rather
   than colliding. A file opts out with **`@no_prelude`** on its first line. On a non-root file that
   drops its bindings; on the root it drops the prelude's declarations from the whole program, since

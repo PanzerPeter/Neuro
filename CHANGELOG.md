@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-08-29
+
+### Fixed
+
+- **Documentation: `print` / `println` were documented as available and do not exist.**
+  Three documents stated that the implicit prelude puts `println` and `print` in scope in
+  every module. No such builtin is implemented in any slice — `neurc check` on a call to
+  either reports `undefined function 'println'`. The prelude claim is corrected in the
+  documentation index, the quick-start feature list, and the modules reference, and the
+  quick-start now says plainly that a program's exit code is currently its only result
+  channel, since the sole text a compiled binary writes is a panic diagnostic on stderr.
+  Printing to stdout is now the first tracked item of Phase 2.
+- Corrected the spread operator's spelling in the planning documents from `...expr` to
+  `..expr`, matching the specification and the struct-update form that already parses.
+
+### Added
+
+- `docs/BUGS.md`: **BUG-015** — `==` on a struct that implements no `PartialEq` passes the
+  type checker and then crashes the backend with an internal `Found StructValue ... but
+  expected the IntValue variant` error. The supported path (`@derive(Copy, Clone)` plus an
+  explicit `impl PartialEq`) compiles and runs correctly; what is missing is the rejection
+  of the unimplemented one. Also records that `@derive(PartialEq)` — and any unknown
+  derive — is currently accepted and silently ignored.
+
+### Changed
+
+- A sub-feature audit of the language specification against the roadmap found six
+  constructs that are specified but were never given a roadmap item, and are not
+  implemented: `print` / `println`, `.is_nan()`, the codepoint-aware string APIs
+  (`.chars()`, `.char_indices()`, `.char_slice(range)`), `.enumerate()`, the
+  `IntoIterator` / `Iterator` protocol with its adapters, and `if val` / `while val`.
+  All six are now tracked. The audit's own coverage rule was tightened at the same time:
+  checking that each specification section maps to some roadmap item read 100% clean while
+  every one of these was missing, so coverage is now defined over the constructs a section
+  names, and a deferral written into the prose of a completed item no longer counts as
+  tracking it.
+- The specification's syntax-summary table used a phase numbering of its own that no
+  longer matched the roadmap's (it listed tensors as phase 3, autodiff as 4, and so on).
+  Its phase column is now the roadmap's numbering, with a note saying so.
+
 ## [2.0.1] - 2026-08-29
 
 A stabilisation pass: a combination sweep over the most recently landed features, the two

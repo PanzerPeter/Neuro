@@ -20,6 +20,54 @@ sketch. If you want to work on one:
 
 ---
 
+## BUG-015, `==` on a struct with no `PartialEq` implementation crashes the backend
+
+- **Status**: OPEN
+- **Area**: semantic-analysis (the missing rejection), with the crash surfacing in
+  llvm-backend
+- **Severity**: major — a program the type checker accepts kills the compiler with an
+  internal error instead of producing a diagnostic or a binary
+- **Repro**:
+
+  ```neuro
+  struct V { x: i32 }
+
+  func main() -> i32 {
+      val a = V { x: 1 }
+      val b = V { x: 2 }
+      if a == b { return 1 }
+      return 0
+  }
+  ```
+
+  `neurc check` reports **no error**. `neurc compile` then aborts:
+
+  ```
+  Found StructValue(StructValue { struct_value: Value { name: "a1", ...
+    llvm_type: "{ i32 }" } }) but expected the IntValue variant
+  ```
+
+- **Root cause**: the equality path assumes its operands are comparable primitives and
+  reaches codegen without ever checking that the struct implements `PartialEq`. The
+  backend then asks a struct value for its `IntValue` variant and panics on the
+  mismatch. The correct path works — `@derive(Copy, Clone)` plus an explicit
+  `impl PartialEq for V { func eq(...) func ne(...) }` compiles and runs — so this is a
+  missing rejection on the *unimplemented* path, not a broken operator.
+- **What should happen**: `a == b` on a struct with no `PartialEq` implementation is a
+  type error naming the struct and the missing trait, reported by semantic-analysis. An
+  `impl PartialEq` for a non-`Copy` struct is already rejected with a clear message
+  (`operator trait 'PartialEq' can only be implemented for a `Copy` type`), so the
+  diagnostic vocabulary exists.
+- **Related**: `@derive(PartialEq)` — and `@derive(Bogus)` — are currently accepted and
+  silently ignored, since only `Copy` and `Clone` are implemented. A program can
+  therefore write the derive the specification documents, get no error, and hit this
+  crash. Validating `@derive` arguments is tracked separately on the roadmap; it does
+  not fix this entry on its own.
+- **Workaround**: add `@derive(Copy, Clone)` to the struct and implement `PartialEq`
+  explicitly, or compare the fields.
+
+---
+
 ## BUG-014, a named argument is evaluated in declaration order, not source order
 
 - **Status**: OPEN, needs a maintainer decision before code changes (the language does
