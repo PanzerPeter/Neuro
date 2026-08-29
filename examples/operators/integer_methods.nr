@@ -2,6 +2,9 @@
 // Demonstrates the wrapping / saturating / checked arithmetic intrinsics and the
 // right-shift method on builtin integer types. All dispatch through the builtin-method
 // path: they are compiler-known intrinsics, not user-defined impl methods.
+//
+// Each intrinsic prints what it produced and the run ends with a verdict line,
+// so a wrong answer names itself instead of collapsing into exit 1.
 
 func main() -> i32 {
     val a: u8 = 200
@@ -37,6 +40,14 @@ func main() -> i32 {
         Option::None => 0u8
     }
 
+    println("200.wrapping_add(100)   = {wrapped}")
+    println("200.saturating_add(100) = {saturated}")
+    println("100.saturating_sub(200) = {floored}")
+    println("240.shr(4)              = {shifted}")
+    println("(-16).shr(2)            = {arith}")
+    println("200.checked_add(100)    = None, defaulted to {checked_none}")
+    println("100.checked_add(100)    = Some({checked_some})")
+
     if wrapped == 44u8 {
         if saturated == 255u8 {
             if floored == 0u8 {
@@ -44,6 +55,7 @@ func main() -> i32 {
                     if arith == -4 {
                         if checked_none == 0u8 {
                             if checked_some == 200u8 {
+                                println("all intrinsics agree")
                                 return 0
                             }
                         }
@@ -52,5 +64,6 @@ func main() -> i32 {
             }
         }
     }
+    println("an intrinsic disagreed")
     return 1
 }

@@ -1,3 +1,10 @@
+// A sweep over the core language: arithmetic, comparison, logic, if/else,
+// nested if, function calls, the numeric types, and mutation.
+//
+// Every check prints what it produced and the run ends with a verdict line, so
+// a failure is readable in the output rather than only in the exit code. Exit 0
+// means every check held.
+
 func test_arithmetic() -> i32 {
     val a: i32 = 10
     val b: i32 = 5
@@ -115,6 +122,26 @@ func main() -> i32 {
     val shadow: i32 = test_shadowing()
     val bool_res: bool = test_bool_return()
 
+    // The three wider numeric types get exercised here rather than in the
+    // verdict below, which only deals in i32 and bool.
+    val f32_product: f32 = test_floats(1.5, 4.0)
+    val f64_sum: f64 = test_f64(0.25, 0.5)
+    val i64_sum: i64 = test_i64(4000000000i64, 1000000000i64)
+
+    println("arithmetic      {arith}")
+    println("comparison      {cmp}")
+    println("logical         {log}")
+    println("if / else       {if1}")
+    println("nested if       {if2}")
+    println("nested calls    {call}")
+    println("multiple vars   {mult}")
+    println("mut variable    {mut_test}")
+    println("shadowed mut    {shadow}")
+    println("bool return     {bool_res}")
+    println("f32 product     {f32_product}")
+    println("f64 sum         {f64_sum}")
+    println("i64 sum         {i64_sum}")
+
     if cmp {
         if log {
             if bool_res {
@@ -124,6 +151,7 @@ func main() -> i32 {
                             if mult == 15 {
                                 if mut_test == 25 {
                                     if shadow == 20 {
+                                        println("all checks passed")
                                         return 0
                                     }
                                 }
@@ -135,5 +163,6 @@ func main() -> i32 {
         }
     }
 
+    println("a check failed")
     return 1
 }

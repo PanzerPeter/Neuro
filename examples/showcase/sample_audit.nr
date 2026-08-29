@@ -83,5 +83,12 @@ func main() -> i32 {
 
     val top = headline(good) ?? 0             // 1 * 10
 
-    total + rejected + spread + top
+    println("batch_total(good)  ?? 0     = {total}")
+    println("batch_total(bad)   Err      = {rejected}   (? left the for-in loop)")
+    println("scaled(9, 3)       val-else = {spread}")
+    println("headline(good)     ?? 0     = {top}")
+
+    val sum = total + rejected + spread + top
+    println("total                       = {sum}")
+    sum
 }

@@ -1,0 +1,8 @@
+f16  1.5f16                 = 1.5
+bf16 2.0bf16                = 2.0
+f16 -> f32 + 2.5f32         = 4.0
+narrowed back to f16        = 4.0
+bf16 -> f16                 = 2.0
+scale(0.75f16) via f32      = 3.0
+f16 -> i32                  = 3
+f16 is Copy (a == a_copy)   = true

@@ -46,10 +46,17 @@ func main() -> i32 {
     mut tally: Tally = Tally::new()
     tally.record(4)                          // 4 * 2 = 8
     tally.record(9)                          // 9 * 2 = 18, running total 26
+    println("counter::Tally hits       = {tally.hits}")
 
     val within = counter::capped(tally.hits)          // 26 <= 30, so 26
     val over = counter::capped(41)                    // clamped to 30
     val ceiling = counter::limits::CEILING            // 30
+    println("counter::capped(26)       = {within}")
+    println("counter::capped(41)       = {over}")
+    println("counter::limits::CEILING  = {ceiling}")
 
-    within + over - ceiling                  // 26 + 30 - 30 = 26
+    val total = within + over - ceiling
+    println("total                     = {total}")
+
+    total                                    // 26 + 30 - 30 = 26
 }

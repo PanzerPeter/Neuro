@@ -98,6 +98,20 @@ func main() -> i32 {
     val c = buf.count as i32               // -> 3
     val d = buf.data[1]                    // -> 2
 
+    println("identity<i32>(10)          = {base}")
+    println("choose<i32>(true, 10, 0)   = {pick}")
+    println("second<f64, i32>(2.5, 4)   = {k}")
+    println("identity<(i32, i32)>       = ({t.0}, {t.1})")
+    println("area(Shape::Rect(2, 6))    = {a}")
+    println("Pair<i32, i32>             = ({p.first}, {p.second})")
+    println("Cell<i32>::get()           = {cv}")
+    println("Cell<bool> gated bonus     = {bonus}")
+    println("identity::<i32>(8)         = {id2}")
+    println("sum_all<3> where N > 0     = {s}")
+    println("Buffer<i32, 4> count/data  = {c}, {d}")
+
     // 10 + 10 + 4 + 3 + 5 + 12 + 7 + 6 + 8 + 15 + 3 + 2 = 85
-    return pick + base + k + t.0 + t.1 + a + cv + bonus + id2 + s + c + d
+    val total = pick + base + k + t.0 + t.1 + a + cv + bonus + id2 + s + c + d
+    println("total                      = {total}")
+    return total
 }

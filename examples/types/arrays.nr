@@ -12,14 +12,18 @@ func sum(xs: [i32; 5]) -> i32 {
 func main() -> i32 {
     mut data: [i32; 5] = [1, 2, 3, 4, 5]
     data[0] = 10                 // data is now [10, 2, 3, 4, 5]
+    println("after data[0] = 10: {data[0]}, {data[1]}, {data[2]}, {data[3]}, {data[4]}")
 
     val total: i32 = sum(data)   // 10 + 2 + 3 + 4 + 5 = 24
     val n: u64 = data.len()      // 5
+    println("sum(data)   = {total}")
+    println("data.len()  = {n}")
 
     mut borrowed: i32 = 0
     for x in &data {
         borrowed = borrowed + x  // 24
     }
+    println("for x in &data -> {borrowed}")
 
     // data[2] = 3, n = 5; the two correction terms are 0 when total and the
     // borrowed sum are computed correctly. Exit code: 3 + 5 = 8.

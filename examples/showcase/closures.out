@@ -1,0 +1,4 @@
+capture by value  |x| x + bias      = 50
+move closure      move |x| x * scale = 30
+struct method     s.apply(5)         = 10
+total                                = 90

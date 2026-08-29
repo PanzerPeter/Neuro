@@ -1,0 +1,6 @@
+# neuro manifest
+  verbose   =   on
+  workers   =    8
+  momentum  = 0.900
+# end
+manifest bytes: 81

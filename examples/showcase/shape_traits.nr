@@ -105,6 +105,16 @@ func main() -> i32 {
     val dyn_sum = dyn_area(&sq) + dyn_area(&r)   // 49
     val dyn_flags = dyn_flag(&sq) + dyn_flag(&r) // 1
 
+    println("scaled_area(&Square, 2)  bound generic = {a}")
+    println("scaled_area(&Rect, 1)    bound generic = {b}")
+    println("is_big(): default + override           = {big}")
+    println("array for-in sum                       = {acc}")
+    println("describe(&impl Shape)    static        = {stat}")
+    println("dyn_area over both       dynamic       = {dyn_sum}")
+    println("dyn_flag over both       dynamic       = {dyn_flags}")
+
     // 50 + 24 + 1 + 10 + 26 + 49 + 1 = 161
-    a + b + big + acc + stat + dyn_sum + dyn_flags
+    val total = a + b + big + acc + stat + dyn_sum + dyn_flags
+    println("total                                  = {total}")
+    total
 }

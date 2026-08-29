@@ -1,0 +1,4 @@
+original       = neuro
+clone          = neuro
+byte-equal     = true
+chained .len() = 5

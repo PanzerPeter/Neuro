@@ -1,5 +1,9 @@
 // Example: Expression-Based Returns in Neuro
-// Demonstrates the new Phase 1 feature: implicit returns
+// Demonstrates implicit returns: a function body whose final expression is its
+// value, with no `return` keyword.
+//
+// Every function below is called and printed, so the feature is visible in the
+// program's output as well as in its exit code.
 
 // Simple expression-based return
 func double(x: i32) -> i32 {
@@ -28,11 +32,24 @@ func quad(x: i32) -> i32 {
     double(double(x))
 }
 
-// Main function demonstrating the feature
+// Main entry point
 func main() -> i32 {
     val result1: i32 = double(5)
     val result2: i32 = calculate(3, 4)
     val result3: i32 = quad(2)
 
-    result1 + result2 + result3
+    println("double(5)             = {result1}")
+    println("calculate(3, 4)       = {result2}")
+    println("quad(2)               = {result3}")
+
+    // A `bool` renders in a hole just as a number does.
+    val positive: bool = is_positive(result1)
+    val both: bool = both_positive(result2, result3)
+    println("is_positive(10)       = {positive}")
+    println("both_positive(19, 8)  = {both}")
+
+    val total: i32 = result1 + result2 + result3
+    println("total                 = {total}")
+
+    total
 }

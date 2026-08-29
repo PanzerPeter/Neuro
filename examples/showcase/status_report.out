@@ -1,0 +1,5 @@
+--- sensor report ---
+sensor 0x0011 @ 42.50 | nominal
+sensor 0x0102 @ 63.25 | warning +13 over
+sensor 0x0fff @ 91.00 | critical +11 over
+   checked: 3 of 3

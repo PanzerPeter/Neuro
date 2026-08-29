@@ -1,0 +1,8 @@
+step 0: pos = (2, 3)
+step 1: pos = (4, 6)
+step 2: pos = (6, 9)
+step 3: pos = (8, 12)
+pos == target -> manhattan  = 20
+pos - vel     (Sub impl)    = (6, 9)
+-back         (Neg impl)    = (-6, -9)
+total                       = 35

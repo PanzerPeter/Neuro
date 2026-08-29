@@ -1,0 +1,4 @@
+blend(1, 2, 3)                       = 123
+blend(weight: 3, base: 1, accent: 2) = 123
+blend(1, weight: 3, accent: 2)       = 123
+clamp(99, max: 40, min: 5)           = 40

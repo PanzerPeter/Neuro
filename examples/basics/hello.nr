@@ -1,5 +1,6 @@
 // Neuro Example: Simple arithmetic function
-// Demonstrates Phase 1 syntax: functions, variables, and return statements
+// Demonstrates functions, variables, return statements, and printing each
+// intermediate value on its way to the result.
 
 func add(a: i32, b: i32) -> i32 {
     return a + b
@@ -14,7 +15,12 @@ func calculate(x: i32) -> i32 {
 func main() -> i32 {
     val x: i32 = 5
     val y: i32 = 3
+
     val sum: i32 = add(x, y)
+    println("add({x}, {y})    = {sum}")
+
     val calculated: i32 = calculate(sum)
+    println("calculate({sum}) = {calculated}")
+
     return calculated
 }

@@ -110,11 +110,21 @@ func main() -> i32 {
         k += 1
     }
 
+    println("isqrt(144)             = {s}")
+    println("gcd(48, 36)            = {g}")
+    println("ipow(2, 10)            = {p}")
+    println("pow_checked(2, 10) Some= {fits}")
+    println("pow_checked(1000, 5) None -> {refused}")
+    println("primes in 0..=20       = {primes}")
+
     // Compose, gated on both power results agreeing.
     if p == 1024 {
         if fits == 1024 {
-            return s + g + primes + refused   // 12 + 12 + 8 + 1 = 33
+            val total = s + g + primes + refused   // 12 + 12 + 8 + 1 = 33
+            println("total                  = {total}")
+            return total
         }
     }
+    println("a power result disagreed")
     return 1
 }

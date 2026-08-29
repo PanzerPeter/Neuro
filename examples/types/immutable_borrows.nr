@@ -43,6 +43,14 @@ func main() -> i32 {
     val ps: i64 = read_sum(&pt)   // 7
     val direct: i64 = pt.sum()    // pt still usable after being borrowed
 
+    println("describe(&msg)      = {n}")
+    println("msg.len() after      = {again}   (borrowing never consumes)")
+    println("read_x(&pt)          = {px}")
+    println("read_sum(&pt)        = {ps}")
+    println("pt.sum() after       = {direct}   (pt still usable)")
+
     // n (5) + again (5) + px (3) + ps (7) + direct (7) = 27, minus 27 → 0.
-    return (n as i32) + (again as i32) + (px as i32) + (ps as i32) + (direct as i32) - 27
+    val balance = (n as i32) + (again as i32) + (px as i32) + (ps as i32) + (direct as i32) - 27
+    println("balance              = {balance}")
+    return balance
 }

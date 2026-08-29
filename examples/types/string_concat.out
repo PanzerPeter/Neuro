@@ -1,0 +1,5 @@
+hello + name    = Hello, Neuro!
+hello after     = Hello,    (operands are read, not consumed)
+name after      = Neuro!
+literal + &name = Hi, Neuro!
+its length      = 10

@@ -58,6 +58,7 @@ func main() -> i32 {
     mut steps = 0
     while steps < 4 {
         pos += vel
+        println("step {steps}: pos = ({pos.x}, {pos.y})")
         steps += 1
     }
     // pos = (8, 12)
@@ -70,6 +71,11 @@ func main() -> i32 {
 
     val back = pos - vel      // (6, 9)
     val flipped = -back       // (-6, -9)
+    println("pos == target -> manhattan  = {result}")
+    println("pos - vel     (Sub impl)    = ({back.x}, {back.y})")
+    println("-back         (Neg impl)    = ({flipped.x}, {flipped.y})")
+
     result = result + flipped.manhattan()   // 20 + 15 = 35
+    println("total                       = {result}")
     result
 }

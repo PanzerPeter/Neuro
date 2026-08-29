@@ -61,5 +61,15 @@ func main() -> i32 {
         Err(reason) => reason           // 9
     }
 
-    eight + fallback + quartered + stopped   // 8 + 3 + 5 + 9 = 25
+    // `println` needed no import either — it is a compiler builtin rather than a
+    // prelude declaration, so even `@no_prelude` leaves it in place.
+    println("half(16)     Some -> {eight}")
+    println("half(7)      None -> {fallback}")
+    println("quarter(20)  Ok   -> {quartered}")
+    println("quarter(9)   Err  -> {stopped}")
+
+    val total = eight + fallback + quartered + stopped
+    println("total             -> {total}")
+
+    total                                    // 8 + 3 + 5 + 9 = 25
 }

@@ -33,11 +33,16 @@ func main() -> i32 {
     while i <= 10 {
         stats.sum = stats.sum + (i as f64)
         stats.count = stats.count + 1
+        val running = stats.mean()
+        println("sample {i:>2} -> mean {running:.3}")
         i += 1
     }
 
     val avg = stats.mean()   // 55.0 / 10.0 == 5.5
+    println("sum {stats.sum:.1} over {stats.count} samples -> mean {avg:.2}")
 
     // Truncated mean as the exit code.
-    return avg as i32        // 5
+    val code = avg as i32
+    println("truncated exit code = {code}")
+    return code              // 5
 }

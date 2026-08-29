@@ -30,6 +30,14 @@ func main() -> i32 {
     val [head, ..] = nums                // head = 4
     val [_, second, _] = triple          // second = 2
 
+    println("val Point \{ x, y }       -> x {x}, y {y}")
+    println("val [a, b, c]            -> {a}, {b}, {c}")
+    println("val [first, ..rest]      -> first {first}, rest sums to {rest_sum}")
+    println("val [head, ..]           -> {head}")
+    println("val [_, second, _]       -> {second}")
+
     // 12 + 18 + (1+2+3) + 4 + 26 + 4 + 2 = 72
-    return x + y + a + b + c + first + rest_sum + head + second
+    val total = x + y + a + b + c + first + rest_sum + head + second
+    println("total                    -> {total}")
+    return total
 }

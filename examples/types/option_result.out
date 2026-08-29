@@ -1,0 +1,8 @@
+Option::Some(20)        -> 20
+Option::None, else 5    -> 5
+divide(30, 3) Ok        -> 10
+divide(4, 0)  Err       -> 2
+Option<char> Some       -> n
+Slot::Filled(2)         -> 2
+Slot::Vacant, else 0    -> 0
+total                   -> 42

@@ -1,0 +1,7 @@
+stats::summarize -> mean       = 22
+weight_of via prelude Option   = 7
+choose<i32> renamed from stats = 40
+choose<bool> same template     = true
+fmt::scale (module alias)      = 28
+report::clamp (re-export)      = 28
+scoring::combine (inline mod)  = 75

@@ -86,12 +86,16 @@ func main() -> i32 {
         Result::Err(e) => e            // 180 out of range → 2   (total 52)
     }
 
+    println("index_of / validate running total = {total}")
+
     // The same generic function at `i32` and at `char`.
     total += choose(total > 50, 1, 0)  // → 1                    (total 53)
     val mark = choose(true, 'y', 'n')
+    println("choose<char>(true, 'y', 'n')      = {mark}")
     if mark == 'y' {
         total += 4                     // → 4                    (total 57)
     }
 
+    println("total                             = {total}")
     return total
 }

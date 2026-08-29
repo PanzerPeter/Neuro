@@ -1,0 +1,5 @@
+counter::Tally hits       = 26
+counter::capped(26)       = 26
+counter::capped(41)       = 30
+counter::limits::CEILING  = 30
+total                     = 26

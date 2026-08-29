@@ -1,0 +1,7 @@
+is_positive(42)          = 1
+is_negative(-10)         = 1
+compare(42, 15)          = 1
+sum_to(5)                = 10
+sum_until_break(4)       = 6
+sum_skipping_three(5)    = 12
+total                    = 31

@@ -19,16 +19,20 @@ func main() -> i32 {
     }
     // sum == 16
 
+    println("Vec  after push/index -> for-in sum {sum}")
+
     match counts.pop() {
         Option::Some(last) => { sum = sum + last }   // + 7 -> 23
         Option::None => { sum = sum - 100 }
     }
+    println("Vec  pop() Some       -> {sum}")
 
     // `get` is the checked counterpart to `counts[i]`, which panics out of range.
     match counts.get(9u64) {
         Option::Some(_) => { sum = sum - 100 }
         Option::None => { sum = sum + 1 }            // -> 24
     }
+    println("Vec  get(9) None      -> {sum}")
 
     // --- HashMap<K, V>: average-O(1) lookup ------------------------------
     mut stock: HashMap<string, i32> = HashMap::new()
@@ -46,6 +50,7 @@ func main() -> i32 {
     if stock.remove("nut") {
         sum = sum + 1                                 // -> 68
     }
+    println("Map  get/contains/rm  -> {sum}")
 
     // --- BTreeMap<K, V>: key-ordered -------------------------------------
     // `keys()` returns a Vec, so an ordered map's iteration order is observable.
@@ -56,7 +61,11 @@ func main() -> i32 {
 
     mut highest: i32 = 0
     for key in ranks.keys() {
+        println("BTreeMap key          -> {key}")     // ascending: 10, 20, 30
         highest = key                                 // ascending, so 30 last
     }
-    sum + highest + ranks.len() as i32                // 68 + 30 + 3 = 101
+
+    val total = sum + highest + ranks.len() as i32
+    println("total                 -> {total}")
+    total                                             // 68 + 30 + 3 = 101
 }

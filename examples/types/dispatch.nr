@@ -58,10 +58,15 @@ func main() -> i32 {
     val b = Bird { size: 4 }   // volume  8, legs 2 (overridden)
 
     val stat = loud_static(&d) // 15
+    println("loud_static(&Dog)  static  -> {stat}")
 
     // The same function, two different concrete types behind one interface.
     val a = loud_dyn(&d)       // 15 + 4 = 19
     val c = loud_dyn(&b)       //  8 + 2 = 10
+    println("loud_dyn(&Dog)     dynamic -> {a}   (volume 15 + inherited legs 4)")
+    println("loud_dyn(&Bird)    dynamic -> {c}   (volume 8 + overridden legs 2)")
 
-    stat + a + c               // 15 + 19 + 10 = 44
+    val total = stat + a + c
+    println("total                      -> {total}")
+    total                      // 15 + 19 + 10 = 44
 }

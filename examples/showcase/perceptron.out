@@ -1,0 +1,7 @@
+x 0.0 -> hidden 0.00 -> output 0.10
+x 1.0 -> hidden 0.30 -> output 0.70
+x 2.0 -> hidden 0.80 -> output 1.70
+x 3.0 -> hidden 1.30 -> output 2.70
+x 4.0 -> hidden 1.80 -> output 3.70
+summed output        = 8.90
+truncated exit code  = 8

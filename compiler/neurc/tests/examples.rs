@@ -1,15 +1,22 @@
 // Integration test that compiles and runs *every* program under examples/.
 //
 // Discovery is automatic: the test walks examples/ recursively, collects each
-// `.nr` file, and checks its exit code against examples/expected.txt (the
-// single source of truth for expected codes). Adding a new example therefore
-// requires only dropping the `.nr` file into a subdirectory and adding one
-// line to examples/expected.txt — no edits to this file.
+// `.nr` file, and checks two things against two sources of truth:
 //
-// The test fails loudly when the example set and the manifest drift apart:
+//   exit code -> examples/expected.txt, one `<path>  <code>` line per example
+//   stdout    -> the example's sibling `.out` file, byte for byte
+//
+// An example that writes nothing to standard output has no `.out` file, and the
+// absence *is* the expectation: its stdout must be empty. So adding a silent
+// example is one new line in expected.txt and nothing else, and adding a
+// printing one is that line plus `<name>.out` holding exactly what it prints.
+//
+// The test fails loudly when the example set and its expectations drift apart:
 //   - a `.nr` file with no manifest entry  -> failure (forces registration)
 //   - a manifest entry with no `.nr` file  -> failure (stale entry)
+//   - a `.out` file with no `.nr` beside it -> failure (stale golden file)
 //   - any exit-code mismatch               -> failure
+//   - any stdout mismatch                  -> failure, with both texts shown
 // All discrepancies across all examples are collected and reported together,
 // so one run shows every problem rather than stopping at the first.
 
@@ -36,8 +43,9 @@ fn neurc_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
 }
 
-/// Recursively collect every `.nr` file under `dir`, as paths relative to it.
-fn collect_examples(dir: &Path) -> Vec<String> {
+/// Recursively collect every file under `dir` with extension `ext`, as paths
+/// relative to it. Used for both the `.nr` programs and their `.out` golden files.
+fn collect_by_extension(dir: &Path, ext: &str) -> Vec<String> {
     let mut found = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(current) = stack.pop() {
@@ -49,7 +57,7 @@ fn collect_examples(dir: &Path) -> Vec<String> {
             let path = entry.expect("dir entry").path();
             if path.is_dir() {
                 stack.push(path);
-            } else if path.extension().is_some_and(|ext| ext == "nr") {
+            } else if path.extension().is_some_and(|found_ext| found_ext == ext) {
                 let rel = path
                     .strip_prefix(dir)
                     .expect("strip examples prefix")
@@ -130,20 +138,84 @@ fn compile_example(examples_dir: &Path, rel: &str) -> Result<PathBuf, String> {
     Ok(out)
 }
 
-fn run_exit_code(exe: &Path) -> Result<i32, String> {
-    Command::new(exe)
+/// Run `exe` and return what it wrote to standard output together with its exit code.
+fn run_example(exe: &Path) -> Result<(i32, String), String> {
+    let output = Command::new(exe)
         .output()
-        .map_err(|e| format!("failed to run {}: {}", exe.display(), e))?
+        .map_err(|e| format!("failed to run {}: {}", exe.display(), e))?;
+    let code = output
         .status
         .code()
-        .ok_or_else(|| format!("{} terminated by signal", exe.display()))
+        .ok_or_else(|| format!("{} terminated by signal", exe.display()))?;
+    Ok((code, String::from_utf8_lossy(&output.stdout).into_owned()))
+}
+
+/// The stdout `examples/<rel>` must produce.
+///
+/// It lives in the sibling `.out` file. No such file means the example is a silent
+/// one and must print nothing, so the absence is itself the expectation — that is
+/// what keeps a program which quietly starts printing from passing unnoticed.
+fn expected_stdout(examples_dir: &Path, rel: &str) -> Result<String, String> {
+    let golden = examples_dir.join(rel).with_extension("out");
+    match std::fs::read_to_string(&golden) {
+        Ok(text) => Ok(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(format!("read {}: {}", golden.display(), e)),
+    }
+}
+
+/// Render a stdout mismatch: the first line that differs, then both texts in full.
+///
+/// Trailing whitespace is invisible in a terminal and is exactly the kind of
+/// difference a golden file exists to catch, so every line is quoted.
+fn describe_stdout_mismatch(rel: &str, expected: &str, actual: &str) -> String {
+    let golden = rel.trim_end_matches(".nr").to_string() + ".out";
+    let mut expected_lines = expected.lines();
+    let mut actual_lines = actual.lines();
+    let mut first_diff = String::from("(differs in trailing newline only)");
+    let mut lineno = 1;
+    loop {
+        match (expected_lines.next(), actual_lines.next()) {
+            (None, None) => break,
+            (want, got) if want == got => lineno += 1,
+            (want, got) => {
+                first_diff = format!(
+                    "line {lineno}: expected {}, got {}",
+                    want.map_or("<end of output>".to_string(), |l| format!("{l:?}")),
+                    got.map_or("<end of output>".to_string(), |l| format!("{l:?}")),
+                );
+                break;
+            }
+        }
+    }
+    format!(
+        "stdout does not match {golden}\n    {first_diff}\n\
+         --- expected ({} bytes) ---\n{}\n\
+         --- actual ({} bytes) ---\n{}\n\
+         --- end ---",
+        expected.len(),
+        quote_lines(expected),
+        actual.len(),
+        quote_lines(actual),
+    )
+}
+
+/// Quote every line of `text` so trailing spaces and empty lines stay visible.
+fn quote_lines(text: &str) -> String {
+    if text.is_empty() {
+        return "    <nothing>".to_string();
+    }
+    text.lines()
+        .map(|line| format!("    {line:?}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[test]
 fn all_examples_compile_run_and_match_manifest() {
     let examples_dir = workspace_root().join("examples");
     let manifest = parse_manifest(&examples_dir.join("expected.txt"));
-    let discovered = collect_examples(&examples_dir);
+    let discovered = collect_by_extension(&examples_dir, "nr");
 
     let mut failures: Vec<String> = Vec::new();
 
@@ -156,15 +228,35 @@ fn all_examples_compile_run_and_match_manifest() {
             ));
             continue;
         };
-        let Expectation::Exit(expected) = expectation else {
+        let Expectation::Exit(expected_code) = expectation else {
             continue;
         };
-        match compile_example(&examples_dir, rel) {
-            Ok(exe) => match run_exit_code(&exe) {
-                Ok(code) if code == expected => {}
-                Ok(code) => failures.push(format!("{rel}: exit code {code}, expected {expected}")),
-                Err(e) => failures.push(format!("{rel}: {e}")),
-            },
+        let expected_text = match expected_stdout(&examples_dir, rel) {
+            Ok(text) => text,
+            Err(e) => {
+                failures.push(format!("{rel}: {e}"));
+                continue;
+            }
+        };
+        let exe = match compile_example(&examples_dir, rel) {
+            Ok(exe) => exe,
+            Err(e) => {
+                failures.push(format!("{rel}: {e}"));
+                continue;
+            }
+        };
+        match run_example(&exe) {
+            Ok((code, stdout)) => {
+                if code != expected_code {
+                    failures.push(format!("{rel}: exit code {code}, expected {expected_code}"));
+                }
+                if stdout != expected_text {
+                    failures.push(format!(
+                        "{rel}: {}",
+                        describe_stdout_mismatch(rel, &expected_text, &stdout)
+                    ));
+                }
+            }
             Err(e) => failures.push(format!("{rel}: {e}")),
         }
     }
@@ -174,6 +266,17 @@ fn all_examples_compile_run_and_match_manifest() {
         if !discovered.contains(rel) {
             failures.push(format!(
                 "{rel}: listed in examples/expected.txt but no such file on disk"
+            ));
+        }
+    }
+
+    // Every golden file must belong to an example, or it is describing a program
+    // that no longer exists and is silently asserting nothing.
+    for golden in collect_by_extension(&examples_dir, "out") {
+        let owner = golden.trim_end_matches(".out").to_string() + ".nr";
+        if !discovered.contains(&owner) {
+            failures.push(format!(
+                "{golden}: golden output file with no {owner} beside it"
             ));
         }
     }

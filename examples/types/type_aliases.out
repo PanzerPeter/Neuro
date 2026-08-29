@@ -1,0 +1,5 @@
+Sensor.location (Meters)  = 10.0
+Sensor.reading  (Celsius) = 21.5
+depth() -> Meters         = 10.0
+to_id(7) -> Id            = 7
+tag + (d as i64)          = 17

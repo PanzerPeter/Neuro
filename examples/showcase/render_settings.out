@@ -1,0 +1,10 @@
+hero.label()  = [  12x   8]
+thumb.label() = [  15x  12]
+render report
+-------------
+frames checked: 2
+budget draft, hero  = 192
+budget final, hero  = 186
+budget draft, thumb = 180
+3 checks, 0 first over
+hero pixels + checks = 99

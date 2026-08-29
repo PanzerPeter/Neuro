@@ -1,0 +1,6 @@
+describe(&msg)      = 5
+msg.len() after      = 5   (borrowing never consumes)
+read_x(&pt)          = 3
+read_sum(&pt)        = 7
+pt.sum() after       = 7   (pt still usable)
+balance              = 0

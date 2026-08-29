@@ -1,0 +1,3 @@
+two shared &i32 of x  -> 20
+two &mut calls        -> counter 2, total 22
+scoped &mut, then new -> value 9, total 31

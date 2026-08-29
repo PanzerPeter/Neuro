@@ -3,6 +3,9 @@
 //
 // Note: Phase 1 has limitations with deeply nested control flow
 // This example uses simple patterns that work within these limitations
+//
+// Each helper's answer is printed, so which loop form produced which number is
+// readable without tracing the arithmetic.
 
 func is_positive(n: i32) -> i32 {
     if n > 0 {
@@ -82,6 +85,14 @@ func main() -> i32 {
     val break_sum: i32 = sum_until_break(4)
     val continue_sum: i32 = sum_skipping_three(5)
 
+    println("is_positive(42)          = {pos_check}")
+    println("is_negative(-10)         = {neg_check}")
+    println("compare(42, 15)          = {cmp_result}")
+    println("sum_to(5)                = {loop_sum}")
+    println("sum_until_break(4)       = {break_sum}")
+    println("sum_skipping_three(5)    = {continue_sum}")
+
     val result: i32 = pos_check + neg_check + cmp_result + loop_sum + break_sum + continue_sum
+    println("total                    = {result}")
     return result
 }

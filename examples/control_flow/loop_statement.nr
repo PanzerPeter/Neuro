@@ -6,7 +6,8 @@
 // from the top.
 //
 // This program sums 1 + 2 + 4 + 5 (skipping 3 via `continue`) and stops
-// once the counter passes 5 via `break`, returning 12.
+// once the counter passes 5 via `break`, returning 12. The skip and the exit
+// each announce themselves.
 
 func main() -> i32 {
     mut i: i32 = 0
@@ -15,13 +16,17 @@ func main() -> i32 {
     loop {
         i = i + 1
         if i == 3 {
+            println("continue past {i}")
             continue
         }
         if i > 5 {
+            println("break at {i}")
             break
         }
         sum = sum + i
+        println("add {i}, sum = {sum}")
     }
 
+    println("sum = {sum}")
     return sum
 }

@@ -1,0 +1,4 @@
+Meters(10) + Meters(20) = Meters(30)
+Trip.distance.0         = 30
+Trip.duration.0         = 12
+trip_score(&trip)       = 42

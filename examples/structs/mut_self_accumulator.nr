@@ -4,6 +4,9 @@
 //   `&mut self` methods write to `self.field` and the change is observed by a
 //   later `&self` query. The accumulator is driven entirely through method
 //   calls on a `mut` binding — no direct field assignment in `main`.
+//
+// The running total is printed after each `add`, so the in-place mutation is
+// visible step by step.
 
 struct Accumulator {
     total: i32
@@ -27,8 +30,18 @@ impl Accumulator {
 
 func main() -> i32 {
     mut acc = Accumulator::new()
+
     acc.add(10)
+    val after_first = acc.get()
+    println("add(10) -> {after_first}")
+
     acc.add(15)
+    val after_second = acc.get()
+    println("add(15) -> {after_second}")
+
     acc.add(17)
+    val after_third = acc.get()
+    println("add(17) -> {after_third}")
+
     return acc.get()   // 10 + 15 + 17 == 42
 }

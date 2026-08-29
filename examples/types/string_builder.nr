@@ -35,6 +35,7 @@ func main() -> i32 {
     // `.to_string()` copies the bytes into an owned immutable `string`, which
     // then behaves like any other: it concatenates, compares, and has a length.
     val line: string = report.to_string()
+    println("built: {line}")
     if line != "run: ok (......)" {
         return 91
     }
@@ -46,11 +47,19 @@ func main() -> i32 {
     // builder does not reallocate.
     val filled: u64 = report.len()
     report.clear()
+    val emptied: u64 = report.len()
+    println("len before clear: {filled}")
+    println("len after clear:  {emptied}")
     if report.len() != 0 {
         return 93
     }
     report.push_str("second pass")
 
+    val refilled: string = report.to_string()
+    println("refilled: {refilled}")
+
     // 16 + 11 = 27
-    return (filled + report.len()) as i32
+    val total = (filled + report.len()) as i32
+    println("total len:        {total}")
+    return total
 }

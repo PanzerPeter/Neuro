@@ -1,0 +1,7 @@
+isqrt(144)             = 12
+gcd(48, 36)            = 12
+ipow(2, 10)            = 1024
+pow_checked(2, 10) Some= 1024
+pow_checked(1000, 5) None -> 1
+primes in 0..=20       = 8
+total                  = 33

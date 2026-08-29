@@ -1,0 +1,8 @@
+scaled_area(&Square, 2)  bound generic = 50
+scaled_area(&Rect, 1)    bound generic = 24
+is_big(): default + override           = 1
+array for-in sum                       = 10
+describe(&impl Shape)    static        = 26
+dyn_area over both       dynamic       = 49
+dyn_flag over both       dynamic       = 1
+total                                  = 161

@@ -9,6 +9,12 @@ func main() -> i32 {
     val perms   = 0o7_5_5        // octal grouping       -> 493
     val ratio   = 1_000.000_5    // float with separators
 
+    println("1_000_000    = {million}")
+    println("0xFF_FF      = {grouped}")
+    println("0b1010_0011  = {nibble}")
+    println("0o7_5_5      = {perms}")
+    println("1_000.000_5  = {ratio}")
+
     // Reduce to a deterministic exit code of 0.
     val base = (million / 1_000) - 1_000        // 0
     return base

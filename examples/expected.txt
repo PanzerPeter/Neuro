@@ -4,11 +4,16 @@
 #          <path-relative-to-examples/>   module
 # Blank lines and lines beginning with '#' are ignored.
 #
-# This file is the single source of truth for the example test harness
-# (compiler/neurc/tests/examples.rs). The harness walks examples/ recursively,
-# compiles and runs every *.nr file, and asserts its exit code matches the
-# value here. A *.nr file with no entry below — or an entry with no file —
-# fails the test, so adding an example is one new line here and nothing else.
+# This file is the single source of truth for the exit code the example test
+# harness (compiler/neurc/tests/examples.rs) expects. The harness walks
+# examples/ recursively, compiles and runs every *.nr file, and asserts its
+# exit code matches the value here. A *.nr file with no entry below — or an
+# entry with no file — fails the test, so adding an example is one new line
+# here and nothing else.
+#
+# Standard output is checked separately and is not listed here: an example that
+# prints keeps its exact expected text in a sibling *.out file, and one with no
+# *.out file must print nothing at all.
 #
 # `module` in place of an exit code marks a non-root module of a multi-file
 # program: it has no `main`, and is compiled as part of the root that reaches

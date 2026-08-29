@@ -1,0 +1,5 @@
+built: run: ok (......)
+len before clear: 16
+len after clear:  0
+refilled: second pass
+total len:        27

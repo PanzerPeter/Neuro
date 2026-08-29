@@ -1,0 +1,5 @@
+s              = hello, world
+s.slice(0..5)  = hello
+s.slice(7..=11)= world
+s.slice(0..0)  =    (empty slice)
+score          = 12

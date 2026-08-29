@@ -1,0 +1,6 @@
+set READ    -> 001
+set WRITE   -> 011
+has READ    -> true
+has EXECUTE -> false
+xor WRITE   -> 001
+masked      -> 001 = 1

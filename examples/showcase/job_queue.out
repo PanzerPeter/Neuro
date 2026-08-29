@@ -1,0 +1,9 @@
+slot 0: cost 4 -> 4
+slot 1: cost 12 -> 24
+slot 2: cost 0 -> -7
+slot 3: cost 60 -> -3
+slot 4: cost 9 -> 45
+scored total               = 63
+settled (val-else |verdict|) = 73
+drained (val-else break)   = 3
+total                      = 139

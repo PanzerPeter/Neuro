@@ -21,5 +21,11 @@ func main() -> i32 {
     val c = b.clone()
     val sum_c = c.x + c.y       // 7
 
+    println("a          = ({a.x}, {a.y})")
+    println("b = a       = ({b.x}, {b.y})   (Copy: a still usable)")
+    println("c = b.clone = ({c.x}, {c.y})")
+    println("a.x + a.y   = {sum_a}")
+    println("c.x + c.y   = {sum_c}")
+
     return sum_a + sum_c        // 7 + 7 = 14
 }

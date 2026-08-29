@@ -12,7 +12,9 @@
 // namespace is flat, so those types are either in the program or absent from all of it.
 // On a non-root module it takes the bindings only.
 //
-// This file therefore says what it means with plain arithmetic and nothing else.
+// What `@no_prelude` does *not* take away is `print` / `println`. Those are compiler
+// builtins resolved by name, not prelude declarations, so they still work here — which
+// is why this file can report its answer at all.
 
 func triangular(n: i32) -> i32 {
     mut total: i32 = 0
@@ -23,5 +25,8 @@ func triangular(n: i32) -> i32 {
 }
 
 func main() -> i32 {
-    triangular(8)   // 1 + 2 + ... + 8 = 36
+    val total = triangular(8)
+    println("triangular(8) = {total}")
+    println("no Option, no Result, still printing")
+    total           // 1 + 2 + ... + 8 = 36
 }

@@ -1,0 +1,10 @@
+array for-in sum        = 10
++ w1.doubled() + w2.work = 28
+Signal::Stop            -> 0
+Signal::Go(3)           -> 3
+Signal::Range 1..2      -> 1
+bucket(7)   range arm   -> 2
+bucket(-4)  guard arm   -> 9
+Status::Active in field -> 1
+Status::Idle   in field -> 2
+total                   = 46

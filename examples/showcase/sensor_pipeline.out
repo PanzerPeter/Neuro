@@ -1,0 +1,3 @@
+index_of / validate running total = 52
+choose<char>(true, 'y', 'n')      = y
+total                             = 57

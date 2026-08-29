@@ -8,7 +8,7 @@
 //
 // Here the first loop searches for the first even candidate (2) and the second
 // runs until a counter reaches 5, yielding 5 * 10 = 50. The program returns
-// 2 + 50 - 52 = 0.
+// 2 + 50 - 52 = 0, and prints the two loop values on the way.
 
 func main() -> i32 {
     mut i: i32 = 0
@@ -18,6 +18,7 @@ func main() -> i32 {
             break i
         }
     }
+    println("first even candidate = {first_even}")
 
     mut j: i32 = 0
     val scaled = loop {
@@ -26,6 +27,10 @@ func main() -> i32 {
             break j * 10
         }
     }
+    println("scaled counter       = {scaled}")
 
-    return first_even + scaled - 52
+    val balance = first_even + scaled - 52
+    println("balance              = {balance}")
+
+    return balance
 }

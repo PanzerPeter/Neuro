@@ -1,0 +1,6 @@
+val Point { x, y }       -> x 12, y 18
+val [a, b, c]            -> 1, 2, 3
+val [first, ..rest]      -> first 4, rest sums to 26
+val [head, ..]           -> 4
+val [_, second, _]       -> 2
+total                    -> 72

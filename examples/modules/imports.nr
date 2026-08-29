@@ -39,15 +39,22 @@ func main() -> i32 {
     val corner: Point = Point::new(3, 4)
     val start = Point::new(1, 1)
     val span = corner.manhattan() - start.manhattan()   // 7 - 2 = 5
+    println("Point (named import)        = {span}")
 
     // A bare `import` binds no names, so this module keeps its qualifier.
     val edge = shapes::perimeter(span, 4)               // (5+4)*2 = 18
+    println("shapes::perimeter (bare)    = {edge}")
 
     // The imported variants read as themselves in a pattern.
     val rect = match area_of(span, 4) {
         Some(value) => value,                           // 5 * 4 = 20
         None        => 0
     }
+    println("region::rectangle (renamed) = {rect}")
+    println("SHIFT (renamed constant)    = {SHIFT}")
 
-    rect + edge + SHIFT                                 // 20 + 18 + 2 = 40
+    val total = rect + edge + SHIFT
+    println("total                       = {total}")
+
+    total                                               // 20 + 18 + 2 = 40
 }

@@ -1,0 +1,6 @@
+quarter(40)       = 10
+quarter(6)        = 100   (fallback: Err(3) propagated out)
+digit_sum(4, 5)   = 9
+digit_sum(4, 55)  = 7   (fallback: None propagated out)
+propagated Err    = 3
+total             = 129

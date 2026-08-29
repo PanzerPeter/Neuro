@@ -77,21 +77,39 @@ func main() -> i32 {
         sum += n            // 1 + 2 + 3 + 4 = 10
     }
 
+    println("array for-in sum        = {sum}")
+
     sum += w1.doubled()     // + (5 * 2) = 20
     sum += w2.work          // + 8       = 28
+    println("+ w1.doubled() + w2.work = {sum}")
 
     // Deconstruct the constructed signals.
-    sum += signal_value(a)  // + 0 = 28
-    sum += signal_value(b)  // + 3 = 31
-    sum += signal_value(c)  // + 1 = 32
+    val sa = signal_value(a)
+    val sb = signal_value(b)
+    val sc = signal_value(c)
+    println("Signal::Stop            -> {sa}")
+    println("Signal::Go(3)           -> {sb}")
+    println("Signal::Range 1..2      -> {sc}")
+    sum += sa               // + 0 = 28
+    sum += sb               // + 3 = 31
+    sum += sc               // + 1 = 32
 
     // Value-pattern buckets.
-    sum += bucket(7)        // + 2 = 34
-    sum += bucket(-4)       // + 9 = 43
+    val b7 = bucket(7)
+    val bneg = bucket(-4)
+    println("bucket(7)   range arm   -> {b7}")
+    println("bucket(-4)  guard arm   -> {bneg}")
+    sum += b7               // + 2 = 34
+    sum += bneg             // + 9 = 43
 
     // Match on the enum stored in a struct field.
-    sum += status_bonus(w1.status)  // + 1 = 44
-    sum += status_bonus(w2.status)  // + 2 = 46
+    val bonus1 = status_bonus(w1.status)
+    val bonus2 = status_bonus(w2.status)
+    println("Status::Active in field -> {bonus1}")
+    println("Status::Idle   in field -> {bonus2}")
+    sum += bonus1                   // + 1 = 44
+    sum += bonus2                   // + 2 = 46
 
+    println("total                   = {sum}")
     return sum              // 46
 }

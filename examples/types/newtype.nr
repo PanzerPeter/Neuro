@@ -25,6 +25,13 @@ func trip_score(t: &Trip) -> i32 {
 
 func main() -> i32 {
     val total: Meters = add_distance(Meters(10), Meters(20))   // Meters(30)
+    println("Meters(10) + Meters(20) = Meters({total.0})")
+
     val trip = Trip { distance: total, duration: Seconds(12) }
-    trip_score(&trip)                                          // 30 + 12 = 42
+    println("Trip.distance.0         = {trip.distance.0}")
+    println("Trip.duration.0         = {trip.duration.0}")
+
+    val score = trip_score(&trip)                              // 30 + 12 = 42
+    println("trip_score(&trip)       = {score}")
+    score
 }

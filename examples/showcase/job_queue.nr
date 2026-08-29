@@ -99,6 +99,7 @@ func main() -> i32 {
         // side by side.
         val cost = slot_cost(costs, i) ?? 0
         val points = score(i + 1, cost)
+        println("slot {i}: cost {cost} -> {points}")
         if points > 0 {
             accepted.push(points)
         }
@@ -106,10 +107,13 @@ func main() -> i32 {
     }
     // scores: 1*4=4, 2*12=24, cost 0 -> -7, cost 60 -> -3, 5*9=45  => total 63
 
+    println("scored total               = {total}")
+
     mut settled: i32 = 0
     for points in accepted {
         settled = settled + settle(points)
     }
+    println("settled (val-else |verdict|) = {settled}")
     // 4 -> Accept 4, 24 -> Accept 24, 45 -> Accept 45  => settled 73
 
     // `Vec::pop` yields `Option<i32>`, so the drain loop is a `val-else` whose
@@ -121,5 +125,9 @@ func main() -> i32 {
     }
     // three entries were pushed => drained 3
 
-    total + settled + drained  // 63 + 73 + 3 = 139
+    println("drained (val-else break)   = {drained}")
+
+    val sum = total + settled + drained
+    println("total                      = {sum}")
+    sum                        // 63 + 73 + 3 = 139
 }

@@ -1,0 +1,2 @@
+input 0.0 -> 0.00  fires: false
+input 1.0 -> 0.40  fires: true

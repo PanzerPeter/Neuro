@@ -13,6 +13,8 @@ func main() -> i32 {
     mut acc: i32 = 0
     for i in 1..=10 {
         acc = acc + i        // 1+2+...+10 = 55, well within i32 range
+        println("+ {i} -> {acc}")
     }
+    println("total (same in debug and release) = {acc}")
     return acc
 }

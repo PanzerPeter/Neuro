@@ -1,0 +1,10 @@
+Vec<Item> lines            = 3
+HashMap index entries      = 3
+total weight               = 73
+index.get(girder) -> weight= 45
+index.get(rivet)  -> miss  = 1
+?? bolt                    = 0
+?? rivet, then washer      = 2
+surcharges                 = 9
+BTreeMap heaviest key      = 45
+total                      = 181

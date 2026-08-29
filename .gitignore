@@ -425,9 +425,11 @@ nul
 # Neuro Examples
 # ---------------------------
 # Ignore everything under examples/ (compiled executables land here when
-# building in place) except source, docs, the manifest, and subdirectories.
+# building in place) except source, docs, the manifest, the golden stdout
+# files, and subdirectories.
 examples/**
 !examples/**/
 !examples/**/*.nr
 !examples/**/*.md
 !examples/**/*.txt
+!examples/**/*.out

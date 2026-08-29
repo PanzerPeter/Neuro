@@ -1,0 +1,6 @@
+pair.0 + pair.1        = 42
+val (_, hi) = min_max   -> 9
+val ((a, b), c)         -> 1, 2, 3
+mixed.0 / mixed.1       -> 5, true
+bonus                   = 5
+total                   = 62

@@ -1,0 +1,5 @@
+api::Point (qualified) -> corner = 3, 4
+Point (imported)       -> start  = 1, 1
+span                             = 5
+api::SHIFT (geometry::ORIGIN_SHIFT) = 2
+total                            = 10

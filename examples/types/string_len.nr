@@ -14,6 +14,9 @@ func main() -> i32 {
     val empty: string = ""
     val zero: u64 = empty.len()
 
+    println("{greeting} -> len {n}")
+    println("empty string -> len {zero}")
+
     if n == 12u64 {
         if zero == 0u64 {
             return 0

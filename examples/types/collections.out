@@ -1,0 +1,8 @@
+Vec  after push/index -> for-in sum 16
+Vec  pop() Some       -> 23
+Vec  get(9) None      -> 24
+Map  get/contains/rm  -> 68
+BTreeMap key          -> 10
+BTreeMap key          -> 20
+BTreeMap key          -> 30
+total                 -> 101

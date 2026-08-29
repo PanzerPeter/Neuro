@@ -70,8 +70,11 @@ func main() -> i32 {
                     score = score + grade
                 }
 
+                println("tick {tick} slot {slot}: value {value} grade {grade} score {score}")
+
                 // Critical reading ends the whole sweep, not just this inner loop.
                 if grade == 2 {
+                    println("critical reading -> break sweep")
                     break sweep
                 }
             }
@@ -85,5 +88,11 @@ func main() -> i32 {
     // The three counters are packed into one exit code: 100 + 50 + 10 = 160. The
     // multipliers are kept small deliberately — a process exit status is 8 bits,
     // so any total of 256 or more would wrap and silently mis-report the result.
-    return (closed * 50) + (score * 10) + ticks
+    println("guards closed = {closed}   (destructors ran on the break path)")
+    println("score         = {score}")
+    println("ticks         = {ticks}")
+
+    val code = (closed * 50) + (score * 10) + ticks
+    println("packed code   = {code}")
+    return code
 }

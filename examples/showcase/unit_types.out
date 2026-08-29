@@ -1,0 +1,6 @@
+Leg::new(Meters(30), Seconds(12)).pace() = 18
+Leg { Meters(20), Seconds(8) }.pace()    = 12
+add_distance -> Meters(50)
+terrain_cost(Hill)                       = 5
+terrain_cost(Trail)                      = 3
+total                                    = 94

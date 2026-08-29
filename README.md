@@ -49,7 +49,7 @@ Neuro is an Ahead-of-Time (AOT) compiled language for AI workloads. Python is in
 
 ## Quick Example
 
-A single perceptron with ReLU activation; uses structs, `impl` blocks, associated functions, instance methods, if-expressions, and implicit returns. [This file compiles and runs today.](examples/structs/neuron.nr)
+A single perceptron with ReLU activation; uses structs, `impl` blocks, associated functions, instance methods, if-expressions, implicit returns, and `println`. [This file compiles and runs today.](examples/structs/neuron.nr)
 
 ```neuro
 struct Neuron {
@@ -62,7 +62,7 @@ impl Neuron {
         Neuron { weight: weight, bias: bias }
     }
 
-    // ReLU: pass-through if active, clamp to zero if not
+    // ReLU activation: pass-through if positive, clamp to zero otherwise
     func activate(&self, input: f64) -> f64 {
         val z = (input * self.weight) + self.bias
         if z > 0.0 { z } else { 0.0 }
@@ -77,12 +77,23 @@ impl Neuron {
 func main() -> i32 {
     val neuron = Neuron::new(0.5, -0.1)
 
-    val dead   = neuron.activate(0.0)   // 0.0 * 0.5 − 0.1 = −0.1 → clamped to 0.0
-    val active = neuron.activate(1.0)   // 1.0 * 0.5 − 0.1 =  0.4 → passes through
-    val fired  = neuron.is_active(1.0)  // true
+    val dead = neuron.activate(0.0)         // 0.0 * 0.5 − 0.1 = −0.1 → clamped to 0.0
+    val dead_fires = neuron.is_active(0.0)
+    println("input 0.0 -> {dead:.2}  fires: {dead_fires}")
 
-    return 0
+    val active = neuron.activate(1.0)       // 1.0 * 0.5 − 0.1 =  0.4 → passes through
+    val active_fires = neuron.is_active(1.0)
+    println("input 1.0 -> {active:.2}  fires: {active_fires}")
+
+    if dead > 0.0 { return 1 }
+
+    return (active * 10.0) as i32           // 4
 }
+```
+
+```
+input 0.0 -> 0.00  fires: false
+input 1.0 -> 0.40  fires: true
 ```
 
 ---
@@ -400,7 +411,7 @@ func main() -> i32 {
 
 ### Closures and Higher-Order Functions
 
-Verbatim from [examples/showcase/closures.nr](examples/showcase/closures.nr). It compiles, links, and exits with code 90.
+Verbatim from [examples/showcase/closures.nr](examples/showcase/closures.nr). It compiles, links, prints the three results below, and exits with code 90.
 
 ```neuro
 // Apply `f` to each element of a 4-element array and sum the results.
@@ -442,11 +453,17 @@ func main() -> i32 {
     val s = Scaler { factor: 2 }
     val doubled = s.apply(5)                         // 10
 
-    biased + scaled + doubled                        // 50 + 30 + 10 = 90
+    println("capture by value  |x| x + bias      = {biased}")
+    println("move closure      move |x| x * scale = {scaled}")
+    println("struct method     s.apply(5)         = {doubled}")
+
+    val total = biased + scaled + doubled
+    println("total                                = {total}")
+    total                                            // 50 + 30 + 10 = 90
 }
 ```
 
-Every runnable program in [examples/showcase/](examples/showcase/) combines several features at once and is pinned to an expected exit code in [examples/expected.txt](examples/expected.txt). Tensor types, `@grad`, and GPU kernels are not shown here because they do not exist yet. See the [Quick Roadmap](#quick-roadmap).
+Every runnable program in [examples/showcase/](examples/showcase/) combines several features at once and is pinned twice: to an expected exit code in [examples/expected.txt](examples/expected.txt), and to the exact text it prints in a sibling `.out` file. Tensor types, `@grad`, and GPU kernels are not shown here because they do not exist yet. See the [Quick Roadmap](#quick-roadmap).
 
 ---
 

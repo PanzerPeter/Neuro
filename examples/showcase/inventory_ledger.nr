@@ -121,7 +121,19 @@ func main() -> i32 {
     val lines = items.len() as i32                    // 3
     val indexed = index.len() as i32                  // 3
 
+    println("Vec<Item> lines            = {lines}")
+    println("HashMap index entries      = {indexed}")
+    println("total weight               = {total_weight}")
+    println("index.get(girder) -> weight= {girder_weight}")
+    println("index.get(rivet)  -> miss  = {missing}")
+    println("?? bolt                    = {bolt_at}")
+    println("?? rivet, then washer      = {rivet_at}")
+    println("surcharges                 = {fees}")
+    println("BTreeMap heaviest key      = {heaviest}")
+
     // 73 + 45 + 1 + 9 + 45 + 3 + 3 + 0 + 2 = 181
-    total_weight + girder_weight + missing + fees + heaviest + lines + indexed +
-        bolt_at + rivet_at
+    val total = total_weight + girder_weight + missing + fees + heaviest + lines +
+        indexed + bolt_at + rivet_at
+    println("total                      = {total}")
+    total
 }

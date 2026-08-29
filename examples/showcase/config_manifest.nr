@@ -10,8 +10,9 @@
 // The header, the footer, and the expected document are all block strings: the
 // value each carries is dedented to the column its closing `"""` sits at, so the
 // literals stay indented with the code while the rendered document does not.
-// `main` returns the byte length of the manifest, which only comes out right if
-// every line rendered and every block dedented exactly as intended.
+// The finished manifest is printed and then checked against that literal, so the
+// output *is* the document. `main` returns its byte length, which only comes out
+// right if every line rendered and every block dedented exactly as intended.
 
 enum Setting {
     Flag(bool),
@@ -100,9 +101,14 @@ func main() -> i32 {
     # end
     """
 
+    print(manifest)
+
     if manifest != expected {
+        println("manifest did not match the expected document")
         return 0
     }
 
-    return manifest.len() as i32
+    val bytes = manifest.len() as i32
+    println("manifest bytes: {bytes}")
+    return bytes
 }
