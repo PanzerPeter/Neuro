@@ -127,6 +127,11 @@ also drops the prelude's declarations from the whole program, `Option` and `Resu
 then declared nowhere, because the merged namespace is flat, so those types are either in
 the program or absent from all of it.
 
+`print` / `println` — and the panic family — are **not** in the prelude. They are compiler
+builtins resolved by name, so `@no_prelude` does not take them away; only a local
+declaration of the same name shadows one. See
+[functions.md](functions.md#standard-output-builtins).
+
 ## How a path is resolved
 
 Each segment is looked up beside the file that wrote the path:

@@ -73,11 +73,29 @@ echo $?
 
 The hello.nr program returns 26.
 
-The exit code is currently the only way a program reports a result. There is no `print`
-or `println` yet — the sole text a compiled binary writes is a panic diagnostic, which
-goes to stderr and then aborts the process. Printing to stdout is the first item of
-Phase 2; until it lands, every example in this repository is verified by its exit code
-(pinned in [`examples/expected.txt`](../../examples/expected.txt)).
+A program reports a result two ways. `main`'s `i32` becomes the exit code, and that is
+what every example in this repository is verified by (pinned in
+[`examples/expected.txt`](../../examples/expected.txt)). For text, `print` and `println`
+write to standard output:
+
+```neuro
+func main() -> i32 {
+    val name: string = "Neuro"
+    print("hello from ")
+    println(name)
+    return 0
+}
+```
+
+```
+hello from Neuro
+```
+
+Each takes one `string`, and interpolation renders the holes before the call, so
+`println("phase {n} of {total}")` needs no format arguments. See
+[`examples/basics/greeting.nr`](../../examples/basics/greeting.nr) for a runnable version
+and the [functions reference](../language-reference/functions.md#standard-output-builtins)
+for the full contract.
 
 ## Understanding the Examples
 

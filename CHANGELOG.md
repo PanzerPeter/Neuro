@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-08-29
+
+### Added
+
+- **`print` / `println` — standard output.** A compiled program can now say something to a
+  terminal without dying: both builtins take one `string` and write it to stdout (fd 1),
+  `println` appending a newline, and both return `void`. The exit code is no longer a
+  program's only result channel. They mirror the panic family — resolved by name in
+  semantic analysis with a hard-coded twin in the backend, so a user function of the same
+  name shadows one, and neither is a prelude declaration, so `@no_prelude` does not remove
+  them.
+  - Nothing new was needed for formatting: string interpolation already renders every hole,
+    format mini-language and all, into one ordinary `string` before the call is reached, so
+    `println("x = {x:.2}")` is a plain one-argument call. There is no variadic form, no
+    call-site format string, and no `Display` trait.
+  - The argument is an owned `string` or an immutable `&string` sub-slice (what
+    `.slice(range)` returns). A non-string argument is a type error rather than an implicit
+    interpolation, and `&mut string` — a pointer to the fat pointer rather than the fat
+    pointer itself — is rejected with it.
+  - The text is **read, not consumed**: no move is recorded, so a value stays usable after
+    being printed.
+  - Output is **unbuffered**; a buffered standard-output type remains later work. Both
+    builtins route through one module-private helper carrying a short-write retry loop, so a
+    large buffer written to a pipe — where `write` routinely consumes less than it is
+    offered — is not silently truncated.
+- `examples/basics/greeting.nr`, a runnable tour of both builtins including an interpolated
+  line and a printed `&string` slice.
+- `docs/BUGS.md`: **BUG-016** — binding a `void`-returning call (`val x = println("hi")`, or
+  any user function with no return type) passes the type checker and then aborts code
+  generation with `function call returned void when value expected`. Pre-existing for user
+  `void` functions; the new builtins make the shape easier to write by accident. Statement
+  position is unaffected.
+
+### Changed
+
+- `examples/showcase/status_report.nr` now prints the report it builds, so the showcase
+  exercises `println` alongside structs with `impl` methods, an enum matched by `match`, a
+  fixed-size array walked by `for`-in, string concatenation, and the interpolation format
+  mini-language. Its exit code is unchanged; each line is printed and then checked against
+  the exact text it should produce.
+- The quick start, the functions reference, the modules reference, and both capability
+  tables describe standard output. The quick start no longer says a program has no way to
+  print.
+
 ## [2.0.3] - 2026-08-29
 
 ### Fixed

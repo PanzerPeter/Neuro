@@ -159,7 +159,7 @@ over a same-named function like the checker. Inner access `.0` on a newtype-type
 `HirExprKind::NewtypeAccess { object }` typed as the inner type. No `HirItem` is emitted — a newtype
 is purely a type-system distinction that the backends erase.
 
-Three nodes carry a deliberately-chosen type the source has no first-class form for: a `loop` value-expression takes its `break v` type (or `void`); a method-name callee `FieldAccess` carries the call's result type (there is no method value); a `Range` carries `void` (valid only as a `string.slice` argument — the slice lowering reads its bounds directly). Divergent panic-family calls (`panic`/`assert`/`unreachable`) adopt their context's expected type, or `void` in statement position.
+Three nodes carry a deliberately-chosen type the source has no first-class form for: a `loop` value-expression takes its `break v` type (or `void`); a method-name callee `FieldAccess` carries the call's result type (there is no method value); a `Range` carries `void` (valid only as a `string.slice` argument — the slice lowering reads its bounds directly). Divergent panic-family calls (`panic`/`assert`/`unreachable`) adopt their context's expected type, or `void` in statement position. The standard-output builtins (`print`/`println`, `IO_BUILTINS` in `expressions/mod.rs`) are recognized in the same `lower_ident_call` fallback but do **not** take their type from context: they return, so the call is always `HirType::Void` with one `HirType::String` parameter.
 
 Generics: this slice performs **monomorphization** — the HIR has no generic node, so generic templates are erased into concrete instances here. A generic `FunctionDef` is stored in `generic_templates` (not `functions`) and never lowered directly. A call to a generic function (`lower_generic_call`) infers its type arguments by unifying the template's parameter annotations against the lowered arguments' types (`unify_ast_hir`), resolves the concrete signature under a `type_subst` map (consulted by `resolve_type` for a parameter name), mangles a per-instance name (`mangle_instance` → `name_g_<type…>`, single-underscore marker so the symbol never contains `__`), enqueues the instance if unseen, and emits a `Call` to the mangled name. A worklist drains after the ordinary items: each instance's body lowers under its `type_subst`, appended as a concrete `HirItem::Function`. The backend pre-declares all functions, so instance emission order is irrelevant.
 
@@ -190,6 +190,12 @@ Generic structs & impls: monomorphized the same way. A generic `StructDef` is st
   unaffected — every instance reaching HIR has concrete `usize` array lengths.
 
 ## Recent Updates
+- 2026-08-29: Standard-output builtins (2A). `IO_BUILTINS` (`expressions/mod.rs`) and a
+  matching arm at the end of `lower_ident_call` (`expressions/calls.rs`) resolve `print` /
+  `println` once every declared function, generic template and local binding has been tried,
+  so a user function of that name still wins. Unlike the panic arm beside it the call type is
+  fixed at `HirType::Void` rather than adopted from `expected`. Backend lowering is in
+  `llvm-backend`; no new HIR node.
 - 2026-08-25: `expressions/interpolation.rs` lowers `Expr::InterpString` to
   `HirExprKind::InterpString`, typed `string`. Each hole lowers with no expected type —
   the hole's own expression decides its type, and the rendering follows from that.

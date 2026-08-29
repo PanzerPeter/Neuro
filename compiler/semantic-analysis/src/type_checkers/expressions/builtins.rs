@@ -205,6 +205,56 @@ impl TypeChecker {
         Some(Type::Unknown)
     }
 
+    /// Type-check a call to a compiler-known standard-output builtin:
+    /// `print(text: string)` or `println(text: string)`.
+    ///
+    /// Returns `Some(Type::Void)` when `func_name` names one — recording an arity or
+    /// argument-type diagnostic on violation — and `None` otherwise, so the caller falls
+    /// through to ordinary function resolution. Unlike the panic family these **return**,
+    /// so the result is the real unit type rather than the divergent `Type::Unknown`.
+    ///
+    /// The argument may be an owned `string` or an immutable `&string` slice: both are
+    /// the same `{ ptr, len }` pair, and `.slice(range)` yields the latter. It is read,
+    /// not consumed, so no move is recorded and the caller may keep using the value.
+    pub(super) fn resolve_io_builtin(
+        &mut self,
+        func_name: &str,
+        args: &[Expr],
+        span: Span,
+    ) -> Option<Type> {
+        if !matches!(func_name, "print" | "println") {
+            return None;
+        }
+
+        if args.len() != 1 {
+            self.record_error(TypeError::ArgumentCountMismatch {
+                expected: 1,
+                found: args.len(),
+                span,
+            });
+            return Some(Type::Void);
+        }
+
+        if let Some(arg_ty) = self.check_expr(&args[0], Some(&Type::String)) {
+            // A `&mut string` is a pointer to the fat pointer, not the fat pointer
+            // itself, so it is rejected here rather than peeled with the shared borrows.
+            let accepted = match &arg_ty {
+                Type::Unknown => true,
+                Type::Reference { inner, mutable } => !*mutable && matches!(**inner, Type::String),
+                other => matches!(other, Type::String),
+            };
+            if !accepted {
+                self.record_error(TypeError::Mismatch {
+                    expected: Type::String,
+                    found: arg_ty,
+                    span: args[0].span(),
+                });
+            }
+        }
+
+        Some(Type::Void)
+    }
+
     /// Enforce the rules for the receiver of a `&mut self` method call, which
     /// borrows the receiver mutably for the call's duration.
     ///

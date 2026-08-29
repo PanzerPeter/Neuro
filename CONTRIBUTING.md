@@ -301,16 +301,19 @@ How to take one on:
 Found a new bug? Open an issue with a minimal reproducible example instead of a PR —
 confirmed defects get filed into `docs/BUGS.md` from there.
 
-### Phase 1 — Core Language features
+### Phase 2 — Tensor Foundation & MLIR
 
 The roadmap is dependency-ordered, so pick the **topmost open item**: its prerequisites
 are already done. Coordinate on an issue before starting a large one.
 
-**Every Phase 1 sub-phase (1A–1H) is now complete**, including the last flagged 1C item —
+**Every Phase 1 sub-phase (1A–1H) is complete**, including the last flagged 1C item —
 growable `String` — which shipped in v1.80.0 after the type was specified in the language
-spec. **Phase 2 — Tensor Foundation & MLIR** holds the next open items. Start at the top
-of its `2A — Tensor Core` list in the roadmap; `Tensor<T, [...]>` static tensor type
-syntax is first.
+spec. **Phase 2 — Tensor Foundation & MLIR** holds the next open items, and its first
+sub-phase is not tensor work: `2A — Standard I/O & Spec Stragglers` clears constructs the
+specification names that no Phase 1 item ever tracked. `print` / `println` shipped in
+v2.1.0; `.is_nan()` on `f32` / `f64` is next. Start at the top of 2A in the roadmap, and
+move to `2B — Tensor Core` (`Tensor<T, [...]>` static tensor type syntax) only once 2A is
+clear.
 
 Nothing links `TokenKind` to the editor grammar, so any lexer change must also update
 `neuro-language-support/syntaxes/neuro.tmLanguage.json` by hand in the same commit.

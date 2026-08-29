@@ -223,6 +223,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 if CodegenContext::is_panic_builtin(name) && !self.functions.contains_key(name) {
                     return Ok(Some(self.codegen_panic_builtin(name, args, *span)?));
                 }
+                // The standard-output builtins return unit, so they yield no value: a
+                // statement discards the `None`, and value position reports it as the
+                // void-where-a-value-was-expected error every unit call gets.
+                if CodegenContext::is_io_builtin(name) && !self.functions.contains_key(name) {
+                    self.codegen_io_builtin(name, args)?;
+                    return Ok(None);
+                }
                 self.codegen_call(name, args)
             }
 

@@ -42,9 +42,12 @@ impl TypeChecker {
         }
 
         // A user-defined function of the same name shadows the builtin: only consult the
-        // panic-family resolver when no such function is registered.
+        // panic-family and standard-output resolvers when no such function is registered.
         if !self.functions.contains_key(func_name) {
             if let Some(ret) = self.resolve_panic_builtin(func_name, args, span) {
+                return Some(ret);
+            }
+            if let Some(ret) = self.resolve_io_builtin(func_name, args, span) {
                 return Some(ret);
             }
         }

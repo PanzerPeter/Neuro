@@ -150,7 +150,7 @@ result type into `codegen_builtin_method` (`expressions/methods.rs`).
   variants are materialized and `select`ed. The `Option<T>` instance, its variant tags, and its
   payload layout all come from the call's result type; nothing about `Option` is assumed here.
 
-`resolve_builtin_method` / `is_panic_builtin` are duplicated from `semantic-analysis` to keep the
+`resolve_builtin_method` / `is_panic_builtin` / `is_io_builtin` are duplicated from `semantic-analysis` to keep the
 backend independent of the type-checker slice.
 
 ## if / else-if / else Lowering
@@ -208,6 +208,28 @@ Because `panic`/`unreachable` terminate the block with `unreachable`, following 
 code: `codegen_stmt` early-returns when the block is already terminated, and `codegen_return` /
 `codegen_body`'s tail path skip the `ret` when evaluating the returned expr terminated the block
 (`func f() -> i32 { panic("x") }`). Keeps LLVM from seeing instructions after a terminator.
+
+## Standard-Output ABI
+`print(text: string)` / `println(text: string)` lower in `io.rs`. The `Call`→`Identifier` arm
+(`expressions/mod.rs`) intercepts these names via `CodegenContext::is_io_builtin` before
+`codegen_call`, but only when no user function of the same name is registered (user functions
+shadow, matching the semantic resolver). Both return unit, so the dispatch yields `Ok(None)`: a
+statement discards it, and value position reports the ordinary void-where-a-value-was-expected
+error.
+
+The argument is already the `{ ptr, i64 }` fat pointer — interpolation renders every hole before
+the call is reached — so lowering is an `extractvalue` pair and a call. `println` follows the text
+with a second call over `neuro.print.newline`, a one-byte `.rodata` global emitted once per module.
+There is **no buffering**: output reaches fd 1 through the same external POSIX `write` the panic
+runtime declares (`get_or_declare_write`), unflushed. A buffered stdout is Phase 5 work.
+
+Both go through `neuro.print.write_all(ptr, i64)`, one module-private `Linkage::Private` helper
+emitted on first use, holding the short-write retry loop: `write` may consume less than it was
+offered (a pipe with a full buffer does exactly that), and a bare call per site would silently
+truncate the language's primary result channel. The loop stops on a non-positive return so a closed
+or failing descriptor cannot spin. `get_or_build_write_all` saves and restores the builder position,
+since the helper is built lazily mid-function, and `split_printable` reports a non-aggregate operand
+as an internal error rather than asking it for a struct variant it has not got.
 
 ## Error-Path Outlining
 `outlining.rs` emits every panic-family failure path into a module-private cold function and leaves
@@ -335,6 +357,13 @@ Lowering: AST → Neuro High-Level IR → MLIR dialects (linalg/tensor/func/arit
 emission layer in all paths.
 
 ## Recent Updates
+- 2026-08-29: Standard-output builtins (2A). New `codegen/io.rs` — `is_io_builtin` /
+  `codegen_io_builtin` lower `print` / `println` to unbuffered POSIX `write` on fd 1 through the
+  module-private `neuro.print.write_all` retry loop, with `println` appending the shared
+  `neuro.print.newline` global. The `Call`→`Identifier` arm in `expressions/mod.rs` intercepts them
+  after the panic family and returns `Ok(None)` (unit). No `CodegenContext` state added: the helper
+  and the global are found by name via `module.get_function` / `get_global`. See
+  "Standard-Output ABI".
 - 2026-08-29: Two internal-error aborts closed. `codegen_binary`
   (`codegen/expressions/binary.rs`) checks that both coerced operands are integer or float values
   before the operator match — every arm calls `into_int_value` / `into_float_value`, which *panic*
