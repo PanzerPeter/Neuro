@@ -24,5 +24,10 @@ func main() -> i32 {
     val same: &i32 = identity(&x)
     val pick: &i32 = first(&x, &y)
 
-    return *same + *pick        // 30 + 30 = 60
+    println("identity(&x)   -> {*same}")
+    println("first(&x, &y)  -> {*pick}   (y is {y}, and never returned)")
+
+    val total = *same + *pick   // 30 + 30 = 60
+    println("total          -> {total}")
+    return total
 }

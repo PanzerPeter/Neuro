@@ -1,0 +1,15 @@
+tick 0 slot 0: value 2 grade 0 score 0
+tick 0 slot 1: value 2 grade 0 score 0
+tick 0 slot 2: value 2 grade 0 score 0
+tick 1 slot 0: value 10 grade 1 score 1
+tick 1 slot 1: value 10 grade 1 score 1
+tick 1 slot 2: value 10 grade 1 score 1
+tick 2 slot 0: value 18 grade 1 score 2
+tick 2 slot 1: value 18 grade 1 score 3
+tick 2 slot 2: value 18 grade 1 score 3
+tick 3 slot 0: value 26 grade 2 score 5
+critical reading -> break sweep
+guards closed = 2   (destructors ran on the break path)
+score         = 5
+ticks         = 10
+packed code   = 160

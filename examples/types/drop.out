@@ -1,0 +1,4 @@
+drop #1
+drop #2
+drop #3
+destructors run: 3

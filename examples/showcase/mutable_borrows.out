@@ -1,0 +1,5 @@
+start                = 40
+increment(&mut c)    = 41
+increment(&mut c)    = 42
+add_into(&mut c, 5)  = 47
+*r through &mut i32  = 47

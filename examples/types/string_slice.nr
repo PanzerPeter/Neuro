@@ -28,6 +28,14 @@ func main() -> i32 {
     val ne_other: bool = (&lang != &other)            // true
     val literal: bool = slice_matches(&lang)          // true
 
+    println("&lang == &same  = {eq_same}")
+    println("&lang == &other = {eq_other}")
+    println("&lang != &other = {ne_other}")
+    println("&lang == literal= {literal}")
+    println("lang still bound= {lang}")
+
     // true(1) + false(0) + true(1) + true(1) = 3, minus 3 → 0.
-    return (eq_same as i32) + (eq_other as i32) + (ne_other as i32) + (literal as i32) - 3
+    val balance = (eq_same as i32) + (eq_other as i32) + (ne_other as i32) + (literal as i32) - 3
+    println("balance         = {balance}")
+    return balance
 }

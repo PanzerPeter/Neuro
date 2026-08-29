@@ -6,13 +6,18 @@
 // the code around it without that indentation leaking into the value. Escapes and
 // `{...}` interpolation holes behave exactly as they do in a `"..."` literal.
 //
-// Every block below is checked against the exact text it should produce, and
-// `main` returns the number of checks that passed.
+// Every block below is checked against the exact text it should produce and then
+// printed between markers, so the dedenting is visible column by column in the
+// output. `main` returns the number of checks that passed.
 
 func check(actual: string, expected: string) -> i32 {
     if actual == expected {
+        print("[")
+        print(actual)
+        println("]")
         return 1
     }
+    println("MISMATCH: rendered {actual}, expected {expected}")
     return 0
 }
 

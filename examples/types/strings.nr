@@ -1,5 +1,9 @@
 // Neuro Programming Language - String Type Test
 // Phase 1: Basic string implementation
+//
+// Every string this file builds is printed, so the escapes and the Unicode
+// escape are visible as rendered text. `main` returns 0 — the output is the
+// assertion here.
 
 // Simple string return
 func get_greeting() -> string {
@@ -56,6 +60,22 @@ func main() -> i32 {
     val unicode: string = unicode_string()
     val result: string = complex_example("Complex test")
     val implicit: string = implicit_return()
+
+    println("returned:  {greeting}")
+    println("local:     {message}")
+    println("echoed:    {echoed}")
+    println("unicode:   {unicode}")
+    println("from call: {result}")
+    println("implicit:  {implicit}")
+
+    // The escaped string carries its own newlines and a tab, so it spans lines.
+    println("escaped:")
+    println(escaped)
+
+    // An empty string prints as nothing, and `println` still ends the line.
+    print("empty:     [")
+    print(empty)
+    println("]")
 
     return 0
 }

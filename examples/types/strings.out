@@ -1,0 +1,11 @@
+returned:  Hello, Neuro!
+local:     String types working!
+echoed:    Test echo
+unicode:   Unicode: 👍
+from call: Done
+implicit:  Implicit string return
+escaped:
+Line 1
+Line 2	Tabbed
+Line 3
+empty:     []

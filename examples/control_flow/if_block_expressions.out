@@ -1,0 +1,4 @@
+abs(-7)            = 7
+block value        = 42
+clamp(150, 0, 100) = 100
+total              = 149

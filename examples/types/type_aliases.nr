@@ -32,6 +32,13 @@ func main() -> i32 {
     val d: Meters = s.depth()        // 10.0
     val tag: Id = to_id(7)           // 7
 
+    // An alias is transparent: `Meters` renders as the `f64` it names.
+    println("Sensor.location (Meters)  = {s.location}")
+    println("Sensor.reading  (Celsius) = {s.reading}")
+    println("depth() -> Meters         = {d}")
+    println("to_id(7) -> Id            = {tag}")
+
     val total: i64 = tag + (d as i64)  // 7 + 10 = 17
+    println("tag + (d as i64)          = {total}")
     return total as i32
 }

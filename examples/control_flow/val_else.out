@@ -1,0 +1,9 @@
+Result  bound       = 11
+Result  else |err|  = 9
+Option  bound       = 6
+Option  else        = 4
+Shape   bound       = 12
+Shape   else |other| Square -> 9
+Shape   else |other| Empty  -> 0
+loop    else break  = 10
+total               = 61

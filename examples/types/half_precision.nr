@@ -30,6 +30,24 @@ func main() -> i32 {
     val three: f16 = scale(0.75f16)          // 0.75 * 4 = 3.0
     val code: i32 = three as i32             // 3
 
+    // `f16` / `bf16` are not interpolatable — the narrow contract covers binding,
+    // copy, `==`, and `as`, and rendering is not on that list. Widen to `f32` to
+    // report one, exactly as you widen to compute with one.
+    val a_out: f32 = a as f32
+    val b_out: f32 = b as f32
+    val narrowed_out: f32 = narrowed as f32
+    val b_as_f16_out: f32 = b_as_f16 as f32
+    val three_out: f32 = three as f32
+
+    println("f16  1.5f16                 = {a_out}")
+    println("bf16 2.0bf16                = {b_out}")
+    println("f16 -> f32 + 2.5f32         = {widened}")
+    println("narrowed back to f16        = {narrowed_out}")
+    println("bf16 -> f16                 = {b_as_f16_out}")
+    println("scale(0.75f16) via f32      = {three_out}")
+    println("f16 -> i32                  = {code}")
+    println("f16 is Copy (a == a_copy)   = {same}")
+
     if same && narrowed == 4.0f16 && b_as_f16 == 2.0f16 {
         return code        // 3 on success
     }

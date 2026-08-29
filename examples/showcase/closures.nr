@@ -48,5 +48,11 @@ func main() -> i32 {
     val s = Scaler { factor: 2 }
     val doubled = s.apply(5)                         // 10
 
-    biased + scaled + doubled                        // 50 + 30 + 10 = 90
+    println("capture by value  |x| x + bias      = {biased}")
+    println("move closure      move |x| x * scale = {scaled}")
+    println("struct method     s.apply(5)         = {doubled}")
+
+    val total = biased + scaled + doubled
+    println("total                                = {total}")
+    total                                            // 50 + 30 + 10 = 90
 }

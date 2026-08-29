@@ -1,0 +1,6 @@
+&lang == &same  = true
+&lang == &other = false
+&lang != &other = true
+&lang == literal= true
+lang still bound= Neuro
+balance         = 0

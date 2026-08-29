@@ -1,0 +1,3 @@
+unsafe as value    = 17
+unsafe as statement -> total = 25
+unsafe as return   = 24

@@ -1,0 +1,14 @@
+arithmetic      72
+comparison      true
+logical         true
+if / else       1
+nested if       3
+nested calls    24
+multiple vars   15
+mut variable    25
+shadowed mut    20
+bool return     true
+f32 product     6.0
+f64 sum         0.75
+i64 sum         5000000000
+all checks passed

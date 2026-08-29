@@ -1,0 +1,9 @@
+letter          = A
+emoji           = 👍
+letter as i32   = 65
+code as char    = A
+newline code    = 10
+copy == letter  = true
+'a' < 'b'       = true
+round-trips     = true
+u8 -> char      = true

@@ -27,6 +27,17 @@ func main() -> i32 {
     val nl: char = nl_code as char
     val nl_ok: bool = nl == newline
 
+    // A `char` renders in a hole as the character itself.
+    println("letter          = {letter}")
+    println("emoji           = {emoji}")
+    println("letter as i32   = {code}")
+    println("code as char    = {back}")
+    println("newline code    = {nl_code}")
+    println("copy == letter  = {same}")
+    println("'a' < 'b'       = {ordered}")
+    println("round-trips     = {round_trips}")
+    println("u8 -> char      = {nl_ok}")
+
     if same && ordered && round_trips && nl_ok && emoji == '\u{1F44D}' {
         return code        // 65 on success
     }

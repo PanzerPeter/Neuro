@@ -1,8 +1,16 @@
 # Neuro Example Programs
 
-Runnable `.nr` programs demonstrating the language. Each program returns an
-`i32` from `main`, which becomes the process **exit code** — that is how every
-example asserts its own result, and how the test harness checks it.
+Runnable `.nr` programs demonstrating the language. Each program asserts itself
+two ways, and the test harness checks both:
+
+- the `i32` returned from `main` becomes the process **exit code**, registered in
+  [`expected.txt`](expected.txt);
+- whatever the program writes to **standard output** is fixed byte for byte in a
+  sibling `.out` file — `basics/hello.nr` is pinned by `basics/hello.out`.
+
+Every example currently prints, so every one has a `.out` file. The rule still runs
+the other way too: a program that prints nothing has no `.out` file, and that absence
+is itself the expectation — its output must stay empty.
 
 ## Layout
 
@@ -19,9 +27,11 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | `showcase/`      | **Bigger programs that combine many features at once** — incl. mutable borrows `&mut T` + `*` deref (`mutable_borrows.nr`) |
 
 The single source of truth for each program's expected exit code is
-[`expected.txt`](expected.txt). A multi-file program registers its root with an exit
-code and each of its other modules with the marker `module`: those have no `main` of
-their own and are compiled as part of the root that reaches into them.
+[`expected.txt`](expected.txt); for its expected output, the sibling `.out` file.
+A multi-file program registers its root with an exit code and each of its other
+modules with the marker `module`: those have no `main` of their own and are
+compiled as part of the root that reaches into them, so only the root has output
+of its own to pin.
 
 ## Showcase programs
 
@@ -171,6 +181,9 @@ cargo run -p neurc -- check examples/basics/hello.nr
 # Compile to an executable (choose an output path outside the source tree)
 cargo run -p neurc -- compile examples/basics/hello.nr -o /tmp/hello
 /tmp/hello; echo "exit: $?"
+
+# What it prints is exactly what the golden file holds
+/tmp/hello | diff - examples/basics/hello.out && echo "output matches"
 ```
 
 > Compiled binaries are git-ignored under `examples/`, but prefer `-o /tmp/...`
@@ -187,19 +200,30 @@ cargo test -p neurc --test examples    # just the example harness
 ```
 
 The harness ([`compiler/neurc/tests/examples.rs`](../compiler/neurc/tests/examples.rs))
-walks `examples/` recursively, compiles and runs every `.nr` file, and asserts
-its exit code against [`expected.txt`](expected.txt). It fails if:
+walks `examples/` recursively, compiles and runs every `.nr` file, and asserts both
+its exit code against [`expected.txt`](expected.txt) and its standard output against
+the sibling `.out` file. It fails if:
 
 - a `.nr` file on disk has **no** entry in `expected.txt` (forces registration),
 - an entry in `expected.txt` points at a file that **doesn't exist** (stale),
-- any example's exit code **doesn't match** its registered value.
+- a `.out` file has no `.nr` beside it (stale golden file),
+- any example's exit code **doesn't match** its registered value,
+- any example's output **doesn't match** its `.out` file — including a silent
+  example that starts printing, which has no `.out` and so must print nothing.
+
+An output mismatch prints the first differing line and then both texts in full,
+with every line quoted so trailing whitespace stays visible.
 
 ## Adding an example
 
 1. Drop a `.nr` file into the topic directory it belongs to (create a new
    directory if no topic fits).
 2. Add one line to [`expected.txt`](expected.txt): `path/from/examples.nr  <exit-code>`.
-3. Run `cargo test -p neurc --test examples`.
+3. If it prints, save exactly what it prints beside it as `<name>.out`:
+   `cargo run -p neurc -- compile examples/<name>.nr -o /tmp/ex && /tmp/ex > examples/<name>.out`.
+   Read that file before committing it — it is an assertion, so it is only worth
+   having if the text in it is the text the program *should* produce.
+4. Run `cargo test -p neurc --test examples`.
 
 No Rust edits are needed — discovery is automatic.
 

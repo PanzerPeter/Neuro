@@ -25,6 +25,14 @@ func main() -> i32 {
     val mixed: (i32, bool) = (5, true)
     val bonus = if mixed.1 { mixed.0 } else { 0 }   // 5
 
+    println("pair.0 + pair.1        = {sum}")
+    println("val (_, hi) = min_max   -> {hi}")
+    println("val ((a, b), c)         -> {a}, {b}, {c}")
+    println("mixed.0 / mixed.1       -> {mixed.0}, {mixed.1}")
+    println("bonus                   = {bonus}")
+
     // 42 + 9 + (1+2+3) + 5 = 62
-    return sum + hi + a + b + c + bonus
+    val total = sum + hi + a + b + c + bonus
+    println("total                   = {total}")
+    return total
 }

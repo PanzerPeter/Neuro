@@ -107,10 +107,15 @@ func main() -> i32 {
     thumb.scale(5, max: 40, min: 12)
 
     mut matched: i32 = 0
-    matched = matched + check(hero.label(), "  12x   8")
-    matched = matched + check(thumb.label(), "  15x  12")
+    val hero_label = hero.label()
+    val thumb_label = thumb.label()
+    println("hero.label()  = [{hero_label}]")
+    println("thumb.label() = [{thumb_label}]")
+    matched = matched + check(hero_label, "  12x   8")
+    matched = matched + check(thumb_label, "  15x  12")
 
     val report = header() + "frames checked: {matched}"
+    println(report)
     matched = matched + check(report, "render report\n-------------\nframes checked: 2")
 
     // The same three arguments, named in three different orders.
@@ -119,6 +124,10 @@ func main() -> i32 {
     val c = budget(quality: Quality::Draft, frame: thumb, per_pixel: 1)
 
     // hero is 12x8 = 96 px: draft 192, final 192-6 = 186. thumb is 15x12 = 180.
+    println("budget draft, hero  = {a}")
+    println("budget final, hero  = {b}")
+    println("budget draft, thumb = {c}")
+
     if a != 192 { return 1 }
     if b != 186 { return 2 }
     if c != 180 { return 3 }
@@ -132,8 +141,11 @@ func main() -> i32 {
     if matched != 3 { return 5 }
 
     val summary = "{matched} checks, {over_index} first over"
+    println(summary)
     if summary != "3 checks, 0 first over" { return 6 }
 
     // 96 pixels of hero, plus one for each of the three checks that matched.
-    return hero.pixels() + matched
+    val total = hero.pixels() + matched
+    println("hero pixels + checks = {total}")
+    return total
 }

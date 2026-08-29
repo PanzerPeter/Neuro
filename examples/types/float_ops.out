@@ -1,0 +1,7 @@
+a                  = 10.5
+b                  = 2.5
+sum+diff+prod+quot = 51.45
+NaN < b            = false
+NaN >= b           = false
+NaN == NaN         = false
+all comparisons behaved

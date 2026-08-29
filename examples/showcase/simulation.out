@@ -1,0 +1,10 @@
+step 0: flags 000
+step 1: flags 001
+step 2: flags 011
+step 3: flags 111
+step 4: flags 101
+step 5: flags 101
+READ  set = true
+WRITE set = false   (set on step 2, cleared on step 4)
+EXEC  set = true
+popcount  = 2

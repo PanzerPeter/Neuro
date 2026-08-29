@@ -1,0 +1,7 @@
+lookup(1) ?? 0                = 20
+lookup(7) ?? 5                = 5
+divide(24, 4) ?? 0            = 6
+divide(1, 0) ?? 4             = 4
+lookup(7) ?? lookup(1) ?? 99  = 20
+lookup(1) ?? default_reading()= 20
+total                         = 75

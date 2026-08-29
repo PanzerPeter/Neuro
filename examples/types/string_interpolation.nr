@@ -2,13 +2,16 @@
 //
 // A `{...}` hole holds any expression. An optional `:spec` after it chooses the
 // rendering: precision, radix, sign, field width, and alignment. Every literal
-// below is checked against the exact text it should produce, and `main` returns
-// the number of checks that passed.
+// below is checked against the exact text it should produce and then printed, so
+// the output is a rendering table for the whole mini-language. `main` returns the
+// number of checks that passed.
 
 func check(actual: string, expected: string) -> i32 {
     if actual == expected {
+        println(actual)
         return 1
     }
+    println("MISMATCH: rendered {actual}, expected {expected}")
     return 0
 }
 

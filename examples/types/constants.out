@@ -1,0 +1,6 @@
+BASE_VALUE  = 10
+DOUBLED     = 20   (BASE_VALUE * 2, folded)
+MAX_RETRIES = 3
+sum         = 23
+* LOCAL_SCALE = 46
++ OFFSET      = 51

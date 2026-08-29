@@ -1,0 +1,6 @@
+double(5)             = 10
+calculate(3, 4)       = 19
+quad(2)               = 8
+is_positive(10)       = true
+both_positive(19, 8)  = true
+total                 = 37

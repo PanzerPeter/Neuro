@@ -1,0 +1,3 @@
+identity(&x)   -> 30
+first(&x, &y)  -> 30   (y is 12, and never returned)
+total          -> 60

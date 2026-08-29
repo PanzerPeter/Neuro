@@ -1,0 +1,5 @@
+a          = (3, 4)
+b = a       = (3, 4)   (Copy: a still usable)
+c = b.clone = (3, 4)
+a.x + a.y   = 7
+c.x + c.y   = 7

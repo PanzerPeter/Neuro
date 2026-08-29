@@ -73,10 +73,11 @@ echo $?
 
 The hello.nr program returns 26.
 
-A program reports a result two ways. `main`'s `i32` becomes the exit code, and that is
-what every example in this repository is verified by (pinned in
-[`examples/expected.txt`](../../examples/expected.txt)). For text, `print` and `println`
-write to standard output:
+A program reports a result two ways, and every example in this repository is verified
+on both. `main`'s `i32` becomes the exit code, pinned in
+[`examples/expected.txt`](../../examples/expected.txt); whatever the program writes to
+standard output is pinned byte for byte in a sibling `.out` file. For text, `print` and
+`println` write to standard output:
 
 ```neuro
 func main() -> i32 {

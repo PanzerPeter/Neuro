@@ -48,15 +48,26 @@ func main() -> i32 {
         if step == 2 { m.flags = m.flags | WRITE }
         if step == 3 { m.flags = m.flags | EXEC }
         if step == 4 { m.flags = m.flags ^ WRITE }   // toggle WRITE back off
+        println("step {step}: flags {m.flags:03b}")
         if step == 5 { break }
         step += 1
     }
 
+    val read_set = m.has(READ)
+    val write_set = m.has(WRITE)
+    val exec_set = m.has(EXEC)
+    println("READ  set = {read_set}")
+    println("WRITE set = {write_set}   (set on step 2, cleared on step 4)")
+    println("EXEC  set = {exec_set}")
+
     // Final flags: READ | EXEC (WRITE was set then cleared) -> popcount 2.
     if m.has(READ) {
         if m.has(EXEC) {
-            return m.popcount()   // 2
+            val bits = m.popcount()
+            println("popcount  = {bits}")
+            return bits           // 2
         }
     }
+    println("expected flags were not set")
     return 99
 }

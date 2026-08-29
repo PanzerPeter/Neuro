@@ -1,0 +1,7 @@
+add 1, sum = 1
+add 2, sum = 3
+continue past 3
+add 4, sum = 7
+add 5, sum = 12
+break at 6
+sum = 12

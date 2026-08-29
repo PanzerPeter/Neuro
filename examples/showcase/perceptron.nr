@@ -42,10 +42,15 @@ func main() -> i32 {
     while x < 5.0 {
         val h = hidden.activate(x)
         val y = output.activate(h)
+        println("x {x:.1} -> hidden {h:.2} -> output {y:.2}")
         total = total + y
         x = x + 1.0
     }
 
+    println("summed output        = {total:.2}")
+
     // total == 8.9; truncating toward zero yields 8.
-    return total as i32
+    val code = total as i32
+    println("truncated exit code  = {code}")
+    return code
 }

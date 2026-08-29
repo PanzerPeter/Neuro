@@ -1,0 +1,5 @@
+geometry::Point      span   = 5
+shapes::area::rectangle     = 20
+shapes::perimeter           = 18
+geometry::ORIGIN_SHIFT      = 2
+total                       = 40

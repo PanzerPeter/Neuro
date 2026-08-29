@@ -37,6 +37,13 @@ func main() -> i32 {
     val prefix = head(winner)             // zero-copy 2-byte slice -> "sp"
     val n = tagged_len(winner, true)      // lifetime + type param -> 8
 
+    println("longest(&left, &right) = {winner}")
+    println("head(winner)           = {prefix}   (zero-copy slice)")
+    println("tagged_len(winner, _)  = {n}")
+    println("left still bound       = {left}")
+
     // 8 (len "spectrum") + 2 (len "sp") + 8 (tagged_len) = 18
-    return winner.len() as i32 + prefix.len() as i32 + n
+    val total = winner.len() as i32 + prefix.len() as i32 + n
+    println("total                  = {total}")
+    return total
 }

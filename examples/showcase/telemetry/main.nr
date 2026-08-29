@@ -87,6 +87,15 @@ func main() -> i32 {
     // stops one level short and never mentions `format`.
     val capped = report::clamp(weighted, 30)                     // 28
 
+    println("stats::summarize -> mean       = {mean}")
+    println("weight_of via prelude Option   = {score}")
+    println("choose<i32> renamed from stats = {louder}")
+    println("choose<bool> same template     = {flagged}")
+    println("fmt::scale (module alias)      = {weighted}")
+    println("report::clamp (re-export)      = {capped}")
+
     // The inline module does the final tally; its private `adjust` supplies the bonus.
-    scoring::combine(capped, louder, summary.count, flagged)     // 28 + 40 + 5 + 2 = 75
+    val total = scoring::combine(capped, louder, summary.count, flagged)
+    println("scoring::combine (inline mod)  = {total}")
+    total                                                       // 28 + 40 + 5 + 2 = 75
 }

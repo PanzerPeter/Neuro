@@ -80,8 +80,11 @@ func main() -> i32 {
     transcript.push_str("{header:>8}: {counted}")
 
     val text: string = transcript.to_string()
+    println(text)
+
     val expected: string = "   7 12.5 info\n 108 63.0 warn +13\n4095 91.2 fail +11\n  events: 3"
     if text != expected {
+        println("transcript did not match the expected text")
         return 91
     }
 
@@ -91,5 +94,7 @@ func main() -> i32 {
         return 92
     }
 
-    return text.len() as i32
+    val bytes = text.len() as i32
+    println("transcript bytes: {bytes}")
+    return bytes
 }

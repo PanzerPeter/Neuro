@@ -16,6 +16,8 @@ struct Guard {
 impl Drop for Guard {
     func drop(&mut self) {
         *self.sink = *self.sink + 1
+        val count = *self.sink
+        println("drop #{count}")
     }
 }
 
@@ -28,5 +30,6 @@ func main() -> i32 {
         val moved = c   // `c` is moved into `moved`; only one of them is dropped
     }
     // a, b, and (moved) have each run their destructor exactly once.
+    println("destructors run: {dropped}")
     return dropped
 }

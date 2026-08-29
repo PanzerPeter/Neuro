@@ -1,0 +1,6 @@
+consume(msg) inside branch = 2
+msg.len() after branch     = 2
+moved binding             = neuro
+cloned pair equal          = true
+Copy scalars n + m         = 10
+balance                    = 0

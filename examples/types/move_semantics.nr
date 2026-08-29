@@ -27,13 +27,22 @@ func main() -> i32 {
     val msg: string = "hi"
     if both_ok {
         val len_in_branch: u64 = consume(msg)   // moves `msg` on this path only
+        println("consume(msg) inside branch = {len_in_branch}")
     }
     val len_after: u64 = msg.len()      // valid: the move above was conditional
+    println("msg.len() after branch     = {len_after}")
 
     // Copy scalars are duplicated, so the source stays usable.
     val n: i32 = 5
     val m: i32 = n
     val sum: i32 = n + m                // both `n` and `m` are still valid
 
-    return taken.len() as i32 - 5       // "neuro" has length 5 → 0
+    println("moved binding             = {taken}")
+    println("cloned pair equal          = {both_ok}")
+    println("Copy scalars n + m         = {sum}")
+
+    // "neuro" has length 5 → 0
+    val balance = taken.len() as i32 - 5
+    println("balance                    = {balance}")
+    return balance
 }

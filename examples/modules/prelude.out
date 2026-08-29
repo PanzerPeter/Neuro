@@ -1,0 +1,5 @@
+half(16)     Some -> 8
+half(7)      None -> 3
+quarter(20)  Ok   -> 5
+quarter(9)   Err  -> 9
+total             -> 25

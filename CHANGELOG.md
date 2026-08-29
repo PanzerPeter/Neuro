@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-08-29
+
+### Changed
+
+- **The example harness now checks standard output, not just the exit code.** An example's
+  expected stdout lives beside it in a sibling `.out` file, asserted byte for byte;
+  `examples/expected.txt` keeps owning the exit code. An example with no `.out` file must
+  print nothing, so the absence is itself an assertion and a silent program that starts
+  printing fails rather than passing unnoticed. A `.out` file whose `.nr` has been deleted
+  fails too, the same way a stale `expected.txt` entry already did. A mismatch reports the
+  first differing line and then both texts with every line quoted, so trailing whitespace
+  is visible.
+- **Every example program now prints what it computes**, across `basics/`, `types/`,
+  `operators/`, `control_flow/`, `structs/`, `modules/`, and `showcase/`. Not one exit code changed and `expected.txt` is untouched: the printing is
+  added on top of the assertion that was already there, so an example is now readable by
+  running it rather than by reading `echo $?`. Recursive ones print their own unwinding
+  (`factorial.nr` each multiplication, `fibonacci.nr` every term); the self-checking ones
+  print a labelled line per check plus a verdict, so a failure names itself instead of
+  collapsing into a bare exit `1`; and the examples that previously computed values and
+  discarded them — `extended_types.nr`, `float_suffixes.nr`, `strings.nr` — now report
+  them, which is the only thing that ever made those files worth running.
+- `types/string_interpolation.nr` and `types/triple_quoted.nr` print every rendering they
+  check, so their golden files are now readable tables of the format mini-language and of
+  block-string dedenting.
+- `showcase/status_report.nr` gained the golden file its `println` output had always
+  lacked.
+
+### Fixed
+
+- `.gitignore`: `examples/**` is an ignore-everything-then-allow list, so the new `.out`
+  golden files would have been invisible to `git add`. Added `!examples/**/*.out`.
+- `README.md`'s closures block is labelled "verbatim from
+  `examples/showcase/closures.nr`" and had drifted from it; it is verbatim again. The
+  quick-example perceptron block, which had never matched `examples/structs/neuron.nr`
+  (it returned `0` where the file returns `4`), now does, and both blocks show the output
+  the programs produce.
+
 ## [2.1.0] - 2026-08-29
 
 ### Added

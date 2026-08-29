@@ -19,9 +19,17 @@ func main() -> i32 {
 
     // Methods resolve on the value, so only the type needed qualifying.
     val span = corner.manhattan() - start.manhattan()   // 7 - 2 = 5
+    println("geometry::Point      span   = {span}")
 
     val rect = shapes::area::rectangle(span, 4)         // 5 * 4  = 20
     val edge = shapes::perimeter(span, 4)               // (5+4)*2 = 18
+    val shift = geometry::ORIGIN_SHIFT
+    println("shapes::area::rectangle     = {rect}")
+    println("shapes::perimeter           = {edge}")
+    println("geometry::ORIGIN_SHIFT      = {shift}")
 
-    rect + edge + geometry::ORIGIN_SHIFT                // 20 + 18 + 2 = 40
+    val total = rect + edge + shift
+    println("total                       = {total}")
+
+    total                                               // 20 + 18 + 2 = 40
 }

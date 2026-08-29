@@ -1,0 +1,5 @@
+Point (named import)        = 5
+shapes::perimeter (bare)    = 18
+region::rectangle (renamed) = 20
+SHIFT (renamed constant)    = 2
+total                       = 40

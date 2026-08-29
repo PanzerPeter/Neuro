@@ -3,6 +3,9 @@
 // A single perceptron (neuron) model demonstrating:
 //   structs · impl blocks · associated functions · instance methods
 //   val/mut bindings · if/block expressions · implicit returns
+//
+// Both regions of the activation are printed, so the ReLU clamp is visible as
+// output and not only as an exit code.
 
 struct Neuron {
     weight: f64,
@@ -31,9 +34,13 @@ func main() -> i32 {
 
     // Dead region: input too small to overcome the bias
     val dead = neuron.activate(0.0)    // 0.0 * 0.5 + (−0.1) = −0.1 → 0.0
+    val dead_fires = neuron.is_active(0.0)
+    println("input 0.0 -> {dead:.2}  fires: {dead_fires}")
 
     // Active region: strong enough input fires the neuron
     val active = neuron.activate(1.0)  // 1.0 * 0.5 + (−0.1) =  0.4
+    val active_fires = neuron.is_active(1.0)
+    println("input 1.0 -> {active:.2}  fires: {active_fires}")
 
     // The dead region clamps to exactly zero.
     if dead > 0.0 { return 1 }

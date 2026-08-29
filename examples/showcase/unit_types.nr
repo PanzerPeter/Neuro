@@ -52,11 +52,16 @@ func main() -> i32 {
     val leg2 = Leg { distance: Meters(20), time: Seconds(8) }
 
     mut total: i32 = 0
-    total += leg1.pace()      // 30 - 12 = 18
-    total += leg2.pace()      // 20 -  8 = 12   -> 30
+    val pace1 = leg1.pace()
+    val pace2 = leg2.pace()
+    println("Leg::new(Meters(30), Seconds(12)).pace() = {pace1}")
+    println("Leg \{ Meters(20), Seconds(8) }.pace()    = {pace2}")
+    total += pace1            // 30 - 12 = 18
+    total += pace2            // 20 -  8 = 12   -> 30
 
     // Combine two newtype distances (Meters is Copy, so the fields are not moved).
     val combined: Meters = add_distance(leg1.distance, leg2.distance)  // Meters(50)
+    println("add_distance -> Meters({combined.0})")
     total += combined.0       // + 50           -> 80
 
     // Array + for-in accumulation.
@@ -66,8 +71,13 @@ func main() -> i32 {
     }
 
     // Enum + match.
-    total += terrain_cost(Terrain::Hill)   // + 5 -> 91
-    total += terrain_cost(Terrain::Trail)  // + 3 -> 94
+    val hill = terrain_cost(Terrain::Hill)
+    val trail = terrain_cost(Terrain::Trail)
+    println("terrain_cost(Hill)                       = {hill}")
+    println("terrain_cost(Trail)                      = {trail}")
+    total += hill             // + 5 -> 91
+    total += trail            // + 3 -> 94
 
+    println("total                                    = {total}")
     return total              // 94
 }

@@ -1,0 +1,4 @@
+after data[0] = 10: 10, 2, 3, 4, 5
+sum(data)   = 24
+data.len()  = 5
+for x in &data -> 24

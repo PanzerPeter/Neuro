@@ -1,0 +1,4 @@
+checked_div(10, 2) = 5
+non_negative(7)    = 7
+checked_div(21, 3) = 7
+every guard held

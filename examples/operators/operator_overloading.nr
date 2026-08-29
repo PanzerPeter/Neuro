@@ -4,6 +4,9 @@
 // implements `Add` / `Sub` / `Neg` / `PartialEq` gets `+`, `-`, unary `-`, and
 // `==` / `!=` — each dispatched to its impl method and monomorphized to a plain call
 // (no vtable, zero runtime cost).
+//
+// Each operator's result is printed as a vector, so the dispatch is visible
+// component by component.
 
 @derive(Copy, Clone)
 struct Vec2 {
@@ -44,10 +47,20 @@ impl PartialEq for Vec2 {
 func main() -> i32 {
     val a = Vec2 { x: 5, y: 9 }
     val b = Vec2 { x: 2, y: 3 }
+    println("a        = ({a.x}, {a.y})")
+    println("b        = ({b.x}, {b.y})")
 
     val sum  = a + b     // (7, 12)
     val diff = a - b     // (3, 6)
     val neg  = -b        // (-2, -3)
+    println("a + b    = ({sum.x}, {sum.y})")
+    println("a - b    = ({diff.x}, {diff.y})")
+    println("-b       = ({neg.x}, {neg.y})")
+
+    val equal = a == b
+    val differ = a != b
+    println("a == b   = {equal}")
+    println("a != b   = {differ}")
 
     mut total = sum.x + sum.y + diff.x + diff.y + neg.x + neg.y   // 7+12+3+6-2-3 = 23
     if a == b {
@@ -56,5 +69,6 @@ func main() -> i32 {
     if a != b {
         total = total + 1   // -> 24
     }
+    println("total    = {total}")
     total
 }

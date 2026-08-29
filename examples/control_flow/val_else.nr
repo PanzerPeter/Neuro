@@ -11,6 +11,9 @@
 //   Result<T, E>   the `Err` payload
 //   Option<T>      nothing — `None` is empty, so only `else |_|` (or plain `else`)
 //   any other enum the original scrutinee, unmodified, for a nested `match`
+//
+// Every form is exercised twice — once binding, once failing — and both results
+// are printed, so which side of each `val-else` ran is visible in the output.
 
 enum Shape {
     Circle { radius: i32 },
@@ -81,14 +84,26 @@ func drain(limit: i32) -> i32 {
 func main() -> i32 {
     val ok = doubled_or_error(5)        // 11
     val failed = doubled_or_error(-1)   // 9
+    println("Result  bound       = {ok}")
+    println("Result  else |err|  = {failed}")
+
     val present = reading_or_default(1) // 6
     val absent = reading_or_default(2)  // 4
+    println("Option  bound       = {present}")
+    println("Option  else        = {absent}")
 
     val circle = area(Shape::Circle { radius: 4 })  // 12
     val square = area(Shape::Square(3))             // 9
     val empty = area(Shape::Empty)                  // 0
+    println("Shape   bound       = {circle}")
+    println("Shape   else |other| Square -> {square}")
+    println("Shape   else |other| Empty  -> {empty}")
 
     val drained = drain(4)              // 1 + 2 + 3 + 4 = 10
+    println("loop    else break  = {drained}")
 
-    ok + failed + present + absent + circle + square + empty + drained  // 61
+    val total = ok + failed + present + absent + circle + square + empty + drained
+    println("total               = {total}")
+
+    total  // 61
 }

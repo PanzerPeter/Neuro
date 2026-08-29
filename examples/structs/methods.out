@@ -1,0 +1,4 @@
+Counter::new(10).get()  = 10
+        .plus(32)       = 42
+Rect::new(6, 7).area()      = 42
+               .perimeter() = 26

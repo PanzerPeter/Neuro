@@ -25,6 +25,7 @@ func main() -> i32 {
     val a: &i32 = &x
     val b: &i32 = &x
     total = total + sum2(a, b)        // 0 + 20 = 20
+    println("two shared &i32 of x  -> {total}")
 
     // A `&mut` passed to a call is released when the call returns, so the next
     // call may take its own exclusive borrow of the same place.
@@ -32,6 +33,7 @@ func main() -> i32 {
     inc(&mut counter)                 // 1
     inc(&mut counter)                 // 2
     total = total + counter           // 20 + 2 = 22
+    println("two &mut calls        -> counter {counter}, total {total}")
 
     // A mutable borrow confined to an inner scope ends at the closing brace,
     // freeing the place for a later exclusive borrow.
@@ -43,6 +45,7 @@ func main() -> i32 {
     val rd: &mut i32 = &mut value
     *rd = *rd + 1                     // value = 9
     total = total + value             // 22 + 9 = 31
+    println("scoped &mut, then new -> value {value}, total {total}")
 
     return total
 }

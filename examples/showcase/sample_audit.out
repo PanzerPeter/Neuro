@@ -1,0 +1,5 @@
+batch_total(good)  ?? 0     = 20
+batch_total(bad)   Err      = 120   (? left the for-in loop)
+scaled(9, 3)       val-else = 27
+headline(good)     ?? 0     = 10
+total                       = 177

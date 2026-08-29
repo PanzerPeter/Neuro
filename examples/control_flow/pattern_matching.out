@@ -1,0 +1,9 @@
+Op::Nop                    -> 0
+Op::Push(7)                -> 7
+Op::Range { lo: 2, hi: 5 } -> 3
+classify(0)    literal  -> 10
+classify(2)    or       -> 20
+classify(8)    range    -> 30
+classify(-1)   guard    -> 40
+classify(100)  wildcard -> 99
+total                      -> 209
