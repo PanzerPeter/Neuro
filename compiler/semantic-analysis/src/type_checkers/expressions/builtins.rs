@@ -63,6 +63,20 @@ impl TypeChecker {
                 }
                 Some(Type::U64)
             }
+            // IEEE-754 NaN test. Nullary, yields `bool`. Matched on `recv` (not the
+            // referent) like the integer intrinsics below: reading a scalar through `&T`
+            // needs the deref operator. `is_float` covers `f32`/`f64` only — `f16`/`bf16`
+            // carry a storage-and-cast-only scalar contract.
+            (_, "is_nan") if recv.is_float() => {
+                if !args.is_empty() {
+                    self.record_error(TypeError::ArgumentCountMismatch {
+                        expected: 0,
+                        found: args.len(),
+                        span: call_span,
+                    });
+                }
+                Some(Type::Bool)
+            }
             // Wrapping/saturating arithmetic and the right-shift method.
             // Each takes one same-typed argument and returns the receiver's integer type.
             // Matched on `recv` (not the referent): integer intrinsics require a value

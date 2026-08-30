@@ -208,3 +208,63 @@ fn integer_intrinsic_on_float_reports_method_not_found() {
         errors
     );
 }
+
+#[test]
+fn is_nan_resolves_to_bool_on_both_full_precision_floats() {
+    let errors = semantic_errors(
+        "func main() -> i32 {
+    val d: f64 = 0.0 / 0.0
+    val s: f32 = 1.5f32
+    val a: bool = d.is_nan()
+    val b: bool = s.is_nan()
+    if a { return 1 }
+    if b { return 2 }
+    return 0
+}",
+    );
+    assert!(errors.is_empty(), "is_nan should type-check: {errors:?}");
+}
+
+#[test]
+fn is_nan_wrong_arity_rejected() {
+    let errors = semantic_errors(
+        "func main() -> i32 {
+    val d: f64 = 1.0
+    val a: bool = d.is_nan(2.0)
+    if a { return 1 }
+    return 0
+}",
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ArgumentCountMismatch { .. })),
+        "Expected ArgumentCountMismatch, got: {errors:?}"
+    );
+}
+
+#[test]
+fn is_nan_on_non_float_receiver_reports_method_not_found() {
+    // Integers cannot be NaN, and half-precision has no scalar arithmetic contract
+    // that could produce one — both fall through to the ordinary method lookup.
+    for decl in [
+        "val x: i32 = 1",
+        "val x: f16 = 1.5f16",
+        "val x: bf16 = 1.5bf16",
+    ] {
+        let errors = semantic_errors(&format!(
+            "func main() -> i32 {{
+    {decl}
+    val a: bool = x.is_nan()
+    if a {{ return 1 }}
+    return 0
+}}"
+        ));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, TypeError::MethodNotFound { .. })),
+            "Expected MethodNotFound for `{decl}`, got: {errors:?}"
+        );
+    }
+}

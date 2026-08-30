@@ -4,4 +4,7 @@ sum+diff+prod+quot = 51.45
 NaN < b            = false
 NaN >= b           = false
 NaN == NaN         = false
+NaN.is_nan()       = true
+Inf.is_nan()       = false
+b.is_nan()         = false
 all comparisons behaved

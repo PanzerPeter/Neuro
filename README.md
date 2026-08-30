@@ -104,7 +104,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 
 | Feature | Summary |
 |---|---|
-| **Types & inference** | `i8` through `u64`, `f16`/`bf16`/`f32`/`f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, type aliases |
+| **Types & inference** | `i8` through `u64`, `f16`/`bf16`/`f32`/`f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, type aliases, `.is_nan()` |
 | **Functions & control flow** | Recursion, forward refs, implicit returns, named arguments with external labels (`clamp(x, min: 0.0)`); `if`/`elif`/`else`, `while`, `loop`, range-`for`, labelled `break`/`continue`, block-as-value |
 | **Generics** | Generic functions, structs, and impls plus const generics, `where` clauses, and turbofish, all fully monomorphized at zero runtime cost |
 | **Traits & dispatch** | Required and default methods, operator traits, `impl Trait` (static) and `dyn Trait` (vtable) dispatch with object-safety checks |

@@ -7,7 +7,7 @@ use ast_types::Expr;
 use neuro_hir::{HirExpr, HirExprKind, HirType};
 
 use super::{CLONE_METHOD, IO_BUILTINS, PANIC_BUILTINS};
-use crate::{is_integer, Lowerer, LoweringError};
+use crate::{is_full_float, is_integer, Lowerer, LoweringError};
 
 impl Lowerer {
     /// Lower a call, dispatching on the callee shape: free/builtin function,
@@ -493,6 +493,12 @@ impl Lowerer {
                 Ok((vec![range], slice_ty))
             }
             (HirType::Array { .. }, "len") => Ok((self.lower_args(args, &[])?, HirType::U64)),
+            // `float.is_nan()` — nullary, `bool`. A value receiver only, matching the
+            // integer intrinsics below, and full-precision only: `f16`/`bf16` have no
+            // scalar arithmetic contract to produce a NaN with.
+            (_, "is_nan") if is_full_float(recv) => {
+                Ok((self.lower_args(args, &[])?, HirType::Bool))
+            }
             (
                 _,
                 "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "saturating_add"

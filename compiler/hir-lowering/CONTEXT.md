@@ -233,6 +233,8 @@ the coercion uniformly, and an existing trait object is never re-coerced. A meth
   and `to_string` (`string` result). `mangle_type` uses `HirCollectionKind::mangle_tag()`, so
   `String` mangles as `strbuf` — which the primitive `string` cannot collide with — and yields the
   bare tag when there are no arguments.
+- **`.is_nan()`** — `lower_builtin_method` types it as `HirType::Bool` on a full-precision float
+  receiver (`is_full_float`, so `f16`/`bf16` are excluded), with no arguments to lower.
 - **`checked_{add,sub,mul}`** — `lower_builtin_method` types these on any integer receiver as
   `Option<T>` over that receiver, reusing `collections.rs`'s `option_of` so the instance is
   materialized as an ordinary `HirItem::Enum` exactly like `Vec::pop`'s. They are the only builtin

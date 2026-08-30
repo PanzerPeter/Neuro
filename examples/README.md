@@ -48,8 +48,9 @@ isolation:
   plus a **nesting block comment** shelving an alternative `isqrt` whose body
   carries a `/* */` comment of its own. Exit `33`.
 - [`showcase/running_stats.nr`](showcase/running_stats.nr) — an online mean
-  accumulator. Struct state, direct field mutation, `&self` query method, `f64`
-  division, `as` casts. Exit `5`.
+  accumulator. Struct state, direct field mutation, `&self` query methods, `f64`
+  division, `as` casts, and `.is_nan()` screening a non-finite sample out of the
+  accumulator. Exit `5`.
 - [`showcase/simulation.nr`](showcase/simulation.nr) — a bit-flag state machine.
   Bitwise `<<`/`|`/`&`/`^`, `.shr(n)`, struct state, `&self` predicate +
   popcount methods, `while` with `break`. Exit `2`.

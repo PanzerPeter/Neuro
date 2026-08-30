@@ -2,7 +2,7 @@
 
 use inkwell::intrinsics::Intrinsic;
 use inkwell::values::*;
-use inkwell::IntPredicate;
+use inkwell::{FloatPredicate, IntPredicate};
 use neuro_hir::{HirExpr, HirExprKind};
 
 use crate::codegen::context::{BuiltinMethod, CodegenContext};
@@ -85,6 +85,8 @@ impl<'ctx> CodegenContext<'ctx> {
                     other => Ok(other),
                 }
             }
+            // `float.is_nan()` — the receiver is the whole computation; no arguments.
+            BuiltinMethod::IsNan => self.codegen_is_nan(receiver),
             BuiltinMethod::CheckedAdd | BuiltinMethod::CheckedSub | BuiltinMethod::CheckedMul => {
                 self.codegen_checked_int_intrinsic(kind, recv_ty, result_ty, receiver, args)
             }
@@ -322,6 +324,26 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
+    /// Lower `float.is_nan()` to an unordered self-comparison (`fcmp uno x, x`).
+    ///
+    /// NaN is the only value that compares unordered with itself, which is exactly why the
+    /// test cannot be written in source: `x != x` uses the ordered predicate and is false
+    /// for NaN like every other NaN comparison.
+    fn codegen_is_nan(&mut self, receiver: &HirExpr) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let recv_val = self.codegen_expr(receiver)?;
+        let BasicValueEnum::FloatValue(value) = recv_val else {
+            return Err(CodegenError::InternalError(format!(
+                "is_nan receiver did not lower to a float: {:?}",
+                recv_val
+            )));
+        };
+        Ok(self
+            .builder
+            .build_float_compare(FloatPredicate::UNO, value, value, "is.nan")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into())
+    }
+
     /// Lower an integer intrinsic (`wrapping_*`, `saturating_*`, `.shr`) on a builtin
     /// integer receiver. Signedness is read from the receiver's recorded type, selecting
     /// the arithmetic (`ashr`) vs. logical (`lshr`) shift and the `s`/`u` saturating path.
@@ -368,6 +390,7 @@ impl<'ctx> CodegenContext<'ctx> {
             | BuiltinMethod::StringSlice
             | BuiltinMethod::StructClone
             | BuiltinMethod::ArrayLen
+            | BuiltinMethod::IsNan
             | BuiltinMethod::CheckedAdd
             | BuiltinMethod::CheckedSub
             | BuiltinMethod::CheckedMul => {
