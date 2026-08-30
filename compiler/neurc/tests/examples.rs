@@ -4,7 +4,9 @@
 // `.nr` file, and checks two things against two sources of truth:
 //
 //   exit code -> examples/expected.txt, one `<path>  <code>` line per example
-//   stdout    -> the example's sibling `.out` file, byte for byte
+//   stdout    -> the example's sibling `.out` file, byte for byte (line endings
+//                normalized, so neither git's checkout policy nor the Windows CRT's
+//                text-mode `\n` -> `\r\n` shows up as a difference)
 //
 // An example that writes nothing to standard output has no `.out` file, and the
 // absence *is* the expectation: its stdout must be empty. So adding a silent
@@ -147,7 +149,11 @@ fn run_example(exe: &Path) -> Result<(i32, String), String> {
         .status
         .code()
         .ok_or_else(|| format!("{} terminated by signal", exe.display()))?;
-    Ok((code, String::from_utf8_lossy(&output.stdout).into_owned()))
+    // Line endings are normalized: on Windows the runtime's `\n` leaves the CRT's
+    // text-mode fd 1 as `\r\n`, and the golden files are checked out with whichever
+    // ending git was configured for. Neither is what an example is asserting.
+    let text = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    Ok((code, text))
 }
 
 /// The stdout `examples/<rel>` must produce.
@@ -158,7 +164,7 @@ fn run_example(exe: &Path) -> Result<(i32, String), String> {
 fn expected_stdout(examples_dir: &Path, rel: &str) -> Result<String, String> {
     let golden = examples_dir.join(rel).with_extension("out");
     match std::fs::read_to_string(&golden) {
-        Ok(text) => Ok(text),
+        Ok(text) => Ok(text.replace("\r\n", "\n")),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(e) => Err(format!("read {}: {}", golden.display(), e)),
     }

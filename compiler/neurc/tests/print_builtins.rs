@@ -70,8 +70,14 @@ fn check_error(source: &str, tag: &str) -> String {
     )
 }
 
+/// The bytes the program wrote to stdout, with line endings normalized to `\n`.
+///
+/// On Windows fd 1 is a CRT *text-mode* descriptor, so the one `\n` byte the builtin
+/// writes reaches the pipe as `\r\n` — the same translation a C `printf` gets, and the
+/// convention a native tool is expected to follow. These tests assert *which text* was
+/// written, not the platform's line-ending policy, so the translation is undone here.
 fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
+    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
 }
 
 #[test]

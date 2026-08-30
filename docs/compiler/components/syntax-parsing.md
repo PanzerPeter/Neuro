@@ -199,7 +199,7 @@ Error: unexpected token `}`, expected expression
   at line 5, column 12
 ```
 
-Future (Phase 1+):
+Planned:
 - Error recovery to report multiple errors
 - Suggestion system for common mistakes
 - Better recovery from missing delimiters

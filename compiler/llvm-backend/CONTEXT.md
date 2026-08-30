@@ -220,6 +220,8 @@ error.
 The argument is already the `{ ptr, i64 }` fat pointer — interpolation renders every hole before
 the call is reached — so lowering is an `extractvalue` pair and a call. `println` follows the text
 with a second call over `neuro.print.newline`, a one-byte `.rodata` global emitted once per module.
+That byte is `\n`; on Windows the CRT's text-mode fd 1 turns it into `\r\n`, which is why the
+`print_builtins` and `examples` tests compare stdout with line endings normalized.
 There is **no buffering**: output reaches fd 1 through the same external POSIX `write` the panic
 runtime declares (`get_or_declare_write`), unflushed. A buffered stdout is Phase 5 work.
 

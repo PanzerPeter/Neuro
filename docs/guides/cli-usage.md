@@ -306,13 +306,13 @@ chmod +x ./program
 Override default linker:
 
 ```bash
-# Use specific linker (not yet configurable in Phase 1)
+# Use specific linker (not yet configurable)
 # Future feature
 ```
 
 ### Cross-Compilation
 
-Not yet supported in Phase 1. Compiles for native target only.
+Not yet supported. Compiles for the native target only.
 
 ### Build Scripts
 

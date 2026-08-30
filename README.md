@@ -494,7 +494,7 @@ compiler/
 
 ### Compilation Pipeline
 
-**Current (Phase 1):**
+**Today:**
 ```
 Source (.nr)
   → Lexical Analysis   (tokens)
@@ -522,16 +522,13 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 
 | Phase | Goal | Status |
 |:---:|---|:---:|
-| **1** | **Core Language**: the full general-purpose language | Complete |
-| 1A | Core MVP: types, functions, control flow, LLVM backend | Complete |
-| 1B | Syntax and semantics stabilization: parser fixes, `const`, `as` casts, compound assignment, bitwise ops, integer suffixes, if/block expressions, `while true` lint, IEEE-754 float comparisons, string fat pointers | Complete |
-| 1C | Ownership and borrow checker: move semantics, `Copy`, `&T`, `&mut T`, borrow exclusivity, lifetime elision / returned-reference outlives, `&mut self` methods, deterministic `Drop`, growable `String` | Complete |
-| 1D | Backend plumbing: `neuro-hir` typed IR crate, `melior` integration, AST → HIR lowering, HIR-routed LLVM backend, mlir-backend HIR scaffold | Complete |
-| 1E | Type system: arrays, tuples, structs, methods, destructuring, type aliases, enums, pattern matching, newtypes | Complete |
-| 1F | Generics, traits and dispatch: generics, explicit lifetimes, trait declarations, operator traits, static/dynamic dispatch (`impl`/`dyn`), closures | Complete |
-| 1G | Error handling, modules and prelude: `Option`/`Result`, collections, `checked_*`, `??`, `val-else`, `?`, error-path outlining, multi-file modules, imports, `export` visibility, inline modules & re-exports, implicit prelude | Complete |
-| 1H | Language cleanup: string interpolation, triple-quoted strings, nested comments, named arguments | Complete |
-| **2** | Tensors and MLIR: `print` / `println` to stdout, `Tensor<T, [...]>`, shape generics, named dims, dynamic shapes, DLPack, MLIR linalg lowering, pool allocator, pipeline `|>`, composition `>>`, einstein notation. Finishing it ships **v3.0.0** | In progress |
+| **1** | **Core Language**: types, control flow, LLVM backend, ownership and borrow checking, generics, traits and dispatch, closures, enums and pattern matching, error handling, modules and prelude, string interpolation | Complete |
+| **2** | **Tensors and MLIR**: first-class tensor types lowered through MLIR Linalg, plus the pool allocator. Finishing it ships **v3.0.0** | In progress |
+| 2A | Standard I/O and spec stragglers: `print` / `println`, `.is_nan()`, codepoint string APIs, `.enumerate()`, the iterator protocol, `@derive(Debug, PartialEq)` | In progress |
+| 2B | Tensor core: `Tensor<T, [...]>`, literal coercion, move semantics, DLPack, slicing, shape generics, named dims, dynamic shapes, reductions | Planned |
+| 2C | MLIR lowering: tensor arithmetic to Linalg, broadcasting, matmul behind `@`, end-to-end HIR → MLIR → LLVM | Planned |
+| 2D | Pool allocator: `pool` blocks, `PoolAware`, LIFO release at scope exit | Planned |
+| 2E | Functional sugar: pipeline `\|>`, composition `>>`, einstein notation, functional tensor ops | Planned |
 | **3** | Automatic differentiation: Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | Planned |
 | **4** | GPU acceleration: MLIR GPU dialects (nvgpu / rocdl / Triton), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | Planned |
 | **5** | Neural network standard library: `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | Planned |
