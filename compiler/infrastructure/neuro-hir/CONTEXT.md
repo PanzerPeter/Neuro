@@ -1,92 +1,107 @@
 # neuro-hir
 
 ## Purpose
-Provide the typed High-Level IR (HIR) node definitions — the stable, backend-agnostic contract between the frontend (parser + type checker) and all backends (`llvm-backend`, `mlir-backend`).
+Provide the typed High-Level IR node definitions — the stable, backend-agnostic contract between the frontend (parser + type checker) and every backend (`llvm-backend`, `mlir-backend`).
 
 ## Entry Point
 - Type: Library (no entry function — pure data)
 - Public types: `HirProgram`, `HirItem`, `HirFunction`, `HirParam`, `HirStruct`, `HirField`,
   `HirEnum`, `HirEnumVariant`, `HirEnumField`, `HirImpl`, `HirMethod`, `HirSelfParam`, `HirConst`,
-  `HirStmt`, `HirExpr`, `HirExprKind`, `HirFieldInit`, `HirType`
+  `HirTrait`, `HirClosure`, `HirCapture`, `HirStmt`, `HirExpr`, `HirExprKind`, `HirFieldInit`,
+  `HirType`, `HirCollectionKind`
 
 ## Data Ownership
 - Tables / Events Published / Events Consumed / Public Read Model: none
 
 ## Shared Kernel
-- shared-types — `Span`, `Literal` embedded in HIR nodes
-- ast-types — `BinaryOp`, `UnaryOp` operator enums reused unchanged (pure data enums,
-  identical between surface and IR; reused to avoid a pointless duplicate + conversion)
+- shared-types — `Span`, `Literal`, `FormatSpec` embedded in HIR nodes
+- ast-types — `BinaryOp` / `UnaryOp` reused unchanged (pure data enums, identical between
+  surface and IR; reused rather than duplicated-plus-converted)
 
 ## Notes
-The HIR mirrors the surface AST (`ast-types`) one-to-one in structure, with two defining
-differences that make it the *typed* contract:
+This crate defines the HIR **types only**. AST → HIR lowering (`hir-lowering`) produces them and
+the backends consume them; neither belongs here.
 
-1. **Every expression carries its resolved type.** `HirExpr` is `{ kind, ty, span }`; `ty` is a
-   fully resolved `HirType`. `HirType` has **no `Unknown` variant** — reaching the HIR implies the
-   program type-checked. Its variant set mirrors the resolved types the semantic analyzer produces
-   today; no tensor/generic variants until the language gains them (No Speculative Generality).
-2. **Syntactic noise is normalized away.** The AST's `Expr::Paren` grouping node is dropped — tree
-   structure already encodes grouping. Identifiers are resolved to their `String` name; the source
-   span lives on the enclosing node.
+The HIR mirrors the surface AST one-to-one in structure, with two defining differences that make
+it the *typed* contract:
 
-## Recent Updates
-- 2026-08-29: Growable `String`. Added `HirCollectionKind::String`, the one **nullary** collection
-  kind — its buffer is a byte run, so it carries no type arguments. `HirCollectionKind` gained
-  `arity()` (0/1/2) and `mangle_tag()`; the tag for `String` is `strbuf` rather than the lowercased
-  surface name, which would collide with the primitive `string` in a mangled instance name. No new
-  `HirType` variant: `HirType::Collection { kind: String, args: [] }` is the whole representation.
-- 2026-08-25: Added `HirExprKind::InterpString { parts }` with `HirInterpPart::{Text,
-  Formatted}`. A hole written without a spec carries `FormatSpec::default()`, so
-  backends see one uniform shape for every hole.
-- 2026-07-31: `val-else`. Added `HirStmt::ValElse { scrutinee, test, bindings, else_binding,
-  else_block, span }`, reusing `HirMatchTest` / `HirMatchBinding` verbatim rather than introducing a
-  parallel vocabulary. It is a statement, not a `Match` variant, because its `bindings` belong to the
-  ENCLOSING scope and stay live for every following statement — a `Match` arm's die with the arm.
-  `else_binding` is scoped to `else_block` alone and is `None` for `Option` (whose failure variant has
-  no payload) and for an omitted / `|_|` form. The frontend guarantees `else_block` diverges, so
-  backends may terminate it with `unreachable`.
-- 2026-07-28: One `loop` node. `HirStmt::Loop` is removed to mirror the AST change; `HirExprKind::Loop`
-  is the sole loop node and a statement-position loop is a `HirStmt::Expr` wrapping it, typed `void`.
-- 2026-07-27: Standard collections. Added `HirType::Collection { kind, args }` with
-  `HirCollectionKind::{Vec, HashMap, BTreeMap}` (Display renders `Vec<i32>`), and the
-  `HirExprKind::CollectionNew` expression kind — the typed mirror of `Vec::new()` and its siblings,
-  whose `ty` is the collection being built. Collection *methods* need no node of their own: they
-  reach backends as an ordinary `Call` with a `FieldAccess` callee, and the callee's `ty` carries the
-  call's resolved result (the `Option<T>` a fallible reader returns, the `Vec<K>` `keys()` builds).
-- 2026-07-27: Standard collections. Added `HirType::Collection { kind, args }` with
-  `HirCollectionKind::{Vec, HashMap, BTreeMap}` (Display renders `Vec<i32>`), and the
-  `HirExprKind::CollectionNew` expression kind — the typed mirror of `Vec::new()` and its siblings,
-  whose `ty` is the collection being built. Collection *methods* need no node of their own: they
-  reach backends as an ordinary `Call` with a `FieldAccess` callee, and the callee's `ty` carries the
-  call's resolved result (the `Option<T>` instance a fallible reader returns, the `Vec<K>` that
-  `keys()` builds).
-- 2026-07-24: Closures and lambdas. Added `HirItem::Closure(HirClosure { name, captures, params, return_type, body, span })` — one lifted item per closure literal, whose first (implicit) parameter at codegen is the captured-environment pointer — and `HirExprKind::Closure { name, captures }`, the closure value that references its lifted item and lists the enclosing variables to snapshot (in capture-layout order). Added `HirCapture { name, ty }`. The value's `ty` is the existing `HirType::Function { params, ret }` (previously only used for function references). Re-exported `HirClosure` and `HirCapture` from the crate root.
-- 2026-07-19: Static & dynamic dispatch. Added `HirType::DynObject(String)` (a trait object, valid only as a `HirType::Reference` referent; backends lower `&dyn T` to a `{ data ptr, vtable ptr }` fat pointer), `HirExprKind::DynCoerce { value }` (the `&T` -> `&dyn Trait` unsizing coercion — `value.ty` names the concrete type that selects the vtable, the node's `ty` is the trait-object reference), and `HirItem::Trait(HirTrait { name, methods, span })`. `HirTrait` exists ONLY to give dynamic dispatch a canonical vtable slot order (the trait's declaration order); static-dispatch traits remain fully erased. Re-exported `HirTrait` from the crate root.
-- 2026-07-02: Newtype declarations. Added `HirType::Newtype { name, inner }` (a nominal wrapper
-  that carries its resolved inner type so backends can erase it) and the transparent expression kinds
-  `HirExprKind::NewtypeConstruct { name, value }` (`Name(value)`) and `HirExprKind::NewtypeAccess {
-  object }` (`.0`). A newtype produces no `HirItem` — it dissolves into these types/nodes, which both
-  backends lower straight through to the inner value.
-- 2026-07-02: Pattern matching. Added `HirExprKind::Match { scrutinee, arms }` with the fully
-  resolved `HirMatchArm { tests, bindings, guard, body }`. `HirMatchTest::{Wildcard, Tag, IntEq,
-  IntRange}` are the refutable tests (an exclusive `a..b` is pre-normalized to `a..=b-1`);
-  `HirMatchBinding { name, ty, source }` with `HirBindingSource::{Scrutinee, EnumPayload { slot }}`
-  describes each binding so the backend needs no pattern/exhaustiveness logic.
-- 2026-06-30: Enums with associated data. Added `HirType::Enum(String)` (nominal), `HirItem::Enum`
-  with `HirEnum { name, variants }` / `HirEnumVariant { name, fields }` / `HirEnumField { name:
-  Option<String>, ty }`, and `HirExprKind::EnumConstruct { enum_name, variant, tag, payload }` — the
-  single node all three surface construction forms normalize to (payload in declared field order; `tag`
-  is the variant's declaration index). Consumed by both backends.
-- 2026-06-29: Struct + array destructuring. Added `HirExprKind::ArrayRest { array, start }`, the
-  typed mirror of the AST's array-rest node; its `ty` carries the resolved `[T; N - start]` remainder
-  type. Struct destructuring carries no HIR node (the parser desugars it to field accesses).
-- 2026-06-28: Tuples. Added `HirType::Tuple(Vec<HirType>)` (with `(T1, T2, ...)` Display) and the
-  `HirExprKind::TupleLiteral { elements }` / `HirExprKind::TupleIndex { object, index }` expression
-  kinds — the typed mirror of the AST's tuple nodes. Destructuring carries no HIR node (the parser
-  desugars it before lowering).
+1. **Every expression carries its resolved type.** `HirExpr` is `{ kind, ty, span }` and `ty` is
+   a fully resolved `HirType`. `HirType` has **no `Unknown` variant** — reaching the HIR implies
+   the program type-checked. Its variant set mirrors what the semantic analyzer produces today;
+   no tensor/generic variants until the language gains them (No Speculative Generality).
+2. **Syntactic noise is normalized away.** The AST's `Expr::Paren` is dropped (tree structure
+   already encodes grouping) and identifiers are resolved to their `String` name, with the source
+   span on the enclosing node.
 
-Scope of 1D item 2: this crate defines the HIR types only. The AST → HIR lowering (item 3)
-and the `llvm-backend` migration onto HIR (item 4) are separate pipeline steps that produce/consume
-these types; they are intentionally not part of this crate. No frontend-only data (attributes such
-as `@allow` lint suppression) is carried into the HIR — those are consumed before lowering. Backend
-attributes (`@grad`, `@gpu`) will be added here when the features that need them land.
+Nothing frontend-only survives into the HIR: lint-suppression attributes such as `@allow` are
+consumed before lowering. Backend attributes (`@grad`, `@gpu`) belong here when the features that
+need them land, and not before.
+
+### Nodes that carry a deliberate design decision
+
+**Generics do not exist here.** `hir-lowering` monomorphizes every template into concrete items,
+so there is no generic node to define.
+
+**Traits are erased except for one thing.** `HirItem::Trait(HirTrait { name, methods, span })`
+exists ONLY to give dynamic dispatch a canonical vtable slot order — the trait's declaration
+order. Static-dispatch traits are fully erased. `HirType::DynObject(String)` is valid only as a
+`HirType::Reference` referent (backends lower `&dyn T` to a `{ data ptr, vtable ptr }` fat
+pointer), and `HirExprKind::DynCoerce { value }` is the `&T` → `&dyn Trait` unsizing: `value.ty`
+names the concrete type that selects the vtable, the node's `ty` is the trait-object reference.
+
+**Closures are lifted items.** `HirItem::Closure(HirClosure { name, captures, params,
+return_type, body, span })` is one lifted item per closure literal, whose first (implicit)
+parameter at codegen is the captured-environment pointer. `HirExprKind::Closure { name,
+captures }` is the value referencing it, listing the enclosing variables to snapshot in
+capture-layout order (`HirCapture { name, ty }`). The value's `ty` is the ordinary
+`HirType::Function { params, ret }`.
+
+**Match arms are fully resolved, so backends need no pattern logic.** `HirExprKind::Match
+{ scrutinee, arms }` carries `HirMatchArm { tests, bindings, guard, body }`.
+`HirMatchTest::{Wildcard, Tag, IntEq, IntRange}` are the refutable tests — an exclusive `a..b`
+is pre-normalized to `a..=b-1` — and `HirMatchBinding { name, ty, source }` with
+`HirBindingSource::{Scrutinee, EnumPayload { slot }}` describes each binding. No exhaustiveness
+reasoning reaches a backend.
+
+**`val-else` is a statement, not a `Match` variant.** `HirStmt::ValElse { scrutinee, test,
+bindings, else_binding, else_block, span }` reuses `HirMatchTest` / `HirMatchBinding` verbatim
+rather than growing a parallel vocabulary. It is a statement because its `bindings` belong to
+the ENCLOSING scope and stay live for every following statement, where a `Match` arm's bindings
+die with the arm. `else_binding` is scoped to `else_block` alone and is `None` for `Option`
+(whose failure variant has no payload) and for the omitted / `|_|` forms. The frontend
+guarantees `else_block` diverges, so a backend may terminate it with `unreachable`.
+
+**One loop node.** `HirExprKind::Loop` is the only loop; a statement-position loop is a
+`HirStmt::Expr` wrapping it, typed `void`. Two shapes for one construct is what let a tail
+`loop` be silently compiled as a discarded value.
+
+**Enums normalize three construction forms to one.** `HirType::Enum(String)` is nominal;
+`HirExprKind::EnumConstruct { enum_name, variant, tag, payload }` is what unit, tuple, and
+struct-variant syntax all become — payload in declared field order, `tag` the variant's
+declaration index.
+
+**Newtypes produce no item.** `HirType::Newtype { name, inner }` carries its resolved inner type
+and the transparent `HirExprKind::NewtypeConstruct { name, value }` / `NewtypeAccess { object }`
+lower straight through, so backends erase the wrapper entirely.
+
+**Collections are a type, not a family of nodes.** `HirType::Collection { kind, args }` with
+`HirCollectionKind::{Vec, HashMap, BTreeMap, String}` (Display renders `Vec<i32>`), plus
+`HirExprKind::CollectionNew` — the typed mirror of `Vec::new()` and its siblings, whose `ty` is
+the collection being built. Collection *methods* need no node: they reach backends as an
+ordinary `Call` with a `FieldAccess` callee whose `ty` carries the call's resolved result (the
+`Option<T>` a fallible reader returns, the `Vec<K>` `keys()` builds).
+
+`String` is the one **nullary** kind — its buffer is a byte run, so it carries no type
+arguments and needs no new `HirType` variant: `Collection { kind: String, args: [] }` is the
+whole representation. `HirCollectionKind::arity()` (0/1/2) and `mangle_tag()` serve that;
+`String`'s tag is `strbuf` rather than the lowercased surface name, which would collide with
+the primitive `string` in a mangled instance name.
+
+**Tuples and array rests** are the typed mirrors of their AST nodes: `HirType::Tuple(Vec<HirType>)`
+(Display `(T1, T2, ...)`) with `HirExprKind::TupleLiteral` / `TupleIndex`, and
+`HirExprKind::ArrayRest { array, start }` whose `ty` carries the resolved `[T; N - start]`
+remainder. Tuple, struct, and array *destructuring* carry no HIR node — the parser desugars them.
+
+**Interpolated strings carry a uniform hole shape.** `HirExprKind::InterpString { parts }` with
+`HirInterpPart::{Text, Formatted}`; a hole written without a spec carries `FormatSpec::default()`,
+so a backend sees one shape for every hole rather than two.
