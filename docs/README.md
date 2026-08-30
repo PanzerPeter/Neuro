@@ -126,8 +126,9 @@ Key design goals:
   interpolation renders every hole into one ordinary `string` first, so `println("{x:.2}")` is a
   plain one-argument call. An owned `string` or an immutable `&string` slice both work, and the
   text is read rather than moved. Compiler builtins like the panic family, so a local declaration
-  of the name shadows one and `@no_prelude` does not remove them. Unbuffered: each call issues its
-  write immediately, see
+  of the name shadows one and `@no_prelude` does not remove them. Buffered, and drained on every
+  path out of the program — including a panic, ahead of its diagnostic — with line buffering when
+  standard output is a terminal, see
   [functions.md](language-reference/functions.md#standard-output-builtins)
 
 ### Control Flow
@@ -307,8 +308,11 @@ Key design goals:
 - Full LLVM 20 backend via inkwell 0.9.0
 - Native executable generation
 - Signedness-aware integer codegen
-- `print` / `println` lower to unbuffered POSIX `write` on fd 1 through one module-private
-  helper carrying the short-write retry loop, so a large buffer is never truncated on a pipe
+- `print` / `println` lower to a module-private buffered writer on fd 1: bytes are copied into a
+  page-sized `.bss` buffer and drained through one helper carrying the short-write retry loop, so
+  a large buffer is never truncated on a pipe. The drain is inserted at every exit — `main`'s
+  returns, the panic runtime's `abort`, the `-O0` overflow trap — and after every `println` when
+  fd 1 is a terminal; a string too large for the buffer bypasses it in a single write
 - Error-path outlining: every panic-family failure path (`panic`, `assert`, `unreachable`, and the
   array, `Vec`, string-slice, and UTF-8-boundary guards) is emitted into a module-private cold
   function and called from the failure site, so the diagnostic machinery never sits inline in the

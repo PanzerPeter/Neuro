@@ -118,7 +118,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop`, `&T` / `&mut T` with flow-sensitive exclusivity, lifetime elision and annotations |
 | **Strings** | Immutable fat-pointer `string` with escapes, `&string` slices, `==`, `+` concatenation, `.len()` / `.clone()` / `.slice(a..b)`, interpolation `"{x:.2}"`, triple-quoted `"""` blocks with dedent; growable `String` buffer for building text — `push_str` / `clear` / `to_string` |
 | **Modules & visibility** | Multi-file programs: every `.nr` file is a module and `mod.nr` directories nest; inline `module { }` blocks group within one file; `import math::{sqrt}`, `import ./utils`, `as` renames, module aliases, variant imports, and `export import` re-export facades; declarations and struct fields are private until `export` opts them in; an implicit prelude puts `Option` / `Result` and `Some` / `None` / `Ok` / `Err` in every module, with `@no_prelude` to opt out |
-| **Toolchain** | Native binaries via inkwell 0.9 / LLVM 20; `neurc check` and `neurc compile`; `print` / `println` to stdout; `panic` / `assert` / `unreachable` runtime, with error paths outlined off the hot path |
+| **Toolchain** | Native binaries via inkwell 0.9 / LLVM 20; `neurc check` and `neurc compile`; buffered `print` / `println` to stdout, line-buffered on a terminal and drained on every exit path; `panic` / `assert` / `unreachable` runtime, with error paths outlined off the hot path |
 
 ### Current Memory Model
 
@@ -143,9 +143,9 @@ Relative wall time, lower is better — reproduce on your own machine with `pyth
 | `mandelbrot` | scalar `f64` in a tight loop | 1.0x | 1.0x | 35x |
 | `vector_sum` | `Vec` push, indexed sweep | 1.0x | 1.0x | 406x |
 | `call_overhead` | recursion, call and inline cost | 1.0x | 1.1x | 31x |
-| `print_lines` | formatted standard output | 10.6x | 1.0x | 5.1x |
+| `print_lines` | formatted standard output | 2.0x | 1.0x | 5.3x |
 
-Ratios, not absolutes, because the absolutes belong to the machine rather than to the language — and to whichever `python3` is on your PATH, which is why the interpreter is named. `print_lines` is the honest outlier: `print` / `println` write straight to fd 1 with no buffering layer, so the cost there is syscalls, not code quality. Buffered output is not implemented yet.
+Ratios, not absolutes, because the absolutes belong to the machine rather than to the language — and to whichever `python3` is on your PATH, which is why the interpreter is named. `print_lines` is the honest outlier. The syscalls are gone — standard output is buffered, and the same loop printing a constant line rather than an interpolated one runs at C's speed — so what is left is the formatting: interpolation renders each hole through `snprintf` twice, once to measure the result and once to produce it, into a heap buffer that is then copied into the joined string. `printf` formats once, straight into its own buffer. Closing that is not done yet.
 
 The default is `-O 0`, which selects trapping arithmetic and runs no optimization pipeline — pass `-O 3` before drawing any conclusion about speed.
 

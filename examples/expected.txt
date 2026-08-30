@@ -110,6 +110,7 @@ modules/shapes/area.nr      module
 
 # --- showcase (multiple features working together) ------------------------
 showcase/borrowed_text.nr   18
+showcase/buffered_report.nr 40
 showcase/closures.nr        90
 showcase/config_manifest.nr 81
 showcase/enum_records.nr    46

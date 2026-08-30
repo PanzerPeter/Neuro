@@ -795,9 +795,20 @@ A user-defined function named `print` or `println` shadows the builtin within th
 exactly as one named `panic` does. Both are compiler builtins rather than declarations, so
 `@no_prelude` does not take them away.
 
-Output is **unbuffered**: every call issues the write immediately, which is why a printed
-line appears even if the program later panics, and why printing in a tight loop is slower
-than it will be once a buffered standard-output type lands.
+Output is **buffered**. A call copies its bytes into a page-sized buffer, and the buffer
+reaches the operating system when it fills — so a printing loop pays one write for
+thousands of lines rather than one, or for `println` two, per call.
+
+That buffer is emptied on every path out of the program, so buffering never costs output:
+when `main` returns, when the panic runtime aborts, and when a debug-build arithmetic
+overflow traps. A line printed before a panic therefore still appears, and it appears
+*before* the panic's diagnostic on standard error rather than after it.
+
+When standard output is a **terminal**, the buffer is emptied at the end of every
+`println` instead of only when it fills, so a program's progress is visible while it runs.
+A pipe or a file gets the full buffer. This is the behaviour of C's standard library, and
+of every language's standard output built on it. `print` writes no line terminator and so
+ends no line: its bytes wait for the next `println` or for the program to finish.
 
 ## Generic Functions
 

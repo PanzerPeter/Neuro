@@ -64,7 +64,10 @@ load-bearing:
 2. **Vtables** (`emit_vtables`) — after all signatures are declared, before any body, so item
    order never matters.
 3. **Bodies.**
-4. **Soft-float builtins** linked in when the module uses `half`/`bfloat`, after codegen and
+4. **Standard-output drain** (`finalize_stdout_buffer`) — inserted after all bodies, because only
+   a finished module knows whether it prints at all and because the exit paths it edits are all
+   emitted by then. See Standard-Output ABI.
+5. **Soft-float builtins** linked in when the module uses `half`/`bfloat`, after codegen and
    before `verify`.
 
 ## Stack Slot Placement
@@ -401,7 +404,9 @@ Each builtin writes its diagnostic to stderr (fd 2) via external POSIX `write`
 
 That sequence is **not** emitted inline — see Error-Path Outlining. The `file:line:col` suffix
 comes from the `Call` span start via the `SourceFile` (empty when no source is supplied).
-`write` + `abort` are POSIX/libc (Linux, macOS; MSVC CRT on Windows).
+`write` + `abort` are POSIX/libc (Linux, macOS; MSVC CRT on Windows). `abort` runs no exit hook, so
+`emit_abort_unreachable` takes `&mut self` and records its call for the standard-output drain — see
+Exit-path draining.
 
 Because `panic` / `unreachable` terminate the block with `unreachable`, following statements are
 dead code: `codegen_stmt` early-returns when the block is already terminated, and `codegen_return`
@@ -429,14 +434,14 @@ array and `Vec` bounds, string-slice bounds, UTF-8 codepoint boundary.
 - `mark_cold_branch(branch, cold_edge_is_true)` attaches `!prof` `branch_weights` (`2000 : 1`) to
   every guard branch and to the `-O0` overflow check. The overflow trap is weighted but **not**
   outlined — its block is a single `llvm.trap`, so a call would trade one instruction for another.
+  `emit_trap` takes `&mut self` and records its call for the standard-output drain, since `trap`
+  runs no exit hook either — see Exit-path draining.
 
 ## Standard-Output ABI
 `print(text: string)` / `println(text: string)` lower in `io.rs`. The `Call`→`Identifier` arm
 intercepts them via `CodegenContext::is_io_builtin` after the panic family and under the same
 user-function-shadows rule. Both return unit, so the dispatch yields `Ok(None)`: a statement
-discards it, and value position reports the ordinary void-where-a-value-was-expected error. No
-`CodegenContext` state is added — the helper and the global are found by name via
-`module.get_function` / `get_global`.
+discards it, and value position reports the ordinary void-where-a-value-was-expected error.
 
 The argument is already the `{ ptr, i64 }` fat pointer (interpolation renders every hole before the
 call is reached), so lowering is an `extractvalue` pair and a call. `println` follows the text with
@@ -444,17 +449,53 @@ a second call over `neuro.print.newline`, a one-byte `.rodata` global emitted on
 byte is `\n`; on Windows the CRT's text-mode fd 1 turns it into `\r\n`, which is why the
 `print_builtins` and `examples` tests compare stdout with line endings normalized.
 
-There is **no buffering**: output reaches fd 1 through the same external POSIX `write` the panic
-runtime declares, unflushed. A buffered stdout is later work.
+Output is **buffered**. `PRINT_BUFFER_BYTES` (4096) bytes of `.bss` (`neuro.print.buffer`) plus an
+`i64` fill counter (`neuro.print.used`) and an `i8` mode cache (`neuro.print.mode`), all
+`Linkage::Private`. Four module-private helpers, each emitted on first use, each saving and
+restoring the builder position because they are built lazily mid-function:
 
-Both go through `neuro.print.write_all(ptr, i64)`, one module-private `Linkage::Private` helper
-emitted on first use, holding the short-write retry loop: `write` may consume less than it was
-offered (a pipe with a full buffer does exactly that), and a bare call per site would silently
-truncate the language's primary result channel. The loop stops on a non-positive return so a
-closed or failing descriptor cannot spin. `get_or_build_write_all` saves and restores the builder
-position, since the helper is built lazily mid-function, and `split_printable` reports a
-non-aggregate operand as an internal error rather than asking it for a struct variant it has not
-got.
+- `neuro.print.emit(ptr, i64)` — the only thing a builtin calls with bytes. Copies into the buffer
+  when they fit; drains first when they do not; and when they are larger than the buffer could ever
+  hold, hands them to `write_all` directly after that drain, so one enormous string stays one
+  syscall instead of being chopped into pages. `emit` has consumed the bytes by the time it
+  returns on every path, which is what lets `codegen_io_builtin` free an owned argument right
+  after the call.
+- `neuro.print.flush()` — drains and zeroes the counter. A no-op when nothing is buffered, so it
+  is cheap enough to call unconditionally from an exit path.
+- `neuro.print.line_end()` — emitted after `println`'s newline. Resolves `isatty(1)` once into
+  `neuro.print.mode` and drains only when fd 1 is a terminal, so interactive output stays
+  line-by-line while a pipe or file gets the full buffer. The compiler knows where the line
+  boundary is, so the runtime never scans bytes for `\n`. `print` writes no terminator and so
+  calls this not at all — the same rule C's line-buffered stdio follows. `isatty` is declared as
+  `_isatty` on Windows, chosen with `cfg!(windows)` since `neurc` compiles for the host.
+- `neuro.print.write_all(ptr, i64)` — the drain primitive, holding the short-write retry loop:
+  `write` may consume less than it was offered (a pipe with a full buffer does exactly that), and
+  a bare call per site would silently truncate the language's primary result channel. The loop
+  stops on a non-positive return so a closed or failing descriptor cannot spin.
+
+`split_printable` reports a non-aggregate operand as an internal error rather than asking it for a
+struct variant it has not got.
+
+### Exit-path draining
+Buffering is only sound if the buffer always reaches fd 1 before the process stops, and the
+language stops in exactly three ways: `main` returns, the panic runtime calls `abort`, or `-O0`
+arithmetic hits `llvm.trap`. Neither `abort` nor `trap` runs an exit hook, and the Windows
+fallback linkers are invoked with `/ENTRY:main`, so `atexit` and `llvm.global_dtors` are not
+available to lean on either.
+
+`finalize_stdout_buffer` (io.rs) inserts the drain instead, called from `build_module` after every
+body is generated and before soft-float linking and `verify`. It returns immediately unless
+`neuro.print.buffer` exists, so a program that never prints reserves no buffer, declares no
+`isatty`, and keeps its exit paths untouched. Otherwise it inserts `call void @neuro.print.flush()`
+before every recorded process-exit instruction and before every `ret` in `@main` — `main` is
+emitted under its own name with no wrapper, so that is the C entry point itself.
+
+The exit instructions are recorded as they are emitted, into `CodegenContext::process_exit_points`,
+by `record_process_exit` (context.rs): `emit_abort_unreachable` (panic.rs) and `emit_trap`
+(binary.rs) call it right after building their call, and it takes the block's last instruction
+because inkwell's `CallSiteValue` does not convert to an `InstructionValue`. Draining in front of
+the panic path is not only about not losing bytes: it is what keeps the stderr diagnostic behind
+the stdout output that led up to it.
 
 ## String Interpolation ABI
 `codegen/expressions/interp.rs` renders each part to a `{ ptr, len }` fat pointer and concatenates

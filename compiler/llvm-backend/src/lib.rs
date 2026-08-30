@@ -273,6 +273,11 @@ fn build_module<'ctx>(
         }
     }
 
+    // Drain buffered standard output on every path out of the process. Runs here because
+    // only a finished module knows whether it prints at all, and because the exit paths
+    // it edits — `main`'s returns, `abort`, `llvm.trap` — are all emitted by now.
+    codegen_ctx.finalize_stdout_buffer()?;
+
     // Link self-contained soft-float conversion builtins when the module uses
     // f16/bf16, so the emitted object resolves the half-precision libcalls
     // itself instead of depending on a platform runtime (libgcc/compiler-rt),
@@ -871,6 +876,90 @@ mod tests {
             !result.unwrap().is_empty(),
             "object code should not be empty"
         );
+    }
+
+    #[test]
+    fn standard_output_is_buffered_rather_than_written_per_call() {
+        let source = r#"
+            func main() -> i32 {
+                println("one")
+                return 0
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let main_body = function_body(&ir, "main");
+
+        assert!(
+            !main_body.contains("@write("),
+            "a print must reach the buffer, not the syscall:\n{}",
+            main_body
+        );
+        assert_eq!(
+            main_body.matches("call void @neuro.print.emit(").count(),
+            2,
+            "println emits its text and its newline into the same buffer:\n{}",
+            main_body
+        );
+        assert!(
+            ir.contains("@neuro.print.buffer = private global"),
+            "the buffer must be a module-private reservation:\n{}",
+            ir
+        );
+    }
+
+    #[test]
+    fn a_module_that_never_prints_reserves_no_output_buffer() {
+        // The drain is inserted after every body is generated precisely so that a
+        // program with no print keeps its exit paths — and its .bss — untouched.
+        let source = r#"
+            func main() -> i32 {
+                val n: i32 = 41
+                return n + 1
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+
+        assert!(
+            !ir.contains("neuro.print"),
+            "the standard-output runtime must not be emitted at all:\n{}",
+            ir
+        );
+    }
+
+    #[test]
+    fn every_exit_path_drains_the_output_buffer() {
+        // `main` returning, `abort`, and `llvm.trap` are the only three ways this
+        // language stops running, and none of the last two runs an exit hook.
+        let source = r#"
+            func main() -> i32 {
+                mut n: i32 = 2147483647
+                println("working")
+                assert(n > 0)
+                n = n + 1
+                return 0
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+
+        assert!(
+            function_body(&ir, "main").contains("call void @neuro.print.flush()"),
+            "main must drain before it returns:\n{}",
+            function_body(&ir, "main")
+        );
+        for (before, path) in [
+            ("call void @abort()", "the panic runtime"),
+            ("call void @llvm.trap()", "the overflow trap"),
+        ] {
+            let drained = ir
+                .split(before)
+                .next()
+                .map(|head| head.trim_end().ends_with("call void @neuro.print.flush()"))
+                .unwrap_or(false);
+            assert!(drained, "{} must drain the buffer first:\n{}", path, ir);
+        }
     }
 
     #[test]

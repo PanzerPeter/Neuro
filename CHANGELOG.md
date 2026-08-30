@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-08-30
+
+### Added
+
+- **Standard output is buffered.** `print` / `println` handed every call straight to the
+  `write` syscall — two of them for a `println`, one for the text and one for the newline —
+  so a printing loop spent essentially all of its time entering the kernel. 600,000
+  `println`s through a pipe took 157 ms; they now take 2 ms, and the `print_lines`
+  benchmark moves from 10.6x `clang -O2` to 2.0x. What is left of that gap is string
+  interpolation, not output: the same loop printing a constant line matches C.
+
+  Bytes are copied into a page-sized module-private buffer and drained when it fills. A
+  string too large for the buffer bypasses it and goes out in a single write rather than
+  being chopped into pages.
+
+  The buffer is drained on every path out of the program, so nothing is ever traded away
+  for the speed: when `main` returns, when the panic runtime aborts, and when debug-build
+  arithmetic overflows and traps. Draining ahead of a panic also fixes an ordering the
+  unbuffered version got for free — the diagnostic on standard error now follows the
+  output that led up to it instead of racing ahead of it.
+
+  When standard output is a terminal, the buffer is drained at the end of every `println`
+  instead of only when it fills, so a program's progress stays visible while it runs. Even
+  there it is an improvement: the text and its newline now leave in one write rather than
+  two. A program that prints nothing reserves no buffer and keeps its exit paths untouched.
+
 ## [2.2.1] - 2026-08-30
 
 ### Fixed

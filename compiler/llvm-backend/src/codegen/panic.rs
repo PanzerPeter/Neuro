@@ -165,11 +165,12 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Emit `abort()` followed by an `unreachable` terminator, ending the basic block.
-    pub(crate) fn emit_abort_unreachable(&self) -> CodegenResult<()> {
+    pub(crate) fn emit_abort_unreachable(&mut self) -> CodegenResult<()> {
         let abort_fn = self.get_or_declare_abort();
         self.builder
             .build_call(abort_fn, &[], "panic.abort")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.record_process_exit();
         self.builder
             .build_unreachable()
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
