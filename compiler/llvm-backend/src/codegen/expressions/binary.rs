@@ -382,7 +382,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Emit a call to `llvm.trap`, which terminates the process on execution.
-    fn emit_trap(&self) -> CodegenResult<()> {
+    fn emit_trap(&mut self) -> CodegenResult<()> {
         let trap = Intrinsic::find("llvm.trap")
             .ok_or_else(|| CodegenError::InternalError("missing llvm.trap intrinsic".into()))?;
         let decl = trap
@@ -391,6 +391,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder
             .build_call(decl, &[], "")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.record_process_exit();
         Ok(())
     }
 

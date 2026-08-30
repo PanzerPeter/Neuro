@@ -279,3 +279,92 @@ fn the_wrong_argument_count_is_rejected() {
         );
     }
 }
+
+#[test]
+fn output_spanning_many_buffer_loads_arrives_in_order() {
+    // Each line is far shorter than the buffer, so this crosses the fill-and-drain
+    // boundary hundreds of times. Ordering across those drains is the whole contract.
+    let output = run_program(
+        r#"
+func main() -> i32 {
+    for i in 0..2000 {
+        println("line {i}")
+    }
+    return 0
+}
+"#,
+        "print_many_lines",
+    );
+
+    let expected: String = (0..2000).map(|i| format!("line {i}\n")).collect();
+    assert_eq!(stdout(&output), expected);
+}
+
+#[test]
+fn a_line_longer_than_the_buffer_keeps_its_neighbours_in_order() {
+    // A string too large to ever fit bypasses the buffer and goes straight to `write`.
+    // The bytes already held must leave first, or the bypass would overtake them.
+    let output = run_program(
+        r#"
+func main() -> i32 {
+    mut block: string = "0123456789"
+    for i in 0..10 {
+        block = block + block
+    }
+    println("head")
+    println(block)
+    print("tail")
+    return 0
+}
+"#,
+        "print_oversize_ordering",
+    );
+
+    let text = stdout(&output);
+    let body = "0123456789".repeat(1024);
+    assert_eq!(text, format!("head\n{body}\ntail"));
+}
+
+#[test]
+fn buffered_output_reaches_stdout_before_a_panic_aborts() {
+    // `abort` runs no exit hook, so anything still buffered would be lost — and the
+    // diagnostic on stderr would describe a failure the output never led up to.
+    let output = run_program(
+        r#"
+func main() -> i32 {
+    println("step one")
+    println("step two")
+    panic("stop here")
+}
+"#,
+        "print_flushed_before_panic",
+    );
+
+    assert_eq!(stdout(&output), "step one\nstep two\n");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("panic: stop here"),
+        "stderr: {:?}",
+        output.stderr
+    );
+    assert_ne!(output.status.code(), Some(0));
+}
+
+#[test]
+fn buffered_output_reaches_stdout_before_an_overflow_trap() {
+    // The `-O0` overflow check terminates through `llvm.trap`, which is not the panic
+    // runtime's `abort` and needs the drain inserted in front of it in its own right.
+    let output = run_program(
+        r#"
+func main() -> i32 {
+    println("counted up to the limit")
+    mut n: i32 = 2147483647
+    n = n + 1
+    return n
+}
+"#,
+        "print_flushed_before_trap",
+    );
+
+    assert_eq!(stdout(&output), "counted up to the limit\n");
+    assert_ne!(output.status.code(), Some(0));
+}

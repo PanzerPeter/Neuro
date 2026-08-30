@@ -135,6 +135,13 @@ isolation:
   `@derive(Copy, Clone)` struct with `&self` methods, an enum with a payload + `match`, and
   string interpolation with the format mini-language (`:>4`, `:.1`, `:+d`). The finished
   text is checked exactly, then `.clear()` proves the buffer is reusable. Exit `64`.
+- [`showcase/buffered_report.nr`](showcase/buffered_report.nr) — **buffered standard
+  output**: a 240-line shift report followed by a banner larger than the output buffer
+  itself, so the lines held in the buffer, the drains that empty it, and the oversize
+  string that skips it all have to come out in the order they were written. Combined with a
+  `@derive(Copy, Clone)` struct with `&self` methods, a `Vec<Reading>` + `for`-in, the
+  growable `String` with `push_str`, and interpolation with the format mini-language
+  (`:>3`, `:.2`). Exit `40` — the number of readings at peak load.
 - [`showcase/scan_guard.nr`](showcase/scan_guard.nr) — **deterministic `Drop` +
   labeled breaks**: two `impl Drop` scope guards sharing a `&mut i32` counter while a
   labeled `break` exits *two* nested loops at once, proving the destructors still run

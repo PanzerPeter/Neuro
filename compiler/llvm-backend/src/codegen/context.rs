@@ -227,6 +227,12 @@ pub(crate) struct CodegenContext<'ctx> {
     /// and by the constant diagnostic text baked into it. Failure sites worded
     /// identically share one body instead of emitting the diagnostic machinery twice.
     pub(crate) cold_thunks: HashMap<(bool, String), FunctionValue<'ctx>>,
+
+    /// Every `abort` and `llvm.trap` call emitted, in emission order. Neither runs an
+    /// exit hook, so buffered standard output has to be drained immediately in front of
+    /// them; `finalize_stdout_buffer` does that once the module is known to print at all.
+    /// Empty for a program with no panic path and no `-O0` overflow check.
+    pub(crate) process_exit_points: Vec<inkwell::values::InstructionValue<'ctx>>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -256,6 +262,23 @@ impl<'ctx> CodegenContext<'ctx> {
             drop_scopes: Vec::new(),
             enum_variants: HashMap::new(),
             cold_thunks: HashMap::new(),
+            process_exit_points: Vec::new(),
+        }
+    }
+
+    /// Record the call just emitted as a point where the process stops running, so the
+    /// standard-output buffer is drained in front of it.
+    ///
+    /// Takes the block's last instruction rather than the call's own value: inkwell's
+    /// `CallSiteValue` does not convert to an `InstructionValue`, and a call is the last
+    /// thing in its block at the moment it is built.
+    pub(crate) fn record_process_exit(&mut self) {
+        let last = self
+            .builder
+            .get_insert_block()
+            .and_then(|block| block.get_last_instruction());
+        if let Some(instruction) = last {
+            self.process_exit_points.push(instruction);
         }
     }
 

@@ -1,0 +1,401 @@
+minute   0 | load 40.00
+minute   1 | load 41.00
+minute   2 | load 42.00
+minute   3 | load 43.00
+minute   4 | load 44.00
+minute   5 | load 45.00
+minute   6 | load 46.00
+minute   7 | load 47.00
+minute   8 | load 48.00
+minute   9 | load 49.00
+minute  10 | load 50.00
+minute  11 | load 51.00
+minute  12 | load 52.00
+minute  13 | load 53.00
+minute  14 | load 54.00
+minute  15 | load 55.00
+minute  16 | load 56.00
+minute  17 | load 57.00
+minute  18 | load 58.00
+minute  19 | load 59.00
+minute  20 | load 60.00
+minute  21 | load 61.00
+minute  22 | load 62.00
+minute  23 | load 63.00
+minute  24 | load 64.00
+minute  25 | load 65.00
+minute  26 | load 66.00
+minute  27 | load 67.00
+minute  28 | load 68.00
+minute  29 | load 69.00
+minute  30 | load 70.00
+minute  31 | load 71.00
+minute  32 | load 72.00
+minute  33 | load 73.00
+minute  34 | load 74.00
+minute  35 | load 75.00
+minute  36 | load 76.00
+minute  37 | load 77.00
+minute  38 | load 78.00
+minute  39 | load 79.00
+minute  40 | load 80.00
+minute  41 | load 81.00
+minute  42 | load 82.00
+minute  43 | load 83.00
+minute  44 | load 84.00
+minute  45 | load 85.00
+minute  46 | load 86.00
+minute  47 | load 87.00
+minute  48 | load 88.00
+minute  49 | load 89.00
+minute  50 | load 90.00
+minute  51 | load 91.00
+minute  52 | load 92.00
+minute  53 | load 93.00
+minute  54 | load 94.00
+minute  55 | load 95.00
+minute  56 | load 96.00
+minute  57 | load 97.00
+minute  58 | load 98.00
+minute  59 | load 99.00
+minute  60 | load 100.00
+minute  61 | load 40.00
+minute  62 | load 41.00
+minute  63 | load 42.00
+minute  64 | load 43.00
+minute  65 | load 44.00
+minute  66 | load 45.00
+minute  67 | load 46.00
+minute  68 | load 47.00
+minute  69 | load 48.00
+minute  70 | load 49.00
+minute  71 | load 50.00
+minute  72 | load 51.00
+minute  73 | load 52.00
+minute  74 | load 53.00
+minute  75 | load 54.00
+minute  76 | load 55.00
+minute  77 | load 56.00
+minute  78 | load 57.00
+minute  79 | load 58.00
+minute  80 | load 59.00
+minute  81 | load 60.00
+minute  82 | load 61.00
+minute  83 | load 62.00
+minute  84 | load 63.00
+minute  85 | load 64.00
+minute  86 | load 65.00
+minute  87 | load 66.00
+minute  88 | load 67.00
+minute  89 | load 68.00
+minute  90 | load 69.00
+minute  91 | load 70.00
+minute  92 | load 71.00
+minute  93 | load 72.00
+minute  94 | load 73.00
+minute  95 | load 74.00
+minute  96 | load 75.00
+minute  97 | load 76.00
+minute  98 | load 77.00
+minute  99 | load 78.00
+minute 100 | load 79.00
+minute 101 | load 80.00
+minute 102 | load 81.00
+minute 103 | load 82.00
+minute 104 | load 83.00
+minute 105 | load 84.00
+minute 106 | load 85.00
+minute 107 | load 86.00
+minute 108 | load 87.00
+minute 109 | load 88.00
+minute 110 | load 89.00
+minute 111 | load 90.00
+minute 112 | load 91.00
+minute 113 | load 92.00
+minute 114 | load 93.00
+minute 115 | load 94.00
+minute 116 | load 95.00
+minute 117 | load 96.00
+minute 118 | load 97.00
+minute 119 | load 98.00
+minute 120 | load 99.00
+minute 121 | load 100.00
+minute 122 | load 40.00
+minute 123 | load 41.00
+minute 124 | load 42.00
+minute 125 | load 43.00
+minute 126 | load 44.00
+minute 127 | load 45.00
+minute 128 | load 46.00
+minute 129 | load 47.00
+minute 130 | load 48.00
+minute 131 | load 49.00
+minute 132 | load 50.00
+minute 133 | load 51.00
+minute 134 | load 52.00
+minute 135 | load 53.00
+minute 136 | load 54.00
+minute 137 | load 55.00
+minute 138 | load 56.00
+minute 139 | load 57.00
+minute 140 | load 58.00
+minute 141 | load 59.00
+minute 142 | load 60.00
+minute 143 | load 61.00
+minute 144 | load 62.00
+minute 145 | load 63.00
+minute 146 | load 64.00
+minute 147 | load 65.00
+minute 148 | load 66.00
+minute 149 | load 67.00
+minute 150 | load 68.00
+minute 151 | load 69.00
+minute 152 | load 70.00
+minute 153 | load 71.00
+minute 154 | load 72.00
+minute 155 | load 73.00
+minute 156 | load 74.00
+minute 157 | load 75.00
+minute 158 | load 76.00
+minute 159 | load 77.00
+minute 160 | load 78.00
+minute 161 | load 79.00
+minute 162 | load 80.00
+minute 163 | load 81.00
+minute 164 | load 82.00
+minute 165 | load 83.00
+minute 166 | load 84.00
+minute 167 | load 85.00
+minute 168 | load 86.00
+minute 169 | load 87.00
+minute 170 | load 88.00
+minute 171 | load 89.00
+minute 172 | load 90.00
+minute 173 | load 91.00
+minute 174 | load 92.00
+minute 175 | load 93.00
+minute 176 | load 94.00
+minute 177 | load 95.00
+minute 178 | load 96.00
+minute 179 | load 97.00
+minute 180 | load 98.00
+minute 181 | load 99.00
+minute 182 | load 100.00
+minute 183 | load 40.00
+minute 184 | load 41.00
+minute 185 | load 42.00
+minute 186 | load 43.00
+minute 187 | load 44.00
+minute 188 | load 45.00
+minute 189 | load 46.00
+minute 190 | load 47.00
+minute 191 | load 48.00
+minute 192 | load 49.00
+minute 193 | load 50.00
+minute 194 | load 51.00
+minute 195 | load 52.00
+minute 196 | load 53.00
+minute 197 | load 54.00
+minute 198 | load 55.00
+minute 199 | load 56.00
+minute 200 | load 57.00
+minute 201 | load 58.00
+minute 202 | load 59.00
+minute 203 | load 60.00
+minute 204 | load 61.00
+minute 205 | load 62.00
+minute 206 | load 63.00
+minute 207 | load 64.00
+minute 208 | load 65.00
+minute 209 | load 66.00
+minute 210 | load 67.00
+minute 211 | load 68.00
+minute 212 | load 69.00
+minute 213 | load 70.00
+minute 214 | load 71.00
+minute 215 | load 72.00
+minute 216 | load 73.00
+minute 217 | load 74.00
+minute 218 | load 75.00
+minute 219 | load 76.00
+minute 220 | load 77.00
+minute 221 | load 78.00
+minute 222 | load 79.00
+minute 223 | load 80.00
+minute 224 | load 81.00
+minute 225 | load 82.00
+minute 226 | load 83.00
+minute 227 | load 84.00
+minute 228 | load 85.00
+minute 229 | load 86.00
+minute 230 | load 87.00
+minute 231 | load 88.00
+minute 232 | load 89.00
+minute 233 | load 90.00
+minute 234 | load 91.00
+minute 235 | load 92.00
+minute 236 | load 93.00
+minute 237 | load 94.00
+minute 238 | load 95.00
+minute 239 | load 96.00
+[  0] shift block filler row
+[  1] shift block filler row
+[  2] shift block filler row
+[  3] shift block filler row
+[  4] shift block filler row
+[  5] shift block filler row
+[  6] shift block filler row
+[  7] shift block filler row
+[  8] shift block filler row
+[  9] shift block filler row
+[ 10] shift block filler row
+[ 11] shift block filler row
+[ 12] shift block filler row
+[ 13] shift block filler row
+[ 14] shift block filler row
+[ 15] shift block filler row
+[ 16] shift block filler row
+[ 17] shift block filler row
+[ 18] shift block filler row
+[ 19] shift block filler row
+[ 20] shift block filler row
+[ 21] shift block filler row
+[ 22] shift block filler row
+[ 23] shift block filler row
+[ 24] shift block filler row
+[ 25] shift block filler row
+[ 26] shift block filler row
+[ 27] shift block filler row
+[ 28] shift block filler row
+[ 29] shift block filler row
+[ 30] shift block filler row
+[ 31] shift block filler row
+[ 32] shift block filler row
+[ 33] shift block filler row
+[ 34] shift block filler row
+[ 35] shift block filler row
+[ 36] shift block filler row
+[ 37] shift block filler row
+[ 38] shift block filler row
+[ 39] shift block filler row
+[ 40] shift block filler row
+[ 41] shift block filler row
+[ 42] shift block filler row
+[ 43] shift block filler row
+[ 44] shift block filler row
+[ 45] shift block filler row
+[ 46] shift block filler row
+[ 47] shift block filler row
+[ 48] shift block filler row
+[ 49] shift block filler row
+[ 50] shift block filler row
+[ 51] shift block filler row
+[ 52] shift block filler row
+[ 53] shift block filler row
+[ 54] shift block filler row
+[ 55] shift block filler row
+[ 56] shift block filler row
+[ 57] shift block filler row
+[ 58] shift block filler row
+[ 59] shift block filler row
+[ 60] shift block filler row
+[ 61] shift block filler row
+[ 62] shift block filler row
+[ 63] shift block filler row
+[ 64] shift block filler row
+[ 65] shift block filler row
+[ 66] shift block filler row
+[ 67] shift block filler row
+[ 68] shift block filler row
+[ 69] shift block filler row
+[ 70] shift block filler row
+[ 71] shift block filler row
+[ 72] shift block filler row
+[ 73] shift block filler row
+[ 74] shift block filler row
+[ 75] shift block filler row
+[ 76] shift block filler row
+[ 77] shift block filler row
+[ 78] shift block filler row
+[ 79] shift block filler row
+[ 80] shift block filler row
+[ 81] shift block filler row
+[ 82] shift block filler row
+[ 83] shift block filler row
+[ 84] shift block filler row
+[ 85] shift block filler row
+[ 86] shift block filler row
+[ 87] shift block filler row
+[ 88] shift block filler row
+[ 89] shift block filler row
+[ 90] shift block filler row
+[ 91] shift block filler row
+[ 92] shift block filler row
+[ 93] shift block filler row
+[ 94] shift block filler row
+[ 95] shift block filler row
+[ 96] shift block filler row
+[ 97] shift block filler row
+[ 98] shift block filler row
+[ 99] shift block filler row
+[100] shift block filler row
+[101] shift block filler row
+[102] shift block filler row
+[103] shift block filler row
+[104] shift block filler row
+[105] shift block filler row
+[106] shift block filler row
+[107] shift block filler row
+[108] shift block filler row
+[109] shift block filler row
+[110] shift block filler row
+[111] shift block filler row
+[112] shift block filler row
+[113] shift block filler row
+[114] shift block filler row
+[115] shift block filler row
+[116] shift block filler row
+[117] shift block filler row
+[118] shift block filler row
+[119] shift block filler row
+[120] shift block filler row
+[121] shift block filler row
+[122] shift block filler row
+[123] shift block filler row
+[124] shift block filler row
+[125] shift block filler row
+[126] shift block filler row
+[127] shift block filler row
+[128] shift block filler row
+[129] shift block filler row
+[130] shift block filler row
+[131] shift block filler row
+[132] shift block filler row
+[133] shift block filler row
+[134] shift block filler row
+[135] shift block filler row
+[136] shift block filler row
+[137] shift block filler row
+[138] shift block filler row
+[139] shift block filler row
+[140] shift block filler row
+[141] shift block filler row
+[142] shift block filler row
+[143] shift block filler row
+[144] shift block filler row
+[145] shift block filler row
+[146] shift block filler row
+[147] shift block filler row
+[148] shift block filler row
+[149] shift block filler row
+[150] shift block filler row
+[151] shift block filler row
+[152] shift block filler row
+[153] shift block filler row
+[154] shift block filler row
+[155] shift block filler row
+[156] shift block filler row
+[157] shift block filler row
+[158] shift block filler row
+[159] shift block filler row
+readings 240 | peaks 40
