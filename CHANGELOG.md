@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-08-30
+
+### Added
+
+- **`.char_slice(range)` on strings — slicing by character instead of by byte.**
+  `.slice(0..3)` on `"héllo"` returns `"hé"`, because `é` costs two bytes and the range
+  counts bytes. That is the right answer when the offsets came from a byte position and the
+  wrong one whenever they came from counting characters, which is most of the time in
+  tokenizer and text-processing code — where the same range is just as likely to land in the
+  middle of a code point and panic. `.char_slice(0..3)` returns `"hél"`.
+
+  It is otherwise the method it sits beside: a borrowed, zero-copy `&string` view under the
+  same borrow rules, exclusive (`a..b`) or inclusive (`a..=b`), chainable, comparable, and
+  usable anywhere a `&string` is. It costs a walk of the string's bytes to find each
+  endpoint, where `.slice` is a pointer addition — pay it when the indices are characters,
+  keep `.slice` when they are bytes or the text is ASCII.
+
+  Only one runtime rule applies instead of `.slice`'s two: the range must stay within the
+  string's character count and must not run backwards, and violating that panics with
+  `string char slice out of bounds`. There is no code-point-boundary rule to break, because
+  a character index cannot name a position inside a character — which is the reason to use
+  the method at all. The character count itself is a legal upper bound, so the empty slice at
+  the end of a string is addressable rather than an error.
+
 ## [2.3.0] - 2026-08-30
 
 ### Added

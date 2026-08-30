@@ -45,6 +45,9 @@ impl<'ctx> CodegenContext<'ctx> {
             // `string.slice(a..b)` — a borrowed `&string` view into the receiver's
             // UTF-8 bytes, with runtime bounds and codepoint-boundary checks.
             BuiltinMethod::StringSlice => self.codegen_string_slice(receiver, args),
+            // `string.char_slice(a..b)` — the same borrowed view, located by counting
+            // code points instead of bytes.
+            BuiltinMethod::StringCharSlice => self.codegen_char_slice(receiver, args),
             // `array.len()` — the static length `N` of `[T; N]`, read from the
             // receiver type recorded by the type pass. A compile-time constant `u64`;
             // the receiver is not evaluated (length is independent of its value).
@@ -187,7 +190,22 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         self.codegen_guard_or_panic(aligned, "string slice splits a UTF-8 code point", offset)?;
 
-        // SAFETY: the bounds guard above proved `0 <= start <= len`, so offsetting the
+        self.string_fat_slice(base_ptr, start, end)
+    }
+
+    /// Build the `&string` fat pointer for the byte range `[start, end)` of the string
+    /// based at `base_ptr`. Shared by `.slice` and `.char_slice`, which differ only in how
+    /// they arrive at the two byte offsets.
+    ///
+    /// The caller MUST have already guarded `0 <= start <= end <= len`; this function
+    /// emits no checks of its own.
+    pub(super) fn string_fat_slice(
+        &mut self,
+        base_ptr: PointerValue<'ctx>,
+        start: IntValue<'ctx>,
+        end: IntValue<'ctx>,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        // SAFETY: the caller's bounds guard proved `0 <= start <= len`, so offsetting the
         // base pointer by `start` stays within the string's allocation.
         let new_ptr = unsafe {
             self.builder
@@ -218,7 +236,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Lower a slice bound expression to an `i64` index, sign-extending or truncating a
     /// differently sized integer (a bare literal defaults to `i32` in the backend).
-    fn slice_index_to_i64(&mut self, expr: &HirExpr) -> CodegenResult<IntValue<'ctx>> {
+    pub(super) fn slice_index_to_i64(&mut self, expr: &HirExpr) -> CodegenResult<IntValue<'ctx>> {
         let value = self.codegen_expr(expr)?.into_int_value();
         let i64_ty = self.context.i64_type();
         let width = value.get_type().get_bit_width();
@@ -305,7 +323,10 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// An owned `string` and an immutable `&string` are both already the struct. A `&mut
     /// string` receiver is the referent's address, so it is loaded through.
-    fn string_receiver_struct(&mut self, receiver: &HirExpr) -> CodegenResult<StructValue<'ctx>> {
+    pub(super) fn string_receiver_struct(
+        &mut self,
+        receiver: &HirExpr,
+    ) -> CodegenResult<StructValue<'ctx>> {
         let recv_val = self.codegen_expr(receiver)?;
         match recv_val {
             BasicValueEnum::StructValue(sv) => Ok(sv),
@@ -388,6 +409,7 @@ impl<'ctx> CodegenContext<'ctx> {
             BuiltinMethod::StringLen
             | BuiltinMethod::StringClone
             | BuiltinMethod::StringSlice
+            | BuiltinMethod::StringCharSlice
             | BuiltinMethod::StructClone
             | BuiltinMethod::ArrayLen
             | BuiltinMethod::IsNan

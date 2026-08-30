@@ -428,3 +428,139 @@ func main() -> i32 {
 "#;
     run_expecting(source, 0);
 }
+
+/// `.char_slice(range)` indexes code points where `.slice(range)` indexes bytes. On
+/// ASCII the two agree, which is exactly why every test below uses multi-byte text:
+/// an implementation that quietly forwarded to the byte path would pass on ASCII.
+#[test]
+fn char_slice_counts_code_points_not_bytes() {
+    let source = r#"
+func main() -> i32 {
+    val s = "héllo"
+    // 'h' + 'é' (two bytes) + 'l' -> 4 bytes for 3 characters.
+    if s.char_slice(0..3) == "hél" { return s.char_slice(0..3).len() as i32 }
+    return 1
+}
+"#;
+    run_expecting(source, 4);
+}
+
+#[test]
+fn char_slice_and_slice_disagree_on_multibyte_text() {
+    let source = r#"
+func main() -> i32 {
+    val s = "héllo"
+    val by_char = s.char_slice(0..3)
+    val by_byte = s.slice(0..3)
+    if by_char == by_byte { return 1 }
+    if by_char == "hél" && by_byte == "hé" { return 0 }
+    return 2
+}
+"#;
+    run_expecting(source, 0);
+}
+
+#[test]
+fn char_slice_accepts_an_inclusive_range() {
+    let source = r#"
+func main() -> i32 {
+    val s = "日本語テキスト"
+    if s.char_slice(3..=6) == "テキスト" { return 0 }
+    return 1
+}
+"#;
+    run_expecting(source, 0);
+}
+
+#[test]
+fn char_slice_spans_the_whole_string_and_the_empty_end() {
+    // The character count is a legal upper bound, so the last position is addressable
+    // and yields an empty slice rather than a panic.
+    let source = r#"
+func main() -> i32 {
+    val s = "añb"
+    if s.char_slice(0..3) != s { return 1 }
+    if s.char_slice(3..3).len() != 0 { return 2 }
+    return 0
+}
+"#;
+    run_expecting(source, 0);
+}
+
+#[test]
+fn char_slice_resolves_through_a_borrow_and_chains() {
+    let source = r#"
+func middle(s: &string) -> &string {
+    s.char_slice(1..3)
+}
+
+func main() -> i32 {
+    val s = "αβγδε"
+    val m = middle(&s)
+    if m != "βγ" { return 1 }
+    if m.char_slice(1..2) != "γ" { return 2 }
+    return 0
+}
+"#;
+    run_expecting(source, 0);
+}
+
+#[test]
+fn a_char_slice_past_the_last_code_point_panics() {
+    let source = r#"
+func main() -> i32 {
+    val s = "héllo"
+    val bad = s.char_slice(0..6)
+    bad.len() as i32
+}
+"#;
+    run_expecting_abort(source);
+}
+
+#[test]
+fn a_reversed_char_slice_range_panics() {
+    let source = r#"
+func main() -> i32 {
+    val s = "héllo"
+    val bad = s.char_slice(4..1)
+    bad.len() as i32
+}
+"#;
+    run_expecting_abort(source);
+}
+
+#[test]
+fn char_slice_with_a_non_range_argument_is_a_type_error() {
+    let source = r#"
+func main() -> i32 {
+    val s = "hello"
+    val bad = s.char_slice(3)
+    bad.len() as i32
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(
+        !success,
+        "char_slice with a non-range argument must be a type error; got: {stderr}"
+    );
+}
+
+#[test]
+fn char_slice_is_computed_afresh_on_every_loop_iteration() {
+    // Like `.slice`, the result is a fat pointer by value: no alloca, so a loop over it
+    // must not grow the stack even though the scan itself is a call.
+    let source = r#"
+func main() -> i32 {
+    val text = "ααααβββββ"
+    mut total = 0
+    mut i = 0
+    while i < 50000 {
+        val part = text.char_slice(0..4)
+        total = total + (part.len() as i32)
+        i = i + 1
+    }
+    total / 50000
+}
+"#;
+    run_expecting(source, 8);
+}

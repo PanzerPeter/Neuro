@@ -4,6 +4,7 @@
 
 mod arrays;
 mod binary;
+mod char_slice;
 mod control_flow;
 mod enums;
 mod format_float;

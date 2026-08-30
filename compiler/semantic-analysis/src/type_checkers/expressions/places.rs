@@ -127,9 +127,9 @@ impl TypeChecker {
     }
 
     /// A range `a..b` is not a first-class value: it is consumed directly
-    /// by `string.slice` via `check_string_slice`, so reaching it through the
-    /// general expression path means it was used somewhere a range is not allowed.
-    /// Still check the bounds for cascaded diagnostics.
+    /// by `string.slice` / `string.char_slice` via `check_string_slice`, so reaching it
+    /// through the general expression path means it was used somewhere a range is not
+    /// allowed. Still check the bounds for cascaded diagnostics.
     pub(super) fn check_range_expr(
         &mut self,
         start: &Expr,

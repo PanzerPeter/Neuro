@@ -280,7 +280,7 @@ current compiler supports:
 - Integers: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
 - Floats: `f16`, `bf16`, `f32`, `f64`
 - Boolean: `bool`; `char` (32-bit Unicode scalar)
-- Strings: fat-pointer `string` with escape sequences (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==`/`!=` byte-level comparison; `+` concatenation; `.len()` / `.clone()` / `.slice(a..b)`
+- Strings: fat-pointer `string` with escape sequences (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==`/`!=` byte-level comparison; `+` concatenation; `.len()` / `.clone()` / `.slice(a..b)` (bytes) / `.char_slice(a..b)` (code points)
 - Structs: user-defined types with nominal typing
 - Fixed-size arrays `[T; N]`, tuples `(T1, T2, ...)`, enums with associated data, `newtype`, `type` aliases
 

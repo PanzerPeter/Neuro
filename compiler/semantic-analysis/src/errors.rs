@@ -400,10 +400,10 @@ pub enum TypeError {
     #[error("cannot return a reference to '{name}' at {span:?}: it is local to this function and does not outlive the call; return a reference derived from a parameter instead")]
     ReturnsReferenceToLocal { name: String, span: Span },
 
-    #[error("a range expression `a..b` is only valid as the argument to `.slice()` at {span:?}")]
+    #[error("a range expression `a..b` is only valid as the argument to `.slice()` or `.char_slice()` at {span:?}")]
     RangeNotAllowed { span: Span },
 
-    #[error("`.slice()` expects a range argument `a..b` or `a..=b` at {span:?}")]
+    #[error("`.slice()` / `.char_slice()` expects a range argument `a..b` or `a..=b` at {span:?}")]
     SliceExpectsRange { span: Span },
 
     #[error("array element type {ty} is not Copy at {span:?}: arrays of non-Copy element types (strings, non-Copy structs) are not yet supported")]

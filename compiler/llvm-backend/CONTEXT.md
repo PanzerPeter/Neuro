@@ -205,6 +205,16 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   computed fat pointer itself, returned by value with no stack slot, so a slice returned across a
   call boundary stays valid. The `Range` argument is consumed here; reaching it through general
   `codegen_expr` is an internal error.
+- `string.char_slice(a..b)` / `.char_slice(a..=b)` → `codegen_char_slice`
+  (`expressions/char_slice.rs`), the same borrowed `&string` with its range counting **code
+  points** instead of bytes. Each endpoint is resolved to a byte offset by the module-private
+  `neuro.string.char_offset(ptr, len, index)` helper — a byte walk that skips continuation bytes
+  (`0b10xxxxxx`) and answers `-1` for an index the string does not reach — and the resulting byte
+  pair goes through the same `string_fat_slice` tail `.slice` uses. Only the bounds guard survives
+  (`start` found, and `start <= end` on the resolved offsets, which catches a reversed range and an
+  unreachable end together); the UTF-8 boundary checks do not exist here, because a code point
+  index cannot name a position inside a code point. `char_offset(s, n)` for an `n`-character string
+  is `len`, which is what makes the end of the string a legal upper bound.
 - `struct.clone()` → handled in the struct method-call arm rather than `resolve_builtin_method`
   (which is keyed by `Type`): when the receiver is a struct, the field is `clone`, and no
   `StructName__clone` exists, it passes `BuiltinMethod::StructClone`. Semantic analysis already

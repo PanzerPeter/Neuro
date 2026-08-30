@@ -67,8 +67,8 @@ arm happened to be written first.
 ### Nodes with a deliberately chosen type
 Three have no first-class source form: a `loop` value-expression takes its `break v` type (or
 `void`); a method-name callee `FieldAccess` carries the *call's* result type, since there is no
-method value; a `Range` carries `void`, being valid only as a `string.slice` argument whose
-lowering reads its bounds directly.
+method value; a `Range` carries `void`, being valid only as a `string.slice` /
+`string.char_slice` argument whose lowering reads its bounds directly.
 
 Divergent panic-family calls (`panic` / `assert` / `unreachable`) adopt their context's expected
 type, or `void` in statement position. The standard-output builtins (`print` / `println`,
@@ -233,6 +233,10 @@ the coercion uniformly, and an existing trait object is never re-coerced. A meth
   and `to_string` (`string` result). `mangle_type` uses `HirCollectionKind::mangle_tag()`, so
   `String` mangles as `strbuf` — which the primitive `string` cannot collide with — and yields the
   bare tag when there are no arguments.
+- **`.slice(range)` / `.char_slice(range)`** — `lower_builtin_method` gives both the same
+  `&string` result type and lowers the range argument unchanged. The two differ only in the unit
+  their indices count (bytes vs. code points), which is settled in the backend, so this slice does
+  not distinguish them beyond the method name reaching codegen.
 - **`.is_nan()`** — `lower_builtin_method` types it as `HirType::Bool` on a full-precision float
   receiver (`is_full_float`, so `f16`/`bf16` are excluded), with no arguments to lower.
 - **`checked_{add,sub,mul}`** — `lower_builtin_method` types these on any integer receiver as

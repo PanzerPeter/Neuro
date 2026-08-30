@@ -363,8 +363,28 @@ violation:
 - **Code-point alignment:** each endpoint must fall on a UTF-8 code-point boundary. A range
   that splits a multi-byte code point panics with `string slice splits a UTF-8 code point`.
 
-A range expression `a..b` / `a..=b` is valid **only** as a `.slice` argument; used anywhere
-else it is a compile error.
+**`.char_slice(range) -> &string`**, the codepoint-indexed companion to `.slice`. It returns
+the same borrowed, zero-copy `&string`, but its range counts **Unicode code points** rather
+than bytes, walking the UTF-8 data to locate each endpoint — O(n) on the receiver's length,
+where `.slice` is O(1). Use it whenever the indices came from counting characters (tokenizer
+and NLP work); use `.slice` when the offsets are already byte offsets or the text is known to
+be ASCII.
+
+```neuro
+val s = "héllo"                       // 5 characters, 6 bytes: 'é' takes two
+val by_char = s.char_slice(0..3)      // "hél" — three characters, four bytes
+val by_byte = s.slice(0..3)           // "hé"  — three bytes
+val tail = s.char_slice(3..=4)        // "lo", inclusive upper bound
+val empty = s.char_slice(5..5)        // "", the character count is a legal bound
+```
+
+Only the **bounds** rule applies: the range must satisfy `0 <= start <= end <= character
+count`, and a reversed or out-of-range range panics with `string char slice out of bounds`.
+There is no code-point-alignment rule to break — a code point index cannot name a position
+inside a code point, which is the reason to reach for this method in the first place.
+
+A range expression `a..b` / `a..=b` is valid **only** as a `.slice` or `.char_slice`
+argument; used anywhere else it is a compile error.
 
 ## Growable Strings (`String`)
 

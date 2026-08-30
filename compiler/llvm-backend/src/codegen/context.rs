@@ -26,6 +26,10 @@ pub(crate) enum BuiltinMethod {
     /// `string.slice(a..b)` → a borrowed `&string` sub-slice; panics on an out-of-bounds
     /// or mid-codepoint boundary.
     StringSlice,
+    /// `string.char_slice(a..b)` → a borrowed `&string` sub-slice whose range counts
+    /// codepoints rather than bytes; panics on an out-of-bounds range. No boundary check
+    /// is needed — a codepoint index cannot name a position inside a code point.
+    StringCharSlice,
     /// `struct.clone()` → a copy of the struct aggregate value, for `@derive(Clone)` types.
     StructClone,
     /// `int.wrapping_add(rhs)` → two's-complement wrapping add.
@@ -71,6 +75,7 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<Builti
         (Type::String, "len") => Some(BuiltinMethod::StringLen),
         (Type::String, "clone") => Some(BuiltinMethod::StringClone),
         (Type::String, "slice") => Some(BuiltinMethod::StringSlice),
+        (Type::String, "char_slice") => Some(BuiltinMethod::StringCharSlice),
         // `array.len()` → the static element count as `u64`. Auto-derefs a
         // borrow of an array (`&[T; N]`) like the string builtins above.
         (Type::Array { .. }, "len") => Some(BuiltinMethod::ArrayLen),
@@ -552,11 +557,15 @@ mod tests {
             resolve_builtin_method(&Type::String, "slice"),
             Some(BuiltinMethod::StringSlice)
         ));
+        assert!(matches!(
+            resolve_builtin_method(&Type::String, "char_slice"),
+            Some(BuiltinMethod::StringCharSlice)
+        ));
     }
 
     #[test]
     fn slice_resolves_through_a_string_borrow() {
-        // A `&string` receiver auto-derefs, so `.slice` resolves on it too.
+        // A `&string` receiver auto-derefs, so both slice spellings resolve on it too.
         let recv = Type::Reference {
             inner: Box::new(Type::String),
             mutable: false,
@@ -564,6 +573,10 @@ mod tests {
         assert!(matches!(
             resolve_builtin_method(&recv, "slice"),
             Some(BuiltinMethod::StringSlice)
+        ));
+        assert!(matches!(
+            resolve_builtin_method(&recv, "char_slice"),
+            Some(BuiltinMethod::StringCharSlice)
         ));
     }
 

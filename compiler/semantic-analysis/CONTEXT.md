@@ -171,9 +171,11 @@ yet.
 compiler-known set before `MethodNotFound`, returning the result type (and an arity diagnostic on
 a wrong count):
 - `string.len() -> u64`, `string.clone() -> string` (nullary);
-- `string.slice(a..b) -> &string` via `check_string_slice` — one `Expr::Range` argument with
-  integer bounds, else `SliceExpectsRange`. A bare `Expr::Range` anywhere else is
-  `RangeNotAllowed`;
+- `string.slice(a..b) -> &string` and `string.char_slice(a..b) -> &string`, both via
+  `check_string_slice` — one `Expr::Range` argument with integer bounds, else
+  `SliceExpectsRange`. A bare `Expr::Range` anywhere else is `RangeNotAllowed`. The two share a
+  check because they share a contract: they differ only in whether the indices count bytes or
+  code points, which is a backend concern with no type-level consequence;
 - on any integer receiver, `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and `.shr(n)`,
   each taking one same-typed argument (`check_unary_int_intrinsic_arg`) and returning the receiver
   type;

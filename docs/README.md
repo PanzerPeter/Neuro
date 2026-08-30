@@ -158,7 +158,7 @@ Key design goals:
 - Type cast: `n as f64`, `pi as i32`
 - Null-coalescing `??`: unwraps an `Option<T>` / `Result<T, E>` to its payload, else evaluates the fallback (R-to-L associativity, lazy fallback, `Err` payload discarded)
 - String equality: `==` and `!=` via length-check + `memcmp`
-- Builtin method dispatch on primitive & string receivers: `string.len() -> u64` (O(1) fat-pointer read), `.clone()`, and `.slice(a..b) -> &string` (zero-copy sub-slice; panics on out-of-bounds or mid-codepoint boundary)
+- Builtin method dispatch on primitive & string receivers: `string.len() -> u64` (O(1) fat-pointer read), `.clone()`, `.slice(a..b) -> &string` (zero-copy sub-slice; byte indices, panics on out-of-bounds or mid-codepoint boundary), and `.char_slice(a..b) -> &string` (the same view indexed by code point, O(n) scan; panics on out-of-bounds only)
 - String interpolation `"Hello, {name}!"` with the format mini-language (`{x:.2}`, `{n:08d}`, `{s:^10}`, `{n:x}`, `{n:b}`, `{d:+d}`, `{v:?}`), see [expressions.md](language-reference/expressions.md#string-interpolation)
 - Triple-quoted block strings `"""…"""`: multi-line text dedented to the column of the closing delimiter, with the same escapes and interpolation holes as a `"…"` literal, see [expressions.md](language-reference/expressions.md#triple-quoted-strings)
 - Growable `String` buffer for building text incrementally, the mutable counterpart to the immutable `string`: `String::new()` / `.push_str(text)` / `.len()` / `.clear()` / `.to_string()`, see [types.md](language-reference/types.md#growable-strings-string)
