@@ -1,20 +1,19 @@
 # source-location
 
 ## Purpose
-Map byte offsets from `Span` values to human-readable line/column positions and extract source code snippets for diagnostic display.
+Map a `Span`'s byte offsets to human-readable line/column positions and extract source snippets for diagnostic display.
 
 ## Entry Point
 - Type: Library (no entry function — pure utilities)
 - Key types: `SourceFile`, `Position`
 
 ## Data Ownership
-- Tables: none
-- Events Published: none
-- Events Consumed: none
-- Public Read Model: none
+- Tables / Events Published / Events Consumed / Public Read Model: none
 
 ## Shared Kernel
-- shared-types — `Span` is the input type for all position-resolution operations
+- shared-types — `Span` is the input to every position-resolution operation
 
 ## Notes
-`SourceFile` caches line-start byte offsets on construction for O(log n) span-to-line conversion. `position_at(span)` returns a `Position { line, column }`. `snippet(span)` returns the source text slice for inline error display. Pure infrastructure with no compiler business logic.
+`SourceFile` caches line-start byte offsets on construction, so `position_at(span)` is an
+O(log n) binary search rather than a rescan. `snippet(span)` slices the source for inline
+error display. Pure infrastructure: no compiler business logic.

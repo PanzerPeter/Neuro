@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.4] - 2026-08-30
+
+### Changed
+
+- **Every slice's `CONTEXT.md` compacted and de-rotted.** The files had accumulated an
+  append-only, dated "Recent Updates" log beside their contract sections — a changelog in a
+  file that VSA defines as a contract, duplicating what `CHANGELOG.md` and git history already
+  hold. Each file is now organized by subject and states current behaviour with the design
+  rationale that the source cannot; the dates, the "added field X" announcements, and the
+  historical narration are gone. 27% smaller in total.
+
+### Fixed
+
+- **Stale claims in `llvm-backend/CONTEXT.md`.** Roughly a hundred lines described machinery
+  the move to HIR deleted — a backend type-collection pass (`type_pass.rs`, `expr_types`), the
+  span-keyed side tables that fed it (`builtin_methods`, `fa_struct_names`, `binary_left_types`,
+  `index_object_types`), and `global_const_types` — while the file's own header already said no
+  such pass exists. The Struct ABI section still said a struct was unusable as a function
+  parameter or return type, which the by-value struct work had made false.
+- **`ast-types/CONTEXT.md` misreported method receiver support**, claiming `&self` was the only
+  variant working end to end and that `&mut self` and `self` were rejected. All three reach
+  codegen; owned `self` is accepted on a `Copy` receiver.
+- **`module-resolution/CONTEXT.md`** said per-module private namespaces would arrive with the
+  `export` rules. Those rules shipped; the merge is still flat, so a name collision between two
+  modules is a hard error regardless of visibility.
+- **`project-config/CONTEXT.md`** attributed dependency resolution to a phase number that is not
+  in the roadmap. The field parses and nothing reads it.
+
 ## [2.1.3] - 2026-08-30
 
 ### Fixed

@@ -1,35 +1,35 @@
 # shared-types
 
 ## Purpose
-Provide lightweight, zero-business-logic data structures used universally across all compiler slices: source spans, identifiers, and literal values.
+Provide the lightweight, zero-business-logic data structures used universally across compiler slices: source spans, identifiers, literal values, and format specifiers.
 
 ## Entry Point
 - Type: Library (no entry function — pure data)
-- Public types: `Span`, `Identifier`, `Literal`, `IntSuffix`, `FloatSuffix`
+- Public types: `Span`, `Identifier`, `Literal`, `IntSuffix`, `FloatSuffix`, `FormatSpec`,
+  `FormatAlign`, `FormatKind`
 
 ## Data Ownership
-- Tables: none
-- Events Published: none
-- Events Consumed: none
-- Public Read Model: none
+- Tables / Events Published / Events Consumed / Public Read Model: none
 
 ## Shared Kernel
-No upstream dependencies within the Neuro workspace. This is the lowest-level infrastructure crate.
+None. This is the lowest-level crate in the workspace.
 
 ## Notes
-`Span` is a half-open byte-offset range `[start, end)` used by every AST node and token for accurate error reporting. `Identifier` wraps a `String` name with a `Span`. `Literal` enumerates all compile-time constant value kinds (integer, float, string, bool, char). `Literal::Char(char)` holds a single Unicode scalar value.
+`Span` is a half-open byte-offset range `[start, end)` carried by every token and AST node, so
+a diagnostic can point at exact source. `Identifier` pairs a `String` name with a `Span`.
 
-`IntSuffix` is a `Copy` enum enumerating the eight integer literal type suffixes (`I8`–`U64`). It is carried by `Literal::Integer(i64, Option<IntSuffix>)`: `None` means no suffix was written (contextual inference applies); `Some(s)` means the suffix overrides inference and pins the type.
+`Literal` enumerates every compile-time constant kind. Three of them carry an **optional**
+suffix, and `None` vs `Some` is the whole inference contract:
+- `Literal::Integer(i64, Option<IntSuffix>)` — `IntSuffix` is a `Copy` enum of the eight
+  integer suffixes (`I8`–`U64`). `None` means no suffix was written and contextual inference
+  applies; `Some(s)` pins the type and overrides inference.
+- `Literal::Float(f64, Option<FloatSuffix>)` — `FloatSuffix` is `F16` / `BF16` / `F32` / `F64`,
+  same semantics (`None` defaults to `f64`). Half-precision literals must always carry their
+  suffix: they have no contextual default.
+- `Literal::Char(char)` holds one Unicode scalar value.
 
-`FloatSuffix` is a `Copy` enum (`F16`, `BF16`, `F32`, `F64`) carried by `Literal::Float(f64, Option<FloatSuffix>)` with the same semantics: `None` means contextual inference (default `f64`); `Some(s)` pins the float type. Half-precision (`F16`/`BF16`) literals must always carry the suffix — they have no contextual default.
-
-## Recent Updates
-- 2026-08-25: Added `FormatSpec` (with `FormatAlign` and `FormatKind`) — the parsed `spec`
-  half of a string-interpolation hole `{expr:spec}` — plus the `MAX_FORMAT_WIDTH` and
-  `MAX_FORMAT_PRECISION` ceilings semantic analysis enforces. Pure data: the parser
-  validates the written grammar, the type checker validates it against the value's type,
-  and every pass between them only reads fields.
-- 2026-04-18: Added `IntSuffix` enum; changed `Literal::Integer(i64)` → `Literal::Integer(i64, Option<IntSuffix>)` to carry explicit type suffixes from the lexer through to semantic analysis.
-- 2026-05-25: Added `FloatSuffix` enum; changed `Literal::Float(f64)` → `Literal::Float(f64, Option<FloatSuffix>)` mirroring the integer-suffix encoding for `1.5f32`/`2.0f64` literals.
-- 2026-06-15: Added `Literal::Char(char)` for the `char` primitive type.
-- 2026-06-16: Extended `FloatSuffix` with `F16`/`BF16` for half-precision literals (`1.5f16`, `0.02bf16`).
+`FormatSpec` (with `FormatAlign` / `FormatKind`) is the parsed `spec` half of a
+string-interpolation hole `{expr:spec}`, alongside the `MAX_FORMAT_WIDTH` and
+`MAX_FORMAT_PRECISION` ceilings semantic analysis enforces. It is pure data with the
+validation split three ways: the parser checks the written grammar, the type checker checks it
+against the value's type, and every pass between them only reads fields.

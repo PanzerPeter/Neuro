@@ -115,10 +115,11 @@ Expand a root `.nr` file into the single item list its program is built from, lo
 - **The merge is flat, and collisions are reported.** Every module's items join one
   namespace — an inline block's items included, so a block does not buy a private namespace,
   only a private *surface*; qualifiers are verified against the owning module and then stripped, so
-  semantic analysis, HIR lowering, and both backends never learn that modules exist. The
-  cost is that two modules cannot each declare `helper` — that is a hard error naming both
-  files, not a silent winner. Per-module private namespaces need the `export` visibility
-  rules and land with them.
+  semantic analysis, HIR lowering, and both backends never learn that modules exist. The cost is
+  that two modules cannot each declare `helper`, even privately: `check_name_collisions` runs on
+  the merged namespace, independently of `export`, and reports a hard error naming both files
+  rather than picking a silent winner. Per-module private namespaces would need a different merge,
+  not a visibility rule.
 - **The qualifier rides inside `Identifier::name`.** The parser folds `a::b::c` into a
   qualifier `a::b` plus a member `c` rather than growing an AST node, because resolution
   always runs before semantic analysis and no `::` name survives it. A cross-module struct
