@@ -340,6 +340,17 @@ impl TypeChecker {
                     return Some(());
                 }
 
+                // A binding needs a value, and `void` is not one. Reaching codegen
+                // with it is only answerable there as an internal error, because the
+                // value path has no representation for the absence of a value.
+                if matches!(final_ty, Type::Void) {
+                    self.record_error(TypeError::VoidBinding {
+                        name: name.name.clone(),
+                        span: *span,
+                    });
+                    return Some(());
+                }
+
                 if let Err(duplicate_name) =
                     self.symbols.define(name.name.clone(), final_ty, *mutable)
                 {

@@ -174,6 +174,16 @@ casts, identifiers referring to other known consts). Body `Stmt::Const` validate
 expression context.
 
 ## Recent Updates
+- 2026-08-30: New public error `TypeError::VoidBinding` (BUG-016). A binding whose initializer
+  has type `void` used to pass the checker and abort the backend, which can only answer it with
+  an internal error because its value path has no representation for the absence of a value. The
+  `Stmt::VarDecl` arm now rejects a `Type::Void` `final_ty` beside the existing `Type::Unknown`
+  guard, and mirrors it — the error is recorded and the name is left undefined. Testing the
+  binding's TYPE rather than its initializer's shape is what makes one check cover every
+  spelling: a `void` call is only two of them, the others being an `if`, a `match`, a bare block,
+  a `loop { break }`, and an explicit `: void` annotation. Statement position is untouched, so
+  `println("hi")` on its own line still compiles; the backend's `InternalError` stays as the
+  unreachable assertion it was meant to be.
 - 2026-08-29: Standard-output builtins (2A) — `resolve_io_builtin` (`expressions/builtins.rs`)
   recognizes `print` / `println` in `check_plain_call` after `resolve_panic_builtin` and behind the
   same "no user function of this name" guard. One `string` / immutable `&string` argument, result

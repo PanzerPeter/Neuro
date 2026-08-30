@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.3] - 2026-08-30
+
+### Fixed
+
+- **Binding a `void` initializer is a type error now, not an internal compiler error.**
+  `val x = println("hi")` — and `val x = nothing()` for any user function with no return
+  type — passed `neurc check` and then aborted code generation with `function call returned
+  void when value expected`. A combination sweep found the same class reachable through six
+  more spellings that BUG-016's report did not cover and its fix sketch would have missed:
+  a `mut` binding, an `if` whose branches are both `void`, a `match` whose arms are, a bare
+  block with a `void` tail, `loop { break }`, and an explicit `: void` annotation. The last
+  four produce a different backend message (`void type cannot be used as a value`), which is
+  why they read as a separate defect and were not.
+
+  The check is on the binding's **type**, not on whether its initializer is a call — only two
+  of the eight spellings have a callee at all — so one guard in `semantic-analysis`
+  (`type_checkers/statements.rs`, the `Stmt::VarDecl` arm, beside the existing `Type::Unknown`
+  guard) covers every one of them with the new `TypeError::VoidBinding`. The backend is
+  unchanged: its two errors were the right last line of defence in the wrong place, and are now
+  genuinely unreachable. Statement position never had the problem and still does not, so
+  `println("hi")` on its own line, a `void` call on its own line, and a `void` `if` used as a
+  statement all compile exactly as before.
+
 ## [2.1.2] - 2026-08-30
 
 ### Fixed

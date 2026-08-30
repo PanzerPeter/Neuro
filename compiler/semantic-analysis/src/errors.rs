@@ -242,6 +242,11 @@ pub enum TypeError {
     #[error("variable '{name}' used without initialization at {span:?}")]
     UninitializedVariable { name: String, span: Span },
 
+    #[error(
+        "cannot bind '{name}' at {span:?}: the initializer has type void, which is not a value"
+    )]
+    VoidBinding { name: String, span: Span },
+
     #[error("cannot assign to immutable variable '{name}' at {span:?}")]
     AssignToImmutable { name: String, span: Span },
 
