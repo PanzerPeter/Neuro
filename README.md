@@ -20,6 +20,7 @@
 - [Overview](#overview)
 - [Quick Example](#quick-example)
 - [Current Capabilities](#current-capabilities)
+- [Performance](#performance)
 - [Installation](#installation)
 - [Usage](#usage)
 - [Language Syntax](#language-syntax)
@@ -121,11 +122,32 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 
 ### Current Memory Model
 
-> **Alpha memory warning.** Stack values are reclaimed on return and string literals live in `.rodata`, so neither leaks. Move semantics, borrows, deterministic `Drop`, and the owning collections have landed, so a `Vec`, `HashMap`, `BTreeMap`, or `String` frees its buffer at scope exit. What still leaks is the *anonymous* heap `string` — the one `+` concatenation, interpolation, and `String::to_string` produce. It is not owned by a binding the drop machinery tracks, so nothing frees it.
+> **Alpha memory warning.** Stack values are reclaimed on return and string literals live in `.rodata`, so neither leaks. Move semantics, borrows, deterministic `Drop`, and the owning collections have landed, so a `Vec`, `HashMap`, `BTreeMap`, or `String` frees its buffer at scope exit. A heap `string` — the one `+` concatenation and interpolation produce — is freed too when the compiler can prove who owns it: a temporary the statement consumes, or a binding whose initializer allocated it. A loop that formats output therefore holds steady rather than growing.
+>
+> What still leaks is a heap `string` that escapes what the compiler can follow: one stored into a collection or a struct field, one returned from a function, and the prior value of a reassigned binding. The ownership test answers conservatively by design, since freeing a `.rodata` literal would be far worse than holding a buffer.
 >
 > This block is removed once those results are tracked too. Until then, do not assume memory-safety semantics beyond what the table above claims.
 >
 > If memory-safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
+
+---
+
+## Performance
+
+`neurc compile -O 3` hands the module to the same LLVM 20 optimization pipeline `clang -O2` uses, so compute-bound code lands in the same range as C++ rather than somewhere between C++ and Python.
+
+Relative wall time, lower is better — reproduce on your own machine with `python benchmarks/run.py`, which builds all three implementations of each program and refuses to report timings if they disagree on output:
+
+| Benchmark | What it stresses | Neuro `-O 3` | `clang -O2` | Python 3.14 |
+|---|---|---|---|---|
+| `mandelbrot` | scalar `f64` in a tight loop | 1.0x | 1.0x | 35x |
+| `vector_sum` | `Vec` push, indexed sweep | 1.0x | 1.0x | 406x |
+| `call_overhead` | recursion, call and inline cost | 1.0x | 1.1x | 31x |
+| `print_lines` | formatted standard output | 10.6x | 1.0x | 5.1x |
+
+Ratios, not absolutes, because the absolutes belong to the machine rather than to the language — and to whichever `python3` is on your PATH, which is why the interpreter is named. `print_lines` is the honest outlier: `print` / `println` write straight to fd 1 with no buffering layer, so the cost there is syscalls, not code quality. Buffered output is not implemented yet.
+
+The default is `-O 0`, which selects trapping arithmetic and runs no optimization pipeline — pass `-O 3` before drawing any conclusion about speed.
 
 ---
 
@@ -612,7 +634,7 @@ The project is in early alpha, so breaking changes are expected. Contributions s
 AI development is stuck in a fragmented paradigm: developers iterate in an interpreted glue language (Python), while underlying libraries are written in unmanaged, safety-critical systems languages (C++/CUDA). 
 
 Neuro is built to unify this stack:
-1. **True native performance.** Compiled AOT via LLVM 20, with no heavy runtime interpreter and no global interpreter lock (GIL).
+1. **True native performance.** Compiled AOT via LLVM 20, with no heavy runtime interpreter and no global interpreter lock (GIL). [Measured against C++ and Python](#performance) on compute-bound programs.
 2. **AI-First Type System:** Native compile-time shape verification for tensors using MLIR (Phase 2), preventing runtime dimension mismatches before a single line of training executes.
 3. **Immutability by Default:** A modern `val`/`mut` paradigm to ensure highly parallelized tensor computations are thread-safe by design.
 

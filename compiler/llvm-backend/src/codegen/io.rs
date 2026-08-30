@@ -54,6 +54,14 @@ impl<'ctx> CodegenContext<'ctx> {
         let value = self.codegen_expr(text)?;
         let (ptr, len) = self.split_printable(value, name)?;
 
+        // An argument the caller built here — `println("n = {n}")`, `print(a + b)` — is a
+        // temporary nothing else can reach. `write` copies the bytes out and retains
+        // none of them, so the buffer is dead the moment the last one leaves, and the
+        // allocation and the free sit in the same block with nothing between them that
+        // could escape it. A borrowed argument (a literal, a variable, a slice) answers
+        // `false` here and is left alone.
+        let owns_argument = Self::produces_owned_string(text);
+
         let write_all = self.get_or_build_write_all()?;
         let text_args: [BasicMetadataValueEnum; 2] = [ptr.into(), len.into()];
         self.builder
@@ -68,6 +76,13 @@ impl<'ctx> CodegenContext<'ctx> {
             ];
             self.builder
                 .build_call(write_all, &newline_args, "")
+                .map_err(llvm_err)?;
+        }
+
+        if owns_argument {
+            let free_fn = self.get_or_declare_free();
+            self.builder
+                .build_call(free_fn, &[ptr.into()], "")
                 .map_err(llvm_err)?;
         }
 

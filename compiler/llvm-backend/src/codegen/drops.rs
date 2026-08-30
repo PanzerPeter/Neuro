@@ -8,6 +8,7 @@
 // program declares no `Drop` types: the scope stack stays empty and nothing is
 // emitted.
 
+use ast_types::BinaryOp;
 use inkwell::values::{BasicValueEnum, PointerValue};
 use neuro_hir::{HirExpr, HirExprKind, HirType};
 
@@ -42,6 +43,55 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             _ => None,
         }
+    }
+
+    /// Whether evaluating `expr` always yields a freshly `malloc`'d string buffer
+    /// that nothing else aliases, making its consumer responsible for releasing it.
+    ///
+    /// Deliberately conservative: it answers `true` only for the two producers that
+    /// allocate unconditionally. A `.rodata` literal, a variable, a `slice` borrowing
+    /// its source, and a value returned by a function — which may have returned either
+    /// a literal or a heap buffer, indistinguishably — all answer `false` and are never
+    /// freed. The asymmetry is the point: a missed `true` leaks a buffer, while a wrong
+    /// `true` frees `.rodata` or double-frees, so only provable ownership counts.
+    pub(crate) fn produces_owned_string(expr: &HirExpr) -> bool {
+        match &expr.kind {
+            // `codegen_interp_string` concatenates every piece into one fresh buffer,
+            // and does so unconditionally — even a hole-free interpolation allocates.
+            HirExprKind::InterpString { .. } => true,
+            // `+` yielding a `string` is `codegen_string_concat`, which always allocates
+            // a `len1 + len2` buffer. No numeric addition produces a `string`, so the
+            // result type alone identifies the concatenation.
+            HirExprKind::Binary {
+                op: BinaryOp::Add, ..
+            } => matches!(Type::from_hir(&expr.ty), Type::String),
+            _ => false,
+        }
+    }
+
+    /// Release the heap buffer behind a `string` fat pointer held in `storage_ptr`.
+    ///
+    /// Emitted only for a binding registered as [`DropTarget::HeapString`], whose
+    /// initializer [`produces_owned_string`] proved allocates.
+    fn emit_heap_string_free(&mut self, storage_ptr: PointerValue<'ctx>) -> CodegenResult<()> {
+        let fat_ptr_ty = self.string_fat_ptr_type();
+        let buffer = self
+            .builder
+            .build_struct_gep(fat_ptr_ty, storage_ptr, 0, "str.drop.buf.addr")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let buffer = self
+            .builder
+            .build_load(
+                self.context.ptr_type(inkwell::AddressSpace::default()),
+                buffer,
+                "str.drop.buf",
+            )
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let free_fn = self.get_or_declare_free();
+        self.builder
+            .build_call(free_fn, &[buffer.into()], "")
+            .map_err(|e| CodegenError::LlvmError(format!("failed to free string: {}", e)))?;
+        Ok(())
     }
 
     /// Record an owned `Drop`-typed binding for destruction at scope exit.
@@ -175,6 +225,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     })?;
             }
             DropTarget::Collection => self.emit_collection_free(storage_ptr)?,
+            DropTarget::HeapString => self.emit_heap_string_free(storage_ptr)?,
         }
         // Clear the flag so a re-reachable drop site cannot run the destructor twice.
         self.builder

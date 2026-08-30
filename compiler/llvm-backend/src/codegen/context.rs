@@ -141,6 +141,11 @@ pub(crate) enum DropTarget {
     UserDrop(String),
     /// A standard collection: release the heap buffer its header points at.
     Collection,
+    /// A `string` binding initialized from a producer that always allocates
+    /// (interpolation or `+`): release the buffer its fat pointer points at.
+    /// Only a binding whose initializer was proven to allocate carries this, so
+    /// a `.rodata` literal is never handed to `free`.
+    HeapString,
 }
 
 /// Central state container for LLVM IR code generation.
