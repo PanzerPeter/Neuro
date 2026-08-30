@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.2] - 2026-08-30
+
+### Fixed
+
+- **Windows CI: the `print` / `println` tests no longer fail on line endings.** On Windows
+  fd 1 is a CRT text-mode descriptor, so the one `\n` byte the builtin writes leaves the
+  process as `\r\n` — the same translation a C `printf` gets there. The builtins keep that
+  platform convention; the `print_builtins` and `examples` harnesses now compare stdout
+  with line endings normalized, which also stops the example golden files from depending
+  on how git was configured to check them out.
+
+### Changed
+
+- **README roadmap collapses Phase 1 and opens Phase 2's sub-phases.** Phase 1 is one
+  Complete row now that it has shipped; Phase 2 lists 2A–2E the way Phase 1 listed its own
+  sub-phases while it was open.
+
+### Documentation
+
+- Corrected a false limitation in the struct reference: a *free* function may return a
+  struct, and does — the by-value ABI covers free functions, associated functions, and
+  methods alike. Consuming `self` methods remain unsupported.
+- Retired stale "Phase 1" framing across `docs/` where it described the project's current
+  state rather than a design decision.
+
 ## [2.1.1] - 2026-08-29
 
 ### Changed

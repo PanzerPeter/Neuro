@@ -753,6 +753,9 @@ family they return: the result is `void`, so a call is a statement and not a val
 | `print` | `print(text: string)` | Write `text` to stdout. |
 | `println` | `println(text: string)` | Write `text` followed by a newline. |
 
+The newline is one `\n` byte. Standard output is the platform's text stream, so on
+Windows it reaches the console or pipe as `\r\n`, exactly as it would from a C program.
+
 ```neuro
 func main() -> i32 {
     val name: string = "Neuro"

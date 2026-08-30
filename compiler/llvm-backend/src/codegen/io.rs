@@ -6,6 +6,11 @@
 // module's concern: string interpolation has already rendered every hole into the fat
 // pointer by the time the call is reached, so a `print` is one argument wide.
 //
+// The newline is the one byte `\n`. On Windows fd 1 is a CRT text-mode descriptor, so
+// that byte leaves the process as `\r\n` — the translation a C `printf` gets on the same
+// platform. The builtins follow that convention rather than forcing the descriptor into
+// binary mode, so tests and golden files compare text with line endings normalized.
+//
 // `write` is permitted to consume fewer bytes than it was offered, which a pipe with a
 // full buffer routinely does, so the bytes go through one module-private helper holding
 // the retry loop rather than a bare call per site. Output is the language's primary

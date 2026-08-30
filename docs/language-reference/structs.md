@@ -114,9 +114,9 @@ func main() -> i32 {
 }
 ```
 
-> **Phase 1 limitation**: A *free* function may not return a struct; the by-value struct ABI
-> is not implemented for them. Associated functions and methods declared in an `impl` block
-> may return structs (this is what makes the `Type::new(...)` constructor pattern work).
+A function of any kind may return a struct — free functions, associated functions, and
+methods alike. The by-value struct ABI covers all three, which is what makes both a plain
+factory function and the `Type::new(...)` constructor pattern work.
 
 ## impl Blocks
 
@@ -419,7 +419,6 @@ The following are not yet implemented and will be rejected at compile time:
 - `self` (consuming) on a **non-`Copy`** struct (needs the by-value struct ABI). On a `Copy`
   struct an owned `self` is accepted, because copying by value is ABI-identical to `&self`
   (this is what lets an operator-trait method `func add(self, ...)` work)
-- Struct return types from free functions (backend limitation; associated functions and methods may return structs)
 - Nested structs as field types
 
 ```neuro

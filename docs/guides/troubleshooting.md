@@ -521,7 +521,7 @@ Include in bug reports:
 ```markdown
 ## Environment
 - OS: Windows 11 / Ubuntu 22.04 / macOS 13
-- Neuro: Phase 1 (commit hash)
+- Neuro: version from `neurc --version` (and commit hash)
 - LLVM: 20.x
 - Rust: 1.85+
 
@@ -620,7 +620,8 @@ Use `neurc check` for rapid feedback without code generation.
 
 ### Can I use Neuro for production?
 
-Not yet - Phase 1 is alpha stage. Wait for Phase 1+ for production readiness.
+Not yet — the language is alpha. The core language (Phase 1) is complete, but tensors,
+autodiff, and the GPU path are still ahead; see the [Quick Roadmap](../../README.md#quick-roadmap).
 
 ## Still Stuck?
 

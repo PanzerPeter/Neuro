@@ -375,12 +375,12 @@ func bad_example() -> i32 {
 
 ## Future Enhancements
 
-### Remaining Phase 1 (Core Language) work
+### Open checker items
 
-Structs, methods, arrays, tuples, `as` conversions, the borrow checker, enums and pattern
-matching, generics, traits, and dispatch have all landed, see the
-[Quick Roadmap](../../../README.md#quick-roadmap) for what is left. The checker's own open
-items:
+Phase 1 (Core Language) is complete: structs, methods, arrays, tuples, `as` conversions,
+the borrow checker, enums and pattern matching, generics, traits, and dispatch have all
+landed. See the [Quick Roadmap](../../../README.md#quick-roadmap) for the phase now open.
+What the checker still owes:
 
 - [ ] **Generic type arguments beyond `Copy`**: type arguments are `Copy`-restricted, and a
       generic may not be instantiated with an enclosing type parameter
