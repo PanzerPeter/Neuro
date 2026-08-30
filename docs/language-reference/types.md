@@ -169,6 +169,31 @@ val d = 1.5e-5f64     // fractional + exponent with suffix
 
 Valid suffixes: `f16`, `bf16`, `f32`, `f64`. The suffix attaches directly to the literal; no whitespace is permitted between the digits and the suffix. The exponent form (`1e10f32`) and the fractional form (`1.5f32`) both accept a suffix.
 
+#### Float Methods
+
+| Method | Returns | Behavior |
+|--------|---------|----------|
+| `.is_nan()` | `bool` | `true` when the receiver is NaN, `false` for every other value including `Inf` and `-Inf`. Nullary; defined on `f32` and `f64` only. |
+
+Floats follow IEEE 754 in full, so **every** comparison against NaN is false — `NaN == NaN`
+and `NaN != NaN` alike. That makes NaN undetectable with the comparison operators, and
+`.is_nan()` is the way to test for it:
+
+```neuro
+val zero: f64 = 0.0
+val nan: f64 = zero / zero    // 0.0 / 0.0 is NaN
+val inf: f64 = 1.0 / zero     // division by zero is Inf, an ordinary ordered value
+
+val a: bool = nan.is_nan()    // true
+val b: bool = inf.is_nan()    // false — infinity is not NaN
+val c: bool = nan == nan      // false: the equality operator cannot see it
+```
+
+The result is an ordinary `bool`, so it composes with `!`, `&&`, and `||`. Like the integer
+intrinsics, `.is_nan()` needs a value receiver: read through a `&f64` with `*r` first.
+`f16` / `bf16` do not provide it — their scalar contract is storage and casts only, with no
+arithmetic that could produce a NaN (see below).
+
 ### Half-Precision Types (`f16` / `bf16`)
 
 Modern AI relies on half-precision for mixed-precision training, so `f16` and `bf16` are first-class scalar primitives. To avoid the cross-hardware inconsistency of half-precision ALUs, they carry a **narrow scalar contract**:

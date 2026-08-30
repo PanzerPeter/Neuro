@@ -8,5 +8,7 @@ sample  7 -> mean 4.000
 sample  8 -> mean 4.500
 sample  9 -> mean 5.000
 sample 10 -> mean 5.500
+rejected a non-finite sample; accumulator untouched
+accumulator trustworthy = true
 sum 55.0 over 10 samples -> mean 5.50
 truncated exit code = 5

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-08-30
+
+### Added
+
+- **`.is_nan()` on `f32` and `f64`** (roadmap 2A). IEEE-754 makes every comparison against
+  NaN false — `NaN == NaN` included — so no operator can detect it; `.is_nan()` is the
+  documented test and is now implemented. A nullary builtin method returning `bool`, taking
+  a value receiver like the integer intrinsics, and lowering to `fcmp uno x, x` — the
+  self-comparison is the whole check, since NaN is the only value unordered with itself.
+  `f16` / `bf16` are excluded: their scalar contract is storage and casts only, with no
+  arithmetic that could produce a NaN, so `h.is_nan()` stays a `MethodNotFound` diagnostic.
+
 ## [2.1.4] - 2026-08-30
 
 ### Changed

@@ -186,6 +186,11 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   (signed) / `lshr` (unsigned). `saturating_add`/`sub` → `llvm.{s,u}{add,sub}.sat`;
   `saturating_mul` has no direct intrinsic and becomes `{s,u}mul.with.overflow` + `select`
   (unsigned → MAX; signed → MIN on differing operand signs, else MAX).
+- `.is_nan()` → `codegen_is_nan`: `fcmp uno x, x` on the receiver value, yielding the `i1` a
+  `bool` lowers to. The self-comparison IS the test — NaN is the only value unordered with
+  itself — and it is why the check cannot be spelled in source, where `x != x` uses the ordered
+  predicate. Resolved for `F32`/`F64` spelled out rather than via this slice's `Type::is_float`,
+  which also admits `f16`/`bf16`.
 - `checked_{add,sub,mul}` → `codegen_checked_int_intrinsic`: `llvm.{s,u}{add,sub,mul}.with.overflow`
   via the shared `emit_with_overflow`, then `build_option_value` (`collections/mod.rs`) selects
   `Some(result)` / `None` on the negated overflow bit. Branchless — both variants are materialized

@@ -50,6 +50,8 @@ pub(crate) enum BuiltinMethod {
     CheckedMul,
     /// `array.len()` → the compile-time element count `N` of `[T; N]`, as `u64`.
     ArrayLen,
+    /// `float.is_nan()` → `fcmp uno`: an unordered self-comparison, true only for NaN.
+    IsNan,
 }
 
 /// Resolve a compiler-known intrinsic on a builtin receiver. Mirrors the resolver in
@@ -72,6 +74,10 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<Builti
         // `array.len()` → the static element count as `u64`. Auto-derefs a
         // borrow of an array (`&[T; N]`) like the string builtins above.
         (Type::Array { .. }, "len") => Some(BuiltinMethod::ArrayLen),
+        // `.is_nan()` needs a value receiver too, and is spelled out over `F32`/`F64`
+        // rather than `Type::is_float`: that backend predicate also admits `f16`/`bf16`,
+        // whose scalar contract is storage and casts only.
+        (_, "is_nan") if matches!(recv, Type::F32 | Type::F64) => Some(BuiltinMethod::IsNan),
         // Integer intrinsics require a value receiver (matched on `recv`, not the referent):
         // reading a scalar through `&T` needs the deref operator.
         (_, m) if recv.is_integer() => match m {
@@ -571,6 +577,27 @@ mod tests {
             resolve_builtin_method(&Type::I64, "checked_mul"),
             Some(BuiltinMethod::CheckedMul)
         ));
+    }
+
+    #[test]
+    fn is_nan_resolves_on_full_precision_floats_only() {
+        assert!(matches!(
+            resolve_builtin_method(&Type::F32, "is_nan"),
+            Some(BuiltinMethod::IsNan)
+        ));
+        assert!(matches!(
+            resolve_builtin_method(&Type::F64, "is_nan"),
+            Some(BuiltinMethod::IsNan)
+        ));
+        assert!(resolve_builtin_method(&Type::F16, "is_nan").is_none());
+        assert!(resolve_builtin_method(&Type::BF16, "is_nan").is_none());
+        assert!(resolve_builtin_method(&Type::I32, "is_nan").is_none());
+        // A value receiver is required, as for the integer intrinsics.
+        let borrowed = Type::Reference {
+            inner: Box::new(Type::F64),
+            mutable: false,
+        };
+        assert!(resolve_builtin_method(&borrowed, "is_nan").is_none());
     }
 
     #[test]

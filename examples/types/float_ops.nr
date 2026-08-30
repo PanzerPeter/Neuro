@@ -1,5 +1,6 @@
 // Neuro Example: Floating-point operations
-// Demonstrates: f64 type, float arithmetic, and Phase 1.5 compliant IEEE-754 tracking
+// Demonstrates: f64 type, float arithmetic, IEEE-754 comparison ordering, and
+// `.is_nan()` — the only way to detect NaN, since every comparison against it is false
 
 func calculate_f64(x: f64, y: f64) -> f64 {
     val sum: f64 = x + y
@@ -37,6 +38,18 @@ func main() -> i32 {
     if isnan < b { return 5 }
     if isnan >= b { return 6 }
     if isnan == isnan { return 7 }
+
+    // Because every comparison against NaN is false, no operator can detect it.
+    // `.is_nan()` is the documented test — true for NaN alone, and false for the
+    // infinities, which are ordinary ordered values.
+    val inf: f64 = 1.0 / 0.0
+    println("NaN.is_nan()       = {isnan.is_nan()}")
+    println("Inf.is_nan()       = {inf.is_nan()}")
+    println("b.is_nan()         = {b.is_nan()}")
+
+    if !isnan.is_nan() { return 8 }
+    if inf.is_nan() { return 9 }
+    if b.is_nan() { return 10 }
 
     println("all comparisons behaved")
     return 42

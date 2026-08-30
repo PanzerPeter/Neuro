@@ -69,7 +69,7 @@ Key design goals:
 ### Types
 
 - Primitive integers: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
-- Floating point: `f32`, `f64`
+- Floating point: `f32`, `f64`; `.is_nan()` detects NaN, which no comparison operator can (IEEE-754 makes every NaN comparison false)
 - Half-precision: `f16` and `bf16`, scalar primitives with a narrow storage/cast/compare contract (no arithmetic; compute in `f32`)
 - Boolean: `bool`
 - Character: `char`, a single 32-bit Unicode scalar value

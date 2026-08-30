@@ -177,6 +177,10 @@ a wrong count):
 - on any integer receiver, `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and `.shr(n)`,
   each taking one same-typed argument (`check_unary_int_intrinsic_arg`) and returning the receiver
   type;
+- `f32`/`f64`.`is_nan()` (nullary) returns `bool`. Gated on `Type::is_float`, which admits the
+  full-precision floats only — `f16`/`bf16` fall through to `MethodNotFound`, having no scalar
+  arithmetic that could produce a NaN. Like the integer intrinsics it matches on `recv` rather
+  than the referent, so a `&f64` receiver needs an explicit deref;
 - `checked_{add,sub,mul}` take the same argument but return `Option<T>` over the receiver,
   instantiated through the shared `option_of` (`collections.rs`) so the overflow-reporting
   intrinsics and the fallible collection readers materialize the same prelude enum instance. A
