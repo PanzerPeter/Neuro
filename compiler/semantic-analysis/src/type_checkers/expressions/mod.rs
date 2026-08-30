@@ -204,9 +204,9 @@ impl TypeChecker {
             Expr::Deref { operand, span } => self.check_deref_expr(operand, span),
 
             // A range `a..b` is not a first-class value: it is consumed directly
-            // by `string.slice` via `check_string_slice`, so reaching it through the
-            // general expression path means it was used somewhere a range is not allowed.
-            // Still check the bounds for cascaded diagnostics.
+            // by `string.slice` / `string.char_slice` via `check_string_slice`, so
+            // reaching it through the general expression path means it was used somewhere
+            // a range is not allowed. Still check the bounds for cascaded diagnostics.
             Expr::Range {
                 start, end, span, ..
             } => self.check_range_expr(start, end, span),

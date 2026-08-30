@@ -1,0 +1,8 @@
+s                  = héllo
+s.len()            = 6   (bytes, not characters)
+s.char_slice(0..3) = hél
+s.slice(0..3)      = hé
+s.char_slice(3..=4)= lo
+s.char_slice(5..5) = []   (empty slice)
+nested             = é
+score              = 19

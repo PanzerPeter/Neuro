@@ -194,6 +194,80 @@ fn string_slice_without_range_is_rejected() {
     );
 }
 
+/// `.char_slice(range)` shares `.slice`'s type contract exactly: one range in, a
+/// borrowed `&string` out. The two differ only in the unit their indices count, which
+/// is settled in the backend and invisible to the type checker.
+#[test]
+fn char_slice_resolves_to_a_string_reference() {
+    let mut checker = TypeChecker::new();
+
+    // "hello".char_slice(0..3)
+    let expr = Expr::Call {
+        func: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Literal(
+                Literal::String("hello".to_string()),
+                Span::new(0, 7),
+            )),
+            field: make_ident("char_slice"),
+            span: Span::new(0, 18),
+        }),
+        arg_labels: Vec::new(),
+        type_args: Vec::new(),
+        args: vec![Expr::Range {
+            start: Box::new(Expr::Literal(Literal::Integer(0, None), Span::new(19, 20))),
+            end: Box::new(Expr::Literal(Literal::Integer(3, None), Span::new(22, 23))),
+            inclusive: false,
+            span: Span::new(19, 23),
+        }],
+        span: Span::new(0, 24),
+    };
+
+    let ty = checker.check_expr(&expr, None);
+    assert_eq!(
+        ty,
+        Some(Type::Reference {
+            inner: Box::new(Type::String),
+            mutable: false,
+        })
+    );
+    assert!(
+        !checker.has_errors(),
+        "string.char_slice(range) should type-check cleanly, got: {:?}",
+        checker.into_errors()
+    );
+}
+
+#[test]
+fn char_slice_without_range_is_rejected() {
+    let mut checker = TypeChecker::new();
+
+    // "hello".char_slice(3) — argument must be a range, not a bare integer
+    let expr = Expr::Call {
+        func: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Literal(
+                Literal::String("hello".to_string()),
+                Span::new(0, 7),
+            )),
+            field: make_ident("char_slice"),
+            span: Span::new(0, 18),
+        }),
+        arg_labels: Vec::new(),
+        type_args: Vec::new(),
+        args: vec![Expr::Literal(Literal::Integer(3, None), Span::new(19, 20))],
+        span: Span::new(0, 21),
+    };
+
+    checker.check_expr(&expr, None);
+    let errors = checker.into_errors();
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::SliceExpectsRange { .. })),
+        "Expected SliceExpectsRange, got: {:?}",
+        errors
+    );
+}
+
 #[test]
 fn range_outside_slice_is_rejected() {
     let mut checker = TypeChecker::new();

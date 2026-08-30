@@ -19,7 +19,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | Directory        | What it covers                                                         |
 | ---------------- | ---------------------------------------------------------------------- |
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` to stdout |
-| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer |
+| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` byte sub-slices and `.char_slice(range)` codepoint sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result`, `?` error propagation |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
@@ -92,9 +92,10 @@ isolation:
 - [`showcase/borrowed_text.nr`](showcase/borrowed_text.nr) — **explicit lifetime
   annotations** `<'a>` on the classic `longest<'a>(a: &'a string, b: &'a string)
   -> &'a string`, working together with immutable string borrows, zero-copy
-  `.slice(range)` / `.len()`, an if-expression, and a lifetime mixed with a type
-  parameter (`tagged_len<'a, T>`) that monomorphizes on `T` only. The lifetime is
-  validated then erased — zero runtime cost. Exit `18`.
+  `.slice(range)` / `.char_slice(range)` / `.len()`, an if-expression, and a lifetime
+  mixed with a type parameter (`tagged_len<'a, T>`) that monomorphizes on `T` only.
+  The lifetime is validated then erased — zero runtime cost. The two slice methods are
+  shown side by side on multi-byte text, where they part company. Exit `25`.
 - [`showcase/shape_traits.nr`](showcase/shape_traits.nr) — **trait declarations**:
   a `Shape` trait with a required `area` and a **default** `is_big` method, implemented
   for two structs (`Square` inherits the default, `Rect` overrides it), dispatched

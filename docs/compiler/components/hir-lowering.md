@@ -45,7 +45,7 @@ Three nodes carry a deliberately-chosen type the source has no first-class form 
 
 - a `loop` value-expression takes its `break v` type (or `void`);
 - a method-name callee (`FieldAccess`) carries the call's result type (there is no method value);
-- a `Range` carries `void` (valid only as a `string.slice` argument, slice lowering reads its bounds
+- a `Range` carries `void` (valid only as a `string.slice` / `string.char_slice` argument, whose lowering reads its bounds
   directly).
 
 Divergent panic-family calls (`panic` / `assert` / `unreachable`) adopt their context's expected

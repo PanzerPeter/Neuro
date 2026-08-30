@@ -72,6 +72,44 @@ fn string_concat_yields_string_and_len_yields_u64() {
 }
 
 #[test]
+fn both_slice_spellings_lower_to_a_string_borrow() {
+    // `.slice` counts bytes and `.char_slice` code points, but the index unit is a
+    // backend concern: both lower to the same borrowed `&string`.
+    let program = lower(
+        "func main() -> i32 { val s = \"hello\"\n val b = s.slice(0..2)\n val c = s.char_slice(0..2)\n 0 }",
+    );
+    let body = function_body(&program, "main");
+    let borrowed = HirType::Reference {
+        inner: Box::new(HirType::String),
+        mutable: false,
+    };
+    assert_eq!(binding_init(body, "b").ty, borrowed);
+    assert_eq!(binding_init(body, "c").ty, borrowed);
+}
+
+#[test]
+fn char_slice_keeps_its_range_argument() {
+    // The range reaches the backend intact — it is the argument, not a folded pair of
+    // offsets, because only the backend knows how to turn code points into bytes.
+    let program =
+        lower("func main() -> i32 { val s = \"hello\"\n val c = s.char_slice(1..=3)\n 0 }");
+    let body = function_body(&program, "main");
+    let HirExprKind::Call { args, .. } = &binding_init(body, "c").kind else {
+        panic!("char_slice did not lower to a call");
+    };
+    assert!(matches!(
+        args.as_slice(),
+        [neuro_hir::HirExpr {
+            kind: HirExprKind::Range {
+                inclusive: true,
+                ..
+            },
+            ..
+        }]
+    ));
+}
+
+#[test]
 fn struct_field_access_and_method_call_resolve_types() {
     let src = "struct Point { x: f64, y: f64 }\n\
                impl Point {\n\

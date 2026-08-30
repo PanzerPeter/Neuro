@@ -62,6 +62,7 @@ types/string_len.nr                 0
 types/string_slice.nr               0
 types/destructuring.nr              72
 types/string_slice_method.nr        12
+types/string_char_slice.nr          19
 types/strings.nr                    0
 types/tuples.nr                     62
 types/type_aliases.nr               17
@@ -109,7 +110,7 @@ modules/shapes/mod.nr       module
 modules/shapes/area.nr      module
 
 # --- showcase (multiple features working together) ------------------------
-showcase/borrowed_text.nr   18
+showcase/borrowed_text.nr   25
 showcase/buffered_report.nr 40
 showcase/closures.nr        90
 showcase/config_manifest.nr 81

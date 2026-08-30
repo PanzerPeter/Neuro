@@ -50,7 +50,11 @@ impl TypeChecker {
             }
             // Borrowed sub-slice. Takes a single range argument `a..b` / `a..=b`
             // and yields a `&string` view into the receiver's UTF-8 data (zero copy).
-            (Type::String, "slice") => Some(self.check_string_slice(args, call_span)),
+            // `.slice` indexes bytes, `.char_slice` codepoints; the two differ only in
+            // how the backend turns the range into byte offsets, so they share a check.
+            (Type::String, "slice" | "char_slice") => {
+                Some(self.check_string_slice(args, call_span))
+            }
             // Array length, the compile-time `N` of `[T; N]`. Auto-derefs through
             // a borrow of an array (`&[T; N]`). Takes no arguments and yields `u64`.
             (Type::Array { .. }, "len") => {
@@ -129,10 +133,10 @@ impl TypeChecker {
         }
     }
 
-    /// Type-check `string.slice(range)`: exactly one `a..b` / `a..=b` argument
-    /// whose bounds are integers. Returns the `&string` slice type; on any violation a
-    /// diagnostic is recorded and the `&string` type is still returned so checking
-    /// continues with the documented result type.
+    /// Type-check `string.slice(range)` / `string.char_slice(range)`: exactly one
+    /// `a..b` / `a..=b` argument whose bounds are integers. Returns the `&string` slice
+    /// type; on any violation a diagnostic is recorded and the `&string` type is still
+    /// returned so checking continues with the documented result type.
     pub(super) fn check_string_slice(&mut self, args: &[Expr], call_span: Span) -> Type {
         let slice_ty = Type::Reference {
             inner: Box::new(Type::String),

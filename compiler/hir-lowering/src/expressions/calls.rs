@@ -481,9 +481,12 @@ impl Lowerer {
         match (recv.referent(), method) {
             (HirType::String, "len") => Ok((self.lower_args(args, &[])?, HirType::U64)),
             (HirType::String, "clone") => Ok((self.lower_args(args, &[])?, HirType::String)),
-            (HirType::String, "slice") => {
+            // `.slice` indexes bytes and `.char_slice` codepoints, but both take one
+            // range and yield the same borrowed `&string`; the index unit is a backend
+            // concern, so the lowering is shared.
+            (HirType::String, method @ ("slice" | "char_slice")) => {
                 let arg = args.first().ok_or_else(|| LoweringError::Malformed {
-                    detail: "string.slice expects a range argument".to_string(),
+                    detail: format!("string.{} expects a range argument", method),
                 })?;
                 let range = self.lower_expr(arg, None)?;
                 let slice_ty = HirType::Reference {
