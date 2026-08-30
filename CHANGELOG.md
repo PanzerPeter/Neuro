@@ -9,6 +9,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-08-30
+
+### Fixed
+
+- **`-O1`/`-O2`/`-O3` now run an LLVM optimization pipeline.** The backend set the
+  optimization level on the `TargetMachine` and nothing else. That level governs only
+  instruction selection, scheduling, and register allocation — it runs no IR passes — so
+  every local stayed in the `alloca` codegen gave it, no call was inlined, and no
+  loop-invariant work was hoisted. A `-O3` binary was within a few percent of a `-O0` one.
+  The module is now run through `default<O1|O2|O3>` before instruction selection. On the
+  new floating-point benchmark this halves runtime and brings Neuro level with
+  `clang -O2` on the same program. `-O0` still runs no passes, so its trapping arithmetic
+  and bounds guards stay exactly where codegen put them.
+
+### Added
+
+- **Cross-language benchmark harness** (`benchmarks/`). Each benchmark is a Neuro / C++ /
+  Python triple computing the same result; the harness builds them, refuses to report
+  timings if their output disagrees, and prints wall time relative to the fastest. Four
+  benchmarks cover scalar float loops, `Vec` throughput, call overhead, and formatted
+  standard output.
+
+- **A heap `string` is released when its owner is known.** `+` concatenation and string
+  interpolation allocate, and nothing ever freed the result, so a loop that formatted
+  output grew without bound — 3.2 million interpolated lines held roughly 200 MB. Peak
+  memory is now flat across that range.
+
+  The fat pointer describes a `.rodata` literal and a `malloc`'d buffer identically, so
+  ownership is decided at compile time instead: an expression owns its buffer only if it
+  is an interpolation or a `+` yielding `string`, the two producers that always allocate.
+  A binding initialized by one is registered with the existing scope-exit drop machinery,
+  flag-guarded against a move exactly as a collection binding is; an argument to
+  `print` / `println` is released after the write, which retains none of the bytes it
+  copies. Interpolation also frees the scratch buffer behind each rendered hole once the
+  concatenation has copied it out — and because `__neuro_pad`, `__neuro_point`, and
+  `__neuro_exp` hand their input straight back when the text already has the requested
+  shape, a result that may alias its source is released under a pointer comparison rather
+  than outright.
+
+  The test answers conservatively: a value returned by a function may have been either a
+  literal or a heap buffer, so it is never freed. A heap string that escapes into a
+  collection, a struct field, or a return value therefore still leaks, as does the prior
+  value of a reassigned binding — the same limit the Drop ABI already carries.
+
+### Changed
+
+- **The emitted module carries its target triple and data layout.** Without a data layout
+  the optimizer cannot reason about the size, alignment, or pointer width of the types it
+  transforms, and would be outright wrong for any target whose layout differs from LLVM's
+  default guess.
+
+- **`README.md` gained a Performance section.** The "true native performance" claim now
+  points at measured ratios against C++ and Python and at the harness that reproduces
+  them, and the alpha memory warning describes what actually leaks.
+
 ## [2.2.0] - 2026-08-30
 
 ### Added

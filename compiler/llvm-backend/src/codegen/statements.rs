@@ -1,4 +1,4 @@
-use crate::codegen::context::LoopTargets;
+use crate::codegen::context::{DropTarget, LoopTargets};
 use inkwell::values::BasicValueEnum;
 use inkwell::IntPredicate;
 use neuro_hir::{HirConst, HirExpr, HirExprKind, HirStmt, HirType};
@@ -23,7 +23,16 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<()> {
         // Resolve whether this binding owns a `Drop` value before the initializer is
         // consumed, so its destructor can be scheduled for scope exit.
-        let drop_target = self.drop_target(ty);
+        //
+        // A `string` owns nothing by type — the same fat pointer describes a `.rodata`
+        // literal and a heap buffer — so ownership comes from the initializer instead:
+        // a binding initialized by a producer that always allocates owns that buffer and
+        // frees it at scope exit, exactly as a collection binding frees its own.
+        let drop_target = self.drop_target(ty).or_else(|| {
+            let initialized_from_allocation = init.is_some_and(Self::produces_owned_string);
+            (initialized_from_allocation && matches!(Type::from_hir(ty), Type::String))
+                .then_some(DropTarget::HeapString)
+        });
 
         let init_val = if let Some(expr) = init {
             Some(self.codegen_expr(expr)?)

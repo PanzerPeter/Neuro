@@ -433,3 +433,6 @@ examples/**
 !examples/**/*.md
 !examples/**/*.txt
 !examples/**/*.out
+
+# Benchmark harness build artifacts
+benchmarks/build/

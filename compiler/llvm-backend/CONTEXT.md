@@ -19,6 +19,18 @@ populated as bindings are lowered, exists only so the place statements `obj.fiel
 `source_location::SourceFile` solely to render `file:line:col` in panic-family runtime
 diagnostics. They affect nothing else.
 
+`optimization` selects two independent things. It picks the `TargetMachine`'s level, which
+governs instruction selection and register allocation; and it picks the LLVM IR pass
+pipeline (`default<O1>` / `default<O2>` / `default<O3>`) run over the verified module before
+instruction selection. Both are needed — the `TargetMachine` level runs no IR passes at all,
+so without the pipeline nothing promotes an `alloca` to an SSA value, inlines a call, or
+hoists loop-invariant work. `-O0` runs no pipeline, which is what keeps its trapping
+arithmetic and bounds guards where codegen emitted them.
+
+The module is stamped with the target triple and data layout before the pipeline runs, so
+the optimizer reasons about the real size, alignment, and pointer width of the types it
+transforms.
+
 ## Data Ownership
 - Tables / Events Published / Events Consumed / Public Read Model: none
 
@@ -107,9 +119,25 @@ are normalized with `load_string_fatptr`, a `len1 + len2` buffer is `malloc`'d, 
 bytes are `memcpy`'d in (the second at a `gep i8` offset of `len1`), and a fresh `{ ptr, len }` is
 returned. The result is a new owned, immutable string with **no** NUL terminator (consistent with
 the `len` contract). The frontend types the result as owned `String` even when an operand is
-`&string`, so the value is never a reference. **The heap buffer is not freed** — an anonymous heap
-string is owned by no tracked binding, so `+`, string interpolation, and `String::to_string` all
-leak until heap-string ownership lands.
+`&string`, so the value is never a reference.
+
+### Heap-string ownership
+The fat pointer describes a `.rodata` literal and a `malloc`'d buffer identically, so ownership
+cannot be read off a value at runtime. It is decided at compile time instead, by
+`produces_owned_string` (`drops.rs`): an expression owns its buffer only if it is an
+`InterpString` or a `+` yielding `string` — the two producers that allocate unconditionally.
+Everything else — a literal, a variable, a `slice`, a value returned by a function that could have
+returned either — answers `false` and is never freed. The asymmetry is deliberate: a missed `true`
+leaks a buffer, a wrong `true` hands `.rodata` to `free`.
+
+Two consumers act on that answer. `codegen_var_decl` registers a `string` binding whose initializer
+owns its buffer as `DropTarget::HeapString`, so the scope-exit machinery releases it exactly as it
+releases a collection's storage, flag-guarded against a move. `codegen_io_builtin` releases an
+argument it can prove the caller built, since `write` retains none of the bytes it copies out.
+
+**Known limits**: a heap string that escapes into a collection, a struct field, or a function's
+return value is still owned by nothing and leaks — the conservative answer, not a regression. So
+does the prior value of a reassigned binding, matching the same limit the Drop ABI carries.
 
 ## Struct ABI
 User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding —
@@ -430,7 +458,11 @@ got.
 
 ## String Interpolation ABI
 `codegen/expressions/interp.rs` renders each part to a `{ ptr, len }` fat pointer and concatenates
-them into one fresh `malloc`'d buffer (which leaks, exactly as `+` concatenation does). The
+them into one fresh `malloc`'d buffer. Each part carries a `PieceOwner` saying whether the
+rendering allocated its bytes or borrowed them, and the scratch buffers are released once the
+concatenation has copied them out. `__neuro_pad`, `__neuro_point`, and `__neuro_exp` return their
+input untouched when the text already has the requested shape, so a result that may alias its
+source is released under a pointer comparison (`OwnedUnlessSameAs`) rather than outright. The
 rendering helpers live in `format_helpers.rs` (`snprintf`-backed integer and float conversion,
 hand-written binary digits), `format_layout.rs` (sign-aware field padding, debug quoting, UTF-8
 encoding of a `char`), and `format_float.rs` (restoring the point `%g` drops, normalizing C's
@@ -470,7 +502,7 @@ binding of a `Drop` type. `drop_types: HashSet<String>` (filled by `compile` fro
 blocks) gates everything: when it is empty the scope stack stays empty and zero IR is emitted, so
 non-Drop programs are unaffected. `drop_scopes: Vec<Vec<DropEntry>>` is a stack of lexical scopes;
 each `DropEntry` records the binding name, storage `alloca`, an `i1` drop flag, and a `DropTarget`
-(`UserDrop(struct)` | `Collection`).
+(`UserDrop(struct)` | `Collection` | `HeapString`).
 
 `codegen_function` / `codegen_method` open the body scope and register by-value `Drop` or
 collection parameters for destruction at function exit; `codegen_var_decl` registers a local and

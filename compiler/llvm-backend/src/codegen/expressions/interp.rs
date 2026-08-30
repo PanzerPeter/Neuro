@@ -27,6 +27,33 @@ fn llvm_err(e: inkwell::builder::BuilderError) -> CodegenError {
     CodegenError::LlvmError(e.to_string())
 }
 
+/// Who owns the buffer behind a rendered piece.
+///
+/// A rendering either hands back bytes the program already had — a `.rodata` literal,
+/// the caller's own string — or a buffer it allocated. The concatenation copies every
+/// piece out and must then release exactly the allocated ones, so each piece carries
+/// the answer rather than the copy loop guessing from the pointer.
+#[derive(Clone, Copy)]
+enum PieceOwner<'ctx> {
+    /// Bytes owned elsewhere. Freeing these would release `.rodata` or the caller's
+    /// string, so nothing is emitted for them.
+    Borrowed,
+    /// A buffer this rendering allocated and nothing else aliases.
+    Owned,
+    /// The result of a transform that returns its input untouched when the text is
+    /// already in the requested shape — `__neuro_pad`, `__neuro_point`, and
+    /// `__neuro_exp` all do. The buffer is ours only when it is not the borrowed one
+    /// handed in, which is a runtime pointer comparison.
+    OwnedUnlessSameAs(PointerValue<'ctx>),
+}
+
+/// A rendered piece: its `{ ptr, len }` fat pointer and who owns the bytes.
+struct Piece<'ctx> {
+    ptr: PointerValue<'ctx>,
+    len: IntValue<'ctx>,
+    owner: PieceOwner<'ctx>,
+}
+
 impl<'ctx> CodegenContext<'ctx> {
     /// Render and concatenate the parts of an interpolated literal into a new
     /// owned `string`.
@@ -34,7 +61,7 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         parts: &[HirInterpPart],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let mut pieces: Vec<(PointerValue<'ctx>, IntValue<'ctx>)> = Vec::with_capacity(parts.len());
+        let mut pieces: Vec<Piece<'ctx>> = Vec::with_capacity(parts.len());
 
         for part in parts {
             match part {
@@ -44,46 +71,139 @@ impl<'ctx> CodegenContext<'ctx> {
                         .build_global_string_ptr(text, "interp.text")
                         .map_err(llvm_err)?;
                     let len = self.context.i64_type().const_int(text.len() as u64, false);
-                    pieces.push((global.as_pointer_value(), len));
+                    pieces.push(Piece {
+                        ptr: global.as_pointer_value(),
+                        len,
+                        owner: PieceOwner::Borrowed,
+                    });
                 }
                 HirInterpPart::Formatted { expr, spec } => {
                     let ty = Type::from_hir(&expr.ty);
                     let value = self.codegen_expr(expr)?;
-                    let rendered = self.render_hole(value, &ty, spec)?;
-                    pieces.push(self.split_string_value(rendered)?);
+                    // A hole holding a nested producer — `"{a + b}"` — hands us a buffer
+                    // of our own, which a `string` rendering passes straight through.
+                    let incoming = if Self::produces_owned_string(expr) {
+                        PieceOwner::Owned
+                    } else {
+                        PieceOwner::Borrowed
+                    };
+                    let (rendered, owner) = self.render_hole(value, &ty, spec, incoming)?;
+                    let (ptr, len) = self.split_string_value(rendered)?;
+                    pieces.push(Piece { ptr, len, owner });
                 }
             }
         }
 
-        self.build_concat(&pieces)
+        let joined = self.build_concat(&pieces)?;
+
+        // Every rendering is dead once its bytes have been copied into the joined
+        // buffer, and no piece outlives this expression, so the scratch buffers are
+        // released here rather than living as long as the string they contributed to.
+        for piece in &pieces {
+            self.free_piece(piece)?;
+        }
+
+        Ok(joined)
     }
 
     /// Copy every piece into one buffer sized to their total length.
-    fn build_concat(
-        &self,
-        pieces: &[(PointerValue<'ctx>, IntValue<'ctx>)],
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+    fn build_concat(&self, pieces: &[Piece<'ctx>]) -> CodegenResult<BasicValueEnum<'ctx>> {
         let i64_type = self.context.i64_type();
         let mut total = i64_type.const_zero();
-        for (_, len) in pieces {
+        for piece in pieces {
             total = self
                 .builder
-                .build_int_add(total, *len, "interp.total")
+                .build_int_add(total, piece.len, "interp.total")
                 .map_err(llvm_err)?;
         }
 
         let buf = self.build_malloc(total, "interp.buf")?;
         let mut offset = i64_type.const_zero();
-        for (ptr, len) in pieces {
+        for piece in pieces {
             let dst = self.byte_offset(buf, offset, "interp.dst")?;
-            self.build_memcpy_call(dst, *ptr, *len)?;
+            self.build_memcpy_call(dst, piece.ptr, piece.len)?;
             offset = self
                 .builder
-                .build_int_add(offset, *len, "interp.offset")
+                .build_int_add(offset, piece.len, "interp.offset")
                 .map_err(llvm_err)?;
         }
 
         self.build_string_value(buf, total)
+    }
+
+    /// Release a rendered piece's buffer, if the rendering allocated it.
+    fn free_piece(&self, piece: &Piece<'ctx>) -> CodegenResult<()> {
+        match piece.owner {
+            PieceOwner::Borrowed => Ok(()),
+            PieceOwner::Owned => {
+                let free_fn = self.get_or_declare_free();
+                self.builder
+                    .build_call(free_fn, &[piece.ptr.into()], "")
+                    .map_err(llvm_err)?;
+                Ok(())
+            }
+            PieceOwner::OwnedUnlessSameAs(source) => self.free_if_distinct(piece.ptr, source),
+        }
+    }
+
+    /// `if candidate != other { free(candidate) }`.
+    ///
+    /// The pass-through transforms return their input when the text already has the
+    /// requested shape, so the two pointers can name the same buffer. Comparing them is
+    /// what separates "this transform allocated" from "this transform did nothing", and
+    /// it is the only way to tell, since the choice is made at runtime.
+    fn free_if_distinct(
+        &self,
+        candidate: PointerValue<'ctx>,
+        other: PointerValue<'ctx>,
+    ) -> CodegenResult<()> {
+        let parent_fn = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("interpolation emitted outside function".to_string())
+        })?;
+        let same = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::EQ, candidate, other, "interp.same")
+            .map_err(llvm_err)?;
+        let free_bb = self.context.append_basic_block(parent_fn, "interp.free");
+        let cont_bb = self.context.append_basic_block(parent_fn, "interp.kept");
+        self.builder
+            .build_conditional_branch(same, cont_bb, free_bb)
+            .map_err(llvm_err)?;
+
+        self.builder.position_at_end(free_bb);
+        let free_fn = self.get_or_declare_free();
+        self.builder
+            .build_call(free_fn, &[candidate.into()], "")
+            .map_err(llvm_err)?;
+        self.builder
+            .build_unconditional_branch(cont_bb)
+            .map_err(llvm_err)?;
+
+        self.builder.position_at_end(cont_bb);
+        Ok(())
+    }
+
+    /// Apply a transform that may return its input untouched, folding the input's
+    /// ownership into the result's.
+    ///
+    /// When the input was ours, it is released here unless the transform handed it
+    /// straight back — in which case it *is* the result and stays ours. When the input
+    /// was borrowed, the result is ours only if the transform allocated, which the
+    /// consumer settles by the same pointer comparison.
+    fn chain_transform(
+        &self,
+        result: BasicValueEnum<'ctx>,
+        source: PointerValue<'ctx>,
+        source_owner: PieceOwner<'ctx>,
+    ) -> CodegenResult<(BasicValueEnum<'ctx>, PieceOwner<'ctx>)> {
+        match source_owner {
+            PieceOwner::Owned => {
+                let (result_ptr, _) = self.split_string_value(result)?;
+                self.free_if_distinct(source, result_ptr)?;
+                Ok((result, PieceOwner::Owned))
+            }
+            _ => Ok((result, PieceOwner::OwnedUnlessSameAs(source))),
+        }
     }
 
     /// Split a `{ ptr, len }` value into its two fields.
@@ -112,7 +232,8 @@ impl<'ctx> CodegenContext<'ctx> {
         value: BasicValueEnum<'ctx>,
         ty: &Type,
         spec: &FormatSpec,
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        incoming: PieceOwner<'ctx>,
+    ) -> CodegenResult<(BasicValueEnum<'ctx>, PieceOwner<'ctx>)> {
         let target = ty.referent().clone();
         // A `&mut T` hole is the referent's address; read through it before rendering.
         let value = match (ty, value) {
@@ -125,8 +246,8 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => value,
         };
 
-        let rendered = match &target {
-            Type::String => self.render_string(value, spec)?,
+        let (rendered, owner) = match &target {
+            Type::String => self.render_string(value, spec, incoming)?,
             Type::Bool => self.render_bool(value, spec)?,
             Type::Char => self.render_char(value, spec)?,
             other if other.is_integer() => self.render_integer(value, other, spec)?,
@@ -139,25 +260,38 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         };
 
-        self.apply_width(rendered, spec)
+        self.apply_width(rendered, owner, spec)
     }
 
+    /// A `string` hole borrows the caller's bytes. Debug quoting is the exception: it
+    /// builds a new buffer around them.
     fn render_string(
         &self,
         value: BasicValueEnum<'ctx>,
         spec: &FormatSpec,
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        incoming: PieceOwner<'ctx>,
+    ) -> CodegenResult<(BasicValueEnum<'ctx>, PieceOwner<'ctx>)> {
         if spec.kind == FormatKind::Debug {
-            return self.build_quoted(value, b'"');
+            let (source, _) = self.split_string_value(value)?;
+            let quoted = self.build_quoted(value, b'"')?;
+            // `__neuro_quote` always allocates, so a buffer we brought in is now dead.
+            if matches!(incoming, PieceOwner::Owned) {
+                let free_fn = self.get_or_declare_free();
+                self.builder
+                    .build_call(free_fn, &[source.into()], "")
+                    .map_err(llvm_err)?;
+            }
+            return Ok((quoted, PieceOwner::Owned));
         }
-        Ok(value)
+        Ok((value, incoming))
     }
 
+    /// Both spellings are `.rodata` globals selected between, so nothing is allocated.
     fn render_bool(
         &self,
         value: BasicValueEnum<'ctx>,
         _spec: &FormatSpec,
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+    ) -> CodegenResult<(BasicValueEnum<'ctx>, PieceOwner<'ctx>)> {
         let i64_type = self.context.i64_type();
         let truthy = self
             .builder
@@ -188,14 +322,16 @@ impl<'ctx> CodegenContext<'ctx> {
             )
             .map_err(llvm_err)?
             .into_int_value();
-        self.build_string_value(ptr, len)
+        Ok((self.build_string_value(ptr, len)?, PieceOwner::Borrowed))
     }
 
+    /// The UTF-8 encoding is always a fresh buffer; quoting replaces it with another,
+    /// so the encoding is released as soon as the quoted copy exists.
     fn render_char(
         &self,
         value: BasicValueEnum<'ctx>,
         spec: &FormatSpec,
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+    ) -> CodegenResult<(BasicValueEnum<'ctx>, PieceOwner<'ctx>)> {
         let utf8 = self.get_or_define_utf8()?;
         let encoded = self
             .builder
@@ -206,17 +342,25 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or_else(|| CodegenError::InternalError("utf8 helper returned void".to_string()))?;
 
         if spec.kind == FormatKind::Debug {
-            return self.build_quoted(encoded, b'\'');
+            let (encoded_ptr, _) = self.split_string_value(encoded)?;
+            let quoted = self.build_quoted(encoded, b'\'')?;
+            // `__neuro_quote` always allocates, so the encoding it read is now dead.
+            let free_fn = self.get_or_declare_free();
+            self.builder
+                .build_call(free_fn, &[encoded_ptr.into()], "")
+                .map_err(llvm_err)?;
+            return Ok((quoted, PieceOwner::Owned));
         }
-        Ok(encoded)
+        Ok((encoded, PieceOwner::Owned))
     }
 
+    /// Every integer rendering goes through a helper that allocates its result.
     fn render_integer(
         &self,
         value: BasicValueEnum<'ctx>,
         ty: &Type,
         spec: &FormatSpec,
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+    ) -> CodegenResult<(BasicValueEnum<'ctx>, PieceOwner<'ctx>)> {
         let i64_type = self.context.i64_type();
         let raw = value.into_int_value();
 
@@ -229,7 +373,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         if spec.kind == FormatKind::Binary {
             let helper = self.get_or_define_fmt_binary()?;
-            return self
+            let text = self
                 .builder
                 .build_call(helper, &[widened_unsigned.into()], "interp.bin")
                 .map_err(llvm_err)?
@@ -237,7 +381,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 .basic()
                 .ok_or_else(|| {
                     CodegenError::InternalError("binary helper returned void".to_string())
-                });
+                })?;
+            return Ok((text, PieceOwner::Owned));
         }
 
         let (operand, conversion) = match spec.kind {
@@ -256,19 +401,23 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let format = self.format_string(spec, conversion, None)?;
         let helper = self.get_or_define_fmt_int()?;
-        self.builder
+        let text = self
+            .builder
             .build_call(helper, &[operand.into(), format.into()], "interp.int.text")
             .map_err(llvm_err)?
             .try_as_basic_value()
             .basic()
-            .ok_or_else(|| CodegenError::InternalError("int format returned void".to_string()))
+            .ok_or_else(|| CodegenError::InternalError("int format returned void".to_string()))?;
+        Ok((text, PieceOwner::Owned))
     }
 
+    /// `snprintf` renders into a fresh buffer; the two fix-ups that follow may replace
+    /// it with another or hand it straight back, so ownership is chained through them.
     fn render_float(
         &self,
         value: BasicValueEnum<'ctx>,
         spec: &FormatSpec,
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+    ) -> CodegenResult<(BasicValueEnum<'ctx>, PieceOwner<'ctx>)> {
         let f64_type = self.context.f64_type();
         let raw = value.into_float_value();
         // Variadic arguments promote to `double`; `f16`/`bf16`/`f32` widen here.
@@ -310,7 +459,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .bool_type()
                 .const_int(u64::from(spec.precision.is_none()), false);
             let (ptr, len) = self.split_string_value(text)?;
-            return self
+            let fixed = self
                 .builder
                 .build_call(
                     self.get_or_define_normalize_exponent()?,
@@ -322,15 +471,17 @@ impl<'ctx> CodegenContext<'ctx> {
                 .basic()
                 .ok_or_else(|| {
                     CodegenError::InternalError("exponent fix-up returned void".to_string())
-                });
+                })?;
+            return self.chain_transform(fixed, ptr, PieceOwner::Owned);
         }
 
         if spec.kind == FormatKind::Fixed {
-            return Ok(text);
+            return Ok((text, PieceOwner::Owned));
         }
 
         let (ptr, len) = self.split_string_value(text)?;
-        self.builder
+        let pointed = self
+            .builder
             .build_call(
                 self.get_or_define_ensure_point()?,
                 &[ptr.into(), len.into()],
@@ -339,7 +490,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(llvm_err)?
             .try_as_basic_value()
             .basic()
-            .ok_or_else(|| CodegenError::InternalError("float fix-up returned void".to_string()))
+            .ok_or_else(|| CodegenError::InternalError("float fix-up returned void".to_string()))?;
+        self.chain_transform(pointed, ptr, PieceOwner::Owned)
     }
 
     /// Build the `printf` conversion for a spec: sign flag, optional precision,
@@ -394,10 +546,11 @@ impl<'ctx> CodegenContext<'ctx> {
     fn apply_width(
         &self,
         value: BasicValueEnum<'ctx>,
+        owner: PieceOwner<'ctx>,
         spec: &FormatSpec,
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+    ) -> CodegenResult<(BasicValueEnum<'ctx>, PieceOwner<'ctx>)> {
         let Some(width) = spec.width.filter(|width| *width > 0) else {
-            return Ok(value);
+            return Ok((value, owner));
         };
 
         let align = match spec.align {
@@ -409,7 +562,8 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let (ptr, len) = self.split_string_value(value)?;
         let helper = self.get_or_define_pad()?;
-        self.builder
+        let padded = self
+            .builder
             .build_call(
                 helper,
                 &[
@@ -430,6 +584,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(llvm_err)?
             .try_as_basic_value()
             .basic()
-            .ok_or_else(|| CodegenError::InternalError("pad helper returned void".to_string()))
+            .ok_or_else(|| CodegenError::InternalError("pad helper returned void".to_string()))?;
+        self.chain_transform(padded, ptr, owner)
     }
 }

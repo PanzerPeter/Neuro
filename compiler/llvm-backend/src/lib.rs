@@ -293,11 +293,37 @@ fn build_module<'ctx>(
     Ok(codegen_ctx)
 }
 
-/// Emit linkable object code for an already-verified module.
-fn emit_object_code(
-    codegen_ctx: &CodegenContext<'_>,
+impl OptimizationLevelSetting {
+    /// The name of the LLVM middle-end pass pipeline to run before instruction
+    /// selection, or `None` at -O0 where the IR is handed to the backend as emitted.
+    ///
+    /// `TargetMachine`'s own optimization level only tunes instruction selection and
+    /// register allocation — it runs no IR passes at all. Without this pipeline every
+    /// local stays in the `alloca` codegen gave it (no mem2reg/SROA), no call is
+    /// inlined, and nothing is hoisted out of a loop, so -O1..-O3 emit essentially
+    /// the same code as -O0.
+    fn pass_pipeline(self) -> Option<&'static str> {
+        match self {
+            // -O0 also selects trapping arithmetic; leaving the IR untouched keeps
+            // every overflow check and bounds guard exactly where codegen put it.
+            Self::O0 => None,
+            Self::O1 => Some("default<O1>"),
+            Self::O2 => Some("default<O2>"),
+            Self::O3 => Some("default<O3>"),
+        }
+    }
+}
+
+/// Build the target machine for the host, at `optimization`'s backend level.
+///
+/// Split out of `emit_object_code` so `optimize_module` can be driven directly by the
+/// tests that assert on the IR the pipeline produces.
+fn host_target_machine(
     optimization: OptimizationLevelSetting,
-) -> CodegenResult<Vec<u8>> {
+) -> CodegenResult<(
+    inkwell::targets::TargetMachine,
+    inkwell::targets::TargetTriple,
+)> {
     let target_triple = inkwell::targets::TargetMachine::get_default_triple();
     inkwell::targets::Target::initialize_native(&inkwell::targets::InitializationConfig::default())
         .map_err(|e| CodegenError::InitializationFailed(e.to_string()))?;
@@ -321,6 +347,57 @@ fn emit_object_code(
         .ok_or_else(|| {
             CodegenError::InitializationFailed("failed to create target machine".to_string())
         })?;
+
+    Ok((target_machine, target_triple))
+}
+
+/// Stamp `codegen_ctx`'s module with its target and run the IR pass pipeline over it.
+fn optimize_module(
+    codegen_ctx: &CodegenContext<'_>,
+    target_machine: &inkwell::targets::TargetMachine,
+    target_triple: &inkwell::targets::TargetTriple,
+    optimization: OptimizationLevelSetting,
+) -> CodegenResult<()> {
+    // Stamp the module with the target it is being compiled for. Without a data layout
+    // the optimizer falls back to defaults and cannot reason about the size, alignment,
+    // or pointer width of the types it is transforming, which degrades SROA, GVN, and
+    // the vectorizer — and would be outright wrong for any target whose layout differs
+    // from the default guess.
+    codegen_ctx
+        .module
+        .set_data_layout(&target_machine.get_target_data().get_data_layout());
+    codegen_ctx.module.set_triple(target_triple);
+
+    // Run the IR pass pipeline before instruction selection. `create_target_machine`'s
+    // optimization level governs only the backend (ISel, scheduling, regalloc); the
+    // middle-end passes that promote allocas to SSA values, inline, and hoist
+    // loop-invariant work have to be requested separately.
+    if let Some(pipeline) = optimization.pass_pipeline() {
+        codegen_ctx
+            .module
+            .run_passes(
+                pipeline,
+                target_machine,
+                inkwell::passes::PassBuilderOptions::create(),
+            )
+            .map_err(|e| {
+                CodegenError::LlvmError(format!(
+                    "optimization pipeline `{}` failed: {}",
+                    pipeline, e
+                ))
+            })?;
+    }
+
+    Ok(())
+}
+
+/// Emit linkable object code for an already-verified module.
+fn emit_object_code(
+    codegen_ctx: &CodegenContext<'_>,
+    optimization: OptimizationLevelSetting,
+) -> CodegenResult<Vec<u8>> {
+    let (target_machine, target_triple) = host_target_machine(optimization)?;
+    optimize_module(codegen_ctx, &target_machine, &target_triple, optimization)?;
 
     let object_code = target_machine
         .write_to_memory_buffer(&codegen_ctx.module, inkwell::targets::FileType::Object)
@@ -348,6 +425,21 @@ mod tests {
         let context = LLVMContext::create();
         let codegen_ctx = build_module(&context, &hir, optimization, source, "outlining.nr")
             .expect("module generation failed");
+        codegen_ctx.module.print_to_string().to_string()
+    }
+
+    /// `source` lowered, compiled, and run through the optimization pipeline for
+    /// `optimization` — the IR instruction selection actually receives, rather than the
+    /// unoptimized IR `module_ir` returns.
+    fn optimized_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
+        let hir = lower(source);
+        let context = LLVMContext::create();
+        let codegen_ctx = build_module(&context, &hir, optimization, source, "optimized.nr")
+            .expect("module generation failed");
+        let (machine, triple) =
+            host_target_machine(optimization).expect("host target machine unavailable");
+        optimize_module(&codegen_ctx, &machine, &triple, optimization)
+            .expect("optimization pipeline failed");
         codegen_ctx.module.print_to_string().to_string()
     }
 
@@ -486,6 +578,191 @@ mod tests {
         assert!(
             ir.contains(r#"!{!"branch_weights", i32 1, i32 2000}"#),
             "an overflow check's trap edge must be the unlikely one:\n{}",
+            ir
+        );
+    }
+
+    /// Calls to `free` in the body of the function named `name`.
+    fn free_calls(ir: &str, name: &str) -> usize {
+        function_body(ir, name).matches("call void @free(").count()
+    }
+
+    #[test]
+    fn an_interpolated_temporary_is_freed() {
+        // `println` copies the bytes out to fd 1 and keeps none of them, so both buffers
+        // the argument cost — the rendered hole and the joined result — are dead on
+        // return. A loop around this is what made the leak unbounded.
+        let source = r#"
+            func main() -> i32 {
+                mut i: i32 = 0
+                while i < 3 {
+                    println("line {i}")
+                    i += 1
+                }
+                return 0
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+
+        assert!(
+            free_calls(&ir, "main") >= 2,
+            "the rendered hole and the joined string must both be released:\n{}",
+            function_body(&ir, "main")
+        );
+    }
+
+    #[test]
+    fn a_borrowed_argument_is_never_freed() {
+        // A literal lives in `.rodata`. Handing that pointer to `free` would abort, so
+        // the ownership test has to answer `false` for everything it cannot prove.
+        let source = r#"
+            func main() -> i32 {
+                println("line")
+                return 0
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+
+        assert_eq!(
+            free_calls(&ir, "main"),
+            0,
+            "a `.rodata` literal must not be freed:\n{}",
+            function_body(&ir, "main")
+        );
+    }
+
+    #[test]
+    fn a_heap_initialized_string_binding_is_freed_at_scope_exit() {
+        // The binding outlives the statement that built it, so its buffer is released by
+        // the scope-exit machinery rather than at the point of use.
+        let source = r#"
+            func main() -> i32 {
+                val greeting = "a" + "b"
+                println(greeting)
+                return 0
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+
+        assert!(
+            free_calls(&ir, "main") >= 1,
+            "a binding initialized by concatenation owns its buffer:\n{}",
+            body
+        );
+        assert!(
+            body.contains("drop.flag"),
+            "the release must be flag-guarded, so a moved value is not freed twice:\n{}",
+            body
+        );
+    }
+
+    #[test]
+    fn a_borrowed_string_binding_is_not_freed() {
+        // Same shape, but the initializer is a literal: nothing was allocated, so nothing
+        // may be released.
+        let source = r#"
+            func main() -> i32 {
+                val greeting = "ab"
+                println(greeting)
+                return 0
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+
+        assert_eq!(
+            free_calls(&ir, "main"),
+            0,
+            "a binding holding a literal owns nothing:\n{}",
+            function_body(&ir, "main")
+        );
+    }
+
+    #[test]
+    fn a_pass_through_transform_frees_only_what_it_replaced() {
+        // `__neuro_pad` returns its input untouched when the text already fills the
+        // field, so the result can be the same buffer that was handed in. The release
+        // is therefore guarded by a pointer comparison rather than emitted outright.
+        let source = r#"
+            func main() -> i32 {
+                val n = 7
+                println("{n:>8}")
+                return 0
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+
+        assert!(
+            body.contains("interp.same"),
+            "a padded hole must compare the two pointers before freeing either:\n{}",
+            body
+        );
+    }
+
+    #[test]
+    fn optimization_levels_run_an_ir_pipeline() {
+        // Codegen gives every local an `alloca`. Only an IR pass — not the
+        // `TargetMachine`'s optimization level, which runs none — promotes those to SSA
+        // values, so a surviving `alloca` in this loop means no pipeline ran.
+        let source = r#"
+            func total(n: i32) -> i32 {
+                mut sum: i32 = 0
+                mut i: i32 = 0
+                while i < n {
+                    sum += i
+                    i += 1
+                }
+                return sum
+            }
+
+            func main() -> i32 {
+                return total(10)
+            }
+        "#;
+
+        for level in [
+            OptimizationLevelSetting::O1,
+            OptimizationLevelSetting::O2,
+            OptimizationLevelSetting::O3,
+        ] {
+            let ir = optimized_ir(source, level);
+            let body = function_body(&ir, "total");
+            assert!(
+                !body.contains("alloca"),
+                "{:?} left a stack slot unpromoted, so no IR pipeline ran:\n{}",
+                level,
+                body
+            );
+        }
+
+        // -O0 deliberately runs no pipeline: its trapping arithmetic and bounds guards
+        // must stay exactly where codegen emitted them.
+        let unoptimized = optimized_ir(source, OptimizationLevelSetting::O0);
+        assert!(
+            function_body(&unoptimized, "total").contains("alloca"),
+            "-O0 must hand the IR to instruction selection untouched:\n{}",
+            unoptimized
+        );
+    }
+
+    #[test]
+    fn the_optimized_module_carries_its_target() {
+        // Without a data layout the optimizer cannot reason about the size, alignment,
+        // or pointer width of what it transforms.
+        let ir = optimized_ir(
+            "func main() -> i32 { return 0 }",
+            OptimizationLevelSetting::O2,
+        );
+
+        assert!(
+            ir.contains("target datalayout") && ir.contains("target triple"),
+            "the module must name the target it was compiled for:\n{}",
             ir
         );
     }
