@@ -194,6 +194,10 @@ the coercion uniformly, and an existing trait object is never re-coerced. A meth
 `shallow_result_type`.
 
 ### Per-construct lowering notes
+- **Enumerated loops** — `ForRange` / `ForEach` carry the position binding through as
+  `index: Option<String>` and define it in the loop scope as `LOOP_INDEX_TYPE` (`u64`), ahead of
+  the element binding so the two collide rather than shadow. The free-variable walker binds it
+  too, or a closure in the body captures it.
 - **Tuples** — `resolve_type` gives `HirType::Tuple`; a literal is typed by lowering each element
   (hinted by the expected tuple's element type when annotated) and `t.N` reads the N-th element
   type off the auto-derefed tuple type. Destructuring is parser-desugared.

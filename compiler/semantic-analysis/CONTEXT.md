@@ -222,6 +222,12 @@ loop.
   is what keeps `func f() -> i32 { loop { ... return x } }` valid now that a trailing `loop` is
   checked as the implicit return.
 
+- **Enumerated heads.** `for (i, x) in xs.enumerate()` reaches the checker as `Stmt::ForRange` /
+  `Stmt::ForEach` with `index: Some(_)` — the parser resolves the adapter, so nothing here checks a
+  method call. `define_loop_index` binds it as `u64` (matching `.len()` and the index expression,
+  so `xs[i]` needs no cast) in the same scope as the element binding, which is what makes
+  `for (i, i) in ...` a `VariableAlreadyDefined` rather than a shadow.
+
 The `prefer-loop-over-while-true` lint walker descends through `Stmt::Expr(Expr::Loop)`, since
 there is no `Stmt::Loop`.
 

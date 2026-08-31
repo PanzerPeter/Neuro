@@ -75,6 +75,11 @@ guarantees `else_block` diverges, so a backend may terminate it with `unreachabl
 `HirStmt::Expr` wrapping it, typed `void`. Two shapes for one construct is what let a tail
 `loop` be silently compiled as a discarded value.
 
+**Enumerated loops are an option on the loop, not an adapter.** `HirStmt::ForRange` and
+`HirStmt::ForEach` carry `index: Option<String>`, the `u64` position binding of
+`for (i, x) in xs.enumerate()`. There is no iterator value in the HIR for an adapter to wrap, and
+a counted loop already computes the position it would yield.
+
 **Enums normalize three construction forms to one.** `HirType::Enum(String)` is nominal;
 `HirExprKind::EnumConstruct { enum_name, variant, tag, payload }` is what unit, tuple, and
 struct-variant syntax all become — payload in declared field order, `tag` the variant's

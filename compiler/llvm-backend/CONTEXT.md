@@ -385,6 +385,18 @@ labeled one scans `loop_targets` from innermost out for the matching label, an u
 the top. Label validity is guaranteed by semantic analysis, so an unresolved label is an
 `InternalError`.
 
+The three counted loops — `codegen_for_range` (`statements.rs`), `codegen_for_each`
+(`expressions/arrays.rs`), and `codegen_vec_for_each` (`collections/vectors.rs`) — each take an
+`index: Option<&str>`, the `u64` position binding of `for (i, x) in xs.enumerate()`. `loop_index.rs`
+owns its scope bookkeeping: `bind_loop_index` opens a slot and shadows the name across
+`variables` / `variable_types` / `type_env`, `store_loop_index` refreshes it at the top of the
+body, and `unbind_loop_index` restores the outer meaning at the exit block. The array and `Vec`
+loops publish their own induction variable; the range loop steps a separate zero-based counter in
+its step block, because its induction variable carries the range's bounds and element type rather
+than a position. The slot is never the induction variable itself even where the values agree —
+`mem2reg` erases the copy, and aliasing a slot the loop steps would make a future edit silently
+wrong.
+
 ## Integer Overflow ABI
 Integer `+` / `-` / `*` honor the overflow rule, keyed off `OptimizationLevelSetting`:
 - `-O0` → `overflow_checks = true`. `codegen_int_arith` emits

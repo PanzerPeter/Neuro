@@ -100,6 +100,15 @@ the tuple-index parse, so it needs no expression grammar of its own.
   destructure and a payload-less `val None = ...` stays a binding, both because a bare `None`
   pattern is ambiguous until module resolution. The `|name|` after `else` is a dedicated
   production, not a closure literal.
+- **`.enumerate()` in a `for` head is grammar, not a method call.** `parse_for_stmt` reads the
+  head as one loop variable or the pair `(index, value)`, then strips a trailing `.enumerate()`
+  off the iterable into `Stmt::ForRange`/`ForEach`'s `index` field. It cannot be left as an
+  expression for semantic analysis to resolve: a range has no value form to be the receiver of a
+  method, and there is no iterator type for one to return. A pair head and `.enumerate()` imply
+  each other, so either alone is a parse error (`PairWithoutEnumerate` / `EnumerateWithoutPair`).
+  `(0..n).enumerate()` must be parenthesised — `..` binds looser than a call, so the parenthesised
+  range is unwrapped here into the range loop's bounds, and `for i in (0..n)` follows from the
+  same unwrap.
 - **`@no_prelude` vs. an attribute list.** `parse_item_list` checks for the marker *before*
   reading attributes, because an attribute list is claimed by the declaration that follows it and
   this marker has none. It is accepted only as the first thing in a file — not after a

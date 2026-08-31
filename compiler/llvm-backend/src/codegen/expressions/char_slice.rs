@@ -5,16 +5,16 @@
 // whole method is a `gep` and a subtraction, and its only runtime cost is proving the two
 // endpoints do not split a multi-byte code point. That contract is wrong for text whose
 // positions came from counting characters rather than from a previous byte offset — the
-// tokenizer and NLP workloads §2.7 points here — where "the first three characters" of
-// `"héllo"` is four bytes, not three.
+// tokenizer and NLP workloads this method exists for — where "the first three
+// characters" of `"héllo"` is four bytes, not three.
 //
 // A code point index therefore has to be resolved into a byte offset, and UTF-8 offers no
 // way to do that but to walk the bytes: the encoding is variable-width, so the nth code
-// point's position depends on the width of all n before it. Hence the linear scan §2.7
-// specifies, and hence the two boundary rules `.slice` enforces do not appear here at all
-// — a scan can only ever stop on a lead byte, so a code point index cannot name a position
-// inside a code point in the first place. The only way this method can fail is a range
-// that runs off the end of the string or one whose bounds are reversed.
+// point's position depends on the width of all n before it. Hence the linear scan below,
+// and hence the two boundary rules `.slice` enforces do not appear here at all — a scan
+// can only ever stop on a lead byte, so a code point index cannot name a position inside
+// a code point in the first place. The only way this method can fail is a range that runs
+// off the end of the string or one whose bounds are reversed.
 //
 // The scan lives in one module-private helper rather than inline at each call site: it is
 // a loop, and `.char_slice` needs two of them (one per endpoint), so inlining would put

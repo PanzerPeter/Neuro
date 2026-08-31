@@ -57,6 +57,15 @@ pub enum ParseError {
     #[error("string interpolation is not allowed in a pattern; a pattern must be a constant")]
     InterpolationInPattern { span: Span },
 
+    #[error("a `for` head binding a pair `(index, value)` iterates an enumerated sequence; add `.enumerate()` to the iterable")]
+    PairWithoutEnumerate { span: Span },
+
+    #[error("`.enumerate()` yields a position and a value; bind both with a pair pattern `for (index, value) in ...`")]
+    EnumerateWithoutPair { span: Span },
+
+    #[error("`.enumerate()` takes no arguments")]
+    EnumerateTakesNoArguments { span: Span },
+
     #[error("lexical error: {0}")]
     LexError(#[from] LexError),
 }

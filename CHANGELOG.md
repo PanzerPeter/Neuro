@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-08-31
+
+### Added
+
+- **`.enumerate()` in a `for` head — iterating a sequence and its position at once.**
+  `for (place, score) in scores.enumerate()` binds the position alongside the element.
+  Until now the only way to know where you were in a sequence was to keep a counter by
+  hand next to the loop, which is both noise and a place to get the increment wrong; the
+  counted loop the compiler already emits was keeping that number in a register the whole
+  time and simply had no name for it.
+
+  The position is a `u64` counting from zero. That is the type `.len()` returns and the
+  type an index expression takes, so it reads back into the sequence it walks without a
+  cast — `scores[place] == score` holds every iteration — which is what makes the loop
+  able to compare an element with its neighbour rather than only look at it.
+
+  It applies to a fixed-size array, a `Vec<T>`, a borrow of either, and a range. A range
+  must be parenthesised, because `..` binds looser than a method call: `(10..13)` gives
+  positions 0, 1, 2 for values 10, 11, 12 — the position is a count of iterations, never a
+  value the sequence holds. `for i in (0..n)` now compiles for the same reason.
+
+  The pair head and `.enumerate()` imply each other, and either one alone is a parse error
+  rather than a surprise: a pair over a plain iterable says to add the adapter, and
+  `.enumerate()` under a single-variable head says to bind the pair. Both bindings are
+  loop-local, shadowing an outer name for the loop's duration and restoring it at the
+  exit, and naming them alike is a redefinition error rather than a silent shadow.
+
+  There is still no iterator protocol behind this. Like plain `for x in arr`, an
+  enumerated loop is lowered directly as a counted loop, so the position costs nothing
+  beyond a stack slot that `mem2reg` erases.
+
 ## [2.4.0] - 2026-08-30
 
 ### Added

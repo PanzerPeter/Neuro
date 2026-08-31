@@ -76,6 +76,11 @@ walkers.
 - `Expr::Range { start, end, inclusive, span }` is **not** a first-class value — it is valid only
   as a `string.slice` argument, and semantic analysis rejects it elsewhere. `for`-range loops keep
   their bounds on `Stmt::ForRange` and never produce it.
+- `Stmt::ForRange` / `Stmt::ForEach` carry `index: Option<Identifier>` — the position binding of
+  `for (i, x) in xs.enumerate()`, a `u64` counting from zero. `.enumerate()` is an *arity* on the
+  loop node rather than an adapter expression because there is no iterator protocol to return one
+  from, and because a range has no value form to call a method on. Both walkers that bind loop
+  variables must bind this one too, or a closure in the body captures it as a free variable.
 - `Expr::Unsafe { stmts, span }` is structurally identical to `Expr::Block`. The distinct node
   exists so a later phase can attach the `@kernel` aliasing relaxation to it; it carries no
   special semantics today.

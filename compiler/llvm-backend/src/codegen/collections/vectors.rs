@@ -173,6 +173,7 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn codegen_vec_for_each(
         &mut self,
         label: Option<&str>,
+        index: Option<&str>,
         iterator: &str,
         iterable: &HirExpr,
         obj_ty: &Type,
@@ -197,6 +198,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let iter_name = iterator.to_string();
         let previous_var = self.variables.insert(iter_name.clone(), elem_alloca);
         let previous_ty = self.variable_types.insert(iter_name.clone(), elem_llvm);
+        let index_binding = self.bind_loop_index(index)?;
 
         let cond_bb = self.context.append_basic_block(parent_fn, "veach.cond");
         let body_bb = self.context.append_basic_block(parent_fn, "veach.body");
@@ -233,6 +235,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder
             .build_store(elem_alloca, elem_val)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.store_loop_index(&index_binding, i_val)?;
 
         let body_scope_index = self.drop_scopes.len();
         self.push_drop_scope();
@@ -281,6 +284,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
         self.builder.position_at_end(exit_bb);
+        self.unbind_loop_index(index_binding);
 
         match previous_var {
             Some(p) => {

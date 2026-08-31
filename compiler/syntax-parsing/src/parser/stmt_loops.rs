@@ -130,8 +130,15 @@ impl Parser {
         }
     }
 
-    /// Parse a for-range statement: `for <ident> in <expr>..<expr> { ... }`,
-    /// optionally prefixed with a loop `label`.
+    /// Parse a for statement: `for <head> in <iterable> { ... }`, optionally
+    /// prefixed with a loop `label`.
+    ///
+    /// `<head>` is one loop variable, or the pair `(index, value)` that
+    /// `.enumerate()` binds. `<iterable>` is a numeric range, an expression
+    /// yielding a sequence, or either of those with `.enumerate()` applied — the
+    /// adapter is recognised here rather than type-checked as a method because a
+    /// range is not a first-class value, so `(0..n).enumerate()` has no receiver
+    /// to resolve a method against.
     pub(crate) fn parse_for_stmt(
         &mut self,
         start_span: Span,
@@ -139,19 +146,7 @@ impl Parser {
     ) -> ParseResult<Stmt> {
         self.skip_newlines();
 
-        let iterator_token = self.consume(TokenKind::Identifier(String::new()), "loop variable")?;
-        let iterator = if let TokenKind::Identifier(name) = iterator_token.kind {
-            Identifier {
-                name,
-                span: iterator_token.span,
-            }
-        } else {
-            return Err(ParseError::UnexpectedToken {
-                found: iterator_token.kind,
-                expected: "loop variable".to_string(),
-                span: iterator_token.span,
-            });
-        };
+        let (index, iterator) = self.parse_for_head()?;
 
         self.skip_newlines();
         self.consume(TokenKind::In, "'in'")?;
@@ -171,15 +166,42 @@ impl Parser {
             self.advance();
             false
         } else {
-            // No range operator: iterate the parsed expression as an array.
+            // No range operator follows, so the whole iterable is already parsed —
+            // either a sequence expression or a parenthesised range, each possibly
+            // wearing `.enumerate()`.
+            let (iterable, enumerated) = strip_enumerate(start)?;
+            Self::check_head_agrees(&index, enumerated, iterable.span())?;
             let body = self.parse_labeled_block(label.as_ref())?;
-            let end_span = body.last().map(stmt_span).unwrap_or(start.span());
-            return Ok(Stmt::ForEach {
-                label,
-                iterator,
-                iterable: start,
-                body,
-                span: start_span.merge(end_span),
+            let end_span = body.last().map(stmt_span).unwrap_or(iterable.span());
+            let span = start_span.merge(end_span);
+
+            // A parenthesised range is the only way to write `(0..n).enumerate()`,
+            // so unwrap it here rather than leaving a range value no other pass
+            // knows how to consume.
+            return Ok(match unwrap_paren(iterable) {
+                Expr::Range {
+                    start,
+                    end,
+                    inclusive,
+                    ..
+                } => Stmt::ForRange {
+                    label,
+                    index,
+                    iterator,
+                    start: *start,
+                    end: *end,
+                    inclusive,
+                    body,
+                    span,
+                },
+                iterable => Stmt::ForEach {
+                    label,
+                    index,
+                    iterator,
+                    iterable,
+                    body,
+                    span,
+                },
             });
         };
 
@@ -188,12 +210,18 @@ impl Parser {
         let end = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
         self.skip_newlines();
 
+        // An unparenthesised range binds looser than a method call, so
+        // `for i in 0..n.enumerate()` would enumerate `n`, not the range. Reject the
+        // pair head here and point at the spelling that works.
+        Self::check_head_agrees(&index, false, end.span())?;
+
         let body = self.parse_labeled_block(label.as_ref())?;
 
         let end_span = body.last().map(stmt_span).unwrap_or(end.span());
 
         Ok(Stmt::ForRange {
             label,
+            index: None,
             iterator,
             start,
             end,
@@ -201,6 +229,57 @@ impl Parser {
             body,
             span: start_span.merge(end_span),
         })
+    }
+
+    /// Parse the binding half of a `for` head: one loop variable, or the
+    /// `(index, value)` pair an enumerated loop binds. Returns the index binding
+    /// (`None` for the single-variable form) and the value binding.
+    fn parse_for_head(&mut self) -> ParseResult<(Option<Identifier>, Identifier)> {
+        if !self.check(&TokenKind::LeftParen) {
+            return Ok((None, self.parse_loop_variable()?));
+        }
+
+        self.advance(); // consume '('
+        self.skip_newlines();
+        let index = self.parse_loop_variable()?;
+        self.skip_newlines();
+        self.consume(TokenKind::Comma, "',' between the index and value bindings")?;
+        self.skip_newlines();
+        let value = self.parse_loop_variable()?;
+        self.skip_newlines();
+        self.consume(TokenKind::RightParen, "')' to close the loop bindings")?;
+        Ok((Some(index), value))
+    }
+
+    /// Consume one identifier as a loop binding.
+    fn parse_loop_variable(&mut self) -> ParseResult<Identifier> {
+        let token = self.consume(TokenKind::Identifier(String::new()), "loop variable")?;
+        match token.kind {
+            TokenKind::Identifier(name) => Ok(Identifier {
+                name,
+                span: token.span,
+            }),
+            found => Err(ParseError::UnexpectedToken {
+                found,
+                expected: "loop variable".to_string(),
+                span: token.span,
+            }),
+        }
+    }
+
+    /// Reject a head whose arity disagrees with the iterable: a pair binds what
+    /// only `.enumerate()` produces, and `.enumerate()` produces what only a pair
+    /// can bind.
+    fn check_head_agrees(
+        index: &Option<Identifier>,
+        enumerated: bool,
+        span: Span,
+    ) -> ParseResult<()> {
+        match (index.is_some(), enumerated) {
+            (true, false) => Err(ParseError::PairWithoutEnumerate { span }),
+            (false, true) => Err(ParseError::EnumerateWithoutPair { span }),
+            _ => Ok(()),
+        }
     }
 
     /// Parse a `break` statement after its keyword: an optional in-scope loop
@@ -322,5 +401,164 @@ impl Parser {
             _ => unreachable!("keyword guarded above"),
         };
         Ok(Some(stmt))
+    }
+}
+
+/// The adapter name a `for` head recognises on its iterable.
+const ENUMERATE_METHOD: &str = "enumerate";
+
+/// Split a trailing `.enumerate()` off a `for` loop's iterable, returning the
+/// receiver and whether the adapter was there.
+///
+/// Method calls parse as a call whose callee is a field access, so this matches
+/// that shape rather than a dedicated node.
+fn strip_enumerate(iterable: Expr) -> ParseResult<(Expr, bool)> {
+    let Expr::Call {
+        func, args, span, ..
+    } = &iterable
+    else {
+        return Ok((iterable, false));
+    };
+    let Expr::FieldAccess { object, field, .. } = func.as_ref() else {
+        return Ok((iterable, false));
+    };
+    if field.name != ENUMERATE_METHOD {
+        return Ok((iterable, false));
+    }
+    if !args.is_empty() {
+        return Err(ParseError::EnumerateTakesNoArguments { span: *span });
+    }
+    Ok((object.as_ref().clone(), true))
+}
+
+/// Peel the grouping parentheses `(0..n).enumerate()` needs, so the range inside
+/// is visible to the caller.
+fn unwrap_paren(expr: Expr) -> Expr {
+    match expr {
+        Expr::Paren(inner, _) => unwrap_paren(*inner),
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::{Item, Stmt};
+    use crate::errors::ParseError;
+    use crate::parse;
+
+    /// The first statement of the first function body.
+    fn first_stmt(source: &str) -> Stmt {
+        let items = parse(source).expect("program should parse");
+        let Some(Item::Function(func)) = items.first() else {
+            panic!("expected a function item");
+        };
+        func.body.first().cloned().expect("expected a statement")
+    }
+
+    fn parse_err(source: &str) -> ParseError {
+        parse(source).expect_err("program should not parse")
+    }
+
+    #[test]
+    fn enumerated_array_loop_binds_a_pair() {
+        let stmt = first_stmt("func main() -> i32 { for (i, x) in xs.enumerate() { }\n 0 }");
+        let Stmt::ForEach {
+            index, iterator, ..
+        } = stmt
+        else {
+            panic!("expected a for-each");
+        };
+        assert_eq!(index.map(|i| i.name), Some("i".to_string()));
+        assert_eq!(iterator.name, "x");
+    }
+
+    /// The `.enumerate()` receiver is the iterable, not a method call left in the
+    /// tree — nothing downstream resolves methods on a sequence.
+    #[test]
+    fn enumerated_array_loop_keeps_the_receiver_as_the_iterable() {
+        let stmt = first_stmt("func main() -> i32 { for (i, x) in xs.enumerate() { }\n 0 }");
+        let Stmt::ForEach { iterable, .. } = stmt else {
+            panic!("expected a for-each");
+        };
+        assert!(matches!(iterable, crate::ast::Expr::Identifier(id) if id.name == "xs"));
+    }
+
+    /// A parenthesised range is the only spelling `.enumerate()` accepts on a
+    /// range, and it must still lower to the range loop rather than a value.
+    #[test]
+    fn enumerated_range_loop_stays_a_range_loop() {
+        let stmt = first_stmt("func main() -> i32 { for (k, v) in (0..=4).enumerate() { }\n 0 }");
+        let Stmt::ForRange {
+            index,
+            iterator,
+            inclusive,
+            ..
+        } = stmt
+        else {
+            panic!("expected a for-range");
+        };
+        assert_eq!(index.map(|i| i.name), Some("k".to_string()));
+        assert_eq!(iterator.name, "v");
+        assert!(inclusive);
+    }
+
+    #[test]
+    fn plain_loops_carry_no_index() {
+        let Stmt::ForRange { index, .. } =
+            first_stmt("func main() -> i32 { for i in 0..4 { }\n 0 }")
+        else {
+            panic!("expected a for-range");
+        };
+        assert!(index.is_none());
+
+        let Stmt::ForEach { index, .. } = first_stmt("func main() -> i32 { for x in xs { }\n 0 }")
+        else {
+            panic!("expected a for-each");
+        };
+        assert!(index.is_none());
+    }
+
+    #[test]
+    fn labeled_enumerated_loop_keeps_its_label() {
+        let stmt = first_stmt("func main() -> i32 { outer: for (i, x) in xs.enumerate() { }\n 0 }");
+        let Stmt::ForEach { label, index, .. } = stmt else {
+            panic!("expected a for-each");
+        };
+        assert_eq!(label.map(|l| l.name), Some("outer".to_string()));
+        assert!(index.is_some());
+    }
+
+    #[test]
+    fn pair_head_without_enumerate_is_rejected() {
+        assert!(matches!(
+            parse_err("func main() -> i32 { for (i, x) in xs { }\n 0 }"),
+            ParseError::PairWithoutEnumerate { .. }
+        ));
+    }
+
+    /// An unparenthesised range binds looser than the method call, so this would
+    /// have enumerated the upper bound rather than the range.
+    #[test]
+    fn pair_head_over_a_bare_range_is_rejected() {
+        assert!(matches!(
+            parse_err("func main() -> i32 { for (i, x) in 0..4 { }\n 0 }"),
+            ParseError::PairWithoutEnumerate { .. }
+        ));
+    }
+
+    #[test]
+    fn enumerate_without_a_pair_head_is_rejected() {
+        assert!(matches!(
+            parse_err("func main() -> i32 { for x in xs.enumerate() { }\n 0 }"),
+            ParseError::EnumerateWithoutPair { .. }
+        ));
+    }
+
+    #[test]
+    fn enumerate_with_arguments_is_rejected() {
+        assert!(matches!(
+            parse_err("func main() -> i32 { for (i, x) in xs.enumerate(2) { }\n 0 }"),
+            ParseError::EnumerateTakesNoArguments { .. }
+        ));
     }
 }

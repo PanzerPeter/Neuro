@@ -9,6 +9,20 @@ use crate::types::Type;
 
 use super::context::CodegenContext;
 
+/// Everything a counted range loop needs but its body.
+///
+/// `index` names the position binding of `(start..end).enumerate()`: it counts
+/// iterations from zero rather than reusing the induction variable, which carries
+/// the range's own bounds and element type.
+pub(crate) struct ForRangeHead<'a> {
+    pub(crate) label: Option<&'a str>,
+    pub(crate) index: Option<&'a str>,
+    pub(crate) iterator: &'a str,
+    pub(crate) start: &'a HirExpr,
+    pub(crate) end: &'a HirExpr,
+    pub(crate) inclusive: bool,
+}
+
 impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a variable declaration statement.
     ///
@@ -494,13 +508,17 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a for-range statement (`for i in start..end { ... }`).
     pub(crate) fn codegen_for_range(
         &mut self,
-        label: Option<&str>,
-        iterator: &str,
-        start: &HirExpr,
-        end: &HirExpr,
-        inclusive: bool,
+        head: ForRangeHead<'_>,
         body: &[HirStmt],
     ) -> CodegenResult<()> {
+        let ForRangeHead {
+            label,
+            index,
+            iterator,
+            start,
+            end,
+            inclusive,
+        } = head;
         let parent_fn = self
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
@@ -523,6 +541,19 @@ impl<'ctx> CodegenContext<'ctx> {
         let previous_var_type = self
             .variable_types
             .insert(iter_name.clone(), start_val.get_type());
+
+        let i64_ty = self.context.i64_type();
+        let position_alloca = match index {
+            Some(_) => {
+                let slot = self.entry_alloca(i64_ty, "for.pos")?;
+                self.builder
+                    .build_store(slot, i64_ty.const_zero())
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                Some(slot)
+            }
+            None => None,
+        };
+        let index_binding = self.bind_loop_index(index)?;
 
         let cond_bb = self.context.append_basic_block(parent_fn, "for.cond");
         let body_bb = self.context.append_basic_block(parent_fn, "for.body");
@@ -564,6 +595,14 @@ impl<'ctx> CodegenContext<'ctx> {
             })?;
 
         self.builder.position_at_end(body_bb);
+        if let Some(slot) = position_alloca {
+            let position = self
+                .builder
+                .build_load(i64_ty, slot, "for.pos.cur")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .into_int_value();
+            self.store_loop_index(&index_binding, position)?;
+        }
         let body_scope_index = self.drop_scopes.len();
         self.push_drop_scope();
         self.loop_targets.push(LoopTargets {
@@ -609,11 +648,26 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| {
                 CodegenError::LlvmError(format!("failed to store incremented iterator: {}", e))
             })?;
+        if let Some(slot) = position_alloca {
+            let current = self
+                .builder
+                .build_load(i64_ty, slot, "for.pos.cur")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .into_int_value();
+            let next = self
+                .builder
+                .build_int_add(current, i64_ty.const_int(1, false), "for.pos.next")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder
+                .build_store(slot, next)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        }
         self.builder
             .build_unconditional_branch(cond_bb)
             .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
 
         self.builder.position_at_end(exit_bb);
+        self.unbind_loop_index(index_binding);
 
         if let Some(previous) = previous_var {
             self.variables.insert(iter_name.clone(), previous);
@@ -661,15 +715,27 @@ impl<'ctx> CodegenContext<'ctx> {
             } => self.codegen_while(label.as_deref(), condition, body),
             HirStmt::ForRange {
                 label,
+                index,
                 iterator,
                 start,
                 end,
                 inclusive,
                 body,
                 ..
-            } => self.codegen_for_range(label.as_deref(), iterator, start, end, *inclusive, body),
+            } => self.codegen_for_range(
+                ForRangeHead {
+                    label: label.as_deref(),
+                    index: index.as_deref(),
+                    iterator,
+                    start,
+                    end,
+                    inclusive: *inclusive,
+                },
+                body,
+            ),
             HirStmt::ForEach {
                 label,
+                index,
                 iterator,
                 iterable,
                 body,
@@ -679,13 +745,14 @@ impl<'ctx> CodegenContext<'ctx> {
                 if matches!(obj_ty.referent(), Type::Collection { .. }) {
                     return self.codegen_vec_for_each(
                         label.as_deref(),
+                        index.as_deref(),
                         iterator,
                         iterable,
                         &obj_ty,
                         body,
                     );
                 }
-                self.codegen_for_each(label.as_deref(), iterator, iterable, body)
+                self.codegen_for_each(label.as_deref(), index.as_deref(), iterator, iterable, body)
             }
             HirStmt::IndexAssignment {
                 target,

@@ -227,6 +227,7 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             collect_block(body, fv);
         }
         Stmt::ForRange {
+            index,
             iterator,
             start,
             end,
@@ -235,16 +236,23 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
         } => {
             collect_expr(start, fv);
             collect_expr(end, fv);
+            if let Some(index) = index {
+                fv.bound.insert(index.name.clone());
+            }
             fv.bound.insert(iterator.name.clone());
             collect_block(body, fv);
         }
         Stmt::ForEach {
+            index,
             iterator,
             iterable,
             body,
             ..
         } => {
             collect_expr(iterable, fv);
+            if let Some(index) = index {
+                fv.bound.insert(index.name.clone());
+            }
             fv.bound.insert(iterator.name.clone());
             collect_block(body, fv);
         }

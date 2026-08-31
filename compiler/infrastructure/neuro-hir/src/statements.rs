@@ -41,8 +41,11 @@ pub enum HirStmt {
         body: Vec<HirStmt>,
         span: Span,
     },
+    /// `index` is the `u64` position binding of an enumerated loop; `None` for a
+    /// plain `for v in a..b`.
     ForRange {
         label: Option<String>,
+        index: Option<String>,
         iterator: String,
         start: HirExpr,
         end: HirExpr,
@@ -50,8 +53,11 @@ pub enum HirStmt {
         body: Vec<HirStmt>,
         span: Span,
     },
+    /// `index` is the `u64` position binding of an enumerated loop; `None` for a
+    /// plain `for x in xs`.
     ForEach {
         label: Option<String>,
+        index: Option<String>,
         iterator: String,
         iterable: HirExpr,
         body: Vec<HirStmt>,

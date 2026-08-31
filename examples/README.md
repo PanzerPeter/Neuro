@@ -21,7 +21,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` to stdout |
 | `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` byte sub-slices and `.char_slice(range)` codepoint sub-slices, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result`, `?` error propagation |
-| `control_flow/`  | `if`/`else`, `for`-ranges, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
+| `control_flow/`  | `if`/`else`, `for`-ranges, `for (i, x) in xs.enumerate()`, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
 | `modules/`       | Multi-file programs: a sibling module, a `mod.nr` directory module and its child, reached through qualified paths and `import`, with `export` choosing each module's surface; plus inline `module { }` blocks, an `export import` re-export facade, the implicit prelude, and the `@no_prelude` opt-out |
 | `showcase/`      | **Bigger programs that combine many features at once** — incl. mutable borrows `&mut T` + `*` deref (`mutable_borrows.nr`) |
@@ -47,6 +47,13 @@ isolation:
   modulo + compound assignment + `Option`/`match` + tuples + loop-as-value,
   plus a **nesting block comment** shelving an alternative `isqrt` whose body
   carries a `/* */` comment of its own. Exit `33`.
+- [`showcase/ranked_finish.nr`](showcase/ranked_finish.nr) — a race result read
+  by finishing position. `.enumerate()` over a fixed-size array, over the `Vec<i32>`
+  that loop fills, and over a range, with `@derive(Copy)` structs + `&self`
+  methods + `match` on the position + string interpolation. The combination is the
+  point: the `u64` position indexes back into the array that produced it, so each
+  runner is compared with the next — something `for runner in runners` cannot do.
+  Exit `176`.
 - [`showcase/running_stats.nr`](showcase/running_stats.nr) — an online mean
   accumulator. Struct state, direct field mutation, `&self` query methods, `f64`
   division, `as` casts, and `.is_nan()` screening a non-finite sample out of the

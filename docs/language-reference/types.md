@@ -1334,8 +1334,9 @@ for x in &a {  }                     // iterate over a borrow
 - **Bounds**: an out-of-range index panics with a located diagnostic in debug
   builds (`-O0`); release builds omit the check (matching the integer-overflow
   policy).
-- **Iteration**: `for x in arr` / `for x in &arr` bind each element in order;
-  an indexed form (`enumerate`) is not available yet.
+- **Iteration**: `for x in arr` / `for x in &arr` bind each element in order, and
+  `for (i, x) in arr.enumerate()` binds its `u64` position alongside it (see
+  [Control Flow](control-flow.md)).
 
 ## Tuples
 
@@ -1482,7 +1483,8 @@ equally; the map only needs that much.
   only the collection's own buffer is. This matches the existing string-concat
   limitation and resolves with the heap-string work.
 - The general iterator protocol is not involved: `for x in v` lowers to a counted
-  loop, exactly as `for x in arr` does.
+  loop, exactly as `for x in arr` does — and so does `for (i, x) in v.enumerate()`,
+  which binds the counter that loop already keeps.
 
 ## References
 
