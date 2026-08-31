@@ -174,6 +174,8 @@ Key design goals:
 
 - Fixed-size `[T; N]` of `Copy` scalar elements: literals (with element-type inference), index read/write, `.len()` (compile-time `u64`)
 - Iteration `for x in arr` and `for x in &arr`, lowered as a counted loop over the storage
+- `for (i, x) in arr.enumerate()` binds the counted loop's own index as a `u64` position
+  alongside the element; the same head works over `Vec<T>` and over a parenthesised range
 - Out-of-bounds index panics in debug builds (`-O0`); release builds omit the check
 
 ### Tuples (1E)

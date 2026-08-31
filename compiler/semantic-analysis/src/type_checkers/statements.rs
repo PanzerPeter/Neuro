@@ -558,6 +558,7 @@ impl TypeChecker {
 
             Stmt::ForRange {
                 label,
+                index,
                 iterator,
                 start,
                 end,
@@ -606,6 +607,7 @@ impl TypeChecker {
                 });
                 self.symbols.push_scope();
 
+                self.define_loop_index(index);
                 if !matches!(start_ty, Type::Unknown) {
                     if let Err(duplicate_name) =
                         self.symbols.define(iterator.name.clone(), start_ty, false)
@@ -632,6 +634,7 @@ impl TypeChecker {
             // (or a borrow of one); `x` binds each element. Lowered as a counted loop.
             Stmt::ForEach {
                 label,
+                index,
                 iterator,
                 iterable,
                 body,
@@ -664,6 +667,7 @@ impl TypeChecker {
                 });
                 self.symbols.push_scope();
 
+                self.define_loop_index(index);
                 if let Some(element_ty) = element_ty {
                     if let Err(duplicate_name) =
                         self.symbols
@@ -940,6 +944,21 @@ impl TypeChecker {
                 let _ = self.check_expr(expr, None);
                 Some(())
             }
+        }
+    }
+
+    /// Define an enumerated loop's position binding in the already-pushed loop
+    /// scope. It is `u64` whatever the sequence holds, matching `.len()` and the
+    /// index expression, so `xs[i]` works on the binding directly.
+    fn define_loop_index(&mut self, index: &Option<Identifier>) {
+        let Some(index) = index else {
+            return;
+        };
+        if let Err(duplicate_name) = self.symbols.define(index.name.clone(), Type::U64, false) {
+            self.record_error(TypeError::VariableAlreadyDefined {
+                name: duplicate_name,
+                span: index.span,
+            });
         }
     }
 }

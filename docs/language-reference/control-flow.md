@@ -272,6 +272,48 @@ func sum_first_five() -> i32 {
 }
 ```
 
+### Iterating with a Position — `.enumerate()`
+
+A `for` head may bind a pair instead of a single variable when the iterable ends
+in `.enumerate()`. The first binding is the **position** — a `u64` counting from
+zero — and the second is the element:
+
+```neuro
+val scores: [i32; 3] = [5, 4, 3]
+
+for (place, score) in scores.enumerate() {
+    println("place {place} scored {score}")
+}
+```
+
+The position is a `u64` because that is what an index expression and `.len()`
+use, so it reads back into the sequence it walks without a cast:
+
+```neuro
+for (i, score) in scores.enumerate() {
+    val same = scores[i] == score      // true, every iteration
+}
+```
+
+`.enumerate()` applies to a fixed-size array, a `Vec<T>`, a borrow of either, and
+a range. A range must be parenthesised, because `..` binds looser than a method
+call — `0..n.enumerate()` would enumerate `n`:
+
+```neuro
+for (step, value) in (10..13).enumerate() {
+    // step: 0, 1, 2   value: 10, 11, 12
+}
+```
+
+The position is a count of iterations, not a value the sequence holds — which is
+why the two columns above differ.
+
+The pair head and `.enumerate()` imply each other: a pair head over a plain
+iterable, or `.enumerate()` under a single-variable head, is a parse error. Both
+bindings live in the loop's own scope, so they shadow any outer name of the same
+spelling for the loop's duration and disappear at its exit; naming them alike
+(`for (i, i) in ...`) is a redefinition error rather than a shadow.
+
 ## Break and Continue
 
 Use `break` to exit the nearest loop and `continue` to skip to the next iteration:

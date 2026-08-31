@@ -1,0 +1,10 @@
+place 0: 5 (also readable as scores[0] = 5)
+place 1: 4 (also readable as scores[1] = 4)
+place 2: 3 (also readable as scores[2] = 3)
+place 3: 2 (also readable as scores[3] = 2)
+weighted total = 16
+step 0 reaches 10
+step 1 reaches 11
+step 2 reaches 12
+step 3 reaches 13
+value minus position, summed = 40

@@ -6,6 +6,7 @@ pub(crate) mod drops;
 pub(crate) mod expressions;
 pub(crate) mod functions;
 pub(crate) mod io;
+pub(crate) mod loop_index;
 pub(crate) mod outlining;
 pub(crate) mod panic;
 pub(crate) mod statements;

@@ -5,6 +5,10 @@ use neuro_hir::{HirStmt, HirType};
 
 use crate::{LoopCtx, Lowerer, LoweringError};
 
+/// The type of an enumerated loop's position binding. `u64` matches `.len()` and
+/// the index expression, so the binding indexes the sequence it walks.
+const LOOP_INDEX_TYPE: HirType = HirType::U64;
+
 impl Lowerer {
     /// Lower a single statement, threading scope and loop-stack side effects.
     pub(crate) fn lower_stmt(&mut self, stmt: &Stmt) -> Result<HirStmt, LoweringError> {
@@ -119,6 +123,7 @@ impl Lowerer {
 
             Stmt::ForRange {
                 label,
+                index,
                 iterator,
                 start,
                 end,
@@ -129,12 +134,17 @@ impl Lowerer {
                 let start = self.lower_expr(start, None)?;
                 let end = self.lower_expr(end, Some(&start.ty))?;
                 let iter_ty = start.ty.clone();
+                let index_name = index.as_ref().map(|i| i.name.clone());
                 let body = self.lower_loop_body_with(label, false, |lo| {
+                    if let Some(index) = &index_name {
+                        lo.define(index.clone(), LOOP_INDEX_TYPE);
+                    }
                     lo.define(iterator.name.clone(), iter_ty.clone());
                     lo.lower_stmt_list(body)
                 })?;
                 Ok(HirStmt::ForRange {
                     label: label.as_ref().map(|l| l.name.clone()),
+                    index: index_name,
                     iterator: iterator.name.clone(),
                     start,
                     end,
@@ -146,6 +156,7 @@ impl Lowerer {
 
             Stmt::ForEach {
                 label,
+                index,
                 iterator,
                 iterable,
                 body,
@@ -163,12 +174,17 @@ impl Lowerer {
                         }
                     },
                 };
+                let index_name = index.as_ref().map(|i| i.name.clone());
                 let body = self.lower_loop_body_with(label, false, |lo| {
+                    if let Some(index) = &index_name {
+                        lo.define(index.clone(), LOOP_INDEX_TYPE);
+                    }
                     lo.define(iterator.name.clone(), element_ty.clone());
                     lo.lower_stmt_list(body)
                 })?;
                 Ok(HirStmt::ForEach {
                     label: label.as_ref().map(|l| l.name.clone()),
+                    index: index_name,
                     iterator: iterator.name.clone(),
                     iterable,
                     body,

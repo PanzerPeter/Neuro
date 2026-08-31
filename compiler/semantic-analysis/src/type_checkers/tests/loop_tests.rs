@@ -12,6 +12,7 @@ fn test_for_range_accepts_integer_bounds() {
 
     let stmt = Stmt::ForRange {
         label: None,
+        index: None,
         iterator: make_ident("i"),
         start: Expr::Literal(Literal::Integer(0, None), Span::new(0, 1)),
         end: Expr::Literal(Literal::Integer(5, None), Span::new(4, 5)),
@@ -33,6 +34,7 @@ fn test_for_range_rejects_non_integer_bound() {
 
     let stmt = Stmt::ForRange {
         label: None,
+        index: None,
         iterator: make_ident("i"),
         start: Expr::Literal(Literal::Boolean(true), Span::new(0, 4)),
         end: Expr::Literal(Literal::Integer(5, None), Span::new(7, 8)),
@@ -184,4 +186,72 @@ fn test_break_value_in_while_loop_is_rejected() {
     assert!(errors
         .iter()
         .any(|error| matches!(error, TypeError::BreakValueInUnitLoop { .. })));
+}
+
+/// The position binding is `u64` whatever the sequence holds, so it indexes the
+/// sequence it walks without a cast.
+#[test]
+fn enumerated_index_is_u64_and_indexes_its_sequence() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: [i32; 3] = [1, 2, 3]
+    mut total: i32 = 0
+    for (i, x) in a.enumerate() {
+        val n: u64 = i
+        total = total + a[i] + x
+    }
+    for (k, v) in (0..3).enumerate() {
+        val m: u64 = k
+        total = total + v
+    }
+    return 0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "valid enumerated loops; got {errors:?}");
+}
+
+#[test]
+fn enumerated_index_does_not_escape_the_loop() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: [i32; 3] = [1, 2, 3]
+    for (i, x) in a.enumerate() {
+        return x
+    }
+    return i as i32
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, TypeError::UndefinedVariable { .. })),
+        "index should be scoped to the loop; got {errors:?}"
+    );
+}
+
+/// The two bindings share one scope, so a head that names them alike is a
+/// redefinition rather than a silent shadow.
+#[test]
+fn enumerated_head_rejects_a_repeated_name() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: [i32; 3] = [1, 2, 3]
+    for (i, i) in a.enumerate() {
+        return 0
+    }
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, TypeError::VariableAlreadyDefined { .. })),
+        "expected a redefinition error; got {errors:?}"
+    );
 }

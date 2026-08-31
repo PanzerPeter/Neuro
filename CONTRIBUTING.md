@@ -311,10 +311,10 @@ growable `String` — which shipped in v1.80.0 after the type was specified in t
 spec. **Phase 2 — Tensor Foundation & MLIR** holds the next open items, and its first
 sub-phase is not tensor work: `2A — Standard I/O & Spec Stragglers` clears constructs the
 specification names that no Phase 1 item ever tracked. `print` / `println` shipped in
-v2.1.0, `.is_nan()` in v2.2.0, buffered standard output in v2.3.0, and the codepoint-indexed
-`.char_slice(range)` in v2.4.0; `.enumerate()` on arrays and ranges is next. Start at the top
-of 2A in the roadmap, and move to `2B — Tensor Core` (`Tensor<T, [...]>` static tensor type
-syntax) only once 2A is clear.
+v2.1.0, `.is_nan()` in v2.2.0, buffered standard output in v2.3.0, the codepoint-indexed
+`.char_slice(range)` in v2.4.0, and `.enumerate()` on arrays and ranges in v2.5.0; the `&[T]`
+borrowed slice type is next. Start at the top of 2A in the roadmap, and move to
+`2B — Tensor Core` (`Tensor<T, [...]>` static tensor type syntax) only once 2A is clear.
 
 Nothing links `TokenKind` to the editor grammar, so any lexer change must also update
 `neuro-language-support/syntaxes/neuro.tmLanguage.json` by hand in the same commit.

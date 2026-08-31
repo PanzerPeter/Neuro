@@ -160,9 +160,13 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Lower `for x in arr` / `for x in &arr`: a counted loop over the array
     /// storage, binding `iterator` to a copy of each element in turn. Mirrors
     /// `codegen_for_range` minus the user-visible bound expressions.
+    ///
+    /// `index` names the position binding of `arr.enumerate()`, which is the
+    /// induction variable this loop already steps.
     pub(crate) fn codegen_for_each(
         &mut self,
         label: Option<&str>,
+        index: Option<&str>,
         iterator: &str,
         iterable: &HirExpr,
         body: &[HirStmt],
@@ -191,6 +195,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let iter_name = iterator.to_string();
         let previous_var = self.variables.insert(iter_name.clone(), elem_alloca);
         let previous_var_type = self.variable_types.insert(iter_name.clone(), elem_llvm);
+        let index_binding = self.bind_loop_index(index)?;
 
         let cond_bb = self.context.append_basic_block(parent_fn, "foreach.cond");
         let body_bb = self.context.append_basic_block(parent_fn, "foreach.body");
@@ -239,6 +244,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder
             .build_store(elem_alloca, elem_val)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.store_loop_index(&index_binding, i_val)?;
 
         let body_scope_index = self.drop_scopes.len();
         self.push_drop_scope();
@@ -287,6 +293,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
         self.builder.position_at_end(exit_bb);
+        self.unbind_loop_index(index_binding);
 
         // Restore any shadowed outer binding of the iterator name.
         match previous_var {

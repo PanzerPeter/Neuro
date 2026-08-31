@@ -47,8 +47,13 @@ pub enum Stmt {
     /// Executes `body` for each value of `iterator` from `start` up to
     /// `end`. Whether `end` is included depends on `inclusive`. An optional
     /// `label` names the loop for labeled break/continue.
+    ///
+    /// `index` carries the position binding of `for (i, v) in (a..b).enumerate()`:
+    /// a `u64` counting from zero, independent of the range's own bounds and
+    /// element type. `None` is a plain `for v in a..b`.
     ForRange {
         label: Option<Identifier>,
+        index: Option<Identifier>,
         iterator: Identifier,
         start: Expr,
         end: Expr,
@@ -62,8 +67,14 @@ pub enum Stmt {
     /// element in turn. Lowered directly in codegen as a counted loop over the
     /// array storage — it does not dispatch through an iterator protocol. An
     /// optional `label` names the loop for labeled break/continue.
+    ///
+    /// `index` carries the position binding of `for (i, x) in xs.enumerate()`:
+    /// a `u64` counting from zero, which for a counted loop over contiguous
+    /// storage is the same value the lowering already needs. `None` is a plain
+    /// `for x in xs`.
     ForEach {
         label: Option<Identifier>,
+        index: Option<Identifier>,
         iterator: Identifier,
         iterable: Expr,
         body: Vec<Stmt>,
