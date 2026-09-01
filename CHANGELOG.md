@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-09-01
+
+### Fixed
+
+- The MLIR scaffold backend did not know about the borrowed slice type added in 2.6.0, so
+  the `--all-features` build stopped compiling: `map_type` matches `HirType` with no
+  wildcard by design, and `HirType::Slice` had no arm. `[T]` is unsized, so it takes the
+  same answer as `dyn Trait` — rejected in value position, since it reaches one only behind
+  a reference, which already maps to an opaque pointer.
+
 ## [2.6.0] - 2026-09-01
 
 ### Added

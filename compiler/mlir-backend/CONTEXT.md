@@ -49,7 +49,8 @@ through the MLIR verifier before its textual form is returned.
 and the standard collections (`Vec` / `HashMap` / `BTreeMap`) — maps to an opaque `!llvm.ptr`
 until real tensor and struct lowering lands. A newtype is transparent: `HirType::Newtype`
 maps to its inner type's mapping. `void` is the empty result list in return position and
-`MlirError::UnsupportedType` anywhere else.
+`MlirError::UnsupportedType` anywhere else, as are the unsized types (`dyn Trait`, `[T]`),
+which reach a value position only behind the reference that already maps to a pointer.
 
 `map_type` matches `HirType` exhaustively with **no wildcard**, so a new HIR variant is a
 compile error here rather than a silent mis-map. Because the crate builds only under the
