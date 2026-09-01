@@ -166,7 +166,9 @@ impl Lowerer {
                 let element_ty = match Self::collection_element(&iterable.ty) {
                     Some(element) => element,
                     None => match iterable.ty.referent() {
-                        HirType::Array { element, .. } => (**element).clone(),
+                        HirType::Array { element, .. } | HirType::Slice(element) => {
+                            (**element).clone()
+                        }
                         other => {
                             return Err(LoweringError::Malformed {
                                 detail: format!("for-each over non-iterable type '{}'", other),
@@ -255,6 +257,12 @@ impl Lowerer {
             } => {
                 let element_ty = match self.lookup(&target.name) {
                     Some(HirType::Array { element, .. }) => Some(*element),
+                    // A `&mut [T]` target writes through the borrow into the buffer the
+                    // slice points at, so the value is typed by the slice's element.
+                    Some(HirType::Reference { inner, .. }) => match *inner {
+                        HirType::Slice(element) => Some(*element),
+                        _ => None,
+                    },
                     Some(ref collection @ HirType::Collection { .. }) => {
                         Self::collection_element(collection)
                     }

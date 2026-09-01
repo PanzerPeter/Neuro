@@ -45,6 +45,10 @@ impl<'ctx> CodegenContext<'ctx> {
             // `string.slice(a..b)` — a borrowed `&string` view into the receiver's
             // UTF-8 bytes, with runtime bounds and codepoint-boundary checks.
             BuiltinMethod::StringSlice => self.codegen_string_slice(receiver, args),
+            // `seq.slice(a..b)` — a borrowed `&[T]` view over an array, `Vec`, or slice.
+            BuiltinMethod::SequenceSlice => self.codegen_sequence_slice(receiver, args),
+            // `slice.len()` — the length word of the fat pointer.
+            BuiltinMethod::SliceLen => self.codegen_slice_len(receiver),
             // `string.char_slice(a..b)` — the same borrowed view, located by counting
             // code points instead of bytes.
             BuiltinMethod::StringCharSlice => self.codegen_char_slice(receiver, args),
@@ -412,6 +416,8 @@ impl<'ctx> CodegenContext<'ctx> {
             | BuiltinMethod::StringCharSlice
             | BuiltinMethod::StructClone
             | BuiltinMethod::ArrayLen
+            | BuiltinMethod::SequenceSlice
+            | BuiltinMethod::SliceLen
             | BuiltinMethod::IsNan
             | BuiltinMethod::CheckedAdd
             | BuiltinMethod::CheckedSub

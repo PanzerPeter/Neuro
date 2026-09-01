@@ -163,7 +163,7 @@ fn walk_type(ty: &mut Type, f: SiteFn) -> Result<(), ModuleError> {
             Ok(())
         }
         Type::Reference { inner, .. } => walk_type(inner, f),
-        Type::Array { element, .. } => walk_type(element, f),
+        Type::Array { element, .. } | Type::Slice { element, .. } => walk_type(element, f),
         Type::Tuple { elements, .. } => {
             for element in elements {
                 walk_type(element, f)?;

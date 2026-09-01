@@ -118,8 +118,16 @@ pub enum HirExprKind {
     DynCoerce {
         value: Box<HirExpr>,
     },
-    /// Range `start..end` / `start..=end`. Only valid as a `string.slice`
-    /// argument; never produced for `for`-range loops.
+    /// Unsizing coercion `&[T; N]` / `&Vec<T>` → `&[T]`: builds a borrowed slice
+    /// from a reference to a sized container. `value` is that reference (its `ty`
+    /// names the container, which supplies the length); this expression's `ty` is the
+    /// `&[T]` being produced. Backends lower it to a `(buffer pointer, length)` fat
+    /// pointer, mirroring [`HirExprKind::DynCoerce`].
+    SliceCoerce {
+        value: Box<HirExpr>,
+    },
+    /// Range `start..end` / `start..=end`. Only valid as a `string.slice` or
+    /// sequence `.slice` argument; never produced for `for`-range loops.
     Range {
         start: Box<HirExpr>,
         end: Box<HirExpr>,

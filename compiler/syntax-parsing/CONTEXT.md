@@ -85,6 +85,11 @@ the tuple-index parse, so it needs no expression grammar of its own.
   `(2 + 3)` parsed as `f()(2 + 3)`, and a following `[1, 2]` as an index, both of which
   type-checked with a callable on the left. A leading `.` still continues, since it cannot start a
   statement.
+- **Array type vs. slice type.** `[T; N]` and `[T]` share their opening bracket, so `parse_type`
+  parses the element type first and then looks at what follows: a `]` closes an unsized
+  `Type::Slice`, anything else must be the `;` of a sized `Type::Array`. Whether the slice is
+  legal where it was written is not decided here — semantic analysis rejects one outside a
+  reference, exactly as it does for a bare `dyn Trait`.
 - **Prefix vs. infix `&` and `*`.** Purely parser position: prefix `&` is a borrow
   (`Expr::Reference`, operand at `Precedence::Unary`), infix `&` is `BinaryOp::BitAnd`; prefix
   `*` is `Expr::Deref`, infix `*` is multiply. A leading `*` in statement position is a deref

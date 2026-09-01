@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::type_mapping::TypeMapper;
-use crate::types::Type;
+use crate::types::{CollectionKind, Type};
 
 /// A compiler-known intrinsic method on a builtin (non-struct) receiver type.
 /// Recorded by the type-collection pass so `codegen_expr` can lower the call
@@ -54,6 +54,11 @@ pub(crate) enum BuiltinMethod {
     CheckedMul,
     /// `array.len()` → the compile-time element count `N` of `[T; N]`, as `u64`.
     ArrayLen,
+    /// `seq.slice(a..b)` on an array, `Vec`, or slice → a borrowed `&[T]` view over the
+    /// receiver's buffer; panics on an out-of-bounds range.
+    SequenceSlice,
+    /// `slice.len()` → the length word of the `(ptr, len)` fat pointer, as `u64`.
+    SliceLen,
     /// `float.is_nan()` → `fcmp uno`: an unordered self-comparison, true only for NaN.
     IsNan,
 }
@@ -79,6 +84,19 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<Builti
         // `array.len()` → the static element count as `u64`. Auto-derefs a
         // borrow of an array (`&[T; N]`) like the string builtins above.
         (Type::Array { .. }, "len") => Some(BuiltinMethod::ArrayLen),
+        // `.slice(range)` borrows a run out of any contiguous container. A `Vec`
+        // receiver resolves here rather than through the collection surface: the result
+        // is a view into the buffer, not an operation on the header.
+        (
+            Type::Array { .. }
+            | Type::Slice(_)
+            | Type::Collection {
+                kind: CollectionKind::Vec,
+                ..
+            },
+            "slice",
+        ) => Some(BuiltinMethod::SequenceSlice),
+        (Type::Slice(_), "len") => Some(BuiltinMethod::SliceLen),
         // `.is_nan()` needs a value receiver too, and is spelled out over `F32`/`F64`
         // rather than `Type::is_float`: that backend predicate also admits `f16`/`bf16`,
         // whose scalar contract is storage and casts only.
@@ -541,7 +559,7 @@ impl<'ctx> CodegenContext<'ctx> {
 #[cfg(test)]
 mod tests {
     use super::{resolve_builtin_method, BuiltinMethod};
-    use crate::types::Type;
+    use crate::types::{CollectionKind, Type};
 
     #[test]
     fn string_intrinsics_resolve() {
@@ -560,6 +578,34 @@ mod tests {
         assert!(matches!(
             resolve_builtin_method(&Type::String, "char_slice"),
             Some(BuiltinMethod::StringCharSlice)
+        ));
+    }
+
+    /// Every contiguous container answers `.slice` with the same intrinsic, and a `Vec`
+    /// receiver reaches it here rather than through the collection method surface.
+    #[test]
+    fn sequence_slice_resolves_on_every_contiguous_receiver() {
+        let array = Type::Array {
+            element: Box::new(Type::I32),
+            size: 4,
+        };
+        let vector = Type::Collection {
+            kind: CollectionKind::Vec,
+            args: vec![Type::I32],
+        };
+        let slice = Type::Reference {
+            inner: Box::new(Type::Slice(Box::new(Type::I32))),
+            mutable: false,
+        };
+        for recv in [array, vector, slice.clone()] {
+            assert!(matches!(
+                resolve_builtin_method(&recv, "slice"),
+                Some(BuiltinMethod::SequenceSlice)
+            ));
+        }
+        assert!(matches!(
+            resolve_builtin_method(&slice, "len"),
+            Some(BuiltinMethod::SliceLen)
         ));
     }
 

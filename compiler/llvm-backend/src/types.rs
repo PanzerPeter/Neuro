@@ -55,6 +55,11 @@ pub(crate) enum Type {
         element: Box<Type>,
         size: usize,
     },
+    /// Unsized slice `[T]`: a contiguous run of `T` whose length is a runtime value.
+    /// Like [`Type::DynObject`] it is lowered only as the referent of a
+    /// [`Type::Reference`], which becomes a `{ buffer pointer, i64 length }` fat
+    /// pointer held by value.
+    Slice(Box<Type>),
     /// Anonymous tuple `(T1, T2, ...)`. Lowered to an anonymous LLVM struct
     /// `{ T1, T2, ... }`; element access is `extractvalue` by constant index.
     Tuple(Vec<Type>),
@@ -133,6 +138,7 @@ impl Type {
                 element: Box::new(Type::from_hir(element)),
                 size: *size,
             },
+            HirType::Slice(element) => Type::Slice(Box::new(Type::from_hir(element))),
             HirType::Tuple(elements) => Type::Tuple(elements.iter().map(Type::from_hir).collect()),
             HirType::Function { params, ret } => Type::Function {
                 params: params.iter().map(Type::from_hir).collect(),
@@ -170,6 +176,7 @@ impl Type {
             // today, and adding it would rename every existing mangled symbol.
             Type::Reference { inner, .. } => format!("ref{}", inner.mangle()),
             Type::Array { element, size } => format!("arr{}x{}", size, element.mangle()),
+            Type::Slice(element) => format!("slice{}", element.mangle()),
             Type::Tuple(elements) => {
                 let parts: Vec<String> = elements.iter().map(Type::mangle).collect();
                 format!("tup{}", parts.join("_"))

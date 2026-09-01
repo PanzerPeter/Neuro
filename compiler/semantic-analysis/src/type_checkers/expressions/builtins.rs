@@ -5,9 +5,14 @@
 
 use super::TypeChecker;
 use crate::errors::TypeError;
-use crate::types::Type;
+use crate::types::{CollectionKind, Type};
 use ast_types::Expr;
 use shared_types::Span;
+
+/// The borrowing sub-range intrinsics. Both hand back a view into the receiver's
+/// storage, so both register a borrow of it.
+pub(crate) const SLICE_METHOD: &str = "slice";
+pub(crate) const CHAR_SLICE_METHOD: &str = "char_slice";
 
 impl TypeChecker {
     /// Resolve a compiler-known intrinsic method on a builtin (non-struct) receiver.
@@ -15,9 +20,14 @@ impl TypeChecker {
     /// Returns `Some(return_type)` when `method` names an intrinsic for `recv` — recording
     /// an arity diagnostic when the argument count is wrong — and `None` when no such
     /// intrinsic exists, so the caller falls through to the standard `MethodNotFound` error.
+    ///
+    /// `object` is the receiver expression, needed by the borrowing intrinsics: a
+    /// `.slice(range)` result points into the receiver's storage, so the receiver has to
+    /// be a place and the borrow it hands out has to be registered against that place.
     pub(super) fn resolve_builtin_method(
         &mut self,
         recv: &Type,
+        object: &Expr,
         method: &str,
         args: &[Expr],
         call_span: Span,
@@ -53,7 +63,48 @@ impl TypeChecker {
             // `.slice` indexes bytes, `.char_slice` codepoints; the two differ only in
             // how the backend turns the range into byte offsets, so they share a check.
             (Type::String, "slice" | "char_slice") => {
-                Some(self.check_string_slice(args, call_span))
+                let slice_ty = Type::Reference {
+                    inner: Box::new(Type::String),
+                    mutable: false,
+                };
+                Some(self.check_slice_call(object, slice_ty, args, call_span))
+            }
+            // Borrowed sub-slice of a contiguous sequence: `&[T]` over the receiver's
+            // own storage, zero copy. The three receivers share one check because they
+            // share one result — only the backend cares that an array's length is a
+            // constant, a `Vec`'s a header field, and a slice's already in hand.
+            (Type::Array { element, .. }, "slice") | (Type::Slice(element), "slice") => {
+                let slice_ty = Type::Reference {
+                    inner: Box::new(Type::Slice(element.clone())),
+                    mutable: false,
+                };
+                Some(self.check_slice_call(object, slice_ty, args, call_span))
+            }
+            (
+                Type::Collection {
+                    kind: CollectionKind::Vec,
+                    args: params,
+                },
+                "slice",
+            ) => {
+                let element = params.first().cloned().unwrap_or(Type::Unknown);
+                let slice_ty = Type::Reference {
+                    inner: Box::new(Type::Slice(Box::new(element))),
+                    mutable: false,
+                };
+                Some(self.check_slice_call(object, slice_ty, args, call_span))
+            }
+            // `slice.len()` reads the length word of the `(ptr, len)` fat pointer, so
+            // it is O(1) exactly as it is on the array or `Vec` behind it.
+            (Type::Slice(_), "len") => {
+                if !args.is_empty() {
+                    self.record_error(TypeError::ArgumentCountMismatch {
+                        expected: 0,
+                        found: args.len(),
+                        span: call_span,
+                    });
+                }
+                Some(Type::U64)
             }
             // Array length, the compile-time `N` of `[T; N]`. Auto-derefs through
             // a borrow of an array (`&[T; N]`). Takes no arguments and yields `u64`.
@@ -133,16 +184,69 @@ impl TypeChecker {
         }
     }
 
-    /// Type-check `string.slice(range)` / `string.char_slice(range)`: exactly one
-    /// `a..b` / `a..=b` argument whose bounds are integers. Returns the `&string` slice
-    /// type; on any violation a diagnostic is recorded and the `&string` type is still
-    /// returned so checking continues with the documented result type.
-    pub(super) fn check_string_slice(&mut self, args: &[Expr], call_span: Span) -> Type {
-        let slice_ty = Type::Reference {
-            inner: Box::new(Type::String),
-            mutable: false,
-        };
+    /// Type-check a `.slice(range)` / `.char_slice(range)` call: the receiver must be a
+    /// borrowable place, and the single argument an `a..b` / `a..=b` range over integer
+    /// bounds. `slice_ty` is the borrowed view the receiver yields, which the caller has
+    /// already derived from the receiver type. On any violation a diagnostic is recorded
+    /// and `slice_ty` is still returned so checking continues with the documented type.
+    fn check_slice_call(
+        &mut self,
+        object: &Expr,
+        slice_ty: Type,
+        args: &[Expr],
+        call_span: Span,
+    ) -> Type {
+        self.register_slice_borrow(object, call_span);
+        self.check_slice_range_arg(slice_ty, args, call_span)
+    }
 
+    /// Register the shared borrow a `.slice(range)` call takes of its receiver.
+    ///
+    /// The returned view points into the receiver's storage, so it is a borrow in every
+    /// sense the checker already models: it conflicts with a live `&mut`, and a `val`
+    /// initializer promotes it to a persistent borrow that keeps the receiver frozen for
+    /// as long as the slice binding lives.
+    fn register_slice_borrow(&mut self, object: &Expr, call_span: Span) {
+        let Some(place) = Self::slice_borrow_root(object) else {
+            return;
+        };
+        if let Some((_, exclusive)) = self.symbols.borrow_counts(&place) {
+            if exclusive > 0 {
+                self.record_error(TypeError::CannotBorrowWhileMutablyBorrowed {
+                    name: place.clone(),
+                    span: call_span,
+                });
+            }
+        }
+        self.symbols.add_transient_borrow(&place, false);
+    }
+
+    /// The binding a `.slice` receiver ultimately borrows from, seen through a chain of
+    /// slice calls: `s.slice(a..b).slice(c..d)` borrows `s`, since every view in the
+    /// chain points into the same buffer.
+    ///
+    /// `None` for a receiver rooted in a temporary — a call result, a literal. Such a
+    /// view is sound for the rest of the frame the temporary lives in, and the borrow
+    /// tracker's rule throughout is to record only borrows it can name rather than
+    /// guess at the ones it cannot.
+    pub(crate) fn slice_borrow_root(expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Paren(inner, _) => Self::slice_borrow_root(inner),
+            Expr::Call { func, .. } => match func.as_ref() {
+                Expr::FieldAccess { object, field, .. }
+                    if field.name == SLICE_METHOD || field.name == CHAR_SLICE_METHOD =>
+                {
+                    Self::slice_borrow_root(object)
+                }
+                _ => None,
+            },
+            other => Self::place_root_name(other),
+        }
+    }
+
+    /// Validate the single range argument shared by every `.slice`-family intrinsic:
+    /// exactly one `a..b` / `a..=b` argument whose bounds are integers.
+    fn check_slice_range_arg(&mut self, slice_ty: Type, args: &[Expr], call_span: Span) -> Type {
         if args.len() != 1 {
             self.record_error(TypeError::ArgumentCountMismatch {
                 expected: 1,

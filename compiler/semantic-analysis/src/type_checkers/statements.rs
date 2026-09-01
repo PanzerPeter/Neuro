@@ -11,16 +11,20 @@ pub(crate) struct LoopExit {
     pub(crate) has_break: bool,
 }
 
-/// If `expr` is a direct borrow of a named place (`&x` / `&mut x`, possibly
-/// parenthesised), return that place's name and whether the borrow is exclusive.
-/// A borrow wrapped in any other expression (a block, an `if`, a call result) is
-/// not tracked as persistent — only a direct initializer creates a held borrow,
+/// If `expr` is a direct borrow of a named place — `&x` / `&mut x`, or a
+/// `x.slice(range)` view into `x` — return that place's name and whether the borrow is
+/// exclusive. A borrow wrapped in any other expression (a block, an `if`, a call result)
+/// is not tracked as persistent — only a direct initializer creates a held borrow,
 /// which keeps the analysis free of false positives at the cost of missing some
 /// borrows that escape through compound expressions.
 fn borrow_target_of(expr: &Expr) -> Option<(String, bool)> {
     let mut outer = expr;
     while let Expr::Paren(inner, _) = outer {
         outer = inner;
+    }
+    if let Some(place) = slice_receiver_of(outer) {
+        // A `.slice` view is always a shared borrow: there is no `&mut` slicing form.
+        return Some((place, false));
     }
     let Expr::Reference {
         operand, mutable, ..
@@ -36,6 +40,18 @@ fn borrow_target_of(expr: &Expr) -> Option<(String, bool)> {
         Expr::Identifier(ident) => Some((ident.name.clone(), *mutable)),
         _ => None,
     }
+}
+
+/// The binding a `.slice(range)` / `.char_slice(range)` call borrows from, when the
+/// receiver roots at one. The intrinsics hand back a view into the receiver's storage,
+/// so the checker treats the call exactly like an `&receiver` for provenance and
+/// aliasing; `register_slice_borrow` records the matching transient borrow, which this
+/// promotes to a persistent one when the call initializes a binding.
+fn slice_receiver_of(expr: &Expr) -> Option<String> {
+    if !matches!(expr, Expr::Call { .. }) {
+        return None;
+    }
+    TypeChecker::slice_borrow_root(expr)
 }
 
 /// The trailing value expression of a block — the last statement when it is a
@@ -630,8 +646,8 @@ impl TypeChecker {
                 Some(())
             }
 
-            // `for x in arr` over an array value. The iterable must be an array
-            // (or a borrow of one); `x` binds each element. Lowered as a counted loop.
+            // `for x in arr` over an array, `Vec`, or borrowed slice. `x` binds each
+            // element by value. Lowered as a counted loop.
             Stmt::ForEach {
                 label,
                 index,
@@ -644,7 +660,9 @@ impl TypeChecker {
                 let element_ty = match self.collection_element(&iterable_ty) {
                     Some(element) => Some(element),
                     None => match iterable_ty.referent() {
-                        Type::Array { element, .. } => Some((**element).clone()),
+                        Type::Array { element, .. } | Type::Slice(element) => {
+                            Some((**element).clone())
+                        }
                         Type::Unknown => None,
                         other => {
                             self.record_error(TypeError::NotIndexable {
@@ -709,26 +727,45 @@ impl TypeChecker {
                     return None;
                 };
 
-                if !symbol.mutable {
-                    self.record_error(TypeError::AssignToImmutable {
-                        name: target.name.clone(),
-                        span: target.span,
-                    });
-                    return None;
-                }
-
-                let element_ty = match self.collection_element(&symbol.ty) {
-                    Some(element) => element,
-                    None => match &symbol.ty {
-                        Type::Array { element, .. } => (**element).clone(),
-                        other => {
-                            self.record_error(TypeError::NotIndexable {
-                                found: other.clone(),
-                                span: *span,
+                // Write permission through a slice comes from the borrow, not the
+                // binding: `xs: &mut [T]` is an immutable binding holding a mutable
+                // view, and a `&[T]` binding declared `mut` still may not write.
+                let element_ty = match &symbol.ty {
+                    Type::Reference { inner, mutable } if matches!(**inner, Type::Slice(_)) => {
+                        if !mutable {
+                            self.record_error(TypeError::AssignToImmutable {
+                                name: target.name.clone(),
+                                span: target.span,
                             });
                             return None;
                         }
-                    },
+                        let Type::Slice(element) = inner.as_ref() else {
+                            return None;
+                        };
+                        (**element).clone()
+                    }
+                    _ => {
+                        if !symbol.mutable {
+                            self.record_error(TypeError::AssignToImmutable {
+                                name: target.name.clone(),
+                                span: target.span,
+                            });
+                            return None;
+                        }
+                        match self.collection_element(&symbol.ty) {
+                            Some(element) => element,
+                            None => match &symbol.ty {
+                                Type::Array { element, .. } => (**element).clone(),
+                                other => {
+                                    self.record_error(TypeError::NotIndexable {
+                                        found: other.clone(),
+                                        span: *span,
+                                    });
+                                    return None;
+                                }
+                            },
+                        }
+                    }
                 };
 
                 let idx_ty = self.check_expr(index, None).unwrap_or(Type::Unknown);

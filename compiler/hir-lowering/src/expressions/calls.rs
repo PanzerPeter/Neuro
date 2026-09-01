@@ -6,7 +6,7 @@
 use ast_types::Expr;
 use neuro_hir::{HirExpr, HirExprKind, HirType};
 
-use super::{CLONE_METHOD, IO_BUILTINS, PANIC_BUILTINS};
+use super::{CLONE_METHOD, IO_BUILTINS, PANIC_BUILTINS, SLICE_METHOD};
 use crate::{is_full_float, is_integer, Lowerer, LoweringError};
 
 impl Lowerer {
@@ -442,6 +442,11 @@ impl Lowerer {
                 })?;
             let (params, ret) = (sig.params.clone(), sig.ret.clone());
             (self.lower_args(args, &params)?, ret)
+        } else if method == SLICE_METHOD && sliceable_element(recv.referent()).is_some() {
+            // `.slice(range)` borrows the receiver's buffer, so it is a slice intrinsic
+            // on every contiguous container — a `Vec` included, whose own method surface
+            // acts on the header rather than handing out a view into it.
+            self.lower_sequence_slice(&recv, args)?
         } else if matches!(recv.referent(), HirType::Collection { .. }) {
             self.lower_collection_method(&recv, method, args)?
         } else {
@@ -467,6 +472,28 @@ impl Lowerer {
             result_ty,
             span,
         ))
+    }
+
+    /// Lower `seq.slice(range)` on an array, `Vec`, or slice: the single range argument
+    /// and the `&[T]` view it yields.
+    fn lower_sequence_slice(
+        &mut self,
+        recv: &HirType,
+        args: &[Expr],
+    ) -> Result<(Vec<HirExpr>, HirType), LoweringError> {
+        let element =
+            sliceable_element(recv.referent()).ok_or_else(|| LoweringError::Malformed {
+                detail: format!("`{}` cannot be sliced", recv),
+            })?;
+        let arg = args.first().ok_or_else(|| LoweringError::Malformed {
+            detail: "`.slice` expects a range argument".to_string(),
+        })?;
+        let range = self.lower_expr(arg, None)?;
+        let slice_ty = HirType::Reference {
+            inner: Box::new(HirType::Slice(Box::new(element))),
+            mutable: false,
+        };
+        Ok((vec![range], slice_ty))
     }
 
     /// Resolve a compiler-known intrinsic on a builtin (non-struct) receiver,
@@ -495,7 +522,9 @@ impl Lowerer {
                 };
                 Ok((vec![range], slice_ty))
             }
-            (HirType::Array { .. }, "len") => Ok((self.lower_args(args, &[])?, HirType::U64)),
+            (HirType::Array { .. } | HirType::Slice(_), "len") => {
+                Ok((self.lower_args(args, &[])?, HirType::U64))
+            }
             // `float.is_nan()` — nullary, `bool`. A value receiver only, matching the
             // integer intrinsics below, and full-precision only: `f16`/`bf16` have no
             // scalar arithmetic contract to produce a NaN with.
@@ -564,5 +593,18 @@ impl Lowerer {
             out.push(self.lower_expr(arg, params.get(i))?);
         }
         Ok(out)
+    }
+}
+
+/// The element type of a contiguous container a `.slice(range)` may borrow from —
+/// `[T; N]`, `Vec<T>`, or an existing `[T]`. `None` for every other receiver.
+fn sliceable_element(ty: &HirType) -> Option<HirType> {
+    match ty {
+        HirType::Array { element, .. } | HirType::Slice(element) => Some((**element).clone()),
+        HirType::Collection {
+            kind: neuro_hir::HirCollectionKind::Vec,
+            args,
+        } => args.first().cloned(),
+        _ => None,
     }
 }

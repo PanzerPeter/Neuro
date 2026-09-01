@@ -81,6 +81,12 @@ pub enum Type {
         element: Box<Type>,
         size: ArrayLen,
     },
+    /// Unsized slice `[T]`: a contiguous run of `T` whose length is a runtime
+    /// value rather than part of the type. It is **unsized**, so like
+    /// [`Type::DynObject`] it only ever appears as the referent of a [`Type::Reference`]
+    /// — `&[T]` / `&mut [T]` — and a bare `[T]` annotation is rejected during type
+    /// resolution. Two slice types are compatible when their element types are.
+    Slice(Box<Type>),
     /// A monomorphization-internal const generic *argument* value: the concrete
     /// value bound to a `const N: T` parameter, used only inside the type-argument
     /// substitution and instance mangling. Never appears in a real value/annotation
@@ -254,6 +260,10 @@ impl Type {
                     size: bn,
                 },
             ) => an == bn && a.is_compatible_with(b),
+
+            // Slices match when their element types match. Unlike an array, the
+            // length is not part of the type, so `&[i32]` accepts any run of `i32`.
+            (Type::Slice(a), Type::Slice(b)) => a.is_compatible_with(b),
 
             // Collections match when they are the same kind over the same
             // element/key/value types — `Vec<i32>` and `Vec<i64>` are distinct.
@@ -436,6 +446,7 @@ impl fmt::Display for Type {
                 }
             }
             Type::Array { element, size } => write!(f, "[{}; {}]", element, size),
+            Type::Slice(element) => write!(f, "[{}]", element),
             Type::ConstValue(v) => write!(f, "{}", v),
             Type::Tuple(elements) => {
                 write!(f, "(")?;

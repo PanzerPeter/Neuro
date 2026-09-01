@@ -518,6 +518,7 @@ fn mangle_type(ty: &HirType) -> String {
             )
         }
         HirType::Array { element, size } => format!("arr{}_{}", size, mangle_type(element)),
+        HirType::Slice(element) => format!("slice_{}", mangle_type(element)),
         HirType::Tuple(elements) => {
             let parts: Vec<String> = elements.iter().map(mangle_type).collect();
             format!("tup{}_{}", elements.len(), parts.join("_"))

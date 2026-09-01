@@ -65,6 +65,14 @@ pub enum Type {
         span: Span,
     },
 
+    /// Unsized slice type `[T]`: a contiguous run of `T` of a length not known
+    /// at compile time. `span` covers the leading `[` through the closing `]`.
+    ///
+    /// It is never a type on its own — only `&[T]` / `&mut [T]` are inhabited — so
+    /// semantic analysis rejects it outside a reference. The owned forms are
+    /// `[T; N]` and `Vec<T>`.
+    Slice { element: Box<Type>, span: Span },
+
     /// Anonymous tuple type `(T1, T2, ...)`: a fixed-size, heterogeneous,
     /// positionally-indexed aggregate. `span` covers the leading `(` through the
     /// closing `)`. Always has at least two element types — a single
@@ -124,6 +132,7 @@ impl Type {
             Type::Named(ident) => ident.span,
             Type::Reference { span, .. } => *span,
             Type::Array { span, .. } => *span,
+            Type::Slice { span, .. } => *span,
             Type::Tuple { span, .. } => *span,
             Type::Generic { span, .. } => *span,
             Type::ImplTrait { span, .. } => *span,

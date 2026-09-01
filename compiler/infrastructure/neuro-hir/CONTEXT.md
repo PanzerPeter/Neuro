@@ -49,6 +49,15 @@ order. Static-dispatch traits are fully erased. `HirType::DynObject(String)` is 
 pointer), and `HirExprKind::DynCoerce { value }` is the `&T` → `&dyn Trait` unsizing: `value.ty`
 names the concrete type that selects the vtable, the node's `ty` is the trait-object reference.
 
+**Slices are the second unsized type, and the second coercion.** `HirType::Slice(Box<HirType>)`
+is `[T]`; like `DynObject` it is valid only as a `HirType::Reference` referent, which backends
+lower to a `{ buffer ptr, i64 len }` fat pointer held by value — for `&mut [T]` as well, since a
+write goes to the buffer the pointer names rather than to the pair.
+`HirExprKind::SliceCoerce { value }` is the `&[T; N]` / `&Vec<T>` → `&[T]` unsizing: `value.ty`
+names the container the length comes from, the node's `ty` is the slice reference. It mirrors
+`DynCoerce` deliberately — these two are the language's only implicit conversions, and
+`hir-lowering` applies both at one site.
+
 **Closures are lifted items.** `HirItem::Closure(HirClosure { name, captures, params,
 return_type, body, span })` is one lifted item per closure literal, whose first (implicit)
 parameter at codegen is the captured-environment pointer. `HirExprKind::Closure { name,

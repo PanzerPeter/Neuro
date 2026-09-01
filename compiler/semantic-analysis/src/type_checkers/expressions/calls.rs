@@ -146,7 +146,7 @@ impl TypeChecker {
         }
         for (arg, expected_ty) in args.iter().zip(visible_params.iter()) {
             if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
-                if !arg_ty.is_compatible_with(expected_ty) {
+                if !self.assignable(&arg_ty, expected_ty) {
                     self.record_error(TypeError::Mismatch {
                         expected: expected_ty.clone(),
                         found: arg_ty,
@@ -441,7 +441,7 @@ impl TypeChecker {
                             return Some(ret);
                         }
                         if let Some(ret) =
-                            self.resolve_builtin_method(&obj_ty, &field.name, args, *span)
+                            self.resolve_builtin_method(&obj_ty, object, &field.name, args, *span)
                         {
                             return Some(ret);
                         }
@@ -517,7 +517,7 @@ impl TypeChecker {
 
                 for (arg, expected_ty) in args.iter().zip(visible_params.iter()) {
                     if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
-                        if !arg_ty.is_compatible_with(expected_ty) {
+                        if !self.assignable(&arg_ty, expected_ty) {
                             self.record_error(TypeError::Mismatch {
                                 expected: expected_ty.clone(),
                                 found: arg_ty,
@@ -593,7 +593,7 @@ impl TypeChecker {
 
                 for (arg, expected_ty) in args.iter().zip(param_types.iter()) {
                     if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
-                        if !arg_ty.is_compatible_with(expected_ty) {
+                        if !self.assignable(&arg_ty, expected_ty) {
                             self.record_error(TypeError::Mismatch {
                                 expected: expected_ty.clone(),
                                 found: arg_ty,

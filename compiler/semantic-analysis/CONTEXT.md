@@ -121,6 +121,9 @@ the cascade.
   **mutability and referent both match** — there is no `&mut T` → `&T` coercion. References are
   always `Copy` and never move-tracked. Method-call and field-access resolution auto-deref via
   `referent()`, so `r.len()` / `r.field` / `r.method()` work through a borrow.
+- `Type::Slice(element)` and `Type::DynObject` are the two **unsized** types: valid only as a
+  reference referent, and carrying the language's only two implicit conversions (see Slices,
+  below, and Traits).
 - `Type::peel_string_ref` normalizes `&string` → `string`, one layer, string only. It is what
   makes an owned `string` and a `&string` slice interchangeable for `==`, `!=`, and `+`, while
   `&i32 == i32` and `i32 == &string` stay type errors.
@@ -446,6 +449,19 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   `Expr::ArrayRest { array, start, exact }` requires an array source and yields the
   `[T; N - start]` remainder, with `exact` demanding `N == start`
   (`ArrayPatternLengthMismatch`). Other errors: `ArrayLengthMismatch`, `CannotInferEmptyArray`.
+- **Slices.** `Type::Slice(element)` is `[T]`, the unsized run behind `&[T]` / `&mut [T]`.
+  `resolve_type_ctx` accepts it only `behind_ref`, exactly as it does `dyn Trait`, and reports
+  `SliceNotBehindReference` otherwise. Two slice types are compatible when their elements are —
+  a length is not part of the type. `assignable` carries the unsizing coercion
+  `&[T; N]` / `&Vec<T>` / `&[T]` → `&[T]` (`unsizes_to_slice`), with mutability matching exactly,
+  and every argument, return, and annotated-binding site routes through it. `.slice(range)` on an
+  array, a `Vec`, or a slice yields `&[T]`; `slice.len()` is `u64`; indexing, `for x in xs`, and
+  `Stmt::IndexAssignment` all accept a slice, the last taking its write permission from the
+  *reference* (`&mut [T]`) rather than from the binding's own `mut`.
+  A `.slice` call registers a shared borrow of the place its receiver roots at
+  (`slice_borrow_root` sees through a chain of slice calls), so a live view blocks a `&mut` of
+  the source and `borrow_target_of` promotes it to a persistent borrow when it initializes a
+  binding — which is what makes returning a view of a local a `ReturnsReferenceToLocal`.
 - **Tuples.** Each element is checked against the expected tuple's element type when annotated;
   `t.N` is `NotATuple` on a non-tuple and `TupleIndexOutOfBounds` past the arity. Struct, tuple,
   and array *destructuring* is parser-desugared and reaches this slice as ordinary field-access

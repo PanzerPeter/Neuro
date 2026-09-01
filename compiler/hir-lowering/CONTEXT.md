@@ -183,17 +183,24 @@ A `traits` table (name → methods in declaration order, with their visible para
 types) is registered before impls, and each `Item::Trait` lowers to a `HirItem::Trait` carrying
 that order — the canonical vtable slot layout backends need. `resolve_type` delegates to
 `resolve_type_ctx(ty, behind_ref)` so `&dyn Trait` resolves to `Reference(DynObject)` while a bare
-`dyn` is an internal error (the checker rejects it first).
+`dyn` is an internal error (the checker rejects it first). `[T]` rides the same flag: it lowers to
+`HirType::Slice` only behind a reference.
 
 `lower_expr` is a thin wrapper that lowers via `lower_expr_uncoerced` and then applies
-`apply_dyn_coercion`. That is the **single site** where `&T` → `&dyn Trait` unsizing is inserted,
-so every context supplying an expected type — call arguments, returns, annotated bindings — gets
-the coercion uniformly, and an existing trait object is never re-coerced. A method call on a
+`apply_unsizing_coercion`. That is the **single site** where both unsizings are inserted —
+`&T` → `&dyn Trait` (`DynCoerce`) and `&[T; N]` / `&Vec<T>` → `&[T]` (`SliceCoerce`) — so every
+context supplying an expected type (call arguments, returns, annotated bindings) gets them
+uniformly, and a value that already has the target shape is never re-coerced. A method call on a
 `DynObject` receiver types from the trait declaration, naming no implementor. Return-position
 `impl Trait` resolves to its concrete type through `declared_return_type` /
 `shallow_result_type`.
 
 ### Per-construct lowering notes
+- **Slices** — `.slice(range)` is routed to `lower_sequence_slice` *ahead of* the collection
+  method surface, because a `Vec` receiver's `.slice` borrows its buffer rather than acting on the
+  header; `sliceable_element` names the three receivers that permit it (`[T; N]`, `Vec<T>`,
+  `[T]`). Indexing, `for x in xs`, and `IndexAssignment` each read a slice's element type
+  alongside the array's, and `slice.len()` is `u64`.
 - **Enumerated loops** — `ForRange` / `ForEach` carry the position binding through as
   `index: Option<String>` and define it in the loop scope as `LOOP_INDEX_TYPE` (`u64`), ahead of
   the element binding so the two collide rather than shadow. The free-variable walker binds it

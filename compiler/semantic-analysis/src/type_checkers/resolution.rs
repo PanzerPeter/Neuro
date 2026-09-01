@@ -12,8 +12,8 @@ impl TypeChecker {
     }
 
     /// Resolve a type annotation, tracking whether it appears directly behind a
-    /// reference (`behind_ref`). The flag is consulted only for `dyn Trait`,
-    /// which is unsized and therefore valid solely as a reference referent.
+    /// reference (`behind_ref`). The flag is consulted by the two unsized types,
+    /// `dyn Trait` and `[T]`, which are valid solely as a reference referent.
     fn resolve_type_ctx(&mut self, ty: &ast_types::Type, behind_ref: bool) -> Option<Type> {
         match ty {
             // Dynamic-dispatch trait object `dyn Trait`: valid only behind a
@@ -176,6 +176,21 @@ impl TypeChecker {
                     size: len,
                 })
             }
+            // Unsized slice `[T]`: valid only behind a reference, giving `&[T]` /
+            // `&mut [T]`. The element carries no `Copy` restriction the owning
+            // container did not already impose — a slice never owns what it points at,
+            // so it cannot be the thing that drops or moves an element.
+            ast_types::Type::Slice { element, span } => {
+                let element_ty = self.resolve_type(element)?;
+                if !behind_ref {
+                    self.record_error(TypeError::SliceNotBehindReference {
+                        element: element_ty.to_string(),
+                        span: *span,
+                    });
+                    return None;
+                }
+                Some(Type::Slice(Box::new(element_ty)))
+            }
             // Tuple `(T1, T2, ...)`. Each element must be `Copy` in this phase
             // — non-Copy element tuples (e.g. holding a `string` or a non-Copy struct)
             // need per-element move/Drop tracking, a documented follow-on (mirrors the
@@ -315,10 +330,11 @@ impl TypeChecker {
 
     /// Whether a value of type `found` may be supplied where `expected` is required.
     ///
-    /// This is ordinary type compatibility plus the one implicit conversion the language
-    /// has: the unsizing coercion `&T` → `&dyn Trait`, permitted when `T`
-    /// implements `Trait` and the reference mutabilities agree. There is no `&mut T` →
-    /// `&T` weakening, so the mutability match is exact.
+    /// This is ordinary type compatibility plus the two unsizing coercions the language
+    /// has: `&T` → `&dyn Trait`, permitted when `T` implements `Trait`, and
+    /// `&[T; N]` / `&Vec<T>` → `&[T]`, which forgets a compile-time length in favour of
+    /// a runtime one. Both require the reference mutabilities to agree — there is no
+    /// `&mut T` → `&T` weakening, so the mutability match is exact.
     pub(crate) fn assignable(&self, found: &Type, expected: &Type) -> bool {
         if found.is_compatible_with(expected) {
             return true;
@@ -336,10 +352,28 @@ impl TypeChecker {
         else {
             return false;
         };
-        let Type::DynObject(trait_name) = expected_inner.as_ref() else {
+        if found_mut != expected_mut {
             return false;
-        };
-        found_mut == expected_mut && self.type_implements_trait(found_inner, trait_name)
+        }
+        match expected_inner.as_ref() {
+            Type::DynObject(trait_name) => self.type_implements_trait(found_inner, trait_name),
+            Type::Slice(element) => Self::unsizes_to_slice(found_inner, element),
+            _ => false,
+        }
+    }
+
+    /// Whether a reference to `source` may be unsized to a `&[element]`: the two
+    /// contiguous owning containers, `[T; N]` and `Vec<T>`, plus a slice of the same
+    /// element (an already-borrowed slice passed straight through).
+    pub(crate) fn unsizes_to_slice(source: &Type, element: &Type) -> bool {
+        match source {
+            Type::Array { element: e, .. } | Type::Slice(e) => e.is_compatible_with(element),
+            Type::Collection {
+                kind: CollectionKind::Vec,
+                args,
+            } => args.first().is_some_and(|e| e.is_compatible_with(element)),
+            _ => false,
+        }
     }
 
     /// Whether a concrete type satisfies a trait bound: a nominal type

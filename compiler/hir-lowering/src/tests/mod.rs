@@ -5,6 +5,7 @@ mod expr_tests;
 mod generic_tests;
 mod match_tests;
 mod newtype_tests;
+mod slice_tests;
 mod trait_tests;
 mod try_tests;
 mod val_else_tests;
