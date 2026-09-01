@@ -221,6 +221,10 @@ fn is_annotatable(ty: &Type, generics: &[GenericParam]) -> bool {
                     }
                 }
         }
+        // `&[T]` is reachable at a call site only through the unsizing coercion an
+        // argument position applies, which a `val` annotation does not — the same reason
+        // `dyn Trait` is dropped below.
+        Type::Slice { .. } => false,
         Type::Tuple { elements, .. } => elements.iter().all(|e| is_annotatable(e, generics)),
         Type::Generic { name, args, .. } => {
             names_a_concrete_type(&name.name, generics)

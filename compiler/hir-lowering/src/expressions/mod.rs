@@ -17,7 +17,9 @@ use ast_types::{Expr, UnaryOp};
 use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirType};
 use shared_types::Literal;
 
-use coercion::{apply_dyn_coercion, binary_result_type, is_numeric, literal_scalar, literal_type};
+use coercion::{
+    apply_unsizing_coercion, binary_result_type, is_numeric, literal_scalar, literal_type,
+};
 
 use crate::{is_integer, LoopCtx, Lowerer, LoweringError};
 
@@ -31,6 +33,9 @@ const IO_BUILTINS: &[&str] = &["print", "println"];
 
 /// The deep-copy method shared by `string` and `Clone`-deriving structs.
 const CLONE_METHOD: &str = "clone";
+
+/// The borrowing sub-range method on every contiguous container.
+const SLICE_METHOD: &str = "slice";
 
 /// An enum variant's ordered payload fields: each `(optional field name, type)`.
 /// `Some` name marks a struct-variant field; `None` a tuple-variant element.
@@ -46,13 +51,14 @@ impl Lowerer {
         expected: Option<&HirType>,
     ) -> Result<HirExpr, LoweringError> {
         let lowered = self.lower_expr_uncoerced(expr, expected)?;
-        Ok(apply_dyn_coercion(lowered, expected))
+        Ok(apply_unsizing_coercion(lowered, expected))
     }
 
-    /// Lower an expression without applying the trait-object coercion. Every contextual
-    /// typing rule lives here; [`Lowerer::lower_expr`] wraps the result so the single
-    /// `&T` → `&dyn Trait` unsizing site is applied uniformly wherever an
-    /// expected type is supplied — call arguments, returns, and annotated bindings.
+    /// Lower an expression without applying the unsizing coercions. Every contextual
+    /// typing rule lives here; [`Lowerer::lower_expr`] wraps the result so the two
+    /// unsizing sites — `&T` → `&dyn Trait` and `&[T; N]` / `&Vec<T>` → `&[T]` — are
+    /// applied uniformly wherever an expected type is supplied: call arguments,
+    /// returns, and annotated bindings.
     fn lower_expr_uncoerced(
         &mut self,
         expr: &Expr,
@@ -389,7 +395,7 @@ impl Lowerer {
                 let element = match Self::collection_element(&object.ty) {
                     Some(element) => element,
                     None => match object.ty.referent().clone() {
-                        HirType::Array { element, .. } => *element,
+                        HirType::Array { element, .. } | HirType::Slice(element) => *element,
                         other => {
                             return Err(LoweringError::Malformed {
                                 detail: format!("index into non-indexable type '{}'", other),

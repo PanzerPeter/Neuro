@@ -112,7 +112,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | **Closures & lambdas** | `\|x: i32\| x * x`, `move` closures, `(T) -> R` function types, higher-order functions; compiled to `{ fn_ptr, env_ptr }`, no heap |
 | **Structs & methods** | Fields, shorthand init, functional update `..base`, `impl` blocks with `&self` / `&mut self` methods and associated functions |
 | **Enums & newtypes** | Unit, tuple, and struct-field variants; generic enums monomorphized per type argument; `newtype` for distinct nominal wrappers |
-| **Arrays, tuples & collections** | Fixed-size `[T; N]` and anonymous tuples over `Copy` elements; heap-backed `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, `String` that move on assignment and free at scope exit |
+| **Arrays, tuples & collections** | Fixed-size `[T; N]` and anonymous tuples over `Copy` elements; borrowed slices `&[T]` / `&mut [T]` with zero-copy `.slice(range)` over an array or a `Vec`; heap-backed `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, `String` that move on assignment and free at scope exit |
 | **Pattern matching** | Exhaustive `match` expressions over variant / literal / or / range / wildcard patterns with `if` guards, plus `val Point { x, y } = p` and `val [a, ..rest] = arr` destructuring |
 | **`Option` / `Result`** | `Option<T>` and `Result<T, E>` from the implicit prelude. They are ordinary generic enums, available with no declaration and no import, variants included; `??` unwraps either with a lazy fallback; `?` propagates the failure to the caller; `val-else` unwraps or exits the scope; `checked_add` / `checked_sub` / `checked_mul` report integer overflow as `Option::None` |
 | **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop`, `&T` / `&mut T` with flow-sensitive exclusivity, lifetime elision and annotations |
@@ -546,7 +546,7 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 |:---:|---|:---:|
 | **1** | **Core Language**: types, control flow, LLVM backend, ownership and borrow checking, generics, traits and dispatch, closures, enums and pattern matching, error handling, modules and prelude, string interpolation | Complete |
 | **2** | **Tensors and MLIR**: first-class tensor types lowered through MLIR Linalg, plus the pool allocator. Finishing it ships **v3.0.0** | In progress |
-| 2A | Standard I/O and spec stragglers: `print` / `println`, `.is_nan()`, codepoint string APIs, `.enumerate()`, the iterator protocol, `@derive(Debug, PartialEq)` | In progress |
+| 2A | Standard I/O and spec stragglers: `print` / `println`, `.is_nan()`, codepoint string APIs, `.enumerate()`, borrowed slices `&[T]`, the iterator protocol, `@derive(Debug, PartialEq)` | In progress |
 | 2B | Tensor core: `Tensor<T, [...]>`, literal coercion, move semantics, DLPack, slicing, shape generics, named dims, dynamic shapes, reductions | Planned |
 | 2C | MLIR lowering: tensor arithmetic to Linalg, broadcasting, matmul behind `@`, end-to-end HIR → MLIR → LLVM | Planned |
 | 2D | Pool allocator: `pool` blocks, `PoolAware`, LIFO release at scope exit | Planned |

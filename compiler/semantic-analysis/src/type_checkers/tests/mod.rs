@@ -13,6 +13,7 @@ mod literal_tests;
 mod loop_tests;
 mod match_tests;
 mod newtype_tests;
+mod slice_tests;
 mod string_tests;
 mod trait_tests;
 mod try_tests;

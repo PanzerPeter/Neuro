@@ -101,6 +101,14 @@ impl Lowerer {
                 element: Box::new(self.resolve_type(element)?),
                 size: crate::resolve_array_size(size, &self.const_subst)?,
             }),
+            // `[T]` is unsized, so it reaches here only as a reference referent; the
+            // checker rejects every other placement, mirroring `dyn Trait` above.
+            ast_types::Type::Slice { element, .. } if behind_ref => {
+                Ok(HirType::Slice(Box::new(self.resolve_type(element)?)))
+            }
+            ast_types::Type::Slice { element, .. } => Err(LoweringError::UnresolvedType {
+                name: format!("[{}]", self.resolve_type(element)?),
+            }),
             ast_types::Type::Tuple { elements, .. } => {
                 let mut resolved = Vec::with_capacity(elements.len());
                 for element in elements {

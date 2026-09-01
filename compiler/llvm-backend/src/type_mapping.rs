@@ -106,6 +106,17 @@ impl<'ctx> TypeMapper<'ctx> {
         self.context.struct_type(&[ptr.into(), ptr.into()], false)
     }
 
+    /// The LLVM layout of a borrowed slice `&[T]` / `&mut [T]`:
+    /// `{ ptr buffer, i64 len }`. The buffer pointer addresses the first element of the
+    /// borrowed run and `len` counts the elements in it; the element type is erased,
+    /// since LLVM 20 pointers are untyped and every access re-derives the stride from
+    /// the slice's semantic element type.
+    pub(crate) fn slice_ref_type(&self) -> inkwell::types::StructType<'ctx> {
+        let ptr = self.context.ptr_type(inkwell::AddressSpace::default());
+        self.context
+            .struct_type(&[ptr.into(), self.context.i64_type().into()], false)
+    }
+
     /// The LLVM header shared by every standard collection:
     /// `{ ptr buffer, i64 len, i64 cap, i64 used }`.
     ///
@@ -182,6 +193,14 @@ impl<'ctx> TypeMapper<'ctx> {
                 inner,
                 mutable: false,
             } if matches!(**inner, Type::String) => self.map_type_at_depth(inner, depth),
+            // A borrow of a slice — `&[T]` or `&mut [T]` — is the `{ ptr, i64 }` fat
+            // pointer itself, held by value: the length is not recoverable from the
+            // referent's address, so it has to travel with the pointer. Unlike
+            // `&string` this includes the mutable form, because a write through a slice
+            // goes to the buffer the pointer names, not to the fat pointer itself.
+            Type::Reference { inner, .. } if matches!(**inner, Type::Slice(_)) => {
+                Ok(self.slice_ref_type().into())
+            }
             // Every other borrow `&T` / `&mut T` is an opaque pointer to the referent's
             // storage. LLVM 20 pointers are untyped, so they all map to the same `ptr`.
             Type::Reference { .. } => Ok(self
@@ -192,6 +211,11 @@ impl<'ctx> TypeMapper<'ctx> {
             Type::DynObject(name) => Err(CodegenError::UnsupportedType(format!(
                 "`dyn {}` is unsized and must be used behind a reference",
                 name
+            ))),
+            // A bare `[T]` has no size either; only `&[T]` / `&mut [T]` are.
+            Type::Slice(element) => Err(CodegenError::UnsupportedType(format!(
+                "`[{}]` is unsized and must be used behind a reference",
+                element.mangle()
             ))),
             // Fixed-size array `[T; N]` → LLVM `[N x T]` aggregate.
             Type::Array { element, size } => {

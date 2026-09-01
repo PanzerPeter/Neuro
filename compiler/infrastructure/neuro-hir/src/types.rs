@@ -62,6 +62,11 @@ pub enum HirType {
         element: Box<HirType>,
         size: usize,
     },
+    /// Unsized slice `[T]`: a contiguous run of `T` whose length is a runtime
+    /// value. Like [`HirType::DynObject`] it appears only as the referent of a
+    /// [`HirType::Reference`], which backends lower to a `(buffer pointer, length)`
+    /// fat pointer.
+    Slice(Box<HirType>),
     /// Anonymous tuple `(T1, T2, ...)`: a positionally-indexed, heterogeneous
     /// aggregate with at least two elements.
     Tuple(Vec<HirType>),
@@ -173,6 +178,7 @@ impl fmt::Display for HirType {
                 }
             }
             HirType::Array { element, size } => write!(f, "[{}; {}]", element, size),
+            HirType::Slice(element) => write!(f, "[{}]", element),
             HirType::Tuple(elements) => {
                 write!(f, "(")?;
                 for (i, el) in elements.iter().enumerate() {

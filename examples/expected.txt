@@ -60,6 +60,7 @@ types/string_interpolation.nr       20
 types/triple_quoted.nr              6
 types/string_len.nr                 0
 types/string_slice.nr               0
+types/slices.nr                     43
 types/destructuring.nr              72
 types/string_slice_method.nr        12
 types/string_char_slice.nr          19
@@ -129,6 +130,7 @@ showcase/running_stats.nr   5
 showcase/sample_audit.nr    177
 showcase/scan_guard.nr      160
 showcase/sensor_pipeline.nr 57
+showcase/sensor_windows.nr  85
 showcase/shape_traits.nr    161
 showcase/simulation.nr      2
 showcase/status_report.nr   34

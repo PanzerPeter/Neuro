@@ -9,14 +9,22 @@ use super::Parser;
 impl Parser {
     /// Parse a type annotation
     pub(crate) fn parse_type(&mut self) -> ParseResult<Type> {
-        // Fixed-size array type `[T; N]`: element type, `;`, then either a
-        // non-negative integer length literal or a `const` generic parameter name
-        // (`[T; CAP]`), closed by `]`.
+        // Bracketed sequence type: `[T; N]` is a fixed-size array, `[T]` an unsized
+        // slice. They share a prefix, so the `;` (or its absence before `]`) selects.
         if self.check(&TokenKind::LeftBracket) {
             let open = self.advance().ok_or(ParseError::UnexpectedEof {
                 expected: "'['".to_string(),
             })?;
             let element = self.parse_type()?;
+            if self.check(&TokenKind::RightBracket) {
+                let close = self.advance().ok_or(ParseError::UnexpectedEof {
+                    expected: "']'".to_string(),
+                })?;
+                return Ok(Type::Slice {
+                    element: Box::new(element),
+                    span: open.span.merge(close.span),
+                });
+            }
             self.consume(TokenKind::Semicolon, "';' in array type `[T; N]`")?;
             let size_token = self.advance().ok_or(ParseError::UnexpectedEof {
                 expected: "array length".to_string(),
@@ -279,6 +287,47 @@ mod tests {
             panic!("expected a generic type application, got {ty:?}");
         };
         assert_eq!(&src[span.start..span.end], "Box<i32>");
+    }
+
+    #[test]
+    fn slice_type_parses_without_a_length() {
+        let src = "func sum(xs: &[i32]) -> i32 { return 0 }";
+        let items = parse(src).expect("parses");
+        let Some(Item::Function(func)) = items.first() else {
+            panic!("expected a function item");
+        };
+        let Type::Reference { inner, mutable, .. } = &func.params[0].ty else {
+            panic!("expected a reference parameter type");
+        };
+        assert!(!mutable);
+        let Type::Slice { element, span } = inner.as_ref() else {
+            panic!("expected a slice referent, got {inner:?}");
+        };
+        assert!(matches!(element.as_ref(), Type::Named(id) if id.name == "i32"));
+        assert_eq!(&src[span.start..span.end], "[i32]");
+    }
+
+    #[test]
+    fn mutable_slice_type_parses() {
+        let src = "func fill(xs: &mut [u8]) { }";
+        let items = parse(src).expect("parses");
+        let Some(Item::Function(func)) = items.first() else {
+            panic!("expected a function item");
+        };
+        let Type::Reference { inner, mutable, .. } = &func.params[0].ty else {
+            panic!("expected a reference parameter type");
+        };
+        assert!(mutable);
+        assert!(matches!(inner.as_ref(), Type::Slice { .. }));
+    }
+
+    /// `[T; N]` keeps its own shape now that `[T]` shares the opening bracket.
+    #[test]
+    fn sized_array_type_still_parses() {
+        let src = "func main() -> i32 { val a: [i32; 3] = [1, 2, 3]\n return 0 }";
+        let items = parse(src).expect("parses");
+        let ty = first_var_type(&items).expect("has a var decl");
+        assert!(matches!(ty, Type::Array { .. }));
     }
 
     #[test]

@@ -215,6 +215,11 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   unreachable end together); the UTF-8 boundary checks do not exist here, because a code point
   index cannot name a position inside a code point. `char_offset(s, n)` for an `n`-character string
   is `len`, which is what makes the end of the string a legal upper bound.
+- `seq.slice(a..b)` / `.slice(a..=b)` on an array, `Vec`, or slice → `BuiltinMethod::SequenceSlice`
+  → `codegen_sequence_slice` (`expressions/slices.rs`), the slice ABI below. It resolves **ahead
+  of** the collection method surface in `codegen_call_expr`, because a `Vec` receiver's `.slice`
+  borrows the buffer rather than acting on the header.
+- `slice.len()` → `BuiltinMethod::SliceLen` → `extractvalue` field 1 of the fat pointer (`u64`).
 - `struct.clone()` → handled in the struct method-call arm rather than `resolve_builtin_method`
   (which is keyed by `Type`): when the receiver is a struct, the field is `clone`, and no
   `StructName__clone` exists, it passes `BuiltinMethod::StructClone`. Semantic analysis already
@@ -279,15 +284,28 @@ than assuming the prelude's declaration order.
   elements `start..N` of the source (via `array_place_ptr`) and `insert_value`-ing them. A
   zero-length remainder (the rest-less arity-assert form) yields an undef `[T; 0]`, discarded in
   statement position.
+- **Slices** — `map_type` lowers `&[T]` *and* `&mut [T]` to `slice_ref_type()`, the
+  `{ ptr buffer, i64 len }` fat pointer held by value; a bare `[T]` is rejected as unsized. The
+  mutable form is by value too (unlike `&mut string`): a write through a slice goes to the buffer
+  the pointer names, not to the pair. `expressions/slices.rs` owns every operation.
+  `slice_source` reduces the three receivers to one `(buffer, element type, length)` triple —
+  an array via `array_place_ptr` with its static `N`, a `Vec` via `collection_place_ptr` plus its
+  `FIELD_LEN`/`FIELD_BUFFER`, a slice by `extractvalue` — and `codegen_slice_coerce` (the
+  `SliceCoerce` node) pairs that triple back into a fat pointer. `codegen_sequence_slice` computes
+  `(base + start, end - start)` behind a bounds guard that runs in **every** build, not only debug
+  ones: an out-of-range range hands back a *view* that outlives the check, so there is no later
+  point at which a release build could still notice. Index reads/writes and `for x in xs` keep the
+  ordinary debug-only element guard, against the runtime length instead of a constant.
 - **Newtypes** — transparent at runtime: `Type::from_hir` erases `HirType::Newtype { inner, .. }`
   to `from_hir(inner)`, so codegen never sees a newtype. `NewtypeConstruct` and `NewtypeAccess`
   both codegen their inner expression unchanged. No backend `Type` variant, type mapping, or item
   handling.
 
 ## Reference and Primitive Lowering
-`map_type` lowers a reference to an opaque `ptr`, with two exceptions: an immutable `&string`
-(the fat pointer itself, above) and `Reference(DynObject)` (the two-word `dyn_ref_type()` struct).
-A bare `DynObject` is rejected as unsized.
+`map_type` lowers a reference to an opaque `ptr`, with three exceptions: an immutable `&string`
+(the fat pointer itself, above), `Reference(DynObject)` (the two-word `dyn_ref_type()` struct),
+and `Reference(Slice)` (the two-word `slice_ref_type()` struct, mutable or not). A bare
+`DynObject` or `Slice` is rejected as unsized.
 
 `codegen_reference` returns the borrowed place's storage pointer — mutability is compile-time
 only. `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer.

@@ -14,6 +14,7 @@ mod interp;
 mod literals;
 mod matches;
 mod methods;
+mod slices;
 mod tuples;
 mod unary;
 
@@ -131,6 +132,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 let target_ty = Type::from_hir(&expr.ty);
                 self.codegen_dyn_coerce(value, &target_ty)
             }
+            // Unsizing coercion `&[T; N]` / `&Vec<T>` → `&[T]`: pair the container's
+            // buffer address with its element count.
+            HirExprKind::SliceCoerce { value } => self.codegen_slice_coerce(value),
 
             // Dereference `*operand`: load the referent through the reference.
             // The result type `T` is exactly this expression's type.
@@ -155,6 +159,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 let obj_ty = Type::from_hir(&object.ty);
                 if matches!(obj_ty.referent(), Type::Collection { .. }) {
                     return self.codegen_vec_index(object, &obj_ty, index, expr.span.start);
+                }
+                if matches!(obj_ty.referent(), Type::Slice(_)) {
+                    return self.codegen_slice_index(object, index, &obj_ty, expr.span.start);
                 }
                 self.codegen_index(object, index, &obj_ty, &expr.span)
             }
@@ -268,30 +275,32 @@ impl<'ctx> CodegenContext<'ctx> {
                     return self.codegen_method_call(&mangled, object, args);
                 }
 
-                // A standard collection's methods are compiler-known too, but their
-                // result type comes from the call (an `Option<T>` instance, a `Vec<K>`),
-                // which the callee node carries.
+                // Non-struct receiver: a compiler-known intrinsic on a builtin type.
+                // Resolved ahead of the collection surface below because `.slice(range)`
+                // borrows a `Vec`'s buffer — it hands back a `&[T]` view rather than
+                // performing an operation on the collection header.
+                //
+                // `checked_*` builds an `Option<T>` instance, so the call's result type —
+                // which only the frontend can name — travels on the callee.
+                if let Some(kind) = resolve_builtin_method(&recv_ty, field) {
+                    let result_ty = Type::from_hir(&callee.ty);
+                    return Ok(Some(self.codegen_builtin_method(
+                        kind, &recv_ty, &result_ty, object, args,
+                    )?));
+                }
+
+                // A standard collection's methods are compiler-known too, and their
+                // result type likewise comes from the call (an `Option<T>`, a `Vec<K>`).
                 if matches!(recv_ty.referent(), Type::Collection { .. }) {
                     let result_ty = Type::from_hir(&callee.ty);
                     return self
                         .codegen_collection_method(field, &recv_ty, &result_ty, object, args);
                 }
 
-                // Non-struct receiver: a compiler-known intrinsic on a builtin type.
-                match resolve_builtin_method(&recv_ty, field) {
-                    Some(kind) => {
-                        // `checked_*` builds an `Option<T>` instance, so the call's result
-                        // type — which only the frontend can name — travels on the callee.
-                        let result_ty = Type::from_hir(&callee.ty);
-                        Ok(Some(self.codegen_builtin_method(
-                            kind, &recv_ty, &result_ty, object, args,
-                        )?))
-                    }
-                    None => Err(CodegenError::InternalError(format!(
-                        "unresolved builtin method '{}' on {:?} reached codegen",
-                        field, recv_ty
-                    ))),
-                }
+                Err(CodegenError::InternalError(format!(
+                    "unresolved builtin method '{}' on {:?} reached codegen",
+                    field, recv_ty
+                )))
             }
 
             // Associated function call: `TypeName::func(args)`.

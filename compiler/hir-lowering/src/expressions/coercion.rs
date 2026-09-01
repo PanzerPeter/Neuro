@@ -1,5 +1,5 @@
-//! Type derivation shared by the expression dispatch: the trait-object unsizing
-//! coercion, contextual literal typing, and the result type of a binary operator.
+//! Type derivation shared by the expression dispatch: the unsizing coercions,
+//! contextual literal typing, and the result type of a binary operator.
 
 use neuro_hir::{HirExpr, HirExprKind, HirType};
 use shared_types::Literal;
@@ -8,13 +8,13 @@ use crate::types::{float_suffix_type, int_suffix_type};
 use crate::{is_full_float, is_integer, peels_to_string, LoweringError};
 use ast_types::BinaryOp;
 
-/// Wrap a concrete reference in the unsizing coercion `&T` → `&dyn Trait` when
-/// the context calls for a trait object and the value is not already one.
+/// Wrap a reference in whichever unsizing coercion the expected type calls for:
+/// `&T` → `&dyn Trait`, or `&[T; N]` / `&Vec<T>` → `&[T]`.
 ///
-/// This is the sole implicit conversion in the language, so it is applied at exactly one
-/// place: every context that supplies an expected type routes through here. The checker
-/// has already verified that `T` implements the trait, so no impl lookup is repeated.
-pub(super) fn apply_dyn_coercion(expr: HirExpr, expected: Option<&HirType>) -> HirExpr {
+/// These are the language's only implicit conversions, so they are applied at exactly
+/// one place: every context that supplies an expected type routes through here. The
+/// checker has already verified the conversion is legal, so nothing is re-derived.
+pub(super) fn apply_unsizing_coercion(expr: HirExpr, expected: Option<&HirType>) -> HirExpr {
     let Some(HirType::Reference {
         inner: expected_inner,
         mutable,
@@ -22,26 +22,33 @@ pub(super) fn apply_dyn_coercion(expr: HirExpr, expected: Option<&HirType>) -> H
     else {
         return expr;
     };
-    if !matches!(expected_inner.as_ref(), HirType::DynObject(_)) {
+    // Only a reference can be unsized, and one that already has the target referent
+    // shape is the coercion's own output — re-wrapping it would double the conversion.
+    let HirType::Reference { inner: found, .. } = &expr.ty else {
         return expr;
-    }
-    // A value that is already a trait object needs no coercion; anything else must be a
-    // concrete `&T` for the checker to have accepted it here.
-    match &expr.ty {
-        HirType::Reference { inner, .. } if matches!(inner.as_ref(), HirType::DynObject(_)) => expr,
-        HirType::Reference { .. } => {
-            let span = expr.span;
-            HirExpr::new(
-                HirExprKind::DynCoerce {
-                    value: Box::new(expr),
-                },
-                HirType::Reference {
-                    inner: expected_inner.clone(),
-                    mutable: *mutable,
-                },
-                span,
-            )
-        }
+    };
+    let target = HirType::Reference {
+        inner: expected_inner.clone(),
+        mutable: *mutable,
+    };
+    let span = expr.span;
+    match (expected_inner.as_ref(), found.as_ref()) {
+        (HirType::DynObject(_), HirType::DynObject(_)) => expr,
+        (HirType::DynObject(_), _) => HirExpr::new(
+            HirExprKind::DynCoerce {
+                value: Box::new(expr),
+            },
+            target,
+            span,
+        ),
+        (HirType::Slice(_), HirType::Slice(_)) => expr,
+        (HirType::Slice(_), _) => HirExpr::new(
+            HirExprKind::SliceCoerce {
+                value: Box::new(expr),
+            },
+            target,
+            span,
+        ),
         _ => expr,
     }
 }

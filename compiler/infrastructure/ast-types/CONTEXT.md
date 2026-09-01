@@ -74,8 +74,12 @@ walkers.
   has one operand, and its type comes from that operand's success payload while its *failure*
   path is typed by the enclosing function's return type.
 - `Expr::Range { start, end, inclusive, span }` is **not** a first-class value — it is valid only
-  as a `string.slice` argument, and semantic analysis rejects it elsewhere. `for`-range loops keep
-  their bounds on `Stmt::ForRange` and never produce it.
+  as a `.slice` / `.char_slice` argument, and semantic analysis rejects it elsewhere. `for`-range
+  loops keep their bounds on `Stmt::ForRange` and never produce it.
+- `Type::Slice { element, span }` is `[T]`, the unsized run behind `&[T]` / `&mut [T]`. It shares
+  its opening bracket with `Type::Array`, and the `;` (or its absence before `]`) is what the
+  parser selects on. Like `Type::DynTrait` it is valid only as a reference referent; semantic
+  analysis rejects a bare one.
 - `Stmt::ForRange` / `Stmt::ForEach` carry `index: Option<Identifier>` — the position binding of
   `for (i, x) in xs.enumerate()`, a `u64` counting from zero. `.enumerate()` is an *arity* on the
   loop node rather than an adapter expression because there is no iterator protocol to return one

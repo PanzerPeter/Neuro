@@ -13,7 +13,7 @@ impl TypeChecker {
     /// The root binding name of a place expression, peeling parentheses, field
     /// access, and dereference (`(o).inner` and `*o` both root at `o`). A receiver
     /// with no place root — a call or literal temporary — yields `None`.
-    pub(super) fn place_root_name(expr: &Expr) -> Option<String> {
+    pub(crate) fn place_root_name(expr: &Expr) -> Option<String> {
         match expr {
             Expr::Identifier(ident) => Some(ident.name.clone()),
             Expr::Paren(inner, _) => Self::place_root_name(inner),
@@ -127,9 +127,9 @@ impl TypeChecker {
     }
 
     /// A range `a..b` is not a first-class value: it is consumed directly
-    /// by `string.slice` / `string.char_slice` via `check_string_slice`, so reaching it
-    /// through the general expression path means it was used somewhere a range is not
-    /// allowed. Still check the bounds for cascaded diagnostics.
+    /// by the `.slice` / `.char_slice` intrinsics, so reaching it through the general
+    /// expression path means it was used somewhere a range is not allowed. Still check
+    /// the bounds for cascaded diagnostics.
     pub(super) fn check_range_expr(
         &mut self,
         start: &Expr,
@@ -169,7 +169,9 @@ impl TypeChecker {
             return Some(element);
         }
         match obj_ty.referent() {
-            Type::Array { element, .. } => Some((**element).clone()),
+            // A slice indexes exactly like the array or `Vec` it borrows; the only
+            // difference is that its bound is a runtime length, not a constant.
+            Type::Array { element, .. } | Type::Slice(element) => Some((**element).clone()),
             other => {
                 self.record_error(TypeError::NotIndexable {
                     found: other.clone(),

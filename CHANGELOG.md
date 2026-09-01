@@ -9,6 +9,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-09-01
+
+### Added
+
+- **Borrowed slices `&[T]` / `&mut [T]` — one signature over an array, a sub-range, and a
+  `Vec`.** A function that only reads or writes elements had to pick a container and commit
+  to it: `[i32; 4]` and `Vec<i32>` are different types, and `[i32; 4]` and `[i32; 5]` are two
+  more, so a `sum` worth writing once had to be written four times or made generic over
+  something it does not actually care about. A slice is the shape it does care about — a
+  pointer and a length — and it is the array-and-`Vec` analogue of the `&string` that has
+  served text since 1C.
+
+  ```neuro
+  func sum(xs: &[i32]) -> i32 {
+      mut total = 0
+      for x in xs { total = total + x }
+      total
+  }
+
+  val a = sum(&fixed)                // whole array
+  val b = sum(fixed.slice(1..3))     // sub-range, zero copy
+  val c = sum(&grown)                // Vec, same signature
+  ```
+
+  `&[T; N]`, `&Vec<T>`, and `&[T]` all satisfy a `&[T]` parameter, and the `&mut` forms a
+  `&mut [T]` one. Mutability matches exactly — there is no weakening in either direction.
+  Nothing is copied at the boundary: the conversion reads the container's buffer address and
+  its element count, which the container was already holding.
+
+  `.slice(a..b)` and `.slice(a..=b)` take a sub-range of an array, a `Vec`, or another slice,
+  again with no copy. `.len()` is O(1) over the borrowed run rather than the container.
+  Indexing is bounds-checked exactly as on the owner, and `xs[i] = v` through a `&mut [T]`
+  writes into the owner's buffer, so an in-place pass over an array is a function that takes
+  a slice and returns nothing. `for x in xs` and `.enumerate()` work as they do on an array.
+
+  The range check runs in **every** build, debug and release alike — unlike the index check,
+  which stays debug-only. The asymmetry is the point: a bad index is one bad read, while a
+  bad range hands back a *view* that outlives the check and misreads on every later access,
+  so there is no later moment at which a release build could still catch it.
+
+  A slice is a borrow and the borrow checker treats it as one. A live view counts as a shared
+  borrow of the place it came from, so taking a `&mut` of that place while the view is alive
+  is rejected, and returning a view of a function-local buffer is the same dangling-reference
+  error as returning `&local`.
+
+  `[T]` on its own is unsized and never appears outside a reference; writing it as a bare
+  parameter type is a diagnostic that shows the two spellings that do work. The owned forms
+  remain `[T; N]` and `Vec<T>`.
+
+### Fixed
+
+- Arguments to struct methods, associated functions, and trait-dispatched methods were
+  checked for exact type compatibility rather than assignability, so the `&T` → `&dyn Trait`
+  unsizing that a plain function call has always accepted was silently refused at those three
+  call sites. All four paths now agree.
+
 ## [2.5.0] - 2026-08-31
 
 ### Added

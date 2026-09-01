@@ -752,6 +752,16 @@ impl<'ctx> CodegenContext<'ctx> {
                         body,
                     );
                 }
+                if matches!(obj_ty.referent(), Type::Slice(_)) {
+                    return self.codegen_slice_for_each(
+                        label.as_deref(),
+                        index.as_deref(),
+                        iterator,
+                        iterable,
+                        &obj_ty,
+                        body,
+                    );
+                }
                 self.codegen_for_each(label.as_deref(), index.as_deref(), iterator, iterable, body)
             }
             HirStmt::IndexAssignment {
@@ -763,6 +773,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 let target_ty = self.type_env.get(target).cloned();
                 if let Some(ty @ Type::Collection { .. }) = target_ty {
                     return self.codegen_vec_index_assignment(target, &ty, index, value);
+                }
+                if let Some(ty) = target_ty.filter(|t| matches!(t.referent(), Type::Slice(_))) {
+                    return self.codegen_slice_index_assignment(target, &ty, index, value);
                 }
                 self.codegen_index_assignment(target, index, value)
             }

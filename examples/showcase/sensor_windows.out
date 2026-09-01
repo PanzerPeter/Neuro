@@ -1,0 +1,9 @@
+all       n=6  total= 238  peak= 91  mean=39.67
+midday    n=3  total= 121  peak= 91  mean=40.33
+  hour 0:  12
+  hour 1:  45
+  hour 2:   7
+clamped 2 reading(s) to 50
+capped    n=6  total= 187  peak= 50  mean=31.17
+spares    n=3  total=  92  peak= 44  mean=30.67
+headroom below 60 = 10

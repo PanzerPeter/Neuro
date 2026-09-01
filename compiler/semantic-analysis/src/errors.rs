@@ -128,6 +128,9 @@ pub enum TypeError {
     #[error("`dyn {trait_name}` at {span:?} is unsized and must appear behind a reference — write `&dyn {trait_name}` or `&mut dyn {trait_name}`")]
     DynTraitNotBehindReference { trait_name: String, span: Span },
 
+    #[error("`[{element}]` at {span:?} is unsized and must appear behind a reference — write `&[{element}]` or `&mut [{element}]`")]
+    SliceNotBehindReference { element: String, span: Span },
+
     #[error("trait '{trait_name}' is not object-safe and cannot be used as `dyn {trait_name}` at {span:?}: {reason}")]
     TraitNotObjectSafe {
         trait_name: String,

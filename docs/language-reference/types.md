@@ -15,6 +15,7 @@ expression already carries the type the checker resolved for it.
 - Implemented: string type
 - Implemented: structs (definition, instantiation, field access, field mutation)
 - Implemented: fixed-size arrays `[T; N]` of `Copy` elements
+- Implemented: borrowed slices `&[T]` / `&mut [T]` over an array, a `Vec<T>`, or a sub-range
 - Implemented: tuples `(T1, T2, ...)` of `Copy` elements, with destructuring
 - Implemented: generic functions, structs, and impls, monomorphized
 - Implemented: traits, operator traits, and `impl` / `dyn` dispatch
@@ -1061,7 +1062,7 @@ func returns_i32() -> i32 {
 - Explicit type annotations + contextual numeric inference with range validation
 - Explicit type conversions via `as`
 - Function types, strict type checking, type-mismatch error reporting
-- Structs, methods, fixed-size arrays `[T; N]`, tuples + destructuring, type aliases
+- Structs, methods, fixed-size arrays `[T; N]`, borrowed slices `&[T]` / `&mut [T]`, tuples + destructuring, type aliases
 - Enums with associated data `enum E { A, B(T), C { f: T } }`, generic enums `enum Slot<T> { ... }`
 - Pattern matching, newtypes
 - Generics + monomorphization, traits, operator traits, static/dynamic dispatch, closures
@@ -1337,6 +1338,55 @@ for x in &a {  }                     // iterate over a borrow
 - **Iteration**: `for x in arr` / `for x in &arr` bind each element in order, and
   `for (i, x) in arr.enumerate()` binds its `u64` position alongside it (see
   [Control Flow](control-flow.md)).
+
+## Borrowed Slices (`&[T]` / `&mut [T]`)
+
+`&[T]` is a non-owning `(ptr, len)` view over a contiguous run of `T` — the array-and-`Vec`
+analogue of `&string`. A function that only reads or writes elements takes one, and stops
+caring whether they came from a `[T; N]`, a `Vec<T>`, or the interior of either.
+
+```neuro
+func sum(xs: &[i32]) -> i32 {
+    mut total = 0
+    for x in xs { total = total + x }
+    total
+}
+
+func double_each(xs: &mut [i32]) {
+    mut i: u64 = 0
+    while i < xs.len() {
+        xs[i] = xs[i] * 2
+        i = i + 1
+    }
+}
+
+val fixed: [i32; 4] = [1, 2, 3, 4]
+mut grown: Vec<i32> = Vec::new()
+
+val a = sum(&fixed)                  // whole array
+val b = sum(fixed.slice(1..3))       // sub-range, zero copy
+val c = sum(&grown)                  // Vec, same signature
+```
+
+- **`[T]` alone is unsized** and never appears outside a reference; annotating a parameter
+  `[T]` is a compile error. The owned forms are `[T; N]` and `Vec<T>`.
+- **Unsizing**: `&[T; N]`, `&Vec<T>`, and `&[T]` all satisfy a `&[T]` parameter, and the
+  `&mut` forms a `&mut [T]` one. Mutability must match exactly — there is no `&T` → `&mut T`
+  strengthening, and no `&mut T` → `&T` weakening.
+- **`.slice(range)`** on an array, a `Vec<T>`, or another slice yields a `&[T]` view over the
+  named sub-range, copying nothing. It accepts `a..b` and `a..=b`. An out-of-range or reversed
+  range panics in **every** build, debug and release alike: the call hands back a view that
+  outlives the check, so there is no later point at which the mistake could still be caught.
+- **`.len()`** is O(1), read from the length word of the view — the borrowed run's length, not
+  the container's.
+- **Indexing** is bounds-checked exactly as on the owning container: debug builds panic on an
+  out-of-range index, release builds omit the check. `xs[i] = v` requires a `&mut [T]`; the
+  write reaches the buffer, so the owner sees it.
+- **Iteration**: `for x in xs` binds each element by value, and `.enumerate()` works on a
+  slice like it does on an array.
+- **Borrow rules** are the ordinary ones. A live view counts as a shared borrow of the place
+  it came from, so a `&mut` of that place while the view is alive is rejected, and returning a
+  view of a function-local buffer is rejected as a dangling reference.
 
 ## Tuples
 

@@ -36,9 +36,11 @@ Bind every call site's arguments to the callee's parameters in declaration order
   own type annotation (`ParamBinding::ty`), because a binding is typed by its initializer
   while an argument is typed by its parameter, and `Vec::new()` or an `i64` literal would
   otherwise lose that. The annotation is dropped when it would not mean the same thing at a
-  call site — a type parameter of the callee, `Self`, `impl Trait`, `dyn Trait`, a function
-  type — and for every method signature, which is agreed across impls by parameter *name*
-  and so cannot promise a type. Only these calls give up the identical-IR property; a call
+  call site — a type parameter of the callee, `Self`, `impl Trait`, `dyn Trait`, `&[T]`, a
+  function type — the last three because an argument reaches them through a coercion an
+  argument position applies and a binding does not. It is dropped for every method signature
+  too, since a method signature is agreed across impls by parameter *name* and so cannot
+  promise a type. Only these calls give up the identical-IR property; a call
   of literals, or one whose permutation moves nothing observable, is still permuted in place.
 - **The rewrite is skipped when the callee is an expression rather than a name.** A method's
   receiver is evaluated before its arguments, so hoisting them ahead of a computed receiver

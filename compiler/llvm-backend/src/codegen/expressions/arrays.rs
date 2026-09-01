@@ -321,7 +321,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// An owned-array identifier uses its alloca directly; a borrow of an array
     /// (`&[T; N]`) evaluates the operand to the array's address; any other
     /// array-valued expression is materialised into a fresh temporary.
-    fn array_place_ptr(
+    pub(super) fn array_place_ptr(
         &mut self,
         object: &HirExpr,
         obj_ty: &Type,
@@ -403,7 +403,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Widen an integer index value to `i64` for GEP and the bounds compare, using
     /// zero-extension for unsigned index types and sign-extension for signed ones.
-    fn widen_index_to_i64(
+    pub(super) fn widen_index_to_i64(
         &self,
         idx: IntValue<'ctx>,
         idx_sem: &Type,

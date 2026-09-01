@@ -178,6 +178,19 @@ Key design goals:
   alongside the element; the same head works over `Vec<T>` and over a parenthesised range
 - Out-of-bounds index panics in debug builds (`-O0`); release builds omit the check
 
+### Borrowed slices (2A)
+
+- `&[T]` / `&mut [T]`: a non-owning `(ptr, len)` view over a contiguous run, the array-and-`Vec`
+  analogue of `&string`. `[T]` alone is unsized and is rejected outside a reference
+- One signature serves every source: `&[T; N]`, `&Vec<T>`, and `&[T]` all satisfy a `&[T]`
+  parameter, and the `&mut` forms a `&mut [T]` one. Mutability must match exactly
+- `.slice(a..b)` / `.slice(a..=b)` on an array, a `Vec<T>`, or a slice yields a sub-range view
+  with no copy; an out-of-range range panics in **every** build, since the view outlives the check
+- `.len()` is O(1) over the borrowed run; indexing is bounds-checked as on the owner, and
+  `xs[i] = v` through a `&mut [T]` reaches the owner's buffer
+- `for x in xs` and `.enumerate()` work as they do on an array; a live view is a shared borrow
+  of its source, so a `&mut` of that source is rejected while it lives
+
 ### Tuples (1E)
 
 - Anonymous `(T1, T2, ...)` of `Copy` elements: literals, `.0`/`.1` constant index access

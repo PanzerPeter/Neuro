@@ -157,7 +157,9 @@ fn rewrite_type(ty: &mut Type, resolved: &HashMap<String, Type>) {
             }
         }
         Type::Reference { inner, .. } => rewrite_type(inner, resolved),
-        Type::Array { element, .. } => rewrite_type(element, resolved),
+        Type::Array { element, .. } | Type::Slice { element, .. } => {
+            rewrite_type(element, resolved)
+        }
         Type::Tuple { elements, .. } => {
             for element in elements {
                 rewrite_type(element, resolved);
@@ -482,6 +484,7 @@ mod tests {
             Type::Named(ident) => ident.name.as_str(),
             Type::Reference { .. } => "<reference>",
             Type::Array { .. } => "<array>",
+            Type::Slice { .. } => "<slice>",
             Type::Tuple { .. } => "<tuple>",
             Type::Generic { .. } => "<generic>",
             Type::Tensor { .. } => "<tensor>",
