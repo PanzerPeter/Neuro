@@ -207,6 +207,13 @@ fn map_type<'c>(context: &'c Context, ty: &HirType) -> Result<Type<'c>, MlirErro
                 "unsized `dyn {name}` cannot appear in value position"
             )))
         }
+        // A slice is unsized for the same reason: only `&[T]` / `&mut [T]` are
+        // values, and the reference arm above already maps those to a pointer.
+        HirType::Slice(element) => {
+            return Err(MlirError::UnsupportedType(format!(
+                "unsized `[{element}]` cannot appear in value position"
+            )))
+        }
     };
     Ok(mapped)
 }
