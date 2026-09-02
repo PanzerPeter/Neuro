@@ -160,3 +160,100 @@ impl Point {
 "#;
     assert!(parse(source).is_err(), "bare `Self` should be rejected");
 }
+
+#[test]
+fn parses_an_associated_type_binding_in_a_bound() {
+    let source = r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+func head<T: Source<Item = i32>>(src: &T) -> i32 { 0 }
+"#;
+    let items = parse(source).expect("a constrained bound should parse");
+    let func = items
+        .iter()
+        .find_map(|item| match item {
+            Item::Function(f) => Some(f),
+            _ => None,
+        })
+        .expect("expected a function item");
+    let bound = &func.generics[0].bounds[0];
+    assert_eq!(bound.trait_name.name, "Source");
+    let [(name, syntax_parsing::Type::Named(ty))] = &bound.assoc_bindings[..] else {
+        panic!("expected one associated-type binding");
+    };
+    assert_eq!(name.name, "Item");
+    assert_eq!(ty.name, "i32");
+}
+
+#[test]
+fn a_where_clause_bound_takes_the_same_constraint() {
+    let source = r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+func head<T>(src: &T) -> i32 where T: Source<Item = i32> { 0 }
+"#;
+    let items = parse(source).expect("a constrained where bound should parse");
+    let func = items
+        .iter()
+        .find_map(|item| match item {
+            Item::Function(f) => Some(f),
+            _ => None,
+        })
+        .expect("expected a function item");
+    let bound = &func.generics[0].bounds[0];
+    assert_eq!(bound.trait_name.name, "Source");
+    assert_eq!(bound.assoc_bindings.len(), 1);
+    assert_eq!(bound.assoc_bindings[0].0.name, "Item");
+}
+
+#[test]
+fn argument_position_impl_trait_carries_its_constraint_into_the_bound() {
+    let source = r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+func head(src: &impl Source<Item = i32>) -> i32 { 0 }
+"#;
+    let items = parse(source).expect("a constrained `impl Trait` argument should parse");
+    let func = items
+        .iter()
+        .find_map(|item| match item {
+            Item::Function(f) => Some(f),
+            _ => None,
+        })
+        .expect("expected a function item");
+    // The desugar appends one anonymous parameter per `impl Trait` occurrence, and the
+    // constraint has to survive it or the bound would say less than what was written.
+    let bound = &func.generics[0].bounds[0];
+    assert_eq!(bound.trait_name.name, "Source");
+    assert_eq!(bound.assoc_bindings.len(), 1);
+    assert_eq!(bound.assoc_bindings[0].0.name, "Item");
+}
+
+#[test]
+fn a_bound_takes_no_positional_type_argument() {
+    let source = r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+func head<T: Source<i32>>(src: &T) -> i32 { 0 }
+"#;
+    assert!(
+        parse(source).is_err(),
+        "only `Assoc = T` entries constrain a bound; a positional argument names nothing"
+    );
+}

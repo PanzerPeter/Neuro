@@ -185,6 +185,20 @@ impl TypeChecker {
         for e in errors {
             self.record_error(e);
         }
+        // The bindings are in scope as `self_assoc` for exactly this block; recording
+        // them keyed by the pair is what lets a `Trait<Assoc = T>` bound elsewhere ask
+        // what this impl chose.
+        let bindings: HashMap<String, Type> = info
+            .assoc_types
+            .iter()
+            .filter_map(|name| {
+                self.self_assoc
+                    .get(name)
+                    .map(|ty| (name.clone(), ty.clone()))
+            })
+            .collect();
+        self.impl_assoc
+            .insert((trait_name.to_string(), struct_name.to_string()), bindings);
         self.trait_impls
             .insert((trait_name.to_string(), struct_name.to_string()));
     }

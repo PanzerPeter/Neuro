@@ -19,7 +19,7 @@ func measure(s: &impl Shape) -> i32 { 0 }
     let param = &func.generics[0];
     assert!(matches!(param.kind, GenericParamKind::Type));
     assert_eq!(param.bounds.len(), 1);
-    assert_eq!(param.bounds[0].name, "Shape");
+    assert_eq!(param.bounds[0].trait_name.name, "Shape");
 
     // The parameter annotation now names that generated parameter, behind the `&`.
     let Type::Reference { inner, .. } = &func.params[0].ty else {
@@ -60,7 +60,7 @@ func mix<T>(a: T, b: &impl Shape) -> i32 { 0 }
     assert_eq!(func.generics.len(), 2);
     assert_eq!(func.generics[0].name.name, "T");
     assert!(func.generics[0].bounds.is_empty());
-    assert_eq!(func.generics[1].bounds[0].name, "Shape");
+    assert_eq!(func.generics[1].bounds[0].trait_name.name, "Shape");
 }
 
 /// Return-position `impl Trait` is NOT desugared: it names one concrete type chosen by

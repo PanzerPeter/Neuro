@@ -6,6 +6,10 @@ use crate::errors::{ParseError, ParseResult};
 
 use super::Parser;
 
+/// A bound's parsed `<Assoc = T, ...>` list and the span of its closing `>`, both empty
+/// for the bare `Trait` form.
+pub(super) type AssocBindings = (Vec<(Identifier, Type)>, Option<Span>);
+
 /// The only form `Self` takes in a type annotation: bare `Self` is not one, because the
 /// implementing type is always nameable where an annotation is written.
 const SELF_ASSOC_FORM: &str = "`Self::` followed by an associated type name — bare `Self` is not a type annotation, name the type itself";
@@ -141,8 +145,13 @@ impl Parser {
                 expected: "'impl'".to_string(),
             })?;
             let trait_name = self.parse_trait_ref_name("trait name after `impl`")?;
-            let span = kw.span.merge(trait_name.span);
-            return Ok(Type::ImplTrait { trait_name, span });
+            let (assoc_bindings, close_span) = self.parse_assoc_bindings()?;
+            let span = kw.span.merge(close_span.unwrap_or(trait_name.span));
+            return Ok(Type::ImplTrait {
+                trait_name,
+                assoc_bindings,
+                span,
+            });
         }
         // Dynamic-dispatch trait object `dyn Trait`: the `dyn` keyword followed
         // by a trait name. Valid only behind a reference; semantic rejects a bare `dyn`.
@@ -237,6 +246,53 @@ impl Parser {
                 span: token.span,
             }),
         }
+    }
+
+    /// Parse the optional `<Assoc = T, ...>` constraint list that follows a trait name
+    /// in a bound, returning the bindings and the span of the closing `>`.
+    ///
+    /// Both are empty / `None` when no `<` follows, which is the bare `Trait` form. A
+    /// trait's own generic parameters are not bound positionally here: every entry must
+    /// name an associated type, so a positional argument is a parse error rather than a
+    /// silently accepted one.
+    pub(super) fn parse_assoc_bindings(&mut self) -> ParseResult<AssocBindings> {
+        if !self.check(&TokenKind::Less) {
+            return Ok((Vec::new(), None));
+        }
+        self.consume(TokenKind::Less, "'<'")?;
+        self.skip_newlines();
+        let mut bindings = Vec::new();
+        loop {
+            let name_token = self.consume(
+                TokenKind::Identifier(String::new()),
+                "associated type name in a `Trait<Assoc = T>` bound",
+            )?;
+            let TokenKind::Identifier(name) = name_token.kind else {
+                return Err(ParseError::UnexpectedToken {
+                    found: name_token.kind,
+                    expected: "associated type name in a `Trait<Assoc = T>` bound".to_string(),
+                    span: name_token.span,
+                });
+            };
+            self.consume(TokenKind::Equal, "'=' after an associated type name")?;
+            self.skip_newlines();
+            let ty = self.parse_type()?;
+            bindings.push((
+                Identifier {
+                    name,
+                    span: name_token.span,
+                },
+                ty,
+            ));
+            self.skip_newlines();
+            if !self.check(&TokenKind::Comma) {
+                break;
+            }
+            self.advance(); // ','
+            self.skip_newlines();
+        }
+        let close = self.consume(TokenKind::Greater, "'>'")?;
+        Ok((bindings, Some(close.span)))
     }
 
     /// Parse a `<T1, N, ...>` generic-argument list in a type application. Each

@@ -6,7 +6,7 @@
 
 use crate::errors::TypeError;
 use crate::type_checkers::val_else::{stmt_diverges, stmts_diverge};
-use crate::type_checkers::{GenericFnSig, TypeChecker};
+use crate::type_checkers::{BoundInfo, GenericFnSig, TypeChecker};
 use crate::types::Type;
 use ast_types::{Expr, FunctionDef, Stmt};
 use shared_types::Span;
@@ -55,9 +55,11 @@ impl TypeChecker {
         // `impl Trait` is static dispatch: it resolves transparently to the one
         // concrete type the body constructs, so callers see that type directly.
         let return_type = match &func.return_type {
-            Some(ast_types::Type::ImplTrait { trait_name, span }) => {
-                self.resolve_impl_return(&trait_name.name, &func.body, *span)
-            }
+            Some(ast_types::Type::ImplTrait {
+                trait_name,
+                assoc_bindings,
+                span,
+            }) => self.resolve_impl_return(&trait_name.name, assoc_bindings, &func.body, *span),
             Some(ret_ty) => self.resolve_type(ret_ty).unwrap_or(Type::Void),
             None => Type::Void,
         };
@@ -101,14 +103,17 @@ impl TypeChecker {
                     ast_types::GenericParamKind::Type => None,
                 })
                 .collect();
-            let bounds: HashMap<String, Vec<String>> = func
+            let bounds: HashMap<String, Vec<BoundInfo>> = func
                 .generics
                 .iter()
                 .filter(|g| !g.bounds.is_empty())
                 .map(|g| {
                     (
                         g.name.name.clone(),
-                        g.bounds.iter().map(|b| b.name.clone()).collect(),
+                        self.generic_bounds
+                            .get(&g.name.name)
+                            .cloned()
+                            .unwrap_or_default(),
                     )
                 })
                 .collect();
@@ -317,6 +322,7 @@ impl TypeChecker {
     pub(super) fn resolve_impl_return(
         &mut self,
         trait_name: &str,
+        assoc_bindings: &[(shared_types::Identifier, ast_types::Type)],
         body: &[Stmt],
         span: Span,
     ) -> Type {
@@ -341,6 +347,20 @@ impl TypeChecker {
                 ty: concrete.clone(),
                 span,
             });
+            return concrete;
+        }
+        // `-> impl Trait<Assoc = T>` promises the caller what the concrete type's impl
+        // bound the associated type to, so the two must agree.
+        let bound = ast_types::TraitBound {
+            trait_name: shared_types::Identifier {
+                name: trait_name.to_string(),
+                span,
+            },
+            assoc_bindings: assoc_bindings.to_vec(),
+        };
+        let resolved = self.resolve_bounds(std::slice::from_ref(&bound));
+        for info in &resolved {
+            self.check_assoc_bindings(info, &concrete, span);
         }
         concrete
     }

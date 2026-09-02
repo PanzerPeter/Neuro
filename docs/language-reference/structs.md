@@ -438,11 +438,36 @@ nested inside another type (`Option<Self::Sample>`). An impl may spell the posit
 way — `-> i32` above means the same thing. Conformance requires every declared associated
 type to be bound, and rejects a binding the trait never declared.
 
-Two positions erase the implementing type and therefore cannot say what an associated type
-is. Both are rejected rather than guessed, and both wait on the `Trait<Assoc = T>` bound form:
+### Constraining an associated type in a bound
 
-- a trait declaring an associated type is **not object-safe**, so it has no `dyn` form
-- a method whose signature names one cannot be called through a bare `T: Trait` bound
+A bare `T: Channel` bound erases the implementor, and with it the only thing that says what
+`Sample` is — so a generic body cannot call a method whose signature names it. The
+`Trait<Assoc = T>` form puts the answer in the bound:
+
+```neuro
+func scaled<T: Channel<Sample = i32>>(source: &T, factor: i32) -> i32 {
+    source.sample() * factor       // typed as i32 by the bound
+}
+```
+
+The constraint is written wherever a bound is:
+
+```neuro
+func clause<T>(source: &T) -> i32 where T: Channel<Sample = i32> { source.sample() }
+
+func anonymous(source: &impl Channel<Sample = i32>) -> i32 { source.sample() }
+
+func make(seed: i32) -> impl Channel<Sample = i32> { Tally { counted: seed } }
+```
+
+At the call site the concrete type argument's own binding must match the one the bound
+demands: passing a `Channel` implementor whose `type Sample = f64` to a `Sample = i32` bound
+is an error naming both types. A bound may only constrain an associated type the trait
+declares, and a bare bound still cannot type a call to a method that names one.
+
+A trait declaring an associated type remains **not object-safe**, so it has no `dyn` form: a
+trait object erases the implementor, which is exactly what the binding would have to come
+from.
 
 ## Unsupported (Phase 1+)
 

@@ -233,11 +233,21 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("method '{method}' of trait '{trait_name}' at {span:?} names associated type `Self::{assoc}`, which a bound on a type parameter cannot yet constrain: call it on a concrete type (the `{trait_name}<{assoc} = T>` bound form is not implemented)")]
+    #[error("method '{method}' of trait '{trait_name}' at {span:?} names associated type `Self::{assoc}`, which this bound leaves open: write `{trait_name}<{assoc} = T>` to say what it is")]
     UnconstrainedAssociatedType {
         trait_name: String,
         method: String,
         assoc: String,
+        span: Span,
+    },
+
+    #[error("bound `{trait_name}<{assoc} = {expected}>` at {span:?} is not satisfied by {ty}, which binds `{assoc}` to {found}")]
+    AssociatedTypeBoundMismatch {
+        trait_name: String,
+        assoc: String,
+        expected: Type,
+        found: Type,
+        ty: Type,
         span: Span,
     },
 

@@ -108,7 +108,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | **Types & inference** | `i8` through `u64`, `f16`/`bf16`/`f32`/`f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, type aliases, `.is_nan()` |
 | **Functions & control flow** | Recursion, forward refs, implicit returns, named arguments with external labels (`clamp(x, min: 0.0)`); `if`/`elif`/`else`, `while`, `loop`, range-`for`, `for (i, x) in xs.enumerate()`, labelled `break`/`continue`, block-as-value |
 | **Generics** | Generic functions, structs, and impls plus const generics, `where` clauses, and turbofish, all fully monomorphized at zero runtime cost |
-| **Traits & dispatch** | Required and default methods, associated types (`type Item` / `Self::Item`), operator traits, `impl Trait` (static) and `dyn Trait` (vtable) dispatch with object-safety checks |
+| **Traits & dispatch** | Required and default methods, associated types (`type Item` / `Self::Item`) and `Trait<Assoc = T>` bounds, operator traits, `impl Trait` (static) and `dyn Trait` (vtable) dispatch with object-safety checks |
 | **Closures & lambdas** | `\|x: i32\| x * x`, `move` closures, `(T) -> R` function types, higher-order functions; compiled to `{ fn_ptr, env_ptr }`, no heap |
 | **Structs & methods** | Fields, shorthand init, functional update `..base`, `impl` blocks with `&self` / `&mut self` methods and associated functions |
 | **Enums & newtypes** | Unit, tuple, and struct-field variants; generic enums monomorphized per type argument; `newtype` for distinct nominal wrappers |

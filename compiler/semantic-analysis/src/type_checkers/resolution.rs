@@ -413,7 +413,7 @@ impl TypeChecker {
                 return self
                     .generic_bounds
                     .get(p)
-                    .is_some_and(|b| b.iter().any(|t| t == trait_name));
+                    .is_some_and(|b| b.iter().any(|t| t.trait_name == trait_name));
             }
             _ => return false,
         };

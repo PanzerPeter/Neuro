@@ -3,7 +3,7 @@ use shared_types::Identifier;
 
 use crate::ast::{
     Attribute, ConstDef, GenericParam, GenericParamKind, Item, MethodDef, ModuleDef, NewtypeDef,
-    TraitMethod, Type,
+    TraitBound, TraitMethod, Type,
 };
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
@@ -459,14 +459,21 @@ pub(super) fn desugar_impl_trait_params(
     generics: &mut Vec<GenericParam>,
 ) -> Type {
     match ty {
-        Type::ImplTrait { trait_name, span } => {
+        Type::ImplTrait {
+            trait_name,
+            assoc_bindings,
+            span,
+        } => {
             let name = format!("__impl{}", *counter);
             *counter += 1;
             let ident = Identifier { name, span: *span };
             generics.push(GenericParam {
                 name: ident.clone(),
                 kind: GenericParamKind::Type,
-                bounds: vec![trait_name.clone()],
+                bounds: vec![TraitBound {
+                    trait_name: trait_name.clone(),
+                    assoc_bindings: assoc_bindings.clone(),
+                }],
                 span: *span,
             });
             Type::Named(ident)

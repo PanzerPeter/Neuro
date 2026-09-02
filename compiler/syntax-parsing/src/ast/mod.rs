@@ -5,5 +5,5 @@ pub use ast_types::{
     EnumVariant, Expr, FieldDef, FieldInit, FieldPattern, FunctionDef, GenericArg, GenericParam,
     GenericParamKind, ImplDef, ImportDef, ImportName, ImportSelection, InterpPart, Item, MatchArm,
     MethodDef, ModuleDef, NewtypeDef, ParamLabel, Parameter, Pattern, SelfParam, Stmt, StructDef,
-    TraitDef, TraitMethod, Type, UnaryOp, VariantPayload,
+    TraitBound, TraitDef, TraitMethod, Type, UnaryOp, VariantPayload,
 };

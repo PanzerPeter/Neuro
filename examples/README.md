@@ -19,7 +19,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | Directory        | What it covers                                                         |
 | ---------------- | ---------------------------------------------------------------------- |
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` to stdout |
-| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` byte sub-slices and `.char_slice(range)` codepoint sub-slices, borrowed slices `&[T]` / `&mut [T]` over arrays and `Vec`s, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer |
+| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` byte sub-slices and `.char_slice(range)` codepoint sub-slices, borrowed slices `&[T]` / `&mut [T]` over arrays and `Vec`s, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), associated-type bounds (`T: Source<Item = i32>`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result`, `?` error propagation |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `for (i, x) in xs.enumerate()`, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
@@ -119,7 +119,9 @@ isolation:
   type could not do. Combined with a trait default method (`channel_id`, inherited by the tally
   and overridden by the others), `@derive(Copy)` structs with `&self` methods, a drain returning
   `Option<Self::Sample>` unwrapped by `match`, `Vec<i32>` + `for`-in, an if-expression, and
-  interpolation with the format mini-language (`:.1`, `:>4`). Exit `92`.
+  interpolation with the format mini-language (`:.1`, `:>4`). A `Channel<Sample = i32>`
+  bound then reads every counted channel through one generic body — the constraint the
+  trait declaration alone cannot express. Exit `108`.
 - [`showcase/vector_physics.nr`](showcase/vector_physics.nr) — **operator traits**:
   a `Copy` `Vec2` implementing `Add` / `Sub` / `Neg` / `PartialEq`, so `+` / `-` / unary
   `-` / `==` dispatch to the impl methods, combined with an `&self` method, compound

@@ -107,10 +107,12 @@ Key design goals:
   call site. Fully monomorphized and erased, so there is no vtable and no runtime cost.
   A trait may declare **associated types** (`type Item`), bound by each impl
   (`type Item = i32`) and named as `Self::Item` on either side, including nested
-  (`Option<Self::Item>`). A trait declaration itself carries no generic parameters yet, and
-  the `Trait<Assoc = T>` bound form is not implemented — so a trait with an associated type
-  is not object-safe, and a method whose signature names one cannot be called through a
-  bare `T: Trait` bound
+  (`Option<Self::Item>`). A bound constrains one with `T: Trait<Item = i32>`, in the
+  parameter list, a `where` clause, or an `impl Trait` position, which is what lets a
+  generic body call a method whose signature names it; the concrete type argument's own
+  binding must match. A bare `T: Trait` bound still cannot type such a call, and a trait
+  declaring an associated type is not object-safe (a `dyn` erases the implementor).
+  A trait declaration itself carries no generic parameters yet
 - **Static & dynamic dispatch** (1F): `impl Trait` in argument position
   (`func train(m: &impl Model)`) and return position (`func make() -> impl Shape`) is
   anonymous-generic sugar: monomorphized at zero cost, and each `impl Trait` parameter is its
