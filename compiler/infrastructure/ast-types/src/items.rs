@@ -233,9 +233,10 @@ pub struct ImplDef {
     /// Value predicates from an impl-level `where` clause, checked at each
     /// instantiation (see [`FunctionDef::where_predicates`]).
     pub where_predicates: Vec<Expr>,
-    /// Associated-type bindings declared inside the block, e.g. the `type Output = Vec2`
-    /// of an operator-trait impl. Each entry is `(name, bound type)`. Empty for
-    /// blocks with no `type` items.
+    /// Associated-type bindings declared inside the block: the `type Output = Vec2` of
+    /// an operator-trait impl, or the `type Item = u32` that answers a user trait's
+    /// [`TraitDef::assoc_types`] declaration. Each entry is `(name, bound type)`. Empty
+    /// for blocks with no `type` items.
     pub assoc_types: Vec<(Identifier, Type)>,
     pub methods: Vec<MethodDef>,
     pub span: Span,
@@ -340,6 +341,11 @@ pub struct TraitDef {
     pub name: Identifier,
     /// `true` when the declaration carries `export`. See [`FunctionDef::exported`].
     pub exported: bool,
+    /// Associated type names the trait declares (`type Item`), in declaration order.
+    /// A declaration carries the name only: what it stands for is chosen by each
+    /// implementor's `type Item = T` binding, which is why the two sides live on
+    /// different nodes ([`ImplDef::assoc_types`] holds the bindings).
+    pub assoc_types: Vec<Identifier>,
     pub methods: Vec<TraitMethod>,
     pub span: Span,
 }

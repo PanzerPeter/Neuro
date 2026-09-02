@@ -354,6 +354,20 @@ trait member (`NotATraitMethod`) with a matching signature (`TraitMethodSignatur
 `resolve_generic_trait_method`. Traits are otherwise fully erased — the parser injects default
 methods into impls, so they check as ordinary methods.
 
+**Associated types.** `TraitInfo.assoc_types` lists what a trait declares (`type Item`);
+`self_assoc` holds what the impl under check bound each one to, installed by `enter_impl_assoc`
+around both `register_impl` and `check_impl` and consulted by `resolve_type` for a
+`Type::Named` spelled `Self::Item`. A declared position is *not* a type at the declaration —
+`register_trait` leaves it `Unknown` and keeps the signature as written in `TraitMethodSig.decl`,
+which `trait_signature_mismatch` then resolves per impl, so the trait's `Self::Item` is compared
+as the type that impl chose. Conformance also requires every declared name bound
+(`MissingAssociatedType`) and nothing else bound (`UnknownAssociatedType`); an unbound path
+anywhere else is `UnboundAssociatedType`. Two positions erase the implementor and therefore
+cannot say what the associated type is: a trait declaring one is **not object-safe**
+(`TraitNotObjectSafe`), and dispatch through a bare `T: Trait` bound reports
+`UnconstrainedAssociatedType`. Both point at the `Trait<Assoc = T>` bound form, which is the
+next roadmap item.
+
 **Lang items** are compiler-known traits the user only ever writes an `impl` for:
 - `Drop` — `register_drop_impl` requires exactly the destructor `drop(&mut self)` (no params, no
   return, else `InvalidDropImpl`) and `T` must not be `Copy` (`DropTypeCannotBeCopy`). No Drop

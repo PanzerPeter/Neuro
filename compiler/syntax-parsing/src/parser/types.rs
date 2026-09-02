@@ -6,6 +6,10 @@ use crate::errors::{ParseError, ParseResult};
 
 use super::Parser;
 
+/// The only form `Self` takes in a type annotation: bare `Self` is not one, because the
+/// implementing type is always nameable where an annotation is written.
+const SELF_ASSOC_FORM: &str = "`Self::` followed by an associated type name — bare `Self` is not a type annotation, name the type itself";
+
 impl Parser {
     /// Parse a type annotation
     pub(crate) fn parse_type(&mut self) -> ParseResult<Type> {
@@ -149,6 +153,28 @@ impl Parser {
             let trait_name = self.parse_trait_ref_name("trait name after `dyn`")?;
             let span = kw.span.merge(trait_name.span);
             return Ok(Type::DynTrait { trait_name, span });
+        }
+
+        // Associated-type path `Self::Item`. The qualifier rides in the name exactly as a
+        // module qualifier does, so no pass between here and the type checker — which is
+        // the first place an implementing type is known — needs a node of its own for it.
+        if self.check(&TokenKind::SelfUpper) {
+            let kw = self.advance().ok_or(ParseError::UnexpectedEof {
+                expected: "'Self'".to_string(),
+            })?;
+            if !self.check(&TokenKind::ColonColon) {
+                return Err(ParseError::UnexpectedToken {
+                    found: TokenKind::SelfUpper,
+                    expected: SELF_ASSOC_FORM.to_string(),
+                    span: kw.span,
+                });
+            }
+            self.advance(); // consume '::'
+            let assoc = self.consume_identifier("associated type name after `Self::`")?;
+            return Ok(Type::Named(Identifier {
+                name: format!("Self::{}", assoc.name),
+                span: kw.span.merge(assoc.span),
+            }));
         }
 
         let token = self.advance().ok_or(ParseError::UnexpectedEof {
@@ -339,5 +365,17 @@ mod tests {
             panic!("expected a generic type application, got {ty:?}");
         };
         assert_eq!(&src[span.start..span.end], "Pair<i32, bool>");
+    }
+
+    #[test]
+    fn self_assoc_path_carries_its_qualifier_and_spans_both_halves() {
+        let src = "func main() -> i32 { val x: Self::Item = 0\n return 0 }";
+        let items = parse(src).expect("parses");
+        let ty = first_var_type(&items).expect("has a var decl");
+        let Type::Named(ident) = ty else {
+            panic!("expected a named type, got {ty:?}");
+        };
+        assert_eq!(ident.name, "Self::Item");
+        assert_eq!(&src[ident.span.start..ident.span.end], "Self::Item");
     }
 }

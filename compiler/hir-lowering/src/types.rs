@@ -15,6 +15,23 @@ impl Lowerer {
         self.resolve_type_ctx(ty, false)
     }
 
+    /// Resolve one position of a trait's declared signature.
+    ///
+    /// A trait declaration has no implementing type, so an associated-type position
+    /// (`Self::Item`) has nothing to resolve against and stands as `void` here. Nothing
+    /// reads it: this table types calls through `&dyn Trait`, and a trait declaring an
+    /// associated type is not object-safe. An impl's own signatures resolve normally,
+    /// through the binding its block installs.
+    pub(crate) fn resolve_trait_sig_type(
+        &mut self,
+        ty: &ast_types::Type,
+    ) -> Result<HirType, LoweringError> {
+        if names_self_assoc(ty) {
+            return Ok(HirType::Void);
+        }
+        self.resolve_type(ty)
+    }
+
     /// Resolve a type annotation, tracking whether it sits directly behind a reference.
     /// The flag matters only for `dyn Trait`, which is unsized and valid solely
     /// as a reference referent — the checker has already rejected any other placement,
@@ -200,5 +217,28 @@ pub(crate) fn float_suffix_type(suffix: &FloatSuffix) -> HirType {
         FloatSuffix::BF16 => HirType::BF16,
         FloatSuffix::F32 => HirType::F32,
         FloatSuffix::F64 => HirType::F64,
+    }
+}
+
+/// Whether an annotation names an associated type in any position: `Option<Self::Item>`
+/// names one just as a bare `Self::Item` does.
+fn names_self_assoc(ty: &ast_types::Type) -> bool {
+    match ty {
+        ast_types::Type::Named(ident) => ident.name.starts_with("Self::"),
+        ast_types::Type::Reference { inner, .. } => names_self_assoc(inner),
+        ast_types::Type::Array { element, .. } | ast_types::Type::Slice { element, .. } => {
+            names_self_assoc(element)
+        }
+        ast_types::Type::Tuple { elements, .. } => elements.iter().any(names_self_assoc),
+        ast_types::Type::Generic { args, .. } => args.iter().any(|arg| match arg {
+            ast_types::GenericArg::Type(inner) => names_self_assoc(inner),
+            ast_types::GenericArg::Const { .. } => false,
+        }),
+        ast_types::Type::Function { params, ret, .. } => {
+            params.iter().any(names_self_assoc) || names_self_assoc(ret)
+        }
+        ast_types::Type::ImplTrait { .. }
+        | ast_types::Type::DynTrait { .. }
+        | ast_types::Type::Tensor { .. } => false,
     }
 }

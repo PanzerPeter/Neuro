@@ -84,7 +84,7 @@ checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "argument-binding"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "ast-types",
  "shared-types",
@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "ast-types"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "shared-types",
 ]
@@ -302,7 +302,7 @@ dependencies = [
 
 [[package]]
 name = "control-flow"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "thiserror",
 ]
@@ -390,7 +390,7 @@ checksum = "abd57806937c9cc163efc8ea3910e00a62e2aeb0b8119f1793a978088f8f6b04"
 
 [[package]]
 name = "diagnostics"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "shared-types",
  "thiserror",
@@ -548,7 +548,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hir-lowering"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "ast-types",
  "neuro-hir",
@@ -670,7 +670,7 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "lexical-analysis"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "diagnostics",
  "logos",
@@ -704,7 +704,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "llvm-backend"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "ast-types",
  "criterion",
@@ -811,7 +811,7 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "mlir-backend"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "melior",
  "neuro-hir",
@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "module-resolution"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "ast-types",
  "shared-types",
@@ -840,7 +840,7 @@ dependencies = [
 
 [[package]]
 name = "neurc"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "argument-binding",
@@ -861,7 +861,7 @@ dependencies = [
 
 [[package]]
 name = "neuro-hir"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "ast-types",
  "shared-types",
@@ -990,7 +990,7 @@ dependencies = [
 
 [[package]]
 name = "project-config"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "serde",
  "thiserror",
@@ -1103,7 +1103,7 @@ dependencies = [
 
 [[package]]
 name = "semantic-analysis"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "ast-types",
  "diagnostics",
@@ -1172,7 +1172,7 @@ dependencies = [
 
 [[package]]
 name = "shared-types"
-version = "2.6.1"
+version = "2.7.0"
 
 [[package]]
 name = "shlex"
@@ -1204,7 +1204,7 @@ dependencies = [
 
 [[package]]
 name = "source-location"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "shared-types",
 ]
@@ -1228,7 +1228,7 @@ dependencies = [
 
 [[package]]
 name = "syntax-parsing"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "ast-types",
  "diagnostics",

@@ -4,6 +4,9 @@ use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, CollectionKind, Type};
 
+/// The qualifier an associated-type path carries in its name, as the parser spells it.
+pub(crate) const SELF_ASSOC_PREFIX: &str = "Self::";
+
 impl TypeChecker {
     /// Convert syntax-parsing type to semantic type.
     /// Returns None if the type is unknown (error is recorded).
@@ -51,6 +54,21 @@ impl TypeChecker {
                 None
             }
             ast_types::Type::Named(ident) => match ident.name.as_str() {
+                // An associated-type path `Self::Item`. It is a type only where an impl
+                // says what it is, so resolution is a lookup in the bindings of the impl
+                // being checked — inside the trait declaration itself there is nothing to
+                // look up, and the position stays untyped until an implementor answers it.
+                name if name.starts_with(SELF_ASSOC_PREFIX) => {
+                    let assoc = &name[SELF_ASSOC_PREFIX.len()..];
+                    if let Some(bound) = self.self_assoc.get(assoc) {
+                        return Some(bound.clone());
+                    }
+                    self.record_error(TypeError::UnboundAssociatedType {
+                        name: assoc.to_string(),
+                        span: ident.span,
+                    });
+                    None
+                }
                 // Signed integers
                 "i8" => Some(Type::I8),
                 "i16" => Some(Type::I16),
@@ -307,13 +325,21 @@ impl TypeChecker {
     }
 
     /// Whether a trait is object-safe: every method must dispatch on a `&self`
-    /// or `&mut self` receiver. A method with no receiver (associated function) or one
-    /// that consumes `self` by value cannot be placed behind a fixed-layout vtable.
-    /// Returns `Ok(())` when safe, or `Err(reason)` naming the first offending method.
+    /// or `&mut self` receiver, and the trait must declare no associated type. A method
+    /// with no receiver (associated function) or one that consumes `self` by value cannot
+    /// be placed behind a fixed-layout vtable; an associated type has no answer once the
+    /// implementor is erased, and naming one in the bound is the `Trait<Assoc = T>` form.
+    /// Returns `Ok(())` when safe, or `Err(reason)` naming the first offending member.
     pub(crate) fn trait_object_safety(&self, trait_name: &str) -> Result<(), String> {
         let Some(info) = self.traits.get(trait_name) else {
             return Ok(());
         };
+        if let Some(assoc) = info.assoc_types.first() {
+            return Err(format!(
+                "it declares associated type '{}', which a trait object leaves unspecified (the `{}<{} = T>` bound form is not implemented)",
+                assoc, trait_name, assoc
+            ));
+        }
         for (name, sig) in &info.methods {
             match sig.self_param {
                 Some(ast_types::SelfParam::Ref) | Some(ast_types::SelfParam::RefMut) => {}

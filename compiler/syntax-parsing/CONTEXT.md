@@ -85,6 +85,13 @@ the tuple-index parse, so it needs no expression grammar of its own.
   `(2 + 3)` parsed as `f()(2 + 3)`, and a following `[1, 2]` as an index, both of which
   type-checked with a callable on the left. A leading `.` still continues, since it cannot start a
   statement.
+- **Associated types are two productions, not one.** `parse_trait_def` reads a bare `type Name`
+  into `TraitDef.assoc_types` and rejects `type Name = T` there, while `parse_impl_def` reads
+  exactly the binding form into `ImplDef.assoc_types` — a trait that could supply a default
+  would let an impl skip the binding the conformance check exists to demand. In type position
+  `parse_type` accepts only the `Self::Name` form and folds it into a `Type::Named` whose name
+  carries the qualifier; bare `Self` is rejected, since the implementing type is always
+  nameable where an annotation is written.
 - **Array type vs. slice type.** `[T; N]` and `[T]` share their opening bracket, so `parse_type`
   parses the element type first and then looks at what follows: a `]` closes an unsized
   `Type::Slice`, anything else must be the `;` of a sized `Type::Array`. Whether the slice is

@@ -79,6 +79,10 @@ pub(crate) struct TypeChecker {
     /// User-declared traits keyed by name: each carries its method signatures so
     /// `impl Trait for Type` conformance and generic-body trait-method dispatch resolve.
     traits: HashMap<String, TraitInfo>,
+    /// Associated-type bindings in scope: the name after `Self::` → the type an impl
+    /// bound it to. Non-empty only while an `impl` block's signatures and method bodies
+    /// are checked, which is exactly the region where `Self::Item` denotes a type.
+    pub(crate) self_assoc: HashMap<String, Type>,
     /// Concrete `(trait name, implementing type name)` pairs that have an
     /// `impl Trait for Type` block. A generic bound `T: Trait` is satisfied at a
     /// call site exactly when the concrete type argument appears here.
@@ -160,6 +164,10 @@ pub(crate) struct GenericFnSig {
 #[derive(Clone)]
 pub(crate) struct TraitInfo {
     pub(crate) methods: HashMap<String, TraitMethodSig>,
+    /// Associated type names the trait declares (`type Item`). Every impl must bind
+    /// each one, and a trait declaring any is not object-safe: a trait object erases the
+    /// implementor, and with it the only thing that says what `Self::Item` is.
+    pub(crate) assoc_types: Vec<String>,
 }
 
 /// How a binary operator dispatches to an operator-trait method.
@@ -175,14 +183,20 @@ pub(crate) struct OperatorDispatch {
 
 /// One resolved trait-method signature. `params` excludes the implicit `self`.
 /// `required` is true when the trait gave no default body — an implementor must provide
-/// one. Types are resolved in the trait's (non-generic) scope, so `Self`-typed and
-/// associated-type positions are not supported this phase.
+/// one. Types are resolved in the trait's (non-generic) scope, where an associated-type
+/// position has no binding yet and therefore resolves to [`Type::Unknown`]; `decl` keeps
+/// the signature as written so conformance can re-resolve it against each impl's
+/// bindings, which is the only place `Self::Item` is a real type.
 #[derive(Clone)]
 pub(crate) struct TraitMethodSig {
     pub(crate) self_param: Option<ast_types::SelfParam>,
     pub(crate) params: Vec<Type>,
     pub(crate) ret: Type,
     pub(crate) required: bool,
+    pub(crate) decl: ast_types::TraitMethod,
+    /// Whether any position of `decl` names an associated type. A call through an erased
+    /// receiver (a bounded type parameter) cannot type such a signature.
+    pub(crate) uses_assoc: bool,
 }
 
 /// A resolved enum variant: its name, construction form, and ordered payload
@@ -249,6 +263,7 @@ impl TypeChecker {
             generic_structs: HashMap::new(),
             generic_impls: HashMap::new(),
             traits: HashMap::new(),
+            self_assoc: HashMap::new(),
             trait_impls: HashSet::new(),
             operator_binary_impls: HashMap::new(),
             operator_unary_impls: HashMap::new(),

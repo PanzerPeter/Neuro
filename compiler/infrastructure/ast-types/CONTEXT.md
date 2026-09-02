@@ -133,9 +133,14 @@ walkers.
 
 ### Method receivers
 `ImplDef` holds an optional `trait_name` — `Some` for a trait implementation (`impl Drop for T`),
-`None` for an inherent block — plus `assoc_types: Vec<(Identifier, Type)>` for `type Output = T`
-bindings inside operator-trait impls. Each `MethodDef` holds an `Option<SelfParam>`
-distinguishing associated functions (`None`) from instance methods (`Some`).
+`None` for an inherent block — plus `assoc_types: Vec<(Identifier, Type)>` for `type Name = T`
+bindings: the operator traits' `type Output = T`, and the answer to whatever a user trait's
+`TraitDef.assoc_types: Vec<Identifier>` declares. The two sides sit on different nodes because a
+declaration carries a name only. An associated type is named in a signature as
+`Type::Named("Self::Item")` — the qualifier rides in the name exactly as a module prefix does, and
+only the type checker, which is the first pass that knows the implementing type, resolves it. Each
+`MethodDef` holds an `Option<SelfParam>` distinguishing associated functions (`None`) from
+instance methods (`Some`).
 
 All three `SelfParam` variants reach codegen, with different support:
 `Ref` (`&self`) passes the struct by value; `RefMut` (`&mut self`) passes it by pointer and

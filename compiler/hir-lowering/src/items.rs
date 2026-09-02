@@ -442,10 +442,10 @@ impl Lowerer {
         for method in &def.methods {
             let mut params = Vec::with_capacity(method.params.len());
             for param in &method.params {
-                params.push(self.resolve_type(&param.ty)?);
+                params.push(self.resolve_trait_sig_type(&param.ty)?);
             }
             let ret = match &method.return_type {
-                Some(t) => self.resolve_type(t)?,
+                Some(t) => self.resolve_trait_sig_type(t)?,
                 None => HirType::Void,
             };
             methods.push(crate::TraitMethodInfo {
@@ -460,20 +460,52 @@ impl Lowerer {
 
     fn register_impl(&mut self, def: &ImplDef) -> Result<(), LoweringError> {
         let struct_name = def.type_name.name.clone();
+        let saved_ty = self.enter_impl_assoc(def)?;
+        let outcome = self.register_impl_methods(def, &struct_name);
+        self.type_subst = saved_ty;
+        outcome
+    }
+
+    fn register_impl_methods(
+        &mut self,
+        def: &ImplDef,
+        struct_name: &str,
+    ) -> Result<(), LoweringError> {
         for method in &def.methods {
             // An owned `self` on a `Copy` receiver is valid for operator-trait methods
             // The checker already rejected it on any non-`Copy` type, so every
             // owned-`self` method reaching lowering is sound and is registered normally.
             let mangled = format!("{}__{}", struct_name, method.name.name);
-            let (params, ret) = self.method_signature(&struct_name, method)?;
+            let (params, ret) = self.method_signature(struct_name, method)?;
             self.functions.insert(mangled.clone(), (params, ret));
             self.impl_methods
-                .entry(struct_name.clone())
+                .entry(struct_name.to_string())
                 .or_default()
                 .insert(method.name.name.clone(), mangled);
         }
-        self.register_operator_impl(def, &struct_name)?;
+        self.register_operator_impl(def, struct_name)?;
         Ok(())
+    }
+
+    /// Install an `impl` block's associated-type bindings, returning the substitution to
+    /// restore afterwards.
+    ///
+    /// A binding is a name standing for a concrete type over one block, which is what
+    /// the type-parameter substitution already is — so `Self::Item` joins it under its
+    /// written spelling and every annotation resolves through the one path.
+    fn enter_impl_assoc(
+        &mut self,
+        def: &ImplDef,
+    ) -> Result<std::collections::HashMap<String, HirType>, LoweringError> {
+        if def.assoc_types.is_empty() {
+            return Ok(self.type_subst.clone());
+        }
+        let mut subst = self.type_subst.clone();
+        for (name, ty) in &def.assoc_types {
+            let resolved = self.resolve_type(ty)?;
+            subst.insert(format!("Self::{}", name.name), resolved);
+        }
+        Ok(std::mem::replace(&mut self.type_subst, subst))
     }
 
     /// Record the operator dispatch for an operator-trait impl, mirroring the
@@ -850,13 +882,22 @@ impl Lowerer {
 
     fn lower_impl(&mut self, def: &ImplDef) -> Result<HirImpl, LoweringError> {
         let struct_name = def.type_name.name.clone();
+        let saved_ty = self.enter_impl_assoc(def)?;
         let mut methods = Vec::new();
         for method in &def.methods {
             // Owned `self` on a `Copy` receiver is a valid operator-trait method;
             // the checker rejected it on any non-`Copy` type, so it is lowered like any
             // other method (an owned `Copy` receiver is ABI-identical to `&self`).
-            methods.push(self.lower_method(&struct_name, method)?);
+            let lowered = self.lower_method(&struct_name, method);
+            match lowered {
+                Ok(m) => methods.push(m),
+                Err(e) => {
+                    self.type_subst = saved_ty;
+                    return Err(e);
+                }
+            }
         }
+        self.type_subst = saved_ty;
         Ok(HirImpl {
             type_name: struct_name,
             trait_name: def.trait_name.as_ref().map(|t| t.name.clone()),

@@ -110,3 +110,53 @@ impl Add for Vec2 {
     assert_eq!(imp.methods.len(), 1);
     assert_eq!(imp.methods[0].name.name, "add");
 }
+
+#[test]
+fn parses_an_associated_type_declaration_and_its_self_path() {
+    let source = r#"
+trait Iterator {
+    type Item
+
+    func next(&mut self) -> Option<Self::Item>
+}
+"#;
+    let items = parse(source).expect("trait with an associated type should parse");
+    let Item::Trait(def) = &items[0] else {
+        panic!("expected a trait item");
+    };
+    assert_eq!(def.assoc_types.len(), 1);
+    assert_eq!(def.assoc_types[0].name, "Item");
+    assert_eq!(def.methods.len(), 1);
+    let Some(syntax_parsing::Type::Generic { name, args, .. }) = &def.methods[0].return_type else {
+        panic!("expected `Option<...>` as the return type");
+    };
+    assert_eq!(name.name, "Option");
+    let [syntax_parsing::GenericArg::Type(syntax_parsing::Type::Named(item))] = &args[..] else {
+        panic!("expected one type argument");
+    };
+    assert_eq!(item.name, "Self::Item");
+}
+
+#[test]
+fn a_trait_may_not_bind_its_own_associated_type() {
+    let source = r#"
+trait Iterator {
+    type Item = i32
+}
+"#;
+    assert!(
+        parse(source).is_err(),
+        "`type Item = i32` is the impl's binding, not a trait declaration"
+    );
+}
+
+#[test]
+fn bare_self_is_not_a_type_annotation() {
+    let source = r#"
+struct Point { x: i32 }
+impl Point {
+    func me(&self) -> Self { Point { x: 1 } }
+}
+"#;
+    assert!(parse(source).is_err(), "bare `Self` should be rejected");
+}
