@@ -9,7 +9,7 @@ mod functions;
 mod impls;
 mod newtypes;
 mod structs;
-mod traits;
+pub(crate) mod traits;
 
 use super::TypeChecker;
 use crate::errors::TypeError;

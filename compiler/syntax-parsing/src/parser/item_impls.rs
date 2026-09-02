@@ -11,6 +11,11 @@ use crate::errors::{ParseError, ParseResult};
 use super::statements::stmt_span;
 use super::Parser;
 
+/// What a trait's `type` item must look like, for the diagnostic that rejects a binding
+/// where a declaration belongs.
+const TRAIT_ASSOC_DECL_FORM: &str =
+    "a newline — a trait declares `type Name`, an impl binds it with `type Name = T`";
+
 impl Parser {
     /// Parse an `impl TypeName { … }` block
     pub(crate) fn parse_impl_def(&mut self) -> ParseResult<ImplDef> {
@@ -141,12 +146,13 @@ impl Parser {
         Ok((name, ty))
     }
 
-    /// Parse a `trait` declaration: `trait Name { <method signatures> }`.
+    /// Parse a `trait` declaration: `trait Name { <associated types> <method signatures> }`.
     ///
     /// Each method is either **required** (signature terminated by a newline, no body)
-    /// or a **default** method (signature followed by a `{ ... }` block). Traits carry
-    /// no generic parameters, supertraits, or associated types this phase — those land
-    /// with the operator traits and dispatch work.
+    /// or a **default** method (signature followed by a `{ ... }` block). An associated
+    /// type is declared as a bare `type Name` — the trait names the member, each
+    /// implementor binds it with `type Name = T`. Traits carry no generic parameters of
+    /// their own this phase.
     pub(crate) fn parse_trait_def(&mut self) -> ParseResult<TraitDef> {
         let start = self.consume(TokenKind::Trait, "'trait'")?;
         self.skip_newlines();
@@ -156,7 +162,13 @@ impl Parser {
         self.skip_newlines();
 
         let mut methods = Vec::new();
+        let mut assoc_types = Vec::new();
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            if self.check(&TokenKind::Type) {
+                assoc_types.push(self.parse_assoc_type_decl()?);
+                self.skip_newlines();
+                continue;
+            }
             methods.push(self.parse_trait_method_def()?);
             self.skip_newlines();
         }
@@ -165,9 +177,31 @@ impl Parser {
         Ok(TraitDef {
             name,
             exported: false,
+            assoc_types,
             methods,
             span: start.span.merge(close.span),
         })
+    }
+
+    /// Parse an associated-type declaration inside a `trait` block: `type Name`.
+    ///
+    /// A declaration names a member and stops there; the `= T` form is the impl's
+    /// binding, so writing one here is rejected rather than read as a default — a trait
+    /// that could supply one would let an impl silently skip the binding the
+    /// conformance check exists to demand.
+    fn parse_assoc_type_decl(&mut self) -> ParseResult<Identifier> {
+        self.consume(TokenKind::Type, "'type'")?;
+        self.skip_newlines();
+        let name = self.consume_identifier("associated type name")?;
+        if self.check(&TokenKind::Equal) {
+            let eq = self.consume(TokenKind::Equal, "'='")?;
+            return Err(ParseError::UnexpectedToken {
+                found: TokenKind::Equal,
+                expected: TRAIT_ASSOC_DECL_FORM.to_string(),
+                span: eq.span,
+            });
+        }
+        Ok(name)
     }
 
     /// Parse one method signature inside a `trait` block.

@@ -215,6 +215,32 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("`Self::{name}` at {span:?} has no binding here: an associated type is named inside the trait that declares it or an `impl` that binds it")]
+    UnboundAssociatedType { name: String, span: Span },
+
+    #[error("trait '{trait_name}' declares no associated type '{name}' at {span:?}")]
+    UnknownAssociatedType {
+        trait_name: String,
+        name: String,
+        span: Span,
+    },
+
+    #[error("`impl {trait_name} for {type_name}` at {span:?} does not bind associated type '{name}': add `type {name} = <type>`")]
+    MissingAssociatedType {
+        trait_name: String,
+        type_name: String,
+        name: String,
+        span: Span,
+    },
+
+    #[error("method '{method}' of trait '{trait_name}' at {span:?} names associated type `Self::{assoc}`, which a bound on a type parameter cannot yet constrain: call it on a concrete type (the `{trait_name}<{assoc} = T>` bound form is not implemented)")]
+    UnconstrainedAssociatedType {
+        trait_name: String,
+        method: String,
+        assoc: String,
+        span: Span,
+    },
+
     #[error("`impl {trait_name} for {type_name}` at {span:?} requires `impl {supertrait} for {type_name}`")]
     MissingSupertraitImpl {
         trait_name: String,

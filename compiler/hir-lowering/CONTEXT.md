@@ -195,6 +195,13 @@ uniformly, and a value that already has the target shape is never re-coerced. A 
 `impl Trait` resolves to its concrete type through `declared_return_type` /
 `shallow_result_type`.
 
+An **associated type** reaches lowering as a `Type::Named` spelled `Self::Item`. `enter_impl_assoc`
+adds each `impl` block's bindings to `type_subst` under that spelling for the block's signature
+registration and its bodies — a name standing for a concrete type over one block is what the
+type-parameter substitution already is, so annotations resolve through the one path. A trait's own
+declaration has no implementor, so `resolve_trait_sig_type` gives such a position `Void` in the
+`traits` table; nothing reads it, because a trait declaring an associated type is not object-safe.
+
 ### Per-construct lowering notes
 - **Slices** — `.slice(range)` is routed to `lower_sequence_slice` *ahead of* the collection
   method surface, because a `Vec` receiver's `.slice` borrows its buffer rather than acting on the

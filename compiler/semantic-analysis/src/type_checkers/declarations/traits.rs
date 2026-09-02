@@ -5,17 +5,21 @@
 
 use super::is_builtin_type_name;
 use crate::errors::TypeError;
+use crate::type_checkers::resolution::SELF_ASSOC_PREFIX;
 use crate::type_checkers::{TraitInfo, TraitMethodSig, TypeChecker};
 use crate::types::Type;
 use ast_types::{ImplDef, TraitDef};
+use shared_types::Identifier;
 use std::collections::HashMap;
 
 impl TypeChecker {
-    /// Register a trait declaration's method signatures.
+    /// Register a trait declaration's associated types and method signatures.
     ///
-    /// Each signature is resolved in the trait's (non-generic) scope; `Self`-typed and
-    /// associated-type positions are not supported this phase (they land with operator
-    /// traits and dispatch). A duplicate trait name or method is rejected.
+    /// Each signature is resolved in the trait's (non-generic) scope. A position naming
+    /// an associated type is left as [`Type::Unknown`] here rather than resolved: the
+    /// declaration says which member exists, and only an implementor's binding says what
+    /// it is. The signature as written is kept so conformance can resolve it per impl.
+    /// A duplicate trait name or method is rejected.
     pub(crate) fn register_trait(&mut self, def: &TraitDef) {
         if self.traits.contains_key(&def.name.name) || is_builtin_type_name(&def.name.name) {
             self.record_error(TypeError::TraitAlreadyDefined {
@@ -25,17 +29,31 @@ impl TypeChecker {
             return;
         }
 
+        let declared: Vec<String> = def.assoc_types.iter().map(|a| a.name.clone()).collect();
         let mut methods: HashMap<String, TraitMethodSig> = HashMap::new();
         for m in &def.methods {
+            let mut named = Vec::new();
+            for ty in m.params.iter().map(|p| &p.ty).chain(m.return_type.iter()) {
+                collect_self_assoc(ty, &mut named);
+            }
+            for assoc in &named {
+                if !declared.contains(&assoc.name) {
+                    self.record_error(TypeError::UnknownAssociatedType {
+                        trait_name: def.name.name.clone(),
+                        name: assoc.name.clone(),
+                        span: assoc.span,
+                    });
+                }
+            }
             let params: Vec<Type> = m
                 .params
                 .iter()
-                .map(|p| self.resolve_type(&p.ty).unwrap_or(Type::Unknown))
+                .map(|p| self.resolve_trait_sig_type(&p.ty))
                 .collect();
             let ret = m
                 .return_type
                 .as_ref()
-                .map(|t| self.resolve_type(t).unwrap_or(Type::Void))
+                .map(|t| self.resolve_trait_sig_type(t))
                 .unwrap_or(Type::Void);
             if methods.contains_key(&m.name.name) {
                 self.record_error(TypeError::FunctionAlreadyDefined {
@@ -51,12 +69,31 @@ impl TypeChecker {
                     params,
                     ret,
                     required: m.default_body.is_none(),
+                    decl: m.clone(),
+                    uses_assoc: !named.is_empty(),
                 },
             );
         }
 
-        self.traits
-            .insert(def.name.name.clone(), TraitInfo { methods });
+        self.traits.insert(
+            def.name.name.clone(),
+            TraitInfo {
+                methods,
+                assoc_types: declared,
+            },
+        );
+    }
+
+    /// Resolve one position of a trait's declared signature. An associated-type position
+    /// has no binding at the declaration, so it carries no information rather than a
+    /// wrong one; every other position resolves and reports as usual.
+    fn resolve_trait_sig_type(&mut self, ty: &ast_types::Type) -> Type {
+        let mut named = Vec::new();
+        collect_self_assoc(ty, &mut named);
+        if !named.is_empty() {
+            return Type::Unknown;
+        }
+        self.resolve_type(ty).unwrap_or(Type::Unknown)
     }
 
     /// Validate an `impl Trait for Type` block against the trait's declaration and
@@ -86,6 +123,30 @@ impl TypeChecker {
         // Compare each impl method against its trait declaration. Collect diagnostics
         // first so the immutable borrow of `self.traits` is released before recording.
         let mut errors: Vec<TypeError> = Vec::new();
+
+        // The associated types: every declared one bound exactly once, and nothing bound
+        // that was never declared. The bindings themselves are already in scope
+        // (`self.self_assoc`), which is what lets the signature comparison below resolve
+        // a trait's `Self::Item` to what this impl chose.
+        for (name, ty) in &def.assoc_types {
+            if !info.assoc_types.contains(&name.name) {
+                errors.push(TypeError::UnknownAssociatedType {
+                    trait_name: trait_name.to_string(),
+                    name: name.name.clone(),
+                    span: ty.span(),
+                });
+            }
+        }
+        for declared in &info.assoc_types {
+            if !def.assoc_types.iter().any(|(n, _)| &n.name == declared) {
+                errors.push(TypeError::MissingAssociatedType {
+                    trait_name: trait_name.to_string(),
+                    type_name: struct_name.to_string(),
+                    name: declared.clone(),
+                    span: def.type_name.span,
+                });
+            }
+        }
         for method in &def.methods {
             let sig = match info.methods.get(&method.name.name) {
                 Some(s) => s,
@@ -129,8 +190,10 @@ impl TypeChecker {
     }
 
     /// Compare one impl method's signature against its trait declaration, returning a
-    /// human-readable reason when they differ. Parameter and return types are
-    /// resolved in the (non-generic) impl scope, matching the trait's resolution.
+    /// human-readable reason when they differ. Both sides are resolved in the impl's
+    /// scope — the trait's signature as written, not as registered — so an associated-type
+    /// position is compared as the type this impl bound it to, and an impl may spell that
+    /// position either way.
     pub(super) fn trait_signature_mismatch(
         &mut self,
         method: &ast_types::MethodDef,
@@ -139,33 +202,80 @@ impl TypeChecker {
         if method.self_param != sig.self_param {
             return Some("receiver (`self`) form differs from the trait".to_string());
         }
-        if method.params.len() != sig.params.len() {
+        if method.params.len() != sig.decl.params.len() {
             return Some(format!(
                 "expected {} parameter(s), found {}",
-                sig.params.len(),
+                sig.decl.params.len(),
                 method.params.len()
             ));
         }
-        for (p, expected) in method.params.iter().zip(sig.params.iter()) {
+        for (p, declared) in method.params.iter().zip(sig.decl.params.iter()) {
+            let expected = self.resolve_type(&declared.ty).unwrap_or(Type::Unknown);
             let got = self.resolve_type(&p.ty).unwrap_or(Type::Unknown);
-            if !got.is_compatible_with(expected) {
+            if !got.is_compatible_with(&expected) {
                 return Some(format!(
                     "parameter '{}' has type {}, trait requires {}",
                     p.name.name, got, expected
                 ));
             }
         }
+        let expected_ret = sig
+            .decl
+            .return_type
+            .as_ref()
+            .map(|t| self.resolve_type(t).unwrap_or(Type::Unknown))
+            .unwrap_or(Type::Void);
         let ret = method
             .return_type
             .as_ref()
             .map(|t| self.resolve_type(t).unwrap_or(Type::Void))
             .unwrap_or(Type::Void);
-        if !ret.is_compatible_with(&sig.ret) {
+        if !ret.is_compatible_with(&expected_ret) {
             return Some(format!(
                 "return type is {}, trait requires {}",
-                ret, sig.ret
+                ret, expected_ret
             ));
         }
         None
+    }
+}
+
+/// Collect every associated-type path an annotation names, nested positions included:
+/// `Option<Self::Item>` names `Item` just as a bare `Self::Item` does.
+pub(crate) fn collect_self_assoc(ty: &ast_types::Type, out: &mut Vec<Identifier>) {
+    match ty {
+        ast_types::Type::Named(ident) => {
+            if let Some(assoc) = ident.name.strip_prefix(SELF_ASSOC_PREFIX) {
+                out.push(Identifier {
+                    name: assoc.to_string(),
+                    span: ident.span,
+                });
+            }
+        }
+        ast_types::Type::Reference { inner, .. } => collect_self_assoc(inner, out),
+        ast_types::Type::Array { element, .. } | ast_types::Type::Slice { element, .. } => {
+            collect_self_assoc(element, out)
+        }
+        ast_types::Type::Tuple { elements, .. } => {
+            for element in elements {
+                collect_self_assoc(element, out);
+            }
+        }
+        ast_types::Type::Generic { args, .. } => {
+            for arg in args {
+                if let ast_types::GenericArg::Type(inner) = arg {
+                    collect_self_assoc(inner, out);
+                }
+            }
+        }
+        ast_types::Type::Function { params, ret, .. } => {
+            for param in params {
+                collect_self_assoc(param, out);
+            }
+            collect_self_assoc(ret, out);
+        }
+        ast_types::Type::ImplTrait { .. }
+        | ast_types::Type::DynTrait { .. }
+        | ast_types::Type::Tensor { .. } => {}
     }
 }

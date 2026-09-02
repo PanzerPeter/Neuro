@@ -12,6 +12,7 @@ use crate::type_checkers::val_else::stmts_diverge;
 use crate::type_checkers::TypeChecker;
 use crate::types::Type;
 use ast_types::{ImplDef, SelfParam};
+use std::collections::HashMap;
 
 impl TypeChecker {
     /// Register all method signatures from an `impl` block into the global
@@ -30,6 +31,10 @@ impl TypeChecker {
         }
 
         let struct_name = def.type_name.name.clone();
+
+        // The block's associated-type bindings are in scope for every signature below:
+        // a method may write `Self::Item` for what this impl bound it to.
+        let saved_assoc = self.enter_impl_assoc(def);
 
         // Recognize the compiler-known `Drop` lang-item. It is matched by name
         // here exactly like `Copy`/`Clone` derives, without the general trait system.
@@ -126,7 +131,23 @@ impl TypeChecker {
             }
         }
 
+        self.self_assoc = saved_assoc;
         Some(())
+    }
+
+    /// Resolve an `impl` block's `type Name = T` bindings and install them as the
+    /// associated types in scope, returning the previous scope to restore afterwards.
+    ///
+    /// The bindings are resolved before they are installed, so a binding cannot name
+    /// another one — an associated type stands for a concrete type, not for a chain.
+    pub(super) fn enter_impl_assoc(&mut self, def: &ImplDef) -> HashMap<String, Type> {
+        let mut bindings = HashMap::new();
+        for (name, ty) in &def.assoc_types {
+            if let Some(resolved) = self.resolve_type(ty) {
+                bindings.insert(name.name.clone(), resolved);
+            }
+        }
+        std::mem::replace(&mut self.self_assoc, bindings)
     }
 
     /// Validate an operator-trait impl and record its operator dispatch.
@@ -329,6 +350,7 @@ impl TypeChecker {
     /// Type-check the body of each method in an `impl` block.
     pub(crate) fn check_impl(&mut self, def: &ImplDef) {
         let struct_name = def.type_name.name.clone();
+        let saved_assoc = self.enter_impl_assoc(def);
 
         for method in &def.methods {
             let mangled = format!("{}__{}", struct_name, method.name.name);
@@ -424,5 +446,7 @@ impl TypeChecker {
             self.current_function_return_type = None;
             self.current_fn_outliving.clear();
         }
+
+        self.self_assoc = saved_assoc;
     }
 }

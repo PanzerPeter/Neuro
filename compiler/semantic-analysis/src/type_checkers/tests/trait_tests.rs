@@ -236,3 +236,228 @@ func main() -> i32 {
         "using `+` on a struct without an Add impl must be rejected; got {errors:?}"
     );
 }
+
+#[test]
+fn associated_type_binding_resolves_self_paths() {
+    // The iterator shape: the trait names `Item`, the impl says what it is, and both
+    // signatures spell the position `Self::Item`.
+    let errors = semantic_errors(
+        r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+struct Counter { n: i32 }
+
+impl Source for Counter {
+    type Item = i32
+
+    func first(&self) -> Self::Item { self.n }
+}
+
+func main() -> i32 {
+    val c = Counter { n: 7 }
+    c.first()
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "an impl binding its associated type must type-check; got {errors:?}"
+    );
+}
+
+#[test]
+fn an_impl_may_spell_the_associated_position_concretely() {
+    let errors = semantic_errors(
+        r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+struct Counter { n: i32 }
+
+impl Source for Counter {
+    type Item = i32
+
+    func first(&self) -> i32 { self.n }
+}
+
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "the binding's type and `Self::Item` name the same type; got {errors:?}"
+    );
+}
+
+#[test]
+fn an_impl_must_bind_every_declared_associated_type() {
+    let errors = semantic_errors(
+        r#"
+trait Source {
+    type Item
+
+    func first(&self) -> i32
+}
+
+struct Counter { n: i32 }
+
+impl Source for Counter {
+    func first(&self) -> i32 { self.n }
+}
+
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::MissingAssociatedType { .. })),
+        "an unbound associated type must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn an_impl_may_not_bind_an_undeclared_associated_type() {
+    let errors = semantic_errors(
+        r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+struct Counter { n: i32 }
+
+impl Source for Counter {
+    type Item = i32
+    type Extra = bool
+
+    func first(&self) -> Self::Item { self.n }
+}
+
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UnknownAssociatedType { .. })),
+        "a binding the trait never declared must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_signature_disagreeing_with_the_bound_associated_type_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+struct Counter { n: i32 }
+
+impl Source for Counter {
+    type Item = i32
+
+    func first(&self) -> bool { true }
+}
+
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TraitMethodSignatureMismatch { .. })),
+        "the trait's `Self::Item` is this impl's `i32`; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_self_path_outside_an_impl_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func first() -> Self::Item { 1 }
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UnboundAssociatedType { .. })),
+        "`Self::Item` with no implementing type must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_trait_with_an_associated_type_is_not_object_safe() {
+    let errors = semantic_errors(
+        r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+struct Counter { n: i32 }
+
+impl Source for Counter {
+    type Item = i32
+
+    func first(&self) -> Self::Item { self.n }
+}
+
+func take(s: &dyn Source) -> i32 { 0 }
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TraitNotObjectSafe { .. })),
+        "a trait object leaves the associated type unspecified; got {errors:?}"
+    );
+}
+
+#[test]
+fn dispatching_an_associated_signature_through_a_bound_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+struct Counter { n: i32 }
+
+impl Source for Counter {
+    type Item = i32
+
+    func first(&self) -> Self::Item { self.n }
+}
+
+func read<T: Source>(s: &T) -> i32 {
+    val v = s.first()
+    0
+}
+
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UnconstrainedAssociatedType { .. })),
+        "a bare `T: Source` bound does not say what `Self::Item` is; got {errors:?}"
+    );
+}

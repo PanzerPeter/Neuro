@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-09-02
+
+### Added
+
+- **Associated types in trait declarations, and `Self::Assoc` paths.** A trait could declare
+  methods but not the types they work over, so a `Channel` trait had to pick one sample type
+  for every implementor: a thermocouple reporting `f64`, a tally reporting `i32`, and an
+  interlock reporting `bool` could not share a trait at all. A trait now declares a member
+  type with `type Item`, each impl answers with `type Item = u32`, and both sides name it as
+  `Self::Item` — in a parameter, in a return type, in a method body, and nested inside another
+  type, which is what the spec's `func next(&mut self) -> Option<Self::Item>` needs. An impl may
+  spell such a position concretely instead; the two mean the same thing. Conformance requires
+  every declared associated type to be bound and rejects a binding the trait never declared,
+  and each impl's binding is what its trait's signature is compared against.
+
+  A declaration is not a type: the trait says which member exists, and only an implementor
+  says what it is. Two positions erase the implementor and are therefore rejected rather than
+  guessed — a trait declaring an associated type is not object-safe, and a method whose
+  signature names one cannot be called through a bare `T: Trait` bound. Both diagnostics name
+  the `Trait<Assoc = T>` bound form, which is the next roadmap item.
+
+  A trait may not write `type Item = i32`: a default binding would let an impl skip the
+  binding conformance exists to demand, so the parse error names the declaration and the
+  binding forms separately. Bare `Self` remains a parse error in a type annotation.
+
+
 ## [2.6.1] - 2026-09-01
 
 ### Fixed

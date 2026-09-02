@@ -1,0 +1,9 @@
+channel 1 thermocouple -> 60.0 C
+channel 0 tally       ->   17
+channel 3 interlock   -> true
+drained 4
+drained 3
+drained 2
+drained 1
+sum 10, holdover 0, temperature 60, bonus 5
+total = 92

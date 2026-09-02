@@ -410,7 +410,39 @@ A trait-bounded generic is **fully monomorphized and erased**: each `impl` lower
 methods and each bound is specialized per concrete type, so there is no vtable and no runtime
 cost. Supertraits (`Comparable` requires `PartialEq`), dynamic dispatch (`dyn Trait`, which
 *does* use a vtable), and the [operator traits](operators.md#operator-overloading) have all
-landed. Associated types beyond the operator traits' `type Output` are still outstanding.
+landed.
+
+### Associated types
+
+A trait may declare an associated type: a member type each implementor chooses. The trait
+writes the name alone; the impl binds it, and either side names it as `Self::Name`:
+
+```neuro
+trait Channel {
+    type Sample
+
+    func sample(&self) -> Self::Sample
+}
+
+struct Tally { counted: i32 }
+
+impl Channel for Tally {
+    type Sample = i32
+
+    func sample(&self) -> Self::Sample { self.counted }
+}
+```
+
+`Self::Sample` resolves to whatever the impl bound, in a signature, in a method body, and
+nested inside another type (`Option<Self::Sample>`). An impl may spell the position either
+way — `-> i32` above means the same thing. Conformance requires every declared associated
+type to be bound, and rejects a binding the trait never declared.
+
+Two positions erase the implementing type and therefore cannot say what an associated type
+is. Both are rejected rather than guessed, and both wait on the `Trait<Assoc = T>` bound form:
+
+- a trait declaring an associated type is **not object-safe**, so it has no `dyn` form
+- a method whose signature names one cannot be called through a bare `T: Trait` bound
 
 ## Unsupported (Phase 1+)
 

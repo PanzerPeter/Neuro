@@ -105,9 +105,12 @@ Key design goals:
   methods; `impl Trait for Type` checked for conformance; trait-bounded generics
   `func f<T: Shape>(x: &T)` dispatch trait methods on the type parameter, checked at the
   call site. Fully monomorphized and erased, so there is no vtable and no runtime cost.
-  A `trait` declaration itself carries no generic parameters, supertraits, or associated
-  types yet; only the compiler-known operator traits have associated-type bindings
-  (`type Output = T`) in their `impl` blocks
+  A trait may declare **associated types** (`type Item`), bound by each impl
+  (`type Item = i32`) and named as `Self::Item` on either side, including nested
+  (`Option<Self::Item>`). A trait declaration itself carries no generic parameters yet, and
+  the `Trait<Assoc = T>` bound form is not implemented — so a trait with an associated type
+  is not object-safe, and a method whose signature names one cannot be called through a
+  bare `T: Trait` bound
 - **Static & dynamic dispatch** (1F): `impl Trait` in argument position
   (`func train(m: &impl Model)`) and return position (`func make() -> impl Shape`) is
   anonymous-generic sugar: monomorphized at zero cost, and each `impl Trait` parameter is its

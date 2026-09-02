@@ -5,6 +5,8 @@
 
 use super::{declarations, eval_const_predicate, TypeChecker, CLONE_METHOD, COLLECTION_CTOR};
 use crate::errors::TypeError;
+use crate::type_checkers::declarations::traits::collect_self_assoc;
+use crate::type_checkers::{TraitInfo, TraitMethodSig};
 use crate::types::{CollectionKind, Type};
 use ast_types::{Expr, GenericArg};
 use shared_types::{Identifier, Span};
@@ -110,20 +112,35 @@ impl TypeChecker {
     ///
     /// Searches every trait named in the parameter's bounds; the first trait declaring a
     /// method of this name wins. Returns `None` when no bound trait declares it.
+    ///
+    /// A signature naming an associated type is reported rather than typed: the bound
+    /// names the trait alone, so nothing here says what `Self::Item` is at this call.
     pub(super) fn resolve_generic_trait_method(
-        &self,
+        &mut self,
         param: &str,
         method: &str,
+        span: Span,
     ) -> Option<(Vec<Type>, Type)> {
-        let bounds = self.generic_bounds.get(param)?;
+        let bounds = self.generic_bounds.get(param)?.clone();
         for trait_name in bounds {
-            if let Some(sig) = self
+            let Some(sig) = self
                 .traits
-                .get(trait_name)
+                .get(&trait_name)
                 .and_then(|info| info.methods.get(method))
-            {
-                return Some((sig.params.clone(), sig.ret.clone()));
+                .cloned()
+            else {
+                continue;
+            };
+            if sig.uses_assoc {
+                let assoc = trait_assoc_named(&sig, self.traits.get(&trait_name));
+                self.record_error(TypeError::UnconstrainedAssociatedType {
+                    trait_name: trait_name.clone(),
+                    method: method.to_string(),
+                    assoc,
+                    span,
+                });
             }
+            return Some((sig.params.clone(), sig.ret.clone()));
         }
         None
     }
@@ -383,7 +400,7 @@ impl TypeChecker {
                     // rebinds it to the concrete type's impl method.
                     Type::Generic(param) => {
                         if let Some((visible_params, ret)) =
-                            self.resolve_generic_trait_method(param, &field.name)
+                            self.resolve_generic_trait_method(param, &field.name, *span)
                         {
                             self.check_call_args(args, &visible_params, *span);
                             return Some(ret);
@@ -652,4 +669,26 @@ impl TypeChecker {
             Some(Type::Unknown)
         }
     }
+}
+
+/// Name one associated type a trait-method signature depends on, for the diagnostic that
+/// rejects calling it through a bound. The first the signature names is the one to point
+/// at; a trait's own declaration order settles the fallback when the signature names none
+/// directly (a nested position resolved through the declaration).
+fn trait_assoc_named(sig: &TraitMethodSig, info: Option<&TraitInfo>) -> String {
+    let mut named = Vec::new();
+    for ty in sig
+        .decl
+        .params
+        .iter()
+        .map(|p| &p.ty)
+        .chain(sig.decl.return_type.iter())
+    {
+        collect_self_assoc(ty, &mut named);
+    }
+    named
+        .first()
+        .map(|a| a.name.clone())
+        .or_else(|| info.and_then(|i| i.assoc_types.first().cloned()))
+        .unwrap_or_else(|| "Assoc".to_string())
 }

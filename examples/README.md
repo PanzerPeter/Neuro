@@ -113,6 +113,13 @@ isolation:
   `dyn_area` / `dyn_flag` taking `&dyn Shape` (dynamic, one body serving both shapes
   through a vtable, reaching Square's inherited default and Rect's override). Exit
   `161`.
+- [`showcase/typed_channels.nr`](showcase/typed_channels.nr) — **associated types**: one
+  `Channel` trait whose `type Sample` each instrument binds differently (`f64`, `i32`, `bool`),
+  so three unrelated measurement types share one trait — which a trait fixed to a single sample
+  type could not do. Combined with a trait default method (`channel_id`, inherited by the tally
+  and overridden by the others), `@derive(Copy)` structs with `&self` methods, a drain returning
+  `Option<Self::Sample>` unwrapped by `match`, `Vec<i32>` + `for`-in, an if-expression, and
+  interpolation with the format mini-language (`:.1`, `:>4`). Exit `92`.
 - [`showcase/vector_physics.nr`](showcase/vector_physics.nr) — **operator traits**:
   a `Copy` `Vec2` implementing `Add` / `Sub` / `Neg` / `PartialEq`, so `+` / `-` / unary
   `-` / `==` dispatch to the impl methods, combined with an `&self` method, compound
