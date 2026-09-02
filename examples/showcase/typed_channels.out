@@ -5,5 +5,6 @@ drained 4
 drained 3
 drained 2
 drained 1
+scaled tally 17, scaled cycle 6, labelled 10
 sum 10, holdover 0, temperature 60, bonus 5
-total = 92
+total = 108

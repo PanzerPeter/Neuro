@@ -2,6 +2,7 @@
 //
 // Cumulative integration example combining:
 //   associated types (`type Sample`) and `Self::Sample` paths
+//   · `Channel<Sample = i32>` bounds constraining that member on a type parameter
 //   · trait declarations with a default method · @derive(Copy) structs with `&self` methods
 //   · `Option<T>` + `match` · `Vec<T>` + `for`-in · string interpolation and the
 //     format mini-language
@@ -12,7 +13,11 @@
 // member; each impl says what it is; `Self::Sample` reads back whatever that impl chose,
 // including nested inside `Option<...>` where the drain loop needs it.
 //
-// Expected exit code: 92
+// A generic reader needs the other half. `T: Channel` erases the instrument, and with it
+// the only thing that says what `Sample` is, so `T: Channel<Sample = i32>` puts the
+// answer in the bound — one body serving every counted channel and no float channel.
+//
+// Expected exit code: 108
 
 trait Channel {
     type Sample
@@ -60,6 +65,31 @@ impl Channel for Interlock {
     func sample(&self) -> Self::Sample { self.latched }
 
     func channel_id(&self) -> i32 { 3 }
+}
+
+@derive(Copy, Clone)
+struct Cycle {
+    ticks: i32
+}
+
+impl Channel for Cycle {
+    type Sample = i32
+
+    func sample(&self) -> Self::Sample { self.ticks * 2 }
+
+    func channel_id(&self) -> i32 { 4 }
+}
+
+// One body, every counted channel. The bound is what makes `sample()` typeable here:
+// the trait declaration alone says only that `Sample` exists. Passing the thermocouple
+// would be rejected — its impl binds `Sample` to f64.
+func scaled<T: Channel<Sample = i32>>(source: &T, factor: i32) -> i32 {
+    source.sample() * factor
+}
+
+// The same bound spelled anonymously, for a reader that names its parameter once.
+func labelled(source: &impl Channel<Sample = i32>) -> i32 {
+    source.sample() + source.channel_id()
 }
 
 // A drain whose element type is its own associated type: the loop below never names
@@ -116,13 +146,20 @@ func main() -> i32 {
         sum = sum + item
     }
 
+    // The constrained bound: two implementors, one monomorphized body each.
+    val ticker = Cycle { ticks: 3 }
+    val scaled_tally = scaled(&counter, 1)   // 17
+    val scaled_cycle = scaled(&ticker, 1)    //  6
+    val marked = labelled(&ticker)           //  6 + 4 = 10
+    println("scaled tally {scaled_tally}, scaled cycle {scaled_cycle}, labelled {marked}")
+
     val holdover = backlog.sample()
     val temperature = degrees as i32
     val bonus = if latched { 5 } else { 0 }
 
     println("sum {sum}, holdover {holdover}, temperature {temperature}, bonus {bonus}")
 
-    val total = sum + holdover + temperature + counted + bonus
+    val total = sum + holdover + temperature + counted + bonus + scaled_cycle + marked
     println("total = {total}")
     total
 }

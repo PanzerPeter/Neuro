@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [2.8.0] - 2026-09-02
+
+### Added
+
+- **`Trait<Assoc = T>` bounds.** A trait could declare an associated type, but a bound could
+  not say what it was: `T: Channel` erases the implementor, and with it the only thing that
+  answers `Self::Sample`, so a generic body could not call a method whose signature names
+  one. A bound now constrains it — `func scaled<T: Channel<Sample = i32>>(source: &T)` types
+  `source.sample()` as `i32`, including where the associated type sits nested inside another
+  type. The constraint is written in every place a bound is: the parameter list, a `where`
+  clause, argument-position `impl Channel<Sample = i32>`, and return position, where it
+  states what the caller gets.
+
+  The constraint is checked, not assumed. Passing a `Channel` implementor whose
+  `type Sample = f64` to a `Sample = i32` bound is an error naming both types, and a bound may
+  only constrain an associated type its trait declares. A type parameter passed through from
+  an enclosing generic has no impl to read, so its own bound has to answer for it.
+
+  A signature naming an associated type is typed by re-resolving the trait's declaration
+  under the bound's constraints — the same per-impl re-resolution conformance already does,
+  which is why a nested position needs no special case. A bare `T: Trait` bound still cannot
+  type such a call, and its diagnostic now names the form that fixes it. `dyn Trait<Assoc = T>`
+  remains unsupported: a trait declaring an associated type is not object-safe.
+
+
 ## [2.7.0] - 2026-09-02
 
 ### Added
@@ -28,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   says what it is. Two positions erase the implementor and are therefore rejected rather than
   guessed — a trait declaring an associated type is not object-safe, and a method whose
   signature names one cannot be called through a bare `T: Trait` bound. Both diagnostics name
-  the `Trait<Assoc = T>` bound form, which is the next roadmap item.
+  the `Trait<Assoc = T>` bound form.
 
   A trait may not write `type Item = i32`: a default binding would let an impl skip the
   binding conformance exists to demand, so the parse error names the declaration and the

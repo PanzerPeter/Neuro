@@ -11,7 +11,7 @@ mod newtypes;
 mod structs;
 pub(crate) mod traits;
 
-use super::TypeChecker;
+use super::{BoundInfo, TypeChecker};
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, Type};
 use ast_types::Item;
@@ -128,12 +128,6 @@ impl TypeChecker {
                     span: gp.name.span,
                 });
             }
-            if !gp.bounds.is_empty() {
-                self.generic_bounds.insert(
-                    gp.name.name.clone(),
-                    gp.bounds.iter().map(|b| b.name.clone()).collect(),
-                );
-            }
             match &gp.kind {
                 ast_types::GenericParamKind::Type => {
                     self.generic_scope.insert(gp.name.name.clone());
@@ -151,6 +145,51 @@ impl TypeChecker {
                 }
             }
         }
+
+        // Bounds resolve in a second pass: `T: Source<Item = U>` may constrain an
+        // associated type to another parameter of the same list, which is only in scope
+        // once every name above has been registered.
+        for gp in generics {
+            if gp.bounds.is_empty() {
+                continue;
+            }
+            let bounds = self.resolve_bounds(&gp.bounds);
+            self.generic_bounds.insert(gp.name.name.clone(), bounds);
+        }
+    }
+
+    /// Resolve a parameter's written bounds, validating each `Trait<Assoc = T>` binding
+    /// against the trait's declaration: a binding must name an associated type that
+    /// trait declares, since nothing else is constrainable.
+    pub(crate) fn resolve_bounds(&mut self, bounds: &[ast_types::TraitBound]) -> Vec<BoundInfo> {
+        let mut resolved = Vec::new();
+        for bound in bounds {
+            let declared = self
+                .traits
+                .get(&bound.trait_name.name)
+                .map(|info| info.assoc_types.clone());
+            let mut assoc = Vec::new();
+            for (name, ty) in &bound.assoc_bindings {
+                if let Some(declared) = &declared {
+                    if !declared.contains(&name.name) {
+                        self.record_error(TypeError::UnknownAssociatedType {
+                            trait_name: bound.trait_name.name.clone(),
+                            name: name.name.clone(),
+                            span: name.span,
+                        });
+                        continue;
+                    }
+                }
+                if let Some(resolved_ty) = self.resolve_type(ty) {
+                    assoc.push((name.name.clone(), resolved_ty));
+                }
+            }
+            resolved.push(BoundInfo {
+                trait_name: bound.trait_name.name.clone(),
+                assoc,
+            });
+        }
+        resolved
     }
 
     /// Clear the generic type + const parameter scopes on leaving a generic definition.

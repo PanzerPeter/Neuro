@@ -87,6 +87,11 @@ pub(crate) struct TypeChecker {
     /// `impl Trait for Type` block. A generic bound `T: Trait` is satisfied at a
     /// call site exactly when the concrete type argument appears here.
     trait_impls: HashSet<(String, String)>,
+    /// What each trait impl bound its associated types to:
+    /// `(trait name, implementing type name)` → binding name → type. A
+    /// `T: Trait<Assoc = U>` bound is satisfied only when the concrete argument's entry
+    /// here answers `Assoc` with the same type the bound demanded.
+    pub(crate) impl_assoc: HashMap<(String, String), HashMap<String, Type>>,
     /// Operator-trait dispatch: `(struct name, binary operator)` → the value
     /// type of the right operand and the operator's result type. Present exactly when
     /// the struct has an operator-trait impl providing that operator.
@@ -94,9 +99,9 @@ pub(crate) struct TypeChecker {
     /// Operator-trait dispatch for unary operators (`-a` via `Neg`, `~a` via `Not`).
     operator_unary_impls: HashMap<(String, ast_types::UnaryOp), Type>,
     /// Trait bounds of the type parameters in scope while a generic definition is checked
-    /// Parameter name → declared trait names. Lets a generic body dispatch
+    /// Parameter name → its declared bounds. Lets a generic body dispatch
     /// a trait method on a bounded type parameter. Empty outside a generic definition.
-    pub(crate) generic_bounds: HashMap<String, Vec<String>>,
+    pub(crate) generic_bounds: HashMap<String, Vec<BoundInfo>>,
     /// Mangled names of generic-struct instantiations already materialized into
     /// `struct_defs` / `impl_methods`, so each instance is built exactly once.
     instantiated_structs: HashSet<String>,
@@ -157,7 +162,19 @@ pub(crate) struct GenericFnSig {
     pub(crate) where_predicates: Vec<ast_types::Expr>,
     /// Trait bounds per type parameter, e.g. `T: Drawable`. Checked at each call
     /// site against the inferred concrete type argument.
-    pub(crate) bounds: HashMap<String, Vec<String>>,
+    pub(crate) bounds: HashMap<String, Vec<BoundInfo>>,
+}
+
+/// One resolved trait bound on a type parameter.
+///
+/// `assoc` holds the `Trait<Assoc = T>` constraints, resolved in the scope the bound was
+/// written in and kept in written order so several unsatisfied ones report in a stable
+/// order. Empty for a bare `Trait` bound, which is why a method naming `Self::Assoc`
+/// cannot be typed through one: the bound says nothing about what it is.
+#[derive(Clone)]
+pub(crate) struct BoundInfo {
+    pub(crate) trait_name: String,
+    pub(crate) assoc: Vec<(String, Type)>,
 }
 
 /// A user-declared trait's resolved method signatures, keyed by method name.
@@ -265,6 +282,7 @@ impl TypeChecker {
             traits: HashMap::new(),
             self_assoc: HashMap::new(),
             trait_impls: HashSet::new(),
+            impl_assoc: HashMap::new(),
             operator_binary_impls: HashMap::new(),
             operator_unary_impls: HashMap::new(),
             generic_bounds: HashMap::new(),

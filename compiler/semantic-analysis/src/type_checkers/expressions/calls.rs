@@ -6,7 +6,7 @@
 use super::{declarations, eval_const_predicate, TypeChecker, CLONE_METHOD, COLLECTION_CTOR};
 use crate::errors::TypeError;
 use crate::type_checkers::declarations::traits::collect_self_assoc;
-use crate::type_checkers::{TraitInfo, TraitMethodSig};
+use crate::type_checkers::BoundInfo;
 use crate::types::{CollectionKind, Type};
 use ast_types::{Expr, GenericArg};
 use shared_types::{Identifier, Span};
@@ -113,8 +113,10 @@ impl TypeChecker {
     /// Searches every trait named in the parameter's bounds; the first trait declaring a
     /// method of this name wins. Returns `None` when no bound trait declares it.
     ///
-    /// A signature naming an associated type is reported rather than typed: the bound
-    /// names the trait alone, so nothing here says what `Self::Item` is at this call.
+    /// A signature naming an associated type is typed under the bound's
+    /// `Trait<Assoc = T>` constraints — the trait's declaration is re-resolved with them
+    /// in scope, exactly as an impl's own bindings resolve it. A bare bound constrains
+    /// nothing, so such a call is reported instead.
     pub(super) fn resolve_generic_trait_method(
         &mut self,
         param: &str,
@@ -122,25 +124,58 @@ impl TypeChecker {
         span: Span,
     ) -> Option<(Vec<Type>, Type)> {
         let bounds = self.generic_bounds.get(param)?.clone();
-        for trait_name in bounds {
+        for bound in bounds {
             let Some(sig) = self
                 .traits
-                .get(&trait_name)
+                .get(&bound.trait_name)
                 .and_then(|info| info.methods.get(method))
                 .cloned()
             else {
                 continue;
             };
-            if sig.uses_assoc {
-                let assoc = trait_assoc_named(&sig, self.traits.get(&trait_name));
+            if !sig.uses_assoc {
+                return Some((sig.params.clone(), sig.ret.clone()));
+            }
+            let mut named = Vec::new();
+            for ty in sig
+                .decl
+                .params
+                .iter()
+                .map(|p| &p.ty)
+                .chain(sig.decl.return_type.iter())
+            {
+                collect_self_assoc(ty, &mut named);
+            }
+            if let Some(open) = named
+                .iter()
+                .find(|a| !bound.assoc.iter().any(|(n, _)| n == &a.name))
+            {
                 self.record_error(TypeError::UnconstrainedAssociatedType {
-                    trait_name: trait_name.clone(),
+                    trait_name: bound.trait_name.clone(),
                     method: method.to_string(),
-                    assoc,
+                    assoc: open.name.clone(),
                     span,
                 });
+                return Some((sig.params.clone(), sig.ret.clone()));
             }
-            return Some((sig.params.clone(), sig.ret.clone()));
+            let saved = std::mem::replace(
+                &mut self.self_assoc,
+                bound.assoc.iter().cloned().collect::<HashMap<_, _>>(),
+            );
+            let params: Vec<Type> = sig
+                .decl
+                .params
+                .iter()
+                .map(|p| self.resolve_type(&p.ty).unwrap_or(Type::Unknown))
+                .collect();
+            let ret = sig
+                .decl
+                .return_type
+                .as_ref()
+                .map(|t| self.resolve_type(t).unwrap_or(Type::Unknown))
+                .unwrap_or(Type::Void);
+            self.self_assoc = saved;
+            return Some((params, ret));
         }
         None
     }
@@ -182,39 +217,82 @@ impl TypeChecker {
     /// no user-trait impl and therefore fails the bound.
     pub(super) fn check_trait_bounds(
         &mut self,
-        bounds: &HashMap<String, Vec<String>>,
+        bounds: &HashMap<String, Vec<BoundInfo>>,
         subst: &HashMap<String, Type>,
         span: Span,
     ) {
-        for (param, traits) in bounds {
+        for (param, param_bounds) in bounds {
             let Some(concrete) = subst.get(param) else {
                 continue;
             };
-            for trait_name in traits {
+            for bound in param_bounds {
                 // A bound naming an unknown trait is reported once at the impl/decl site;
                 // skip it here so the same typo is not echoed at every call.
-                if !self.traits.contains_key(trait_name) {
+                if !self.traits.contains_key(&bound.trait_name) {
                     continue;
                 }
                 let satisfied = match concrete {
                     Type::Struct(name) => self
                         .trait_impls
-                        .contains(&(trait_name.clone(), name.clone())),
+                        .contains(&(bound.trait_name.clone(), name.clone())),
                     Type::Generic(name) => self
                         .generic_bounds
                         .get(name)
-                        .is_some_and(|b| b.contains(trait_name)),
+                        .is_some_and(|b| b.iter().any(|o| o.trait_name == bound.trait_name)),
                     _ => false,
                 };
                 if !satisfied {
                     self.record_error(TypeError::TraitBoundNotSatisfied {
                         param: param.clone(),
                         ty: concrete.clone(),
-                        trait_name: trait_name.clone(),
+                        trait_name: bound.trait_name.clone(),
                         span,
                     });
+                    continue;
                 }
+                self.check_assoc_bindings(bound, concrete, span);
             }
+        }
+    }
+
+    /// Verify a `Trait<Assoc = T>` bound against what the concrete type argument's impl
+    /// bound that associated type to. A type parameter passed through from an enclosing
+    /// generic has no impl to read, so its own bound is what must answer.
+    pub(crate) fn check_assoc_bindings(&mut self, bound: &BoundInfo, concrete: &Type, span: Span) {
+        for (assoc, expected) in &bound.assoc {
+            let found = match concrete {
+                Type::Struct(name) => self
+                    .impl_assoc
+                    .get(&(bound.trait_name.clone(), name.clone()))
+                    .and_then(|b| b.get(assoc))
+                    .cloned(),
+                Type::Generic(name) => self
+                    .generic_bounds
+                    .get(name)
+                    .and_then(|bounds| bounds.iter().find(|o| o.trait_name == bound.trait_name))
+                    .and_then(|outer| {
+                        outer
+                            .assoc
+                            .iter()
+                            .find(|(n, _)| n == assoc)
+                            .map(|(_, ty)| ty.clone())
+                    }),
+                _ => None,
+            };
+            if found
+                .as_ref()
+                .is_some_and(|f| f.is_compatible_with(expected))
+            {
+                continue;
+            }
+            self.record_error(TypeError::AssociatedTypeBoundMismatch {
+                trait_name: bound.trait_name.clone(),
+                assoc: assoc.clone(),
+                expected: expected.clone(),
+                found: found.unwrap_or(Type::Unknown),
+                ty: concrete.clone(),
+                span,
+            });
         }
     }
 
@@ -669,26 +747,4 @@ impl TypeChecker {
             Some(Type::Unknown)
         }
     }
-}
-
-/// Name one associated type a trait-method signature depends on, for the diagnostic that
-/// rejects calling it through a bound. The first the signature names is the one to point
-/// at; a trait's own declaration order settles the fallback when the signature names none
-/// directly (a nested position resolved through the declaration).
-fn trait_assoc_named(sig: &TraitMethodSig, info: Option<&TraitInfo>) -> String {
-    let mut named = Vec::new();
-    for ty in sig
-        .decl
-        .params
-        .iter()
-        .map(|p| &p.ty)
-        .chain(sig.decl.return_type.iter())
-    {
-        collect_self_assoc(ty, &mut named);
-    }
-    named
-        .first()
-        .map(|a| a.name.clone())
-        .or_else(|| info.and_then(|i| i.assoc_types.first().cloned()))
-        .unwrap_or_else(|| "Assoc".to_string())
 }

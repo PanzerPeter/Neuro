@@ -3,11 +3,11 @@
 // One of the item-kind parsers; each adds methods to the same `impl Parser` block.
 
 use lexical_analysis::TokenKind;
-use shared_types::Identifier;
+use shared_types::{Identifier, Span};
 
 use crate::ast::{
     Attribute, Expr, FunctionDef, GenericParam, GenericParamKind, MethodDef, ParamLabel, Parameter,
-    SelfParam,
+    SelfParam, TraitBound,
 };
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
@@ -252,7 +252,7 @@ impl Parser {
                 });
             };
 
-            let mut bounds: Vec<Identifier> = Vec::new();
+            let mut bounds: Vec<TraitBound> = Vec::new();
             let mut end_span = name.span;
             let kind = if is_const {
                 // `const N: T` — the declared integer type is mandatory.
@@ -265,22 +265,15 @@ impl Parser {
                 end_span = ty.span();
                 GenericParamKind::Const(ty)
             } else {
-                // Optional trait bounds on a type parameter: `T: A + B`. Parsed for forward
-                // compatibility; the bound names are stored but not enforced until the trait
-                // system lands.
+                // Optional trait bounds on a type parameter: `T: A + B`, each optionally
+                // constraining an associated type as `A<Item = i32>`.
                 if self.check(&TokenKind::Colon) {
                     self.advance(); // ':'
                     self.skip_newlines();
                     loop {
-                        let bound_token =
-                            self.consume(TokenKind::Identifier(String::new()), "trait bound name")?;
-                        if let TokenKind::Identifier(n) = bound_token.kind {
-                            end_span = bound_token.span;
-                            bounds.push(Identifier {
-                                name: n,
-                                span: bound_token.span,
-                            });
-                        }
+                        let (bound, bound_span) = self.parse_trait_bound()?;
+                        end_span = bound_span;
+                        bounds.push(bound);
                         if !self.check(&TokenKind::Plus) {
                             break;
                         }
@@ -351,16 +344,10 @@ impl Parser {
                 };
                 self.consume(TokenKind::Colon, "':'")?;
                 self.skip_newlines();
-                let mut bounds: Vec<Identifier> = Vec::new();
+                let mut bounds: Vec<TraitBound> = Vec::new();
                 loop {
-                    let bound_token =
-                        self.consume(TokenKind::Identifier(String::new()), "trait bound name")?;
-                    if let TokenKind::Identifier(n) = bound_token.kind {
-                        bounds.push(Identifier {
-                            name: n,
-                            span: bound_token.span,
-                        });
-                    }
+                    let (bound, _) = self.parse_trait_bound()?;
+                    bounds.push(bound);
                     if !self.check(&TokenKind::Plus) {
                         break;
                     }
@@ -388,6 +375,30 @@ impl Parser {
         }
 
         Ok(predicates)
+    }
+
+    /// Parse one trait bound — `Trait`, or `Trait<Assoc = T>` constraining an associated
+    /// type the trait declares — returning it with the span of its last token.
+    fn parse_trait_bound(&mut self) -> ParseResult<(TraitBound, Span)> {
+        let token = self.consume(TokenKind::Identifier(String::new()), "trait bound name")?;
+        let TokenKind::Identifier(name) = token.kind else {
+            return Err(ParseError::UnexpectedToken {
+                found: token.kind,
+                expected: "trait bound name".to_string(),
+                span: token.span,
+            });
+        };
+        let (assoc_bindings, close_span) = self.parse_assoc_bindings()?;
+        Ok((
+            TraitBound {
+                trait_name: Identifier {
+                    name,
+                    span: token.span,
+                },
+                assoc_bindings,
+            },
+            close_span.unwrap_or(token.span),
+        ))
     }
 
     /// Whether the upcoming `where`-clause item is a trait bound (`Ident : ...`) rather

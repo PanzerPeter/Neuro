@@ -461,3 +461,206 @@ func main() -> i32 { 0 }
         "a bare `T: Source` bound does not say what `Self::Item` is; got {errors:?}"
     );
 }
+
+#[test]
+fn a_constrained_bound_types_an_associated_signature() {
+    let errors = semantic_errors(
+        r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+@derive(Copy)
+struct Counter { n: i32 }
+
+impl Source for Counter {
+    type Item = i32
+
+    func first(&self) -> Self::Item { self.n }
+}
+
+func read<T: Source<Item = i32>>(s: &T) -> i32 {
+    s.first()
+}
+
+func main() -> i32 {
+    val c = Counter { n: 4 }
+    read(&c)
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "`Source<Item = i32>` says what `Self::Item` is; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_constrained_bound_types_a_nested_associated_position() {
+    // The binding has to reach a nested position, not only a bare annotation.
+    let errors = semantic_errors(
+        r#"
+trait Source {
+    type Item
+
+    func pair(&self) -> (Self::Item, i32)
+}
+
+@derive(Copy)
+struct Counter { n: i32 }
+
+impl Source for Counter {
+    type Item = i32
+
+    func pair(&self) -> (Self::Item, i32) { (self.n, 1) }
+}
+
+func read<T: Source<Item = i32>>(s: &T) -> i32 {
+    val p = s.pair()
+    p.0 + p.1
+}
+
+func main() -> i32 {
+    val c = Counter { n: 4 }
+    read(&c)
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "the binding resolves `(Self::Item, i32)` to `(i32, i32)`; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_type_argument_binding_a_different_associated_type_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+@derive(Copy)
+struct Tally { n: f64 }
+
+impl Source for Tally {
+    type Item = f64
+
+    func first(&self) -> Self::Item { self.n }
+}
+
+func read<T: Source<Item = i32>>(s: &T) -> i32 {
+    0
+}
+
+func main() -> i32 {
+    val t = Tally { n: 1.0 }
+    read(&t)
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::AssociatedTypeBoundMismatch { .. })),
+        "`Tally` binds `Item` to f64, which the bound forbids; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_bound_may_only_constrain_a_declared_associated_type() {
+    let errors = semantic_errors(
+        r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+func read<T: Source<Bogus = i32>>(s: &T) -> i32 { 0 }
+
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UnknownAssociatedType { .. })),
+        "`Bogus` is not a member of `Source`; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_constraint_carries_through_a_second_bounded_parameter() {
+    // The inner call has no impl to read — its argument is the outer parameter — so the
+    // outer bound's own constraint is what must answer for it.
+    let errors = semantic_errors(
+        r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+@derive(Copy)
+struct Counter { n: i32 }
+
+impl Source for Counter {
+    type Item = i32
+
+    func first(&self) -> Self::Item { self.n }
+}
+
+func read<T: Source<Item = i32>>(s: &T) -> i32 { s.first() }
+
+func relay<U: Source<Item = i32>>(s: &U) -> i32 { read(s) }
+
+func main() -> i32 {
+    val c = Counter { n: 4 }
+    relay(&c)
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "both bounds constrain `Item` to i32; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_return_position_constraint_must_match_the_concrete_impl() {
+    let errors = semantic_errors(
+        r#"
+trait Source {
+    type Item
+
+    func first(&self) -> Self::Item
+}
+
+@derive(Copy)
+struct Tally { n: f64 }
+
+impl Source for Tally {
+    type Item = f64
+
+    func first(&self) -> Self::Item { self.n }
+}
+
+func make() -> impl Source<Item = i32> {
+    Tally { n: 1.0 }
+}
+
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::AssociatedTypeBoundMismatch { .. })),
+        "`-> impl Source<Item = i32>` promises what `Tally` does not bind; got {errors:?}"
+    );
+}

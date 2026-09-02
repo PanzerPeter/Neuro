@@ -73,8 +73,9 @@ func main() -> i32 {
 
 #[test]
 fn an_associated_type_carries_through_a_generic_enum() {
-    // §3.7's own signature: the associated type sits inside `Option<...>`, so the
-    // binding has to reach a nested position, not only a bare annotation.
+    // The canonical iterator signature: the associated type sits inside
+    // `Option<...>`, so the binding has to reach a nested position, not only a
+    // bare annotation.
     let test = CompileTest::new();
     let source = r#"
 trait Iterator {

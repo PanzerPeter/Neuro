@@ -27,19 +27,29 @@ pub enum GenericParamKind {
     Const(Type),
 }
 
+/// One trait bound written on a type parameter: `Trait`, or `Trait<Assoc = T>`.
+///
+/// The bindings are the same `(name, type)` shape an `impl` block writes in
+/// [`ImplDef::assoc_types`], because the two answer the same declaration: an impl says
+/// what its associated type is, a bound says what a caller's must be.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitBound {
+    pub trait_name: Identifier,
+    /// `Trait<Assoc = T>` bindings in written order. Empty for a bare `Trait`.
+    pub assoc_bindings: Vec<(Identifier, Type)>,
+}
+
 /// A single generic parameter in a `<...>` list: `T`, `T: Bound + Bound`, or
 /// `const N: u32`.
 ///
-/// `bounds` records the trait names syntactically (from either the inline `T: Bound`
-/// form or a `where` clause), but they are **not enforced** in this phase — the trait
-/// system does not exist yet, so a bound is parsed for forward compatibility and
-/// ignored by later passes. `kind` distinguishes a type parameter from a const (value)
-/// parameter.
+/// `bounds` records the trait bounds written on the parameter, from either the inline
+/// `T: Bound` form or a `where` clause. `kind` distinguishes a type parameter from a
+/// const (value) parameter.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GenericParam {
     pub name: Identifier,
     pub kind: GenericParamKind,
-    pub bounds: Vec<Identifier>,
+    pub bounds: Vec<TraitBound>,
     pub span: Span,
 }
 

@@ -95,7 +95,12 @@ pub enum Type {
     /// In argument position the parser rewrites it into a fresh trait-bounded generic
     /// parameter (so this node never reaches semantic there); in return position it
     /// survives and is resolved transparently to the concrete type the body produces.
-    ImplTrait { trait_name: Identifier, span: Span },
+    /// `assoc_bindings` carries the `Trait<Assoc = T>` constraint form, empty without it.
+    ImplTrait {
+        trait_name: Identifier,
+        assoc_bindings: Vec<(Identifier, Type)>,
+        span: Span,
+    },
 
     /// Dynamic-dispatch trait object `dyn Trait`: an unsized runtime type that
     /// only ever appears behind a reference (`&dyn Trait` / `&mut dyn Trait`). Method

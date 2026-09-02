@@ -11,7 +11,7 @@ Provide the canonical Abstract Syntax Tree node definitions shared by every stag
   - `items` — `Item`, `FunctionDef`, `StructDef`, `EnumDef`, `EnumVariant`, `VariantPayload`,
     `FieldDef`, `ImplDef`, `MethodDef`, `SelfParam`, `TraitDef`, `TraitMethod`, `ConstDef`,
     `NewtypeDef`, `ModuleDef`, `ModuleId`, `ImportDef`, `ImportName`, `ImportSelection`,
-    `Parameter`, `ParamLabel`, `GenericParam`, `GenericParamKind`, `Attribute`
+    `Parameter`, `ParamLabel`, `GenericParam`, `GenericParamKind`, `TraitBound`, `Attribute`
   - `statements` — `Stmt`
   - `types` — `Type`, `ArraySize`, `GenericArg`
 
@@ -97,7 +97,9 @@ walkers.
   `type_name` identifier's `name`; module resolution splits and erases it.
 - `Type::ImplTrait` survives parsing **only in return position** — in argument position the
   parser rewrites it into a fresh trait-bounded `GenericParam`, so downstream slices see an
-  ordinary generic. `Type::DynTrait` always survives; semantic analysis resolves it to a
+  ordinary generic. Its `assoc_bindings` carry the `impl Trait<Assoc = T>` constraint through
+  that rewrite, which is why the node holds the same binding list a `TraitBound` does.
+  `Type::DynTrait` always survives; semantic analysis resolves it to a
   trait-object type and rejects it outside a reference.
 
 ### Fields that encode a cross-slice contract
@@ -136,7 +138,10 @@ walkers.
 `None` for an inherent block — plus `assoc_types: Vec<(Identifier, Type)>` for `type Name = T`
 bindings: the operator traits' `type Output = T`, and the answer to whatever a user trait's
 `TraitDef.assoc_types: Vec<Identifier>` declares. The two sides sit on different nodes because a
-declaration carries a name only. An associated type is named in a signature as
+declaration carries a name only. `GenericParam.bounds: Vec<TraitBound>` is the third place the
+same `(name, type)` binding shape appears — a bound constrains an associated type
+(`T: Channel<Sample = i32>`) exactly as an impl answers it. An associated type is named in a
+signature as
 `Type::Named("Self::Item")` — the qualifier rides in the name exactly as a module prefix does, and
 only the type checker, which is the first pass that knows the implementing type, resolves it. Each
 `MethodDef` holds an `Option<SelfParam>` distinguishing associated functions (`None`) from

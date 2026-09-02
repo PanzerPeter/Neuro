@@ -34,6 +34,7 @@ basics/type_inference.nr        42
 
 # --- types ----------------------------------------------------------------
 types/arrays.nr                     8
+types/assoc_bounds.nr               50
 types/borrow_exclusivity.nr         31
 types/char.nr                       65
 types/collections.nr                101
@@ -138,6 +139,6 @@ showcase/telemetry/main.nr          75
 showcase/telemetry/stats.nr         module
 showcase/telemetry/report/mod.nr    module
 showcase/telemetry/report/format.nr module
-showcase/typed_channels.nr  92
+showcase/typed_channels.nr  108
 showcase/unit_types.nr      94
 showcase/vector_physics.nr  35

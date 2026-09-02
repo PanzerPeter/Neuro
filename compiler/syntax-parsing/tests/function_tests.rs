@@ -36,7 +36,7 @@ fn test_parse_generic_function_params() {
             let bound_names: Vec<&str> = func.generics[1]
                 .bounds
                 .iter()
-                .map(|b| b.name.as_str())
+                .map(|b| b.trait_name.name.as_str())
                 .collect();
             assert_eq!(bound_names, vec!["Ord", "Eq"]);
         }

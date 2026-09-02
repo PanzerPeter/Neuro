@@ -1,0 +1,7 @@
+doubled(Counter 5) -> 10
+doubled(Stride 4)  -> 24
+negated(Counter 5) -> -5
+plain(Stride 4)    -> 12
+make(7).first()    -> 7
+Gauge.first()      -> 2
+total              -> 50

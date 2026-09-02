@@ -346,8 +346,9 @@ Errors: `UnknownArrayLength`, `ConstPredicateViolated`, `TurbofishCountMismatch`
 
 ### Traits
 `traits` (name → `TraitInfo` of resolved method signatures), `trait_impls` (the `(trait, type)`
-pairs with an impl), and `generic_bounds` (type-parameter → bound trait names, live inside a
-generic definition) carry the trait system. `register_impl` calls `check_trait_conformance` for any
+pairs with an impl), `impl_assoc` (`(trait, type)` → what that impl bound each associated type
+to), and `generic_bounds` (type-parameter → `BoundInfo`s, live inside a generic definition)
+carry the trait system. `register_impl` calls `check_trait_conformance` for any
 non-lang-item trait impl: every required method present (`MissingTraitMethod`), each impl method a
 trait member (`NotATraitMethod`) with a matching signature (`TraitMethodSignatureMismatch`), or
 `UnknownTrait`. Method dispatch resolves `obj.m()` on a bounded type parameter via
@@ -362,11 +363,21 @@ around both `register_impl` and `check_impl` and consulted by `resolve_type` for
 which `trait_signature_mismatch` then resolves per impl, so the trait's `Self::Item` is compared
 as the type that impl chose. Conformance also requires every declared name bound
 (`MissingAssociatedType`) and nothing else bound (`UnknownAssociatedType`); an unbound path
-anywhere else is `UnboundAssociatedType`. Two positions erase the implementor and therefore
-cannot say what the associated type is: a trait declaring one is **not object-safe**
-(`TraitNotObjectSafe`), and dispatch through a bare `T: Trait` bound reports
-`UnconstrainedAssociatedType`. Both point at the `Trait<Assoc = T>` bound form, which is the
-next roadmap item.
+anywhere else is `UnboundAssociatedType`. A trait declaring an associated type is **not
+object-safe** (`TraitNotObjectSafe`): a trait object erases the implementor, and nothing else
+says what the member is.
+
+**Constrained bounds.** `T: Trait<Assoc = U>` is resolved by `resolve_bounds` (in
+`declarations/mod.rs`) into `BoundInfo { trait_name, assoc }`, in a second pass over the
+parameter list so a constraint may name another parameter of the same list; a binding the trait
+never declared is `UnknownAssociatedType`. `resolve_generic_trait_method` then types a call
+whose signature names an associated type by installing the bound's constraints as `self_assoc`
+and re-resolving `TraitMethodSig.decl` — the same per-impl re-resolution conformance does. A
+bare bound leaves the position open and still reports `UnconstrainedAssociatedType`. At the call
+site `check_assoc_bindings` compares the constraint against `impl_assoc` for the concrete type
+argument (or, for a type parameter passed through from an enclosing generic, against that
+parameter's own bound), reporting `AssociatedTypeBoundMismatch`; `resolve_impl_return` runs the
+same check for return-position `impl Trait<Assoc = U>`.
 
 **Lang items** are compiler-known traits the user only ever writes an `impl` for:
 - `Drop` — `register_drop_impl` requires exactly the destructor `drop(&mut self)` (no params, no

@@ -234,7 +234,10 @@ precedence.
 token in a `<...>` list is collected into a separate `lifetimes` vector, kept apart from
 type/const generics because a lifetime does not monomorphize, with a duplicate-lifetime check.
 It also accepts `const N: T` (setting `GenericParamKind::Const`). Bounds after `:` are
-`+`-separated trait names, recorded but not enforced here. `parse_where_clause` folds trait
+`+`-separated `TraitBound`s, each an optionally-constrained trait name: `parse_trait_bound`
+reads the name then `parse_assoc_bindings`, which takes the `<Assoc = T, ...>` form and rejects
+a positional argument, since a trait's own generic parameters are not bindable in a bound.
+`parse_where_clause` folds trait
 bounds into the matching parameter and collects value predicates. `parse_type`'s reference branch
 parses an optional lifetime after `&` and before `mut` (`&'a T` / `&'a mut T`).
 
