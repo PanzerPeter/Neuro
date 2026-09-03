@@ -57,11 +57,14 @@ pub enum ParseError {
     #[error("string interpolation is not allowed in a pattern; a pattern must be a constant")]
     InterpolationInPattern { span: Span },
 
-    #[error("a `for` head binding a pair `(index, value)` iterates an enumerated sequence; add `.enumerate()` to the iterable")]
+    #[error("a `for` head binding a pair `(index, value)` iterates a position-yielding head; add `.enumerate()` to the iterable, or iterate `.char_indices()` for byte offsets")]
     PairWithoutEnumerate { span: Span },
 
-    #[error("`.enumerate()` yields a position and a value; bind both with a pair pattern `for (index, value) in ...`")]
-    EnumerateWithoutPair { span: Span },
+    #[error("`.{head}()` yields a position and a value; bind both with a pair pattern `for (index, value) in ...`")]
+    PairHeadWithoutPair { head: String, span: Span },
+
+    #[error("`.char_indices()` is a complete `for` head: it already binds a position, so it takes no `.enumerate()` and no `.map` / `.filter` adapters")]
+    CharIndicesHeadDecorated { span: Span },
 
     #[error("`.enumerate()` takes no arguments")]
     EnumerateTakesNoArguments { span: Span },

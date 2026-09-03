@@ -125,3 +125,40 @@ export trait IntoIterator {
     type Iter
     func into_iter(self) -> Self::Iter
 }
+
+// The iterator `string.chars()` hands out: a cursor over one borrowed string's
+// Unicode scalar values.
+//
+// The text is borrowed, never owned, so walking a string neither copies nor consumes
+// it. `.chars()` is the only way to build one — the fields are private, and the
+// compiler fills them in.
+export struct Chars {
+    source: &string,
+    offset: u64
+}
+
+impl Iterator for Chars {
+    type Item = char
+    func next(&mut self) -> Option<char> {
+        if self.offset >= self.source.len() {
+            return Option::None
+        }
+        val scalar = self.source.__char_at(self.offset)
+        // UTF-8 spends as many bytes on a scalar as its magnitude needs, so the step
+        // to the next code point follows from the value just decoded and costs no
+        // second pass over the text. This is what keeps a step O(1).
+        val code = scalar as u32
+        mut width: u64 = 1
+        if code >= 128 {
+            width = 2
+        }
+        if code >= 2048 {
+            width = 3
+        }
+        if code >= 65536 {
+            width = 4
+        }
+        self.offset = self.offset + width
+        Option::Some(scalar)
+    }
+}

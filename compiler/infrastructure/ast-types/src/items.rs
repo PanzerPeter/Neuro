@@ -13,6 +13,14 @@ use super::types::Type;
 /// exactly the rule that needs it. The parser stamps 0 on everything it produces.
 pub type ModuleId = u32;
 
+/// The module id the implicit prelude's own declarations carry.
+///
+/// The prelude is prepended after module resolution has numbered the program's files, so
+/// it takes an id no loaded module can hold. It lives here rather than in the driver
+/// because the type checker needs it too: the intrinsics the prelude's own bodies are
+/// written against resolve only while checking a declaration stamped with this id.
+pub const PRELUDE_MODULE: ModuleId = ModuleId::MAX;
+
 /// What a generic parameter binds.
 ///
 /// A `Type` parameter (`T`) is substituted with a concrete type at each instantiation.

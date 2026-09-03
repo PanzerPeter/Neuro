@@ -165,3 +165,120 @@ fn protocol_loops_nest() {
     ));
     assert!(errors.is_empty(), "expected no errors, got {errors:?}");
 }
+
+/// The codepoint iterator as the prelude declares it, so `.chars()` has something to
+/// resolve to here. The `__char_at` step is prelude-private; inside these tests every
+/// declaration is a user declaration, so the body stands in for it.
+const CHARS_DECL: &str = r#"
+struct Chars { source: &string, offset: u64 }
+
+impl Iterator for Chars {
+    type Item = char
+    func next(&mut self) -> Option<char> {
+        if self.offset >= self.source.len() { return Option::None }
+        self.offset = self.offset + 1
+        Option::Some('a')
+    }
+}
+"#;
+
+#[test]
+fn a_chars_head_binds_a_char() {
+    let source = format!(
+        "{PROTOCOL_TRAITS}{CHARS_DECL}
+func main() -> i32 {{
+    mut wide = 0
+    for c in \"héllo\".chars() {{
+        if (c as u32) > 127 {{ wide = wide + 1 }}
+    }}
+    wide
+}}
+"
+    );
+    let errors = semantic_errors(&source);
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+/// `.char_indices()` is a head form, not a method: its position binding is a `u64` byte
+/// offset and its value binding the code point standing there.
+#[test]
+fn a_char_indices_head_binds_a_byte_offset_and_a_char() {
+    let source = format!(
+        "{PROTOCOL_TRAITS}{CHARS_DECL}
+func main() -> i32 {{
+    val text = \"héllo\"
+    mut last: u64 = 0
+    for (off, c) in text.char_indices() {{
+        if c == 'o' {{ last = off }}
+    }}
+    last as i32
+}}
+"
+    );
+    let errors = semantic_errors(&source);
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+/// Outside a `for` head there is no position to bind, so the call names no method at
+/// all — the diagnostic is the ordinary one for a method a type does not have.
+#[test]
+fn char_indices_outside_a_for_head_is_not_a_method() {
+    let source = format!(
+        "{PROTOCOL_TRAITS}{CHARS_DECL}
+func main() -> i32 {{
+    val it = \"hi\".char_indices()
+    0
+}}
+"
+    );
+    let errors = semantic_errors(&source);
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::MethodNotFound { method_name, .. } if method_name == "char_indices"
+        )),
+        "expected MethodNotFound for char_indices, got {errors:?}"
+    );
+}
+
+/// The decode step behind `Chars::next` belongs to the prelude. A program is not the
+/// prelude, so it cannot reach it — the language specifies no byte-indexed read.
+#[test]
+fn the_decode_intrinsic_is_out_of_reach_of_a_program() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val c = "hi".__char_at(0)
+    0
+}
+"#,
+    );
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::MethodNotFound { method_name, .. } if method_name == "__char_at"
+        )),
+        "expected MethodNotFound for __char_at, got {errors:?}"
+    );
+}
+
+/// Without the prelude there is no iterator to hand out, so `.chars()` reports the
+/// missing declaration rather than resolving to a type that is not there.
+#[test]
+fn chars_without_the_iterator_declaration_reports_it() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val it = "hi".chars()
+    0
+}
+"#,
+    );
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::UnknownTypeName { name, .. } if name == "Chars"
+        )),
+        "expected UnknownTypeName for Chars, got {errors:?}"
+    );
+}

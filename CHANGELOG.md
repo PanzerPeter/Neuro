@@ -10,6 +10,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.11.0] - 2026-09-03
+
+### Added
+
+- **Codepoint iterators: `.chars()` and `.char_indices()`.** A `string` is UTF-8, and every
+  API on it counted bytes: `.len()` is a byte length and `.slice(range)` takes byte offsets.
+  Walking text one character at a time had no answer at all short of `.char_slice(i..i+1)`
+  per character, which rescans from the start on every step. `.chars()` now hands out an
+  iterator over Unicode scalar values whose every step is O(1) — it decodes the code point
+  standing at its byte offset and advances by that code point's own width, so no part of the
+  text is read twice.
+
+  ```neuro
+  val text = "héllo"
+
+  for c in text.chars() {
+      println("{c}")                      // 5 scalars, though text.len() is 6 bytes
+  }
+
+  for (position, c) in text.chars().enumerate() { }   // position counts code points
+  ```
+
+  It is an ordinary iterator from the prelude, not a special form: `.enumerate()` numbers
+  the scalars, `.map(f)` / `.filter(p)` decorate them, and the iterator itself is a value
+  that can be held and stepped by hand — `walk.next()` answers `Option<char>`. The receiver
+  is borrowed rather than consumed, so the text stays usable, and a `&string` walks exactly
+  as an owned `string` does.
+
+- **`for (offset, c) in text.char_indices()`** binds the **byte offset** of each scalar
+  beside it. Those are the offsets `.slice(range)` takes, which is the pairing the method
+  exists for: find a position by reading characters, then cut by bytes.
+
+  ```neuro
+  mut cut: u64 = 0
+  for (offset, c) in "aé漢".char_indices() {
+      if c == '漢' { cut = offset }       // 3 — 'a' is one byte, 'é' two
+  }
+  ```
+
+  An offset always names the code point its own step yields, never the one after it, and a
+  `continue` cannot knock the two out of step. Unlike `.chars()`, `.char_indices()` is a
+  `for`-head form rather than a method: it binds a pair, and a pair cannot travel through
+  `Iterator::next`, whose `Option` payload is restricted to scalar primitives in this phase.
+  So it appears only in a `for` head, binds a pair there, and takes no `.enumerate()` and no
+  adapters — it already carries a position of its own. Reach for `.chars()` when a chain is
+  what you want.
+
+### Fixed
+
+- A program that declared its own `Option` dropped the prelude's, which had always been the
+  rule — but nothing in the prelude used to depend on another prelude declaration, and now
+  `Chars` does. Shadowing a prelude name now also withdraws the prelude declarations written
+  against it, along with any `impl` block extending a type the program displaced, instead of
+  leaving them to be compiled against a replacement they were never written for.
+
+
 ## [2.10.0] - 2026-09-03
 
 ### Added

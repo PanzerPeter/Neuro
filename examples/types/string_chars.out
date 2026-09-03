@@ -1,0 +1,14 @@
+text        = aé漢🎉
+text.len()  = 10   (bytes, not characters)
+scalars     = 4
+  #0 a
+  #1 é
+  #2 漢
+  #3 🎉
+  @0 a code 97
+  @1 é code 233
+  @3 漢 code 28450
+  @6 🎉 code 127881
+tail        = 漢🎉
+stepped     = ok!
+score       = 31

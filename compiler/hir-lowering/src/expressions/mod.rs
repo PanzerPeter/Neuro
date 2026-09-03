@@ -37,6 +37,16 @@ const CLONE_METHOD: &str = "clone";
 /// The borrowing sub-range method on every contiguous container.
 const SLICE_METHOD: &str = "slice";
 
+/// The codepoint iterator `string.chars()` yields, declared in the prelude, and the
+/// two fields the lowering fills in: the borrowed text and the byte cursor into it.
+pub(crate) const CHARS_STRUCT: &str = "Chars";
+pub(crate) const CHARS_SOURCE_FIELD: &str = "source";
+pub(crate) const CHARS_OFFSET_FIELD: &str = "offset";
+/// The method that produces one.
+pub(crate) const CHARS_METHOD: &str = "chars";
+/// The prelude-private decode step `Chars::next` is written against.
+const CHAR_AT_METHOD: &str = "__char_at";
+
 /// An enum variant's ordered payload fields: each `(optional field name, type)`.
 /// `Some` name marks a struct-variant field; `None` a tuple-variant element.
 type PayloadFields = Vec<(Option<String>, HirType)>;

@@ -30,6 +30,9 @@ pub(crate) enum BuiltinMethod {
     /// codepoints rather than bytes; panics on an out-of-bounds range. No boundary check
     /// is needed — a codepoint index cannot name a position inside a code point.
     StringCharSlice,
+    /// `string.__char_at(offset)` → the Unicode scalar whose UTF-8 encoding begins at
+    /// that byte. Private to the prelude, which writes its codepoint iterator against it.
+    StringCharAt,
     /// `struct.clone()` → a copy of the struct aggregate value, for `@derive(Clone)` types.
     StructClone,
     /// `int.wrapping_add(rhs)` → two's-complement wrapping add.
@@ -81,6 +84,7 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<Builti
         (Type::String, "clone") => Some(BuiltinMethod::StringClone),
         (Type::String, "slice") => Some(BuiltinMethod::StringSlice),
         (Type::String, "char_slice") => Some(BuiltinMethod::StringCharSlice),
+        (Type::String, "__char_at") => Some(BuiltinMethod::StringCharAt),
         // `array.len()` → the static element count as `u64`. Auto-derefs a
         // borrow of an array (`&[T; N]`) like the string builtins above.
         (Type::Array { .. }, "len") => Some(BuiltinMethod::ArrayLen),

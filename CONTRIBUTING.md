@@ -315,8 +315,9 @@ v2.1.0, `.is_nan()` in v2.2.0, buffered standard output in v2.3.0, the codepoint
 `.char_slice(range)` in v2.4.0, `.enumerate()` on arrays and ranges in v2.5.0, and the
 `&[T]` / `&mut [T]` borrowed slice type in v2.6.0, associated types in trait
 declarations in v2.7.0, the `Trait<Assoc = T>` bound form in v2.8.0, and the
-`IntoIterator` / `Iterator` protocol in v2.9.0, and the `.map()` / `.filter()` head
-adapters in v2.10.0; the codepoint iterators `.chars()` / `.char_indices()` are next.
+`IntoIterator` / `Iterator` protocol in v2.9.0, the `.map()` / `.filter()` head
+adapters in v2.10.0, and the codepoint iterators `.chars()` / `.char_indices()` in
+v2.11.0; `@derive` argument validation with the `Debug` / `PartialEq` derives is next.
 Start at the top of 2A in the roadmap, and move to `2B — Tensor Core`
 (`Tensor<T, [...]>` static tensor type syntax) only once 2A is clear.
 

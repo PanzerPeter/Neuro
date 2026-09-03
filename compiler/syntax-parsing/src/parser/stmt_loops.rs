@@ -134,7 +134,7 @@ impl Parser {
     /// prefixed with a loop `label`.
     ///
     /// `<head>` is one loop variable, or the pair `(index, value)` that
-    /// `.enumerate()` binds. `<iterable>` is a numeric range, an expression
+    /// `.enumerate()` and `.char_indices()` bind. `<iterable>` is a numeric range, an expression
     /// yielding a sequence, or either of those wearing a chain of `.map(f)` /
     /// `.filter(p)` adapters and an outermost `.enumerate()` — the adapters are
     /// recognised here rather than type-checked as methods because a range is not a
@@ -171,7 +171,21 @@ impl Parser {
             // either a sequence expression or a parenthesised range, each possibly
             // wearing an adapter chain.
             let (iterable, adapters, enumerated) = strip_adapters(start)?;
-            Self::check_head_agrees(&index, enumerated, iterable.span())?;
+            // `.char_indices()` binds its own position, so a chain around one would have
+            // two sources for a single binding — and an adapter that drops or replaces
+            // elements would leave the offsets naming text no longer being yielded.
+            let char_indices = is_char_indices_head(&iterable);
+            if char_indices && (enumerated || !adapters.is_empty()) {
+                return Err(ParseError::CharIndicesHeadDecorated {
+                    span: iterable.span(),
+                });
+            }
+            let pair_head = match (enumerated, char_indices) {
+                (true, _) => Some(ENUMERATE_METHOD),
+                (_, true) => Some(CHAR_INDICES_METHOD),
+                _ => None,
+            };
+            Self::check_head_agrees(&index, pair_head, iterable.span())?;
             let body = self.parse_labeled_block(label.as_ref())?;
             let end_span = body.last().map(stmt_span).unwrap_or(iterable.span());
             let span = start_span.merge(end_span);
@@ -216,7 +230,7 @@ impl Parser {
         // An unparenthesised range binds looser than a method call, so
         // `for i in 0..n.enumerate()` would enumerate `n`, not the range. Reject the
         // pair head here and point at the spelling that works.
-        Self::check_head_agrees(&index, false, end.span())?;
+        Self::check_head_agrees(&index, None, end.span())?;
 
         let body = self.parse_labeled_block(label.as_ref())?;
 
@@ -271,17 +285,21 @@ impl Parser {
         }
     }
 
-    /// Reject a head whose arity disagrees with the iterable: a pair binds what
-    /// only `.enumerate()` produces, and `.enumerate()` produces what only a pair
-    /// can bind.
+    /// Reject a head whose arity disagrees with the iterable: a pair binds what only a
+    /// position-yielding head produces, and such a head produces what only a pair can
+    /// bind. `pair_head` names that head (`enumerate`, `char_indices`) when the iterable
+    /// wears one, so the diagnostic points at the spelling actually written.
     fn check_head_agrees(
         index: &Option<Identifier>,
-        enumerated: bool,
+        pair_head: Option<&str>,
         span: Span,
     ) -> ParseResult<()> {
-        match (index.is_some(), enumerated) {
-            (true, false) => Err(ParseError::PairWithoutEnumerate { span }),
-            (false, true) => Err(ParseError::EnumerateWithoutPair { span }),
+        match (index.is_some(), pair_head) {
+            (true, None) => Err(ParseError::PairWithoutEnumerate { span }),
+            (false, Some(head)) => Err(ParseError::PairHeadWithoutPair {
+                head: head.to_string(),
+                span,
+            }),
             _ => Ok(()),
         }
     }
@@ -410,6 +428,8 @@ impl Parser {
 
 /// The position-binding adapter a `for` head recognises on its iterable.
 const ENUMERATE_METHOD: &str = "enumerate";
+/// The codepoint head that binds a byte offset beside each scalar.
+const CHAR_INDICES_METHOD: &str = "char_indices";
 /// The element-transforming adapter.
 const MAP_METHOD: &str = "map";
 /// The element-dropping adapter.
@@ -498,6 +518,22 @@ fn strip_enumerate(iterable: Expr) -> ParseResult<(Expr, bool)> {
         return Err(ParseError::EnumerateTakesNoArguments { span: *span });
     }
     Ok((object.as_ref().clone(), true))
+}
+
+/// Whether `iterable` is a `.char_indices()` call, the second head form that binds a
+/// pair.
+///
+/// Unlike `.enumerate()` the call is left in the tree: it names an intrinsic on the
+/// receiver, so the passes downstream resolve it as the method it is. All that is
+/// decided here is the arity of the head it may wear.
+fn is_char_indices_head(iterable: &Expr) -> bool {
+    let Expr::Call { func, args, .. } = iterable else {
+        return false;
+    };
+    let Expr::FieldAccess { field, .. } = func.as_ref() else {
+        return false;
+    };
+    field.name == CHAR_INDICES_METHOD && args.is_empty()
 }
 
 /// Peel the grouping parentheses `(0..n).enumerate()` needs, so the range inside
@@ -682,7 +718,7 @@ mod tests {
     fn enumerate_without_a_pair_head_is_rejected() {
         assert!(matches!(
             parse_err("func main() -> i32 { for x in xs.enumerate() { }\n 0 }"),
-            ParseError::EnumerateWithoutPair { .. }
+            ParseError::PairHeadWithoutPair { .. }
         ));
     }
 
@@ -691,6 +727,49 @@ mod tests {
         assert!(matches!(
             parse_err("func main() -> i32 { for (i, x) in xs.enumerate(2) { }\n 0 }"),
             ParseError::EnumerateTakesNoArguments { .. }
+        ));
+    }
+
+    /// The second pair-yielding head. Unlike `.enumerate()` the call stays in the tree:
+    /// it is an intrinsic on the receiver, resolved by the passes downstream.
+    #[test]
+    fn char_indices_binds_a_pair_and_keeps_its_call() {
+        let stmt = first_stmt("func main() -> i32 { for (o, c) in s.char_indices() { }\n 0 }");
+        let Stmt::ForEach {
+            index,
+            iterator,
+            iterable,
+            ..
+        } = stmt
+        else {
+            panic!("expected a for-each");
+        };
+        assert_eq!(index.map(|i| i.name), Some("o".to_string()));
+        assert_eq!(iterator.name, "c");
+        assert!(matches!(iterable, crate::ast::Expr::Call { .. }));
+    }
+
+    #[test]
+    fn char_indices_without_a_pair_head_is_rejected() {
+        assert!(matches!(
+            parse_err("func main() -> i32 { for c in s.char_indices() { }\n 0 }"),
+            ParseError::PairHeadWithoutPair { head, .. } if head == "char_indices"
+        ));
+    }
+
+    #[test]
+    fn char_indices_under_enumerate_is_rejected() {
+        assert!(matches!(
+            parse_err("func main() -> i32 { for (i, c) in s.char_indices().enumerate() { }\n 0 }"),
+            ParseError::CharIndicesHeadDecorated { .. }
+        ));
+    }
+
+    #[test]
+    fn an_adapter_over_char_indices_is_rejected() {
+        assert!(matches!(
+            parse_err("func main() -> i32 { for (o, c) in s.char_indices().filter(p) { }\n 0 }"),
+            ParseError::CharIndicesHeadDecorated { .. }
         ));
     }
 }

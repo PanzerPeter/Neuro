@@ -278,3 +278,87 @@ fn array_and_range_heads_keep_their_counted_loops() {
         "a range head stays a ForRange, got {body:?}"
     );
 }
+
+/// The prelude's codepoint iterator, declared here because the lowering slice sees no
+/// prelude. `.chars()` builds one, so its shape has to match what the lowering emits.
+const CHARS_DECLS: &str = r#"
+struct Chars { source: &string, offset: u64 }
+
+impl Iterator for Chars {
+    type Item = char
+    func next(&mut self) -> Option<char> {
+        if self.offset >= self.source.len() { return Option::None }
+        val scalar = self.source.__char_at(self.offset)
+        self.offset = self.offset + 1
+        Option::Some(scalar)
+    }
+}
+"#;
+
+/// `.chars()` never reaches a backend as a call: it is the iterator's own literal, so
+/// the receiver's borrow and the zero cursor are visible right here.
+#[test]
+fn chars_lowers_to_the_iterator_literal() {
+    let program = lower(&format!(
+        "{PROTOCOL_DECLS}{CHARS_DECLS}
+         func main() -> i32 {{
+            val s = \"hi\"
+            val it = s.chars()
+            0
+         }}"
+    ));
+    let init = super::binding_init(function_body(&program, "main"), "it");
+    let HirExprKind::StructLiteral { name, fields, .. } = &init.kind else {
+        panic!("`.chars()` builds the iterator, got {:?}", init.kind);
+    };
+    assert_eq!(name, "Chars");
+    assert_eq!(fields[0].name, "source");
+    assert!(
+        matches!(fields[0].value.kind, HirExprKind::Reference { .. }),
+        "the text is borrowed, not moved, got {:?}",
+        fields[0].value.kind
+    );
+    assert_eq!(fields[1].name, "offset");
+    assert_eq!(fields[1].value.ty, HirType::U64);
+}
+
+/// `.char_indices()` binds byte offsets, and a byte offset lives on the iterator: the
+/// loop samples it before stepping, and never counts steps of its own.
+#[test]
+fn char_indices_samples_the_iterator_cursor_before_each_step() {
+    let program = lower(&format!(
+        "{PROTOCOL_DECLS}{CHARS_DECLS}
+         func main() -> i32 {{
+            val s = \"hi\"
+            for (o, c) in s.char_indices() {{ }}
+            0
+         }}"
+    ));
+    let stmts = protocol_loop(function_body(&program, "main"));
+    let HirStmt::While { body, .. } = stmts.last().expect("the loop is the last statement") else {
+        panic!("the desugar ends in a while, got {:?}", stmts.last());
+    };
+
+    let HirStmt::Assignment { target, value, .. } = &body[0] else {
+        panic!("the cursor is sampled first, got {:?}", body[0]);
+    };
+    assert!(target.starts_with("__iter_pos_"), "got {target}");
+    let HirExprKind::FieldAccess { field, .. } = &value.kind else {
+        panic!("the sample reads the iterator, got {:?}", value.kind);
+    };
+    assert_eq!(field, "offset");
+
+    let HirStmt::Expr(step) = &body[1] else {
+        panic!("the step follows the sample, got {:?}", body[1]);
+    };
+    let HirExprKind::Match { arms, .. } = &step.kind else {
+        panic!("the step is a match");
+    };
+    let HirExprKind::Block { stmts: arm } = &arms[0].body.kind else {
+        panic!("the yielding arm is a block");
+    };
+    assert!(
+        !arm.iter().any(|s| matches!(s, HirStmt::Assignment { .. })),
+        "a byte cursor is advanced by `next`, not by the loop, got {arm:?}"
+    );
+}

@@ -11,16 +11,9 @@
 //! prelude's contents are stated.
 
 use anyhow::{anyhow, Result};
+use ast_types::PRELUDE_MODULE;
 use module_resolution::PreludeVariant;
 use syntax_parsing::Item;
-
-/// The module id the prelude's own declarations are stamped with.
-///
-/// The prelude is prepended after module resolution has numbered the program's files, so
-/// it needs an id no loaded module can hold. Its declarations are reachable from every
-/// module the same way — a private prelude field is private to the prelude, not to
-/// whichever file happens to be the root.
-const PRELUDE_MODULE: ast_types::ModuleId = ast_types::ModuleId::MAX;
 
 /// The prelude in Neuro source form, so the declarations read exactly as a user would
 /// write them and stay in one place as more items join them.
@@ -74,18 +67,48 @@ impl Prelude {
     ///
     /// A prelude item whose name the program already declares is dropped: a local
     /// declaration shadows the prelude, which is the module system's rule and the only way
-    /// to keep a program that defines its own `Result` compilable.
+    /// to keep a program that defines its own `Result` compilable. Dropping one
+    /// declaration takes with it every prelude declaration written against it — the
+    /// prelude's own bodies are compiled against the prelude's own types, and a
+    /// replacement is a different type with a different surface.
     pub fn prepend(self, items: Vec<Item>) -> Vec<Item> {
         let declared: Vec<&str> = items.iter().filter_map(item_name).collect();
+        let dropped = dropped_declarations(&declared);
         let mut combined: Vec<Item> = self
             .items
             .into_iter()
-            .filter(|item| !item_name(item).is_some_and(|name| declared.contains(&name)))
+            .filter(|item| !is_dropped(item, &dropped))
             .map(stamp_prelude_module)
             .collect();
         combined.extend(items);
         combined
     }
+}
+
+/// Prelude declarations written against other prelude declarations, and the names each
+/// needs. Shadowing a needed name takes the dependent declaration down with it.
+const PRELUDE_DEPENDENCIES: &[(&str, &[&str])] = &[("Chars", &["Option", "Iterator"])];
+
+/// Every prelude name a program's own declarations displace: the names it declares
+/// outright, plus the prelude declarations written against those.
+fn dropped_declarations(declared: &[&str]) -> Vec<String> {
+    let mut dropped: Vec<String> = declared.iter().map(|name| name.to_string()).collect();
+    for (dependent, needs) in PRELUDE_DEPENDENCIES {
+        if needs.iter().any(|need| dropped.iter().any(|d| d == need)) {
+            dropped.push((*dependent).to_string());
+        }
+    }
+    dropped
+}
+
+/// Whether a prelude item is displaced: the declaration itself, or an `impl` block
+/// extending a displaced type — those methods belong to the prelude's type, not to
+/// whatever the program put in its place.
+fn is_dropped(item: &Item, dropped: &[String]) -> bool {
+    if let Item::Impl(def) = item {
+        return dropped.iter().any(|name| name == &def.type_name.name);
+    }
+    item_name(item).is_some_and(|name| dropped.iter().any(|d| d == name))
 }
 
 /// Mark a prelude declaration as belonging to the prelude's own module.
@@ -148,5 +171,26 @@ mod tests {
             .filter(|item| matches!(item, Item::Enum(def) if def.name.name == "Option"))
             .count();
         assert_eq!(options, 1);
+    }
+
+    /// `Chars::next` answers `Option<char>`, so a program that brings its own `Option`
+    /// leaves the prelude's iterator with nothing to return. It goes with it, along with
+    /// the `impl` block that extends it.
+    #[test]
+    fn shadowing_a_prelude_name_withdraws_what_depends_on_it() {
+        let program = syntax_parsing::parse("enum Option { Nothing }").expect("program parses");
+        let combined = load().expect("the prelude parses").prepend(program);
+        assert!(
+            !combined
+                .iter()
+                .any(|item| matches!(item, Item::Struct(def) if def.name.name == "Chars")),
+            "the dependent declaration is withdrawn"
+        );
+        assert!(
+            !combined
+                .iter()
+                .any(|item| matches!(item, Item::Impl(def) if def.type_name.name == "Chars")),
+            "and so is the impl block extending it"
+        );
     }
 }

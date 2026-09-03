@@ -222,6 +222,15 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   unreachable end together); the UTF-8 boundary checks do not exist here, because a code point
   index cannot name a position inside a code point. `char_offset(s, n)` for an `n`-character string
   is `len`, which is what makes the end of the string a legal upper bound.
+- `string.__char_at(offset)` → `BuiltinMethod::StringCharAt` → `codegen_char_at`
+  (`expressions/char_at.rs`), the Unicode scalar whose UTF-8 encoding begins at that byte, as an
+  `i32`. The module-private `neuro.string.char_at(ptr, len, offset)` helper takes the lead byte's
+  payload — selected from its own value, since the width follows from it — and folds in every
+  following byte matching `0b10xxxxxx`, so a scalar's own bytes bound the loop and no width is
+  computed up front. An offset at or past `len` answers `0`. This is the only byte-indexed read of
+  a string in the backend, and its one caller is the prelude's codepoint iterator: the frontend
+  refuses the method to every other module. There is no `.chars()` tag here — that call is already
+  the iterator's struct literal by the time the HIR arrives.
 - `seq.slice(a..b)` / `.slice(a..=b)` on an array, `Vec`, or slice → `BuiltinMethod::SequenceSlice`
   → `codegen_sequence_slice` (`expressions/slices.rs`), the slice ABI below. It resolves **ahead
   of** the collection method surface in `codegen_call_expr`, because a `Vec` receiver's `.slice`

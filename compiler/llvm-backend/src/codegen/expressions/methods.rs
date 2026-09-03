@@ -52,6 +52,9 @@ impl<'ctx> CodegenContext<'ctx> {
             // `string.char_slice(a..b)` — the same borrowed view, located by counting
             // code points instead of bytes.
             BuiltinMethod::StringCharSlice => self.codegen_char_slice(receiver, args),
+            // `string.__char_at(offset)` — the decode step behind the prelude's codepoint
+            // iterator, and the only byte-indexed read of a string anywhere.
+            BuiltinMethod::StringCharAt => self.codegen_char_at(receiver, args),
             // `array.len()` — the static length `N` of `[T; N]`, read from the
             // receiver type recorded by the type pass. A compile-time constant `u64`;
             // the receiver is not evaluated (length is independent of its value).
@@ -414,6 +417,7 @@ impl<'ctx> CodegenContext<'ctx> {
             | BuiltinMethod::StringClone
             | BuiltinMethod::StringSlice
             | BuiltinMethod::StringCharSlice
+            | BuiltinMethod::StringCharAt
             | BuiltinMethod::StructClone
             | BuiltinMethod::ArrayLen
             | BuiltinMethod::SequenceSlice
