@@ -134,6 +134,18 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   The built-in sequence heads never reach this path: a range, an array, a `Vec`, and a borrowed
   slice keep their `HirStmt::ForRange` / `ForEach` counted-loop nodes, which is what leaves
   their generated code unchanged.
+- **The `.map(f)` / `.filter(p)` desugar** (`loop_adapters.rs`). A head's `adapters` chain is
+  folded into the loop it decorates rather than materialized as an iterator value, so all four
+  head shapes and the protocol path share one implementation. `plan_loop_adapters` binds each
+  adapter function ONCE, ahead of the loop (`__adapt_fn_N_k`), and the loop binds
+  `__adapt_elem_N` instead of the user's name; `apply_loop_adapters` then opens the body with the
+  chain — a filter as `if !p(cur) { continue }`, a map as a `__adapt_v_N_k` binding — and closes
+  it with the user's binding over whatever the last adapter produced. The whole thing is wrapped
+  in a `Block`, which is what scopes the function bindings to the loop.
+  An enumerated adapted head takes its position from a `__adapt_pos_N` cursor rather than the
+  counted loop's `index`: that index counts SOURCE steps, so a filtered chain would leave gaps in
+  it. The cursor is read and advanced after the filters and before the user's statements, for the
+  same reason the protocol path's `__iter_pos_N` is.
 - **Traits.** The parser has already injected each trait's default methods into the matching
   `impl Trait for Type` blocks, so trait impls and their inherited defaults lower through the
   ordinary inherent-impl path, and a trait-bounded generic monomorphizes to concrete dispatch with

@@ -66,6 +66,9 @@ pub enum ParseError {
     #[error("`.enumerate()` takes no arguments")]
     EnumerateTakesNoArguments { span: Span },
 
+    #[error("`.{adapter}()` takes exactly one argument: the function applied to each element")]
+    LoopAdapterArity { adapter: String, span: Span },
+
     #[error("lexical error: {0}")]
     LexError(#[from] LexError),
 }

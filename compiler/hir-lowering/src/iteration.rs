@@ -17,7 +17,7 @@
 //! never reach this module: they keep their direct counted-loop lowering, which is what
 //! the spec's implementation note permits and what keeps their generated code unchanged.
 
-use ast_types::Stmt;
+use ast_types::{LoopAdapter, Stmt};
 use neuro_hir::{
     HirBindingSource, HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest, HirStmt,
     HirType,
@@ -54,12 +54,14 @@ impl Lowerer {
     /// `head` is the already-lowered iterable. The loop's own scope holds the
     /// generated iterator binding as well as the element and position bindings, so a
     /// `break` / `continue` inside `body` resolves against the emitted `while`.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn lower_protocol_for(
         &mut self,
         label: &Option<Identifier>,
         index: &Option<Identifier>,
         iterator: &Identifier,
         head: HirExpr,
+        adapters: &[LoopAdapter],
         body: &[Stmt],
         span: Span,
     ) -> Result<HirStmt, LoweringError> {
@@ -68,11 +70,22 @@ impl Lowerer {
         let next_ret = self.next_return_type(&iter_ty)?;
         let (some_tag, _) = self.success_variant(&next_ret)?;
 
+        // An adapted head takes its element binding and its yielded-position cursor
+        // from the plan, so the two are advanced together with the chain rather than
+        // per protocol step.
+        let plan = match adapters.is_empty() {
+            true => None,
+            false => Some(self.plan_loop_adapters(adapters, index, span)?),
+        };
+
         self.protocol_counter += 1;
         let iter_binding = format!("__iter_{}", self.protocol_counter);
-        let cursor_binding = index
-            .as_ref()
-            .map(|_| format!("__iter_pos_{}", self.protocol_counter));
+        let cursor_binding = match plan {
+            Some(_) => None,
+            None => index
+                .as_ref()
+                .map(|_| format!("__iter_pos_{}", self.protocol_counter)),
+        };
 
         let mut prelude = vec![HirStmt::VarDecl {
             name: iter_binding.clone(),
@@ -81,6 +94,9 @@ impl Lowerer {
             mutable: true,
             span,
         }];
+        if let Some(plan) = &plan {
+            prelude.extend(plan.prelude.iter().cloned());
+        }
         if let Some(cursor) = &cursor_binding {
             prelude.push(HirStmt::VarDecl {
                 name: cursor.clone(),
@@ -100,9 +116,16 @@ impl Lowerer {
         }
 
         let index_name = index.as_ref().map(|i| i.name.clone());
-        let element_name = iterator.name.clone();
+        let element_name = match &plan {
+            Some(plan) => plan.element.clone(),
+            None => iterator.name.clone(),
+        };
         let element_ty = item_ty.clone();
         let arm_body = self.lower_loop_body_with(label, false, |lo: &mut Self| {
+            if let Some(plan) = &plan {
+                lo.define(element_name.clone(), element_ty.clone());
+                return lo.apply_loop_adapters(plan, &element_ty, index, iterator, body, span);
+            }
             if let Some(name) = &index_name {
                 lo.define(name.clone(), LOOP_INDEX_TYPE);
             }
@@ -145,7 +168,7 @@ impl Lowerer {
                     HirMatchArm {
                         tests: vec![HirMatchTest::Tag { tag: some_tag }],
                         bindings: vec![HirMatchBinding {
-                            name: iterator.name.clone(),
+                            name: element_name.clone(),
                             ty: item_ty,
                             source: HirBindingSource::EnumPayload { slot: 0 },
                         }],

@@ -4,6 +4,7 @@ mod enum_tests;
 mod expr_tests;
 mod generic_tests;
 mod iteration_tests;
+mod loop_adapter_tests;
 mod match_tests;
 mod newtype_tests;
 mod slice_tests;

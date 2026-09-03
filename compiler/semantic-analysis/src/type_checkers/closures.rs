@@ -231,11 +231,15 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             iterator,
             start,
             end,
+            adapters,
             body,
             ..
         } => {
             collect_expr(start, fv);
             collect_expr(end, fv);
+            for adapter in adapters {
+                collect_expr(&adapter.callee, fv);
+            }
             if let Some(index) = index {
                 fv.bound.insert(index.name.clone());
             }
@@ -246,10 +250,14 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             index,
             iterator,
             iterable,
+            adapters,
             body,
             ..
         } => {
             collect_expr(iterable, fv);
+            for adapter in adapters {
+                collect_expr(&adapter.callee, fv);
+            }
             if let Some(index) = index {
                 fv.bound.insert(index.name.clone());
             }

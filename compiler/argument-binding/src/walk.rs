@@ -100,14 +100,29 @@ fn walk_stmt(stmt: &mut Stmt, f: CallFn, errors: &mut Vec<ArgumentError>) {
             walk_stmts(body, f, errors);
         }
         Stmt::ForRange {
-            start, end, body, ..
+            start,
+            end,
+            adapters,
+            body,
+            ..
         } => {
             walk_expr(start, f, errors);
             walk_expr(end, f, errors);
+            for adapter in adapters {
+                walk_expr(&mut adapter.callee, f, errors);
+            }
             walk_stmts(body, f, errors);
         }
-        Stmt::ForEach { iterable, body, .. } => {
+        Stmt::ForEach {
+            iterable,
+            adapters,
+            body,
+            ..
+        } => {
             walk_expr(iterable, f, errors);
+            for adapter in adapters {
+                walk_expr(&mut adapter.callee, f, errors);
+            }
             walk_stmts(body, f, errors);
         }
         Stmt::DerefAssignment { pointer, value, .. } => {

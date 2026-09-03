@@ -33,6 +33,7 @@ mod collections;
 mod expressions;
 mod items;
 mod iteration;
+mod loop_adapters;
 mod operator_traits;
 mod statements;
 mod types;

@@ -12,7 +12,7 @@ Provide the canonical Abstract Syntax Tree node definitions shared by every stag
     `FieldDef`, `ImplDef`, `MethodDef`, `SelfParam`, `TraitDef`, `TraitMethod`, `ConstDef`,
     `NewtypeDef`, `ModuleDef`, `ModuleId`, `ImportDef`, `ImportName`, `ImportSelection`,
     `Parameter`, `ParamLabel`, `GenericParam`, `GenericParamKind`, `TraitBound`, `Attribute`
-  - `statements` — `Stmt`
+  - `statements` — `Stmt`, `LoopAdapter`, `LoopAdapterKind`
   - `types` — `Type`, `ArraySize`, `GenericArg`
 
 ## Data Ownership
@@ -85,6 +85,12 @@ walkers.
   loop node rather than an adapter expression because there is no iterator protocol to return one
   from, and because a range has no value form to call a method on. Both walkers that bind loop
   variables must bind this one too, or a closure in the body captures it as a free variable.
+- The same two nodes carry `adapters: Vec<LoopAdapter>` — the `.map(f)` / `.filter(p)` chain the
+  head wore, in source order, each holding a `LoopAdapterKind` and the single `callee` expression.
+  They ride on the loop node for the same reason `index` does: a range has no receiver to resolve
+  a method against, and an adapter that returned a value would need a generic `Option<T>` payload
+  the enum surface cannot express yet. Every walker over `Stmt` must visit `callee`, which is an
+  ordinary expression evaluated once in the scope *enclosing* the loop.
 - `Expr::Unsafe { stmts, span }` is structurally identical to `Expr::Block`. The distinct node
   exists so a later phase can attach the `@kernel` aliasing relaxation to it; it carries no
   special semantics today.

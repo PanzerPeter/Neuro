@@ -17,6 +17,7 @@ fn test_for_range_accepts_integer_bounds() {
         start: Expr::Literal(Literal::Integer(0, None), Span::new(0, 1)),
         end: Expr::Literal(Literal::Integer(5, None), Span::new(4, 5)),
         inclusive: false,
+        adapters: Vec::new(),
         body: vec![Stmt::Continue {
             label: None,
             span: Span::new(8, 16),
@@ -39,6 +40,7 @@ fn test_for_range_rejects_non_integer_bound() {
         start: Expr::Literal(Literal::Boolean(true), Span::new(0, 4)),
         end: Expr::Literal(Literal::Integer(5, None), Span::new(7, 8)),
         inclusive: false,
+        adapters: Vec::new(),
         body: vec![],
         span: Span::new(0, 12),
     };

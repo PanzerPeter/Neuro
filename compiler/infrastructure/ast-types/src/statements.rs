@@ -5,6 +5,29 @@ use shared_types::{Identifier, Span};
 use super::expressions::{Expr, Pattern};
 use super::types::Type;
 
+/// Which transformation a `for`-head adapter applies to the element stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoopAdapterKind {
+    /// `.map(f)` — replaces each element with `f(element)`.
+    Map,
+    /// `.filter(p)` — drops each element for which `p(element)` is false.
+    Filter,
+}
+
+/// One `.map(f)` / `.filter(p)` call peeled off a `for` head.
+///
+/// The adapter is recognised by the parser rather than resolved as a method
+/// because a range is not a first-class value, so `(0..n).map(f)` has no receiver
+/// to dispatch against — the same reason `.enumerate()` is a head form.
+/// `callee` is the single argument: a closure literal, a function name, or any
+/// expression of function type.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoopAdapter {
+    pub kind: LoopAdapterKind,
+    pub callee: Expr,
+    pub span: Span,
+}
+
 /// Statement AST nodes
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
@@ -51,6 +74,9 @@ pub enum Stmt {
     /// `index` carries the position binding of `for (i, v) in (a..b).enumerate()`:
     /// a `u64` counting from zero, independent of the range's own bounds and
     /// element type. `None` is a plain `for v in a..b`.
+    ///
+    /// `adapters` are the `.map(f)` / `.filter(p)` calls the head wore, in source
+    /// order; empty for a bare range.
     ForRange {
         label: Option<Identifier>,
         index: Option<Identifier>,
@@ -58,6 +84,7 @@ pub enum Stmt {
         start: Expr,
         end: Expr,
         inclusive: bool,
+        adapters: Vec<LoopAdapter>,
         body: Vec<Stmt>,
         span: Span,
     },
@@ -72,11 +99,15 @@ pub enum Stmt {
     /// a `u64` counting from zero, which for a counted loop over contiguous
     /// storage is the same value the lowering already needs. `None` is a plain
     /// `for x in xs`.
+    ///
+    /// `adapters` are the `.map(f)` / `.filter(p)` calls the head wore, in source
+    /// order; empty for a bare `for x in xs`.
     ForEach {
         label: Option<Identifier>,
         index: Option<Identifier>,
         iterator: Identifier,
         iterable: Expr,
+        adapters: Vec<LoopAdapter>,
         body: Vec<Stmt>,
         span: Span,
     },

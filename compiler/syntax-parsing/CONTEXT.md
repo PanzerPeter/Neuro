@@ -121,6 +121,14 @@ the tuple-index parse, so it needs no expression grammar of its own.
   `(0..n).enumerate()` must be parenthesised — `..` binds looser than a call, so the parenthesised
   range is unwrapped here into the range loop's bounds, and `for i in (0..n)` follows from the
   same unwrap.
+- **`.map(f)` / `.filter(p)` in a `for` head are grammar too.** `strip_adapters` peels the whole
+  chain outside-in — an outermost `.enumerate()` first, then any number of `.map` / `.filter`
+  calls — and reverses it into source order on `Stmt::ForRange`/`ForEach`'s `adapters` field. Each
+  takes exactly one argument (`LoopAdapterArity` otherwise). `.enumerate()` is recognised only at
+  the outermost position: it yields pairs, so nothing beneath one could be handed a single element.
+  The cost of resolving them here is the same one `.enumerate()` pays — a user type with its own
+  one-argument `.map` method cannot be a bare `for` head — and it buys the adapters over ranges and
+  arrays, neither of which is an `Iterator` impl with a method to call.
 - **`@no_prelude` vs. an attribute list.** `parse_item_list` checks for the marker *before*
   reading attributes, because an attribute list is claimed by the declaration that follows it and
   this marker has none. It is accepted only as the first thing in a file — not after a
