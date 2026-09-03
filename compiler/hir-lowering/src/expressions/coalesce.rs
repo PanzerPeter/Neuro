@@ -96,7 +96,7 @@ impl Lowerer {
     ///
     /// The checker has already rejected every other left operand, so a miss here means
     /// the two passes disagree — reported as a lowering error rather than a panic.
-    pub(super) fn success_variant(&self, ty: &HirType) -> Result<(u32, HirType), LoweringError> {
+    pub(crate) fn success_variant(&self, ty: &HirType) -> Result<(u32, HirType), LoweringError> {
         let HirType::Enum(instance) = ty.referent() else {
             return Err(Self::not_fallible(ty));
         };

@@ -314,6 +314,97 @@ bindings live in the loop's own scope, so they shadow any outer name of the same
 spelling for the loop's duration and disappear at its exit; naming them alike
 (`for (i, i) in ...`) is a redefinition error rather than a shadow.
 
+### The iteration protocol
+
+`for` is not limited to the built-in sequences. `for x in e` means:
+
+1. call `e.into_iter()` once, producing an iterator;
+2. call `.next()` on that iterator repeatedly;
+3. bind each `Some(v)` to the loop variable and run the body;
+4. stop when `.next()` answers `None`.
+
+Two prelude traits state the contract, so no import is needed:
+
+```neuro
+trait Iterator {
+    type Item
+    func next(&mut self) -> Option<Self::Item>
+}
+
+trait IntoIterator {
+    type Item
+    type Iter
+    func into_iter(self) -> Self::Iter
+}
+```
+
+Any type implementing either one may stand in a `for` head. A type that
+implements `Iterator` **is** its own iterator — no second `IntoIterator` impl is
+needed, and the loop uses the value directly:
+
+```neuro
+@derive(Copy, Clone)
+struct Countdown { remaining: i32 }
+
+impl Iterator for Countdown {
+    type Item = i32
+
+    func next(&mut self) -> Option<i32> {
+        if self.remaining <= 0 { return Option::None }
+        self.remaining = self.remaining - 1
+        Option::Some(self.remaining)
+    }
+}
+
+val c = Countdown { remaining: 3 }
+for n in c {
+    println("{n}")          // 2, 1, 0
+}
+```
+
+Implement `IntoIterator` when the container and the cursor are different types —
+which is what lets a container be walked more than once, since each `for` head
+asks it for a fresh cursor.
+
+The loop variable's type is the `Item` the iterator's own `impl Iterator` bound,
+`break` and `continue` work as they do in any other loop (a label lands on the
+`for` and reaches out of a nested one), and `.enumerate()` applies here too, its
+position counting the loop's own steps.
+
+**Adapters.** An adapter is an iterator that wraps another one, so it composes in
+a single `for` head. The `Iterator<Item = T>` bound on its type parameter is what
+lets its body call `.next()` on what it holds:
+
+```neuro
+@derive(Copy, Clone)
+struct Doubling<S> { inner: S }
+
+impl<S: Iterator<Item = i32>> Iterator for Doubling<S> {
+    type Item = i32
+
+    func next(&mut self) -> Option<i32> {
+        match self.inner.next() {
+            Option::Some(v) => Option::Some(v * 2),
+            Option::None => Option::None
+        }
+    }
+}
+
+val doubled = Doubling { inner: Countdown { remaining: 3 } }
+for n in doubled {
+    println("{n}")          // 4, 2, 0
+}
+```
+
+Nothing between the source and the loop is materialized: each step pulls one
+element through the whole chain.
+
+**What is not covered.** The built-in heads — a range, a fixed-size array, a
+`Vec<T>`, a borrowed slice — do **not** go through the protocol. They compile to
+counted loops directly, which is a lowering choice, not a difference in meaning.
+Adapter *methods* on an arbitrary iterator (`.map(f)`, `.filter(p)`) are not
+provided yet; write the adapter type, as above.
+
 ## Break and Continue
 
 Use `break` to exit the nearest loop and `continue` to skip to the next iteration:

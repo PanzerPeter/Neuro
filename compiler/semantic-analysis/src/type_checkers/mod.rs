@@ -248,6 +248,7 @@ mod closures;
 mod collections;
 mod declarations;
 mod expressions;
+mod iteration;
 mod literals;
 mod matches;
 mod moves;

@@ -1,0 +1,18 @@
+even: 0
+even: 2
+even: 4
+even: 6
+even: 8
+sum of evens below 10 = 20
+position 0 holds 0
+position 1 holds 2
+position 2 holds 4
+position 3 holds 6
+position 4 holds 8
+visited 5 values
+evens from 4 sum to 18
+tripled: 0
+tripled: 6
+tripled: 12
+tripled: 18
+tripled evens below 8 sum to 36

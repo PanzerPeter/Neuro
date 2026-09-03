@@ -169,6 +169,12 @@ impl Lowerer {
                         HirType::Array { element, .. } | HirType::Slice(element) => {
                             (**element).clone()
                         }
+                        // A nominal head has no counted-loop form; it iterates through
+                        // the protocol, which desugars to nodes already in the HIR.
+                        other if self.iterates_by_protocol(other) => {
+                            return self
+                                .lower_protocol_for(label, index, iterator, iterable, body, *span);
+                        }
                         other => {
                             return Err(LoweringError::Malformed {
                                 detail: format!("for-each over non-iterable type '{}'", other),
@@ -344,7 +350,7 @@ impl Lowerer {
     /// Lower a loop body, running `inner` (which binds any loop variable and lowers
     /// the statements) inside the loop's context and scope. The loop context lets a
     /// `break v` resolve to this loop and accumulate its value type.
-    fn lower_loop_body_with(
+    pub(crate) fn lower_loop_body_with(
         &mut self,
         label: &Option<shared_types::Identifier>,
         is_value: bool,

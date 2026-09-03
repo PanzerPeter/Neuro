@@ -239,6 +239,13 @@ impl Lowerer {
                     .or_default()
                     .insert(method.name.name.clone(), inst_key);
             }
+            // The instance implements whatever the template's impl did. Mirrors the
+            // checker; without it a `for` head over a generic iterator adapter would
+            // find no protocol on the instance the head actually has.
+            if let Some(trait_name) = &imp.trait_name {
+                self.trait_impls
+                    .insert((trait_name.name.clone(), mangled.to_string()));
+            }
         }
         Ok(())
     }
@@ -460,6 +467,10 @@ impl Lowerer {
 
     fn register_impl(&mut self, def: &ImplDef) -> Result<(), LoweringError> {
         let struct_name = def.type_name.name.clone();
+        if let Some(trait_name) = &def.trait_name {
+            self.trait_impls
+                .insert((trait_name.name.clone(), struct_name.clone()));
+        }
         let saved_ty = self.enter_impl_assoc(def)?;
         let outcome = self.register_impl_methods(def, &struct_name);
         self.type_subst = saved_ty;

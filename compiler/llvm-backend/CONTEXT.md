@@ -158,8 +158,15 @@ Values live on the stack via `alloca`, initialised field-by-field with `insertva
 and `insertvalue`s the explicit fields over it.
 
 `codegen_field_access` reads a field of a **non-place** object (a chain `o.inner.v`, a call result)
-with `extractvalue`, keeping the GEP-and-load path for a named binding. `get_struct_ptr_and_type`
-still requires a place, so a `&mut self` method reached through a chain remains unsupported.
+with `extractvalue`, keeping the GEP-and-load path for a named binding.
+
+`get_struct_ptr_and_type` addresses a receiver place. It resolves a named binding (auto-loading
+through a `&Struct` / `&mut Struct` binding, whose alloca holds a pointer rather than the
+aggregate) and, recursively, a **field of a place**: the parent's pointer, then a GEP to the
+field's slot. That second arm is what makes `self.inner.next()` work — an adapter's `&mut self`
+method driving the iterator it wraps writes back into the field's own storage, where reaching
+the field as a value would discard the advance. Anything else (a call result, a literal) has no
+address and is refused: a `&mut self` method needs storage to write through.
 
 ## Method ABI
 `impl` methods lower to LLVM free functions mangled `StructName__methodName` (double underscore).

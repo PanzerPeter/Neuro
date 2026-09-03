@@ -314,8 +314,9 @@ specification names that no Phase 1 item ever tracked. `print` / `println` shipp
 v2.1.0, `.is_nan()` in v2.2.0, buffered standard output in v2.3.0, the codepoint-indexed
 `.char_slice(range)` in v2.4.0, `.enumerate()` on arrays and ranges in v2.5.0, and the
 `&[T]` / `&mut [T]` borrowed slice type in v2.6.0, associated types in trait
-declarations in v2.7.0, and the `Trait<Assoc = T>` bound form in v2.8.0; the `Iterator`
-protocol is next. Start at the top of 2A in the roadmap, and move to `2B — Tensor Core`
+declarations in v2.7.0, the `Trait<Assoc = T>` bound form in v2.8.0, and the
+`IntoIterator` / `Iterator` protocol in v2.9.0; the adapter methods `.map()` / `.filter()`
+are next. Start at the top of 2A in the roadmap, and move to `2B — Tensor Core`
 (`Tensor<T, [...]>` static tensor type syntax) only once 2A is clear.
 
 Nothing links `TokenKind` to the editor grammar, so any lexer change must also update

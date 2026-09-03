@@ -21,7 +21,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` to stdout |
 | `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` byte sub-slices and `.char_slice(range)` codepoint sub-slices, borrowed slices `&[T]` / `&mut [T]` over arrays and `Vec`s, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), associated-type bounds (`T: Source<Item = i32>`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result`, `?` error propagation |
-| `control_flow/`  | `if`/`else`, `for`-ranges, `for (i, x) in xs.enumerate()`, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
+| `control_flow/`  | `if`/`else`, `for`-ranges, `for (i, x) in xs.enumerate()`, the `IntoIterator` / `Iterator` protocol and hand-written adapters, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
 | `modules/`       | Multi-file programs: a sibling module, a `mod.nr` directory module and its child, reached through qualified paths and `import`, with `export` choosing each module's surface; plus inline `module { }` blocks, an `export import` re-export facade, the implicit prelude, and the `@no_prelude` opt-out |
 | `showcase/`      | **Bigger programs that combine many features at once** — incl. mutable borrows `&mut T` + `*` deref (`mutable_borrows.nr`) |
@@ -176,6 +176,17 @@ isolation:
   struct + `&self` method, fixed-size arrays, `match` on the returned `Result`,
   `val-else` with an `|e|` error binding, and `??` defaulting the reads that only need
   a fallback. Exit `177`.
+- [`showcase/stream_pipeline.nr`](showcase/stream_pipeline.nr) — **the iteration
+  protocol**: a `Readings` container implementing `IntoIterator`, the `ReadingsIter`
+  cursor it hands out implementing `Iterator`, and three adapters over it — a `Scaled`
+  transform, an `Above` filter that may pull several elements per step, and a `Shaped`
+  transform carrying a **closure in a struct field**. Two adapters are stacked over one
+  source and drained by a single `for` head, so nothing between the source and the loop
+  is ever materialized. Combined with an **associated-type bound**
+  (`S: Iterator<Item = i32>`) that is what lets an adapter call `self.inner.next()`,
+  generic structs monomorphized per instance, `@derive(Copy)` structs with `&mut self`
+  methods, `Option` + `match`, `Vec<i32>` + `for`-in, `.enumerate()` over a protocol
+  head, and interpolation with the format mini-language (`:>2`, `:>3`). Exit `144`.
 - [`showcase/telemetry/main.nr`](showcase/telemetry/main.nr) — **multi-file
   compilation and `import`**: a root module reaching a sibling (`stats`), a `mod.nr`
   directory module (`report`), and its child (`report::format`), naming them through a

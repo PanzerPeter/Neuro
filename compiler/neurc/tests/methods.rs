@@ -338,3 +338,52 @@ func main() -> i32 {
         .expect("impl before struct should compile and run");
     assert_eq!(exit_code, 42, "21 * 2 should equal 42");
 }
+
+// ── a method called on a struct field ────────────────────────────────────────
+
+/// A `&mut self` method reached through a field writes back into the field's storage.
+/// Passing a copy instead would silently discard the mutation, which is what makes an
+/// iterator adapter driving the iterator it wraps (`self.inner.next()`) work.
+#[test]
+fn a_mut_self_method_on_a_field_mutates_in_place() {
+    let test = CompileTest::new();
+    let source = r#"
+@derive(Copy, Clone)
+struct Counter {
+    count: i32
+}
+
+impl Counter {
+    func bump(&mut self) -> i32 {
+        self.count = self.count + 1
+        self.count
+    }
+}
+
+@derive(Copy, Clone)
+struct Machine {
+    ticks: Counter
+}
+
+impl Machine {
+    func step(&mut self) -> i32 {
+        self.ticks.bump()
+    }
+}
+
+func main() -> i32 {
+    mut m = Machine { ticks: Counter { count: 0 } }
+    val first = m.step()
+    val second = m.step()
+    val third = m.step()
+    return first * 100 + second * 10 + third
+}
+"#;
+    let exit_code = test
+        .compile_and_run("field_method_receiver.nr", source)
+        .expect("a method on a struct field should compile and run");
+    assert_eq!(
+        exit_code, 123,
+        "the counter advances 1, 2, 3 across the calls"
+    );
+}
