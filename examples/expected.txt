@@ -86,6 +86,7 @@ control_flow/for_range_inclusive.nr   15
 control_flow/if_block_expressions.nr  149
 control_flow/iterator_protocol.nr     79
 control_flow/labeled_breaks.nr        4
+control_flow/loop_adapters.nr         109
 control_flow/loop_statement.nr        12
 control_flow/loop_value.nr            0
 control_flow/panic_assert.nr          7
@@ -136,7 +137,7 @@ showcase/sensor_windows.nr  85
 showcase/shape_traits.nr    161
 showcase/simulation.nr      2
 showcase/status_report.nr   34
-showcase/stream_pipeline.nr 144
+showcase/stream_pipeline.nr 189
 showcase/telemetry/main.nr          75
 showcase/telemetry/stats.nr         module
 showcase/telemetry/report/mod.nr    module

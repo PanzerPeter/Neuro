@@ -17,5 +17,5 @@ pub use items::{
     ModuleId, NewtypeDef, ParamLabel, Parameter, SelfParam, StructDef, TraitBound, TraitDef,
     TraitMethod, VariantPayload,
 };
-pub use statements::Stmt;
+pub use statements::{LoopAdapter, LoopAdapterKind, Stmt};
 pub use types::{ArraySize, GenericArg, Type};

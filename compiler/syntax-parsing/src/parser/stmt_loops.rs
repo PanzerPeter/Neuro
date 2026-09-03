@@ -7,7 +7,7 @@
 use lexical_analysis::TokenKind;
 use shared_types::{Identifier, Span};
 
-use crate::ast::{Expr, Stmt};
+use crate::ast::{Expr, LoopAdapter, LoopAdapterKind, Stmt};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 
@@ -135,10 +135,11 @@ impl Parser {
     ///
     /// `<head>` is one loop variable, or the pair `(index, value)` that
     /// `.enumerate()` binds. `<iterable>` is a numeric range, an expression
-    /// yielding a sequence, or either of those with `.enumerate()` applied — the
-    /// adapter is recognised here rather than type-checked as a method because a
-    /// range is not a first-class value, so `(0..n).enumerate()` has no receiver
-    /// to resolve a method against.
+    /// yielding a sequence, or either of those wearing a chain of `.map(f)` /
+    /// `.filter(p)` adapters and an outermost `.enumerate()` — the adapters are
+    /// recognised here rather than type-checked as methods because a range is not a
+    /// first-class value, so `(0..n).map(f)` has no receiver to resolve a method
+    /// against.
     pub(crate) fn parse_for_stmt(
         &mut self,
         start_span: Span,
@@ -168,8 +169,8 @@ impl Parser {
         } else {
             // No range operator follows, so the whole iterable is already parsed —
             // either a sequence expression or a parenthesised range, each possibly
-            // wearing `.enumerate()`.
-            let (iterable, enumerated) = strip_enumerate(start)?;
+            // wearing an adapter chain.
+            let (iterable, adapters, enumerated) = strip_adapters(start)?;
             Self::check_head_agrees(&index, enumerated, iterable.span())?;
             let body = self.parse_labeled_block(label.as_ref())?;
             let end_span = body.last().map(stmt_span).unwrap_or(iterable.span());
@@ -191,6 +192,7 @@ impl Parser {
                     start: *start,
                     end: *end,
                     inclusive,
+                    adapters,
                     body,
                     span,
                 },
@@ -199,6 +201,7 @@ impl Parser {
                     index,
                     iterator,
                     iterable,
+                    adapters,
                     body,
                     span,
                 },
@@ -226,6 +229,7 @@ impl Parser {
             start,
             end,
             inclusive,
+            adapters: Vec::new(),
             body,
             span: start_span.merge(end_span),
         })
@@ -404,8 +408,73 @@ impl Parser {
     }
 }
 
-/// The adapter name a `for` head recognises on its iterable.
+/// The position-binding adapter a `for` head recognises on its iterable.
 const ENUMERATE_METHOD: &str = "enumerate";
+/// The element-transforming adapter.
+const MAP_METHOD: &str = "map";
+/// The element-dropping adapter.
+const FILTER_METHOD: &str = "filter";
+
+/// Split the whole adapter chain off a `for` loop's iterable: an outermost
+/// `.enumerate()`, then any number of `.map(f)` / `.filter(p)` calls beneath it.
+///
+/// Returns the base iterable, the adapters in SOURCE order (the peel runs
+/// outside-in, so the collected list is reversed), and whether the head was
+/// enumerated. `.enumerate()` is recognised only at the outermost position: it
+/// yields pairs, and no adapter beneath one could be given a single element.
+fn strip_adapters(iterable: Expr) -> ParseResult<(Expr, Vec<LoopAdapter>, bool)> {
+    let (mut current, enumerated) = strip_enumerate(iterable)?;
+    let mut adapters = Vec::new();
+    loop {
+        match peel_adapter(current)? {
+            Peeled::Adapter(receiver, adapter) => {
+                adapters.push(adapter);
+                current = receiver;
+            }
+            Peeled::Base(expr) => {
+                adapters.reverse();
+                return Ok((expr, adapters, enumerated));
+            }
+        }
+    }
+}
+
+/// One step of the adapter peel: either an adapter and the receiver under it, or
+/// the base iterable that wears none.
+enum Peeled {
+    Adapter(Expr, LoopAdapter),
+    Base(Expr),
+}
+
+/// Split one trailing `.map(f)` / `.filter(p)` off `iterable`.
+fn peel_adapter(iterable: Expr) -> ParseResult<Peeled> {
+    let Expr::Call {
+        func, args, span, ..
+    } = &iterable
+    else {
+        return Ok(Peeled::Base(iterable));
+    };
+    let Expr::FieldAccess { object, field, .. } = func.as_ref() else {
+        return Ok(Peeled::Base(iterable));
+    };
+    let kind = match field.name.as_str() {
+        MAP_METHOD => LoopAdapterKind::Map,
+        FILTER_METHOD => LoopAdapterKind::Filter,
+        _ => return Ok(Peeled::Base(iterable)),
+    };
+    let [callee] = args.as_slice() else {
+        return Err(ParseError::LoopAdapterArity {
+            adapter: field.name.clone(),
+            span: *span,
+        });
+    };
+    let adapter = LoopAdapter {
+        kind,
+        callee: callee.clone(),
+        span: *span,
+    };
+    Ok(Peeled::Adapter(object.as_ref().clone(), adapter))
+}
 
 /// Split a trailing `.enumerate()` off a `for` loop's iterable, returning the
 /// receiver and whether the adapter was there.
@@ -481,6 +550,69 @@ mod tests {
             panic!("expected a for-each");
         };
         assert!(matches!(iterable, crate::ast::Expr::Identifier(id) if id.name == "xs"));
+    }
+
+    /// The chain is recorded in source order, so the lowering applies it left to
+    /// right over the elements.
+    #[test]
+    fn an_adapter_chain_is_kept_in_source_order() {
+        use crate::ast::LoopAdapterKind;
+        let stmt = first_stmt("func main() -> i32 { for v in xs.map(f).filter(p).map(g) { }\n 0 }");
+        let Stmt::ForEach {
+            iterable, adapters, ..
+        } = stmt
+        else {
+            panic!("expected a for-each");
+        };
+        assert!(matches!(iterable, crate::ast::Expr::Identifier(id) if id.name == "xs"));
+        let kinds: Vec<LoopAdapterKind> = adapters.iter().map(|a| a.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                LoopAdapterKind::Map,
+                LoopAdapterKind::Filter,
+                LoopAdapterKind::Map
+            ]
+        );
+    }
+
+    /// A range wears its adapters through the parenthesised spelling and still
+    /// lowers to the counted range loop.
+    #[test]
+    fn an_adapted_range_stays_a_range_loop() {
+        let stmt = first_stmt("func main() -> i32 { for v in (0..4).filter(p) { }\n 0 }");
+        let Stmt::ForRange { adapters, .. } = stmt else {
+            panic!("expected a for-range");
+        };
+        assert_eq!(adapters.len(), 1);
+    }
+
+    /// `.enumerate()` is the outermost adapter: it yields pairs, so nothing beneath
+    /// one could be handed a single element.
+    #[test]
+    fn enumerate_sits_outside_the_adapter_chain() {
+        let stmt =
+            first_stmt("func main() -> i32 { for (i, v) in xs.filter(p).enumerate() { }\n 0 }");
+        let Stmt::ForEach {
+            index, adapters, ..
+        } = stmt
+        else {
+            panic!("expected a for-each");
+        };
+        assert_eq!(index.map(|i| i.name), Some("i".to_string()));
+        assert_eq!(adapters.len(), 1);
+    }
+
+    #[test]
+    fn an_adapter_without_exactly_one_argument_is_rejected() {
+        assert!(matches!(
+            parse_err("func main() -> i32 { for v in xs.map() { }\n 0 }"),
+            ParseError::LoopAdapterArity { .. }
+        ));
+        assert!(matches!(
+            parse_err("func main() -> i32 { for v in xs.filter(p, q) { }\n 0 }"),
+            ParseError::LoopAdapterArity { .. }
+        ));
     }
 
     /// A parenthesised range is the only spelling `.enumerate()` accepts on a

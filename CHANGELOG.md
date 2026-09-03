@@ -10,6 +10,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.10.0] - 2026-09-03
+
+### Added
+
+- **`.map(f)` and `.filter(p)` adapters on a `for` head.** The iteration protocol landed in
+  2.9.0 with composable adapter *types*, but building one still meant declaring a struct and
+  an `impl Iterator` for it. A head may now end in a chain of `.map(f)` / `.filter(p)` calls
+  instead: `.map` replaces each element with `f(element)`, `.filter` drops each element its
+  predicate rejects, and the chain runs left to right to any depth, pulling one element
+  through the whole thing at a time with nothing in between materialized.
+
+  ```neuro
+  for value in [1, 2, 3, 4, 5]
+      .map(|x: i32| -> i32 { x * x })
+      .filter(|x: i32| -> bool { x > 4 }) {
+      println("{value}")        // 9, 16, 25
+  }
+  ```
+
+  They apply to every head shape — a range (parenthesised, since `..` binds looser than a
+  call), a fixed-size array, a `Vec<T>`, a borrowed slice, and any type implementing
+  `IntoIterator` or `Iterator` — because they are part of the head's grammar rather than
+  methods resolved against a receiver, exactly as `.enumerate()` has always been. That is
+  what reaches the arrays and ranges the specification's own examples use: neither is an
+  `Iterator` impl, so neither has a method to call.
+
+  `.map` may change the element type, so the loop binding is whatever the function returns.
+  The function is an ordinary expression of function type, evaluated once *before* the loop:
+  it cannot name the binding it feeds, and a closure binding used by a head is still usable
+  afterwards. `.enumerate()` stays outermost and now counts what the chain **yielded**, so a
+  filtered head's positions stay dense. A `.filter` predicate that does not answer `bool`, a
+  `.map` that returns `void`, a function that does not accept the element type, and an
+  adapter without exactly one argument are each rejected where the head is written.
+
+  An adapter chain is a head form, not a value: `val m = xs.map(f)` does not resolve. Write
+  the adapter type for a pipeline that has to be stored or returned.
+
 ## [2.9.0] - 2026-09-03
 
 ### Added

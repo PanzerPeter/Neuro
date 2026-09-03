@@ -454,6 +454,29 @@ pub enum TypeError {
     #[error("cannot iterate over a value of type {found} at {span:?}: a `for` head must be a range, an array, a `Vec<T>`, a `&[T]`, or a type implementing `IntoIterator` or `Iterator`")]
     NotIterable { found: Type, span: Span },
 
+    #[error("`.{adapter}()` at {span:?} needs a function of one parameter, but was given {found}")]
+    LoopAdapterNotCallable {
+        adapter: String,
+        found: Type,
+        span: Span,
+    },
+
+    #[error("`.{adapter}()` at {span:?} is applied to elements of type {expected}, but its function takes {found}")]
+    LoopAdapterInput {
+        adapter: String,
+        expected: Type,
+        found: Type,
+        span: Span,
+    },
+
+    #[error("`.{adapter}()` at {span:?} needs a function returning {expected}, but its function returns {found}")]
+    LoopAdapterOutput {
+        adapter: String,
+        expected: String,
+        found: Type,
+        span: Span,
+    },
+
     #[error("cannot infer the element type of `{name}::new()` at {span:?}; annotate the binding, e.g. `val v: {name}<...> = {name}::new()`")]
     CollectionTypeNotInferable { name: String, span: Span },
 

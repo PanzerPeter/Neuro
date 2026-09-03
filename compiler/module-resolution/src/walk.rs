@@ -232,14 +232,29 @@ fn walk_stmt(stmt: &mut Stmt, f: SiteFn) -> Result<(), ModuleError> {
             walk_stmts(body, f)
         }
         Stmt::ForRange {
-            start, end, body, ..
+            start,
+            end,
+            adapters,
+            body,
+            ..
         } => {
             walk_expr(start, f)?;
             walk_expr(end, f)?;
+            for adapter in adapters {
+                walk_expr(&mut adapter.callee, f)?;
+            }
             walk_stmts(body, f)
         }
-        Stmt::ForEach { iterable, body, .. } => {
+        Stmt::ForEach {
+            iterable,
+            adapters,
+            body,
+            ..
+        } => {
             walk_expr(iterable, f)?;
+            for adapter in adapters {
+                walk_expr(&mut adapter.callee, f)?;
+            }
             walk_stmts(body, f)
         }
         Stmt::Break { value, .. } => {

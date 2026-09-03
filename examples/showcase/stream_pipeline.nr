@@ -1,11 +1,12 @@
 // Showcase — the iteration protocol carrying a small stream pipeline.
 //
 // Integration example combining several features at once:
-//   the `IntoIterator` / `Iterator` protocol · trait associated types
-//   (`type Item`) and an associated-type bound (`S: Iterator<Item = i32>`) ·
-//   generic structs monomorphized per instance · closures stored in a struct field ·
-//   `@derive(Copy)` structs with `&mut self` methods · `Option` + `match` ·
-//   `Vec<i32>` + `for`-in · string interpolation with the format mini-language.
+//   the `IntoIterator` / `Iterator` protocol · the `.map(f)` / `.filter(p)` head
+//   adapters · trait associated types (`type Item`) and an associated-type bound
+//   (`S: Iterator<Item = i32>`) · generic structs monomorphized per instance ·
+//   closures stored in a struct field · `@derive(Copy)` structs with `&mut self`
+//   methods · `Option` + `match` · `Vec<i32>` + `for`-in · string interpolation
+//   with the format mini-language.
 //
 // The point is composition: a source, a transform, and a filter are three separate
 // types, each implementing `Iterator`, and a single `for` head drives the whole chain
@@ -160,5 +161,27 @@ func main() -> i32 {
     }
     println("sample remainders mod 5 total {remainders}")
 
-    return raw_total + counted + kept_total + remainders
+    // The same pipeline written with the compiler's own adapters. `.map` and
+    // `.filter` are part of the `for` head rather than values, so one head
+    // expresses what `Scaled` + `Above` needed two types for — and the head they
+    // decorate is the very same `IntoIterator` container.
+    mut inline_total = 0
+    for value in readings
+        .map(|sample: i32| -> i32 { sample * 3 })
+        .filter(|scaled: i32| -> bool { scaled > 20 }) {
+        inline_total = inline_total + value
+    }
+    println("inline pipeline totals {inline_total}, matching {kept_total}")
+
+    // An adapted head over an array, enumerated. The position counts what the
+    // chain YIELDED, so it stays dense however much the filter drops.
+    val labels: [i32; 6] = [4, 11, 6, 15, 2, 19]
+    mut flagged = 0
+    for (rank, value) in labels.filter(|v: i32| -> bool { v > 10 }).enumerate() {
+        println("rank {rank:>2} flagged {value:>3}")
+        flagged = flagged + value
+    }
+    println("flagged {flagged} across the run")
+
+    return raw_total + counted + kept_total + remainders + flagged
 }

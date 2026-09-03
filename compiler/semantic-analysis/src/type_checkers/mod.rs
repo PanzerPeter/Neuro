@@ -250,6 +250,7 @@ mod declarations;
 mod expressions;
 mod iteration;
 mod literals;
+mod loop_adapters;
 mod matches;
 mod moves;
 pub(crate) mod operator_traits;

@@ -402,8 +402,61 @@ element through the whole chain.
 **What is not covered.** The built-in heads — a range, a fixed-size array, a
 `Vec<T>`, a borrowed slice — do **not** go through the protocol. They compile to
 counted loops directly, which is a lowering choice, not a difference in meaning.
-Adapter *methods* on an arbitrary iterator (`.map(f)`, `.filter(p)`) are not
-provided yet; write the adapter type, as above.
+
+### Adapter methods — `.map(f)` and `.filter(p)`
+
+A `for` head may end in a chain of `.map(f)` / `.filter(p)` calls, which need no
+adapter type of their own:
+
+- `.map(f)` replaces each element with `f(element)`;
+- `.filter(p)` drops each element for which `p(element)` is false.
+
+```neuro
+for value in [1, 2, 3, 4].map(|x: i32| -> i32 { x * 2 }) {
+    println("{value}")        // 2, 4, 6, 8
+}
+
+for value in (0..12).filter(|x: i32| -> bool { x % 4 == 0 }) {
+    println("{value}")        // 0, 4, 8
+}
+```
+
+The chain runs left to right — a filter sees what the map before it produced —
+and composes to any depth. Each element is pulled through the whole chain one at
+a time; nothing in between is materialized:
+
+```neuro
+for value in [1, 2, 3, 4, 5]
+    .map(|x: i32| -> i32 { x * x })
+    .filter(|x: i32| -> bool { x > 4 }) {
+    println("{value}")        // 9, 16, 25
+}
+```
+
+`.map` may change the element type, so the loop binding is whatever the function
+returns. The function is an ordinary expression of function type — usually a
+closure literal — evaluated **once**, before the loop, in the scope around it: it
+cannot name the binding it feeds, and a closure binding used by a head is still
+usable afterwards.
+
+Like `.enumerate()`, these apply to every head: a range (parenthesised), a
+fixed-size array, a `Vec<T>`, a borrow of either, and any type that implements
+`IntoIterator` or `Iterator`. `.enumerate()` stays outermost, and its position
+counts what the chain **yielded** — so it stays dense however much a filter drops:
+
+```neuro
+for (rank, value) in [10, 3, 20, 4, 30].filter(|x: i32| -> bool { x >= 10 }).enumerate() {
+    println("{rank}: {value}")     // 0: 10   1: 20   2: 30
+}
+```
+
+A `.filter` predicate must return `bool` and a `.map` function must return a
+value; a function that does not take the element type is rejected where the head
+is written.
+
+**Head form, not a value.** `.map` / `.filter` are part of the `for` head, exactly
+as `.enumerate()` is — `val m = xs.map(f)` is not a method call that resolves.
+Write the adapter type, as above, when the pipeline has to be stored or returned.
 
 ## Break and Continue
 

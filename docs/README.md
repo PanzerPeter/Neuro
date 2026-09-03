@@ -156,6 +156,10 @@ Key design goals:
   wrapping another iterator included — stands in a `for` head. The built-in heads (range, array,
   `Vec<T>`, `&[T]`) keep their counted-loop lowering, see
   [control-flow.md](language-reference/control-flow.md#the-iteration-protocol)
+- `.map(f)` / `.filter(p)` adapter methods on a `for` head (2A): they apply to every head shape,
+  compose left to right to any depth, and sit under an outermost `.enumerate()` whose position
+  counts what the chain yielded, see
+  [control-flow.md](language-reference/control-flow.md#adapter-methods--mapf-and-filterp)
 - Attribute system: `@allow(prefer_loop_over_while_true)` suppresses the `while true` lint
 
 ### Operators

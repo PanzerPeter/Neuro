@@ -11,6 +11,7 @@ mod generic_tests;
 mod intrinsic_tests;
 mod iteration_tests;
 mod literal_tests;
+mod loop_adapter_tests;
 mod loop_tests;
 mod match_tests;
 mod newtype_tests;

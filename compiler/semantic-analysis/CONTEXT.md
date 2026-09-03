@@ -231,6 +231,16 @@ loop.
   so `xs[i]` needs no cast) in the same scope as the element binding, which is what makes
   `for (i, i) in ...` a `VariableAlreadyDefined` rather than a shadow.
 
+- **Adapted heads.** `type_checkers/loop_adapters.rs`. `check_loop_adapters` folds the head's
+  `adapters` over the element type the base head produced: `.map(f)` replaces it with `f`'s
+  return type, `.filter(p)` leaves it alone. Each function is checked in the scope *enclosing*
+  the loop — it is evaluated once, before the loop, and cannot name the binding it feeds — and is
+  READ rather than moved, so a closure binding used by a head stays usable afterwards. Four
+  rejections: a non-function or wrong-arity argument (`LoopAdapterNotCallable`), a parameter that
+  does not accept the element (`LoopAdapterInput`), a `.filter` predicate that does not answer
+  `bool`, and a `.map` returning `void` (both `LoopAdapterOutput`) — the last because the loop
+  binding would otherwise have no type the backend can represent.
+
 ### The iteration protocol
 `type_checkers/iteration.rs`. A `Stmt::ForEach` head that is neither a collection, an array,
 nor a slice falls through to `iteration_item`, which answers what one step binds:

@@ -579,6 +579,7 @@ impl TypeChecker {
                 start,
                 end,
                 inclusive: _,
+                adapters,
                 body,
                 span: _,
             } => {
@@ -611,6 +612,14 @@ impl TypeChecker {
                     });
                 }
 
+                // The adapter chain is checked in the enclosing scope: its functions are
+                // evaluated once, before the loop, and cannot see the loop binding.
+                let element_ty = match start_ty {
+                    Type::Unknown => None,
+                    ref known => Some(known.clone()),
+                };
+                let element_ty = self.check_loop_adapters(element_ty, adapters);
+
                 // As with `while`, body moves are not guaranteed straight-line;
                 // restore the move state after the loop. A `for` yields unit,
                 // so it is not a value loop.
@@ -624,9 +633,10 @@ impl TypeChecker {
                 self.symbols.push_scope();
 
                 self.define_loop_index(index);
-                if !matches!(start_ty, Type::Unknown) {
+                if let Some(element_ty) = element_ty {
                     if let Err(duplicate_name) =
-                        self.symbols.define(iterator.name.clone(), start_ty, false)
+                        self.symbols
+                            .define(iterator.name.clone(), element_ty, false)
                     {
                         self.record_error(TypeError::VariableAlreadyDefined {
                             name: duplicate_name,
@@ -653,6 +663,7 @@ impl TypeChecker {
                 index,
                 iterator,
                 iterable,
+                adapters,
                 body,
                 span: _,
             } => {
@@ -682,6 +693,8 @@ impl TypeChecker {
                         },
                     },
                 };
+
+                let element_ty = self.check_loop_adapters(element_ty, adapters);
 
                 // Body moves are not guaranteed straight-line; restore move state after
                 // the loop. A `for` yields unit, so it is not a value loop.

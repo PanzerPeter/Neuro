@@ -128,12 +128,18 @@ impl Lowerer {
                 start,
                 end,
                 inclusive,
+                adapters,
                 body,
                 span,
             } => {
                 let start = self.lower_expr(start, None)?;
                 let end = self.lower_expr(end, Some(&start.ty))?;
                 let iter_ty = start.ty.clone();
+                if !adapters.is_empty() {
+                    return self.lower_adapted_for_range(
+                        label, index, iterator, start, end, *inclusive, adapters, body, *span,
+                    );
+                }
                 let index_name = index.as_ref().map(|i| i.name.clone());
                 let body = self.lower_loop_body_with(label, false, |lo| {
                     if let Some(index) = &index_name {
@@ -159,6 +165,7 @@ impl Lowerer {
                 index,
                 iterator,
                 iterable,
+                adapters,
                 body,
                 span,
             } => {
@@ -172,8 +179,9 @@ impl Lowerer {
                         // A nominal head has no counted-loop form; it iterates through
                         // the protocol, which desugars to nodes already in the HIR.
                         other if self.iterates_by_protocol(other) => {
-                            return self
-                                .lower_protocol_for(label, index, iterator, iterable, body, *span);
+                            return self.lower_protocol_for(
+                                label, index, iterator, iterable, adapters, body, *span,
+                            );
                         }
                         other => {
                             return Err(LoweringError::Malformed {
@@ -182,6 +190,11 @@ impl Lowerer {
                         }
                     },
                 };
+                if !adapters.is_empty() {
+                    return self.lower_adapted_for_each(
+                        label, index, iterator, iterable, element_ty, adapters, body, *span,
+                    );
+                }
                 let index_name = index.as_ref().map(|i| i.name.clone());
                 let body = self.lower_loop_body_with(label, false, |lo| {
                     if let Some(index) = &index_name {
