@@ -32,6 +32,7 @@ mod closures;
 mod collections;
 mod expressions;
 mod items;
+mod iteration;
 mod operator_traits;
 mod statements;
 mod types;
@@ -133,6 +134,11 @@ struct Lowerer {
     clone_structs: HashSet<String>,
     /// Struct name → method name → mangled key into [`Self::functions`].
     impl_methods: HashMap<String, HashMap<String, String>>,
+    /// Concrete `(trait name, implementing type name)` pairs with an
+    /// `impl Trait for Type` block. Duplicates the checker's table rather than
+    /// importing it, and is what the `for`-loop desugar reads to tell an
+    /// `IntoIterator` container from an `Iterator` that is already its own iterator.
+    trait_impls: HashSet<(String, String)>,
     /// Declared traits → their methods in declaration order. The order is
     /// the vtable slot order for dynamic dispatch; each entry carries the method's
     /// visible (non-`self`) parameter types and return type so a call through a
@@ -200,6 +206,10 @@ struct Lowerer {
     /// Monotonic counter naming the bindings each `?` desugar introduces (`__try_N`),
     /// so a chain of propagations in one expression never shadows itself.
     try_counter: usize,
+    /// Monotonic counter naming the iterator and position bindings each `for`-loop
+    /// protocol desugar introduces (`__iter_N` / `__iter_pos_N`), so nested loops over
+    /// two iterators never shadow each other.
+    protocol_counter: usize,
 }
 
 /// One trait method's lowering-visible signature, in declaration order.
@@ -290,6 +300,7 @@ impl Lowerer {
             newtypes: HashMap::new(),
             clone_structs: HashSet::new(),
             impl_methods: HashMap::new(),
+            trait_impls: HashSet::new(),
             traits: HashMap::new(),
             operator_binary_impls: HashMap::new(),
             operator_unary_impls: HashMap::new(),
@@ -312,6 +323,7 @@ impl Lowerer {
             closure_counter: 0,
             coalesce_counter: 0,
             try_counter: 0,
+            protocol_counter: 0,
         }
     }
 

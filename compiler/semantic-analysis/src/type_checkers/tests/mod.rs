@@ -9,6 +9,7 @@ mod enum_expr_tests;
 mod enum_tests;
 mod generic_tests;
 mod intrinsic_tests;
+mod iteration_tests;
 mod literal_tests;
 mod loop_tests;
 mod match_tests;

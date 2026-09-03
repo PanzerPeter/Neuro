@@ -664,13 +664,22 @@ impl TypeChecker {
                             Some((**element).clone())
                         }
                         Type::Unknown => None,
-                        other => {
-                            self.record_error(TypeError::NotIndexable {
-                                found: other.clone(),
-                                span: iterable.span(),
-                            });
-                            None
-                        }
+                        other => match self.iteration_item(other) {
+                            // A nominal head is iterable exactly when the protocol says
+                            // so; the head is consumed into the loop's iterator, so it
+                            // moves like any other by-value placement.
+                            Some(item) => {
+                                self.record_move(iterable);
+                                Some(item)
+                            }
+                            None => {
+                                self.record_error(TypeError::NotIterable {
+                                    found: other.clone(),
+                                    span: iterable.span(),
+                                });
+                                None
+                            }
+                        },
                     },
                 };
 

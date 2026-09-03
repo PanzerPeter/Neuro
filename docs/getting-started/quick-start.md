@@ -316,6 +316,8 @@ current compiler supports:
 - `if` / `else if` / `else` chains; `if` and blocks as value expressions
 - `while` loops; `loop` (including as a value expression)
 - Range-for loops: `for i in 0..n` (exclusive) and `for i in 0..=n` (inclusive)
+- `for x in e` over any type implementing the prelude's `IntoIterator` / `Iterator` protocol,
+  adapters included
 - `break` and `continue`, with value-carrying breaks and loop labels
 - `match` as an exhaustive expression with payload binding, or-patterns, ranges, and guards
 - `panic(msg)` / `assert(cond)` / `unreachable()`

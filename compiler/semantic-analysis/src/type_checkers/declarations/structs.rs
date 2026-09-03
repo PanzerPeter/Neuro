@@ -325,6 +325,24 @@ impl TypeChecker {
                     .or_default()
                     .insert(method.name.name.clone(), inst_key);
             }
+
+            // The instance implements whatever the template's impl did, with the
+            // template's associated bindings substituted. Without this a generic
+            // iterator adapter would satisfy `Iterator` under its base name only, and
+            // no `for` head over an instance of it could find its `Item`.
+            let Some(trait_ident) = &imp.trait_name else {
+                continue;
+            };
+            let trait_name = trait_ident.name.clone();
+            if let Some(bindings) = self.impl_assoc.get(&(trait_name.clone(), base.to_string())) {
+                let concrete: HashMap<String, Type> = bindings
+                    .iter()
+                    .map(|(n, t)| (n.clone(), substitute_generic(t, &impl_subst)))
+                    .collect();
+                self.impl_assoc
+                    .insert((trait_name.clone(), mangled.to_string()), concrete);
+            }
+            self.trait_impls.insert((trait_name, mangled.to_string()));
         }
     }
 }

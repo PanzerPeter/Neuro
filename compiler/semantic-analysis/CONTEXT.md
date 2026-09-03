@@ -231,6 +231,28 @@ loop.
   so `xs[i]` needs no cast) in the same scope as the element binding, which is what makes
   `for (i, i) in ...` a `VariableAlreadyDefined` rather than a shadow.
 
+### The iteration protocol
+`type_checkers/iteration.rs`. A `Stmt::ForEach` head that is neither a collection, an array,
+nor a slice falls through to `iteration_item`, which answers what one step binds:
+
+- `IntoIterator` is consulted first (`trait_impls`), and the iterator is the declared return
+  type of that impl's `into_iter`. Otherwise the head is taken to be its own iterator — the
+  blanket `impl<I: Iterator> IntoIterator for I` stated as a rule, since a blanket impl has no
+  syntax yet.
+- The `Item` comes from the ITERATOR's own `impl Iterator` entry in `impl_assoc`, not from the
+  container's. That is also what enforces `IntoIterator::Iter: Iterator`: a bound on an
+  associated-type declaration has no syntax, so the requirement is checked on the type
+  `into_iter` actually returned.
+- The head is a consuming position — the loop takes the value as its iterator — so it is
+  `record_move`d like any other by-value placement.
+- A head implementing neither trait is `TypeError::NotIterable`, which replaced the
+  `NotIndexable` this arm used to reuse: iterating and indexing are no longer the same question.
+
+`instantiate_impls_for` copies each generic impl's `trait_impls` entry and its `impl_assoc`
+bindings onto every monomorphized instance, substituted. Without that a generic iterator
+adapter would satisfy `Iterator` under its base name only, and no `for` head over an instance
+of it could find its `Item`.
+
 The `prefer-loop-over-while-true` lint walker descends through `Stmt::Expr(Expr::Loop)`, since
 there is no `Stmt::Loop`.
 

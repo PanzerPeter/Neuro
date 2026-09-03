@@ -115,6 +115,25 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   scope so later statements type against them. `resolve_else_binding` mirrors the checker's
   binding table off `enum_instance_base`: a `Result`'s `Err` payload (slot 0), `None` for
   `Option`, else the whole scrutinee.
+- **The `for`-loop iteration protocol** (`iteration.rs`). A `Stmt::ForEach` whose head is a
+  nominal type carrying an `IntoIterator` or `Iterator` impl (`trait_impls`, this slice's own
+  copy of the checker's table) becomes a `HirStmt::Expr` wrapping a `Block`: a mutable
+  `__iter_N` binding initialized from `head.into_iter()` — or from the head itself, when it is
+  already an `Iterator` — followed by a `while true` whose single statement is a two-arm
+  `Match` on `__iter_N.next()`. Arm 0 tests the `Some` tag and binds payload slot 0 to the loop
+  variable; arm 1 is a `Wildcard` whose body breaks, exactly as the `?` desugar's failure arm
+  terminates its block. The label rides on the emitted `while`, so `break`/`continue`, labeled
+  or not, resolve against it with no backend change.
+  Two details are load-bearing. The `next` receiver carries the ITERATOR's type, not the call's
+  result: the backend recovers the method symbol from the receiver, so typing it as the result
+  sends `next` looking for a builtin on `Option`. And the element type is read out of the
+  `Some` payload of `next`'s return (`success_variant`) rather than off the impl's `type Item`
+  binding, so the binding and the storage the backend decodes cannot drift apart. An enumerated
+  head gets a `__iter_pos_N` cursor declared beside the iterator and advanced at the TOP of the
+  yielding arm, so a `continue` cannot skip the advance and repeat an index.
+  The built-in sequence heads never reach this path: a range, an array, a `Vec`, and a borrowed
+  slice keep their `HirStmt::ForRange` / `ForEach` counted-loop nodes, which is what leaves
+  their generated code unchanged.
 - **Traits.** The parser has already injected each trait's default methods into the matching
   `impl Trait for Type` blocks, so trait impls and their inherited defaults lower through the
   ordinary inherent-impl path, and a trait-bounded generic monomorphizes to concrete dispatch with
@@ -144,6 +163,10 @@ items, the backend needs no generic awareness.
 avoiding `__`, because the backend recovers a method's receiver struct by splitting the method
 symbol on `__`. Semantic analysis rejects a user name containing `__`, so `<instance>__<method>`
 holds exactly one separator from both sides.
+
+`instantiate_generic_impls` also records each instance's `trait_impls` entry, mirroring the
+checker: without it a generic iterator adapter would satisfy `Iterator` under its base name
+only, and a `for` head over an instance would find no protocol on the type it actually has.
 
 Const generics ride the same machinery: a `const_subst` (name → value) and `const_types`
 (name → int type) are active while an instance body lowers, parallel to `type_subst`. `MonoArg`

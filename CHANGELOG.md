@@ -10,6 +10,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.9.0] - 2026-09-03
+
+### Added
+
+- **The `IntoIterator` / `Iterator` iteration protocol.** `for` worked over ranges, arrays,
+  `Vec`s, and slices and over nothing else, so a type of your own could not be iterated at
+  all. `for x in e` is now defined as the spec states it: call `e.into_iter()` once, then
+  `.next()` until it answers `None`, binding each `Some` payload to the loop variable. The two
+  traits it dispatches against ship in the prelude, so a type stands in a `for` head after one
+  `impl Iterator for MyCursor { type Item = i32; func next(&mut self) -> Option<i32> { … } }`
+  and nothing else — no import, and no second impl: a type implementing `Iterator` is its own
+  iterator. Implement `IntoIterator` when the container and the cursor are different types,
+  which is what lets a container be walked more than once.
+
+  Adapters compose. An iterator that wraps another one — a transform, a filter that pulls
+  several elements per step — is an iterator itself, so it stands in a `for` head exactly like
+  the source it wraps, and several stack over one source with nothing between them
+  materialized. The `Iterator<Item = T>` bound added in 2.8.0 is what types the wrapped
+  `self.inner.next()` call.
+
+  The built-in heads are unchanged: a range, an array, a `Vec<T>`, and a `&[T]` still compile
+  to counted loops, which is a lowering choice rather than a difference in meaning, and their
+  generated code is byte-for-byte what it was. `break`, `continue`, labels, and `.enumerate()`
+  all work on a protocol head, the last counting the loop's own steps. A head implementing
+  neither trait now says so — the diagnostic names the protocol instead of reporting that the
+  value cannot be indexed.
+
+  Not shipped: adapter *methods* on an arbitrary iterator (`.map(f)`, `.filter(p)`). The
+  adapter types are writable and compose today; a method usable on any iterator needs a
+  return type naming a wrapper over `Self`, which is not yet expressible.
+
+### Fixed
+
+- A method could not be called on a struct field: `self.inner.next()`, the shape every
+  iterator adapter has, type-checked and then aborted code generation with "chained field
+  access is not yet supported". A receiver reached through a field is now addressed by
+  indexing into its parent's storage, so a `&mut self` method called that way writes through
+  to the field rather than mutating a discarded copy.
+
+
 ## [2.8.0] - 2026-09-02
 
 ### Added

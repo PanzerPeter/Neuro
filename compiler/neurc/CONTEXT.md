@@ -65,11 +65,20 @@ to be the root rather than to the prelude itself. `prelude.nr` marks its own sur
 root file's `@no_prelude`, and the merged namespace is flat, so the prelude's declarations are
 either in the whole program or absent from all of it.
 
-`prelude.nr` currently declares `Option<T>`, `Result<T, E>`, and the `OrderedF32` / `OrderedF64`
-validating wrappers — `@derive(Copy, Clone)`, a `new` constructor that panics on NaN, and
-`PartialEq` + `Comparable` impls. The wrappers exist so an ordered map can be keyed on a float:
-IEEE-754 `<` is a partial order, so a raw float key could be inserted and never found again.
-They deliberately do **not** implement `Hashable`.
+`prelude.nr` currently declares `Option<T>`, `Result<T, E>`, the `OrderedF32` / `OrderedF64`
+validating wrappers, and the `Iterator` / `IntoIterator` protocol traits. The wrappers exist so
+an ordered map can be keyed on a float: IEEE-754 `<` is a partial order, so a raw float key
+could be inserted and never found again — hence `@derive(Copy, Clone)`, a `new` constructor
+that panics on NaN, and `PartialEq` + `Comparable` impls. They deliberately do **not**
+implement `Hashable`.
+
+The two protocol traits are what `for` desugars against: `Iterator` declares
+`type Item` and `next(&mut self) -> Option<Self::Item>`; `IntoIterator` declares `type Item`,
+`type Iter`, and `into_iter(self) -> Self::Iter`. They are ordinary trait declarations —
+nothing in the checker or the lowerer treats them as lang items, and a program declaring its
+own `Iterator` shadows them like any other prelude name. `type Iter` carries no `: Iterator`
+bound because an associated-type *declaration* has no bound syntax yet; the requirement is
+enforced where the loop is built, on the type `into_iter` actually returns.
 
 ### Remaining pipeline facts
 Lint warnings from `type_check` are forwarded to stderr by `print_warnings` in both entry

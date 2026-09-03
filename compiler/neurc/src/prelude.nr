@@ -103,3 +103,25 @@ impl Comparable for OrderedF64 {
         self.value >= rhs.value
     }
 }
+
+// The iteration protocol `for` desugars against.
+//
+// `for x in e` calls `e.into_iter()` once and then `.next()` until it answers
+// `None`. A type implementing `Iterator` is its own iterator: the compiler uses it
+// directly rather than demanding a second, identical `IntoIterator` impl, which is
+// the blanket `impl<I: Iterator> IntoIterator for I` written as a rule because a
+// blanket impl is not yet expressible here.
+//
+// `type Iter` carries no `: Iterator` bound: a bound on an associated-type
+// DECLARATION has no syntax yet, so the constraint is enforced where the loop is
+// built, by requiring the returned type to have a `next`.
+export trait Iterator {
+    type Item
+    func next(&mut self) -> Option<Self::Item>
+}
+
+export trait IntoIterator {
+    type Item
+    type Iter
+    func into_iter(self) -> Self::Iter
+}

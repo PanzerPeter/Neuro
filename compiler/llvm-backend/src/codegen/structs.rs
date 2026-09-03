@@ -248,9 +248,39 @@ impl<'ctx> CodegenContext<'ctx> {
                     Ok((alloca, llvm_ty))
                 }
             }
-            _ => Err(CodegenError::UnsupportedType(
-                "chained field access is not yet supported".to_string(),
-            )),
+            // A field of a struct that itself has storage: GEP into the parent rather
+            // than materializing a copy. This is what lets an adapter's `&mut self`
+            // method drive the iterator it wraps (`self.inner.next()`) and have the
+            // advance stick — reaching the field as a value would discard it.
+            HirExprKind::FieldAccess {
+                object: parent,
+                field,
+            } => {
+                let Type::Struct(parent_name) = Type::from_hir(&parent.ty).referent().clone()
+                else {
+                    return Err(CodegenError::UnsupportedType(format!(
+                        "field '{}' is not reached through a struct",
+                        field
+                    )));
+                };
+                let (parent_ptr, parent_llvm) =
+                    self.get_struct_ptr_and_type(parent, &parent_name)?;
+                let idx = self.struct_field_index(&parent_name, field)?;
+                let field_ptr = self
+                    .builder
+                    .build_struct_gep(
+                        parent_llvm,
+                        parent_ptr,
+                        idx as u32,
+                        &format!("{}.ptr", field),
+                    )
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                Ok((field_ptr, self.get_struct_llvm_type(struct_name)?))
+            }
+            other => Err(CodegenError::UnsupportedType(format!(
+                "a method receiver must be a place, not {:?}",
+                other
+            ))),
         }
     }
 }

@@ -1532,9 +1532,12 @@ equally; the map only needs that much.
 - A `string` stored in a collection is not freed when the collection is dropped;
   only the collection's own buffer is. This matches the existing string-concat
   limitation and resolves with the heap-string work.
-- The general iterator protocol is not involved: `for x in v` lowers to a counted
-  loop, exactly as `for x in arr` does — and so does `for (i, x) in v.enumerate()`,
-  which binds the counter that loop already keeps.
+- `Vec<T>` does not go through the `IntoIterator` / `Iterator` protocol
+  ([control flow](control-flow.md#the-iteration-protocol)): `for x in v` lowers to
+  a counted loop, exactly as `for x in arr` does — and so does
+  `for (i, x) in v.enumerate()`, which binds the counter that loop already keeps.
+  The protocol is what a *user-defined* type implements to stand in a `for` head;
+  the built-in sequences take the direct path instead.
 
 ## References
 
