@@ -444,6 +444,17 @@ impl TypeChecker {
         self.newtype_defs.get(name)
     }
 
+    /// Whether `name` is a declared (non-generic) struct.
+    pub(crate) fn is_declared_struct(&self, name: &str) -> bool {
+        self.struct_defs.contains_key(name)
+    }
+
+    /// Whether the declaration being checked belongs to the implicit prelude, which is
+    /// the one body allowed to use the compiler's private intrinsics.
+    pub(crate) fn in_prelude(&self) -> bool {
+        self.current_module == ast_types::PRELUDE_MODULE
+    }
+
     /// Whether `name` is a registered generic enum template — usable as a type only
     /// with type arguments.
     pub(crate) fn is_generic_enum(&self, name: &str) -> bool {

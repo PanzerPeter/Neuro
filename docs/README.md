@@ -160,6 +160,11 @@ Key design goals:
   compose left to right to any depth, and sit under an outermost `.enumerate()` whose position
   counts what the chain yielded, see
   [control-flow.md](language-reference/control-flow.md#adapter-methods--mapf-and-filterp)
+- Codepoint iteration over text (2A): `.chars()` yields an iterator over Unicode scalar values
+  (O(1) per step) that composes with `.enumerate()` and the adapters, and
+  `for (offset, c) in s.char_indices()` binds each scalar's byte offset — the offset
+  `.slice(range)` takes, see
+  [control-flow.md](language-reference/control-flow.md#walking-text--chars-and-char_indices)
 - Attribute system: `@allow(prefer_loop_over_while_true)` suppresses the `while true` lint
 
 ### Operators
@@ -172,7 +177,7 @@ Key design goals:
 - Type cast: `n as f64`, `pi as i32`
 - Null-coalescing `??`: unwraps an `Option<T>` / `Result<T, E>` to its payload, else evaluates the fallback (R-to-L associativity, lazy fallback, `Err` payload discarded)
 - String equality: `==` and `!=` via length-check + `memcmp`
-- Builtin method dispatch on primitive & string receivers: `string.len() -> u64` (O(1) fat-pointer read), `.clone()`, `.slice(a..b) -> &string` (zero-copy sub-slice; byte indices, panics on out-of-bounds or mid-codepoint boundary), and `.char_slice(a..b) -> &string` (the same view indexed by code point, O(n) scan; panics on out-of-bounds only)
+- Builtin method dispatch on primitive & string receivers: `string.len() -> u64` (O(1) fat-pointer read), `.clone()`, `.slice(a..b) -> &string` (zero-copy sub-slice; byte indices, panics on out-of-bounds or mid-codepoint boundary), and `.char_slice(a..b) -> &string` (the same view indexed by code point, O(n) scan; panics on out-of-bounds only); `.chars() -> Chars`, the prelude iterator over Unicode scalar values (O(1) per step), with `.char_indices()` as the `for`-head form binding each scalar's byte offset
 - String interpolation `"Hello, {name}!"` with the format mini-language (`{x:.2}`, `{n:08d}`, `{s:^10}`, `{n:x}`, `{n:b}`, `{d:+d}`, `{v:?}`), see [expressions.md](language-reference/expressions.md#string-interpolation)
 - Triple-quoted block strings `"""…"""`: multi-line text dedented to the column of the closing delimiter, with the same escapes and interpolation holes as a `"…"` literal, see [expressions.md](language-reference/expressions.md#triple-quoted-strings)
 - Growable `String` buffer for building text incrementally, the mutable counterpart to the immutable `string`: `String::new()` / `.push_str(text)` / `.len()` / `.clear()` / `.to_string()`, see [types.md](language-reference/types.md#growable-strings-string)

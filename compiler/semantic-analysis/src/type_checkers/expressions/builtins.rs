@@ -14,6 +14,14 @@ use shared_types::Span;
 pub(crate) const SLICE_METHOD: &str = "slice";
 pub(crate) const CHAR_SLICE_METHOD: &str = "char_slice";
 
+/// The codepoint iterator `string.chars()` hands out, declared in the prelude.
+pub(crate) const CHARS_STRUCT: &str = "Chars";
+/// `string.chars()` — the method that produces one.
+pub(crate) const CHARS_METHOD: &str = "chars";
+/// The prelude-private decode intrinsic `Chars::next` steps with: the Unicode scalar
+/// whose UTF-8 encoding begins at a byte offset.
+pub(crate) const CHAR_AT_METHOD: &str = "__char_at";
+
 impl TypeChecker {
     /// Resolve a compiler-known intrinsic method on a builtin (non-struct) receiver.
     ///
@@ -108,6 +116,26 @@ impl TypeChecker {
             }
             // Array length, the compile-time `N` of `[T; N]`. Auto-derefs through
             // a borrow of an array (`&[T; N]`). Takes no arguments and yields `u64`.
+            // `.chars()` — the codepoint iterator. Nullary, and a borrow rather
+            // than a move: the iterator holds a view into the receiver's UTF-8 bytes, so
+            // it registers the same transient borrow `.slice` does.
+            (Type::String, CHARS_METHOD) => {
+                if !args.is_empty() {
+                    self.record_error(TypeError::ArgumentCountMismatch {
+                        expected: 0,
+                        found: args.len(),
+                        span: call_span,
+                    });
+                }
+                Some(self.chars_iterator(object, call_span))
+            }
+            // The decode step `Chars::next` is written against. Private to the prelude:
+            // the language specifies no byte-indexed access to a string, and this is the
+            // one place inside the compiler's own source that needs it.
+            (Type::String, CHAR_AT_METHOD) if self.in_prelude() => {
+                self.check_char_at_arg(args, call_span);
+                Some(Type::Char)
+            }
             (Type::Array { .. }, "len") => {
                 if !args.is_empty() {
                     self.record_error(TypeError::ArgumentCountMismatch {
@@ -152,6 +180,44 @@ impl TypeChecker {
                 Some(self.option_of(recv.clone(), call_span))
             }
             _ => None,
+        }
+    }
+
+    /// The `Chars` iterator type `.chars()` yields, with the receiver's borrow recorded.
+    ///
+    /// The type is the prelude's, so a program compiled with `@no_prelude` has no
+    /// iterator to hand out and gets the same unknown-type diagnostic any other missing
+    /// prelude declaration produces.
+    pub(crate) fn chars_iterator(&mut self, object: &Expr, call_span: Span) -> Type {
+        self.register_slice_borrow(object, call_span);
+        if !self.is_declared_struct(CHARS_STRUCT) {
+            self.record_error(TypeError::UnknownTypeName {
+                name: CHARS_STRUCT.to_string(),
+                span: call_span,
+            });
+            return Type::Unknown;
+        }
+        Type::Struct(CHARS_STRUCT.to_string())
+    }
+
+    /// Validate `__char_at`'s single byte-offset argument.
+    fn check_char_at_arg(&mut self, args: &[Expr], call_span: Span) {
+        if args.len() != 1 {
+            self.record_error(TypeError::ArgumentCountMismatch {
+                expected: 1,
+                found: args.len(),
+                span: call_span,
+            });
+            return;
+        }
+        if let Some(arg_ty) = self.check_expr(&args[0], Some(&Type::U64)) {
+            if !arg_ty.is_compatible_with(&Type::U64) {
+                self.record_error(TypeError::Mismatch {
+                    expected: Type::U64,
+                    found: arg_ty,
+                    span: args[0].span(),
+                });
+            }
         }
     }
 

@@ -55,6 +55,13 @@ A prelude item whose name the program already declares is dropped, so a local de
 shadows it. The items are otherwise ordinary declarations: nothing downstream special-cases
 `Option` or `Result`.
 
+Dropping one item takes with it every prelude declaration written against it. `Chars::next`
+returns `Option<char>`, so a program declaring its own `Option` would leave the prelude's own
+body compiled against a type that is no longer there — `PRELUDE_DEPENDENCIES` records that
+edge (`Chars` needs `Option` and `Iterator`), and `dropped_declarations` closes over it.
+`is_dropped` also drops an `impl` block extending a displaced type: those methods belong to the
+prelude's type, not to whatever the program put in its place.
+
 `prepend` stamps every prelude declaration with `PRELUDE_MODULE` (`ModuleId::MAX`), an id no
 loaded file can hold. The prelude is prepended *after* module resolution has numbered the
 program's files, so leaving it at 0 would make its internals private to whichever file happens
@@ -66,7 +73,8 @@ root file's `@no_prelude`, and the merged namespace is flat, so the prelude's de
 either in the whole program or absent from all of it.
 
 `prelude.nr` currently declares `Option<T>`, `Result<T, E>`, the `OrderedF32` / `OrderedF64`
-validating wrappers, and the `Iterator` / `IntoIterator` protocol traits. The wrappers exist so
+validating wrappers, the `Iterator` / `IntoIterator` protocol traits, and `Chars`, the codepoint
+iterator `string.chars()` hands out. The wrappers exist so
 an ordered map can be keyed on a float: IEEE-754 `<` is a partial order, so a raw float key
 could be inserted and never found again — hence `@derive(Copy, Clone)`, a `new` constructor
 that panics on NaN, and `PartialEq` + `Comparable` impls. They deliberately do **not**
@@ -79,6 +87,14 @@ nothing in the checker or the lowerer treats them as lang items, and a program d
 own `Iterator` shadows them like any other prelude name. `type Iter` carries no `: Iterator`
 bound because an associated-type *declaration* has no bound syntax yet; the requirement is
 enforced where the loop is built, on the type `into_iter` actually returns.
+
+`Chars` holds a `&string` view and a `u64` byte cursor, and its `impl Iterator` is written in
+ordinary Neuro — the one thing it cannot say in source is the decode itself, which it takes from
+the prelude-private `__char_at(offset)` intrinsic (`in_prelude()` in the type checker gates it on
+`PRELUDE_MODULE`, the constant `ast_types` now owns so both this crate and the checker read the
+same one). The step width follows from the decoded scalar's own magnitude, so a step reads the
+text once. `.chars()` fills the fields in: the lowering builds the struct literal, and the fields
+stay private so nothing else can.
 
 ### Remaining pipeline facts
 Lint warnings from `type_check` are forwarded to stderr by `print_warnings` in both entry

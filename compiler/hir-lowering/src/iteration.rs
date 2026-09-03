@@ -36,6 +36,20 @@ const INTO_ITER_METHOD: &str = "into_iter";
 const NEXT_METHOD: &str = "next";
 /// The type of an enumerated loop's position binding, matching the counted loops'.
 const LOOP_INDEX_TYPE: HirType = HirType::U64;
+/// The byte cursor a `Chars` iterator carries, which is what `.char_indices()` binds.
+const CHARS_OFFSET_FIELD: &str = "offset";
+/// The `for`-head form that drives a `Chars` iterator by that cursor.
+const CHAR_INDICES_METHOD: &str = "char_indices";
+
+/// Where a protocol loop's position binding takes its value.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoopPosition {
+    /// `.enumerate()` — a counter over the steps the loop yielded.
+    Step,
+    /// `.char_indices()` — the iterator's own byte cursor, sampled before each step so
+    /// the offset names the code point that step is about to yield.
+    ByteOffset,
+}
 
 impl Lowerer {
     /// Whether `ty` iterates through the protocol rather than as a built-in sequence.
@@ -64,6 +78,7 @@ impl Lowerer {
         adapters: &[LoopAdapter],
         body: &[Stmt],
         span: Span,
+        position: LoopPosition,
     ) -> Result<HirStmt, LoweringError> {
         let (iter_ty, iter_init) = self.iterator_of(head, span)?;
         let item_ty = self.protocol_item_type(&iter_ty)?;
@@ -141,19 +156,23 @@ impl Lowerer {
                     mutable: false,
                     span,
                 });
-                stmts.push(HirStmt::Assignment {
-                    target: cursor.clone(),
-                    value: HirExpr::new(
-                        HirExprKind::Binary {
-                            op: ast_types::BinaryOp::Add,
-                            left: Box::new(variable(cursor, LOOP_INDEX_TYPE, span)),
-                            right: Box::new(int_literal(1, LOOP_INDEX_TYPE, span)),
-                        },
-                        LOOP_INDEX_TYPE,
+                // A byte cursor belongs to the iterator and is advanced by its own
+                // `next`; only the step counter is the loop's to raise.
+                if position == LoopPosition::Step {
+                    stmts.push(HirStmt::Assignment {
+                        target: cursor.clone(),
+                        value: HirExpr::new(
+                            HirExprKind::Binary {
+                                op: ast_types::BinaryOp::Add,
+                                left: Box::new(variable(cursor, LOOP_INDEX_TYPE, span)),
+                                right: Box::new(int_literal(1, LOOP_INDEX_TYPE, span)),
+                            },
+                            LOOP_INDEX_TYPE,
+                            span,
+                        ),
                         span,
-                    ),
-                    span,
-                });
+                    });
+                }
             }
             stmts.extend(lo.lower_stmt_list(body)?);
             Ok(stmts)
@@ -201,6 +220,26 @@ impl Lowerer {
             span,
         );
 
+        // The sample sits ahead of the step because `next` advances the cursor past the
+        // code point it returns: read afterwards, every offset would name the following
+        // one. A `continue` cannot skip it — it is the first statement of the body.
+        let mut loop_body = Vec::new();
+        if let (LoopPosition::ByteOffset, Some(cursor)) = (position, &cursor_binding) {
+            loop_body.push(HirStmt::Assignment {
+                target: cursor.clone(),
+                value: HirExpr::new(
+                    HirExprKind::FieldAccess {
+                        object: Box::new(variable(&iter_binding, iter_ty.clone(), span)),
+                        field: CHARS_OFFSET_FIELD.to_string(),
+                    },
+                    LOOP_INDEX_TYPE,
+                    span,
+                ),
+                span,
+            });
+        }
+        loop_body.push(HirStmt::Expr(step));
+
         prelude.push(HirStmt::While {
             label: label.as_ref().map(|l| l.name.clone()),
             condition: HirExpr::new(
@@ -208,7 +247,7 @@ impl Lowerer {
                 HirType::Bool,
                 span,
             ),
-            body: vec![HirStmt::Expr(step)],
+            body: loop_body,
             span,
         });
 
@@ -319,6 +358,23 @@ impl Lowerer {
             detail: format!("for-each over non-iterable type '{}'", ty),
         }
     }
+}
+
+/// The receiver of a `text.char_indices()` `for` head, or `None` for any other iterable.
+///
+/// The parser has already rejected a head that is decorated or bound to one variable, so
+/// a match here is a loop the byte cursor drives.
+pub(crate) fn char_indices_receiver(iterable: &ast_types::Expr) -> Option<&ast_types::Expr> {
+    let ast_types::Expr::Call { func, args, .. } = iterable else {
+        return None;
+    };
+    let ast_types::Expr::FieldAccess { object, field, .. } = func.as_ref() else {
+        return None;
+    };
+    if field.name != CHAR_INDICES_METHOD || !args.is_empty() {
+        return None;
+    }
+    Some(object.as_ref())
 }
 
 /// The declaration name behind a nominal type, which is the key the trait tables use.

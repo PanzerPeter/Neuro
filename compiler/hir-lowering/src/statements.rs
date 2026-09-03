@@ -3,6 +3,7 @@
 use ast_types::Stmt;
 use neuro_hir::{HirStmt, HirType};
 
+use crate::iteration::{char_indices_receiver, LoopPosition};
 use crate::{LoopCtx, Lowerer, LoweringError};
 
 /// The type of an enumerated loop's position binding. `u64` matches `.len()` and
@@ -169,6 +170,23 @@ impl Lowerer {
                 body,
                 span,
             } => {
+                // `text.char_indices()` names no method: it is a head form that drives
+                // the same `Chars` iterator `.chars()` yields, with the position taken
+                // from that iterator's byte cursor rather than from a step counter.
+                if let Some(receiver) = char_indices_receiver(iterable) {
+                    let receiver = self.lower_expr(receiver, None)?;
+                    let head = self.lower_chars_iterator(receiver, *span)?;
+                    return self.lower_protocol_for(
+                        label,
+                        index,
+                        iterator,
+                        head,
+                        adapters,
+                        body,
+                        *span,
+                        LoopPosition::ByteOffset,
+                    );
+                }
                 let iterable = self.lower_expr(iterable, None)?;
                 let element_ty = match Self::collection_element(&iterable.ty) {
                     Some(element) => element,
@@ -180,7 +198,14 @@ impl Lowerer {
                         // the protocol, which desugars to nodes already in the HIR.
                         other if self.iterates_by_protocol(other) => {
                             return self.lower_protocol_for(
-                                label, index, iterator, iterable, adapters, body, *span,
+                                label,
+                                index,
+                                iterator,
+                                iterable,
+                                adapters,
+                                body,
+                                *span,
+                                LoopPosition::Step,
                             );
                         }
                         other => {

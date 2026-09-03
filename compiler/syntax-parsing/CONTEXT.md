@@ -117,10 +117,17 @@ the tuple-index parse, so it needs no expression grammar of its own.
   off the iterable into `Stmt::ForRange`/`ForEach`'s `index` field. It cannot be left as an
   expression for semantic analysis to resolve: a range has no value form to be the receiver of a
   method, and there is no iterator type for one to return. A pair head and `.enumerate()` imply
-  each other, so either alone is a parse error (`PairWithoutEnumerate` / `EnumerateWithoutPair`).
+  each other, so either alone is a parse error (`PairWithoutEnumerate` / `PairHeadWithoutPair`).
   `(0..n).enumerate()` must be parenthesised — `..` binds looser than a call, so the parenthesised
   range is unwrapped here into the range loop's bounds, and `for i in (0..n)` follows from the
   same unwrap.
+- **`.char_indices()` is the second pair-yielding head.** It is left in the tree rather than
+  stripped — it names an intrinsic on a `string` receiver, so the passes downstream resolve it —
+  and all the parser decides is arity: `is_char_indices_head` makes a pair head legal over one,
+  and mandatory (`PairHeadWithoutPair` names the head that produced the error). A head wearing one
+  takes no `.enumerate()` and no adapters, since it already binds a position and an adapter would
+  desynchronise the offsets from the scalars actually yielded; either is
+  `CharIndicesHeadDecorated`.
 - **`.map(f)` / `.filter(p)` in a `for` head are grammar too.** `strip_adapters` peels the whole
   chain outside-in — an outermost `.enumerate()` first, then any number of `.map` / `.filter`
   calls — and reverses it into source order on `Stmt::ForRange`/`ForEach`'s `adapters` field. Each

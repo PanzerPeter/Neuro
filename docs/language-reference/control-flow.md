@@ -458,6 +458,26 @@ is written.
 as `.enumerate()` is — `val m = xs.map(f)` is not a method call that resolves.
 Write the adapter type, as above, when the pipeline has to be stored or returned.
 
+### Walking text — `.chars()` and `.char_indices()`
+
+A `string` is UTF-8, so its characters are not its bytes. `.chars()` is an ordinary
+iterator over Unicode scalar values and stands in a `for` head like any other, with
+`.enumerate()` and the adapters composing over it. `.char_indices()` is the second
+**pair-yielding head form**: it binds the byte offset of each scalar beside it, which
+is the offset `.slice(range)` takes.
+
+```neuro
+for c in "héllo".chars() { }                       // 5 scalars, 6 bytes
+
+for (offset, c) in "héllo".char_indices() {
+    // offset: 0, 1, 3, 4, 5 — 'é' occupies two bytes
+}
+```
+
+A `.char_indices()` head binds a pair and only a pair, and it takes no `.enumerate()`
+and no adapters: it already carries a position. See
+[types](types.md) for the method surface behind both.
+
 ## Break and Continue
 
 Use `break` to exit the nearest loop and `continue` to skip to the next iteration:

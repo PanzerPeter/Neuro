@@ -10,8 +10,9 @@ Provide the canonical Abstract Syntax Tree node definitions shared by every stag
     `FieldPattern`, `FieldInit`, `ClosureParam`, `InterpPart`
   - `items` — `Item`, `FunctionDef`, `StructDef`, `EnumDef`, `EnumVariant`, `VariantPayload`,
     `FieldDef`, `ImplDef`, `MethodDef`, `SelfParam`, `TraitDef`, `TraitMethod`, `ConstDef`,
-    `NewtypeDef`, `ModuleDef`, `ModuleId`, `ImportDef`, `ImportName`, `ImportSelection`,
-    `Parameter`, `ParamLabel`, `GenericParam`, `GenericParamKind`, `TraitBound`, `Attribute`
+    `NewtypeDef`, `ModuleDef`, `ModuleId`, `PRELUDE_MODULE`, `ImportDef`, `ImportName`,
+    `ImportSelection`, `Parameter`, `ParamLabel`, `GenericParam`, `GenericParamKind`,
+    `TraitBound`, `Attribute`
   - `statements` — `Stmt`, `LoopAdapter`, `LoopAdapterKind`
   - `types` — `Type`, `ArraySize`, `GenericArg`
 
@@ -126,6 +127,9 @@ walkers.
   trace of which file a declaration came from, and it exists because field visibility needs the
   receiver's type and is therefore checked by `semantic-analysis`, which has nothing else to
   read it from. `ImplDef` carries `module` but no `exported`: an `impl` declares no name.
+  `PRELUDE_MODULE` (`ModuleId::MAX`) is the id the implicit prelude's own declarations carry. It
+  lives here rather than in the driver because two slices read it: the driver stamps it, and the
+  type checker gates the intrinsics the prelude's bodies are written against on it.
 - **Lifetimes.** `lifetimes: Vec<Identifier>` on `FunctionDef` / `StructDef` / `ImplDef` and
   `lifetime: Option<Identifier>` on `Type::Reference` are kept apart from `generics` because
   lifetimes are a distinct namespace and do not drive monomorphization. Both are validated and

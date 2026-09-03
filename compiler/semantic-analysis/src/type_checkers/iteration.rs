@@ -5,6 +5,10 @@
 //! reaches here is a head whose type is a user nominal type, which is iterable exactly
 //! when the protocol says so.
 
+use ast_types::Expr;
+use shared_types::Span;
+
+use crate::errors::TypeError;
 use crate::types::Type;
 
 use super::TypeChecker;
@@ -17,8 +21,32 @@ const ITERATOR_TRAIT: &str = "Iterator";
 const ITEM_ASSOC: &str = "Item";
 /// `IntoIterator`'s producing method.
 const INTO_ITER_METHOD: &str = "into_iter";
+/// The `for`-head form that drives a `Chars` iterator by byte offset.
+const CHAR_INDICES_METHOD: &str = "char_indices";
 
 impl TypeChecker {
+    /// Type-check a `for` head of the form `text.char_indices()`, yielding the `Chars`
+    /// iterator it drives.
+    ///
+    /// The call is not a method anywhere else in the language: it is a head form, like
+    /// `.enumerate()`, and the position it binds is a byte offset read off the iterator
+    /// rather than a payload it can yield — `Iterator::next` answers `Option<Self::Item>`,
+    /// and an `Option` payload may only be a scalar, so a pair cannot travel through it.
+    pub(crate) fn check_char_indices_head(&mut self, receiver: &Expr, span: Span) -> Type {
+        let receiver_ty = self.check_expr(receiver, None).unwrap_or(Type::Unknown);
+        if !matches!(receiver_ty.referent(), Type::String) {
+            if !matches!(receiver_ty, Type::Unknown) {
+                self.record_error(TypeError::MethodNotFound {
+                    struct_name: receiver_ty.to_string(),
+                    method_name: CHAR_INDICES_METHOD.to_string(),
+                    span,
+                });
+            }
+            return Type::Unknown;
+        }
+        self.chars_iterator(receiver, span)
+    }
+
     /// What one step of iterating over `head` binds, or `None` when `head` does not
     /// implement the protocol.
     ///
@@ -65,6 +93,23 @@ impl TypeChecker {
             _ => None,
         }
     }
+}
+
+/// The receiver of a `text.char_indices()` `for` head, or `None` for any other iterable.
+///
+/// The parser has already rejected a decorated or single-bound one, so a match here is a
+/// head the loop lowering will drive by byte offset.
+pub(crate) fn char_indices_receiver(iterable: &Expr) -> Option<&Expr> {
+    let Expr::Call { func, args, .. } = iterable else {
+        return None;
+    };
+    let Expr::FieldAccess { object, field, .. } = func.as_ref() else {
+        return None;
+    };
+    if field.name != CHAR_INDICES_METHOD || !args.is_empty() {
+        return None;
+    }
+    Some(object.as_ref())
 }
 
 /// The declaration name behind a nominal type, which is the key both trait tables use.

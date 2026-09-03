@@ -4,9 +4,12 @@
 //! Every file here adds methods to the same `impl Lowerer` block.
 
 use ast_types::Expr;
-use neuro_hir::{HirExpr, HirExprKind, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirFieldInit, HirType};
 
-use super::{CLONE_METHOD, IO_BUILTINS, PANIC_BUILTINS, SLICE_METHOD};
+use super::{
+    CHARS_METHOD, CHARS_OFFSET_FIELD, CHARS_SOURCE_FIELD, CHARS_STRUCT, CHAR_AT_METHOD,
+    CLONE_METHOD, IO_BUILTINS, PANIC_BUILTINS, SLICE_METHOD,
+};
 use crate::{is_full_float, is_integer, Lowerer, LoweringError};
 
 impl Lowerer {
@@ -401,6 +404,13 @@ impl Lowerer {
         let object = self.lower_expr(object, None)?;
         let recv = object.ty.clone();
 
+        // `.chars()` is the one intrinsic that produces a value the HIR can already
+        // build: the prelude declares the iterator, so the call becomes its literal and
+        // no backend learns that `.chars()` exists.
+        if method == CHARS_METHOD && matches!(recv.referent(), HirType::String) {
+            return self.lower_chars_iterator(object, span);
+        }
+
         let (lowered_args, result_ty) = if let HirType::Struct(struct_name) = recv.referent() {
             let struct_name = struct_name.clone();
             if let Some(mangled) = self
@@ -474,6 +484,58 @@ impl Lowerer {
         ))
     }
 
+    /// Build the `Chars` iterator `text.chars()` yields: a borrow of the receiver's UTF-8
+    /// bytes paired with a byte cursor at zero.
+    ///
+    /// The borrow is what keeps the iterator from consuming the string. An immutable
+    /// borrow of a `string` IS the fat pointer by value, so it holds a temporary receiver
+    /// (`(a + b).chars()`) exactly as safely as it holds a named one.
+    pub(crate) fn lower_chars_iterator(
+        &mut self,
+        receiver: HirExpr,
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let borrowed_ty = HirType::Reference {
+            inner: Box::new(HirType::String),
+            mutable: false,
+        };
+        let source = match receiver.ty {
+            HirType::Reference { .. } => receiver,
+            _ => HirExpr::new(
+                HirExprKind::Reference {
+                    operand: Box::new(receiver),
+                    mutable: false,
+                },
+                borrowed_ty,
+                span,
+            ),
+        };
+        Ok(HirExpr::new(
+            HirExprKind::StructLiteral {
+                name: CHARS_STRUCT.to_string(),
+                fields: vec![
+                    HirFieldInit {
+                        name: CHARS_SOURCE_FIELD.to_string(),
+                        value: Box::new(source),
+                        span,
+                    },
+                    HirFieldInit {
+                        name: CHARS_OFFSET_FIELD.to_string(),
+                        value: Box::new(HirExpr::new(
+                            HirExprKind::Literal(shared_types::Literal::Integer(0, None)),
+                            HirType::U64,
+                            span,
+                        )),
+                        span,
+                    },
+                ],
+                base: None,
+            },
+            HirType::Struct(CHARS_STRUCT.to_string()),
+            span,
+        ))
+    }
+
     /// Lower `seq.slice(range)` on an array, `Vec`, or slice: the single range argument
     /// and the `&[T]` view it yields.
     fn lower_sequence_slice(
@@ -521,6 +583,12 @@ impl Lowerer {
                     mutable: false,
                 };
                 Ok((vec![range], slice_ty))
+            }
+            // The prelude-private decode step behind `Chars::next`. The semantic pass has
+            // already refused it to every module but the prelude's own.
+            (HirType::String, CHAR_AT_METHOD) => {
+                let args = self.lower_args(args, &[HirType::U64])?;
+                Ok((args, HirType::Char))
             }
             (HirType::Array { .. } | HirType::Slice(_), "len") => {
                 Ok((self.lower_args(args, &[])?, HirType::U64))

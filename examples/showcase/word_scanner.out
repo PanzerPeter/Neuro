@@ -1,0 +1,12 @@
+line        = héllo wörld from neuro
+bytes       = 24
+scalars     = 22
+words       = 4
+  0: héllo  bytes  6  scalars  5
+  1: wörld  bytes  6  scalars  5
+  2:   from  bytes  4  scalars  4
+  3:  neuro  bytes  5  scalars  5
+wide        = 2
+accented    = 2
+third       = from
+total       = 27

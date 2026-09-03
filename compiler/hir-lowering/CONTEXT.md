@@ -134,6 +134,12 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   The built-in sequence heads never reach this path: a range, an array, a `Vec`, and a borrowed
   slice keep their `HirStmt::ForRange` / `ForEach` counted-loop nodes, which is what leaves
   their generated code unchanged.
+  A `LoopPosition` picks where the position binding's value comes from. `Step` is the counter
+  above; `ByteOffset` is what a `text.char_indices()` head takes (`char_indices_receiver`
+  recognises it on the AST iterable, ahead of lowering it) — the loop samples the iterator's own
+  `offset` field into `__iter_pos_N` as the FIRST statement of the `while` body, because `next`
+  advances that field past the code point it returns and a sample taken afterwards would name
+  the following one. Nothing increments it: the iterator owns it.
 - **The `.map(f)` / `.filter(p)` desugar** (`loop_adapters.rs`). A head's `adapters` chain is
   folded into the loop it decorates rather than materialized as an iterator value, so all four
   head shapes and the protocol path share one implementation. `plan_loop_adapters` binds each
@@ -290,6 +296,13 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   `&string` result type and lowers the range argument unchanged. The two differ only in the unit
   their indices count (bytes vs. code points), which is settled in the backend, so this slice does
   not distinguish them beyond the method name reaching codegen.
+- **`.chars()`** — intercepted in `lower_method_call` ahead of every other dispatch and lowered
+  to the prelude iterator's own `StructLiteral`: `Chars { source: &receiver, offset: 0 }`. No
+  backend learns that `.chars()` exists. The borrow is emitted even for a temporary receiver,
+  which is sound because an immutable borrow of a `string` IS the fat pointer by value.
+- **`__char_at(offset)`** — `lower_builtin_method` types the prelude's decode step as
+  `HirType::Char` with a `u64` argument. The semantic pass has already refused it to every
+  module but the prelude's, so no gate is repeated here.
 - **`.is_nan()`** — `lower_builtin_method` types it as `HirType::Bool` on a full-precision float
   receiver (`is_full_float`, so `f16`/`bf16` are excluded), with no arguments to lower.
 - **`checked_{add,sub,mul}`** — `lower_builtin_method` types these on any integer receiver as

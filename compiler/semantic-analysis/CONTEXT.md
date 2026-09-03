@@ -179,6 +179,14 @@ a wrong count):
   `SliceExpectsRange`. A bare `Expr::Range` anywhere else is `RangeNotAllowed`. The two share a
   check because they share a contract: they differ only in whether the indices count bytes or
   code points, which is a backend concern with no type-level consequence;
+- `string.chars() -> Chars` (nullary), the prelude's codepoint iterator. Like `.slice` it
+  registers a transient borrow of the receiver, because the iterator holds a view into the
+  receiver's bytes rather than owning them. `Chars` is a prelude declaration, so a program
+  compiled with `@no_prelude` — or one shadowing it — gets `UnknownTypeName` instead;
+- `string.__char_at(offset) -> char`, gated on `in_prelude()` (the declaration being checked
+  carries `ast_types::PRELUDE_MODULE`). It is the decode step `Chars::next` is written against;
+  the language specifies no byte-indexed read of a string, so every other module sees
+  `MethodNotFound`;
 - on any integer receiver, `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and `.shr(n)`,
   each taking one same-typed argument (`check_unary_int_intrinsic_arg`) and returning the receiver
   type;
@@ -257,6 +265,13 @@ nor a slice falls through to `iteration_item`, which answers what one step binds
   `record_move`d like any other by-value placement.
 - A head implementing neither trait is `TypeError::NotIterable`, which replaced the
   `NotIndexable` this arm used to reuse: iterating and indexing are no longer the same question.
+
+`char_indices_receiver` (same module) recognises the `text.char_indices()` head form ahead of
+the ordinary `check_expr` on the iterable, and `check_char_indices_head` types it as the same
+`Chars` iterator `.chars()` yields — the position it binds is a byte offset the lowering reads
+off that iterator, not a payload it could yield, since an `Option` payload is restricted to
+scalars and a pair is not one. A non-`string` receiver is `MethodNotFound`, matching what the
+call gets anywhere but a `for` head.
 
 `instantiate_impls_for` copies each generic impl's `trait_impls` entry and its `impl_assoc`
 bindings onto every monomorphized instance, substituted. Without that a generic iterator

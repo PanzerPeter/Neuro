@@ -1,8 +1,8 @@
 // Adapter methods in a `for` head: `.map(f)` and `.filter(p)`.
 //
-// §3.7 names `.map()`, `.filter()`, and `.enumerate()` as adapters that "return
-// new `Iterator`s, so they compose in a single `for` head". They are recognised
-// as part of the head rather than resolved as methods, which is what lets them
+// `.map()`, `.filter()`, and `.enumerate()` are adapters that return new iterators,
+// so they compose in a single `for` head. They are recognised as part of the head
+// rather than resolved as methods, which is what lets them
 // apply to a range and an array — neither of which is a value with methods on it.
 //
 //     .map(f)     replaces each element with `f(element)`

@@ -667,7 +667,13 @@ impl TypeChecker {
                 body,
                 span: _,
             } => {
-                let iterable_ty = self.check_expr(iterable, None).unwrap_or(Type::Unknown);
+                // `text.char_indices()` is a head form rather than a method: it types as
+                // the `Chars` iterator it drives, and its position binding is the byte
+                // offset the lowering reads off that iterator between steps.
+                let iterable_ty = match super::iteration::char_indices_receiver(iterable) {
+                    Some(receiver) => self.check_char_indices_head(receiver, iterable.span()),
+                    None => self.check_expr(iterable, None).unwrap_or(Type::Unknown),
+                };
                 let element_ty = match self.collection_element(&iterable_ty) {
                     Some(element) => Some(element),
                     None => match iterable_ty.referent() {

@@ -387,6 +387,45 @@ inside a code point, which is the reason to reach for this method in the first p
 A range expression `a..b` / `a..=b` is valid **only** as a `.slice` or `.char_slice`
 argument; used anywhere else it is a compile error.
 
+**`.chars() -> Chars`**, an iterator over the receiver's Unicode scalar values. Each step is
+O(1): the cursor decodes the code point standing at its byte offset and advances by that code
+point's own UTF-8 width, so no part of the text is scanned twice. `Chars` is an ordinary
+`Iterator` from the prelude (see [control flow](control-flow.md)), which means a `for` head
+drives it, `.enumerate()` numbers the scalars, `.map(f)` / `.filter(p)` decorate them, and the
+iterator itself is a value that can be held and stepped by hand. The receiver is **borrowed**,
+not consumed, so the text stays usable afterwards.
+
+```neuro
+val text = "héllo"
+
+for c in text.chars() {
+    println("{c}")                    // 5 scalars, though text.len() is 6 bytes
+}
+
+for (position, c) in text.chars().enumerate() { }   // position counts code points
+
+mut walk = text.chars()
+val first = walk.next() ?? '?'        // Option::Some('h')
+```
+
+**`for (offset, c) in text.char_indices()`**, the same walk with the **byte offset** of each
+scalar bound alongside it. Those are the offsets `.slice(range)` takes, which is what makes the
+pair the tokenizer's tool: find a position by reading characters, then cut by bytes. An offset
+names the code point its step yields, never the one after it.
+
+```neuro
+mut cut: u64 = 0
+for (offset, c) in "aé漢".char_indices() {
+    if c == '漢' { cut = offset }     // 3 — 'a' is one byte, 'é' two
+}
+```
+
+`.char_indices()` is a **`for`-head form**, like `.enumerate()`, rather than a method: it binds
+a pair, and a pair cannot travel through `Iterator::next`, whose `Option` payload is limited to
+scalars in this phase. So it appears only in a `for` head, it binds a pair there (never a single
+variable), and it takes no `.enumerate()` and no adapters — it already carries a position of its
+own. Where a chain is wanted, walk `.chars()` instead.
+
 ## Growable Strings (`String`)
 
 `string` is immutable, which makes it cheap to pass, slice, and share, but wrong for text that is
