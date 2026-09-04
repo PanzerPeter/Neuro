@@ -197,3 +197,26 @@ fn error_unknown_type_name() {
         .iter()
         .any(|e| matches!(e, TypeError::UnknownTypeName { .. })));
 }
+
+#[test]
+fn error_unmatchable_scrutinee_reports_once() {
+    // A `string` scrutinee is rejected up front. The literal patterns must not
+    // then be re-checked against it: doing so produced a second, nonsensical
+    // "this pattern matches a `string` but the value has type string".
+    let source = r#"func test() -> i32 {
+        val s: string = "a"
+        return match s {
+            "a" => 1,
+            _ => 0,
+        }
+    }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let result = type_check(&items);
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+    assert_eq!(errors.len(), 1);
+    assert!(matches!(
+        errors[0],
+        TypeError::UnsupportedMatchScrutinee { .. }
+    ));
+}
