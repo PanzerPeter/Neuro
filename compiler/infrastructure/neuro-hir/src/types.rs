@@ -11,8 +11,8 @@ use std::fmt;
 /// allowed to assume well-typedness.
 ///
 /// The variant set mirrors the resolved types the semantic analyzer produces
-/// today. Composite future types (tensors, generics) are intentionally
-/// absent until the language gains them.
+/// today. Composite future types (generics) are intentionally absent until the
+/// language gains them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HirType {
     I8,
@@ -74,6 +74,15 @@ pub enum HirType {
     Function {
         params: Vec<HirType>,
         ret: Box<HirType>,
+    },
+    /// Statically shaped tensor `Tensor<T, [d0, ...]>`. Every extent is known at
+    /// compile time and is part of the type; an empty `shape` is the rank-0 scalar
+    /// tensor. The HIR carries the type so the contract is complete, but no backend
+    /// has a runtime representation for it yet — a tensor buffer's layout arrives with
+    /// tensor construction.
+    Tensor {
+        element: Box<HirType>,
+        shape: Vec<usize>,
     },
     /// A heap-backed standard collection: `Vec<T>` (one argument),
     /// `HashMap<K, V>` / `BTreeMap<K, V>` (two), or `String` (none). Backends lower
@@ -179,6 +188,16 @@ impl fmt::Display for HirType {
             }
             HirType::Array { element, size } => write!(f, "[{}; {}]", element, size),
             HirType::Slice(element) => write!(f, "[{}]", element),
+            HirType::Tensor { element, shape } => {
+                write!(f, "Tensor<{}, [", element)?;
+                for (i, extent) in shape.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", extent)?;
+                }
+                write!(f, "]>")
+            }
             HirType::Tuple(elements) => {
                 write!(f, "(")?;
                 for (i, el) in elements.iter().enumerate() {

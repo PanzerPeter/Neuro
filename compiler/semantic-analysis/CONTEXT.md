@@ -554,6 +554,17 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   (`slice_borrow_root` sees through a chain of slice calls), so a live view blocks a `&mut` of
   the source and `borrow_target_of` promotes it to a persistent borrow when it initializes a
   binding — which is what makes returning a view of a local a `ReturnsReferenceToLocal`.
+- **Tensors.** `Type::Tensor { element, shape }` is the statically shaped `Tensor<T, [d0, ...]>`.
+  Rank and every extent are part of the type, so two tensors are compatible only when their
+  elements match and their shapes are equal extent for extent; an empty `shape` is the rank-0
+  scalar tensor. `resolve_type` restricts the element to a fixed-width scalar (integers,
+  `f16`/`bf16`/`f32`/`f64`, `bool`) and reports `NonScalarTensorElement` otherwise. A tensor owns
+  its buffer, so `is_type_copy` is false and `is_type_move_tracked` is true: it moves on
+  assignment and on being passed. `Tensor` is a prelude name a module may shadow, so the
+  shape-less spelling `Tensor<f32>` reaches the `Type::Generic` arm, where an unshadowed
+  `Tensor` reports `TensorShapeRequired` rather than `NotAGenericType`. Only the *type* exists
+  at this stage — no tensor value can be constructed, and the LLVM backend rejects the type as
+  having no runtime representation.
 - **Tuples.** Each element is checked against the expected tuple's element type when annotated;
   `t.N` is `NotATuple` on a non-tuple and `TupleIndexOutOfBounds` past the arity. Struct, tuple,
   and array *destructuring* is parser-desugared and reaches this slice as ordinary field-access

@@ -63,6 +63,13 @@ pub(crate) enum Type {
     /// Anonymous tuple `(T1, T2, ...)`. Lowered to an anonymous LLVM struct
     /// `{ T1, T2, ... }`; element access is `extractvalue` by constant index.
     Tuple(Vec<Type>),
+    /// Statically shaped tensor `Tensor<T, [d0, ...]>`. It reaches the backend so the
+    /// type model stays complete, but it has no LLVM lowering yet: the buffer layout
+    /// arrives with tensor construction, so mapping one is an error today.
+    Tensor {
+        element: Box<Type>,
+        shape: Vec<usize>,
+    },
     /// A heap-backed standard collection. Every kind lowers to the same
     /// `{ buffer, length, capacity, used }` header; `kind` selects the buffer layout
     /// and the operations emitted against it.
@@ -139,6 +146,10 @@ impl Type {
                 size: *size,
             },
             HirType::Slice(element) => Type::Slice(Box::new(Type::from_hir(element))),
+            HirType::Tensor { element, shape } => Type::Tensor {
+                element: Box::new(Type::from_hir(element)),
+                shape: shape.clone(),
+            },
             HirType::Tuple(elements) => Type::Tuple(elements.iter().map(Type::from_hir).collect()),
             HirType::Function { params, ret } => Type::Function {
                 params: params.iter().map(Type::from_hir).collect(),
@@ -177,6 +188,10 @@ impl Type {
             Type::Reference { inner, .. } => format!("ref{}", inner.mangle()),
             Type::Array { element, size } => format!("arr{}x{}", size, element.mangle()),
             Type::Slice(element) => format!("slice{}", element.mangle()),
+            Type::Tensor { element, shape } => {
+                let extents: Vec<String> = shape.iter().map(|d| d.to_string()).collect();
+                format!("tensor{}x{}", extents.join("x"), element.mangle())
+            }
             Type::Tuple(elements) => {
                 let parts: Vec<String> = elements.iter().map(Type::mangle).collect();
                 format!("tup{}", parts.join("_"))

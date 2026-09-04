@@ -28,7 +28,10 @@ it the *typed* contract:
 1. **Every expression carries its resolved type.** `HirExpr` is `{ kind, ty, span }` and `ty` is
    a fully resolved `HirType`. `HirType` has **no `Unknown` variant** — reaching the HIR implies
    the program type-checked. Its variant set mirrors what the semantic analyzer produces today;
-   no tensor/generic variants until the language gains them (No Speculative Generality).
+   no generic variants until the language gains them (No Speculative Generality).
+   `HirType::Tensor { element, shape }` is present because the surface type is: it carries the
+   statically shaped `Tensor<T, [d0, ...]>` through the contract even though no backend can map
+   it to a runtime value yet.
 2. **Syntactic noise is normalized away.** The AST's `Expr::Paren` is dropped (tree structure
    already encodes grouping) and identifiers are resolved to their `String` name, with the source
    span on the enclosing node.

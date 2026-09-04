@@ -38,7 +38,8 @@ Bind every call site's arguments to the callee's parameters in declaration order
   otherwise lose that. The annotation is dropped when it would not mean the same thing at a
   call site — a type parameter of the callee, `Self`, `impl Trait`, `dyn Trait`, `&[T]`, a
   function type — the last three because an argument reaches them through a coercion an
-  argument position applies and a binding does not. It is dropped for every method signature
+  argument position applies and a binding does not. A statically shaped `Tensor<T, [d0, ...]>`
+  is *kept*: its extents are literals, so restating it at a call site names the same type. It is dropped for every method signature
   too, since a method signature is agreed across impls by parameter *name* and so cannot
   promise a type. Only these calls give up the identical-IR property; a call
   of literals, or one whose permutation moves nothing observable, is still permuted in place.

@@ -72,6 +72,12 @@ pub enum ParseError {
     #[error("`.{adapter}()` takes exactly one argument: the function applied to each element")]
     LoopAdapterArity { adapter: String, span: Span },
 
+    #[error("a `[...]` shape argument is only valid on a tensor type; `{name}` takes type or const arguments, as in `{name}<i32>`")]
+    ShapeArgumentOnNonTensor { name: String, span: Span },
+
+    #[error("`Tensor` takes exactly two arguments — an element type and a `[...]` shape, as in `Tensor<f32, [3, 3]>`")]
+    TensorTypeArity { span: Span },
+
     #[error("lexical error: {0}")]
     LexError(#[from] LexError),
 }

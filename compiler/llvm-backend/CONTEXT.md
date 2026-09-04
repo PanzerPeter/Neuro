@@ -332,7 +332,11 @@ than assuming the prelude's declaration order.
 `map_type` lowers a reference to an opaque `ptr`, with three exceptions: an immutable `&string`
 (the fat pointer itself, above), `Reference(DynObject)` (the two-word `dyn_ref_type()` struct),
 and `Reference(Slice)` (the two-word `slice_ref_type()` struct, mutable or not). A bare
-`DynObject` or `Slice` is rejected as unsized.
+`DynObject` or `Slice` is rejected as unsized. `Type::Tensor { element, shape }` is carried
+through `from_hir` and `mangle` so the backend type model stays a faithful image of the HIR, but
+`map_type` rejects it: a tensor's buffer layout is settled by tensor construction, which the
+language does not have, so a program annotating one type-checks (`neurc check`) and fails here
+with an `UnsupportedType` naming the tensor.
 
 `codegen_reference` returns the borrowed place's storage pointer — mutability is compile-time
 only. `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer.

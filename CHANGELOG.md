@@ -10,6 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.13.0] - 2026-09-04
+
+### Added
+
+- **Static tensor type syntax `Tensor<T, [d0, ...]>` (Phase 2B).** The first tensor
+  construct in the language, and a **type-level** one: the annotation parses, resolves,
+  and type-checks anywhere a type may be written — `val` bindings, parameters, return
+  types, struct fields, and type aliases — for rank 0 (`Tensor<f32, []>`) through
+  rank-N. Rank and every extent are part of the type, so `Tensor<f32, [2, 2]>` and
+  `Tensor<f32, [3, 3]>` are distinct and a mismatch is reported with both spelled out.
+  A tensor owns its buffer, so it is not `Copy`: passing one moves it, and passing it
+  twice is a use-after-move. The element type is restricted to a fixed-width scalar —
+  any integer, `f16` / `bf16` / `f32` / `f64`, or `bool`.
+
+  `Tensor` remains a prelude *name* rather than a keyword: the parser claims it only
+  once a bracketed shape appears, so a module declaring its own generic `Tensor<T>`
+  still shadows it. That also lets `Box<[T; N]>` keep parsing as an array type argument
+  — a shape is recognised by the token after `[`, which for a type can never be an
+  integer or a closing bracket.
+
+  **Not yet:** there is no way to construct a tensor value. Literals, the
+  `Tensor::<T, [...]>::zeros()` family, arithmetic, slicing, and reductions are all
+  later 2B items. A program that annotates a tensor passes `neurc check` but cannot be
+  compiled to a binary; the backend reports that a tensor has no runtime representation
+  yet. Symbolic extents, named dimensions, and dynamic `?` axes are parse errors until
+  their own roadmap items land.
+
+
 ## [2.12.5] - 2026-09-04
 
 ### Added

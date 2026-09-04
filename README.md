@@ -547,7 +547,7 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | **1** | **Core Language**: types, control flow, LLVM backend, ownership and borrow checking, generics, traits and dispatch, closures, enums and pattern matching, error handling, modules and prelude, string interpolation | Complete |
 | **2** | **Tensors and MLIR**: first-class tensor types lowered through MLIR Linalg, plus the pool allocator. Finishing it ships **v3.0.0** | In progress |
 | 2A | Standard I/O and spec stragglers: `print` / `println`, `.is_nan()`, codepoint string APIs, `.enumerate()`, borrowed slices `&[T]`, the iterator protocol, `@derive(Debug, PartialEq)` | Complete |
-| 2B | Tensor core: `Tensor<T, [...]>`, literal coercion, move semantics, DLPack, slicing, shape generics, named dims, dynamic shapes, reductions | Planned |
+| 2B | Tensor core: `Tensor<T, [...]>`, literal coercion, move semantics, DLPack, slicing, shape generics, named dims, dynamic shapes, reductions | In progress |
 | 2C | MLIR lowering: tensor arithmetic to Linalg, broadcasting, matmul behind `@`, end-to-end HIR → MLIR → LLVM | Planned |
 | 2D | Pool allocator: `pool` blocks, `PoolAware`, LIFO release at scope exit | Planned |
 | 2E | Functional sugar: pipeline `\|>`, composition `>>`, einstein notation, functional tensor ops | Planned |
