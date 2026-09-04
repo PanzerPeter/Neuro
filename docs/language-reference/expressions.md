@@ -29,8 +29,9 @@ val report  = "Sum: {a + b}, Product: {a * b}"
 
 A hole holds any expression (a call, a field access, a struct literal, an `if`,
 a nested block): the lexer only finds the hole's bounds and the parser
-re-parses its text as an ordinary expression. Write a literal `{` as `\{`; an
-unpaired `}` needs no escape.
+re-parses its text as an ordinary expression. Write a literal brace as `\{` or
+`\}`; an unescaped `}` outside a hole is an error, so a dropped `{` is caught
+where it goes missing.
 
 An optional `:spec` after the expression chooses the rendering. The shape is
 `[< > ^] [+] [0] [width] [.precision] [kind]`, where *kind* is one of

@@ -53,15 +53,35 @@ fn holes_render_bindings_and_expressions() {
 }
 
 #[test]
-fn escaped_brace_and_bare_close_stay_literal() {
+fn escaped_braces_render_as_literal_braces() {
     run(
         "interp_escapes.nr",
         "    val n: i32 = 1\n",
         &[
-            ("\\{not a hole}", "\\{not a hole}"),
-            ("a}b", "a}b"),
-            ("{n}\\{n}", "1\\{n}"),
+            ("\\{not a hole\\}", "\\{not a hole\\}"),
+            ("a\\}b", "a\\}b"),
+            ("{n}\\{n\\}", "1\\{n\\}"),
         ],
+    );
+}
+
+/// An unescaped `}` outside a hole is an error, not literal text: it is what catches a
+/// `{` that went missing, so the two delimiters stay symmetric.
+#[test]
+fn regression_an_unescaped_closing_brace_outside_a_hole_is_rejected() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    println("a}b")
+    return 0
+}
+"#;
+    let error = test
+        .compile_and_run("interp_bare_close.nr", source)
+        .expect_err("a bare `}` outside a hole must not compile");
+    assert!(
+        error.contains("unescaped `}`"),
+        "expected an unescaped-brace diagnostic, got: {error}"
     );
 }
 
@@ -155,7 +175,7 @@ func main() -> i32 {
     // A hole re-parses as a full expression, so struct-literal colons, call
     // parentheses, and block braces all nest inside it.
     val text = "{p.x},{p.y} {double(a)} {if a < 3 { 1 } else { 0 }} {Point { x: 9, y: 0 }.x} {'}'}"
-    if text == "3,4 4 1 9 }" {
+    if text == "3,4 4 1 9 \}" {
         return 0
     }
     return 1

@@ -59,7 +59,8 @@ decodes to `StringValue::Plain`, one with holes to `StringValue::Interp` carryin
 **One** token variant covers both because a logos callback picks a variant's *payload*, never the
 variant — the decoder can only decide plain-vs-interpolated after walking the content.
 
-`decode_string_literal` splits text from holes, decoding escapes (`\{` writes a literal brace)
+`decode_string_literal` splits text from holes, decoding escapes (`\{` / `\}` write literal
+braces; an unescaped `}` outside a hole is `LexError::UnescapedClosingBrace`)
 and recording each hole's raw source with its **absolute** file span, so the parser's sub-parse
 of the hole reports at real columns. Hole bounds come from brace-depth matching that skips char
 literals, so a `\u{...}` payload's brace does not close the hole. A `"` inside a hole is not

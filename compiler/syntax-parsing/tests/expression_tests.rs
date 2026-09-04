@@ -689,7 +689,7 @@ fn test_parse_interpolation_spec_is_attached_to_its_hole() {
 
 #[test]
 fn test_parse_literal_without_holes_stays_a_plain_string() {
-    let expr = parse_expr(r#""no holes \{here}""#).expect("escaped brace should parse");
+    let expr = parse_expr(r#""no holes \{here\}""#).expect("escaped braces should parse");
     match expr {
         Expr::Literal(Literal::String(text), _) => assert_eq!(text, "no holes {here}"),
         other => panic!("Expected a plain string literal, got {:?}", other),

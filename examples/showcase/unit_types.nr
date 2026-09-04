@@ -55,7 +55,7 @@ func main() -> i32 {
     val pace1 = leg1.pace()
     val pace2 = leg2.pace()
     println("Leg::new(Meters(30), Seconds(12)).pace() = {pace1}")
-    println("Leg \{ Meters(20), Seconds(8) }.pace()    = {pace2}")
+    println("Leg \{ Meters(20), Seconds(8) \}.pace()    = {pace2}")
     total += pace1            // 30 - 12 = 18
     total += pace2            // 20 -  8 = 12   -> 30
 
