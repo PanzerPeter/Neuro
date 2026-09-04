@@ -93,17 +93,22 @@
       ]
     },
     "string_escapes": {
-      "comment": "The escapes the string decoder accepts: \\n \\r \\t \\\\ \\\" \\0 \\{ \\xNN \\u{...}. `\\u{...}` must be matched whole here, or the interpolation rule below would read its brace as an interpolation hole.",
+      "comment": "The escapes the string decoder accepts: \\n \\r \\t \\\\ \\\" \\0 \\{ \\} \\xNN \\u{...}. `\\u{...}` must be matched whole here, or the interpolation rule below would read its brace as an interpolation hole.",
       "patterns": [
         {
           "name": "constant.character.escape.neuro",
-          "match": "\\\\(?:u\\{[0-9a-fA-F]+\\}|x[0-9a-fA-F]{2}|[nrt\\\\\"0{])"
+          "match": "\\\\(?:u\\{[0-9a-fA-F]+\\}|x[0-9a-fA-F]{2}|[nrt\\\\\"0{}])"
         },
         {
           "name": "invalid.illegal.unknown-escape.neuro",
           "match": "\\\\."
         }
       ]
+    },
+    "unescaped_brace": {
+      "comment": "Outside a hole, a bare `}` is a lex error (`LexError::UnescapedClosingBrace`), not literal text \u2014 it is what catches a `{` that went missing. `\\}` is the way to write the brace itself, and is claimed by `#string_escapes` first. Listed after `#interpolation` so a hole's own closing brace ends the hole instead of landing here.",
+      "name": "invalid.illegal.unescaped-closing-brace.neuro",
+      "match": "\\}"
     },
     "interpolation": {
       "comment": "A `{expr}` hole. The lexer hands the hole's raw text to the parser, which re-lexes it as an expression with one restriction: a `\"` string literal terminates the enclosing token, so a hole may not contain one. `#interpolation_body` therefore omits the string rules rather than including `$self`.",
@@ -201,6 +206,9 @@
         },
         {
           "include": "#interpolation"
+        },
+        {
+          "include": "#unescaped_brace"
         }
       ]
     },
@@ -214,6 +222,9 @@
         },
         {
           "include": "#interpolation"
+        },
+        {
+          "include": "#unescaped_brace"
         }
       ]
     },

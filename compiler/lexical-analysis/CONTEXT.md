@@ -77,7 +77,10 @@ does so by **dropping characters from the indexed `(absolute_offset, char)` vect
 rebuilding a `String`, which is why interpolation holes inside a block string still report at
 real source columns — `decode_chunks` slices each hole straight out of the original source by
 absolute offset. Its rules:
-- the newline after the opening `"""` is punctuation and is dropped;
+- the newline after the opening `"""` is punctuation and is dropped, and so is the newline
+  before the closing delimiter's line — each content line pushes its own terminator, so the
+  last of those is popped after the walk. A trailing newline is written as a blank line
+  before the closer, whose terminator then becomes the surviving one;
 - text trailing the opening `"""` on the same line is content, exempt from the dedent check (it
   sits flush against the delimiter and cannot carry indentation);
 - a whitespace-only line normalizes to empty with no indent check;

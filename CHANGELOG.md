@@ -10,6 +10,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.12.2] - 2026-09-04
+
+### Fixed
+
+- **A block string no longer keeps the newline before its closing delimiter.** The
+  specification says both newlines that touch a delimiter are punctuation — the one right
+  after the opening `"""` and the one separating the last content line from the closing
+  line — so a block is its content lines "with no leading or trailing blank". Only the
+  first was dropped, and every block string in the language was one byte long. The value
+  of a block written on one content line is now that line and nothing else.
+
+  The rule was settled in favour of the specification rather than the implementation
+  because the two are not symmetric: under the old behaviour a value *without* a trailing
+  newline could not be written at all short of slicing the result, whereas under the
+  specified rule a trailing newline is still written by leaving a blank line before the
+  closing delimiter — that blank line's own terminator becomes the surviving one. The
+  dedent rule already came from the same design, which strips against the closing
+  delimiter's column.
+
+  One example and two showcase programs assembled documents by leaning on the retained
+  newline and now write the separator themselves; `showcase/config_manifest.nr` prints the
+  same document and returns 80 rather than 81.
+
+- **`\}` is no longer flagged as an unknown escape by the editor grammar.** The TextMate
+  grammar's escape set was not updated when the string decoder gained the `\}` escape, so
+  a correctly written literal closing brace was coloured as an illegal escape. The other
+  half of the same rule is now carried too: a bare `}` outside an interpolation hole is a
+  lex error, and reads as one in the editor rather than as string text.
+
+
 ## [2.12.1] - 2026-09-04
 
 ### Fixed

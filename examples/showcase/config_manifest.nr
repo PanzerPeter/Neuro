@@ -88,7 +88,9 @@ func main() -> i32 {
         body = body + entry.render() + "\n"
     }
 
-    val manifest = header + body + footer
+    // A block ends at its last content line, so the separator between the header
+    // and the body is written here rather than left to the closing delimiter.
+    val manifest = header + "\n" + body + footer
 
     // The same document written out literally. A block string can hold the `#`
     // comment markers and the aligned columns verbatim, so the expectation reads
@@ -101,7 +103,7 @@ func main() -> i32 {
     # end
     """
 
-    print(manifest)
+    println(manifest)
 
     if manifest != expected {
         println("manifest did not match the expected document")

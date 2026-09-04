@@ -880,7 +880,7 @@ fn a_line_comment_inside_a_block_comment_is_inert() {
 fn triple_quoted_string_dedents_to_the_closing_delimiter() {
     let src = "\"\"\"\n    Hello\n    World\n    \"\"\"";
     let result = tokenize(src).expect("block string lexes");
-    assert_eq!(plain_string(&result[0].kind), "Hello\nWorld\n");
+    assert_eq!(plain_string(&result[0].kind), "Hello\nWorld");
     assert!(matches!(result[1].kind, TokenKind::Eof));
 }
 
@@ -893,7 +893,7 @@ fn triple_quoted_string_dedents_to_the_closing_delimiter() {
 fn triple_quoted_string_normalizes_crlf_line_endings() {
     let src = "\"\"\"\r\n    Hello\r\n\r\n    World\r\n    \"\"\"";
     let result = tokenize(src).expect("block string lexes");
-    assert_eq!(plain_string(&result[0].kind), "Hello\n\nWorld\n");
+    assert_eq!(plain_string(&result[0].kind), "Hello\n\nWorld");
 }
 
 /// Text trailing the opening delimiter is content, but the CRLF that ends that
@@ -902,14 +902,42 @@ fn triple_quoted_string_normalizes_crlf_line_endings() {
 fn triple_quoted_string_opening_line_drops_its_carriage_return() {
     let src = "\"\"\"lead\r\n    tail\r\n    \"\"\"";
     let result = tokenize(src).expect("block string lexes");
-    assert_eq!(plain_string(&result[0].kind), "lead\ntail\n");
+    assert_eq!(plain_string(&result[0].kind), "lead\ntail");
+}
+
+/// The newline separating the last content line from the closing delimiter's line
+/// belongs to the delimiter, not to the value. A block written on one content line
+/// is therefore that line and nothing else.
+#[test]
+fn regression_block_string_drops_the_newline_before_its_closing_line() {
+    let src = "\"\"\"\n    ab\n    \"\"\"";
+    let result = tokenize(src).expect("block string lexes");
+    assert_eq!(plain_string(&result[0].kind), "ab");
+}
+
+/// A trailing newline stays writable: the blank line's own terminator becomes the
+/// last one, so only the blank line's separator is dropped.
+#[test]
+fn block_string_keeps_a_trailing_newline_written_as_a_blank_line() {
+    let src = "\"\"\"\n    ab\n\n    \"\"\"";
+    let result = tokenize(src).expect("block string lexes");
+    assert_eq!(plain_string(&result[0].kind), "ab\n");
+}
+
+/// A block whose entire body is the two delimiter lines is empty, and stays empty:
+/// there is no content newline to drop.
+#[test]
+fn block_string_with_no_content_is_empty() {
+    let src = "\"\"\"\n    \"\"\"";
+    let result = tokenize(src).expect("block string lexes");
+    assert_eq!(plain_string(&result[0].kind), "");
 }
 
 #[test]
 fn triple_quoted_string_is_a_single_token() {
     let src = "val a = \"\"\"\n  func val 1 + 2\n  \"\"\"\nval b = 1";
     let result = tokenize(src).expect("block string lexes");
-    assert_eq!(plain_string(&result[3].kind), "func val 1 + 2\n");
+    assert_eq!(plain_string(&result[3].kind), "func val 1 + 2");
     // A newline token separates the two bindings; `val b` must survive intact.
     assert!(matches!(result[5].kind, TokenKind::Val));
 }
@@ -918,28 +946,28 @@ fn triple_quoted_string_is_a_single_token() {
 fn triple_quoted_string_keeps_interior_quotes() {
     let src = "\"\"\"\n    say \"hi\" and \"\" too\n    \"\"\"";
     let result = tokenize(src).expect("block string lexes");
-    assert_eq!(plain_string(&result[0].kind), "say \"hi\" and \"\" too\n");
+    assert_eq!(plain_string(&result[0].kind), "say \"hi\" and \"\" too");
 }
 
 #[test]
 fn triple_quoted_string_blank_lines_need_no_indentation() {
     let src = "\"\"\"\n    first\n\n    last\n    \"\"\"";
     let result = tokenize(src).expect("block string lexes");
-    assert_eq!(plain_string(&result[0].kind), "first\n\nlast\n");
+    assert_eq!(plain_string(&result[0].kind), "first\n\nlast");
 }
 
 #[test]
 fn triple_quoted_string_keeps_indentation_beyond_the_delimiter() {
     let src = "\"\"\"\n  root\n      nested\n  \"\"\"";
     let result = tokenize(src).expect("block string lexes");
-    assert_eq!(plain_string(&result[0].kind), "root\n    nested\n");
+    assert_eq!(plain_string(&result[0].kind), "root\n    nested");
 }
 
 #[test]
 fn triple_quoted_string_decodes_escapes() {
     let src = "\"\"\"\n    a\\tb\\u{21}\n    \"\"\"";
     let result = tokenize(src).expect("block string lexes");
-    assert_eq!(plain_string(&result[0].kind), "a\tb!\n");
+    assert_eq!(plain_string(&result[0].kind), "a\tb!");
 }
 
 /// Text after the opening `"""` is content, and is exempt from the dedent rule —
@@ -948,7 +976,7 @@ fn triple_quoted_string_decodes_escapes() {
 fn triple_quoted_string_keeps_text_on_the_opening_line() {
     let src = "\"\"\"lead\n    tail\n    \"\"\"";
     let result = tokenize(src).expect("block string lexes");
-    assert_eq!(plain_string(&result[0].kind), "lead\ntail\n");
+    assert_eq!(plain_string(&result[0].kind), "lead\ntail");
 }
 
 /// Dedent drops indentation characters from the indexed content rather than
@@ -967,7 +995,9 @@ fn triple_quoted_string_holes_report_real_spans() {
         }
         other => panic!("expected a hole, got {other:?}"),
     }
-    assert_eq!(chunks[2], InterpChunk::Text("\n".to_string()));
+    // The newline before the closing delimiter is punctuation, so the hole is the
+    // last chunk: there is no trailing text.
+    assert_eq!(chunks.len(), 2);
 }
 
 #[test]

@@ -24,13 +24,15 @@ func check(actual: string, expected: string) -> i32 {
 func main() -> i32 {
     mut passed: i32 = 0
 
-    // The newline right after the opening `"""` is punctuation, not content.
-    // The four spaces the closing `"""` sits at are stripped from both lines.
+    // The newlines that touch the delimiters are punctuation, not content: the one
+    // right after the opening `"""` and the one before the closing line both go, so
+    // the value is exactly its two lines. The four spaces the closing `"""` sits at
+    // are stripped from both.
     val basic = """
     first
     second
     """
-    passed = passed + check(basic, "first\nsecond\n")
+    passed = passed + check(basic, "first\nsecond")
 
     // Indentation deeper than the closing delimiter survives — only the common
     // prefix goes away, so nested structure inside the block is preserved.
@@ -38,15 +40,17 @@ func main() -> i32 {
     root
         child
     """
-    passed = passed + check(nested, "root\n    child\n")
+    passed = passed + check(nested, "root\n    child")
 
-    // A blank line needs no indentation of its own and normalizes to empty.
+    // A blank line needs no indentation of its own and normalizes to empty. It is
+    // also how a trailing newline is written: put one before the closing line and
+    // its terminator is the one that survives.
     val paragraphs = """
     one
 
     two
     """
-    passed = passed + check(paragraphs, "one\n\ntwo\n")
+    passed = passed + check(paragraphs, "one\n\ntwo")
 
     // Interpolation and the format mini-language work inside a block.
     val name = "Neuro"
@@ -55,19 +59,19 @@ func main() -> i32 {
     engine: {name}
     ratio:  {ratio:.3}
     """
-    passed = passed + check(report, "engine: Neuro\nratio:  0.500\n")
+    passed = passed + check(report, "engine: Neuro\nratio:  0.500")
 
     // A `"` needs no escaping inside a block: only `"""` ends it.
     val quoted = """
     he said "yes"
     """
-    passed = passed + check(quoted, "he said \"yes\"\n")
+    passed = passed + check(quoted, "he said \"yes\"")
 
     // Escape sequences decode as usual.
     val escaped = """
     tab\there
     """
-    passed = passed + check(escaped, "tab\there\n")
+    passed = passed + check(escaped, "tab\there")
 
     return passed
 }
