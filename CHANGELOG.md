@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.11.1] - 2026-09-04
+
+### Changed
+
+- **Terminal demo re-recorded against the current compiler.** The recorded session had
+  the program's whole result riding in the process exit code, so the demo padded it with
+  an `echo "exit=$?"` and a `time` run to have something to show. `perceptron` now prints
+  its per-input forward pass and the summed output itself, so the tape drops both filler
+  commands and records the three real steps — check, compile, run — with the window sized
+  to the output it actually produces.
+
+
 ## [2.11.0] - 2026-09-03
 
 ### Added

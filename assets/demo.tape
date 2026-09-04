@@ -13,7 +13,7 @@ Require bash
 Set Shell bash
 Set FontSize 21
 Set Width 1360
-Set Height 400
+Set Height 440
 Set Padding 28
 Set Margin 0
 Set WindowBar Colorful
@@ -43,17 +43,12 @@ Sleep 400ms
 Enter
 Sleep 2200ms
 
-# --- 3. run it; the perceptron's summed output is the exit code -----------
-Type './perceptron; echo "exit=$?"'
+# --- 3. run it: forward pass per input, then the summed output ------------
+#     the perceptron truncates that sum into the process exit code
+Type "./perceptron"
 Sleep 400ms
 Enter
-Sleep 1600ms
-
-# --- 4. native startup, no runtime, no interpreter ------------------------
-Type "time ./perceptron"
-Sleep 400ms
-Enter
-Sleep 2200ms
+Sleep 2600ms
 
 # --- cleanup (not recorded) ----------------------------------------------
 Hide
