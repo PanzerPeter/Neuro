@@ -39,14 +39,17 @@ module per declaration kind beside it. `tests/` is split by subject.
   `__` with `ReservedNameSeparator`. `__` is the receiver/method separator in the flat function
   table and the backend splits method symbols on it, so a user name carrying its own `__` could
   forge another item's symbol.
-- **1 — structs** pre-registered into `struct_defs`, with `@derive` Copy/Clone intent into
-  `copy_structs` / `clone_structs`. **1b — `validate_copy_derive`** runs per struct once all are
-  registered, so a Copy field that is another struct resolves regardless of declaration order.
+- **1 — structs** pre-registered into `struct_defs`, with `@derive` intent into `copy_structs` /
+  `clone_structs` / `debug_structs` / `partial_eq_structs`, and every derive argument validated
+  (`UnknownDerive`, `UnimplementedDerive`, `DuplicateDerive`). **1b — `validate_copy_derive`** and
+  **`validate_field_derives`** run per struct once all are registered, so a field that is another
+  struct resolves regardless of declaration order.
 - **1d — `register_trait`** runs before impl registration.
 - **2 — impl method signatures** into `functions` (mangled `StructName__methodName`) and
   `impl_methods` (struct → method → mangled key).
 - **2b — `check_operator_supertraits`** enforces `Comparable: PartialEq` order-independently
-  (`MissingSupertraitImpl`).
+  (`MissingSupertraitImpl`). **2c — `check_derive_impl_conflicts`** rejects a struct that both
+  derives a trait and declares an `impl` of it (`DeriveConflictsWithImpl`).
 - **3 — consts** into `constants`, giving forward references and cross-function visibility with
   no ordering constraint. **3b — every function signature** via `register_function_signature`
   (parameter and return types resolved in the function's generic scope), run over *all* functions
@@ -295,9 +298,24 @@ The analysis is deliberately conservative: `if`/`while`/`for` bodies and if-expr
 snapshot and restore move state, so a conditional move never leaks onto a non-executing path. It
 may miss some moves (a second-iteration loop move, say) but never rejects a valid program.
 
-**`Copy` and `@derive(Copy, Clone)`.** `copy_structs` / `clone_structs` are populated from
-`StructDef.attributes` in `register_struct`; pass 1b checks every field of a Copy struct is itself
-Copy (`CopyDeriveNonCopyField`). Copy implies Clone; unknown derive arguments are ignored.
+**`@derive(...)`.** `copy_structs` / `clone_structs` / `debug_structs` / `partial_eq_structs` are
+populated from `StructDef.attributes` in `record_derive_intent`, which also validates the argument
+list: `IMPLEMENTED_DERIVES` (`Copy`, `Clone`, `Debug`, `PartialEq`) are acted upon,
+`PENDING_DERIVES` (`Hashable`) reports `UnimplementedDerive`, anything else `UnknownDerive`, and a
+repeat is `DuplicateDerive`. Nothing is silently ignored. Pass 1b checks every field of a Copy
+struct is itself Copy (`CopyDeriveNonCopyField`) and every field of a `Debug` / `PartialEq` struct
+is renderable / comparable by the derived rules (`DeriveFieldUnsupported` —
+`is_debug_renderable` / `is_derived_comparable`: a scalar, `string`, or another struct carrying the
+same derive, since the generated code reaches inside a field no other way). A generic template's
+fields are type parameters, which no derive rule can judge, so the check runs again per
+monomorphized instance in `instantiate_generic_struct`. Copy implies Clone.
+
+**Derived `Debug` and `PartialEq`.** Neither routes through a method — that is what separates a
+derive from a hand-written `impl PartialEq`, which lands in `operator_binary_impls` and dispatches.
+`==` / `!=` on a `partial_eq_structs` struct is accepted by `has_derived_equality` beside the
+built-in scalar equality, and lowering leaves it a binary node for the backend to expand
+field-wise. A `debug_structs` struct is the one type whose renderability depends on the specifier:
+it has no display form, so `{x:?}` renders it and `{x}` does not (`UnrenderableStruct`).
 
 **Places, borrows, and derefs.** The `Expr::Reference` arm requires a *place*
 (`is_place_expr`: an identifier or a parenthesised identifier, else `CannotBorrowValue`) and
@@ -574,8 +592,10 @@ Errors: `CollectionTypeNotInferable`, `InvalidCollectionElement`, `InvalidCollec
 auto-dereferenced through a borrow, and its written spec validated against that type — radix kinds
 need an integer, fixed-point and scientific need a float, `+` needs a signed integer or float,
 zero fill cannot combine with `<`/`^`, and width and precision are bounded. The literal always
-types as `string`, so a rejected hole does not cascade. Errors: `UnformattableType`,
-`FormatSpecMismatch`, `FormatWidthTooLarge`, `FormatPrecisionTooLarge`.
+types as `string`, so a rejected hole does not cascade. A struct hole answers through
+`struct_render_obstacle`, which distinguishes a missing `@derive(Debug)` from a missing `:?`.
+Errors: `UnformattableType`, `UnrenderableStruct`, `FormatSpecMismatch`, `FormatWidthTooLarge`,
+`FormatPrecisionTooLarge`.
 
 ### Visibility
 A struct field is private to its declaring module unless it carries `export`, and **this slice is

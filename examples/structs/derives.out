@@ -1,0 +1,4 @@
+a = Reading { sensor: Sensor { id: 7, label: "intake" }, value: 21.5, valid: true }
+c = Reading { sensor: Sensor { id: 7, label: "exhaust" }, value: 21.5, valid: true }
+a == b: true
+a == c: false

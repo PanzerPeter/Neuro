@@ -26,7 +26,20 @@ impl TypeChecker {
             let rendered = ty.referent().clone();
             let hole_span = expr_span_or(expr, *span);
 
-            if !is_formattable(&rendered) {
+            let kind = spec.as_ref().map(|s| s.kind).unwrap_or(FormatKind::Default);
+            // A struct gets its own diagnostic: the generic one lists the renderable
+            // types, which leaves the reader no way to tell "add the derive" apart from
+            // "this type will never render".
+            if let Type::Struct(name) = &rendered {
+                if let Some(hint) = self.struct_render_obstacle(name, kind) {
+                    self.record_error(TypeError::UnrenderableStruct {
+                        name: name.clone(),
+                        hint,
+                        span: hole_span,
+                    });
+                    continue;
+                }
+            } else if !self.is_formattable(&rendered, kind) {
                 self.record_error(TypeError::UnformattableType {
                     ty: rendered,
                     span: hole_span,
@@ -40,6 +53,37 @@ impl TypeChecker {
         }
 
         Some(Type::String)
+    }
+
+    /// The types interpolation knows how to render under `kind`. Structs answer through
+    /// [`Self::struct_render_obstacle`], which also says *why* one cannot render.
+    fn is_formattable(&self, ty: &Type, kind: FormatKind) -> bool {
+        if let Type::Struct(name) = ty {
+            return self.struct_render_obstacle(name, kind).is_none();
+        }
+        ty.is_numeric() || matches!(ty, Type::Bool | Type::Char | Type::String)
+    }
+
+    /// What stops struct `name` rendering under `kind`, or `None` when nothing does.
+    ///
+    /// A struct has no `Display` form, so it renders under `{x:?}` and only when it
+    /// derives `Debug`. Both refusals point at the missing half rather than at the list
+    /// of renderable primitives, which a struct can never join.
+    fn struct_render_obstacle(&self, name: &str, kind: FormatKind) -> Option<String> {
+        if !self.struct_is_debug(name) {
+            return Some(format!(
+                "a struct renders only through its debug form; add `@derive(Debug)` to `{}`",
+                name
+            ));
+        }
+        if kind != FormatKind::Debug {
+            return Some(
+                "a struct has no display form; add the `:?` specifier to the hole to use \
+                 its derived debug rendering"
+                    .to_string(),
+            );
+        }
+        None
     }
 
     /// Reject spec/type pairs no rendering can satisfy, and specs whose written
@@ -124,11 +168,6 @@ impl TypeChecker {
             });
         }
     }
-}
-
-/// The types interpolation knows how to render. Aggregates wait on `@derive(Debug)`.
-fn is_formattable(ty: &Type) -> bool {
-    ty.is_numeric() || matches!(ty, Type::Bool | Type::Char | Type::String)
 }
 
 /// The spec text to quote back in a diagnostic for a format kind.

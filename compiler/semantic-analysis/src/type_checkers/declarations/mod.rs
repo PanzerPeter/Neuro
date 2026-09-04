@@ -35,6 +35,19 @@ const DERIVE_ATTRIBUTE: &str = "derive";
 const COPY_TRAIT: &str = "Copy";
 /// Derive argument requesting the `Clone` trait.
 const CLONE_TRAIT: &str = "Clone";
+/// Derive argument requesting the `Debug` trait — the `{x:?}` rendering.
+const DEBUG_TRAIT: &str = "Debug";
+/// Derive argument requesting the `PartialEq` trait — field-wise `==` / `!=`.
+const PARTIAL_EQ_TRAIT: &str = "PartialEq";
+/// Derive argument requesting the `Hashable` trait. Named by the spec's derivable
+/// set but not yet generated, so it is a diagnostic rather than a silent no-op.
+const HASHABLE_DERIVE: &str = "Hashable";
+
+/// The derive arguments this compiler acts upon, in the order the diagnostic lists them.
+const IMPLEMENTED_DERIVES: &[&str] = &[COPY_TRAIT, CLONE_TRAIT, DEBUG_TRAIT, PARTIAL_EQ_TRAIT];
+
+/// Derive arguments the spec names as derivable but that no pass generates yet.
+const PENDING_DERIVES: &[&str] = &[HASHABLE_DERIVE];
 /// The compiler-known `Drop` lang-item trait name.
 const DROP_TRAIT: &str = "Drop";
 /// The destructor method name required inside an `impl Drop` block.

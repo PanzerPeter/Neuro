@@ -32,7 +32,8 @@ table, return-position `impl Trait` resolution — and a divergence between the 
 have rejected is a `LoweringError`, never a panic.
 
 A registration pre-pass mirrors the checker's: struct field tables (plus `@derive(Copy/Clone)`
-intent), `impl` method signatures under mangled `Struct__method` keys, free-function signatures,
+and `@derive(PartialEq)` intent, in `clone_structs` / `partial_eq_structs`), `impl` method
+signatures under mangled `Struct__method` keys, free-function signatures,
 trait method order, and module constants. Bodies then lower under a lexical scope stack and a
 loop-context stack.
 
@@ -109,6 +110,10 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   method's `rhs: &Rhs` parameter means the argument is wrapped in a `Reference`. Owned `self`
   methods are lowered (valid on a `Copy` receiver; the checker rejected any non-`Copy` case),
   though generic-impl paths still skip them.
+- **Derived equality** (`@derive(PartialEq)`). A struct in `partial_eq_structs` has no `eq` to
+  dispatch to, so `==` / `!=` on one stays an `HirExprKind::Binary` typed `Bool` and the backend
+  expands it over the fields. Handled in the `Binary` arm *before* `binary_result_type`, which
+  admits no aggregate operand — that is the whole difference from the operator-trait route above.
 - **`val-else`** (`val_else.rs`). `lower_val_else` reuses `pattern_test` / `pattern_bindings` from
   `expressions/matches.rs` for the success test and bindings, lowers the `else` branch in a pushed
   scope with its own binding, and only then defines the pattern's bindings in the **enclosing**
@@ -326,4 +331,5 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   path that reaches here is a **generic body**, which types `a == b` as its type parameter and is
   checked once as a template, so an instantiation with an aggregate argument used to arrive at
   codegen and abort it. An operator-trait impl is dispatched to a method call before operand types
-  are ever combined, so a struct with `impl PartialEq` never reaches the check.
+  are ever combined, so a struct with `impl PartialEq` never reaches the check — and a struct with
+  `@derive(PartialEq)` is returned before it, for the same reason.

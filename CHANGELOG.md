@@ -10,6 +10,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.12.0] - 2026-09-04
+
+### Added
+
+- **`@derive(Debug)` and `@derive(PartialEq)`, and every `@derive` argument is now
+  validated.** `@derive(Debug)` gives a struct its `{p:?}` rendering — the struct's name
+  followed by each field in declaration order, `Point { x: 1, y: 2 }` — recursing into a
+  nested struct and quoting a `string` or `char` field; a field-less struct renders as its
+  bare name, and a monomorphized generic instance renders under the name the programmer
+  wrote rather than its mangled key. `@derive(PartialEq)` gives a struct field-wise `==`
+  and `!=`, recursing the same way and comparing through a borrow. Both are generated
+  inline over the fields rather than through a method, which is what lets them work on a
+  struct that does not derive `Copy` — the operator-trait `impl` route requires a `Copy`
+  receiver, and the specification's own example derives `PartialEq` without one.
+
+  Every name in a `@derive` list is now checked. The derivable-and-implemented set is
+  `Copy`, `Clone`, `Debug`, `PartialEq`; `Hashable` is specified but not generated yet and
+  says so, and anything else is rejected outright. Previously an unrecognized argument —
+  `Debug`, `PartialEq`, and `Bogus` alike — was silently ignored, so a program could
+  compile against behavior it did not have.
+
+### Changed
+
+- **A struct in an interpolation hole gets its own diagnostic.** A struct has no display
+  form, so `"{p}"` is an error even with `@derive(Debug)` — write `"{p:?}"`. The message
+  distinguishes a missing derive from a missing specifier, because the general
+  "interpolation renders integers, floats, `bool`, `char`, and `string`" list answers
+  neither question for a struct.
+- **A field a derive cannot reach is a diagnostic naming the field.** Both derives are
+  emitted straight over the fields, so each field must itself be renderable / comparable
+  by the same rules — a scalar, `string`, `char`, `bool`, or another struct carrying the
+  same derive. A nested struct with a hand-written `impl PartialEq` does not qualify: the
+  generated comparison calls nothing. For the same reason, deriving `PartialEq` *and*
+  declaring `impl PartialEq for` the same struct is rejected rather than silently letting
+  the `impl` outrank the derive.
+- **`HirStruct` carries the name its struct was written under.** A monomorphized generic
+  instance is keyed by a mangled name and its template is never emitted, so the backend
+  cannot recover the source spelling; the derived debug rendering needs it.
+
+### Known limitations
+
+- A derived `PartialEq` does not satisfy the `impl PartialEq` a `HashMap` / `BTreeMap`
+  struct key requires. A collection key calls the trait method, and a derive provides
+  none — such a key still needs the hand-written `impl`.
+
+This completes sub-phase **2A — Standard I/O & Spec Stragglers**. Sub-phase 2B (Tensor
+Core) is next.
+
 ## [2.11.1] - 2026-09-04
 
 ### Changed

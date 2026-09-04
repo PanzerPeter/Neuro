@@ -118,6 +118,11 @@ pub struct HirParam {
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirStruct {
     pub name: String,
+    /// The name the programmer wrote. Equal to [`Self::name`] for an ordinary struct;
+    /// for a monomorphized generic instance it is the template's name, since the
+    /// mangled instance key (`Wrapper_g_i32`) appears in no source text and must not
+    /// appear in a rendering of the value either.
+    pub written_name: String,
     pub fields: Vec<HirField>,
     pub span: Span,
 }

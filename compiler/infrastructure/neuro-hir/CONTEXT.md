@@ -119,3 +119,9 @@ remainder. Tuple, struct, and array *destructuring* carry no HIR node — the pa
 **Interpolated strings carry a uniform hole shape.** `HirExprKind::InterpString { parts }` with
 `HirInterpPart::{Text, Formatted}`; a hole written without a spec carries `FormatSpec::default()`,
 so a backend sees one shape for every hole rather than two.
+
+**A struct carries the name it was written under.** `HirStruct` has both `name` — the key every
+`HirType::Struct` refers to it by — and `written_name`, which differs only for a monomorphized
+generic instance, whose key is mangled (`Wrapper_g_i32`). The mangled key appears in no source
+text, so anything a program can *see* — the `@derive(Debug)` rendering above all — uses the
+written name. A backend cannot recover it from the key: the template is not emitted.

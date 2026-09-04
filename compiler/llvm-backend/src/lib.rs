@@ -98,6 +98,7 @@ fn build_module<'ctx>(
 
     // Collect struct definitions first so struct field/parameter types resolve below.
     let mut struct_defs: HashMap<String, Vec<(String, Type)>> = HashMap::new();
+    let mut struct_written_names: HashMap<String, String> = HashMap::new();
     for item in items {
         if let HirItem::Struct(def) = item {
             let mut fields = Vec::new();
@@ -105,6 +106,7 @@ fn build_module<'ctx>(
                 fields.push((field.name.clone(), Type::from_hir(&field.ty)));
             }
             struct_defs.insert(def.name.clone(), fields);
+            struct_written_names.insert(def.name.clone(), def.written_name.clone());
         }
     }
 
@@ -210,6 +212,7 @@ fn build_module<'ctx>(
 
     let mut codegen_ctx = CodegenContext::new(context, "neuro_module");
     codegen_ctx.set_struct_defs(struct_defs);
+    codegen_ctx.set_struct_written_names(struct_written_names);
     codegen_ctx.set_enum_words(enum_words);
     codegen_ctx.set_enum_variants(enum_variants);
     codegen_ctx.set_drop_types(drop_types);

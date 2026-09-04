@@ -16,6 +16,7 @@ mod literals;
 mod matches;
 mod methods;
 mod slices;
+mod struct_eq;
 mod tuples;
 mod unary;
 
