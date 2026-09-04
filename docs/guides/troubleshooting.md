@@ -412,7 +412,7 @@ Executable is larger than expected.
 
 **Solutions**:
 
-**Current** (Phase 1):
+**Current**:
 - Use `-O2` or `-O3` during `neurc compile` to reduce binary size and improve runtime performance
 - Typical size: 1-5 MB for simple programs
 
@@ -557,12 +557,13 @@ These are not bugs, but current limitations. See the
 1. **Type inference**: bare numeric literals default to `i32` / `f64` unless a type is in scope
 2. **Generic type arguments**: restricted to `Copy` types, and a generic may not be
    instantiated with an enclosing type parameter (no `Option<T>` inside a `func f<T>`)
-3. **Strings are immutable**: `+`, `.slice(a..b)`, `.len()`, `.clone()`. Build text that
+3. **Strings are immutable**: `+`, `.len()`, `.clone()`, `.slice(a..b)`,
+   `.char_slice(a..b)`, `.chars()`, `.char_indices()`. Build text that
    grows with the `String` buffer (`String::new` / `.push_str` / `.clear` /
    `.to_string`) instead of chaining `+`
-4. **Named arguments**: not yet implemented. String interpolation, triple-quoted
-   `"""` blocks, and nesting block comments *are* available; a hole may not contain
-   a `"` string literal, and an interpolated literal is not a constant pattern
+4. **String interpolation holes**: a hole may not contain a `"` string literal, and an
+   interpolated literal is not a constant pattern. Triple-quoted `"""` blocks and
+   nesting block comments carry no such restriction
 5. **Ranges**: `a..b` and `a..=b` drive `for` loops and `.slice()`; `.rev()` and
    `.step(n)` are not implemented yet
 6. **Optimization**: `-O0` through `-O3` supported (higher levels may increase compile time)

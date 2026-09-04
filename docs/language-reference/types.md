@@ -1140,9 +1140,10 @@ func returns_i32() -> i32 {
 - Named arguments with external labels, see
   [functions.md](functions.md#named-arguments)
 
-**Remaining Phase 1 work:**
-- Growable runtime strings (`String::new` / `.push_str` / `.clear`), still awaiting a
-  decision on where a mutable growable string type belongs
+- Growable runtime strings through the `String` buffer (`String::new` / `.push_str` /
+  `.clear` / `.to_string`)
+
+Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
 
 ### Phase 2, Tensors (Planned)
 
