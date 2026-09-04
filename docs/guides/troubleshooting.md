@@ -101,6 +101,49 @@ sudo pacman -S base-devel
 xcode-select --install
 ```
 
+### `cargo build --features mlir` fails
+
+The `mlir-backend` slice's `mlir` feature is opt-in and needs more than stock LLVM 20.
+Default builds compile a placeholder and need none of this.
+
+**Symptoms**:
+```
+mlir-sys: MLIR_SYS_200_PREFIX not set
+# or
+error: evaluation of constant value failed: attempt to compute `0_usize - 8_usize`
+```
+
+**Cause**: two separate gaps.
+
+1. Most distro LLVM 20 packages (Arch/CachyOS `llvm20` included) ship **no MLIR** — no
+   `mlir-c` headers, no `libMLIR*`. Check with `ls $LLVM_SYS_201_PREFIX/include/mlir-c`.
+2. `mlir-sys` runs bindgen over the MLIR-C headers. A **newer libclang than 20** misparses
+   LLVM 20's `DEFINE_C_API_STRUCT` macro, yielding opaque 1-byte structs and the
+   `0_usize - 8_usize` const-eval underflow above. Rolling distros ship libclang 22.
+
+**Solution**: build LLVM 20 with MLIR enabled, and point bindgen at a libclang 20.
+
+```bash
+# 1. LLVM 20 + MLIR, installed to a prefix of your choosing
+cmake -S llvm -B build -DLLVM_ENABLE_PROJECTS=mlir -DCMAKE_INSTALL_PREFIX=<mlir-prefix> ...
+
+# 2. libclang 20, unpacked anywhere (no system downgrade needed)
+#    needs libclang.so* plus the clang/20/include resource headers
+
+# 3. Point every binding at them
+export LLVM_SYS_201_PREFIX=<mlir-prefix>   # inkwell
+export MLIR_SYS_200_PREFIX=<mlir-prefix>   # melior
+export TABLEGEN_200_PREFIX=<mlir-prefix>   # mlir-tblgen
+export LIBCLANG_PATH=<libclang-20-dir>
+export BINDGEN_EXTRA_CLANG_ARGS="-resource-dir=<libclang-20-dir>/clang/20"
+
+cargo test -p mlir-backend --features mlir
+```
+
+If the distro libclang 20 is linked against the distro's own versioned `libLLVM.so.20.1`,
+put that package's `lib/` first on `LD_LIBRARY_PATH` so bindgen can load it, and the
+MLIR prefix's `lib/` second for the runtime `libMLIR`.
+
 ## Compilation Errors
 
 ### Type Mismatch Errors

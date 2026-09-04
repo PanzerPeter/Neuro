@@ -10,6 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.12.4] - 2026-09-04
+
+### Fixed
+
+- **A `match` on an unmatchable type no longer emits a second, self-contradicting error.**
+  `match` accepts enums, integers, `char` and `bool`; anything else is rejected once at the
+  scrutinee. The arms were then still checked against the scrutinee's real type, so a `string`
+  scrutinee with string-literal arms also produced "this pattern matches a `string` but the
+  value being matched has type string" — a mismatch report between a type and itself. The arms
+  now see `Unknown`, which every pattern accepts, leaving only the one accurate diagnostic.
+
+### Documentation
+
+- **`docs/guides/troubleshooting.md` covers building the opt-in `mlir` feature.** Two gaps sink
+  it on a stock toolchain: most distro LLVM 20 packages ship no MLIR at all, and a libclang
+  newer than 20 misparses LLVM 20's `DEFINE_C_API_STRUCT`, failing the build with a
+  `0_usize - 8_usize` const-eval underflow rather than anything that names the cause. Both are
+  now written down with the prefixes to set.
+
 ## [2.12.3] - 2026-09-04
 
 ### Fixed

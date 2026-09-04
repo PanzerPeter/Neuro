@@ -46,6 +46,16 @@ impl TypeChecker {
             });
         }
 
+        // An unmatchable scrutinee has been reported once. Checking the patterns
+        // against its real type only restates that in worse words — a `string`
+        // literal pattern would read "matches a `string` but the value has type
+        // string" — so the arms see `Unknown`, which every pattern accepts.
+        let pattern_ty = if matchable {
+            scrut_ty.clone()
+        } else {
+            Type::Unknown
+        };
+
         // Each arm runs on its own path, so snapshot the move state after the
         // scrutinee and restore it between arms — mirroring `if`.
         let move_snapshot = self.symbols.snapshot_moves();
@@ -56,7 +66,7 @@ impl TypeChecker {
         let mut arm_types: Vec<Type> = Vec::with_capacity(arms.len());
         for arm in arms {
             self.symbols.restore_moves(&move_snapshot);
-            let arm_ty = self.check_arm(arm, &scrut_ty, hint.as_ref());
+            let arm_ty = self.check_arm(arm, &pattern_ty, hint.as_ref());
             if hint.is_none() && !matches!(arm_ty, Type::Unknown) {
                 hint = Some(arm_ty.clone());
             }
