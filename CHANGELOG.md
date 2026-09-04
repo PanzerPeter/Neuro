@@ -10,6 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.12.5] - 2026-09-04
+
+### Added
+
+- **`tools/clean_stale_target.py` garbage-collects stale Cargo artifacts.** Cargo never
+  removes the output of previous builds: every code change mints a new metadata hash and
+  leaves the old `deps/<crate>-<hash>.*` files behind forever. Because a test binary here
+  statically links LLVM, a few months of iteration had grown `target/` past 100 GB across
+  tens of thousands of dead files. The script groups files into `<crate>-<hash>` build
+  units, keeps the newest per crate, and deletes the rest together with their matching
+  `.fingerprint/` and `build/` entries. Deleting a live artifact is not a hazard — Cargo
+  rebuilds whatever is missing.
+
+
 ## [2.12.4] - 2026-09-04
 
 ### Fixed
