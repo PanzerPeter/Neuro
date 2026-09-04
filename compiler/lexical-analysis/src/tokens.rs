@@ -575,7 +575,8 @@ fn find_triple_quote_close(body: &str) -> Option<usize> {
 }
 
 /// Strip the closing delimiter's indentation from every content line of a block
-/// string, returning the surviving characters tagged with absolute source offsets.
+/// string, drop the newline that precedes the closing line, and return the surviving
+/// characters tagged with absolute source offsets.
 ///
 /// Dedenting by dropping characters from the indexed vector — rather than by
 /// rebuilding a `String` — is what keeps every remaining character's true offset, so
@@ -633,6 +634,15 @@ fn dedent_block_body(
 
         on_opening_line = false;
         offset = line_end + 1;
+    }
+
+    // Every content line pushed its own terminator, so the last one carries the
+    // newline that separates it from the closing delimiter's line. That newline is
+    // punctuation belonging to the delimiter, not content: dropping it is what makes
+    // a block "no leading or trailing blank". A trailing newline is still writable —
+    // leave a blank line before the closer and its terminator becomes the last one.
+    if out.last().is_some_and(|(_, ch)| *ch == '\n') {
+        out.pop();
     }
 
     Ok(out)

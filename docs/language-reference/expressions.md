@@ -74,12 +74,17 @@ val block = """
     Hello from {name}.
     This spans multiple lines.
     """
-// "Hello from Neuro.\nThis spans multiple lines.\n"
+// "Hello from Neuro.\nThis spans multiple lines."
 ```
 
 The rules:
 
-- The newline directly after the opening `"""` is punctuation and is dropped.
+- Both newlines that touch a delimiter are punctuation and are dropped: the one
+  directly after the opening `"""`, and the one that separates the last content
+  line from the closing delimiter's line. A block is therefore its content lines
+  with no leading or trailing blank. To end a block with a newline, leave a blank
+  line before the closing delimiter — that blank line's own terminator is then the
+  last one, and it survives.
   Text trailing the opening delimiter on the same line is content, and is exempt
   from the dedent rule — it sits flush against the delimiter and cannot be
   indented.

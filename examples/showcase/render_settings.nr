@@ -114,7 +114,9 @@ func main() -> i32 {
     matched = matched + check(hero_label, "  12x   8")
     matched = matched + check(thumb_label, "  15x  12")
 
-    val report = header() + "frames checked: {matched}"
+    // The block ends at its last content line, so the separator before the next
+    // section is written here rather than smuggled in by the delimiter.
+    val report = header() + "\n" + "frames checked: {matched}"
     println(report)
     matched = matched + check(report, "render report\n-------------\nframes checked: 2")
 

@@ -120,7 +120,7 @@ modules/shapes/area.nr      module
 showcase/borrowed_text.nr   25
 showcase/buffered_report.nr 40
 showcase/closures.nr        90
-showcase/config_manifest.nr 81
+showcase/config_manifest.nr 80
 showcase/derived_records.nr 122
 showcase/enum_records.nr    46
 showcase/field_report.nr    63
