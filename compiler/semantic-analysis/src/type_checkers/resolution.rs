@@ -7,6 +7,32 @@ use crate::types::{ArrayLen, CollectionKind, Type};
 /// The qualifier an associated-type path carries in its name, as the parser spells it.
 pub(crate) const SELF_ASSOC_PREFIX: &str = "Self::";
 
+/// The prelude name of the tensor type. A module may shadow it with a generic type of
+/// its own, so this only steers a diagnostic — it never claims the name.
+const TENSOR_TYPE_NAME: &str = "Tensor";
+
+/// Whether `ty` may be a tensor's element type. A tensor buffer is a flat, densely
+/// packed run of fixed-width scalars, which is exactly the set below: `string`, an
+/// aggregate, or a reference has no such representation.
+fn is_tensor_element(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::I8
+            | Type::I16
+            | Type::I32
+            | Type::I64
+            | Type::U8
+            | Type::U16
+            | Type::U32
+            | Type::U64
+            | Type::F16
+            | Type::BF16
+            | Type::F32
+            | Type::F64
+            | Type::Bool
+    )
+}
+
 impl TypeChecker {
     /// Convert syntax-parsing type to semantic type.
     /// Returns None if the type is unknown (error is recorded).
@@ -251,6 +277,18 @@ impl TypeChecker {
                     }
                 }
                 if !self.is_generic_struct(&name.name) && !self.is_generic_enum(&name.name) {
+                    // `Tensor<f32>` is the shape-less spelling of a real type rather than
+                    // an unknown one; say so instead of reporting it as not generic.
+                    if name.name == TENSOR_TYPE_NAME {
+                        self.record_error(TypeError::TensorShapeRequired {
+                            element: resolved
+                                .first()
+                                .map(|t| t.to_string())
+                                .unwrap_or_else(|| "f32".to_string()),
+                            span: *span,
+                        });
+                        return None;
+                    }
                     self.record_error(TypeError::NotAGenericType {
                         name: name.name.clone(),
                         span: *span,
@@ -283,13 +321,27 @@ impl TypeChecker {
                     ret: Box::new(ret_ty),
                 })
             }
-            ast_types::Type::Tensor { span, .. } => {
-                // Tensor types are Phase 2B roadmap work; nothing accepts one yet.
-                self.record_error(TypeError::UnknownTypeName {
-                    name: "Tensor".to_string(),
-                    span: *span,
-                });
-                None
+            // Statically shaped tensor `Tensor<T, [d0, ...]>`. The extents are literals
+            // the parser already validated, so the only thing left to check is the
+            // element: a tensor buffer is a flat run of scalars, and a non-scalar
+            // element has no such layout.
+            ast_types::Type::Tensor {
+                element_type,
+                shape,
+                span,
+            } => {
+                let element = self.resolve_type(element_type)?;
+                if !is_tensor_element(&element) {
+                    self.record_error(TypeError::NonScalarTensorElement {
+                        ty: element,
+                        span: *span,
+                    });
+                    return None;
+                }
+                Some(Type::Tensor {
+                    element: Box::new(element),
+                    shape: shape.clone(),
+                })
             }
         }
     }

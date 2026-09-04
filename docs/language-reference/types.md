@@ -20,6 +20,8 @@ expression already carries the type the checker resolved for it.
 - Implemented: generic functions, structs, and impls, monomorphized
 - Implemented: traits, operator traits, and `impl` / `dyn` dispatch
 - Implemented: enums, generic enums, `Option<T>` / `Result<T, E>`, and the standard collections
+- Type-level only: statically shaped tensors `Tensor<T, [d0, ...]>` — the annotation
+  type-checks, but no tensor value can be constructed yet
 
 ## Primitive Types
 
@@ -1145,13 +1147,12 @@ func returns_i32() -> i32 {
 
 Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
 
-### Phase 2, Tensors (Planned)
+### Phase 2, Tensors
 
-- Static tensor types: `Tensor<f32, [3, 3]>`
-- Compile-time shape checking
-- Broadcasting rules
-- Dynamic tensor shapes
-- Advanced type system features
+- Type-level: static tensor types `Tensor<f32, [3, 3]>` (see [Tensor Types](#tensor-types))
+- Planned: tensor literals and constructors
+- Planned: broadcasting rules
+- Planned: shape generics, named dimensions, and dynamic shapes
 
 ## Type Safety Guarantees
 
@@ -1491,6 +1492,66 @@ binds each named field, and `val [first, second, ..rest] = arr` binds array elem
 positionally with an optional trailing `..rest` (a fresh `[T; N - k]` remainder) or
 bare `..` to ignore it. A rest-less array pattern must match the array's length
 exactly. See [Variables → Destructuring](variables.md#destructuring).
+
+## Tensor Types
+
+`Tensor<T, [d0, d1, ...]>` is a statically shaped tensor: the element type and every
+extent are known at compile time and are part of the type.
+
+```neuro
+type Weights = Tensor<f32, [784, 128]>
+
+struct Layer {
+    bias: Tensor<f32, [128]>
+}
+
+func forward(w: Weights, x: Tensor<f32, [128]>) -> Tensor<f32, [128]> {
+    return x
+}
+
+func loss(l: Tensor<f32, []>) { }        // rank-0 scalar tensor
+func image(px: Tensor<u8, [3, 224, 224]>) { }
+```
+
+The shape is written as a bracketed list of non-negative integer literals. An empty list
+`[]` is the rank-0 scalar tensor. The element must be a fixed-width scalar: any integer
+type, `f16` / `bf16` / `f32` / `f64`, or `bool`.
+
+Rank and every extent are part of the type, so `Tensor<f32, [2, 2]>` and
+`Tensor<f32, [3, 3]>` are different types and a mismatch is a compile error naming both:
+
+```neuro
+func takes_square(t: Tensor<f32, [3, 3]>) { }
+
+func pass_through(t: Tensor<f32, [2, 2]>) {
+    takes_square(t)                       // error: expected Tensor<f32, [3, 3]>,
+}                                         //        found Tensor<f32, [2, 2]>
+```
+
+A tensor owns its buffer, so it is **not** `Copy`. Passing one to a function moves it;
+pass `&Tensor<T, S>` or `&mut Tensor<T, S>` to share it.
+
+```neuro
+func consume(t: Tensor<f32, [2, 2]>) { }
+
+func twice(t: Tensor<f32, [2, 2]>) {
+    consume(t)
+    consume(t)                            // error: use of moved value 't'
+}
+```
+
+`Tensor` is a prelude name rather than a keyword, so a module declaring its own
+`Tensor` shadows it; a shape argument is what marks a type application as a tensor, and
+writing one under any other name is a parse error.
+
+### What tensors cannot do yet
+
+Only the *type* exists at this stage. There is no way to build a tensor value: literals,
+the `Tensor::<T, [...]>::zeros()` family, tensor arithmetic, slicing, and reductions are
+all later work. A program that annotates a tensor passes `neurc check` but cannot be
+compiled to a binary — the backend reports that a tensor has no runtime representation
+yet. Symbolic extents (`Tensor<f32, [M, K]>`), named dimensions, and dynamic axes
+(`Tensor<f32, [?, 768]>`) are not accepted; a non-literal extent is a parse error.
 
 ## Standard Collections
 

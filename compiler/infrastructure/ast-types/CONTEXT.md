@@ -81,6 +81,11 @@ walkers.
   its opening bracket with `Type::Array`, and the `;` (or its absence before `]`) is what the
   parser selects on. Like `Type::DynTrait` it is valid only as a reference referent; semantic
   analysis rejects a bare one.
+- `Type::Tensor { element_type, shape, span }` is the statically shaped `Tensor<T, [d0, ...]>`.
+  `shape` is a `Vec<usize>` of literal extents — an empty one is the rank-0 scalar tensor — so
+  symbolic and dynamic extents have no representation here yet, by design. It is the one type
+  node the parser builds from a *name* plus a bracketed shape rather than from a keyword or a
+  bracket, and `span` covers the name through the closing `>`.
 - `Stmt::ForRange` / `Stmt::ForEach` carry `index: Option<Identifier>` — the position binding of
   `for (i, x) in xs.enumerate()`, a `u64` counting from zero. `.enumerate()` is an *arity* on the
   loop node rather than an adapter expression because there is no iterator protocol to return one

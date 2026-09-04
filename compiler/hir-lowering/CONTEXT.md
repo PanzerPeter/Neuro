@@ -254,6 +254,11 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   header; `sliceable_element` names the three receivers that permit it (`[T; N]`, `Vec<T>`,
   `[T]`). Indexing, `for x in xs`, and `IndexAssignment` each read a slice's element type
   alongside the array's, and `slice.len()` is `u64`.
+- **Tensors** — `resolve_type` maps `ast_types::Type::Tensor` straight to
+  `HirType::Tensor { element, shape }`, and `mangle_type` spells it `tensor_<elem>_<d0>x<d1>`.
+  Nothing else in this slice touches a tensor: no expression can produce one yet, so no literal,
+  method, or coercion path exists. The type reaches the HIR only through annotations, and the
+  LLVM backend is where it is rejected as having no runtime representation.
 - **Enumerated loops** — `ForRange` / `ForEach` carry the position binding through as
   `index: Option<String>` and define it in the loop scope as `LOOP_INDEX_TYPE` (`u64`), ahead of
   the element binding so the two collide rather than shadow. The free-variable walker binds it

@@ -233,10 +233,10 @@ fn is_annotatable(ty: &Type, generics: &[GenericParam]) -> bool {
                     GenericArg::Const { .. } => true,
                 })
         }
-        Type::ImplTrait { .. }
-        | Type::DynTrait { .. }
-        | Type::Function { .. }
-        | Type::Tensor { .. } => false,
+        // A statically shaped tensor is fully nameable at a call site: its extents are
+        // literals, so restating the annotation there means the same type.
+        Type::Tensor { element_type, .. } => is_annotatable(element_type, generics),
+        Type::ImplTrait { .. } | Type::DynTrait { .. } | Type::Function { .. } => false,
     }
 }
 

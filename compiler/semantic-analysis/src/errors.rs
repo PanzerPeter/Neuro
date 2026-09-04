@@ -167,6 +167,12 @@ pub enum TypeError {
     #[error("`[{element}]` at {span:?} is unsized and must appear behind a reference — write `&[{element}]` or `&mut [{element}]`")]
     SliceNotBehindReference { element: String, span: Span },
 
+    #[error("tensor element type {ty} at {span:?} is not a numeric scalar — a tensor's element must be an integer, a floating-point type, or `bool`")]
+    NonScalarTensorElement { ty: Type, span: Span },
+
+    #[error("`Tensor` at {span:?} needs a shape: write `Tensor<{element}, [3, 3]>`, or `Tensor<{element}, []>` for a rank-0 scalar tensor")]
+    TensorShapeRequired { element: String, span: Span },
+
     #[error("trait '{trait_name}' is not object-safe and cannot be used as `dyn {trait_name}` at {span:?}: {reason}")]
     TraitNotObjectSafe {
         trait_name: String,

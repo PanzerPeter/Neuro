@@ -425,6 +425,8 @@ impl TypeChecker {
             // A collection owns a heap buffer, so duplicating its header would
             // alias — and later double-free — that buffer.
             Type::Collection { .. } => false,
+            // A tensor owns its buffer for the same reason a collection does.
+            Type::Tensor { .. } => false,
             _ => true,
         }
     }
@@ -438,6 +440,7 @@ impl TypeChecker {
             Type::String => true,
             Type::Struct(name) => !self.copy_structs.contains(name),
             Type::Collection { .. } => true,
+            Type::Tensor { .. } => true,
             _ => false,
         }
     }

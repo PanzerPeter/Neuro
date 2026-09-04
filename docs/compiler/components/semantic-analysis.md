@@ -389,8 +389,10 @@ What the checker still owes:
       "diverges" from "unknown because an error was already reported"
 
 ### Phase 2: Tensor Types
-- [ ] **Static tensor types**: `Tensor<f32, [3, 3]>`
-- [ ] **Shape checking**: compile-time tensor dimension validation
+- [x] **Static tensor types**: `Tensor<f32, [3, 3]>` resolves to `Type::Tensor { element, shape }`;
+      the element is restricted to a fixed-width scalar and the type is non-`Copy`
+- [ ] **Shape checking beyond identity**: broadcasting and shape generics; today two tensors
+      match only when their elements and every extent are equal
 - [ ] **Broadcasting**: NumPy-style broadcasting rules
 
 ## Troubleshooting

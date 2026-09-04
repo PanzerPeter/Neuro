@@ -51,6 +51,9 @@ until real tensor and struct lowering lands. A newtype is transparent: `HirType:
 maps to its inner type's mapping. `void` is the empty result list in return position and
 `MlirError::UnsupportedType` anywhere else, as are the unsized types (`dyn Trait`, `[T]`),
 which reach a value position only behind the reference that already maps to a pointer.
+`HirType::Tensor` is `UnsupportedType` too: it is the one variant that will eventually get a
+real (Linalg-backed) mapping here rather than an opaque pointer, so it is left unmapped until
+tensor construction gives it a buffer.
 
 `map_type` matches `HirType` exhaustively with **no wildcard**, so a new HIR variant is a
 compile error here rather than a silent mis-map. Because the crate builds only under the

@@ -217,6 +217,17 @@ impl<'ctx> TypeMapper<'ctx> {
                 "`[{}]` is unsized and must be used behind a reference",
                 element.mangle()
             ))),
+            // A tensor has no LLVM form yet: its buffer layout is settled by tensor
+            // construction, which the language does not have. The type still resolves
+            // and type-checks, so the limit is reported here rather than earlier.
+            Type::Tensor { element, shape } => {
+                let extents: Vec<String> = shape.iter().map(|d| d.to_string()).collect();
+                Err(CodegenError::UnsupportedType(format!(
+                    "`Tensor<{}, [{}]>` type-checks but has no runtime representation yet, so it cannot be compiled",
+                    element.mangle(),
+                    extents.join(", ")
+                )))
+            }
             // Fixed-size array `[T; N]` → LLVM `[N x T]` aggregate.
             Type::Array { element, size } => {
                 let elem_llvm = self.map_type_at_depth(element, depth)?;

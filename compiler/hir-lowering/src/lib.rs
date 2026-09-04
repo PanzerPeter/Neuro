@@ -49,8 +49,7 @@ mod tests;
 /// aborts the process on malformed input.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LoweringError {
-    /// A type annotation named a type that does not resolve (unknown name, or a
-    /// `Tensor<...>` that the current surface does not support).
+    /// A type annotation named a type that does not resolve.
     #[error("cannot resolve type annotation '{name}' during lowering")]
     UnresolvedType { name: String },
 
@@ -537,6 +536,10 @@ fn mangle_type(ty: &HirType) -> String {
         }
         HirType::Array { element, size } => format!("arr{}_{}", size, mangle_type(element)),
         HirType::Slice(element) => format!("slice_{}", mangle_type(element)),
+        HirType::Tensor { element, shape } => {
+            let extents: Vec<String> = shape.iter().map(|d| d.to_string()).collect();
+            format!("tensor_{}_{}", mangle_type(element), extents.join("x"))
+        }
         HirType::Tuple(elements) => {
             let parts: Vec<String> = elements.iter().map(mangle_type).collect();
             format!("tup{}_{}", elements.len(), parts.join("_"))

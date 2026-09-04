@@ -77,6 +77,10 @@ Key design goals:
 - Integer and float literal type suffixes: `42i64`, `255u8`, `1.5f32`, `2.0f64`, `1.5f16`, `0.02bf16`
 - Contextual numeric literal inference with range validation
 - Struct types: definition, instantiation, field access, field mutation
+- Statically shaped tensors: `Tensor<T, [d0, ...]>`, rank-0 through rank-N, over any
+  fixed-width scalar element. Type-level only so far — the annotation type-checks and a
+  shape or element mismatch is a compile error, but no tensor value can be constructed,
+  so a program using one is limited to `neurc check`
 
 ### Variables
 

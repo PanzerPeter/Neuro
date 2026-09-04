@@ -118,11 +118,12 @@ pub enum Type {
         span: Span,
     },
 
-    /// Tensor type for multi-dimensional arrays.
+    /// Statically shaped tensor `Tensor<T, [d0, d1, ...]>`.
     ///
-    /// This variant is reserved for future language support and is not yet
-    /// produced by the parser.
-    /// Example target syntax: `Tensor<f32, [3, 3]>`.
+    /// Every extent is known at compile time and is part of the type, so
+    /// `Tensor<f32, [2, 2]>` and `Tensor<f32, [3, 3]>` are distinct types. An empty
+    /// `shape` is the rank-0 scalar tensor `Tensor<T, []>`. `span` covers the type name
+    /// through the closing `>`.
     Tensor {
         element_type: Box<Type>,
         shape: Vec<usize>,

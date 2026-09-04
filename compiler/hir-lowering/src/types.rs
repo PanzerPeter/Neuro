@@ -189,8 +189,13 @@ impl Lowerer {
                     ret: Box::new(self.resolve_type(ret)?),
                 })
             }
-            ast_types::Type::Tensor { .. } => Err(LoweringError::UnresolvedType {
-                name: "Tensor".to_string(),
+            ast_types::Type::Tensor {
+                element_type,
+                shape,
+                ..
+            } => Ok(HirType::Tensor {
+                element: Box::new(self.resolve_type(element_type)?),
+                shape: shape.clone(),
             }),
         }
     }

@@ -97,6 +97,18 @@ the tuple-index parse, so it needs no expression grammar of its own.
   `Type::Slice`, anything else must be the `;` of a sized `Type::Array`. Whether the slice is
   legal where it was written is not decided here — semantic analysis rejects one outside a
   reference, exactly as it does for a bare `dyn Trait`.
+- **Shape argument vs. array/slice type argument.** `Tensor<f32, [2, 3]>` is the one type
+  application whose argument is a shape rather than a type, and it shares its opening bracket
+  with `Box<[T; N]>` / `Box<[T]>`. `shape_argument_ahead` decides on the token after `[`: an
+  integer or an immediate `]` can never open a type, so a shape needs no backtracking.
+  `parse_generic_type_args` therefore returns `(args, Option<ShapeArg>, close_span)`, and
+  `build_tensor_type` turns a shape plus one type argument into `Type::Tensor`. `Tensor` is a
+  prelude name, not a keyword, so the parser only claims it once a shape appears — a module
+  declaring its own generic `Tensor<T>` keeps parsing as `Type::Generic`. A shape under any
+  other name is `ParseError::ShapeArgumentOnNonTensor`; a shape with no element type, or with a
+  second type argument, is `ParseError::TensorTypeArity`. Extents are non-negative integer
+  literals only; a symbolic or `?` extent is a parse error until shape generics and dynamic
+  shapes land.
 - **Prefix vs. infix `&` and `*`.** Purely parser position: prefix `&` is a borrow
   (`Expr::Reference`, operand at `Precedence::Unary`), infix `&` is `BinaryOp::BitAnd`; prefix
   `*` is `Expr::Deref`, infix `*` is multiply. A leading `*` in statement position is a deref

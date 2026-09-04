@@ -109,6 +109,14 @@ pub enum Type {
     /// template: monomorphization substitutes each `Generic` with a concrete type, so a
     /// `Generic` never reaches the HIR.
     Generic(std::string::String),
+    /// Statically shaped tensor `Tensor<T, [d0, d1, ...]>`. Every extent is part of
+    /// the type, so `Tensor<f32, [2, 2]>` and `Tensor<f32, [3, 3]>` are distinct and an
+    /// empty `shape` is the rank-0 scalar tensor. A tensor owns its buffer, so it is
+    /// never `Copy`: assignment and argument passing move it.
+    Tensor {
+        element: Box<Type>,
+        shape: Vec<usize>,
+    },
     /// A heap-backed standard collection: `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`,
     /// or the growable text buffer `String`. These are library types rather than
     /// language primitives, but
@@ -275,6 +283,19 @@ impl Type {
                         .zip(ba.iter())
                         .all(|(x, y)| x.is_compatible_with(y))
             }
+
+            // Tensors match when their element types match and their shapes are
+            // identical extent for extent — rank and every extent are part of the type.
+            (
+                Type::Tensor {
+                    element: a,
+                    shape: ashape,
+                },
+                Type::Tensor {
+                    element: b,
+                    shape: bshape,
+                },
+            ) => ashape == bshape && a.is_compatible_with(b),
 
             // Tuples match when they have the same arity and each element matches.
             (Type::Tuple(a), Type::Tuple(b)) => {
@@ -447,6 +468,16 @@ impl fmt::Display for Type {
             }
             Type::Array { element, size } => write!(f, "[{}; {}]", element, size),
             Type::Slice(element) => write!(f, "[{}]", element),
+            Type::Tensor { element, shape } => {
+                write!(f, "Tensor<{}, [", element)?;
+                for (i, extent) in shape.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", extent)?;
+                }
+                write!(f, "]>")
+            }
             Type::ConstValue(v) => write!(f, "{}", v),
             Type::Tuple(elements) => {
                 write!(f, "(")?;
