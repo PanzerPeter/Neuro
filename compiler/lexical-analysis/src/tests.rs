@@ -426,16 +426,40 @@ fn adjacent_holes_produce_no_empty_text() {
 
 #[test]
 fn escaped_brace_is_plain_text() {
-    // `\{` suppresses the hole; the trailing bare `}` stays literal too.
-    let result = tokenize(r#""\{not a hole}""#).unwrap();
+    // `\{` suppresses the hole; `\}` writes the closing brace the rule then demands.
+    let result = tokenize(r#""\{not a hole\}""#).unwrap();
     assert_eq!(plain_string(&result[0].kind), "{not a hole}");
 }
 
+/// Both interpolation delimiters have an escape form, so a literal brace pair is
+/// writable without either half being read as a hole.
 #[test]
-fn lone_closing_brace_stays_literal() {
-    // The language defines `\{` but no `\}`, so an unpaired `}` must survive as itself.
-    let result = tokenize(r#""a}b""#).unwrap();
+fn regression_escaped_closing_brace_decodes_to_a_literal_brace() {
+    let result = tokenize(r#""a\}b""#).unwrap();
     assert_eq!(plain_string(&result[0].kind), "a}b");
+}
+
+/// An unescaped `}` outside a hole is an error rather than literal text, so a
+/// dropped `{` is caught where it goes missing instead of rendering as content.
+#[test]
+fn regression_lone_closing_brace_is_a_lex_error() {
+    let err = tokenize(r#""a}b""#).unwrap_err();
+    assert!(
+        matches!(err, LexError::UnescapedClosingBrace { .. }),
+        "expected UnescapedClosingBrace, got: {:?}",
+        err
+    );
+}
+
+/// The rule reaches block strings too: they share the same content decoder.
+#[test]
+fn regression_lone_closing_brace_in_a_block_string_is_a_lex_error() {
+    let err = tokenize("\"\"\"\n    a}b\n    \"\"\"").unwrap_err();
+    assert!(
+        matches!(err, LexError::UnescapedClosingBrace { .. }),
+        "expected UnescapedClosingBrace, got: {:?}",
+        err
+    );
 }
 
 #[test]
@@ -454,8 +478,9 @@ fn nested_string_inside_hole_is_rejected() {
 
 #[test]
 fn char_literal_unicode_braces_do_not_count_as_depth() {
-    // The `}` inside `'\u{7D}'` belongs to the escape payload, not the hole.
-    let result = tokenize(r#""{'\u{7D}'} tail}""#).unwrap();
+    // The `}` inside `'\u{7D}'` belongs to the escape payload, not the hole. The
+    // trailing brace is escaped, since an unescaped one outside a hole is an error.
+    let result = tokenize(r#""{'\u{7D}'} tail\}""#).unwrap();
     let chunks = interp_chunks(&result[0].kind);
 
     assert_eq!(chunks.len(), 2);

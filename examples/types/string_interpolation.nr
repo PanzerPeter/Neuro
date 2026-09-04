@@ -60,8 +60,8 @@ func main() -> i32 {
     passed = passed + check("ready={ready} grade={grade}", "ready=true grade=A")
     passed = passed + check("{name:?} {grade:?}", "\"Neuro\" 'A'")
 
-    // `\{` writes a literal brace. An unpaired `}` needs no escape.
-    passed = passed + check("\{not a hole}", "\{not a hole}")
+    // `\{` and `\}` write literal braces; an unescaped `}` outside a hole is an error.
+    passed = passed + check("\{not a hole\}", "\{not a hole\}")
 
     return passed
 }

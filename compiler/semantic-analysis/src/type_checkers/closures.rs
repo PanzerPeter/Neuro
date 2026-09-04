@@ -53,6 +53,11 @@ impl TypeChecker {
         let saved_return = self.current_function_return_type.take();
         self.current_function_return_type = ret_ty.clone();
 
+        // For the same reason, an enclosing loop is not in scope inside the body: a
+        // `break` cannot leave the closure to reach it, and letting the enclosing
+        // loops stay visible passed the program to codegen, which has no such target.
+        let saved_loops = std::mem::take(&mut self.loop_stack);
+
         self.symbols.push_scope();
         for (p, ty) in params.iter().zip(param_types.iter()) {
             let _ = self.symbols.define(p.name.name.clone(), ty.clone(), false);
@@ -92,6 +97,7 @@ impl TypeChecker {
 
         self.symbols.pop_scope();
         self.current_function_return_type = saved_return;
+        self.loop_stack = saved_loops;
 
         Type::Function {
             params: param_types,

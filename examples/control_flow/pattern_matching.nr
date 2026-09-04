@@ -42,7 +42,7 @@ func main() -> i32 {
     // A literal `{` in interpolated text is escaped `\{` so it is not read as
     // opening a hole. A closing `}` is unambiguous outside a hole and stands as
     // itself — `\}` is not an escape sequence.
-    println("Op::Range \{ lo: 2, hi: 5 } -> {range}")
+    println("Op::Range \{ lo: 2, hi: 5 \} -> {range}")
     total += nop + push + range               // => 10
 
     val zero = classify(0)      // literal arm

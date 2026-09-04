@@ -257,3 +257,67 @@ func main() -> i32 {
         "expected a redefinition error; got {errors:?}"
     );
 }
+
+/// A closure body is a separate control-flow body: an enclosing loop is not a
+/// `break` target from inside it, so the enclosing loops must not stay visible while
+/// the body is checked. Before the fix this type-checked and reached codegen, which
+/// aborted with an internal compiler error instead of a diagnostic.
+#[test]
+fn regression_break_inside_a_closure_within_a_loop_is_rejected() {
+    let errors = semantic_errors(
+        "func main() -> i32 {\n\
+         \x20   for i in 0..3 {\n\
+         \x20       val f = || -> i32 { break }\n\
+         \x20   }\n\
+         \x20   return 0\n\
+         }\n",
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, TypeError::BreakOutsideLoop { .. })),
+        "expected BreakOutsideLoop, got: {:?}",
+        errors
+    );
+}
+
+/// The same rule for `continue`, which shares the loop stack.
+#[test]
+fn regression_continue_inside_a_closure_within_a_loop_is_rejected() {
+    let errors = semantic_errors(
+        "func main() -> i32 {\n\
+         \x20   while true {\n\
+         \x20       val f = || -> i32 { continue }\n\
+         \x20   }\n\
+         \x20   return 0\n\
+         }\n",
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, TypeError::ContinueOutsideLoop { .. })),
+        "expected ContinueOutsideLoop, got: {:?}",
+        errors
+    );
+}
+
+/// The isolation must not cut the other way: a loop written *inside* the closure is
+/// a legitimate target for a `break` in its own body.
+#[test]
+fn a_loop_inside_a_closure_still_accepts_its_own_break() {
+    let errors = semantic_errors(
+        "func main() -> i32 {\n\
+         \x20   for i in 0..3 {\n\
+         \x20       val f = || -> i32 {\n\
+         \x20           mut t = 0\n\
+         \x20           loop {\n\
+         \x20               t += 1\n\
+         \x20               if t > 2 { break t }\n\
+         \x20           }\n\
+         \x20       }\n\
+         \x20   }\n\
+         \x20   return 0\n\
+         }\n",
+    );
+    assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+}

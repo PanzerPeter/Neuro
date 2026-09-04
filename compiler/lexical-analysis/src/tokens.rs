@@ -698,9 +698,13 @@ fn decode_chunks(
                     text.push('\0');
                     i += 2;
                 }
-                // Literal `{`: the interpolation delimiter's only escape form.
+                // Literal `{` / `}`: the interpolation delimiters' escape forms.
                 '{' => {
                     text.push('{');
+                    i += 2;
+                }
+                '}' => {
+                    text.push('}');
                     i += 2;
                 }
                 'x' => {
@@ -766,8 +770,15 @@ fn decode_chunks(
             continue;
         }
 
-        // A bare `}` stays literal: the language defines `\{` for a literal `{` but lists
-        // no `\}` escape, so an unpaired `}` must remain representable as itself.
+        // An unescaped `}` outside a hole is rejected rather than taken literally, so a
+        // dropped `{` is caught where it goes missing instead of silently rendering the
+        // rest of the hole as text. `\}` is the way to write the brace itself.
+        if ch == '}' {
+            return Err(LexError::UnescapedClosingBrace {
+                span: Span::new(abs_off, abs_off + ch.len_utf8()),
+            });
+        }
+
         text.push(ch);
         i += 1;
     }

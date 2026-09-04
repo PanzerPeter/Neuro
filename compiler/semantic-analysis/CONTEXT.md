@@ -483,7 +483,9 @@ analysis (a free-variable walk) rejects capturing a non-Copy enclosing local
 (`ClosureCapturesNonCopy`) or assigning to a captured variable (`ClosureAssignsCapture`); module
 constants and functions are referenced directly, not captured. The body is checked with
 `current_function_return_type` redirected to the closure's return type, so an early `return` binds
-to the closure. `check_plain_call` dispatches a call on a local binding of function type.
+to the closure, and with `loop_stack` emptied for the same reason — an enclosing loop is not a
+`break` target from inside a closure, so one written there is `BreakOutsideLoop`. Both are restored
+afterwards. `check_plain_call` dispatches a call on a local binding of function type.
 
 ### Fallible types
 `fallible_kind` (`expressions/operators.rs`) is the shared resolver, so `?` and `??` accept exactly

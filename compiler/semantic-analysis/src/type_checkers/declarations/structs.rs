@@ -162,21 +162,35 @@ impl TypeChecker {
         if let Some(fields) = self.struct_defs.get(registered) {
             for (field_name, field_ty) in fields {
                 let span = span_of(field_name);
+                // A derive can only ever be added to a struct, so the "derive it too"
+                // remedy is offered only when the offending field IS one; for any other
+                // type there is nothing to put the attribute on.
+                let derivable = matches!(field_ty, Type::Struct(_));
                 if debug && !self.is_debug_renderable(field_ty) {
+                    let reason = if derivable {
+                        "renders no debug form; give it `@derive(Debug)` too"
+                    } else {
+                        "renders no debug form, and no derive applies to that type"
+                    };
                     offenders.push((
                         DEBUG_TRAIT,
                         field_name.clone(),
                         field_ty.clone(),
-                        "renders no debug form; give it `@derive(Debug)` too".to_string(),
+                        reason.to_string(),
                         span,
                     ));
                 }
                 if partial_eq && !self.is_derived_comparable(field_ty) {
+                    let reason = if derivable {
+                        "has no field-wise equality; give it `@derive(PartialEq)` too"
+                    } else {
+                        "has no field-wise equality, and no derive applies to that type"
+                    };
                     offenders.push((
                         PARTIAL_EQ_TRAIT,
                         field_name.clone(),
                         field_ty.clone(),
-                        "has no field-wise equality; give it `@derive(PartialEq)` too".to_string(),
+                        reason.to_string(),
                         span,
                     ));
                 }

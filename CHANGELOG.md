@@ -10,6 +10,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.12.1] - 2026-09-04
+
+### Fixed
+
+- **`break` / `continue` inside a closure body no longer escapes the loop check.** A
+  closure written inside a loop inherited that loop as a `break` target, so
+  `for i in 0..3 { val f = || -> i32 { break } }` type-checked and then aborted in code
+  generation with an internal compiler error. A closure body is a separate control-flow
+  body — the checker already redirects `return` to it for exactly that reason — so the
+  enclosing loops are now hidden while the body is checked and restored afterwards. The
+  program is rejected with `'break' used outside of a loop`, and a loop written *inside*
+  the closure still accepts its own `break`.
+
+- **A literal closing brace in a string is writable, and a stray one is caught.** The
+  interpolation escape table implemented `\{` but not `\}`, and took an unescaped `}`
+  outside a hole as literal text. Both halves of the specified rule now hold: `\}` decodes
+  to `}`, and an unescaped `}` outside a hole is `LexError::UnescapedClosingBrace`, which
+  is what catches a `{` that went missing instead of rendering the rest of the intended
+  hole as content. The rule reaches block strings too, since they share the content
+  decoder. Four example programs wrote `\{ … }` and now write `\{ … \}`; their rendered
+  output is byte-for-byte unchanged.
+
+- **Two diagnostics no longer suggest a fix the compiler rejects.** Using a function as a
+  value suggested wrapping it as `|x| f(x)`, which fails on the same checker's rule that a
+  closure parameter needs a type annotation; it now shows the annotated form. A field that
+  blocks `@derive(Debug)` / `@derive(PartialEq)` was always told to derive the trait "too",
+  which is impossible when the field is an array, a collection, or a reference — the
+  remedy is now offered only when the offending field is itself a struct.
+
+
 ## [2.12.0] - 2026-09-04
 
 ### Added

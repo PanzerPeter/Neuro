@@ -35,6 +35,9 @@ pub enum LexError {
 
     #[error("line in triple-quoted string at position {} is indented less than the closing `\"\"\"` ({indent} columns): indent every content line to at least the closing delimiter", span.start)]
     TripleQuoteUnderIndented { indent: usize, span: Span },
+
+    #[error("unescaped `}}` at position {} is outside an interpolation hole: write `\\}}` for a literal brace, or add the `{{` this one was meant to close", span.start)]
+    UnescapedClosingBrace { span: Span },
 }
 
 impl Default for LexError {

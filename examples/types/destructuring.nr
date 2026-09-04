@@ -30,7 +30,7 @@ func main() -> i32 {
     val [head, ..] = nums                // head = 4
     val [_, second, _] = triple          // second = 2
 
-    println("val Point \{ x, y }       -> x {x}, y {y}")
+    println("val Point \{ x, y \}       -> x {x}, y {y}")
     println("val [a, b, c]            -> {a}, {b}, {c}")
     println("val [first, ..rest]      -> first {first}, rest sums to {rest_sum}")
     println("val [head, ..]           -> {head}")
