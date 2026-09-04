@@ -276,6 +276,42 @@ Not yet supported: reassigning a `Drop` binding does not run the prior value's
 destructor, and a struct's `Drop`-typed fields are not dropped automatically
 (no recursive destructor glue).
 
+## Derived Traits (`@derive`)
+
+A struct opts into a small set of compiler-generated traits with `@derive(...)`. The
+derivable-and-implemented set is `Copy`, `Clone`, `Debug`, `PartialEq`; any other name in the
+list is a compile error rather than a silent no-op.
+
+```neuro
+@derive(Debug, PartialEq)
+struct Sensor { id: i32, label: string }
+
+@derive(Debug, PartialEq)
+struct Reading { sensor: Sensor, value: f64 }
+
+func main() -> i32 {
+    val a = Reading { sensor: Sensor { id: 7, label: "intake" }, value: 21.5 }
+    val b = Reading { sensor: Sensor { id: 7, label: "intake" }, value: 21.5 }
+    println("{a:?}")            // Reading { sensor: Sensor { id: 7, label: "intake" }, value: 21.5 }
+    if a == b { return 1 }      // structural equality, recursing into `Sensor`
+    return 0
+}
+```
+
+Both derives recurse, and both are generated inline over the fields rather than through a
+method. That has two consequences worth knowing:
+
+- Every field must itself be renderable / comparable — a scalar, `string`, `char`, `bool`, or
+  another struct carrying the same derive. Anything else is a `DeriveFieldUnsupported` error
+  naming the field.
+- Deriving `PartialEq` and also writing `impl PartialEq for` the same struct is a
+  `DeriveConflictsWithImpl` error. Pick one: the derive for structural equality, the `impl`
+  when the comparison is not field-wise (or when the struct is a `HashMap` / `BTreeMap` key,
+  which calls the trait method and so needs the `impl`).
+
+`{value:?}` is the only hole a struct renders in — a struct has no display form, so `"{p}"`
+is an error even with `@derive(Debug)`. See [`examples/structs/derives.nr`](../../examples/structs/derives.nr).
+
 ## Definition Order Independence
 
 Structs and `impl` blocks can appear in any order. Forward references are supported:
@@ -507,6 +543,12 @@ Neuro uses nominal typing for structs: two struct types are compatible only if t
 | `NotATraitMethod` | A trait impl defines a method the trait does not declare |
 | `TraitMethodSignatureMismatch` | An impl method's signature differs from the trait's |
 | `TraitBoundNotSatisfied` | A generic argument does not implement a required trait |
+| `UnknownDerive` | A `@derive` argument that names no derivable trait |
+| `UnimplementedDerive` | A `@derive` argument the spec allows but no pass generates yet |
+| `DuplicateDerive` | The same trait listed twice in a `@derive` list |
+| `DeriveFieldUnsupported` | A field a derived `Debug` / `PartialEq` cannot render or compare |
+| `DeriveConflictsWithImpl` | A struct both derives a trait and declares an `impl` of it |
+| `UnrenderableStruct` | A struct hole missing `@derive(Debug)`, or missing the `:?` specifier |
 
 ## References
 

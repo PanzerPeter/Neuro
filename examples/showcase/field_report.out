@@ -1,0 +1,13 @@
+ 0     Reading { id: 1, value: 21.5 }
+ 1     Reading { id: 2, value: 18.0 }
+ 2     Reading { id: 3, value: 30.25 }
+ 3 dup Reading { id: 1, value: 21.5 }
+ 4     Reading { id: 4, value: nan }
+
+NaN record equals its copy : false
+duplicates found           : 1
+usable in array            : 4
+usable in vec              : 1
+protocol walk / even / odd : 15 / 6 / 9
+'café' scalars / bytes     : 4 / 5, last starts at 3
+total                      : 63

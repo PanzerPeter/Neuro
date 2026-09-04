@@ -174,7 +174,7 @@ impl TypeChecker {
                 // taken that path when one exists. Two operands of the same aggregate
                 // type are compatible, so without this rejection the operator reaches
                 // codegen, which asks the aggregate for its integer variant and aborts.
-                if !self.has_builtin_equality(&left_cmp) {
+                if !self.has_builtin_equality(&left_cmp) && !self.has_derived_equality(&left_cmp) {
                     match left_ty.referent() {
                         Type::Struct(name) => self.record_error(TypeError::MissingPartialEqImpl {
                             type_name: name.clone(),
@@ -275,6 +275,17 @@ impl TypeChecker {
                     Some(Type::Bool)
                 }
             }
+        }
+    }
+
+    /// Whether `==` / `!=` on `ty` are the field-wise comparison `@derive(PartialEq)`
+    /// generates. A borrow compares its referent: the operator has no meaning on the
+    /// reference itself, and requiring `*r` at each operand would be noise.
+    fn has_derived_equality(&self, ty: &Type) -> bool {
+        match ty.referent() {
+            Type::Struct(name) => self.struct_is_partial_eq(name),
+            Type::Newtype(_) => self.is_derived_comparable(ty),
+            _ => false,
         }
     }
 

@@ -142,6 +142,27 @@ impl Lowerer {
                     }
                 }
                 let right = self.lower_expr(right, Some(&left.ty))?;
+                // `@derive(PartialEq)` equality: no method to dispatch to, so the node
+                // stays a binary one and the backend expands it over the fields. Handled
+                // before the shared result rule, which admits no aggregate operand.
+                if matches!(
+                    op,
+                    ast_types::BinaryOp::Equal | ast_types::BinaryOp::NotEqual
+                ) {
+                    if let HirType::Struct(name) = left.ty.referent() {
+                        if self.partial_eq_structs.contains(name) {
+                            return Ok(HirExpr::new(
+                                HirExprKind::Binary {
+                                    op: *op,
+                                    left: Box::new(left),
+                                    right: Box::new(right),
+                                },
+                                HirType::Bool,
+                                *span,
+                            ));
+                        }
+                    }
+                }
                 let ty = binary_result_type(*op, &left.ty, &right.ty)?;
                 Ok(HirExpr::new(
                     HirExprKind::Binary {

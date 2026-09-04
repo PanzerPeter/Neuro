@@ -1,0 +1,8 @@
+ 0  fresh  Sample { origin: Origin { bay: 1, slot: 2 }, label: 'a', reading: 21.5 }
+ 1  fresh  Sample { origin: Origin { bay: 3, slot: 4 }, label: 'e', reading: 18.0 }
+ 2  dup    Sample { origin: Origin { bay: 1, slot: 2 }, label: 'a', reading: 21.5 }
+ 3  fresh  Sample { origin: Origin { bay: 1, slot: 9 }, label: 'a', reading: 21.5 }
+ 4  dup    Sample { origin: Origin { bay: 3, slot: 4 }, label: 'e', reading: 18.0 }
+
+duplicates = 2
+total      = 122

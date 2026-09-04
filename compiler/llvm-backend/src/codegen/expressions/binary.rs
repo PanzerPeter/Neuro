@@ -434,6 +434,24 @@ impl<'ctx> CodegenContext<'ctx> {
             };
         }
 
+        // `@derive(PartialEq)` equality expands over the struct's fields. Handled
+        // before the numeric coercion below, which assumes a scalar left type and would
+        // ask an aggregate value for its integer variant.
+        if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
+            if let Type::Struct(name) = left_ty.referent() {
+                let name = name.clone();
+                let eq = self.codegen_derived_struct_eq(&name, lhs, rhs)?;
+                return match op {
+                    BinaryOp::Equal => Ok(eq.into()),
+                    _ => Ok(self
+                        .builder
+                        .build_not(eq, "struct_ne")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into()),
+                };
+            }
+        }
+
         // String concatenation: `string + string` allocates a fresh heap
         // buffer and copies both operands' bytes in. Either operand may be owned or
         // a `&string` slice, so each is normalized to its fat pointer first. Handled

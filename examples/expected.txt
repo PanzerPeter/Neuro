@@ -97,6 +97,7 @@ control_flow/val_else.nr              61
 control_flow/while_true_lint.nr       7
 
 # --- structs & methods ----------------------------------------------------
+structs/derives.nr  21
 structs/methods.nr  42
 structs/mut_self_accumulator.nr  42
 structs/neuron.nr   4
@@ -120,7 +121,9 @@ showcase/borrowed_text.nr   25
 showcase/buffered_report.nr 40
 showcase/closures.nr        90
 showcase/config_manifest.nr 81
+showcase/derived_records.nr 122
 showcase/enum_records.nr    46
+showcase/field_report.nr    63
 showcase/generic_toolkit.nr 85
 showcase/inventory_ledger.nr 181
 showcase/job_queue.nr       139

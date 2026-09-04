@@ -197,6 +197,21 @@ Key design goals:
   alongside the element; the same head works over `Vec<T>` and over a parenthesised range
 - Out-of-bounds index panics in debug builds (`-O0`); release builds omit the check
 
+### Derived traits (2A)
+
+- `@derive(Copy, Clone, Debug, PartialEq)` — the derivable-and-implemented set. Any other name in
+  the list is a compile error, never a silent no-op: `Hashable` is specified but not generated yet,
+  and anything else is unknown
+- `@derive(Debug)` gives a struct its `{p:?}` rendering — `Point { x: 1, y: 2 }` — recursing into a
+  nested struct and quoting a `string` or `char` field. A struct has no display form, so `"{p}"`
+  is an error even with the derive
+- `@derive(PartialEq)` gives a struct field-wise `==` / `!=`, recursing the same way. It is
+  generated inline rather than through a method, so deriving it *and* writing
+  `impl PartialEq for` the same struct is rejected — and a `HashMap` / `BTreeMap` struct key,
+  which calls the trait method, still needs the hand-written `impl`
+- Both derives require every field to be renderable / comparable by the same rules; a field that
+  is not names itself in the diagnostic, see [structs.md](language-reference/structs.md#derived-traits-derive)
+
 ### Borrowed slices (2A)
 
 - `&[T]` / `&mut [T]`: a non-owning `(ptr, len)` view over a contiguous run, the array-and-`Vec`

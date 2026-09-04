@@ -211,6 +211,10 @@ pub(crate) struct CodegenContext<'ctx> {
     /// Struct field definitions (name → ordered [(field_name, field_type)]).
     /// Populated before code generation begins; used by GEP and insertvalue.
     pub(crate) struct_defs: HashMap<String, Vec<(String, Type)>>,
+    /// Struct key → the name the programmer wrote for it. The two differ only for a
+    /// monomorphized generic instance, whose key is mangled; the derived debug
+    /// rendering shows the written name.
+    pub(crate) struct_written_names: HashMap<String, String>,
 
     /// Evaluated constant values (both module-level and function-level).
     /// `codegen_identifier` checks this before `variables` to allow locals to shadow consts.
@@ -280,6 +284,7 @@ impl<'ctx> CodegenContext<'ctx> {
             type_env: HashMap::new(),
             loop_targets: Vec::new(),
             struct_defs: HashMap::new(),
+            struct_written_names: HashMap::new(),
             const_values: HashMap::new(),
             overflow_checks: false,
             source: None,

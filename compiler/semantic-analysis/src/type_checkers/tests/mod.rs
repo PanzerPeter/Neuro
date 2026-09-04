@@ -4,6 +4,7 @@ mod builtin_tests;
 mod coalesce_tests;
 mod comparison_tests;
 mod decl_tests;
+mod derive_tests;
 mod drop_tests;
 mod enum_expr_tests;
 mod enum_tests;

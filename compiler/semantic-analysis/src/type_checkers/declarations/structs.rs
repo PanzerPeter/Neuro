@@ -6,7 +6,7 @@
 
 use super::{
     mangle_struct_instance, remap_method_type, substitute_generic, CLONE_TRAIT, COPY_TRAIT,
-    DERIVE_ATTRIBUTE,
+    DEBUG_TRAIT, DERIVE_ATTRIBUTE, IMPLEMENTED_DERIVES, PARTIAL_EQ_TRAIT, PENDING_DERIVES,
 };
 use crate::errors::TypeError;
 use crate::type_checkers::TypeChecker;
@@ -57,24 +57,56 @@ impl TypeChecker {
         }
     }
 
-    /// Record the `@derive(Copy, Clone)` intent declared on a struct.
+    /// Record the `@derive(...)` intent declared on a struct, rejecting any argument
+    /// that names no derivable trait.
     ///
-    /// Only `Copy` and `Clone` are acted upon; any other derive argument (e.g. `Debug`)
-    /// is accepted and ignored so the surface stays forward compatible. `Copy` implies
-    /// `Clone` (a Copy type is trivially cloneable), matching Rust.
+    /// `Copy` implies `Clone` (a Copy type is trivially cloneable), matching Rust. A
+    /// name outside the spec's derivable set is a diagnostic, and so is one the spec
+    /// lists but no pass generates yet — a derive that quietly does nothing is worse
+    /// than one that refuses, because the program then compiles against behavior it
+    /// does not have.
     pub(super) fn record_derive_intent(&mut self, def: &StructDef) {
         let mut derives_copy = false;
         let mut derives_clone = false;
+        let mut derives_debug = false;
+        let mut derives_partial_eq = false;
+        let mut seen: Vec<&str> = Vec::new();
         for attr in &def.attributes {
             if attr.name.name != DERIVE_ATTRIBUTE {
                 continue;
             }
             for arg in &attr.args {
-                match arg.name.as_str() {
-                    COPY_TRAIT => derives_copy = true,
-                    CLONE_TRAIT => derives_clone = true,
-                    _ => {}
+                let name = arg.name.as_str();
+                if let Some(known) = IMPLEMENTED_DERIVES.iter().find(|d| **d == name) {
+                    if seen.contains(known) {
+                        self.record_error(TypeError::DuplicateDerive {
+                            struct_name: def.name.name.clone(),
+                            name: name.to_string(),
+                            span: arg.span,
+                        });
+                        continue;
+                    }
+                    seen.push(known);
+                    match name {
+                        COPY_TRAIT => derives_copy = true,
+                        CLONE_TRAIT => derives_clone = true,
+                        DEBUG_TRAIT => derives_debug = true,
+                        _ => derives_partial_eq = true,
+                    }
+                    continue;
                 }
+                if PENDING_DERIVES.contains(&name) {
+                    self.record_error(TypeError::UnimplementedDerive {
+                        name: name.to_string(),
+                        span: arg.span,
+                    });
+                    continue;
+                }
+                self.record_error(TypeError::UnknownDerive {
+                    name: name.to_string(),
+                    derivable: IMPLEMENTED_DERIVES.join(", "),
+                    span: arg.span,
+                });
             }
         }
         if derives_copy {
@@ -82,6 +114,83 @@ impl TypeChecker {
         }
         if derives_copy || derives_clone {
             self.clone_structs.insert(def.name.name.clone());
+        }
+        if derives_debug {
+            self.debug_structs.insert(def.name.name.clone());
+        }
+        if derives_partial_eq {
+            self.partial_eq_structs.insert(def.name.name.clone());
+        }
+    }
+
+    /// Validate `@derive(Debug)` and `@derive(PartialEq)`: every field must itself be
+    /// renderable / comparable by the same derived rules.
+    ///
+    /// A derive generates code straight over the fields, so it can only reach a field
+    /// whose type the generated code knows how to handle — a scalar, `string`, or
+    /// another struct carrying the same derive. Run after all structs are registered so
+    /// a field naming a struct declared later still resolves.
+    pub(crate) fn validate_field_derives(&mut self, def: &StructDef) {
+        let spans: HashMap<String, Span> = def
+            .fields
+            .iter()
+            .map(|f| (f.name.name.clone(), f.span))
+            .collect();
+        self.validate_derived_fields_of(&def.name.name, &def.name.name, |name| {
+            spans.get(name).copied().unwrap_or(def.name.span)
+        });
+    }
+
+    /// The field rule behind [`Self::validate_field_derives`], applied to whichever
+    /// registered field list `registered` names and reported against `reported`.
+    ///
+    /// The two names differ for a monomorphized instance: its fields live under the
+    /// mangled key, while the diagnostic must name the struct the programmer wrote.
+    fn validate_derived_fields_of(
+        &mut self,
+        registered: &str,
+        reported: &str,
+        span_of: impl Fn(&str) -> Span,
+    ) {
+        let debug = self.debug_structs.contains(registered);
+        let partial_eq = self.partial_eq_structs.contains(registered);
+        if !debug && !partial_eq {
+            return;
+        }
+        // Collect offenders first to avoid borrowing `self` mutably while iterating fields.
+        let mut offenders: Vec<(&'static str, String, Type, String, Span)> = Vec::new();
+        if let Some(fields) = self.struct_defs.get(registered) {
+            for (field_name, field_ty) in fields {
+                let span = span_of(field_name);
+                if debug && !self.is_debug_renderable(field_ty) {
+                    offenders.push((
+                        DEBUG_TRAIT,
+                        field_name.clone(),
+                        field_ty.clone(),
+                        "renders no debug form; give it `@derive(Debug)` too".to_string(),
+                        span,
+                    ));
+                }
+                if partial_eq && !self.is_derived_comparable(field_ty) {
+                    offenders.push((
+                        PARTIAL_EQ_TRAIT,
+                        field_name.clone(),
+                        field_ty.clone(),
+                        "has no field-wise equality; give it `@derive(PartialEq)` too".to_string(),
+                        span,
+                    ));
+                }
+            }
+        }
+        for (trait_name, field_name, field_type, reason, span) in offenders {
+            self.record_error(TypeError::DeriveFieldUnsupported {
+                struct_name: reported.to_string(),
+                trait_name: trait_name.to_string(),
+                field_name,
+                field_type,
+                reason,
+                span,
+            });
         }
     }
 
@@ -277,6 +386,15 @@ impl TypeChecker {
             if self.clone_structs.contains(base) {
                 self.clone_structs.insert(mangled.clone());
             }
+            if self.debug_structs.contains(base) {
+                self.debug_structs.insert(mangled.clone());
+            }
+            if self.partial_eq_structs.contains(base) {
+                self.partial_eq_structs.insert(mangled.clone());
+            }
+            // The template's own fields are type parameters, which no derive rule can
+            // judge; the concrete substitution is the first point at which it can.
+            self.validate_derived_fields_of(&mangled, base, |_| span);
 
             self.instantiate_impls_for(base, &mangled, args);
         }

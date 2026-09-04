@@ -109,6 +109,42 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error(
+        "`@derive({name})` at {span:?} names no derivable trait: the derivable set is {derivable}"
+    )]
+    UnknownDerive {
+        name: String,
+        derivable: String,
+        span: Span,
+    },
+
+    #[error("`@derive({name})` at {span:?} is specified but not implemented yet: write the impl by hand for now")]
+    UnimplementedDerive { name: String, span: Span },
+
+    #[error("`@derive({name})` is listed twice on struct '{struct_name}' at {span:?}")]
+    DuplicateDerive {
+        struct_name: String,
+        name: String,
+        span: Span,
+    },
+
+    #[error("struct '{struct_name}' both derives `{trait_name}` and declares `impl {trait_name} for {struct_name}` at {span:?}: keep one of them")]
+    DeriveConflictsWithImpl {
+        struct_name: String,
+        trait_name: String,
+        span: Span,
+    },
+
+    #[error("struct '{struct_name}' cannot derive `{trait_name}` at {span:?}: field '{field_name}' has type {field_type}, which {reason}")]
+    DeriveFieldUnsupported {
+        struct_name: String,
+        trait_name: String,
+        field_name: String,
+        field_type: Type,
+        reason: String,
+        span: Span,
+    },
+
     #[error("type '{type_name}' implements Drop at {span:?} and so cannot be Copy: a type with a destructor must be moved, not duplicated")]
     DropTypeCannotBeCopy { type_name: String, span: Span },
 
@@ -655,6 +691,13 @@ pub enum TypeError {
 
     #[error("a value of type {ty} cannot be interpolated into a string at {span:?}: interpolation renders integers, floats, `bool`, `char`, and `string`")]
     UnformattableType { ty: Type, span: Span },
+
+    #[error("a value of struct type '{name}' cannot be interpolated at {span:?}: {hint}")]
+    UnrenderableStruct {
+        name: String,
+        hint: String,
+        span: Span,
+    },
 
     #[error(
         "format specifier `{spec}` does not apply to a value of type {ty} at {span:?}: {hint}"

@@ -22,7 +22,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` byte sub-slices and `.char_slice(range)` codepoint sub-slices, the codepoint iterators `.chars()` / `.char_indices()`, borrowed slices `&[T]` / `&mut [T]` over arrays and `Vec`s, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), associated-type bounds (`T: Source<Item = i32>`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result`, `?` error propagation |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `for (i, x) in xs.enumerate()`, the `.map(f)` / `.filter(p)` head adapters, the `IntoIterator` / `Iterator` protocol and hand-written adapters, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
-| `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`) |
+| `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`), the `@derive(Debug, PartialEq)` traits |
 | `modules/`       | Multi-file programs: a sibling module, a `mod.nr` directory module and its child, reached through qualified paths and `import`, with `export` choosing each module's surface; plus inline `module { }` blocks, an `export import` re-export facade, the implicit prelude, and the `@no_prelude` opt-out |
 | `showcase/`      | **Bigger programs that combine many features at once** — incl. mutable borrows `&mut T` + `*` deref (`mutable_borrows.nr`) |
 
@@ -74,6 +74,17 @@ isolation:
   `@derive(Copy)` struct + `impl` methods, an enum with a payload matched by
   `match`, a fixed-size array + `for`-in loop, `+` concatenation, and string
   interpolation with the format mini-language (`:<10`, `:>4`, `:.3`). Exit `81`.
+- [`showcase/field_report.nr`](showcase/field_report.nr) — the **2A sub-phase end to end**:
+  `@derive(Debug, PartialEq)`, `println`, `.is_nan()` on a computed NaN, one `&[T]` slice
+  parameter satisfied by both an array and a `Vec`, the `IntoIterator` / `Iterator` protocol
+  with `type Item` and an `Iterator<Item = i32>` bound, `.enumerate()` and a `.filter(p)`
+  adapter, and `.chars()` / `.char_indices()` over non-ASCII text — the byte offsets and the
+  codepoint count deliberately disagree. Exit `63`.
+- [`showcase/derived_records.nr`](showcase/derived_records.nr) — `@derive(Debug, PartialEq)`
+  finding structural duplicates in a fixed-size array of records, working together with
+  `@derive(Copy, Clone)` structs + `impl` methods, a nested struct field, a counted
+  `for i in 0..n` loop with indexing, an enum + `match`, a labeled `break`, and string
+  interpolation with the format mini-language (`:?`, `:>2`, `:<6`). Exit `122`.
 - [`showcase/enum_records.nr`](showcase/enum_records.nr) — pattern matching
   deconstructing enums with associated data (all three variant
   forms) alongside a struct with an enum field, `impl` methods, a fixed-size

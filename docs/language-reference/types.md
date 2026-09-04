@@ -587,7 +587,21 @@ Rules:
 - `@derive(Clone)` (or `Copy`) enables `struct.clone()`, an explicit deep copy that returns a
   fresh value without moving the receiver. A user-defined `clone` method in an `impl` block
   shadows the builtin.
-- Unknown derive arguments (e.g. `@derive(Debug)`) are accepted and ignored for now.
+- `@derive(Debug)` gives the struct its `{value:?}` rendering: the struct's name followed by
+  each field in declaration order, e.g. `Point { x: 1, y: 2 }`. A field-less struct renders as
+  its bare name. Every field must itself be renderable — a scalar, `string`, `char`, `bool`, or
+  another struct that derives `Debug` — otherwise the derive is a `DeriveFieldUnsupported` error.
+  A struct has no *display* form, so `"{p}"` stays an error even with the derive; write `"{p:?}"`.
+- `@derive(PartialEq)` gives the struct `==` and `!=`, compared field by field. The same field
+  rule applies: a nested struct must derive `PartialEq` too. The comparison is generated inline
+  and never calls a method, which is why a struct that both derives `PartialEq` and declares
+  `impl PartialEq for` it is a `DeriveConflictsWithImpl` error — keep one.
+- The derivable-and-implemented set is exactly `Copy`, `Clone`, `Debug`, `PartialEq`. Any other
+  name in a `@derive` list is a compile error, never a silent no-op: `Hashable` is specified but
+  not generated yet (`UnimplementedDerive` — write the `impl` by hand), and anything else is
+  `UnknownDerive`. A repeated name is `DuplicateDerive`.
+- A derived `PartialEq` does **not** satisfy the `impl PartialEq` a struct key of a `HashMap` or
+  `BTreeMap` requires: a collection key calls the trait method, and a derive provides none.
 
 ```neuro
 @derive(Clone)
@@ -596,6 +610,18 @@ struct Vec2 { x: f64, y: f64 }
 val v = Vec2 { x: 1.0, y: 2.0 }
 val w = v.clone()  // independent copy; v stays usable
 ```
+
+```neuro
+@derive(Debug, PartialEq)
+struct Point { x: i32, y: i32 }
+
+val a = Point { x: 1, y: 2 }
+val b = Point { x: 1, y: 2 }
+println("{a:?} == {b:?} is {a == b}")   // Point { x: 1, y: 2 } == Point { x: 1, y: 2 } is true
+```
+
+See [`examples/structs/derives.nr`](../../examples/structs/derives.nr) for both derives run
+end to end, including the recursion through a nested struct.
 
 ### Type Errors
 

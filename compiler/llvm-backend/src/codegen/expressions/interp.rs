@@ -252,6 +252,7 @@ impl<'ctx> CodegenContext<'ctx> {
             Type::Char => self.render_char(value, spec)?,
             other if other.is_integer() => self.render_integer(value, other, spec)?,
             other if other.is_float() => self.render_float(value, spec)?,
+            Type::Struct(name) => self.render_struct_debug(value, name)?,
             other => {
                 return Err(CodegenError::InternalError(format!(
                     "type {:?} reached interpolation codegen; semantic analysis rejects it",
@@ -261,6 +262,94 @@ impl<'ctx> CodegenContext<'ctx> {
         };
 
         self.apply_width(rendered, owner, spec)
+    }
+
+    /// Render a `@derive(Debug)` struct as `Name { field: value, ... }`.
+    ///
+    /// Only reachable under a `{x:?}` hole — a struct has no `Display` form — and every
+    /// field is rendered with the same Debug kind, which is what quotes a nested
+    /// `string` and recurses into a nested struct. A field-less struct renders as its
+    /// bare name, with no braces to hold nothing.
+    fn render_struct_debug(
+        &self,
+        value: BasicValueEnum<'ctx>,
+        name: &str,
+    ) -> CodegenResult<(BasicValueEnum<'ctx>, PieceOwner<'ctx>)> {
+        let fields = self
+            .struct_defs
+            .get(name)
+            .ok_or_else(|| CodegenError::UnsupportedType(format!("unknown struct '{}'", name)))?
+            .clone();
+        if fields.is_empty() {
+            return self.render_literal_text(self.written_struct_name(name));
+        }
+
+        let aggregate = value.into_struct_value();
+        let field_spec = FormatSpec {
+            kind: FormatKind::Debug,
+            ..FormatSpec::default()
+        };
+
+        let mut pieces: Vec<Piece<'ctx>> = Vec::with_capacity(fields.len() * 2 + 2);
+        pieces.push(self.text_piece(&format!("{} {{ ", self.written_struct_name(name)))?);
+        for (index, (field_name, field_ty)) in fields.iter().enumerate() {
+            if index > 0 {
+                pieces.push(self.text_piece(", ")?);
+            }
+            pieces.push(self.text_piece(&format!("{}: ", field_name))?);
+            let field_value = self
+                .builder
+                .build_extract_value(aggregate, index as u32, &format!("dbg.{}", field_name))
+                .map_err(llvm_err)?;
+            let (rendered, owner) =
+                self.render_hole(field_value, field_ty, &field_spec, PieceOwner::Borrowed)?;
+            let (ptr, len) = self.split_string_value(rendered)?;
+            pieces.push(Piece { ptr, len, owner });
+        }
+        pieces.push(self.text_piece(" }")?);
+
+        let joined = self.build_concat(&pieces)?;
+        // Each field rendering is dead once its bytes are in the joined buffer, exactly
+        // as they are for the holes of the literal this struct sits in.
+        for piece in &pieces {
+            self.free_piece(piece)?;
+        }
+        Ok((joined, PieceOwner::Owned))
+    }
+
+    /// The name the programmer wrote for struct key `name`. The two differ only for a
+    /// monomorphized generic instance, whose mangled key appears in no source text and
+    /// must not appear in a rendering of the value either.
+    fn written_struct_name<'a>(&'a self, name: &'a str) -> &'a str {
+        self.struct_written_names
+            .get(name)
+            .map(String::as_str)
+            .unwrap_or(name)
+    }
+
+    /// A `.rodata` literal as a rendered piece — the punctuation a struct's debug form
+    /// is framed with, and the whole rendering of a field-less one.
+    fn text_piece(&self, text: &str) -> CodegenResult<Piece<'ctx>> {
+        let global = self
+            .builder
+            .build_global_string_ptr(text, "interp.dbg.text")
+            .map_err(llvm_err)?;
+        Ok(Piece {
+            ptr: global.as_pointer_value(),
+            len: self.context.i64_type().const_int(text.len() as u64, false),
+            owner: PieceOwner::Borrowed,
+        })
+    }
+
+    fn render_literal_text(
+        &self,
+        text: &str,
+    ) -> CodegenResult<(BasicValueEnum<'ctx>, PieceOwner<'ctx>)> {
+        let piece = self.text_piece(text)?;
+        Ok((
+            self.build_string_value(piece.ptr, piece.len)?,
+            PieceOwner::Borrowed,
+        ))
     }
 
     /// A `string` hole borrows the caller's bytes. Debug quoting is the exception: it

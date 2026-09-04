@@ -27,6 +27,11 @@ impl<'ctx> CodegenContext<'ctx> {
         self.struct_defs = defs;
     }
 
+    /// Record the source-level name of each struct key, for the derived debug rendering.
+    pub(crate) fn set_struct_written_names(&mut self, names: HashMap<String, String>) {
+        self.struct_written_names = names;
+    }
+
     /// The LLVM struct type for a named struct. Field *names* live in `struct_defs`
     /// (for index lookup); the layout itself comes from the type mapper, so both
     /// paths agree on one aggregate.

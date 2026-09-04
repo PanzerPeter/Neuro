@@ -133,6 +133,10 @@ struct Lowerer {
     newtypes: HashMap<String, ast_types::Type>,
     /// Structs that support `.clone()` (derive `Clone`, or `Copy` which implies it).
     clone_structs: HashSet<String>,
+    /// Structs that derive `PartialEq`. `==` / `!=` on one lowers to a plain binary
+    /// node the backend expands field-wise, NOT to a method call — a derived comparison
+    /// has no `eq` to dispatch to, which is what distinguishes it from an `impl`.
+    partial_eq_structs: HashSet<String>,
     /// Struct name → method name → mangled key into [`Self::functions`].
     impl_methods: HashMap<String, HashMap<String, String>>,
     /// Concrete `(trait name, implementing type name)` pairs with an
@@ -300,6 +304,7 @@ impl Lowerer {
             mono_enum_pending: Vec::new(),
             newtypes: HashMap::new(),
             clone_structs: HashSet::new(),
+            partial_eq_structs: HashSet::new(),
             impl_methods: HashMap::new(),
             trait_impls: HashSet::new(),
             traits: HashMap::new(),

@@ -309,17 +309,17 @@ are already done. Coordinate on an issue before starting a large one.
 **Every Phase 1 sub-phase (1A–1H) is complete**, including the last flagged 1C item —
 growable `String` — which shipped in v1.80.0 after the type was specified in the language
 spec. **Phase 2 — Tensor Foundation & MLIR** holds the next open items, and its first
-sub-phase is not tensor work: `2A — Standard I/O & Spec Stragglers` clears constructs the
-specification names that no Phase 1 item ever tracked. `print` / `println` shipped in
-v2.1.0, `.is_nan()` in v2.2.0, buffered standard output in v2.3.0, the codepoint-indexed
-`.char_slice(range)` in v2.4.0, `.enumerate()` on arrays and ranges in v2.5.0, and the
-`&[T]` / `&mut [T]` borrowed slice type in v2.6.0, associated types in trait
+sub-phase was not tensor work: `2A — Standard I/O & Spec Stragglers` cleared constructs the
+specification names that no Phase 1 item ever tracked, and **2A is now complete**. `print` /
+`println` shipped in v2.1.0, `.is_nan()` in v2.2.0, buffered standard output in v2.3.0, the
+codepoint-indexed `.char_slice(range)` in v2.4.0, `.enumerate()` on arrays and ranges in
+v2.5.0, and the `&[T]` / `&mut [T]` borrowed slice type in v2.6.0, associated types in trait
 declarations in v2.7.0, the `Trait<Assoc = T>` bound form in v2.8.0, and the
 `IntoIterator` / `Iterator` protocol in v2.9.0, the `.map()` / `.filter()` head
-adapters in v2.10.0, and the codepoint iterators `.chars()` / `.char_indices()` in
-v2.11.0; `@derive` argument validation with the `Debug` / `PartialEq` derives is next.
-Start at the top of 2A in the roadmap, and move to `2B — Tensor Core`
-(`Tensor<T, [...]>` static tensor type syntax) only once 2A is clear.
+adapters in v2.10.0, the codepoint iterators `.chars()` / `.char_indices()` in v2.11.0, and
+`@derive` argument validation with the `Debug` / `PartialEq` derives in v2.12.0.
+`2B — Tensor Core` (`Tensor<T, [...]>` static tensor type syntax) holds the next open
+item — start at the top of 2B in the roadmap.
 
 Nothing links `TokenKind` to the editor grammar, so any lexer change must also update
 `neuro-language-support/syntaxes/neuro.tmLanguage.json` by hand in the same commit.

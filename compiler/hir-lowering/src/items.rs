@@ -14,6 +14,7 @@ use crate::{EnumVariantData, Lowerer, LoweringError, MonoInstance};
 const DERIVE_ATTRIBUTE: &str = "derive";
 const COPY_TRAIT: &str = "Copy";
 const CLONE_TRAIT: &str = "Clone";
+const PARTIAL_EQ_TRAIT: &str = "PartialEq";
 
 impl Lowerer {
     /// Build the global symbol tables (structs, methods, functions, constants) in a
@@ -83,7 +84,7 @@ impl Lowerer {
         }
         self.structs.insert(def.name.name.clone(), fields);
 
-        let (mut copy, mut clone) = (false, false);
+        let (mut copy, mut clone, mut partial_eq) = (false, false, false);
         for attr in &def.attributes {
             if attr.name.name != DERIVE_ATTRIBUTE {
                 continue;
@@ -92,6 +93,7 @@ impl Lowerer {
                 match arg.name.as_str() {
                     COPY_TRAIT => copy = true,
                     CLONE_TRAIT => clone = true,
+                    PARTIAL_EQ_TRAIT => partial_eq = true,
                     _ => {}
                 }
             }
@@ -99,6 +101,9 @@ impl Lowerer {
         // `Copy` implies `Clone`: a Copy type is trivially cloneable.
         if copy || clone {
             self.clone_structs.insert(def.name.name.clone());
+        }
+        if partial_eq {
+            self.partial_eq_structs.insert(def.name.name.clone());
         }
         Ok(())
     }
@@ -108,18 +113,24 @@ impl Lowerer {
     /// recorded under the base name so instances can inherit `.clone()` support.
     fn register_generic_struct(&mut self, def: &StructDef) {
         let mut clone = false;
+        let mut partial_eq = false;
         for attr in &def.attributes {
             if attr.name.name != DERIVE_ATTRIBUTE {
                 continue;
             }
             for arg in &attr.args {
-                if matches!(arg.name.as_str(), COPY_TRAIT | CLONE_TRAIT) {
-                    clone = true;
+                match arg.name.as_str() {
+                    COPY_TRAIT | CLONE_TRAIT => clone = true,
+                    PARTIAL_EQ_TRAIT => partial_eq = true,
+                    _ => {}
                 }
             }
         }
         if clone {
             self.clone_structs.insert(def.name.name.clone());
+        }
+        if partial_eq {
+            self.partial_eq_structs.insert(def.name.name.clone());
         }
         self.generic_structs
             .insert(def.name.name.clone(), def.clone());
@@ -157,6 +168,9 @@ impl Lowerer {
 
             if self.clone_structs.contains(base) {
                 self.clone_structs.insert(mangled.clone());
+            }
+            if self.partial_eq_structs.contains(base) {
+                self.partial_eq_structs.insert(mangled.clone());
             }
 
             self.register_instance_methods(base, &mangled, &subst, &const_subst)?;
@@ -292,6 +306,7 @@ impl Lowerer {
         self.const_subst = saved_c;
         self.mono_items.push(HirItem::Struct(HirStruct {
             name: ms.mangled.clone(),
+            written_name: ms.base.clone(),
             fields: hir_fields,
             span: template.span,
         }));
@@ -809,6 +824,7 @@ impl Lowerer {
         }
         Ok(HirStruct {
             name: def.name.name.clone(),
+            written_name: def.name.name.clone(),
             fields,
             span: def.span,
         })

@@ -117,6 +117,15 @@ goes through `load_string_fatptr` (an owned `string` and a `&string` are already
 a `&mut string` is loaded through) and then `codegen_string_eq`. Detection keys off
 `left_ty.referent() == String`, covering owned, borrowed, and mixed operands.
 
+`@derive(PartialEq)` equality is expanded here too, in `codegen/expressions/struct_eq.rs`, and for
+the same reason — before the numeric coercion, which would ask an aggregate value for its integer
+variant. `codegen_derived_struct_eq` walks the struct's fields from `struct_defs`, comparing each
+with `icmp` / `fcmp` / `codegen_string_eq` and recursing into a nested struct, then `and`s the
+results: none of the comparisons can have a side effect, so an `and` chain is cheaper than the
+branching a short-circuit would need. A `&mut S` operand is loaded through first. `!=` negates.
+Recursion is bounded by `MAX_DERIVE_DEPTH`, insurance against a future self-referential layout.
+A hand-written `impl PartialEq` never arrives here — lowering turned it into a method call.
+
 `+` is concatenation, routed to `codegen_string_concat` before the numeric coercion: both operands
 are normalized with `load_string_fatptr`, a `len1 + len2` buffer is `malloc`'d, each operand's
 bytes are `memcpy`'d in (the second at a `gep i8` offset of `len1`), and a fresh `{ ptr, len }` is
@@ -145,7 +154,9 @@ does the prior value of a reassigned binding, matching the same limit the Drop A
 ## Struct ABI
 User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding —
 LLVM handles alignment). `TypeMapper` holds the layout table (`set_struct_fields`, fed by
-`CodegenContext::set_struct_defs`) beside `enum_words`, so `map_type` builds a named struct's
+`CodegenContext::set_struct_defs`) beside `enum_words`, and `struct_written_names` (fed by
+`set_struct_written_names`) maps each key to the name the programmer wrote — they differ only for
+a monomorphized generic instance, and only the derived debug rendering reads it. `map_type` builds a named struct's
 aggregate: a struct works as a free function's **parameter and return type** and as a field of
 another struct. That ABI is by value and direct — no `sret` — matching what methods already did
 for `&self`. `get_struct_llvm_type` delegates to `TypeMapper::struct_type`, so one definition of
@@ -565,6 +576,14 @@ hand-written binary digits), `format_layout.rs` (sign-aware field padding, debug
 encoding of a `char`), and `format_float.rs` (restoring the point `%g` drops, normalizing C's
 `e+00` exponent). Each is emitted once per module with internal linkage rather than inlined at
 every hole. `snprintf` is the one external declaration this adds.
+
+A `@derive(Debug)` struct hole renders through `render_struct_debug`, which frames the fields from
+`struct_defs` as `Name { field: value, ... }` and renders each one under the same `FormatKind::
+Debug` — which is what quotes a nested `string` or `char` and recurses into a nested struct. The
+name comes from `struct_written_names` (`HirStruct::written_name`, set by `set_struct_written_names`
+beside `set_struct_defs`), so a monomorphized instance prints `Wrapper`, not `Wrapper_g_i32`. A
+field-less struct renders as its bare name. The pieces reuse the same `PieceOwner` bookkeeping the
+enclosing literal uses, so a nested rendering's scratch buffers are freed once copied out.
 
 ## Closure ABI
 `codegen/closures.rs`. A closure value is a `{ fn_ptr, env_ptr }` fat pointer, and `map_type`

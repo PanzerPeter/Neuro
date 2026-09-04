@@ -4,7 +4,7 @@
 //! One of the declaration-kind modules under `declarations`; each adds methods
 //! to the same `impl TypeChecker` block.
 
-use super::{DROP_METHOD, DROP_TRAIT};
+use super::{DEBUG_TRAIT, DROP_METHOD, DROP_TRAIT, PARTIAL_EQ_TRAIT};
 use crate::errors::TypeError;
 use crate::type_checkers::collections::{HASHABLE_TRAIT, HASH_METHOD};
 use crate::type_checkers::operator_traits::{is_operator_trait, operator_trait_spec};
@@ -268,6 +268,35 @@ impl TypeChecker {
                     });
                 }
             }
+        }
+    }
+
+    /// Reject a struct that both derives a trait and declares an `impl` of it.
+    ///
+    /// The two produce different code — the derive compares fields inline, the impl
+    /// routes the operator through a method — and the operator dispatch consults the
+    /// impl first, so the derive would be silently outranked.
+    pub(crate) fn check_derive_impl_conflicts(&mut self, items: &[ast_types::Item]) {
+        let mut conflicts: Vec<(String, &'static str, shared_types::Span)> = Vec::new();
+        for item in items {
+            let ast_types::Item::Impl(def) = item else {
+                continue;
+            };
+            let Some(t) = &def.trait_name else { continue };
+            let struct_name = &def.type_name.name;
+            let derived = match t.name.as_str() {
+                PARTIAL_EQ_TRAIT if self.struct_is_partial_eq(struct_name) => PARTIAL_EQ_TRAIT,
+                DEBUG_TRAIT if self.struct_is_debug(struct_name) => DEBUG_TRAIT,
+                _ => continue,
+            };
+            conflicts.push((struct_name.clone(), derived, t.span));
+        }
+        for (struct_name, trait_name, span) in conflicts {
+            self.record_error(TypeError::DeriveConflictsWithImpl {
+                struct_name,
+                trait_name: trait_name.to_string(),
+                span,
+            });
         }
     }
 

@@ -49,8 +49,11 @@ Which specifiers a value accepts depends on its type, and a mismatch is a
 compile error rather than a surprising rendering: radix kinds (`d x X b o`)
 require an integer, fixed-point and scientific (`.N`, `e`) require a float, and
 the `+` flag requires a signed integer or a float. Interpolation renders
-integers, floats, `bool`, `char`, and `string`; aggregates await
-`@derive(Debug)`.
+integers, floats, `bool`, `char`, and `string` directly, and a struct that
+derives `Debug` under the `:?` specifier — `"{p:?}"` yields `Point { x: 1, y: 2 }`,
+recursing into a nested struct and quoting a `string` or `char` field. A struct
+has no display form, so the bare `"{p}"` is a compile error either way. Other
+aggregates (arrays, tuples, enums) do not render yet.
 
 Two limits are worth knowing. A hole may not contain a `"` string literal: the
 quote ends the enclosing literal, and the hole is reported as unterminated. And

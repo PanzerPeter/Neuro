@@ -55,6 +55,13 @@ pub(crate) struct TypeChecker {
     /// Names of structs that derive `Clone` — either explicitly via `@derive(Clone)`
     /// or implicitly because they derive `Copy`. A Clone struct supports `.clone()`.
     clone_structs: HashSet<String>,
+    /// Names of structs that derive `Debug` (`@derive(Debug)`). Only these render in a
+    /// `{x:?}` interpolation hole; every other aggregate stays unformattable.
+    debug_structs: HashSet<String>,
+    /// Names of structs that derive `PartialEq` (`@derive(PartialEq)`). `==` / `!=` on
+    /// one compares its fields; the operator does not route through a method, so this is
+    /// distinct from a hand-written `impl PartialEq` in `operator_binary_impls`.
+    partial_eq_structs: HashSet<String>,
     /// Methods per struct: struct_name → method_name → mangled function key in `functions`
     ///
     /// The mangled key follows the convention `StructName__methodName`.
@@ -276,6 +283,8 @@ impl TypeChecker {
             newtype_defs: HashMap::new(),
             copy_structs: HashSet::new(),
             clone_structs: HashSet::new(),
+            debug_structs: HashSet::new(),
+            partial_eq_structs: HashSet::new(),
             impl_methods: HashMap::new(),
             mut_self_methods: HashSet::new(),
             generic_funcs: HashMap::new(),
@@ -439,6 +448,63 @@ impl TypeChecker {
         self.clone_structs.contains(name)
     }
 
+    /// Whether a struct named `name` derives `Debug`.
+    pub(crate) fn struct_is_debug(&self, name: &str) -> bool {
+        self.debug_structs.contains(name)
+    }
+
+    /// Whether a struct named `name` derives `PartialEq`.
+    pub(crate) fn struct_is_partial_eq(&self, name: &str) -> bool {
+        self.partial_eq_structs.contains(name)
+    }
+
+    /// Whether a `{x:?}` hole can render `ty`, and so whether a `@derive(Debug)` struct
+    /// may hold it as a field.
+    ///
+    /// The scalars and `string` render directly; a struct renders only when it derives
+    /// `Debug` itself, because the rendering is generated field by field and has no
+    /// other way to reach inside one. A borrow is NOT peeled: a field holding one is a
+    /// stored address, and the rendering reads fields out of the aggregate directly.
+    pub(crate) fn is_debug_renderable(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Struct(name) => self.debug_structs.contains(name),
+            // A generic template's field stands for whatever the instantiation
+            // substitutes, so the template answers yes and each instance is validated
+            // against its concrete field types instead.
+            Type::Generic(_) | Type::Unknown => true,
+            // A newtype renders as its inner value. Cycles are rejected at
+            // registration, so this recursion terminates.
+            Type::Newtype(name) => self
+                .lookup_newtype_inner(name)
+                .cloned()
+                .map(|inner| self.is_debug_renderable(&inner))
+                .unwrap_or(false),
+            Type::Bool | Type::Char | Type::String => true,
+            other => other.is_numeric(),
+        }
+    }
+
+    /// Whether a derived `==` can compare `ty`, and so whether a `@derive(PartialEq)`
+    /// struct may hold it as a field.
+    ///
+    /// A hand-written `impl PartialEq` does NOT qualify: the derived comparison is
+    /// emitted inline over the fields and never calls a method, so a nested struct must
+    /// carry the derive too.
+    pub(crate) fn is_derived_comparable(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Struct(name) => self.partial_eq_structs.contains(name),
+            // See [`Self::is_debug_renderable`]: a template defers to its instances.
+            Type::Generic(_) | Type::Unknown => true,
+            Type::Newtype(name) => self
+                .lookup_newtype_inner(name)
+                .cloned()
+                .map(|inner| self.is_derived_comparable(&inner))
+                .unwrap_or(false),
+            Type::Bool | Type::Char | Type::String => true,
+            other => other.is_numeric() || other.is_half_float(),
+        }
+    }
+
     /// Look up a newtype's resolved inner type by name.
     pub(crate) fn lookup_newtype_inner(&self, name: &str) -> Option<&Type> {
         self.newtype_defs.get(name)
@@ -573,6 +639,7 @@ impl TypeChecker {
         for item in items {
             if let Item::Struct(def) = item {
                 self.validate_copy_derive(def);
+                self.validate_field_derives(def);
             }
         }
 
@@ -598,6 +665,11 @@ impl TypeChecker {
         // Pass 2b: operator-trait supertrait check, after all impls are
         // registered so `Comparable: PartialEq` is order-independent.
         self.check_operator_supertraits(items);
+
+        // Pass 2c: a derived trait and a hand-written impl of the same trait are two
+        // different `==`, and the operator dispatch would silently pick the impl. Runs
+        // after every impl is registered so the check is independent of source order.
+        self.check_derive_impl_conflicts(items);
 
         // Pass 3: register module-level constants so they are visible in function bodies
         // regardless of source order.
