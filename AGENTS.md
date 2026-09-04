@@ -13,6 +13,12 @@ For full architecture rules, coding standards, and contribution workflows, refer
 
 **Rules:**
 - New feature slices must depend *only* on `infrastructure/` crates. Never depend on other feature slices.
+- One pairing is allowlisted and only one: `syntax-parsing` depends on `lexical-analysis`, because
+  `parse()` calls `tokenize()` internally rather than making `neurc` orchestrate the two. It is
+  recorded in `compiler/syntax-parsing/CONTEXT.md` and enforced by name in
+  `compiler/neurc/tests/architecture_tests.rs`; a second one needs that test changed first.
+- A feature slice in another slice's `[dev-dependencies]` is fine — a test may build a real input
+  through the earlier stages. The architecture test reads `[dependencies]` only.
 - The CLI driver (`neurc`) is the *only* crate permitted to orchestrate and depend on all slices.
 - Keep every slice's `CONTEXT.md` up-to-date when entry points, public surfaces, or dependencies change.
 - Strictly no business logic in infrastructure crates (`shared-types`, `diagnostics`, `ast-types`, `source-location`, `project-config`, `neuro-hir`).

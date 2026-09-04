@@ -10,6 +10,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.12.3] - 2026-09-04
+
+### Fixed
+
+- **Documentation corrected against the compiler where the two had drifted.** An audit pass
+  found five claims in `docs/` that the compiler contradicts. `troubleshooting.md` listed named
+  arguments as unimplemented, though they have shipped and `examples/basics/named_arguments.nr`
+  compiles; it also gave the string method set without the codepoint APIs. `types.md` still
+  carried a "Remaining Phase 1 work" entry for the growable `String` buffer that shipped in
+  v1.80.0, while listing the same feature as landed twelve lines above it. `operators.md` said a
+  concatenated heap string is never freed "until `Drop` lands (1C)" — 1C landed, and the buffer
+  is freed wherever ownership is provable. `docs/README.md` pointed contributors at Phase 1
+  priorities. A stale `(Phase 1)` label on a binary-size answer is gone too.
+
+- **`project-config`'s `CONTEXT.md` no longer claims a consumer it does not have.** It stated
+  the crate is "read by `neurc` at startup to discover workspace settings". Nothing in the
+  workspace depends on it and no Rust file outside it names `project_config`; `neurc` takes its
+  input from the command line and never looks for a `neuro.toml`. The file now says so, and says
+  what shape the crate is reserving.
+
+- **The one allowlisted cross-slice dependency is documented where the rule is stated.**
+  `AGENTS.md` gave `@architect` the no-cross-slice rule with no exceptions, while
+  `syntax-parsing` depends on `lexical-analysis` by design — recorded in that slice's
+  `CONTEXT.md` and allowlisted by name in the architecture test. Stating the rule without its
+  single exception invites either a spurious violation report or a second exception added
+  without touching the test that gates them.
+
+- **A comment in the type checker named the wrong phase for tensors.** The `Type::Tensor`
+  rejection arm read "Phase 3, not supported in Phase 1"; tensors are Phase 2B and Phase 1 is
+  closed.
+
+
 ## [2.12.2] - 2026-09-04
 
 ### Fixed

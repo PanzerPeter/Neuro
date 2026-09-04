@@ -25,8 +25,11 @@ val b: string = "cd"
 val joined: string = a + &b                   // "abcd"; a and b still valid
 ```
 
-> The concatenated buffer is heap-allocated and not yet freed, runtime heap strings leak until
-> `Drop` / deterministic destruction lands (1C). See the alpha memory warning in the README.
+> The concatenated buffer is heap-allocated. Deterministic `Drop` landed with 1C, so it is
+> freed where the compiler can prove who owns it: a temporary the statement consumes, or a
+> binding whose initializer allocated it. One that escapes that analysis still leaks, notably a
+> heap `string` stored into a collection or a struct field, returned from a function, or
+> displaced by reassigning its binding. See the alpha memory warning in the README.
 
 ### Subtraction (`-`)
 

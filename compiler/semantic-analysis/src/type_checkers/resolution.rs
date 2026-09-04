@@ -284,7 +284,7 @@ impl TypeChecker {
                 })
             }
             ast_types::Type::Tensor { span, .. } => {
-                // Tensor types are Phase 3, not supported in Phase 1
+                // Tensor types are Phase 2B roadmap work; nothing accepts one yet.
                 self.record_error(TypeError::UnknownTypeName {
                     name: "Tensor".to_string(),
                     span: *span,
