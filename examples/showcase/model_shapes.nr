@@ -5,13 +5,15 @@
 //   tensor literal coercion + the construction helpers · structs holding
 //   tensor fields · an enum matched to pick an initializer · a trait with an
 //   `impl` per layer kind · a fixed-size array walked by `for`-in · string
-//   interpolation with the format mini-language · move semantics.
+//   interpolation with the format mini-language · tensor ownership: moves,
+//   `.clone()`, and the `.to(device)` transfer.
 //
 // Every weight below is a real buffer the binary carries or fills at startup;
-// a tensor is not `Copy`, so building a layer MOVES its weights into it. What a
-// tensor cannot do yet is be read back — indexing, arithmetic, and reductions are
-// later 2B items — so the report is built from the shapes, which are part of the
-// types, and the exit code is the total parameter count modulo 256.
+// a tensor is not `Copy`, so building a layer MOVES its weights into it, and a
+// second owner has to be asked for explicitly with `.clone()`. What a tensor
+// cannot do yet is be read back — indexing, arithmetic, and reductions are later
+// 2B items — so the report is built from the shapes, which are part of the types,
+// and the exit code is the total parameter count modulo 256.
 
 enum Init {
     Zeros,
@@ -85,9 +87,15 @@ impl Dense {
 }
 
 // A tensor parameter names its full shape, so a caller with any other shape is a
-// compile error rather than a runtime one.
+// compile error rather than a runtime one. Taking the table by value MOVES it.
 func embedding_rows(table: Tensor<f32, [3, 4]>) -> i32 {
     return 3
+}
+
+// The zero-cost sharing path: a borrow reads a tensor without consuming it, so the
+// caller still owns its table afterwards.
+func embedding_width(table: &Tensor<f32, [3, 4]>) -> i32 {
+    return 4
 }
 
 func main() -> i32 {
@@ -108,7 +116,12 @@ func main() -> i32 {
     // Without a tensor annotation this stays a plain `[i32; 3]`, indexable as one.
     val widths = [4, 8, 4]
 
-    mut total = embedding_rows(embeddings) * widths[0]
+    // A tensor is not `Copy`, and `embedding_rows` below takes one by value — so a
+    // second owner has to be asked for. `.clone()` is that request, and
+    // `.to(Device::CPU)` consumes the copy in turn, handing back the same tensor on
+    // the host, the only device this compiler can lower to today.
+    val on_host = embeddings.clone().to(Device::CPU)
+    mut total = embedding_rows(embeddings) * embedding_width(&on_host)
     println("embeddings [3, 4] via literal   = {total:>4} params")
 
     val projection_line = projection.describe()
@@ -122,6 +135,9 @@ func main() -> i32 {
     for width in widths {
         total = total + width
     }
+
+    // `on_host` is still ours: the borrow above read it without taking it.
+    total = total + embedding_width(&on_host)
 
     println("total parameters                = {total:>4}")
     return total % 256

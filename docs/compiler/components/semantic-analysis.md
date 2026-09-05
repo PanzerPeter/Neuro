@@ -394,6 +394,9 @@ What the checker still owes:
 - [x] **Tensor construction**: a nested array literal coerces under a tensor annotation, and
       the `Tensor::<T, [...]>::…` constructors are resolved against the turbofish or the
       surrounding expectation — see the slice's `CONTEXT.md` for the rules and diagnostics
+- [x] **Tensor ownership**: `.clone()` (nullary, auto-derefs a borrow, moves nothing) and
+      `.to(device)` (one `Device` argument, consumes the receiver, value receivers only)
+      resolve as intrinsics on a tensor receiver
 - [ ] **Shape checking beyond identity**: broadcasting and shape generics; today two tensors
       match only when their elements and every extent are equal
 - [ ] **Broadcasting**: NumPy-style broadcasting rules

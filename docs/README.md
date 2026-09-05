@@ -81,8 +81,11 @@ Key design goals:
   fixed-width scalar element; a shape or element mismatch is a compile error. Values are
   built from a nested array literal under a `Tensor<...>` annotation, or with
   `Tensor::<T, [...]>::zeros()` / `ones()` / `identity()` / `random_normal(mean:, std:)` /
-  `scalar()` / `from()`. A tensor moves rather than copies. Reading one back — indexing,
-  arithmetic, reductions — is later work
+  `scalar()` / `from()`. A tensor owns its buffer and moves rather than copies: `.clone()`
+  is the explicit copy, `&Tensor<T, S>` shares one without consuming it, and
+  `.to(device)` consumes it and hands it back on the requested `Device` (the host is the
+  only one this compiler can lower to). Reading one back — indexing, arithmetic,
+  reductions — is later work
 
 ### Variables
 

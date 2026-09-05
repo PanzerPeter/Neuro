@@ -425,3 +425,117 @@ func main() -> i32 {
     );
     assert!(errors.is_empty(), "shadowed Tensor; got {errors:?}");
 }
+
+/// The `Device` enum these ownership tests need. The unit-test harness type-checks bare
+/// source without the prelude, so the program that would get it implicitly has to declare
+/// it — which is also what a `@no_prelude` module does.
+const DEVICE_DECL: &str = r#"
+enum Device {
+    CPU,
+    GPU(i32)
+}
+"#;
+
+fn errors_with_device(body: &str) -> Vec<TypeError> {
+    semantic_errors(&format!("{DEVICE_DECL}{body}"))
+}
+
+#[test]
+fn clone_does_not_move_the_tensor() {
+    let errors = errors_with_device(
+        r#"
+func take(t: Tensor<f32, [2, 2]>) -> i32 { return 1 }
+
+func main() -> i32 {
+    val a = Tensor::<f32, [2, 2]>::identity()
+    val b = a.clone()
+    return take(a) + take(b)
+}
+"#,
+    );
+    assert!(errors.is_empty(), "clone must not move; got {errors:?}");
+}
+
+/// Cloning through a borrow is the copy path for a tensor someone else owns, so it has to
+/// hand back an owned `Tensor<T, S>` rather than the borrow it was called on.
+#[test]
+fn clone_through_a_borrow_yields_an_owned_tensor() {
+    let errors = errors_with_device(
+        r#"
+func take(t: Tensor<f32, [2, 2]>) -> i32 { return 1 }
+
+func copy_of(t: &Tensor<f32, [2, 2]>) -> i32 {
+    return take(t.clone())
+}
+
+func main() -> i32 {
+    return 0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "borrowed clone; got {errors:?}");
+}
+
+#[test]
+fn a_device_transfer_moves_the_receiver() {
+    let errors = errors_with_device(
+        r#"
+func take(t: Tensor<f32, [2, 2]>) -> i32 { return 1 }
+
+func main() -> i32 {
+    val a = Tensor::<f32, [2, 2]>::identity()
+    val moved = a.to(Device::CPU)
+    return take(a)
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UseOfMovedValue { .. })),
+        "`.to` consumes the tensor; got {errors:?}"
+    );
+}
+
+/// A borrow cannot be consumed, so `.to` is not offered on one — the alternative would be
+/// moving a tensor out from under whoever owns it.
+#[test]
+fn a_device_transfer_is_rejected_on_a_borrow() {
+    let errors = errors_with_device(
+        r#"
+func send(t: &Tensor<f32, [2, 2]>) -> i32 {
+    val moved = t.to(Device::CPU)
+    return 0
+}
+
+func main() -> i32 {
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::MethodNotFound { .. })),
+        "`.to` needs a value receiver; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_device_transfer_requires_a_device_argument() {
+    let errors = errors_with_device(
+        r#"
+func main() -> i32 {
+    val a = Tensor::<f32, [2, 2]>::identity()
+    val moved = a.to(7)
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })),
+        "`.to` takes a Device; got {errors:?}"
+    );
+}

@@ -8,7 +8,7 @@ use neuro_hir::{HirExpr, HirExprKind, HirFieldInit, HirType};
 
 use super::{
     CHARS_METHOD, CHARS_OFFSET_FIELD, CHARS_SOURCE_FIELD, CHARS_STRUCT, CHAR_AT_METHOD,
-    CLONE_METHOD, IO_BUILTINS, PANIC_BUILTINS, SLICE_METHOD,
+    CLONE_METHOD, DEVICE_TYPE_NAME, IO_BUILTINS, PANIC_BUILTINS, SLICE_METHOD, TENSOR_TO_METHOD,
 };
 use crate::{is_full_float, is_integer, Lowerer, LoweringError};
 
@@ -622,6 +622,21 @@ impl Lowerer {
                 let args = self.lower_args(args, std::slice::from_ref(recv))?;
                 let result = self.option_of(recv.clone())?;
                 Ok((args, result))
+            }
+            // `tensor.clone()` — nullary, and the same tensor type as the receiver.
+            // Auto-derefs `&Tensor<T, S>`, so the result is the referent, not the borrow.
+            (tensor @ HirType::Tensor { .. }, CLONE_METHOD) => {
+                let cloned = tensor.clone();
+                Ok((self.lower_args(args, &[])?, cloned))
+            }
+            // `tensor.to(device)` — one `Device` argument, and the receiver's own type
+            // back. A borrow cannot be consumed, so this matches `recv` rather than the
+            // referent, exactly as the type checker does.
+            (HirType::Tensor { .. }, TENSOR_TO_METHOD)
+                if !matches!(recv, HirType::Reference { .. }) =>
+            {
+                let device = HirType::Enum(DEVICE_TYPE_NAME.to_string());
+                Ok((self.lower_args(args, &[device])?, recv.clone()))
             }
             _ => Err(LoweringError::UnresolvedCall {
                 target: format!("{}.{}", recv, method),

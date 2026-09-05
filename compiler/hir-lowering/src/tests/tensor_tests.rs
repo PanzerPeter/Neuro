@@ -186,3 +186,61 @@ func main() -> i32 {
         }
     );
 }
+
+/// The ownership surface keeps the receiver's tensor type: `.clone()` hands back a tensor
+/// even when it was called through a borrow, and `.to()` hands back the tensor it consumed.
+#[test]
+fn the_ownership_methods_keep_the_receivers_tensor_type() {
+    let program = lower(
+        r#"
+enum Device {
+    CPU,
+    GPU(i32)
+}
+
+func copy_of(t: &Tensor<f32, [2, 2]>) -> i32 {
+    val copied = t.clone()
+    return 0
+}
+
+func main() -> i32 {
+    val a = Tensor::<f32, [2, 2]>::identity()
+    val here = a.to(Device::CPU)
+    return 0
+}
+"#,
+    );
+    let tensor = HirType::Tensor {
+        element: Box::new(HirType::F32),
+        shape: vec![2, 2],
+    };
+    let copied = binding_init(function_body(&program, "copy_of"), "copied");
+    assert_eq!(copied.ty, tensor);
+    let here = binding_init(function_body(&program, "main"), "here");
+    assert_eq!(here.ty, tensor);
+}
+
+/// `.to()` carries its device through as the prelude enum, so the backend has a
+/// discriminant to guard on rather than an untyped argument.
+#[test]
+fn a_device_transfer_lowers_its_argument_as_the_device_enum() {
+    let program = lower(
+        r#"
+enum Device {
+    CPU,
+    GPU(i32)
+}
+
+func main() -> i32 {
+    val a = Tensor::<f32, [2]>::zeros()
+    val here = a.to(Device::CPU)
+    return 0
+}
+"#,
+    );
+    let here = binding_init(function_body(&program, "main"), "here");
+    let HirExprKind::Call { args, .. } = &here.kind else {
+        panic!("`.to` should lower to a call, got {:?}", here.kind);
+    };
+    assert_eq!(args[0].ty, HirType::Enum("Device".to_string()));
+}

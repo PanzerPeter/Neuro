@@ -162,3 +162,13 @@ impl Iterator for Chars {
         Option::Some(scalar)
     }
 }
+
+// The device a tensor's buffer lives on, and the argument `tensor.to(device)` takes.
+//
+// `CPU` is declared first because it is the only device the compiler can lower to
+// today: the backend reads its discriminant to decide whether a transfer is a no-op
+// or an abort, so reordering these variants changes what `.to()` accepts.
+export enum Device {
+    CPU,
+    GPU(i32)
+}

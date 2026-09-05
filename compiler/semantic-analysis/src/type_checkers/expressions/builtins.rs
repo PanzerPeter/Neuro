@@ -3,8 +3,9 @@
 // Reached from the `check_expr` dispatch in this module's `mod.rs`. Every file
 // here adds methods to the same `impl TypeChecker` block.
 
-use super::TypeChecker;
+use super::{TypeChecker, CLONE_METHOD};
 use crate::errors::TypeError;
+use crate::type_checkers::tensors::DEVICE_TYPE_NAME;
 use crate::types::{CollectionKind, Type};
 use ast_types::Expr;
 use shared_types::Span;
@@ -21,6 +22,9 @@ pub(crate) const CHARS_METHOD: &str = "chars";
 /// The prelude-private decode intrinsic `Chars::next` steps with: the Unicode scalar
 /// whose UTF-8 encoding begins at a byte offset.
 pub(crate) const CHAR_AT_METHOD: &str = "__char_at";
+
+/// The consuming device transfer `tensor.to(device)`.
+pub(crate) const TENSOR_TO_METHOD: &str = "to";
 
 impl TypeChecker {
     /// Resolve a compiler-known intrinsic method on a builtin (non-struct) receiver.
@@ -178,6 +182,31 @@ impl TypeChecker {
             (_, "checked_add" | "checked_sub" | "checked_mul") if recv.is_integer() => {
                 self.check_unary_int_intrinsic_arg(recv, args, call_span);
                 Some(self.option_of(recv.clone(), call_span))
+            }
+            // A tensor owns its buffer and is not `Copy`, so `.clone()` is the explicit
+            // deep-copy path out of move-by-default — the opt-out the use-after-move
+            // diagnostic already points at. Auto-derefs `&Tensor<T, S>`: copying through
+            // a borrow is how a shared weight is duplicated without moving it out of
+            // whatever owns it.
+            (Type::Tensor { .. }, CLONE_METHOD) => {
+                if !args.is_empty() {
+                    self.record_error(TypeError::ArgumentCountMismatch {
+                        expected: 0,
+                        found: args.len(),
+                        span: call_span,
+                    });
+                }
+                Some(recv.referent().clone())
+            }
+            // `.to(device)` CONSUMES the tensor: it hands back a tensor whose buffer lives
+            // on the requested device and releases the source one, so the receiver is
+            // moved rather than borrowed. Matched on `recv` rather than the referent
+            // because a borrow cannot be consumed — `(&t).to(...)` falls through to
+            // `MethodNotFound` instead of quietly moving out of someone else's tensor.
+            (Type::Tensor { .. }, TENSOR_TO_METHOD) if !matches!(recv, Type::Reference { .. }) => {
+                self.check_call_args(args, &[Type::Enum(DEVICE_TYPE_NAME.to_string())], call_span);
+                self.record_move(object);
+                Some(recv.clone())
             }
             _ => None,
         }

@@ -10,6 +10,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.15.0] - 2026-09-05
+
+### Added
+
+- **Tensor ownership and move semantics (Phase 2B, §4.1).** A tensor already moved rather
+  than copied; what it lacked was any way to opt out of that or to say where its buffer
+  should live. Both now exist.
+  - `tensor.clone()` yields an independent tensor of the same type and leaves the receiver
+    usable. It auto-derefs a borrow, so `t.clone()` on a `&Tensor<T, S>` hands back an
+    *owned* tensor — the copy path for a tensor someone else holds. Until now the
+    use-after-move diagnostic advised a `.clone()` that tensors did not have.
+  - `tensor.to(device)` consumes the tensor and returns it on the requested device. Its
+    argument is `Device`, a new prelude enum (`CPU`, `GPU(i32)`). Calling it on a
+    `&Tensor<T, S>` is rejected: a borrow cannot be consumed.
+  - The host is the only device this compiler lowers to, so `.to(Device::CPU)` is the move
+    itself and copies nothing. A transfer to any other device aborts at run time with a
+    diagnostic rather than silently leaving the buffer on the host — the device is an
+    ordinary runtime value, so that is where the mismatch can be caught.
+
+### Note
+
+- BUG-018 (a tensor over 32768 elements cannot be compiled at `-O 0`) stays open. Its fix
+  sketch attributed the underlying representation change — an owning heap or arena buffer,
+  `llvm.memcpy` copies, a drop with move-out suppression, and `sret` returns — jointly to
+  this item and the pool allocator. That work is about how a tensor buffer is *stored*, not
+  about who owns it, and none of it shipped here; `docs/BUGS.md` now attributes it to the
+  pool-allocator item alone.
+
+
 ## [2.14.1] - 2026-09-05
 
 ### Fixed

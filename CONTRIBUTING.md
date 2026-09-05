@@ -323,9 +323,11 @@ syntax `Tensor<T, [...]>` — shipped in v2.13.0 as a *type-level* landing, and 
 tensors a runtime representation: a nested array literal coerces under a `Tensor<...>`
 annotation, and `Tensor::<T, [...]>::zeros()` / `ones()` / `identity()` /
 `random_normal(mean:, std:)` / `scalar()` / `from()` build one where no annotation reaches.
-A tensor can now be built, bound, moved, passed, returned, and stored in a struct — but not
-read back: ownership and `.to(device)`, DLPack, in-place compound assignment, slicing and
-indexing, and the reductions are all still open. Start at the top of 2B in the roadmap.
+v2.15.0 then shipped the ownership surface: `.clone()` for a second owner, `&Tensor<T, S>`
+for zero-cost sharing, and the consuming `.to(device)` transfer over the prelude's `Device`
+enum. A tensor can now be built, bound, moved, cloned, passed, returned, and stored in a
+struct — but not read back: DLPack, in-place compound assignment, slicing and indexing, and
+the reductions are all still open. Start at the top of 2B in the roadmap.
 
 Nothing links `TokenKind` to the editor grammar, so any lexer change must also update
 `neuro-language-support/syntaxes/neuro.tmLanguage.json` by hand in the same commit.

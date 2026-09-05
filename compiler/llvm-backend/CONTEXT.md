@@ -252,6 +252,17 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   `StructName__clone` exists, it passes `BuiltinMethod::StructClone`. Semantic analysis already
   verified the `Clone` derive. Lowers to the receiver's aggregate value — faithful while
   stack-allocated, must recurse into heap-owning fields later.
+- `tensor.clone()` → `BuiltinMethod::TensorClone` → `codegen_tensor_clone`
+  (`expressions/tensors.rs`). A tensor value *is* its buffer, so copying the aggregate copies
+  every element; a `&Tensor` receiver arrives as a pointer and is loaded through first. Must
+  duplicate the allocation once a tensor buffer stops being a value.
+- `tensor.to(device)` → `BuiltinMethod::TensorTo` → `codegen_tensor_to` (same file). The device
+  argument is the prelude `Device` enum; its tag (`extractvalue` field 0) is compared against
+  `enum_variant_tag("Device", "CPU")` and routed through `codegen_guard_or_panic`, so a transfer
+  to any other device aborts with a diagnostic rather than silently leaving the buffer on the
+  host. A host transfer is the move itself and emits no copy: the receiver's value is the result.
+  `resolve_builtin_method` matches `.to` on the receiver type rather than its referent, so a
+  `&Tensor` resolves to nothing — a borrow cannot be consumed.
 - Integer intrinsics — `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, `.shr(n)` — resolve
   on any integer receiver to its own type and lower in `codegen_int_intrinsic`. Both operands are
   coerced to the receiver int via `coerce_if_needed` (an argument literal may arrive widened to
@@ -335,8 +346,9 @@ and `Reference(Slice)` (the two-word `slice_ref_type()` struct, mutable or not).
 `DynObject` or `Slice` is rejected as unsized. `Type::Tensor { element, shape }` maps to a flat
 row-major `[d0*d1*... x T]` aggregate, passed and returned by value like `[T; N]`: a statically
 shaped tensor carries its whole shape in its type, so the value is exactly its buffer. The
-rank-0 tensor is `[1 x T]` — the empty product — not a zero-length array. Host memory only;
-device buffers and DLPack handles arrive with the ownership and DLPack items.
+rank-0 tensor is `[1 x T]` — the empty product — not a zero-length array. Host memory only:
+`.to(device)` guards on the requested device rather than moving anything, and DLPack handles
+arrive with the DLPack item.
 
 Being a first-class value is also the representation's limit. Copying a tensor is a `load`
 and a `store` of the whole buffer; `-O1`'s SROA rewrites that pair into a `memcpy`, but at

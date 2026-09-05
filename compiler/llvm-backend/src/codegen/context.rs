@@ -35,6 +35,11 @@ pub(crate) enum BuiltinMethod {
     StringCharAt,
     /// `struct.clone()` → a copy of the struct aggregate value, for `@derive(Clone)` types.
     StructClone,
+    /// `tensor.clone()` → a copy of the tensor buffer aggregate.
+    TensorClone,
+    /// `tensor.to(device)` → the receiver, after a runtime guard that the requested
+    /// device is the host.
+    TensorTo,
     /// `int.wrapping_add(rhs)` → two's-complement wrapping add.
     WrappingAdd,
     /// `int.wrapping_sub(rhs)` → two's-complement wrapping subtract.
@@ -81,6 +86,9 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<Builti
     // codegen decide whether to load through the reference.
     match (recv.referent(), method) {
         (Type::String, "len") => Some(BuiltinMethod::StringLen),
+        // A tensor is not `Copy`, so `.clone()` is its explicit deep copy. Auto-derefs
+        // `&Tensor<T, S>` the way the string and struct clones do.
+        (Type::Tensor { .. }, "clone") => Some(BuiltinMethod::TensorClone),
         (Type::String, "clone") => Some(BuiltinMethod::StringClone),
         (Type::String, "slice") => Some(BuiltinMethod::StringSlice),
         (Type::String, "char_slice") => Some(BuiltinMethod::StringCharSlice),
@@ -101,6 +109,11 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<Builti
             "slice",
         ) => Some(BuiltinMethod::SequenceSlice),
         (Type::Slice(_), "len") => Some(BuiltinMethod::SliceLen),
+        // `.to(device)` consumes the tensor, so it needs a value receiver: a borrow is
+        // matched by `recv` here and resolves to nothing, exactly as in the frontend.
+        (Type::Tensor { .. }, "to") if !matches!(recv, Type::Reference { .. }) => {
+            Some(BuiltinMethod::TensorTo)
+        }
         // `.is_nan()` needs a value receiver too, and is spelled out over `F32`/`F64`
         // rather than `Type::is_float`: that backend predicate also admits `f16`/`bf16`,
         // whose scalar contract is storage and casts only.
@@ -638,6 +651,34 @@ mod tests {
             resolve_builtin_method(&recv, "char_slice"),
             Some(BuiltinMethod::StringCharSlice)
         ));
+    }
+
+    /// `.clone()` reaches a tensor through a borrow, `.to()` deliberately does not: a
+    /// borrowed tensor cannot be consumed, and the backend has to reach the same verdict
+    /// the type checker did.
+    #[test]
+    fn tensor_ownership_methods_resolve() {
+        let tensor = Type::Tensor {
+            element: Box::new(Type::F32),
+            shape: vec![2, 2],
+        };
+        let borrowed = Type::Reference {
+            inner: Box::new(tensor.clone()),
+            mutable: false,
+        };
+        assert!(matches!(
+            resolve_builtin_method(&tensor, "clone"),
+            Some(BuiltinMethod::TensorClone)
+        ));
+        assert!(matches!(
+            resolve_builtin_method(&borrowed, "clone"),
+            Some(BuiltinMethod::TensorClone)
+        ));
+        assert!(matches!(
+            resolve_builtin_method(&tensor, "to"),
+            Some(BuiltinMethod::TensorTo)
+        ));
+        assert!(resolve_builtin_method(&borrowed, "to").is_none());
     }
 
     #[test]

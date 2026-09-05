@@ -35,6 +35,16 @@ const XORSHIFT_C: u64 = 17;
 const MANTISSA_BITS: u64 = 53;
 const TWO_PI: f64 = std::f64::consts::TAU;
 
+/// The prelude enum `.to(device)` takes, and the one variant this backend can lower a
+/// transfer to. Any other device is a run-time abort rather than a silent no-op: the
+/// buffer would still be host memory, and a program that believed otherwise would be
+/// wrong about where its compute runs.
+const DEVICE_ENUM: &str = "Device";
+const DEVICE_HOST_VARIANT: &str = "CPU";
+const DEVICE_UNAVAILABLE: &str =
+    "tensor transfer to a non-host device requires the GPU backend, which this compiler \
+     does not have yet";
+
 fn llvm_err(e: inkwell::builder::BuilderError) -> CodegenError {
     CodegenError::LlvmError(e.to_string())
 }
@@ -243,6 +253,67 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder
             .build_load(buffer_ty, buffer, "tensor.rand.value")
             .map_err(llvm_err)
+    }
+
+    /// Lower `tensor.clone()`: a copy of the buffer aggregate.
+    ///
+    /// A tensor value *is* its buffer — there is no separate heap block to duplicate — so
+    /// copying the aggregate copies every element. A `&Tensor<T, S>` receiver arrives as a
+    /// pointer and is loaded through first, which is what makes cloning a borrowed weight
+    /// yield an independent tensor rather than the borrow.
+    pub(crate) fn codegen_tensor_clone(
+        &mut self,
+        recv_ty: &Type,
+        receiver: &HirExpr,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let value = self.codegen_expr(receiver)?;
+        let BasicValueEnum::PointerValue(ptr) = value else {
+            return Ok(value);
+        };
+        let buffer_ty = self.get_any_llvm_type(recv_ty.referent())?;
+        self.builder
+            .build_load(buffer_ty, ptr, "tensor.clone")
+            .map_err(llvm_err)
+    }
+
+    /// Lower `tensor.to(device)`: the consuming device transfer.
+    ///
+    /// Every buffer this backend can build is host memory, so a transfer to the host is
+    /// the move itself and costs nothing. A transfer anywhere else has no lowering at all,
+    /// and the device is an ordinary run-time value, so the mismatch is caught where the
+    /// value is known — a guard on the discriminant that aborts with a diagnostic rather
+    /// than letting the program run somewhere it did not ask for.
+    pub(crate) fn codegen_tensor_to(
+        &mut self,
+        receiver: &HirExpr,
+        args: &[HirExpr],
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let tensor = self.codegen_expr(receiver)?;
+        let device = args.first().ok_or_else(|| {
+            CodegenError::InternalError("`.to` reached codegen without a device".to_string())
+        })?;
+        let BasicValueEnum::StructValue(device_val) = self.codegen_expr(device)? else {
+            return Err(CodegenError::InternalError(
+                "`.to` device argument is not an enum value".to_string(),
+            ));
+        };
+        let tag = self
+            .builder
+            .build_extract_value(device_val, 0, "device.tag")
+            .map_err(llvm_err)?
+            .into_int_value();
+        let host = self.enum_variant_tag(DEVICE_ENUM, DEVICE_HOST_VARIANT)?;
+        let is_host = self
+            .builder
+            .build_int_compare(
+                IntPredicate::EQ,
+                tag,
+                self.context.i32_type().const_int(host as u64, false),
+                "device.is_host",
+            )
+            .map_err(llvm_err)?;
+        self.codegen_guard_or_panic(is_host, DEVICE_UNAVAILABLE, device.span.start)?;
+        Ok(tensor)
     }
 
     /// An LLVM constant array over `values`, which must themselves be constants.

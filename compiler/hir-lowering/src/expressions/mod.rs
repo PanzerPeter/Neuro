@@ -34,6 +34,11 @@ const IO_BUILTINS: &[&str] = &["print", "println"];
 /// The deep-copy method shared by `string` and `Clone`-deriving structs.
 const CLONE_METHOD: &str = "clone";
 
+/// The consuming device transfer `tensor.to(device)`, and the prelude enum naming the
+/// device it moves the buffer to.
+const TENSOR_TO_METHOD: &str = "to";
+const DEVICE_TYPE_NAME: &str = "Device";
+
 /// The borrowing sub-range method on every contiguous container.
 const SLICE_METHOD: &str = "slice";
 
