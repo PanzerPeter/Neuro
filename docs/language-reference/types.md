@@ -20,8 +20,8 @@ expression already carries the type the checker resolved for it.
 - Implemented: generic functions, structs, and impls, monomorphized
 - Implemented: traits, operator traits, and `impl` / `dyn` dispatch
 - Implemented: enums, generic enums, `Option<T>` / `Result<T, E>`, and the standard collections
-- Type-level only: statically shaped tensors `Tensor<T, [d0, ...]>` — the annotation
-  type-checks, but no tensor value can be constructed yet
+- Implemented: statically shaped tensors `Tensor<T, [d0, ...]>` — annotations, literal
+  coercion, the construction helpers, and the ownership surface (`.clone()`, `.to(device)`)
 
 ## Primitive Types
 
@@ -1149,8 +1149,9 @@ Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
 
 ### Phase 2, Tensors
 
-- Type-level: static tensor types `Tensor<f32, [3, 3]>` (see [Tensor Types](#tensor-types))
-- Planned: tensor literals and constructors
+- Implemented: static tensor types `Tensor<f32, [3, 3]>`, literal coercion, the
+  construction helpers, and tensor ownership (see [Tensor Types](#tensor-types))
+- Planned: reading a tensor back — indexing, slicing, arithmetic, and reductions
 - Planned: broadcasting rules
 - Planned: shape generics, named dimensions, and dynamic shapes
 
@@ -1539,6 +1540,56 @@ func twice(t: Tensor<f32, [2, 2]>) {
     consume(t)                            // error: use of moved value 't'
 }
 ```
+
+`.clone()` is the explicit way to get a second owner. It takes no arguments, yields a
+tensor of the same type, and leaves the receiver usable — including when it is called
+through a borrow, where the result is an owned tensor rather than the borrow.
+
+```neuro
+func consume(t: Tensor<f32, [2, 2]>) { }
+
+func read(t: &Tensor<f32, [2, 2]>) -> i32 { return 2 }
+
+func twice(t: Tensor<f32, [2, 2]>) {
+    consume(t.clone())
+    consume(t)                            // fine: the clone was consumed, not `t`
+}
+
+func borrowed(t: &Tensor<f32, [2, 2]>) {
+    consume(t.clone())                    // an owned copy of someone else's tensor
+    read(t)                               // the borrow was never consumed
+}
+```
+
+### Device transfer
+
+`.to(device)` **consumes** the tensor and returns one whose buffer lives on the requested
+device. Its argument is the prelude enum `Device`:
+
+```neuro
+enum Device {
+    CPU,
+    GPU(i32)                              // GPU index
+}
+```
+
+```neuro
+func main() -> i32 {
+    val a = Tensor::<f32, [2, 2]>::identity()
+    val here = a.to(Device::CPU)
+    return 0                              // `a` is moved: using it here is an error
+}
+```
+
+To keep the source, clone first: `t.clone().to(Device::CPU)`.
+
+A borrow cannot be consumed, so `.to` is not offered on `&Tensor<T, S>` — calling it there
+reports that the borrowed type has no such method.
+
+The host is the only device this compiler can lower to today; the GPU backend is later
+work. `.to(Device::CPU)` is therefore the move itself and copies nothing, and a transfer to
+any other device aborts at run time with a diagnostic rather than quietly leaving the
+buffer on the host.
 
 `Tensor` is a prelude name rather than a keyword, so a module declaring its own
 `Tensor` shadows it; a shape argument is what marks a type application as a tensor, and

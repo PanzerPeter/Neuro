@@ -129,7 +129,7 @@ showcase/generic_toolkit.nr 85
 showcase/inventory_ledger.nr 181
 showcase/job_queue.nr       139
 showcase/log_builder.nr     64
-showcase/model_shapes.nr    84
+showcase/model_shapes.nr    88
 showcase/mutable_borrows.nr 47
 showcase/num_algorithms.nr  33
 showcase/perceptron.nr      8

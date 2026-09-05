@@ -116,9 +116,12 @@ is `MAX_O0_TENSOR_ELEMENTS` in `compiler/llvm-backend/src/type_mapping.rs`.
 **Fix sketch** — the cap is a symptom; the representation is the defect. A tensor buffer
 has to stop being a first-class LLVM value: give it storage of its own and copy it with
 `llvm.memcpy`, which needs an owning buffer (heap or arena), a drop at scope exit with
-move-out suppression, and `sret` for returning one by value. That is the work the `Tensor
-ownership and move semantics` and pool-allocator roadmap items already carry, so the cap
-should be deleted when they land rather than patched around before them.
+move-out suppression, and `sret` for returning one by value. The `Tensor ownership and
+move semantics` roadmap item has since landed and did **not** change the representation —
+it shipped the ownership *surface* (`.clone()`, `.to(device)`) on the existing by-value
+buffer, which is orthogonal to how that buffer is stored. The storage change is the
+pool-allocator item's work, and the cap should be deleted when it lands rather than
+patched around before it.
 
 ## Taking one of these on
 

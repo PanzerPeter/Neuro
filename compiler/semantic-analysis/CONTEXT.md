@@ -563,6 +563,14 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   assignment and on being passed. `Tensor` is a prelude name a module may shadow, so the
   shape-less spelling `Tensor<f32>` reaches the `Type::Generic` arm, where an unshadowed
   `Tensor` reports `TensorShapeRequired` rather than `NotAGenericType`.
+- **Tensor ownership, in `type_checkers/expressions/builtins.rs`.** Two intrinsic methods sit on
+  a tensor receiver. `.clone()` is nullary, auto-derefs `&Tensor<T, S>` (the result is the
+  referent, so cloning through a borrow yields an owned tensor), and moves nothing — it is the
+  opt-out `UseOfMovedValue`'s own text points at. `.to(device)` takes one argument of the prelude
+  enum `Device` (`DEVICE_TYPE_NAME` in `type_checkers/tensors.rs`), returns the receiver's type,
+  and calls `record_move` on the receiver: it consumes the tensor. It matches on `recv` rather
+  than the referent, so a `&Tensor` receiver falls through to `MethodNotFound` — a borrow cannot
+  be consumed.
 - **Tensor values, in `type_checkers/tensors.rs`.** Two ways in, one checker.
   An array literal reaching `check_array_literal_expr` with a `Type::Tensor` expectation is a
   *tensor* literal: `check_tensor_literal` walks the annotation's shape and the nesting

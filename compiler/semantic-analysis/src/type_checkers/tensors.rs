@@ -16,6 +16,10 @@ use shared_types::{Identifier, Span};
 /// `enum_defs` first and stand aside when it is taken.
 pub(crate) const TENSOR_TYPE_NAME: &str = "Tensor";
 
+/// The prelude enum naming the device a tensor's buffer lives on, and the one argument
+/// `tensor.to(device)` accepts.
+pub(crate) const DEVICE_TYPE_NAME: &str = "Device";
+
 /// A tensor filled with one value everywhere.
 const CTOR_ZEROS: &str = "zeros";
 const CTOR_ONES: &str = "ones";

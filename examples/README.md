@@ -44,7 +44,9 @@ isolation:
   with structs holding tensor fields, an enum matched to pick an initializer, a trait
   with an `impl` per layer kind, a fixed-size array walked by `for`-in, and string
   interpolation with the format mini-language. A tensor is not `Copy`, so each `match`
-  arm's buffer *moves* into the struct that keeps it. Exit `84`.
+  arm's buffer *moves* into the struct that keeps it, `.clone()` is what buys a second
+  owner, `&Tensor` reads one without consuming it, and `.to(Device::CPU)` is the
+  consuming device transfer. Exit `88`.
 - [`showcase/perceptron.nr`](showcase/perceptron.nr) — a two-neuron feed-forward
   pass. Structs + `impl` (method calling method) + `f64` math + ReLU branch +
   `while` loop + `as` cast. Exit `8`.

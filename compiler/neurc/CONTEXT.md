@@ -73,8 +73,8 @@ root file's `@no_prelude`, and the merged namespace is flat, so the prelude's de
 either in the whole program or absent from all of it.
 
 `prelude.nr` currently declares `Option<T>`, `Result<T, E>`, the `OrderedF32` / `OrderedF64`
-validating wrappers, the `Iterator` / `IntoIterator` protocol traits, and `Chars`, the codepoint
-iterator `string.chars()` hands out. The wrappers exist so
+validating wrappers, the `Iterator` / `IntoIterator` protocol traits, `Chars`, the codepoint
+iterator `string.chars()` hands out, and `Device`, the enum `tensor.to(device)` takes. The wrappers exist so
 an ordered map can be keyed on a float: IEEE-754 `<` is a partial order, so a raw float key
 could be inserted and never found again — hence `@derive(Copy, Clone)`, a `new` constructor
 that panics on NaN, and `PartialEq` + `Comparable` impls. They deliberately do **not**
@@ -87,6 +87,12 @@ nothing in the checker or the lowerer treats them as lang items, and a program d
 own `Iterator` shadows them like any other prelude name. `type Iter` carries no `: Iterator`
 bound because an associated-type *declaration* has no bound syntax yet; the requirement is
 enforced where the loop is built, on the type `into_iter` actually returns.
+
+`Device` is `CPU | GPU(i32)`, and its variant ORDER is load-bearing: the LLVM backend reads
+`CPU`'s discriminant to decide whether a `.to(device)` transfer is the move itself or a runtime
+abort, so reordering the variants changes which devices a program may transfer to. It is
+otherwise an ordinary prelude enum — a program declaring its own `Device` shadows it, and then
+`.to` no longer accepts that program's values.
 
 `Chars` holds a `&string` view and a `u64` byte cursor, and its `impl Iterator` is written in
 ordinary Neuro — the one thing it cannot say in source is the decode itself, which it takes from

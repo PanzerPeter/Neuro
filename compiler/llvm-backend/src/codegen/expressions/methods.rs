@@ -95,6 +95,12 @@ impl<'ctx> CodegenContext<'ctx> {
                     other => Ok(other),
                 }
             }
+            // `tensor.clone()` — the tensor value IS its buffer, so copying the
+            // aggregate copies every element; there is no shared heap block to duplicate
+            // separately. A `&Tensor` receiver is loaded through first.
+            BuiltinMethod::TensorClone => self.codegen_tensor_clone(recv_ty, receiver),
+            // `tensor.to(device)` — the consuming device transfer.
+            BuiltinMethod::TensorTo => self.codegen_tensor_to(receiver, args),
             // `float.is_nan()` — the receiver is the whole computation; no arguments.
             BuiltinMethod::IsNan => self.codegen_is_nan(receiver),
             BuiltinMethod::CheckedAdd | BuiltinMethod::CheckedSub | BuiltinMethod::CheckedMul => {
@@ -419,6 +425,8 @@ impl<'ctx> CodegenContext<'ctx> {
             | BuiltinMethod::StringCharSlice
             | BuiltinMethod::StringCharAt
             | BuiltinMethod::StructClone
+            | BuiltinMethod::TensorClone
+            | BuiltinMethod::TensorTo
             | BuiltinMethod::ArrayLen
             | BuiltinMethod::SequenceSlice
             | BuiltinMethod::SliceLen

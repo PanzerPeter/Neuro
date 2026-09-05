@@ -265,7 +265,11 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   `identity` becomes `TensorIdentity`, `random_normal` becomes `TensorRandomNormal`, and
   `scalar`/`from` become `TensorLiteral`. Shape, rank, arity, and applicability were settled by
   the type checker, so a violation here is a `LoweringError::Malformed`, not a diagnostic.
-  Methods and operators on tensors do not exist yet.
+  The two ownership methods lower through `lower_builtin_method`: `.clone()` is nullary and
+  takes the referent's tensor type (so a `&Tensor` receiver yields an owned tensor), and
+  `.to(device)` lowers its one argument at `HirType::Enum("Device")` and yields the receiver's
+  own type. `.to` is matched on `recv` rather than the referent, so a borrow does not resolve —
+  the same verdict the type checker reaches. Operators on tensors do not exist yet.
 - **Enumerated loops** — `ForRange` / `ForEach` carry the position binding through as
   `index: Option<String>` and define it in the loop scope as `LOOP_INDEX_TYPE` (`u64`), ahead of
   the element binding so the two collide rather than shadow. The free-variable walker binds it
