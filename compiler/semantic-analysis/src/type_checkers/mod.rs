@@ -263,6 +263,7 @@ mod moves;
 pub(crate) mod operator_traits;
 mod resolution;
 mod statements;
+mod tensors;
 mod val_else;
 
 #[cfg(test)]

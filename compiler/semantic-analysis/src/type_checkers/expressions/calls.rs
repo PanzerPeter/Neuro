@@ -6,6 +6,7 @@
 use super::{declarations, eval_const_predicate, TypeChecker, CLONE_METHOD, COLLECTION_CTOR};
 use crate::errors::TypeError;
 use crate::type_checkers::declarations::traits::collect_self_assoc;
+use crate::type_checkers::tensors::TENSOR_TYPE_NAME;
 use crate::type_checkers::BoundInfo;
 use crate::types::{CollectionKind, Type};
 use ast_types::{Expr, GenericArg};
@@ -633,6 +634,15 @@ impl TypeChecker {
                 member,
                 span: path_span,
             } => {
+                // `Tensor::<f32, [3, 3]>::zeros()` and the five other construction helpers,
+                // unless the program declares its own `Tensor`.
+                if type_name.name == TENSOR_TYPE_NAME && self.tensor_name_is_free() {
+                    return Some(
+                        self.check_tensor_construction(
+                            member, type_args, args, expected, *path_span,
+                        ),
+                    );
+                }
                 // `Vec::new()` and friends: a compiler-known constructor, unless
                 // the program declares its own type of that name.
                 if let Some(kind) = CollectionKind::from_name(&type_name.name) {

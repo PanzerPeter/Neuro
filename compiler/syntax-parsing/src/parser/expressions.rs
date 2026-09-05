@@ -7,6 +7,7 @@ use crate::precedence::Precedence;
 
 use super::interpolation::parse_interp_string;
 use super::statements::stmt_span;
+use super::types::TENSOR_TYPE_NAME;
 use super::Parser;
 
 /// A parsed call argument list: the argument expressions, plus the call-site names of
@@ -118,6 +119,18 @@ impl Parser {
                     if matches!(self.tokens.get(idx).map(|t| &t.kind), Some(TokenKind::Loop)) {
                         return self.parse_labeled_loop_expr(ident, token.span);
                     }
+                }
+                // `Tensor::<f32, [3, 3]>::zeros()` — the tensor constructor spelling.
+                // A turbofish is otherwise the callee's own generic arguments and must
+                // be followed by `(`; here it applies to the *type* that qualifies the
+                // constructor, so it is followed by another `::`. `Tensor` is the only
+                // name that takes this form, and the shape inside the turbofish is what
+                // claims it, so a module shadowing `Tensor` is unaffected.
+                if ident.name == TENSOR_TYPE_NAME
+                    && self.check(&TokenKind::ColonColon)
+                    && self.colon_colon_opens_turbofish()
+                {
+                    return self.parse_tensor_qualified_call(ident);
                 }
                 // `::<` is a turbofish (`f::<T>(x)`), not a path member: leave it
                 // for `parse_infix` to attach to the following call. Only `::member`
@@ -862,6 +875,63 @@ impl Parser {
             self.tokens.get(self.current + 1).map(|t| &t.kind),
             Some(TokenKind::Less)
         )
+    }
+
+    /// Parse `Tensor::<T, [d0, ...]>::ctor(args)` — the tensor constructor spelling, whose
+    /// turbofish qualifies the *type* rather than the callee.
+    ///
+    /// The result is an ordinary `Call` on a `Path` whose single type argument is the
+    /// assembled `Type::Tensor`. Nothing downstream needs a node of its own: the tensor
+    /// type is exactly what a turbofish already carries, and the associated-call arm of
+    /// the type checker is already where `Tensor::scalar(v)` — the same constructors
+    /// spelled without a turbofish — has to be resolved anyway.
+    fn parse_tensor_qualified_call(&mut self, type_name: Identifier) -> ParseResult<Expr> {
+        self.advance(); // consume '::'
+        let (args, shape, close_span) = self.parse_generic_type_args()?;
+        let type_span = type_name.span.merge(close_span);
+        let Some((dims, shape_span)) = shape else {
+            return Err(ParseError::TensorTypeArity { span: type_span });
+        };
+        let tensor_type =
+            Self::build_tensor_type(type_name.clone(), args, dims, shape_span, type_span)?;
+
+        self.consume(
+            TokenKind::ColonColon,
+            "'::' and a constructor name after `Tensor::<...>`",
+        )?;
+        let member_token = self.consume(
+            TokenKind::Identifier(String::new()),
+            "a tensor constructor name",
+        )?;
+        let TokenKind::Identifier(member_name) = member_token.kind else {
+            return Err(ParseError::UnexpectedToken {
+                found: member_token.kind,
+                expected: "a tensor constructor name".to_string(),
+                span: member_token.span,
+            });
+        };
+        let member = Identifier {
+            name: member_name,
+            span: member_token.span,
+        };
+
+        self.consume(TokenKind::LeftParen, "'(' after a tensor constructor name")?;
+        let (call_args, arg_labels) = self.parse_call_arguments()?;
+        let close = self.consume(TokenKind::RightParen, "')'")?;
+        let span = type_name.span.merge(close.span);
+        let path_span = type_span.merge(member.span);
+
+        Ok(Expr::Call {
+            func: Box::new(Expr::Path {
+                type_name,
+                member,
+                span: path_span,
+            }),
+            type_args: vec![GenericArg::Type(tensor_type)],
+            args: call_args,
+            arg_labels,
+            span,
+        })
     }
 
     /// Parse turbofish generic arguments `<T, N, ...>`, positioned just after the

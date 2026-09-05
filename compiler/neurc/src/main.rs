@@ -414,11 +414,15 @@ fn link_windows(object_path: &Path, output_path: &Path) -> Result<()> {
 
 #[cfg(not(target_os = "windows"))]
 fn link_unix(object_path: &Path, output_path: &Path) -> Result<()> {
-    // cc (gcc or clang) acts as the linker driver.
+    // cc (gcc or clang) acts as the linker driver. `-lm` is explicit because
+    // `Tensor::random_normal` emits `log` and `cos`, and the C math library is a
+    // separate archive on the older glibc still in wide use; it is a no-op where the
+    // platform has already folded libm into libc.
     let output = Command::new("cc")
         .arg(object_path)
         .arg("-o")
         .arg(output_path)
+        .arg("-lm")
         .output()
         .context("Failed to execute cc - ensure a C compiler (gcc/clang) is installed")?;
 

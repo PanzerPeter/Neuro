@@ -332,11 +332,19 @@ than assuming the prelude's declaration order.
 `map_type` lowers a reference to an opaque `ptr`, with three exceptions: an immutable `&string`
 (the fat pointer itself, above), `Reference(DynObject)` (the two-word `dyn_ref_type()` struct),
 and `Reference(Slice)` (the two-word `slice_ref_type()` struct, mutable or not). A bare
-`DynObject` or `Slice` is rejected as unsized. `Type::Tensor { element, shape }` is carried
-through `from_hir` and `mangle` so the backend type model stays a faithful image of the HIR, but
-`map_type` rejects it: a tensor's buffer layout is settled by tensor construction, which the
-language does not have, so a program annotating one type-checks (`neurc check`) and fails here
-with an `UnsupportedType` naming the tensor.
+`DynObject` or `Slice` is rejected as unsized. `Type::Tensor { element, shape }` maps to a flat
+row-major `[d0*d1*... x T]` aggregate, passed and returned by value like `[T; N]`: a statically
+shaped tensor carries its whole shape in its type, so the value is exactly its buffer. The
+rank-0 tensor is `[1 x T]` — the empty product — not a zero-length array. Host memory only;
+device buffers and DLPack handles arrive with the ownership and DLPack items.
+
+Being a first-class value is also the representation's limit. Copying a tensor is a `load`
+and a `store` of the whole buffer; `-O1`'s SROA rewrites that pair into a `memcpy`, but at
+`-O0` nothing does and SelectionDAG crashes legalizing the monolithic value somewhere above
+50k elements. `map_type` therefore caps a tensor at `MAX_O0_TENSOR_ELEMENTS` when
+`set_tensor_limit(true)` is on (`-O0` only) and reports the limit with the `-O 1` workaround
+instead. The cap is a symptom — see `docs/BUGS.md` BUG-018; it goes away when a tensor's
+buffer stops being a value.
 
 `codegen_reference` returns the borrowed place's storage pointer — mutability is compile-time
 only. `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer.

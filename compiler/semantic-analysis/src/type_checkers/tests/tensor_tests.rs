@@ -177,3 +177,251 @@ func main() -> i32 {
     );
     assert!(errors.is_empty(), "shadowed tensor name; got {errors:?}");
 }
+
+#[test]
+fn a_nested_array_literal_coerces_under_a_tensor_annotation() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val v: Tensor<f32, [3]> = [1.0, 2.0, 3.0]
+    val m: Tensor<f32, [2, 3]> = [
+        [1.0, 2.0, 3.0],
+        [4.0, 5.0, 6.0]
+    ]
+    return 0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "tensor literals; got {errors:?}");
+}
+
+/// The annotation types each leaf, so an `f32` tensor's `1.0` is an `f32` literal
+/// rather than an `f64` one being narrowed — the same rule `val x: f32 = 0.01` follows.
+/// A half-precision element still needs its suffix, exactly as a half-precision scalar
+/// binding does: the tensor path does not widen literal inference.
+#[test]
+fn a_tensor_literal_element_is_typed_by_the_annotation() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val v: Tensor<f32, [2]> = [1.0, 2.0]
+    val w: Tensor<i64, [2]> = [1, 2]
+    val h: Tensor<f16, [2]> = [1.0f16, 2.0f16]
+    return 0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "annotation-typed leaves; got {errors:?}");
+}
+
+/// A value that already has a type is not converted for the annotation's benefit.
+#[test]
+fn a_typed_element_of_the_wrong_type_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val d: f64 = 1.0
+    val v: Tensor<f32, [2]> = [d, 2.0]
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })),
+        "expected a mismatch; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_ragged_tensor_literal_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val m: Tensor<f32, [2, 3]> = [[1.0, 2.0, 3.0], [4.0, 5.0]]
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::TensorExtentMismatch {
+                expected: 3,
+                found: 2,
+                ..
+            }
+        )),
+        "expected an extent mismatch; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_literal_shallower_than_the_shape_is_a_rank_error() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val m: Tensor<f32, [2, 2]> = [1.0, 2.0]
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorRankMismatch { .. })),
+        "expected a rank mismatch; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_rank_zero_tensor_has_no_literal_form() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val s: Tensor<f32, []> = [1.0]
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorScalarNeedsConstructor { .. })),
+        "expected the scalar-constructor hint; got {errors:?}"
+    );
+}
+
+/// Without an annotation the literal is a plain array, which is what keeps
+/// `[1.0, 2.0, 3.0]` an `[f64; 3]`.
+#[test]
+fn an_unannotated_array_literal_is_not_a_tensor() {
+    let errors = semantic_errors(
+        r#"
+func takes_array(a: [f64; 3]) { }
+
+func main() -> i32 {
+    val a = [1.0, 2.0, 3.0]
+    takes_array(a)
+    return 0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "plain array; got {errors:?}");
+}
+
+#[test]
+fn every_construction_helper_type_checks() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val z = Tensor::<f32, [3, 3]>::zeros()
+    val o = Tensor::<f32, [3, 3]>::ones()
+    val e = Tensor::<f32, [4, 4]>::identity()
+    val r = Tensor::<f32, [8, 4]>::random_normal(0.0f32, 0.02f32)
+    val s: Tensor<f32, []> = Tensor::scalar(42.0)
+    val v = Tensor::<f32, [3]>::from([1.0, 2.0, 3.0])
+    return 0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "construction helpers; got {errors:?}");
+}
+
+#[test]
+fn a_constructor_with_no_type_to_build_is_reported() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val z = Tensor::zeros()
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorTypeNotInferable { .. })),
+        "expected the inference hint; got {errors:?}"
+    );
+}
+
+#[test]
+fn an_unknown_constructor_lists_the_ones_that_exist() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val z = Tensor::<f32, [2, 2]>::eye()
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UnknownTensorConstructor { .. })),
+        "expected an unknown-constructor error; got {errors:?}"
+    );
+}
+
+#[test]
+fn identity_requires_a_square_rank_two_shape() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val e = Tensor::<f32, [2, 3]>::identity()
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorConstructorNotApplicable { .. })),
+        "expected an inapplicable-constructor error; got {errors:?}"
+    );
+}
+
+#[test]
+fn random_normal_draws_only_into_full_precision_floats() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val r = Tensor::<i32, [2, 2]>::random_normal(0, 1)
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorConstructorNotApplicable { .. })),
+        "expected an inapplicable-constructor error; got {errors:?}"
+    );
+}
+
+/// The prelude's shadowing promise: a program that declares its own `Tensor` keeps the name,
+/// so the builtin constructors stand aside for it.
+#[test]
+fn a_declared_tensor_type_shadows_the_builtin_constructors() {
+    let errors = semantic_errors(
+        r#"
+struct Tensor {
+    v: i32
+}
+
+impl Tensor {
+    func make() -> Tensor {
+        return Tensor { v: 7 }
+    }
+}
+
+func main() -> i32 {
+    val t = Tensor::make()
+    return t.v
+}
+"#,
+    );
+    assert!(errors.is_empty(), "shadowed Tensor; got {errors:?}");
+}

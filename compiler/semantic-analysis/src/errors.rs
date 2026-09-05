@@ -173,6 +173,37 @@ pub enum TypeError {
     #[error("`Tensor` at {span:?} needs a shape: write `Tensor<{element}, [3, 3]>`, or `Tensor<{element}, []>` for a rank-0 scalar tensor")]
     TensorShapeRequired { element: String, span: Span },
 
+    #[error("this literal at {span:?} has {found} element(s) where the tensor's shape declares {expected}")]
+    TensorExtentMismatch {
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    #[error("this literal at {span:?} is nested {found} deep, but the tensor has rank {expected} — a nested tensor literal must be rectangular and as deep as the shape is long")]
+    TensorRankMismatch {
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    #[error("a rank-0 tensor at {span:?} has no elements to write — build it with `Tensor::scalar(value)` instead of an array literal")]
+    TensorScalarNeedsConstructor { span: Span },
+
+    #[error("the tensor type of `Tensor::{ctor}` at {span:?} cannot be inferred here — annotate the binding with `Tensor<T, [...]>`, or name it with a turbofish: `Tensor::<f32, [3, 3]>::{ctor}(...)`")]
+    TensorTypeNotInferable { ctor: String, span: Span },
+
+    #[error("`Tensor` has no constructor named '{ctor}' at {span:?} — it provides `zeros`, `ones`, `identity`, `random_normal`, `scalar`, and `from`")]
+    UnknownTensorConstructor { ctor: String, span: Span },
+
+    #[error("`Tensor::{ctor}` at {span:?} does not apply to {ty}: {reason}")]
+    TensorConstructorNotApplicable {
+        ctor: String,
+        ty: Type,
+        reason: String,
+        span: Span,
+    },
+
     #[error("trait '{trait_name}' is not object-safe and cannot be used as `dyn {trait_name}` at {span:?}: {reason}")]
     TraitNotObjectSafe {
         trait_name: String,

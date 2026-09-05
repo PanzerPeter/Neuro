@@ -256,9 +256,16 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   alongside the array's, and `slice.len()` is `u64`.
 - **Tensors** — `resolve_type` maps `ast_types::Type::Tensor` straight to
   `HirType::Tensor { element, shape }`, and `mangle_type` spells it `tensor_<elem>_<d0>x<d1>`.
-  Nothing else in this slice touches a tensor: no expression can produce one yet, so no literal,
-  method, or coercion path exists. The type reaches the HIR only through annotations, and the
-  LLVM backend is where it is rejected as having no runtime representation.
+  Construction lives in `tensors.rs`. An array literal lowered against a
+  `HirType::Tensor` expectation becomes `HirExprKind::TensorLiteral` whose `elements` are
+  **flattened row-major** — the nesting carried the shape and the shape is on the node's type,
+  so no backend re-derives it. The six constructors take the tensor type from the turbofish's
+  single `type_args` entry, or from the expectation when the call was written without one, and
+  pick a node: `zeros`/`ones` become `TensorFill` over a literal of the element type,
+  `identity` becomes `TensorIdentity`, `random_normal` becomes `TensorRandomNormal`, and
+  `scalar`/`from` become `TensorLiteral`. Shape, rank, arity, and applicability were settled by
+  the type checker, so a violation here is a `LoweringError::Malformed`, not a diagnostic.
+  Methods and operators on tensors do not exist yet.
 - **Enumerated loops** — `ForRange` / `ForEach` carry the position binding through as
   `index: Option<String>` and define it in the loop scope as `LOOP_INDEX_TYPE` (`u64`), ahead of
   the element binding so the two collide rather than shadow. The free-variable walker binds it

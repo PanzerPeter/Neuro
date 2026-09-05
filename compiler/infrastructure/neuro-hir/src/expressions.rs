@@ -136,6 +136,30 @@ pub enum HirExprKind {
     ArrayLiteral {
         elements: Vec<HirExpr>,
     },
+    /// A tensor built element by element: a coerced nested array literal,
+    /// `Tensor::<T, [...]>::from(...)`, or `Tensor::scalar(v)`.
+    ///
+    /// `elements` is the buffer in row-major order, already flattened — the nesting
+    /// carried the shape and the shape is in the expression's [`HirType::Tensor`], so
+    /// no backend has to re-derive it. Its length is the product of the extents.
+    TensorLiteral {
+        elements: Vec<HirExpr>,
+    },
+    /// A tensor whose every element is `value`: `zeros()` and `ones()`. Distinct from
+    /// [`HirExprKind::TensorLiteral`] so a large fill stays one node and one loop
+    /// instead of one HIR node per element.
+    TensorFill {
+        value: Box<HirExpr>,
+    },
+    /// The rank-2 identity matrix `Tensor::<T, [N, N]>::identity()`. Squareness was
+    /// checked before lowering, so the extents in the expression's type are equal.
+    TensorIdentity,
+    /// A tensor filled with draws from `Normal(mean, std)`. The element type is `f32`
+    /// or `f64`, and both operands carry it.
+    TensorRandomNormal {
+        mean: Box<HirExpr>,
+        std: Box<HirExpr>,
+    },
     Index {
         object: Box<HirExpr>,
         index: Box<HirExpr>,

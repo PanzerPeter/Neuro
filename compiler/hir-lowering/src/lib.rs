@@ -36,6 +36,7 @@ mod iteration;
 mod loop_adapters;
 mod operator_traits;
 mod statements;
+mod tensors;
 mod types;
 mod val_else;
 

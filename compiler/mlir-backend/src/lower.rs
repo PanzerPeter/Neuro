@@ -214,11 +214,12 @@ fn map_type<'c>(context: &'c Context, ty: &HirType) -> Result<Type<'c>, MlirErro
                 "unsized `[{element}]` cannot appear in value position"
             )))
         }
-        // A tensor lowers to a Linalg-backed buffer, which arrives with tensor
-        // construction; until then there is no value form to map.
+        // A tensor lowers to a Linalg-backed buffer, which arrives with 2C's tensor
+        // arithmetic. Mapping it to an opaque pointer in the meantime would be the one
+        // mapping this path exists to avoid.
         HirType::Tensor { .. } => {
             return Err(MlirError::UnsupportedType(format!(
-                "`{ty}` has no runtime representation yet"
+                "`{ty}` has no MLIR representation yet"
             )))
         }
     };

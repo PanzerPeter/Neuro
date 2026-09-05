@@ -23,6 +23,12 @@ Bind every call site's arguments to the callee's parameters in declaration order
   and empties `arg_labels`. Type checking, HIR lowering, and both backends therefore see the
   positional call they always saw, which is what makes a named argument cost nothing at
   runtime — it produces the same IR as writing the arguments in order.
+- **A compiler-known callee has no `Item` to read its labels off, so its signature is
+  seeded.** `SignatureTable::build` calls `seed_builtins` before `collect`, which today
+  records one entry: `Tensor::random_normal(mean:, std:)`, spelled with its labels
+  in the specification but constructed by the compiler rather than declared in the prelude.
+  Seeding first means a program declaring its own `Tensor` overwrites the entry instead of
+  competing with it.
 - **Permuting the arguments also permutes when they are evaluated, so a call that would
   notice is rewritten instead** (`hoisting.rs`). Every later stage evaluates an argument
   where it finds it, so a bare permutation ran `f(second: b(), first: a())` as `a()` then

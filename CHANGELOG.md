@@ -10,6 +10,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.14.0] - 2026-09-05
+
+### Added
+
+- **Tensor values: literal coercion and the construction helpers (Phase 2B).** Tensors
+  stop being type-level. A nested array literal becomes a `Tensor<T, [d0, ...]>` wherever
+  an explicit tensor annotation is in scope, and six constructors build one where no
+  annotation reaches:
+
+  ```neuro
+  val m: Tensor<f32, [2, 3]> = [
+      [1.0, 2.0, 3.0],
+      [4.0, 5.0, 6.0]
+  ]
+
+  val zeros = Tensor::<f32, [3, 3]>::zeros()
+  val ones  = Tensor::<f32, [3, 3]>::ones()
+  val eye   = Tensor::<f32, [4, 4]>::identity()
+  val w     = Tensor::<f32, [128, 64]>::random_normal(mean: 0.0f32, std: 0.02f32)
+  val v     = Tensor::<f32, [3]>::from([1.0, 2.0, 3.0])
+  val loss: Tensor<f32, []> = Tensor::scalar(0.5)
+  ```
+
+  The annotation supplies the element type *and* every extent, and it types the literal's
+  leaves: `1.0` under a `Tensor<f32, ...>` annotation is an `f32` literal, not an `f64`
+  one being narrowed — the same rule `val x: f32 = 0.01` follows. A value that already has
+  a type is not converted for the annotation's benefit. With no annotation in scope,
+  `[1.0, 2.0, 3.0]` is still a plain `[f64; 3]`.
+
+  A nested literal must be rectangular and as deep as the shape is long; a ragged literal,
+  a wrong extent, and a shallow literal are separate diagnostics naming both shapes. A
+  rank-0 tensor has no array-literal form and says so, pointing at `Tensor::scalar(value)`.
+  `identity()` applies only to a square rank-2 shape, `random_normal` draws only into
+  `f32` / `f64`, and a constructor written where nothing supplies its type asks for an
+  annotation or a turbofish rather than guessing.
+
+- **A runtime representation for tensors.** `Tensor<T, [d0, ...]>` maps to a flat,
+  row-major `[d0*d1*... x T]` LLVM aggregate, passed and returned by value like `[T; N]`.
+  A statically shaped tensor carries its whole shape in its type, so the value is exactly
+  its buffer; the rank-0 tensor is a one-element buffer, the empty product. Tensors are
+  not `Copy`, so building one and storing it *moves* it. A fill, an identity matrix, and a
+  constant literal fold to an LLVM constant in `.rodata`; only `random_normal` costs
+  anything at run time — a counted loop over an `xorshift64` + Box–Muller generator
+  emitted once per module and seeded from a fixed constant, so a compiled program draws
+  the same weights on every run.
+
+### Changed
+
+- **The Unix link passes `-lm`.** `Tensor::random_normal` emits `log` and `cos`, and the C
+  math library is a separate archive on the older glibc still in wide use. It is a no-op
+  where the platform has folded libm into libc.
+
+### Known limitation
+
+- A tensor is a first-class LLVM value, so copying one is a whole-buffer `load` and
+  `store`. `-O 1` and above rewrite that into a `memcpy` and any size works; `-O 0` — the
+  default — cannot, so a tensor of more than 32768 elements is **rejected there** with a
+  diagnostic naming the limit and the `-O 1` workaround, rather than crashing the backend.
+  Filed as `BUG-018`; it goes away when a tensor's buffer stops being a value.
+
+### Notes
+
+- A tensor still cannot be **read back**. Indexing and slicing, tensor arithmetic and the
+  `@` operator, in-place compound assignment, `.t()` / `.reshape()` / `.clone()` /
+  `.to(device)`, and the reductions are the remaining 2B items. The MLIR path has no
+  tensor mapping either — that is 2C.
+
+
 ## [2.13.0] - 2026-09-04
 
 ### Added

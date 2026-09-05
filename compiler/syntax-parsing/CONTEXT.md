@@ -109,6 +109,16 @@ the tuple-index parse, so it needs no expression grammar of its own.
   second type argument, is `ParseError::TensorTypeArity`. Extents are non-negative integer
   literals only; a symbolic or `?` extent is a parse error until shape generics and dynamic
   shapes land.
+- **Tensor constructor turbofish.** `Tensor::<f32, [3, 3]>::zeros()` is the one turbofish that
+  qualifies a *type* rather than a callee, so `parse_tensor_qualified_call` handles it in the
+  identifier-primary arm instead of the general infix `::` arm (which still requires a `(`
+  right after the `>`). It reuses `parse_generic_type_args` / `build_tensor_type` and emits an
+  ordinary `Expr::Call` on an `Expr::Path { Tensor, ctor }` whose single `type_args` entry is
+  the assembled `Type::Tensor` — no AST node of its own, because a turbofish already carries
+  exactly that. The parser claims the form on the name `Tensor` followed by `::<`; a turbofish
+  with no shape in it is `ParseError::TensorTypeArity`. The shape-free spelling
+  `Tensor::scalar(v)` stays a plain `Path` call, resolved against the annotation by semantic
+  analysis, which is what keeps a program's own `Tensor` type working.
 - **Prefix vs. infix `&` and `*`.** Purely parser position: prefix `&` is a borrow
   (`Expr::Reference`, operand at `Precedence::Unary`), infix `&` is `BinaryOp::BitAnd`; prefix
   `*` is `Expr::Deref`, infix `*` is multiply. A leading `*` in statement position is a deref

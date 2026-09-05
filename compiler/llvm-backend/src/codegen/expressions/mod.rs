@@ -17,6 +17,7 @@ mod matches;
 mod methods;
 mod slices;
 mod struct_eq;
+mod tensors;
 mod tuples;
 mod unary;
 
@@ -156,6 +157,24 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::ArrayLiteral { elements } => {
                 let array_ty = Type::from_hir(&expr.ty);
                 self.codegen_array_literal(elements, &array_ty)
+            }
+            // Tensor construction: a coerced literal, a fill, the identity
+            // matrix, or a normally distributed fill.
+            HirExprKind::TensorLiteral { elements } => {
+                let tensor_ty = Type::from_hir(&expr.ty);
+                self.codegen_tensor_literal(elements, &tensor_ty)
+            }
+            HirExprKind::TensorFill { value } => {
+                let tensor_ty = Type::from_hir(&expr.ty);
+                self.codegen_tensor_fill(value, &tensor_ty)
+            }
+            HirExprKind::TensorIdentity => {
+                let tensor_ty = Type::from_hir(&expr.ty);
+                self.codegen_tensor_identity(&tensor_ty)
+            }
+            HirExprKind::TensorRandomNormal { mean, std } => {
+                let tensor_ty = Type::from_hir(&expr.ty);
+                self.codegen_tensor_random_normal(mean, std, &tensor_ty)
             }
             HirExprKind::Index { object, index } => {
                 let obj_ty = Type::from_hir(&object.ty);

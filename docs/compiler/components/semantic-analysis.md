@@ -391,6 +391,9 @@ What the checker still owes:
 ### Phase 2: Tensor Types
 - [x] **Static tensor types**: `Tensor<f32, [3, 3]>` resolves to `Type::Tensor { element, shape }`;
       the element is restricted to a fixed-width scalar and the type is non-`Copy`
+- [x] **Tensor construction**: a nested array literal coerces under a tensor annotation, and
+      the `Tensor::<T, [...]>::…` constructors are resolved against the turbofish or the
+      surrounding expectation — see the slice's `CONTEXT.md` for the rules and diagnostics
 - [ ] **Shape checking beyond identity**: broadcasting and shape generics; today two tensors
       match only when their elements and every extent are equal
 - [ ] **Broadcasting**: NumPy-style broadcasting rules

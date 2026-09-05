@@ -1,15 +1,12 @@
 use ast_types::{ArraySize, GenericArg};
 
+use super::tensors::TENSOR_TYPE_NAME;
 use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, CollectionKind, Type};
 
 /// The qualifier an associated-type path carries in its name, as the parser spells it.
 pub(crate) const SELF_ASSOC_PREFIX: &str = "Self::";
-
-/// The prelude name of the tensor type. A module may shadow it with a generic type of
-/// its own, so this only steers a diagnostic — it never claims the name.
-const TENSOR_TYPE_NAME: &str = "Tensor";
 
 /// Whether `ty` may be a tensor's element type. A tensor buffer is a flat, densely
 /// packed run of fixed-width scalars, which is exactly the set below: `string`, an

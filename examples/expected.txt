@@ -67,6 +67,7 @@ types/string_slice_method.nr        12
 types/string_char_slice.nr          19
 types/string_chars.nr               31
 types/strings.nr                    0
+types/tensor_construction.nr        6
 types/tuples.nr                     62
 types/type_aliases.nr               17
 types/underscore_separators.nr      0
@@ -128,6 +129,7 @@ showcase/generic_toolkit.nr 85
 showcase/inventory_ledger.nr 181
 showcase/job_queue.nr       139
 showcase/log_builder.nr     64
+showcase/model_shapes.nr    84
 showcase/mutable_borrows.nr 47
 showcase/num_algorithms.nr  33
 showcase/perceptron.nr      8

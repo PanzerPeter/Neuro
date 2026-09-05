@@ -415,6 +415,11 @@ impl<'ctx> CodegenContext<'ctx> {
         self.overflow_checks = enabled;
     }
 
+    /// Enable or disable the `-O0` cap on how large a tensor buffer may be.
+    pub(crate) fn set_tensor_limit(&mut self, limited: bool) {
+        self.type_mapper.set_tensor_limit(limited);
+    }
+
     /// Provide the module source so panic-family diagnostics can render `file:line:col`.
     pub(crate) fn set_source(&mut self, source: SourceFile) {
         self.source = Some(source);

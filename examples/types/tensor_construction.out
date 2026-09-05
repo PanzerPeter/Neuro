@@ -1,0 +1,7 @@
+row       = Tensor<f32, [3]>
+grid      = Tensor<f32, [2, 3]>
+cube      = Tensor<i32, [2, 2, 2]>
+eye       = Tensor<f32, [4, 4]>::identity()
+weights   = Tensor<f32, [8, 4]>::random_normal(0.0, 0.02)
+loss      = Tensor<f32, []>::scalar(0.5)
+plain[2]  = 30   (a plain array, not a tensor)

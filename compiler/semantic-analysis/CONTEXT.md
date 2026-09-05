@@ -562,9 +562,25 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   its buffer, so `is_type_copy` is false and `is_type_move_tracked` is true: it moves on
   assignment and on being passed. `Tensor` is a prelude name a module may shadow, so the
   shape-less spelling `Tensor<f32>` reaches the `Type::Generic` arm, where an unshadowed
-  `Tensor` reports `TensorShapeRequired` rather than `NotAGenericType`. Only the *type* exists
-  at this stage — no tensor value can be constructed, and the LLVM backend rejects the type as
-  having no runtime representation.
+  `Tensor` reports `TensorShapeRequired` rather than `NotAGenericType`.
+- **Tensor values, in `type_checkers/tensors.rs`.** Two ways in, one checker.
+  An array literal reaching `check_array_literal_expr` with a `Type::Tensor` expectation is a
+  *tensor* literal: `check_tensor_literal` walks the annotation's shape and the nesting
+  together, so each leaf is checked at the annotation's element type (a literal is typed *by*
+  it, a value that already has a type is not converted) and every axis must be rectangular.
+  Wrong extent is `TensorExtentMismatch`, wrong nesting depth is `TensorRankMismatch`, and a
+  rank-0 annotation is `TensorScalarNeedsConstructor` — a rank-0 tensor has no array form.
+  Nothing changes when no tensor annotation is in scope, which is what keeps `[1.0, 2.0]` an
+  `[f64; 2]`.
+  A call whose callee is `Path { Tensor, ctor }` routes to `check_tensor_construction`, guarded
+  by `tensor_name_is_free` so a program declaring its own `Tensor` keeps it. The tensor type
+  comes from the turbofish's single `type_args` entry when the parser built one, and from the
+  expectation otherwise; neither is `TensorTypeNotInferable`. The six helpers are `zeros`,
+  `ones`, `identity`, `random_normal`, `scalar`, and `from` (`UnknownTensorConstructor`
+  otherwise), each with its own applicability rule reported as
+  `TensorConstructorNotApplicable`: `identity` is square and rank 2, `random_normal` draws only
+  into `f32`/`f64`, `scalar` is rank 0, and `from` takes the same nested literal the annotated
+  form coerces.
 - **Tuples.** Each element is checked against the expected tuple's element type when annotated;
   `t.N` is `NotATuple` on a non-tuple and `TupleIndexOutOfBounds` past the arity. Struct, tuple,
   and array *destructuring* is parser-desugared and reaches this slice as ordinary field-access

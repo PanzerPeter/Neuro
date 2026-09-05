@@ -107,4 +107,6 @@ diagnostic from a non-root module reports a position in the root file's coordina
 
 The two-step linker strategy (clang on Unix; lld-link / cl.exe on Windows) is required because
 LLVM object files need a platform linker driver to attach the C runtime startup code — neurc
-cannot ship its own linker.
+cannot ship its own linker. The Unix link passes `-lm` explicitly: `Tensor::random_normal`
+emits `log` and `cos`, and the C math library is a separate archive on the older glibc still in
+wide use. It is a no-op where the platform has folded libm into libc.

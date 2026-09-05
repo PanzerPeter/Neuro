@@ -664,8 +664,9 @@ Use `neurc check` for rapid feedback without code generation.
 
 ### Can I use Neuro for production?
 
-Not yet — the language is alpha. The core language (Phase 1) is complete, but tensors,
-autodiff, and the GPU path are still ahead; see the [Quick Roadmap](../../README.md#quick-roadmap).
+Not yet — the language is alpha. The core language (Phase 1) is complete and tensor values
+can be built, but tensor arithmetic, autodiff, and the GPU path are still ahead; see the
+[Quick Roadmap](../../README.md#quick-roadmap).
 
 ## Still Stuck?
 
