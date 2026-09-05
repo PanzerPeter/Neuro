@@ -5,47 +5,53 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
-## BUG-021 — negating an unsigned integer literal wraps instead of erroring
+## BUG-022 — constant folding wraps silently on overflow
 
 **Repro**
 
 ```neuro
+const C: u8 = 200u8 + 100u8
+
 func main() -> i32 {
-    val x: u8 = -1
-    println("literal -1 as u8 = {x}")     // prints 255
+    println("const sum = {C}")     // prints 44
     return 0
 }
 ```
 
-The same value computed rather than written aborts instead:
+The same arithmetic in a function body aborts on the debug tier:
 
 ```neuro
 func main() -> i32 {
-    mut z: u8 = 0u8
-    z = z - 1u8                            // panic: integer overflow
+    mut a: u8 = 200u8
+    val c: u8 = a + 100u8                  // panic: integer overflow
     return 0
 }
 ```
 
-Two spellings of the same quantity disagree: written as a literal it silently becomes
-`255`, computed it is an overflow panic on the debug tier. Both cannot be right.
+A `const` initializer is evaluated by the compiler, so the debug tier's overflow panic has
+nowhere to fire; the folder produces a value instead, and it produces the wrapped one. The
+result is that a quantity written in a `const` and the same quantity computed in a function
+disagree, on the tier whose whole purpose is to make that disagreement impossible.
 
-**Root cause** — the checker range-checks the literal `1`, which fits `u8`, and then
-types the negation as its operand's type. Nothing ever asks whether the value the
-expression *denotes* is representable. The negation itself lowers to a plain wrapping
-`sub 0, x` with no overflow guard, so the wrap is invisible at run time as well.
+**Root cause** — `fold_const` in `compiler/llvm-backend/src/codegen/expressions/literals.rs`
+uses `wrapping_add` / `wrapping_sub` / `wrapping_mul` / `wrapping_neg` throughout and has no
+error path for overflow. Every operator is affected, not one of them.
 
-**Workaround** — write the intended value directly (`val x: u8 = 255`), or use a signed
-type if a negative value is what was meant.
+**Workaround** — none needed for correctness if the wrap was intended; write the folded value
+directly when it was not. `docs/language-reference/types.md` documents the current behaviour
+("compile-time constant folding always uses wrapping arithmetic regardless of optimization
+level"), so a program relying on it is not relying on an accident.
 
-**Fix sketch** — needs a ruling first. Rejecting `-1` for an unsigned type is what the
-range check would do if it looked at the denoted value, and is what most languages
-choose, but it turns programs that compile today into compile errors. The alternative is
-to declare unary `-` on an unsigned type a defined wrapping operation and say so in the
-language reference, which then leaves it inconsistent with `-` the binary operator on
-the debug tier. The checker already has the hook: `check_unary_expr` range-checks a
-negation over a literal against the negated value, and deliberately restricts that to
-signed targets.
+**Fix sketch** — the ruling that settles it is already made for run-time arithmetic (debug
+panics, release wraps), and a constant expression has no run-time tier to defer to: a `const`
+whose initializer overflows
+cannot produce a defined value under the debug rule and under the release rule at once. Rejecting
+it at compile time is the only answer that does not make the tier observable in a value. That
+means `fold_const` returning a `Result` that carries the overflow, and a diagnostic naming the
+operator and the type. Deliberately NOT bundled with the unary-negation fix that closed BUG-021:
+fixing negation alone inside the folder would recreate exactly the asymmetry BUG-021 was about,
+with `const N: u8 = -ONE` rejected while `const N: u8 = 0u8 - ONE` still wrapped. All operators
+move together or none do. The documentation sentence above is part of the change.
 
 ## BUG-018 — a tensor larger than 32768 elements cannot be compiled at `-O 0`
 
@@ -83,9 +89,20 @@ has to stop being a first-class LLVM value: give it storage of its own and copy 
 move-out suppression, and `sret` for returning one by value. The `Tensor ownership and
 move semantics` roadmap item has since landed and did **not** change the representation —
 it shipped the ownership *surface* (`.clone()`, `.to(device)`) on the existing by-value
-buffer, which is orthogonal to how that buffer is stored. The storage change is the
-pool-allocator item's work, and the cap should be deleted when it lands rather than
-patched around before it.
+buffer, which is orthogonal to how that buffer is stored. The cap should be deleted when
+the storage change lands rather than patched around before it.
+
+That change belongs to the **DLPack standardization** item, which is the next open tensor
+line — not to the pool allocator two sub-phases later, where this entry used to file it.
+DLPack is a `{data*, ndim, shape, strides}` descriptor whose `data` field is a pointer to an
+out-of-line buffer, and an SSA aggregate has no address to put there. The item after it
+promises more of the same: an in-place compound assignment must leave "the buffer address
+stable, so raw pointers held by the runtime, by an optimizer's state, or by a Python DLPack
+consumer stay valid", which a by-value representation cannot offer at all. The pool allocator
+*consumes* a handle that already exists — it registers one on construction and batches its
+release — so it is a policy layer over this representation, not the thing that introduces it.
+Filed under the pool allocator, the storage change sat downstream of the first two items that
+cannot be built without it.
 
 Running the middle-end `sroa` pass at `-O 0` is **not** a shortcut past that work. With
 the cap lifted, adding it does let a large tensor be constructed and cloned inside one

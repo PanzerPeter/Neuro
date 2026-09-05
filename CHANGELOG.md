@@ -10,6 +10,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.15.2] - 2026-09-05
+
+### Fixed
+
+- **Unary `-` now obeys the integer overflow rule, so every spelling of a negation agrees.**
+  A negation was emitted as a bare wrapping instruction while the subtraction it is equivalent
+  to went through the overflow guard, so one quantity had two answers depending on how it was
+  written: `val x: u8 = -1` compiled and produced `255`, and so did `-y` on a `u8` variable and
+  `-ONE` over a `const`, while the identical `0u8 - 1u8` aborted on the debug tier. The same
+  gap hid a defect on the signed side that nothing reported: `-a` where `a` held `i32::MIN`
+  wrapped silently at `-O 0`, while `a - 1` at the same value panicked. Integer negation is
+  `0 - x` and now lowers through the same guard, so it panics on the debug tier and wraps in
+  release exactly where the subtraction does. A negation written directly over a literal stays
+  a compile-time constant and is materialized rather than computed -- it has already been
+  range-checked, and computing it would overflow at precisely the most negative value that
+  literals are able to spell.
+- **A negative literal written for an unsigned type is rejected instead of wrapping.** A
+  literal is checked against the value it denotes, and `-1` denotes `-1` however small its
+  magnitude, so `val x: u8 = -1` is now a compile error rather than a silent `255`. The
+  diagnostic names the type's signedness and the spelling that does produce the wrap
+  (`0u8.wrapping_sub(1u8)`). `val x: u8 = -0` still compiles, since `-0` denotes zero, and an
+  out-of-range negation for a *signed* type is unchanged -- `val x: i8 = -200` remains an
+  ordinary range error, not a signedness one.
+
+  This turns programs that compiled before into compile errors. Both halves are spec
+  conformance rather than a new rule: a literal that does not fit its type has always been an
+  error, and debug-build integer overflow has always been a panic; neither carried an
+  exception for unary minus.
+
 ## [2.15.1] - 2026-09-05
 
 ### Fixed

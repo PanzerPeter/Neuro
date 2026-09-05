@@ -126,12 +126,24 @@ fn regression_one_past_the_bound_is_still_rejected() {
             "i32_high",
             "func main() -> i32 { val x: i32 = 2147483648\n return 0 }",
         ),
-        // `val x: u8 = -1` is deliberately absent: negating an unsigned literal keeps
-        // its existing wrapping meaning (it yields 255), which is a separate open
-        // defect and not something the bound check above changes.
         (
             "i8_suffixed_low",
             "func main() -> i32 { val x = -129i8\n return 0 }",
+        ),
+        // A negated literal is range-checked against the value it DENOTES, so an
+        // unsigned target rejects every negative one however small its magnitude.
+        // These used to compile and silently yield the type's maximum.
+        (
+            "u8_negative_one",
+            "func main() -> i32 { val x: u8 = -1\n return 0 }",
+        ),
+        (
+            "u64_negative_one",
+            "func main() -> i32 { val x: u64 = -1\n return 0 }",
+        ),
+        (
+            "u8_suffixed_negative_one",
+            "func main() -> i32 { val x = -1u8\n return 0 }",
         ),
     ] {
         let test = CompileTest::new();
@@ -141,4 +153,24 @@ fn regression_one_past_the_bound_is_still_rejected() {
             "{name} compiled but is out of range for its type"
         );
     }
+}
+
+#[test]
+fn regression_negated_zero_still_fits_an_unsigned_type() {
+    // The rejection above is about the denoted value, not about the `-` token: `-0`
+    // denotes 0, which every unsigned type holds.
+    let test = CompileTest::new();
+    let exit = test
+        .compile_and_run(
+            "unsigned_negated_zero.nr",
+            r#"
+func main() -> i32 {
+    val a: u8 = -0
+    val b: u64 = -0
+    return (a as i32) + (b as i32)
+}
+"#,
+        )
+        .expect("compilation failed");
+    assert_eq!(exit, 0);
 }

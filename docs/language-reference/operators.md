@@ -168,6 +168,11 @@ val abs_neg: i32 = -abs(x)
 **Types**: Works with numeric types
 **Returns**: Same type as operand
 
+On an integer, `-x` is `0 - x` and follows the same overflow rule as the subtraction: it
+panics in debug builds and wraps in release ones. That makes it an overflow at a signed
+type's `MIN`, and at every nonzero value of an unsigned type — see
+[integer overflow](types.md#integer-overflow).
+
 ### Logical NOT (`!`)
 
 ```neuro

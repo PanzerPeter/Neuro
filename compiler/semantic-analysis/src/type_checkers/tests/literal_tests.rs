@@ -3,7 +3,7 @@ use super::super::TypeChecker;
 use super::{make_function, make_ident, make_type, semantic_errors};
 use crate::errors::TypeError;
 use crate::types::Type;
-use ast_types::{BinaryOp, Expr, Stmt};
+use ast_types::{BinaryOp, Expr, Stmt, UnaryOp};
 use shared_types::{Literal, Span};
 
 #[test]
@@ -85,6 +85,94 @@ fn test_integer_literal_out_of_range_i8() {
             assert_eq!(*ty, Type::I8);
         }
         _ => panic!("Expected IntegerLiteralOutOfRange error"),
+    }
+}
+
+#[test]
+fn test_negated_literal_for_unsigned_target_is_rejected() {
+    // `val x: u8 = -1` as the parser actually builds it: a negation over the
+    // magnitude `1`, not a negative literal. Range-checking the DENOTED value is
+    // what rejects it; checking the magnitude alone sees `1` fitting `u8`.
+    let mut checker = TypeChecker::new();
+
+    let stmt = Stmt::VarDecl {
+        name: make_ident("x"),
+        ty: Some(make_type("u8")),
+        init: Some(Expr::Unary {
+            op: UnaryOp::Negate,
+            operand: Box::new(Expr::Literal(Literal::Integer(1, None), Span::new(12, 13))),
+            span: Span::new(11, 13),
+        }),
+        mutable: false,
+        span: Span::new(0, 13),
+    };
+
+    checker.check_stmt(&stmt);
+    assert!(checker.has_errors());
+
+    let errors = checker.into_errors();
+    assert_eq!(errors.len(), 1);
+    match &errors[0] {
+        TypeError::NegativeLiteralForUnsignedType { magnitude, ty, .. } => {
+            assert_eq!(*magnitude, 1);
+            assert_eq!(*ty, Type::U8);
+        }
+        other => panic!("Expected NegativeLiteralForUnsignedType error, got {other}"),
+    }
+}
+
+#[test]
+fn test_negated_zero_for_unsigned_target_is_accepted() {
+    // `-0` denotes 0, which every unsigned type holds. The rejection above is about
+    // the value the expression denotes, not about the `-` token being present.
+    let mut checker = TypeChecker::new();
+
+    let stmt = Stmt::VarDecl {
+        name: make_ident("x"),
+        ty: Some(make_type("u8")),
+        init: Some(Expr::Unary {
+            op: UnaryOp::Negate,
+            operand: Box::new(Expr::Literal(Literal::Integer(0, None), Span::new(12, 13))),
+            span: Span::new(11, 13),
+        }),
+        mutable: false,
+        span: Span::new(0, 13),
+    };
+
+    assert!(checker.check_stmt(&stmt).is_some());
+    assert!(!checker.has_errors());
+}
+
+#[test]
+fn test_negated_literal_out_of_range_for_signed_target_is_not_the_unsigned_error() {
+    // `val x: i8 = -200` is out of range, but `i8` HAS negative values — it must not
+    // pick up the unsigned diagnostic, which is keyed on the target's signedness.
+    let mut checker = TypeChecker::new();
+
+    let stmt = Stmt::VarDecl {
+        name: make_ident("x"),
+        ty: Some(make_type("i8")),
+        init: Some(Expr::Unary {
+            op: UnaryOp::Negate,
+            operand: Box::new(Expr::Literal(
+                Literal::Integer(200, None),
+                Span::new(12, 15),
+            )),
+            span: Span::new(11, 15),
+        }),
+        mutable: false,
+        span: Span::new(0, 15),
+    };
+
+    checker.check_stmt(&stmt);
+    let errors = checker.into_errors();
+    assert_eq!(errors.len(), 1);
+    match &errors[0] {
+        TypeError::IntegerLiteralOutOfRange { value, ty, .. } => {
+            assert_eq!(*value, -200);
+            assert_eq!(*ty, Type::I8);
+        }
+        other => panic!("Expected IntegerLiteralOutOfRange error, got {other}"),
     }
 }
 

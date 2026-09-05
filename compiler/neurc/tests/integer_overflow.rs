@@ -1,8 +1,9 @@
 // End-to-end tests for integer overflow semantics.
 //
-// Debug builds (`-O0`) panic on `+`/`-`/`*` overflow; release builds (`-O1..-O3`)
-// wrap (two's complement). These tests compile the same overflowing program at
-// both optimization levels and assert the runtime behavior differs accordingly.
+// Debug builds (`-O0`) panic on `+`/`-`/`*` and unary `-` overflow; release builds
+// (`-O1..-O3`) wrap (two's complement). These tests compile the same overflowing
+// program at both optimization levels and assert the runtime behavior differs
+// accordingly.
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus};
 
@@ -141,5 +142,76 @@ fn an_overflow_says_what_failed_and_where() {
     assert!(
         stderr.contains("panic: integer overflow at"),
         "an overflow must name itself and its source location, got:\n{stderr}"
+    );
+}
+
+/// Negating a nonzero unsigned value overflows: the result is negative and `u8` has
+/// no negative values. Written as `0u8 - y` this always panicked on the debug tier,
+/// while `-y` was emitted as a bare `build_int_neg` and wrapped silently.
+const UNSIGNED_NEGATE: &str = r#"
+func main() -> i32 {
+    mut y: u8 = 1u8
+    val n = -y
+    return n as i32
+}
+"#;
+
+/// `-i32::MIN` is unrepresentable, so the negation overflows exactly where `0 - x`
+/// does. `MIN` is computed rather than written so the checker's literal path does not
+/// fold it away before codegen sees it.
+const SIGNED_MIN_NEGATE: &str = r#"
+func main() -> i32 {
+    mut a: i32 = -2147483647
+    a = a - 1
+    val n = -a
+    return n
+}
+"#;
+
+#[test]
+fn unsigned_negation_aborts_in_debug() {
+    let exe = compile_source(UNSIGNED_NEGATE, "un_dbg", "0");
+    let status = run(&exe);
+    assert!(
+        trapped(status),
+        "expected debug build to abort, but it exited with {:?}",
+        status.code()
+    );
+}
+
+#[test]
+fn unsigned_negation_wraps_in_release() {
+    let exe = compile_source(UNSIGNED_NEGATE, "un_rel", "2");
+    let status = run(&exe);
+    // 0 - 1 wraps to u8::MAX.
+    assert_eq!(exit_low_byte(status), Some(255));
+}
+
+#[test]
+fn signed_min_negation_aborts_in_debug() {
+    let exe = compile_source(SIGNED_MIN_NEGATE, "sn_dbg", "0");
+    let status = run(&exe);
+    assert!(
+        trapped(status),
+        "expected debug build to abort, but it exited with {:?}",
+        status.code()
+    );
+}
+
+#[test]
+fn signed_min_negation_wraps_in_release() {
+    let exe = compile_source(SIGNED_MIN_NEGATE, "sn_rel", "2");
+    let status = run(&exe);
+    // -i32::MIN wraps back to i32::MIN; its low byte is 0.
+    assert_eq!(exit_low_byte(status), Some(0));
+}
+
+#[test]
+fn a_negation_overflow_says_what_failed_and_where() {
+    let exe = compile_source(UNSIGNED_NEGATE, "un_msg", "0");
+    let stderr = stderr_of(&exe);
+    assert!(
+        stderr.contains("panic: integer overflow at"),
+        "a negation overflow must name itself and its source location, got:\n{stderr}"
     );
 }

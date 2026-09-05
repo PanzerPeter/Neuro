@@ -365,6 +365,13 @@ pub enum TypeError {
     #[error("integer literal {value} out of range for type {ty} at {span:?}")]
     IntegerLiteralOutOfRange { value: i128, ty: Type, span: Span },
 
+    #[error("literal -{magnitude} at {span:?} is negative and {ty} is unsigned: use a signed type, or `0{ty}.wrapping_sub({magnitude}{ty})` if the two's-complement wrap was intended")]
+    NegativeLiteralForUnsignedType {
+        magnitude: i128,
+        ty: Type,
+        span: Span,
+    },
+
     #[error("'break' used outside of a loop at {span:?}")]
     BreakOutsideLoop { span: Span },
 

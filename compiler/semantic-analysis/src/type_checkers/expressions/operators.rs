@@ -396,9 +396,11 @@ impl TypeChecker {
         // the magnitude is one past the type's maximum, while the value the expression
         // denotes is in range. Check the negated value instead.
         //
-        // Only signed targets take this path. Negating an unsigned literal keeps its
-        // existing wrapping meaning rather than becoming an out-of-range error, which
-        // would be a language change and not this fix.
+        // The same check is what rejects `val x: u8 = -1`: a literal that does not fit
+        // its type is a compile error, and -1 does not fit an unsigned type however it
+        // is spelled. Without it the two spellings of one quantity disagree —
+        // the literal silently became the type's maximum while the computed `0u8 - 1u8`
+        // panicked on the debug tier.
         if let (
             UnaryOp::Negate,
             Expr::Literal(shared_types::Literal::Integer(magnitude, suffix), lit_span),
@@ -413,10 +415,23 @@ impl TypeChecker {
                     // exactly as an un-negated one does.
                     .unwrap_or(Type::I32),
             };
-            if Self::is_signed_integer(&target) {
+            if target.is_integer() {
                 let negated = -*magnitude;
                 if self.check_integer_range(negated, &target) {
                     return Some(target);
+                }
+                // An unsigned target rejects every negative value, so "out of range"
+                // under-explains: the author wrote a negative number for a type that has
+                // none. Name that, and name the spelling that does produce the wrap.
+                // Keyed on the TARGET's signedness, not the value's sign — `-200` for
+                // `i8` is out of range too, and is not this diagnostic.
+                if !Self::is_signed_integer(&target) {
+                    self.record_error(TypeError::NegativeLiteralForUnsignedType {
+                        magnitude: *magnitude,
+                        ty: target,
+                        span: *lit_span,
+                    });
+                    return Some(Type::Unknown);
                 }
                 self.record_error(TypeError::IntegerLiteralOutOfRange {
                     value: negated,

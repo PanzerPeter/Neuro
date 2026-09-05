@@ -51,7 +51,7 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             HirExprKind::Unary { op, operand } => {
                 let operand_ty = Type::from_hir(&operand.ty);
-                self.codegen_unary(*op, operand, &operand_ty)
+                self.codegen_unary(*op, operand, &operand_ty, expr.span.start)
             }
             HirExprKind::Call { callee, args } => {
                 // In value position a unit-returning call is an error — there is no

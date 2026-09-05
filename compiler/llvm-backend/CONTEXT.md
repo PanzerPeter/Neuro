@@ -474,7 +474,8 @@ than a position. The slot is never the induction variable itself even where the 
 wrong.
 
 ## Integer Overflow ABI
-Integer `+` / `-` / `*` honor the overflow rule, keyed off `OptimizationLevelSetting`:
+Integer `+` / `-` / `*` and unary `-` honor the overflow rule, keyed off
+`OptimizationLevelSetting`:
 - `-O0` → `overflow_checks = true`. `codegen_int_arith` emits
   `llvm.{s,u}{add,sub,mul}.with.overflow`, extracts `{result, overflow_bit}`, and hands the
   negated overflow bit to `codegen_guard_or_panic`, so an overflow prints
@@ -485,6 +486,20 @@ Integer `+` / `-` / `*` honor the overflow rule, keyed off `OptimizationLevelSet
 
 Signedness picks the `s`/`u` variant via `TypeMapper::is_unsigned_int`. Bitwise ops
 (`build_and`/`or`/`xor`/`left_shift`, `build_not` for `BitNot`) and floats are unaffected.
+
+Unary `-` on an integer is `0 - x` and overflows exactly where that subtraction does — at a
+signed type's `MIN`, and at every nonzero value of an unsigned type — so `codegen_unary` builds
+a zero and hands the pair to the same `codegen_int_arith` (`pub(super)` for that caller),
+taking the expression's source offset like `codegen_binary`. Emitted separately as
+`build_int_neg` it wrapped silently on the debug tier while `0 - x` panicked, so the two
+spellings of one quantity disagreed.
+
+A negation whose operand is an integer **literal** short-circuits that path and is materialized
+through `codegen_literal` with the magnitude already negated. The checker range-checks such a
+negation against the value it denotes, so it is in range for its type and there is nothing to
+guard; computing it would be wrong as well as redundant, because the most negative value of a
+signed type is written as a magnitude one past that type's maximum and narrows to `MIN`'s own
+bit pattern, on which `0 - MIN` overflows.
 
 ## Integer Division ABI
 Integer `/` and `%` go through `codegen_int_div_rem`, which guards the two operand pairs LLVM's

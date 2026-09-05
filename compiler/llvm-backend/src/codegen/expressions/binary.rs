@@ -290,7 +290,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// any other, so it prints a message and aborts rather than executing a bare
     /// `llvm.trap`: a trap surfaces only as `SIGILL`, which tells the programmer
     /// neither what failed nor where.
-    fn codegen_int_arith(
+    pub(super) fn codegen_int_arith(
         &mut self,
         op: BinaryOp,
         lhs: IntValue<'ctx>,

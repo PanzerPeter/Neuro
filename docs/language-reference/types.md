@@ -98,7 +98,21 @@ func main() -> i32 {
 }
 ```
 
-The debug-build trap turns a silent miscalculation into an immediate failure during development, while release builds match the zero-overhead wrapping behavior of the underlying hardware. The check is applied to `+`, `-`, and `*` only; division and modulo are unaffected. Compile-time constant folding always uses wrapping arithmetic regardless of optimization level.
+The debug-build trap turns a silent miscalculation into an immediate failure during development, while release builds match the zero-overhead wrapping behavior of the underlying hardware. The check is applied to `+`, `-`, `*`, and unary `-` only; division and modulo are unaffected. Compile-time constant folding always uses wrapping arithmetic regardless of optimization level.
+
+Unary negation is `0 - x`, so it overflows wherever that subtraction does: at a signed type's `MIN`, and at every nonzero value of an unsigned type.
+
+```neuro
+mut y: u8 = 1u8
+val n = -y          // Debug: aborts. Release: wraps to 255.
+```
+
+A negative *literal* written for an unsigned type is rejected outright rather than deferred to run time, because a literal is range-checked against the value it denotes:
+
+```neuro
+// val x: u8 = -1        // COMPILE ERROR: -1 is negative and u8 is unsigned
+val x: u8 = 0u8.wrapping_sub(1u8)   // 255, if the wrap is what you meant
+```
 
 #### Integer Methods
 

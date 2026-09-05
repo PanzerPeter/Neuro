@@ -153,8 +153,13 @@ the cascade.
 - A negation directly over an integer literal is range-checked as the **negated** value, in
   `check_unary_expr` ahead of the general operand walk. Checking the magnitude alone rejects the
   most negative value of every signed type, whose magnitude is one past that type's maximum
-  (`-2147483648` for `i32`). Only signed targets take this path: negating an unsigned literal
-  keeps its existing wrapping meaning.
+  (`-2147483648` for `i32`), and accepts `val x: u8 = -1`, whose magnitude fits while the value
+  it denotes does not. Every integer target takes this path. An out-of-range negation over an
+  **unsigned** target is `NegativeLiteralForUnsignedType`, which names the wrapping spelling
+  (`0u8.wrapping_sub(1u8)`) rather than only the range; the split is keyed on the target's
+  signedness through `is_signed_integer`, not on the value's sign, so `val x: i8 = -200` stays
+  an ordinary `IntegerLiteralOutOfRange`. This is the invariant the backend relies on to
+  materialize a negated literal as a constant instead of guarding it at run time.
 - Bitwise `BitAnd`/`BitOr`/`BitXor`/`Shl` require integer operands and return the operand type;
   `BitNot` requires an integer.
 
