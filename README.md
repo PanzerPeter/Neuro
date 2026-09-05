@@ -118,7 +118,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop`, `&T` / `&mut T` with flow-sensitive exclusivity, lifetime elision and annotations |
 | **Strings** | Immutable fat-pointer `string` with escapes, `&string` slices, `==`, `+` concatenation, `.len()` / `.clone()` / `.slice(a..b)` / `.char_slice(a..b)`, codepoint iteration with `.chars()` and `.char_indices()`, interpolation `"{x:.2}"`, triple-quoted `"""` blocks with dedent; growable `String` buffer for building text — `push_str` / `clear` / `to_string` |
 | **Modules & visibility** | Multi-file programs: every `.nr` file is a module and `mod.nr` directories nest; inline `module { }` blocks group within one file; `import math::{sqrt}`, `import ./utils`, `as` renames, module aliases, variant imports, and `export import` re-export facades; declarations and struct fields are private until `export` opts them in; an implicit prelude puts `Option` / `Result` and `Some` / `None` / `Ok` / `Err` in every module, with `@no_prelude` to opt out |
-| **Toolchain** | Native binaries via inkwell 0.9 / LLVM 20; `neurc check` and `neurc compile`; buffered `print` / `println` to stdout, line-buffered on a terminal and drained on every exit path; `panic` / `assert` / `unreachable` runtime, with error paths outlined off the hot path |
+| **Toolchain** | Native binaries via inkwell 0.9 / LLVM 20; `neurc check` and `neurc compile`; buffered `print` / `println` to stdout, line-buffered on a terminal and drained on every exit path; `panic` / `assert` / `unreachable` runtime with located diagnostics, covering array bounds, string slices, a zero divisor, and debug-build integer overflow, all outlined off the hot path |
 
 ### Current Memory Model
 
@@ -136,18 +136,20 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 
 `neurc compile -O 3` hands the module to the same LLVM 20 optimization pipeline `clang -O2` uses, so compute-bound code lands in the same range as C++ rather than somewhere between C++ and Python.
 
-Relative wall time, lower is better — reproduce on your own machine with `python benchmarks/run.py`, which builds all three implementations of each program and refuses to report timings if they disagree on output:
+Best of nine runs on one machine, lower is better. Reproduce with `python benchmarks/run.py`, which builds all three implementations of each program and refuses to report timings if they disagree on output:
 
 | Benchmark | What it stresses | Neuro `-O 3` | `clang -O2` | Python 3.14 |
 |---|---|---|---|---|
-| `mandelbrot` | scalar `f64` in a tight loop | 1.0x | 1.0x | 35x |
-| `vector_sum` | `Vec` push, indexed sweep | 1.0x | 1.0x | 406x |
-| `call_overhead` | recursion, call and inline cost | 1.0x | 1.1x | 31x |
-| `print_lines` | formatted standard output | 2.0x | 1.0x | 5.3x |
+| `mandelbrot` | scalar `f64` in a tight loop | 166 ms | 166 ms | 5791 ms |
+| `vector_sum` | `Vec` push, indexed sweep | 25 ms | 26 ms | 10068 ms |
+| `call_overhead` | recursion, call and inline cost | 45 ms | 51 ms | 1389 ms |
+| `print_lines` | integer holes to standard output | 13 ms | 22 ms | 110 ms |
+| `format_floats` | `f64` holes at a fixed precision | 118 ms | 109 ms | 214 ms |
+| `int_divide` | guarded `/` and `%`, opaque divisor | 96 ms | 89 ms | 1318 ms |
 
-Ratios, not absolutes, because the absolutes belong to the machine rather than to the language — and to whichever `python3` is on your PATH, which is why the interpreter is named. `print_lines` is the honest outlier. The syscalls are gone — standard output is buffered, and the same loop printing a constant line rather than an interpolated one runs at C's speed — so what is left is the formatting: interpolation renders each hole through `snprintf` twice, once to measure the result and once to produce it, into a heap buffer that is then copied into the joined string. `printf` formats once, straight into its own buffer. Closing that is not done yet.
+Absolute times belong to the machine rather than to the language, and the Python column to whichever `python3` is on your PATH, which is why the version is named. Two rows are worth a word. `print_lines` beats C because an integer hole renders through a digit loop instead of `snprintf`; `int_divide` is the one place the compiler spends rather than saves, since `/` and `%` guard the operand pairs the hardware instruction leaves undefined and an opaque divisor keeps those guards in the loop.
 
-The default is `-O 0`, which selects trapping arithmetic and runs no optimization pipeline — pass `-O 3` before drawing any conclusion about speed.
+The default is `-O 0`: checked arithmetic, no optimization pipeline. Pass `-O 3` before drawing any conclusion about speed.
 
 ---
 
@@ -163,162 +165,95 @@ The default is `-O 0`, which selects trapping arithmetic and runs no optimizatio
 
 ---
 
-### Arch Linux / CachyOS
+### Step 1: LLVM 20
+
+This is the only step that differs between systems. Add the `export` to your shell
+profile (`~/.bashrc`, `~/.zshrc`) so it survives a new terminal.
+
+**Arch Linux / CachyOS**
 
 ```bash
-# 1. Install LLVM 20
 sudo pacman -S llvm20
-
-# 2. Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source ~/.cargo/env
-
-# 3. Set the LLVM prefix (add to ~/.bashrc or ~/.zshrc to persist)
 export LLVM_SYS_201_PREFIX=/usr/lib/llvm20
-
-# 4. Clone and build
-git clone https://github.com/PanzerPeter/Neuro.git
-cd Neuro
-cargo build --release
-
-# 5. Run the test suite
-cargo test --workspace
-
-# 6. (Optional) Install the compiler globally
-cargo install --path compiler/neurc
 ```
 
-### Ubuntu / Debian
+**Ubuntu / Debian**
 
 ```bash
-# 1. Install LLVM 20 via the official APT script
 wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 20
-# Alternatively, use the full dev package set:
+# or the full dev package set:
 # sudo apt-get install llvm-20 llvm-20-dev llvm-20-tools libpolly-20-dev
-
-# 2. Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source ~/.cargo/env
-
-# 3. Set the LLVM prefix (add to ~/.bashrc to persist)
 export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20
-echo 'export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20' >> ~/.bashrc
-
-# 4. Clone and build
-git clone https://github.com/PanzerPeter/Neuro.git
-cd Neuro
-cargo build --release
-
-# 5. Run the test suite
-cargo test --workspace
-
-# 6. (Optional) Install the compiler globally
-cargo install --path compiler/neurc
 ```
 
-### macOS (Homebrew)
+**macOS (Homebrew)**
 
 ```bash
-# 1. Install LLVM 20
 brew install llvm@20
-
-# 2. Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source ~/.cargo/env
-
-# 3. Set the LLVM prefix (add to ~/.zshrc or ~/.bash_profile to persist)
 export LLVM_SYS_201_PREFIX="$(brew --prefix llvm@20)"
-echo "export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)" >> ~/.zshrc
+```
 
-# 4. Clone and build
+**Windows 10 / 11 (x64)** needs a longer walkthrough; see below.
+
+### Step 2: Build
+
+With LLVM in place and Rust installed from [rustup.rs](https://rustup.rs/):
+
+```bash
 git clone https://github.com/PanzerPeter/Neuro.git
 cd Neuro
 cargo build --release
-
-# 5. Run the test suite
 cargo test --workspace
 
-# 6. (Optional) Install the compiler globally
-cargo install --path compiler/neurc
+cargo install --path compiler/neurc   # optional, puts neurc on your PATH
 ```
+
+On Windows the same four commands run unchanged in PowerShell, and
+`cargo install` places `neurc.exe` in `%USERPROFILE%\.cargo\bin`, which rustup
+has already added to `PATH`.
+
+---
 
 ### Windows 10 / 11 (x64)
 
-Windows requires the **MSVC toolchain** (not GNU). Make sure Visual Studio Build
-Tools 2019 or later are installed with the **C++ build tools** workload before
-proceeding.
+Windows needs the MSVC toolchain, not GNU, and LLVM does not come from a package
+manager. Four extra steps, after which Step 2 above runs unchanged.
 
-**Step 1. Install Visual Studio Build Tools**
+**Install Visual Studio Build Tools.** Download from
+[visualstudio.microsoft.com/downloads](https://visualstudio.microsoft.com/downloads/)
+under *Tools for Visual Studio* → *Build Tools for Visual Studio 2022*, and select the
+**Desktop development with C++** workload. 2019 or later works.
 
-Download from [visualstudio.microsoft.com/downloads](https://visualstudio.microsoft.com/downloads/)
-→ *Tools for Visual Studio* → *Build Tools for Visual Studio 2022*.
-Select the **Desktop development with C++** workload.
+**Install Rust.** Run `rustup-init.exe` from [rustup.rs](https://rustup.rs/) and choose
+*1) Proceed with standard installation*, which selects the
+`stable-x86_64-pc-windows-msvc` toolchain. Open a new PowerShell window afterwards so
+`cargo` and `rustc` are on `PATH`.
 
-**Step 2. Install Rust**
-
-Download and run `rustup-init.exe` from [rustup.rs](https://rustup.rs/).
-When prompted, choose *1) Proceed with standard installation*. Rustup will
-automatically select the `stable-x86_64-pc-windows-msvc` default toolchain.
-
-Open a **new** PowerShell window after installation so the `cargo` and `rustc`
-commands are on your `PATH`.
-
-**Step 3. Install LLVM 20**
-
-Download the official Windows installer from the LLVM GitHub releases page:
+**Install LLVM 20** to a path without spaces (the NSIS installer enforces this):
 
 ```powershell
-# PowerShell: download and run the installer silently
 $version = "20.1.8"
 $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/LLVM-$version-win64.exe"
 curl.exe -fsSL -o "$env:TEMP\llvm-installer.exe" $url
 Start-Process "$env:TEMP\llvm-installer.exe" -ArgumentList "/S /D=C:\LLVM" -Wait -PassThru | Out-Null
 ```
 
-Or download and run the installer manually from the
-[LLVM GitHub releases page](https://github.com/llvm/llvm-project/releases), installing to `C:\LLVM`
-(the path must not contain spaces; the NSIS installer enforces this).
+The installer is also downloadable by hand from the
+[LLVM releases page](https://github.com/llvm/llvm-project/releases).
 
-**Step 4. Set the LLVM environment variable**
+**Point the build at it.** No admin rights needed:
 
 ```powershell
-# Set permanently for your user account (no admin required)
 [Environment]::SetEnvironmentVariable(
     "LLVM_SYS_201_PREFIX", "C:\LLVM",
     [EnvironmentVariableTarget]::User
 )
-# Also add C:\LLVM\bin to your PATH
 $current = [Environment]::GetEnvironmentVariable("Path", "User")
 [Environment]::SetEnvironmentVariable("Path", "$current;C:\LLVM\bin", "User")
 ```
 
-Close and reopen PowerShell so the changes take effect, then verify:
-
-```powershell
-llvm-config --version   # should print 20.x.y
-```
-
-**Step 5. Clone and build**
-
-```powershell
-git clone https://github.com/PanzerPeter/Neuro.git
-cd Neuro
-cargo build --release
-```
-
-**Step 6. Run the test suite**
-
-```powershell
-cargo test --workspace
-```
-
-**Step 7. (Optional) Install the compiler globally**
-
-```powershell
-cargo install --path compiler/neurc
-# The binary is placed in %USERPROFILE%\.cargo\bin\neurc.exe
-# which is already on PATH after rustup setup.
-```
+Close and reopen PowerShell, then check with `llvm-config --version`, which should
+print `20.x.y`.
 
 > **Troubleshooting Windows build errors**
 >
@@ -327,7 +262,7 @@ cargo install --path compiler/neurc
 >   and points to a directory that contains `bin\llvm-config.exe`.
 > - *`link.exe` not found*: the MSVC Build Tools are not on `PATH`. Run the
 >   build from a **Developer PowerShell** / **x64 Native Tools Command Prompt**
->   or install the *C++ build tools* workload as described in Step 1.
+>   or install the *C++ build tools* workload as described above.
 > - *Version mismatch (`llvm-sys-201` requires LLVM 20)*: an older LLVM is on
 >   `PATH`. Set `LLVM_SYS_201_PREFIX` explicitly to the LLVM 20 prefix and
 >   ensure `C:\LLVM\bin` precedes any other LLVM entries in `PATH`.

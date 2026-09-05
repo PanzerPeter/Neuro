@@ -10,6 +10,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.14.1] - 2026-09-05
+
+### Fixed
+
+- **Integer `/` and `%` no longer compile to undefined behaviour.** A zero divisor and
+  `MIN / -1` are both undefined for LLVM's division instructions, and neither was guarded.
+  Both builds went wrong quietly, in different ways. At `-O 0` the process died of
+  `SIGFPE` with nothing printed. At `-O 1` and above the optimizer treated the operation
+  as unreachable, folded the surrounding code around a poison value, and the program
+  printed a garbage answer and carried on: `10 / 0` reported `93935416918016` and exited
+  `0`.
+
+  A zero divisor now panics in every build:
+
+  ```
+  panic: division by zero at program.nr:4:13
+  panic: remainder by zero at program.nr:4:13
+  ```
+
+  Unlike overflow it has no two's-complement answer to wrap to, so a release build has
+  nothing to do instead of checking. The guard folds away wherever the divisor is a
+  constant or its range is known, and where it survives it is a never-taken branch in
+  front of an instruction that already costs tens of cycles.
+
+  `MIN / -1` is an integer overflow and follows the same rule the other arithmetic
+  operators do: a panic in debug builds, the two's-complement wrap in release.
+  `i32::MIN / -1` is `i32::MIN` and `i32::MIN % -1` is `0`, produced by dividing by `1`
+  so that `-1` never reaches the instruction.
+
+- **A debug-build integer overflow now says what failed and where.** `+` / `-` / `*`
+  overflow at `-O 0` executed a bare `llvm.trap`. That reaches the programmer as
+  `Illegal instruction (core dumped)`, naming neither the operation nor its line, and it
+  was the only panic in the language that printed nothing. It now reports through the
+  same outlined machinery every other guard uses:
+
+  ```
+  panic: integer overflow at program.nr:5:13
+  ```
+
+  Buffered standard output is drained ahead of it, as it already was for every other
+  panic, so the output that led up to the overflow survives. With the trap gone, the
+  language stops in exactly two ways: `main` returns, or the panic runtime aborts.
+
+### Changed
+
+- **Integer interpolation holes render about 3.7x faster.** A hole called `snprintf`
+  twice: once against `(NULL, 0)` to measure the result, once to produce it. That is two
+  traversals of a printf format string and two variadic calls to turn an integer into at
+  most twenty digits. Integers now go through a digit loop emitted once per radix, with
+  the radix a compile-time constant so instruction selection turns the division into a
+  multiply-and-shift. The `print_lines` benchmark went from 36.4 ms to 9.8 ms, which is
+  ahead of the `printf` loop it is measured against.
+
+- **Float interpolation holes render about 2x faster.** The probe call is gone there too.
+  `snprintf` renders once into a stack buffer sized for the widest conversion the format
+  mini-language admits, and its return value is the length. A render that does not fit
+  falls back to allocating what `snprintf` asked for and rendering again, so correctness
+  does not depend on that size being right. The new `format_floats` benchmark went from
+  217.5 ms to 109.8 ms.
+
+  Rendered output is byte-identical to what the `snprintf` path produced, at every
+  optimization level, for every conversion, width, sign flag and precision the format
+  mini-language admits.
+
+### Added
+
+- **Two benchmarks.** `format_floats` covers the float-to-text path a training loop
+  exercises every time it reports a loss, which `print_lines` (integer holes) did not
+  reach. `int_divide` covers guarded `/` and `%` with a divisor no range analysis can pin
+  down — the worst case for the new division guards, and the one place this release costs
+  rather than saves: about a tenth of that loop.
+
+- **`docs/BUGS.md`: BUG-019 and BUG-020**, both found by this pass and both reported
+  rather than fixed, because each needs a decision before it needs a patch. BUG-019: the
+  most negative value of every signed type has no literal spelling (`val x: i32 =
+  -2147483648` is rejected), and `i64` / `u64` fail one stage earlier in the lexer.
+  BUG-020: an out-of-range float-to-integer cast yields poison, so its value depends on
+  the optimization level rather than on the program.
+
 ## [2.14.0] - 2026-09-05
 
 ### Added

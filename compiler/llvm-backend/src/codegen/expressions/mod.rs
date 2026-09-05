@@ -47,7 +47,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 // width / signedness), which is the operand's own type rather than the
                 // expression's result type (e.g. `Bool` for a comparison).
                 let left_ty = Type::from_hir(&left.ty);
-                self.codegen_binary(left, *op, right, &left_ty)
+                self.codegen_binary(left, *op, right, &left_ty, expr.span.start)
             }
             HirExprKind::Unary { op, operand } => {
                 let operand_ty = Type::from_hir(&operand.ty);

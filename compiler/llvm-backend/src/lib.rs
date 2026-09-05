@@ -314,7 +314,7 @@ impl OptimizationLevelSetting {
     /// the same code as -O0.
     fn pass_pipeline(self) -> Option<&'static str> {
         match self {
-            // -O0 also selects trapping arithmetic; leaving the IR untouched keeps
+            // -O0 also selects checked arithmetic; leaving the IR untouched keeps
             // every overflow check and bounds guard exactly where codegen put it.
             Self::O0 => None,
             Self::O1 => Some("default<O1>"),
@@ -567,8 +567,9 @@ mod tests {
 
     #[test]
     fn guard_and_overflow_branches_are_weighted() {
-        // At -O0 arithmetic traps on overflow, so this program carries both branch
-        // shapes: a bounds guard (cold edge false) and an overflow check (cold edge true).
+        // At -O0 arithmetic panics on overflow, so this program carries two runtime
+        // guards: a bounds check and an overflow check. Both report through the panic
+        // machinery, so both have the one guard shape and weight the same edge cold.
         let source = r#"
             func main() -> i32 {
                 val arr: [i32; 3] = [1, 2, 3]
@@ -586,8 +587,13 @@ mod tests {
             ir
         );
         assert!(
-            ir.contains(r#"!{!"branch_weights", i32 1, i32 2000}"#),
-            "an overflow check's trap edge must be the unlikely one:\n{}",
+            ir.contains("panic: integer overflow at"),
+            "an overflow must report a located diagnostic, not a bare trap:\n{}",
+            ir
+        );
+        assert!(
+            !ir.contains("@llvm.trap"),
+            "nothing may still abort through a silent trap:\n{}",
             ir
         );
     }
@@ -935,8 +941,9 @@ mod tests {
 
     #[test]
     fn every_exit_path_drains_the_output_buffer() {
-        // `main` returning, `abort`, and `llvm.trap` are the only three ways this
-        // language stops running, and none of the last two runs an exit hook.
+        // `main` returning and `abort` are the only two ways this language stops
+        // running, and `abort` runs no exit hook. Both a panicking `assert` and an
+        // overflowing `+` reach the second.
         let source = r#"
             func main() -> i32 {
                 mut n: i32 = 2147483647
@@ -954,17 +961,16 @@ mod tests {
             "main must drain before it returns:\n{}",
             function_body(&ir, "main")
         );
-        for (before, path) in [
-            ("call void @abort()", "the panic runtime"),
-            ("call void @llvm.trap()", "the overflow trap"),
-        ] {
-            let drained = ir
-                .split(before)
-                .next()
-                .map(|head| head.trim_end().ends_with("call void @neuro.print.flush()"))
-                .unwrap_or(false);
-            assert!(drained, "{} must drain the buffer first:\n{}", path, ir);
-        }
+        let drained = ir
+            .split("call void @abort()")
+            .next()
+            .map(|head| head.trim_end().ends_with("call void @neuro.print.flush()"))
+            .unwrap_or(false);
+        assert!(
+            drained,
+            "the panic runtime must drain the buffer first:\n{}",
+            ir
+        );
     }
 
     #[test]

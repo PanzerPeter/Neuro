@@ -122,6 +122,42 @@ fn integer_radix_specifiers_match_the_spec_table() {
 }
 
 #[test]
+fn integer_rendering_holds_at_the_width_boundaries() {
+    // The digit loop that replaced `snprintf` has to get right what a C library
+    // handled for free: the widest magnitude of every radix, zero (which is the one
+    // value whose loop body must still run once), and `i64::MIN`, whose magnitude is
+    // not representable as a positive `i64` and is reached by a wrapping negation.
+    run(
+        "interp_int_bounds.nr",
+        concat!(
+            "    val zero: i32 = 0\n",
+            "    mut min: i64 = -9223372036854775807i64\n",
+            "    min = min - 1i64\n",
+            "    val max: i64 = 9223372036854775807i64\n",
+            // `u64::MAX` has no literal spelling: the lexer carries every integer
+            // literal as an `i64`, so it is built from the largest one that does.
+            "    mut umax: u64 = 9223372036854775807u64\n",
+            "    umax = umax * 2u64 + 1u64\n",
+        ),
+        &[
+            ("{zero}", "0"),
+            ("{zero:x}", "0"),
+            ("{zero:o}", "0"),
+            ("{zero:+d}", "+0"),
+            ("{min}", "-9223372036854775808"),
+            ("{max}", "9223372036854775807"),
+            ("{max:+d}", "+9223372036854775807"),
+            ("{umax}", "18446744073709551615"),
+            ("{umax:x}", "ffffffffffffffff"),
+            // 22 octal digits is the longest text any radix can produce, and the one
+            // the renderer's scratch buffer is sized for.
+            ("{umax:o}", "1777777777777777777777"),
+            ("{min:x}", "8000000000000000"),
+        ],
+    );
+}
+
+#[test]
 fn width_alignment_and_flags_pad_the_field() {
     run(
         "interp_padding.nr",

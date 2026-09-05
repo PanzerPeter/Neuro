@@ -11,6 +11,12 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::type_mapping::TypeMapper;
 use crate::types::Type;
 
+/// The diagnostic a debug-build arithmetic overflow panics with.
+const OVERFLOW_PANIC: &str = "integer overflow";
+/// The diagnostic a zero divisor panics with, for `/` and for `%`.
+const DIVIDE_BY_ZERO_PANIC: &str = "division by zero";
+const REMAINDER_BY_ZERO_PANIC: &str = "remainder by zero";
+
 impl<'ctx> CodegenContext<'ctx> {
     /// Compare two string fat-pointers for byte-level equality.
     ///
@@ -275,16 +281,22 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Emit integer `+`, `-`, or `*`.
     ///
     /// In debug builds (`-O0`, `overflow_checks` enabled) the operation uses the
-    /// LLVM `{s,u}{add,sub,mul}.with.overflow` intrinsic and aborts via `llvm.trap`
-    /// when the result overflows, matching the overflow rule that debug arithmetic
-    /// panics on overflow. In release builds the plain wrapping instruction is
-    /// emitted, giving two's-complement wraparound.
+    /// LLVM `{s,u}{add,sub,mul}.with.overflow` intrinsic and panics when the result
+    /// overflows, matching the overflow rule that debug arithmetic panics on
+    /// overflow. In release builds the plain wrapping instruction is emitted, giving
+    /// two's-complement wraparound.
+    ///
+    /// `offset` keys the panic diagnostic's source location. Overflow is a panic like
+    /// any other, so it prints a message and aborts rather than executing a bare
+    /// `llvm.trap`: a trap surfaces only as `SIGILL`, which tells the programmer
+    /// neither what failed nor where.
     fn codegen_int_arith(
         &mut self,
         op: BinaryOp,
         lhs: IntValue<'ctx>,
         rhs: IntValue<'ctx>,
         unsigned: bool,
+        offset: usize,
         name: &str,
     ) -> CodegenResult<IntValue<'ctx>> {
         if !self.overflow_checks {
@@ -335,28 +347,11 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?
             .into_int_value();
 
-        let func = self
-            .current_function
-            .ok_or_else(|| CodegenError::InternalError("arithmetic outside a function".into()))?;
-        let trap_bb = self.context.append_basic_block(func, "arith.overflow");
-        let cont_bb = self.context.append_basic_block(func, "arith.cont");
-
-        let branch = self
+        let ok = self
             .builder
-            .build_conditional_branch(overflowed, trap_bb, cont_bb)
+            .build_not(overflowed, "arith.ok")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        // Weighted, but not outlined: the trap block is a single `llvm.trap`, so moving
-        // it behind a call would trade one instruction for another. The weights are what
-        // keep it off the fall-through path.
-        self.mark_cold_branch(branch, true)?;
-
-        self.builder.position_at_end(trap_bb);
-        self.emit_trap()?;
-        self.builder
-            .build_unreachable()
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-
-        self.builder.position_at_end(cont_bb);
+        self.codegen_guard_or_panic(ok, OVERFLOW_PANIC, offset)?;
         Ok(result)
     }
 
@@ -381,27 +376,122 @@ impl<'ctx> CodegenContext<'ctx> {
         value.map_err(|e| CodegenError::LlvmError(e.to_string()))
     }
 
-    /// Emit a call to `llvm.trap`, which terminates the process on execution.
-    fn emit_trap(&mut self) -> CodegenResult<()> {
-        let trap = Intrinsic::find("llvm.trap")
-            .ok_or_else(|| CodegenError::InternalError("missing llvm.trap intrinsic".into()))?;
-        let decl = trap
-            .get_declaration(&self.module, &[])
-            .ok_or_else(|| CodegenError::InternalError("could not declare llvm.trap".into()))?;
-        self.builder
-            .build_call(decl, &[], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.record_process_exit();
-        Ok(())
+    /// Emit integer `/` or `%`, with the guards LLVM's `sdiv` / `udiv` / `srem` /
+    /// `urem` need in order to stay defined.
+    ///
+    /// Two operand pairs are undefined behaviour for those instructions rather than
+    /// merely surprising: a zero divisor, and `MIN / -1`, whose quotient is not
+    /// representable. Unguarded they do not misbehave quietly — at `-O0` the hardware
+    /// raises `SIGFPE` and the process dies with no diagnostic, and at `-O1` and above
+    /// the optimizer takes the operation for unreachable, folds the surrounding code
+    /// around a poison value, and the program prints a garbage answer and carries on.
+    ///
+    /// A zero divisor panics in **every** build. It is not an overflow and has no
+    /// two's-complement answer to wrap to, so there is no defined release behaviour the
+    /// check could be omitted in favour of — the only alternative to the guard is the
+    /// undefined behaviour above. The cost is one never-taken branch in front of an
+    /// instruction that already costs tens of cycles, and it folds away entirely
+    /// whenever the divisor is a constant or its range is known.
+    ///
+    /// `MIN / -1` *is* an integer overflow and so follows the same rule the other
+    /// arithmetic operators do: a panic in debug builds, the two's-complement wrap in
+    /// release. The release path produces that wrap by dividing by `1` instead, since
+    /// `MIN / 1` is `MIN` and `MIN % 1` is `0` — exactly the wrapped results — without
+    /// ever handing `-1` to the instruction.
+    fn codegen_int_div_rem(
+        &mut self,
+        op: BinaryOp,
+        lhs: IntValue<'ctx>,
+        rhs: IntValue<'ctx>,
+        unsigned: bool,
+        offset: usize,
+        name: &str,
+    ) -> CodegenResult<IntValue<'ctx>> {
+        let llvm_err = |e: inkwell::builder::BuilderError| CodegenError::LlvmError(e.to_string());
+        let int_ty = lhs.get_type();
+        let is_remainder = matches!(op, BinaryOp::Modulo);
+
+        let nonzero = self
+            .builder
+            .build_int_compare(IntPredicate::NE, rhs, int_ty.const_zero(), "div.nonzero")
+            .map_err(llvm_err)?;
+        let message = if is_remainder {
+            REMAINDER_BY_ZERO_PANIC
+        } else {
+            DIVIDE_BY_ZERO_PANIC
+        };
+        self.codegen_guard_or_panic(nonzero, message, offset)?;
+
+        if unsigned {
+            // No unsigned pair overflows: the divisor is now known non-zero and every
+            // quotient of two unsigned values is representable.
+            return if is_remainder {
+                self.builder
+                    .build_int_unsigned_rem(lhs, rhs, name)
+                    .map_err(llvm_err)
+            } else {
+                self.builder
+                    .build_int_unsigned_div(lhs, rhs, name)
+                    .map_err(llvm_err)
+            };
+        }
+
+        // `MIN` is the bit pattern with only the sign bit set, which sits at a different
+        // place in each width — `const_int` truncates rather than sign-extends, so the
+        // shift has to be by this operand's own width less one.
+        let min = int_ty.const_int(1u64 << (int_ty.get_bit_width() - 1), false);
+        let lhs_is_min = self
+            .builder
+            .build_int_compare(IntPredicate::EQ, lhs, min, "div.lhs.min")
+            .map_err(llvm_err)?;
+        let rhs_is_minus_one = self
+            .builder
+            .build_int_compare(
+                IntPredicate::EQ,
+                rhs,
+                int_ty.const_all_ones(),
+                "div.rhs.neg1",
+            )
+            .map_err(llvm_err)?;
+        let overflows = self
+            .builder
+            .build_and(lhs_is_min, rhs_is_minus_one, "div.overflow")
+            .map_err(llvm_err)?;
+
+        let divisor = if self.overflow_checks {
+            let ok = self
+                .builder
+                .build_not(overflows, "div.ok")
+                .map_err(llvm_err)?;
+            self.codegen_guard_or_panic(ok, OVERFLOW_PANIC, offset)?;
+            rhs
+        } else {
+            self.builder
+                .build_select(overflows, int_ty.const_int(1, false), rhs, "div.rhs.safe")
+                .map_err(llvm_err)?
+                .into_int_value()
+        };
+
+        if is_remainder {
+            self.builder
+                .build_int_signed_rem(lhs, divisor, name)
+                .map_err(llvm_err)
+        } else {
+            self.builder
+                .build_int_signed_div(lhs, divisor, name)
+                .map_err(llvm_err)
+        }
     }
 
-    /// Generate code for a binary expression
+    /// Generate code for a binary expression. `offset` is the expression's source
+    /// position, keying the diagnostic of any runtime guard the operator needs.
     pub(crate) fn codegen_binary(
         &mut self,
         left: &HirExpr,
         op: BinaryOp,
         right: &HirExpr,
         left_ty: &Type,
+        offset: usize,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         // `&&` and `||` short-circuit: the RHS must only be evaluated when
         // the LHS does not already decide the result. This requires branching, so
@@ -499,6 +589,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_int_value(),
                             rhs.into_int_value(),
                             unsigned,
+                            offset,
                             "addtmp",
                         )?
                         .into())
@@ -519,6 +610,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_int_value(),
                             rhs.into_int_value(),
                             unsigned,
+                            offset,
                             "subtmp",
                         )?
                         .into())
@@ -539,6 +631,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_int_value(),
                             rhs.into_int_value(),
                             unsigned,
+                            offset,
                             "multmp",
                         )?
                         .into())
@@ -551,23 +644,17 @@ impl<'ctx> CodegenContext<'ctx> {
                         .build_float_div(lhs.into_float_value(), rhs.into_float_value(), "divtmp")
                         .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                         .into())
-                } else if TypeMapper::is_unsigned_int(left_ty) {
-                    // Unsigned integer division
+                } else {
+                    let unsigned = TypeMapper::is_unsigned_int(left_ty);
                     Ok(self
-                        .builder
-                        .build_int_unsigned_div(
+                        .codegen_int_div_rem(
+                            BinaryOp::Divide,
                             lhs.into_int_value(),
                             rhs.into_int_value(),
+                            unsigned,
+                            offset,
                             "divtmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                        .into())
-                } else {
-                    // Signed integer division
-                    Ok(self
-                        .builder
-                        .build_int_signed_div(lhs.into_int_value(), rhs.into_int_value(), "divtmp")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 }
             }
@@ -578,23 +665,17 @@ impl<'ctx> CodegenContext<'ctx> {
                         .build_float_rem(lhs.into_float_value(), rhs.into_float_value(), "modtmp")
                         .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                         .into())
-                } else if TypeMapper::is_unsigned_int(left_ty) {
-                    // Unsigned integer modulo
+                } else {
+                    let unsigned = TypeMapper::is_unsigned_int(left_ty);
                     Ok(self
-                        .builder
-                        .build_int_unsigned_rem(
+                        .codegen_int_div_rem(
+                            BinaryOp::Modulo,
                             lhs.into_int_value(),
                             rhs.into_int_value(),
+                            unsigned,
+                            offset,
                             "modtmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                        .into())
-                } else {
-                    // Signed integer modulo
-                    Ok(self
-                        .builder
-                        .build_int_signed_rem(lhs.into_int_value(), rhs.into_int_value(), "modtmp")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 }
             }

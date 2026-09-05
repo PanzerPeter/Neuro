@@ -12,9 +12,9 @@
 // drained when it fills, which is what every other language's standard output does.
 //
 // Buffering is only correct if the buffer is guaranteed to reach fd 1 before the process
-// stops running, and this language has exactly three ways to stop: `main` returns, the
-// panic runtime aborts, or `-O0` arithmetic traps on overflow. `finalize_stdout_buffer`
-// walks all three and inserts the drain, which is why no exit path needs to remember to.
+// stops running, and this language has exactly two ways to stop: `main` returns, or the
+// panic runtime aborts. `finalize_stdout_buffer` walks both and inserts the drain, which
+// is why no exit path needs to remember to.
 // Flushing ahead of a panic is what keeps its stderr diagnostic behind the output that
 // logically precedes it, rather than jumbled in front of it.
 //
@@ -587,9 +587,9 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// Run once, after every body is generated, because only then is it known whether the
     /// module prints at all — a program that never does keeps its exit paths untouched
-    /// and reserves no buffer. The three paths are `main`'s returns, the panic runtime's
-    /// `abort`, and the `-O0` overflow `llvm.trap`; the latter two are recorded as they
-    /// are emitted, since `abort` and `trap` run no exit hook a buffer could register.
+    /// and reserves no buffer. The two paths are `main`'s returns and the panic runtime's
+    /// `abort`; the latter is recorded as it is emitted, since `abort` runs no exit hook a
+    /// buffer could register.
     pub(crate) fn finalize_stdout_buffer(&mut self) -> CodegenResult<()> {
         if self.module.get_global(BUFFER_GLOBAL).is_none() {
             return Ok(());

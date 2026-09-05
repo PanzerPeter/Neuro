@@ -24,7 +24,7 @@ governs instruction selection and register allocation; and it picks the LLVM IR 
 pipeline (`default<O1>` / `default<O2>` / `default<O3>`) run over the verified module before
 instruction selection. Both are needed — the `TargetMachine` level runs no IR passes at all,
 so without the pipeline nothing promotes an `alloca` to an SSA value, inlines a call, or
-hoists loop-invariant work. `-O0` runs no pipeline, which is what keeps its trapping
+hoists loop-invariant work. `-O0` runs no pipeline, which is what keeps its checked
 arithmetic and bounds guards where codegen emitted them.
 
 The module is stamped with the target triple and data layout before the pipeline runs, so
@@ -457,14 +457,32 @@ wrong.
 ## Integer Overflow ABI
 Integer `+` / `-` / `*` honor the overflow rule, keyed off `OptimizationLevelSetting`:
 - `-O0` → `overflow_checks = true`. `codegen_int_arith` emits
-  `llvm.{s,u}{add,sub,mul}.with.overflow`, extracts `{result, overflow_bit}`, conditionally
-  branches to a per-op `arith.overflow` block (`llvm.trap` + `unreachable`), and continues in
-  `arith.cont` with the result.
+  `llvm.{s,u}{add,sub,mul}.with.overflow`, extracts `{result, overflow_bit}`, and hands the
+  negated overflow bit to `codegen_guard_or_panic`, so an overflow prints
+  `panic: integer overflow at file:line:col` and aborts through the same outlined thunk every
+  other guard uses. `codegen_binary` therefore takes the expression's source offset.
 - `-O1..-O3` → `overflow_checks = false`. `emit_wrapping_int_arith` emits plain
   `build_int_add/sub/mul` (two's-complement wrap).
 
-Signedness picks the `s`/`u` variant via `TypeMapper::is_unsigned_int`. Division, modulo, bitwise
-ops (`build_and`/`or`/`xor`/`left_shift`, `build_not` for `BitNot`), and floats are unaffected.
+Signedness picks the `s`/`u` variant via `TypeMapper::is_unsigned_int`. Bitwise ops
+(`build_and`/`or`/`xor`/`left_shift`, `build_not` for `BitNot`) and floats are unaffected.
+
+## Integer Division ABI
+Integer `/` and `%` go through `codegen_int_div_rem`, which guards the two operand pairs LLVM's
+`sdiv` / `udiv` / `srem` / `urem` leave undefined. Left unguarded these are not quietly wrong:
+`-O0` dies of `SIGFPE` with nothing printed, and `-O1` and above fold the surrounding code around
+a poison value.
+- **Zero divisor** — guarded in *every* build, panicking `division by zero` / `remainder by zero`.
+  It is not an overflow and has no two's-complement answer to wrap to, so there is no defined
+  release behaviour the check could be dropped in favour of. The guard folds away wherever the
+  divisor is a constant or its range is known.
+- **`MIN / -1`** (signed only) — an integer overflow, so it follows the rule above: with
+  `overflow_checks` it panics `integer overflow`; without, the divisor is replaced by `1` through a
+  `select`, since `MIN / 1` is `MIN` and `MIN % 1` is `0` — the two's-complement wraps — and `-1`
+  never reaches the instruction. `MIN` is `1 << (width - 1)`, built from the operand's own width
+  because `const_int` truncates rather than sign-extends.
+
+Unsigned operands skip the second guard: no unsigned quotient is unrepresentable.
 
 ## Panic Runtime ABI
 Panic-family builtins `panic(msg: string)`, `assert(cond: bool)`, `unreachable()` lower in
@@ -510,11 +528,9 @@ array and `Vec` bounds, string-slice bounds, UTF-8 codepoint boundary.
   fat pointer travels as two arguments. `emit_write_cstr` / `emit_write` / `emit_abort_unreachable`
   (`panic.rs`) are `pub(crate)` for it, and `build_thunk_body` saves and restores the builder
   position since thunks are created lazily mid-function.
-- `mark_cold_branch(branch, cold_edge_is_true)` attaches `!prof` `branch_weights` (`2000 : 1`) to
-  every guard branch and to the `-O0` overflow check. The overflow trap is weighted but **not**
-  outlined — its block is a single `llvm.trap`, so a call would trade one instruction for another.
-  `emit_trap` takes `&mut self` and records its call for the standard-output drain, since `trap`
-  runs no exit hook either — see Exit-path draining.
+- `mark_cold_branch(branch)` attaches `!prof` `branch_weights` (`2000 : 1`) to every guard
+  branch. Every guard in the language has one shape — continuation on true, failure on false — so
+  the cold edge is always the false one and the helper takes no side argument.
 
 ## Standard-Output ABI
 `print(text: string)` / `println(text: string)` lower in `io.rs`. The `Call`→`Identifier` arm
@@ -557,10 +573,9 @@ struct variant it has not got.
 
 ### Exit-path draining
 Buffering is only sound if the buffer always reaches fd 1 before the process stops, and the
-language stops in exactly three ways: `main` returns, the panic runtime calls `abort`, or `-O0`
-arithmetic hits `llvm.trap`. Neither `abort` nor `trap` runs an exit hook, and the Windows
-fallback linkers are invoked with `/ENTRY:main`, so `atexit` and `llvm.global_dtors` are not
-available to lean on either.
+language stops in exactly two ways: `main` returns, or the panic runtime calls `abort`. `abort`
+runs no exit hook, and the Windows fallback linkers are invoked with `/ENTRY:main`, so `atexit`
+and `llvm.global_dtors` are not available to lean on either.
 
 `finalize_stdout_buffer` (io.rs) inserts the drain instead, called from `build_module` after every
 body is generated and before soft-float linking and `verify`. It returns immediately unless
@@ -570,8 +585,8 @@ before every recorded process-exit instruction and before every `ret` in `@main`
 emitted under its own name with no wrapper, so that is the C entry point itself.
 
 The exit instructions are recorded as they are emitted, into `CodegenContext::process_exit_points`,
-by `record_process_exit` (context.rs): `emit_abort_unreachable` (panic.rs) and `emit_trap`
-(binary.rs) call it right after building their call, and it takes the block's last instruction
+by `record_process_exit` (context.rs): `emit_abort_unreachable` (panic.rs) calls it right after
+building its call, and it takes the block's last instruction
 because inkwell's `CallSiteValue` does not convert to an `InstructionValue`. Draining in front of
 the panic path is not only about not losing bytes: it is what keeps the stderr diagnostic behind
 the stdout output that led up to it.
@@ -583,11 +598,30 @@ rendering allocated its bytes or borrowed them, and the scratch buffers are rele
 concatenation has copied them out. `__neuro_pad`, `__neuro_point`, and `__neuro_exp` return their
 input untouched when the text already has the requested shape, so a result that may alias its
 source is released under a pointer comparison (`OwnedUnlessSameAs`) rather than outright. The
-rendering helpers live in `format_helpers.rs` (`snprintf`-backed integer and float conversion,
-hand-written binary digits), `format_layout.rs` (sign-aware field padding, debug quoting, UTF-8
-encoding of a `char`), and `format_float.rs` (restoring the point `%g` drops, normalizing C's
-`e+00` exponent). Each is emitted once per module with internal linkage rather than inlined at
-every hole. `snprintf` is the one external declaration this adds.
+rendering helpers live in `format_helpers.rs` (integer and float conversion, hand-written binary
+digits), `format_layout.rs` (sign-aware field padding, debug quoting, UTF-8 encoding of a `char`),
+and `format_float.rs` (restoring the point `%g` drops, normalizing C's `e+00` exponent). Each is
+emitted once per module with internal linkage rather than inlined at every hole. `snprintf` is the
+one external declaration this adds.
+
+Integer holes do **not** go through `snprintf`. `get_or_define_fmt_int(radix, upper)` emits one
+`__neuro_fmt_int_<radix>` per radix actually used: a backwards digit loop over a 24-byte scratch
+buffer (22 octal digits is the widest any radix produces, plus a sign), then one `malloc` and one
+`memcpy` of exactly the bytes written. The radix is a definition-time constant, so instruction
+selection turns the `udiv`/`urem` into a multiply-and-shift. The helper takes a magnitude and an
+ASCII sign byte rather than a printf conversion: the checker rejects `+` on unsigned values and on
+every radix conversion, so only signed decimal can carry a sign, and `render_integer` computes the
+magnitude with a wrapping negation (`0 - i64::MIN` is `i64::MIN`'s own bit pattern, which read as
+unsigned is the magnitude wanted).
+
+Float holes still call the C library, but once. `build_snprintf_alloc` renders into a
+`SCRATCH_TEXT_BYTES` stack buffer and uses `snprintf`'s return value as the length, replacing the
+`(NULL, 0)` probe call that used to precede every render. The buffer is sized for the widest
+conversion the format mini-language admits — `%.Nf` on a full-magnitude `f64`, with `N` capped by
+`MAX_FORMAT_PRECISION` — and a render that does not fit falls back to allocating what `snprintf`
+asked for and rendering again, so correctness does not rest on that size being right. It takes the
+helper's own `FunctionValue`, because it runs inside a helper body the builder was moved into and
+`current_function` still names the caller.
 
 A `@derive(Debug)` struct hole renders through `render_struct_debug`, which frames the fields from
 `struct_defs` as `Name { field: value, ... }` and renders each one under the same `FormatKind::

@@ -366,13 +366,24 @@ Key design goals:
 - `print` / `println` lower to a module-private buffered writer on fd 1: bytes are copied into a
   page-sized `.bss` buffer and drained through one helper carrying the short-write retry loop, so
   a large buffer is never truncated on a pipe. The drain is inserted at every exit — `main`'s
-  returns, the panic runtime's `abort`, the `-O0` overflow trap — and after every `println` when
+  returns and the panic runtime's `abort` — and after every `println` when
   fd 1 is a terminal; a string too large for the buffer bypasses it in a single write
+- Integer `/` and `%` guard the two operand pairs the LLVM instruction leaves undefined: a zero
+  divisor panics in **every** build, since it has no wrapping answer to fall back on, and
+  `MIN / -1` follows the integer-overflow rule — a panic in debug builds, the two's-complement
+  wrap in release, produced by dividing by `1` rather than by handing `-1` to the instruction
+- Debug-build `+` / `-` / `*` overflow panics with a located diagnostic through the same machinery
+  every other guard uses, rather than executing a bare `llvm.trap` the programmer sees only as
+  `SIGILL`
+- Integer interpolation holes render through a digit loop rather than `snprintf`, so a hole costs
+  one pass and one allocation instead of two format-string traversals and a probe call; float
+  holes still call the C library, but once, into a scratch buffer sized for the widest conversion
+  the format mini-language admits
 - Error-path outlining: every panic-family failure path (`panic`, `assert`, `unreachable`, and the
-  array, `Vec`, string-slice, and UTF-8-boundary guards) is emitted into a module-private cold
-  function and called from the failure site, so the diagnostic machinery never sits inline in the
-  function that can fail; guard branches carry `!prof` weights keeping the failure edge off the
-  fall-through path
+  array, `Vec`, string-slice, UTF-8-boundary, division, and overflow guards) is emitted into a
+  module-private cold function and called from the failure site, so the diagnostic machinery never
+  sits inline in the function that can fail; guard branches carry `!prof` weights keeping the
+  failure edge off the fall-through path
 - Full workspace test suite green on every push (see the CI badge in the root [README](../README.md))
 
 ## Compilation Pipeline
