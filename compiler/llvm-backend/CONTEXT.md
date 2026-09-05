@@ -373,6 +373,13 @@ void-error in value position.
 - **`char`** lowers to LLVM `i32`. Casts use `is_int_like` / `is_unsigned_like` so char↔integer
   (and char→char) reuse the int-to-int path — char zero-extends, code points being non-negative —
   and comparisons hit the signed-int branch, correct since valid code points are < 2²¹.
+- **Float-to-integer** casts lower to `llvm.fptosi.sat` / `llvm.fptoui.sat`, not the plain
+  `fptosi` / `fptoui`. The plain instructions are defined only when the truncated value fits the
+  target and yield `poison` otherwise, which made an out-of-range cast's result depend on the
+  optimization level rather than on the source. The saturating form is total: in-range values
+  still truncate toward zero, out-of-range values clamp to the target's bound, and NaN maps to
+  zero. `FoldedConst::cast_to` computes the same function in Rust, so a folded cast and a
+  run-time one agree.
 - **`f16` / `bf16`** lower to LLVM `half` / `bfloat`. Backend `is_float()` **includes** the halves,
   so equality (`fcmp`) and `as`-casts route through the float instructions. The float→float cast
   and `coerce_if_needed` pick `fpext` / `fptrunc` by **bit width**, not a fixed F32/F64 pair; an

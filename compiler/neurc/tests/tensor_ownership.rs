@@ -1,4 +1,4 @@
-// Tensor ownership and move semantics (Phase 2B, §4.1): a tensor is not `Copy`, so it
+// Tensor ownership and move semantics: a tensor is not `Copy`, so it
 // moves on assignment and on being passed; `.clone()` is the explicit deep copy and
 // `.to(device)` the consuming device transfer. End to end through `neurc`.
 mod common;
@@ -114,7 +114,7 @@ func main() -> i32 {
     );
 }
 
-/// The zero-cost sharing path §4.1 points at: a borrowed tensor is not moved, so the
+/// The zero-cost sharing path: a borrowed tensor is not moved, so the
 /// owner may keep using it after any number of borrows.
 #[test]
 fn a_borrowed_tensor_is_not_moved() {

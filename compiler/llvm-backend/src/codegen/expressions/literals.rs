@@ -1,11 +1,52 @@
 // Codegen for expressions: Literals, identifiers, constant folding, and casts.
 
+use inkwell::intrinsics::Intrinsic;
 use inkwell::values::*;
 use neuro_hir::{HirExpr, HirExprKind};
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
+
+/// The inclusive value range of an integer type, as the widest signed integer that
+/// holds every bound (`u64::MAX` does not fit an `i64`).
+///
+/// Used to saturate a float-to-integer cast in the constant folder so a folded cast
+/// and the run-time one agree; see [`CodegenContext::codegen_cast`].
+fn int_type_range(ty: &Type) -> Option<(i128, i128)> {
+    Some(match ty {
+        Type::I8 => (i8::MIN as i128, i8::MAX as i128),
+        Type::I16 => (i16::MIN as i128, i16::MAX as i128),
+        Type::I32 => (i32::MIN as i128, i32::MAX as i128),
+        Type::I64 => (i64::MIN as i128, i64::MAX as i128),
+        Type::U8 => (0, u8::MAX as i128),
+        Type::U16 => (0, u16::MAX as i128),
+        Type::U32 => (0, u32::MAX as i128),
+        Type::U64 => (0, u64::MAX as i128),
+        _ => return None,
+    })
+}
+
+/// Truncate `f` toward zero into `ty`, clamping to the type's bounds and mapping NaN
+/// to zero — the same total function `llvm.fpto{s,u}i.sat` computes at run time.
+fn saturating_float_to_int(f: f64, ty: &Type) -> i128 {
+    let Some((min, max)) = int_type_range(ty) else {
+        return 0;
+    };
+    if f.is_nan() {
+        return 0;
+    }
+    // `f.trunc()` is exact, so the comparisons below decide representability without
+    // the rounding a cast through a narrower integer would introduce.
+    let truncated = f.trunc();
+    if truncated <= min as f64 {
+        min
+    } else if truncated >= max as f64 {
+        max
+    } else {
+        truncated as i128
+    }
+}
 
 /// Trailing byte appended to a string literal's `.rodata` storage so the pointer
 /// doubles as a valid C string for FFI. It is deliberately **excluded** from the
@@ -15,7 +56,9 @@ use crate::types::Type;
 const STRING_NULL_TERMINATOR: u8 = 0;
 
 enum FoldedConst {
-    Int(i64),
+    /// Widened past `i64` so every integer type the language has — `u64` included —
+    /// and every saturated float-to-integer cast is represented exactly.
+    Int(i128),
     Float(f64),
     Bool(bool),
     Str(String),
@@ -29,7 +72,7 @@ impl FoldedConst {
             shared_types::Literal::Boolean(v) => FoldedConst::Bool(*v),
             // A `char` const folds as its 32-bit code point; `map_int_type(Char)`
             // (i32) gives the slot the correct width when emitted.
-            shared_types::Literal::Char(c) => FoldedConst::Int(*c as i64),
+            shared_types::Literal::Char(c) => FoldedConst::Int(*c as i128),
             shared_types::Literal::String(s) => FoldedConst::Str(s.clone()),
         }
     }
@@ -42,7 +85,7 @@ impl FoldedConst {
                     Ok(FoldedConst::Bool(i.get_zero_extended_constant() != Some(0)))
                 } else {
                     Ok(FoldedConst::Int(
-                        i.get_sign_extended_constant().unwrap_or(0),
+                        i.get_sign_extended_constant().unwrap_or(0) as i128,
                     ))
                 }
             }
@@ -62,9 +105,11 @@ impl FoldedConst {
         match (self, target) {
             (FoldedConst::Int(i), t) if t.is_integer() => FoldedConst::Int(i),
             (FoldedConst::Int(i), t) if t.is_float() => FoldedConst::Float(i as f64),
-            (FoldedConst::Float(f), t) if t.is_integer() => FoldedConst::Int(f as i64),
+            (FoldedConst::Float(f), t) if t.is_integer() => {
+                FoldedConst::Int(saturating_float_to_int(f, t))
+            }
             (FoldedConst::Float(f), t) if t.is_float() => FoldedConst::Float(f),
-            (FoldedConst::Bool(b), t) if t.is_integer() => FoldedConst::Int(b as i64),
+            (FoldedConst::Bool(b), t) if t.is_integer() => FoldedConst::Int(b as i128),
             (v, _) => v,
         }
     }
@@ -405,30 +450,52 @@ impl<'ctx> CodegenContext<'ctx> {
                     .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                     .into())
             }
-            // Float to Int
+            // Float to Int.
+            //
+            // Lowered through `llvm.fptosi.sat` / `llvm.fptoui.sat` rather than the
+            // plain `fptosi` / `fptoui`. The plain instructions are defined *only* when
+            // the truncated value fits the target and yield `poison` otherwise, so an
+            // out-of-range cast made the program's output a function of the optimizer
+            // rather than of its source: `1e300 as i32` printed one value at `-O 0`,
+            // another at `-O 3`, and a NaN cast printed stack garbage. The saturating
+            // intrinsics are total — every in-range value still truncates toward zero,
+            // an out-of-range one clamps to the target's bound, and NaN maps to zero —
+            // which is also what the constant folder computes, so a folded cast and a
+            // run-time one now agree.
             (t1, t2) if t1.is_float() && t2.is_integer() => {
                 let float_value = value.into_float_value();
-                if t2.is_unsigned_int() {
-                    Ok(self
-                        .builder
-                        .build_float_to_unsigned_int(
-                            float_value,
-                            target_llvm.into_int_type(),
-                            "cast_f2u",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                        .into())
+                let int_type = target_llvm.into_int_type();
+                let name = if t2.is_unsigned_int() {
+                    "llvm.fptoui.sat"
                 } else {
-                    Ok(self
-                        .builder
-                        .build_float_to_signed_int(
-                            float_value,
-                            target_llvm.into_int_type(),
-                            "cast_f2s",
+                    "llvm.fptosi.sat"
+                };
+                let intrinsic = Intrinsic::find(name).ok_or_else(|| {
+                    CodegenError::LlvmError(format!("intrinsic `{}` is unavailable", name))
+                })?;
+                // Both the result and the argument type are overloaded, in that order,
+                // giving e.g. `llvm.fptosi.sat.i32.f64`.
+                let declaration = intrinsic
+                    .get_declaration(
+                        &self.module,
+                        &[int_type.into(), float_value.get_type().into()],
+                    )
+                    .ok_or_else(|| {
+                        CodegenError::LlvmError(format!(
+                            "could not declare `{}` for this operand type",
+                            name
+                        ))
+                    })?;
+                self.builder
+                    .build_call(declaration, &[float_value.into()], "cast_f2i")
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| {
+                        CodegenError::InternalError(
+                            "saturating float-to-int cast returned void".to_string(),
                         )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                        .into())
-                }
+                    })
             }
             // Int to Float
             (t1, t2) if t1.is_integer() && t2.is_float() => {

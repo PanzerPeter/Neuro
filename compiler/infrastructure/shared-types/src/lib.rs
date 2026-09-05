@@ -209,7 +209,14 @@ pub const MAX_FORMAT_PRECISION: u32 = 1024;
 pub enum Literal {
     /// Integer literal, optionally suffixed (e.g., `42`, `42i64`, `255u8`).
     /// When the suffix is present it overrides contextual type inference.
-    Integer(i64, Option<IntSuffix>),
+    ///
+    /// Carried as an `i128` because no narrower type spans every integer the
+    /// language can spell: `u64::MAX` does not fit an `i64`, and `i64::MIN` is
+    /// written as a negation over the magnitude `9223372036854775808`, which does
+    /// not either. A magnitude is always non-negative as it leaves the lexer; the
+    /// sign appears only where a negation is folded into the literal (match
+    /// patterns), and the checker range-checks against the type's own bounds.
+    Integer(i128, Option<IntSuffix>),
     /// Floating-point literal, optionally suffixed (e.g., `3.14`, `1.5f32`, `2.0f64`).
     /// When the suffix is present it overrides contextual type inference.
     Float(f64, Option<FloatSuffix>),

@@ -79,7 +79,7 @@ pub(super) fn literal_type(lit: &Literal, expected: Option<&HirType>) -> HirType
 /// and string literals are not matchable (the checker rejects them before lowering).
 pub(super) fn literal_scalar(lit: &Literal) -> Result<i64, LoweringError> {
     match lit {
-        Literal::Integer(n, _) => Ok(*n),
+        Literal::Integer(n, _) => Ok(*n as i64),
         Literal::Boolean(b) => Ok(*b as i64),
         Literal::Char(c) => Ok(*c as i64),
         Literal::Float(_, _) | Literal::String(_) => Err(LoweringError::Malformed {

@@ -10,6 +10,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.15.1] - 2026-09-05
+
+### Fixed
+
+- **An out-of-range float-to-integer cast no longer produces an arbitrary value.** `as`
+  from a float to an integer lowered to LLVM's `fptosi` / `fptoui`, which are defined only
+  when the truncated value fits the target and yield `poison` otherwise. Poison is not a
+  wrong number but the absence of one, so the program's output stopped being a function of
+  its source: `1e300 as i32` printed `-2147483648` at `-O 0` and, at `-O 3`, the enclosing
+  `println` disappeared and printed nothing at all; a NaN cast printed stack garbage; and
+  the constant folder computed a third answer again for the same expression written as a
+  `const`. The cast now lowers to `llvm.fptosi.sat` / `llvm.fptoui.sat`, which are total --
+  an in-range value still truncates toward zero, an out-of-range one clamps to the target
+  type's bound, and NaN maps to zero -- and the constant folder computes the same function,
+  so a folded cast and a run-time one agree at every optimization level.
+- **The most negative value of every signed integer type can now be written as a literal.**
+  `val b: i32 = -2147483648` was rejected as out of range, because a negation is an
+  operator over a literal rather than part of it and the checker range-checked the positive
+  magnitude, which is one past the type's maximum. `i64` and `u64` failed a stage earlier
+  still: the lexer carried every integer literal in an `i64`, so `-9223372036854775808i64`
+  and `18446744073709551615u64` were not tokenizable at all. Integer tokens now carry an
+  unsigned magnitude, `Literal::Integer` carries an `i128` -- the narrowest type that spans
+  every integer the language can spell -- and a negation directly over an integer literal
+  is range-checked against the negated value. Values one step outside a type are still
+  rejected, in both directions and in every literal base.
+
+### Changed
+
+- Four sign guards in the parser (tuple index, array length, and two const-generic
+  argument sites) are gone as unreachable code. No integer regex admits a sign, so an
+  integer token never carried a negative value and the guards could never fire; making the
+  token's payload unsigned only exposed that.
+
+
 ## [2.15.0] - 2026-09-05
 
 ### Added

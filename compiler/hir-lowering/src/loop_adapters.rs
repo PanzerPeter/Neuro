@@ -335,7 +335,7 @@ fn variable(name: &str, ty: HirType, span: Span) -> HirExpr {
 
 fn int_literal(value: i64, span: Span) -> HirExpr {
     HirExpr::new(
-        HirExprKind::Literal(Literal::Integer(value, None)),
+        HirExprKind::Literal(Literal::Integer(value as i128, None)),
         LOOP_INDEX_TYPE,
         span,
     )

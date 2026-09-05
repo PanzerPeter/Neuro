@@ -5,83 +5,47 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
-## BUG-020 — an out-of-range float-to-integer cast produces an arbitrary value
+## BUG-021 — negating an unsigned integer literal wraps instead of erroring
 
 **Repro**
 
 ```neuro
 func main() -> i32 {
-    mut f: f64 = 1e300
-    println("1e300 as i32 = {f as i32}")
+    val x: u8 = -1
+    println("literal -1 as u8 = {x}")     // prints 255
     return 0
 }
 ```
 
-The value printed depends on the optimization level, on the surrounding code, and on
-the contents of the stack. `-O 0` happens to print `-2147483648`; `-O 3` prints
-whatever the register held. `nan as i32` and an out-of-range cast to an unsigned type
-behave the same way.
-
-**Root cause** — the cast lowers to LLVM's `fptosi` / `fptoui`, which are defined only
-when the truncated value is representable in the target type and yield `poison`
-otherwise. Poison is not a wrong number, it is the absence of a number: the optimizer
-is free to fold anything that consumes it, which is why the answer changes with the
-build.
-
-The language reference says an out-of-range float-to-integer cast is a compile
-*warning* and points at a `.to_checked::<T>()` escape hatch. Neither exists: no warning
-is emitted, and `.to_checked` is not implemented. So the case the spec expects to be
-diagnosed is instead silently undefined.
-
-**Fix sketch** — needs a ruling first, because three answers are defensible and no two
-of them agree: saturate (LLVM has `llvm.fptosi.sat.*` for exactly this, at a cost of a
-couple of instructions on x86), panic on the debug tier the way integer overflow and
-array bounds do, or keep truncation and add the promised compile warning plus
-`.to_checked`. Whichever wins, the poison has to go: today the program's output is not a
-function of its source.
-
-## BUG-019 — the most negative value of a signed type has no literal spelling
-
-**Repro**
+The same value computed rather than written aborts instead:
 
 ```neuro
 func main() -> i32 {
-    val a: i8  = -128            // rejected
-    val b: i32 = -2147483648     // rejected
+    mut z: u8 = 0u8
+    z = z - 1u8                            // panic: integer overflow
     return 0
 }
 ```
 
-```
-integer literal 128 out of range for type i8
-integer literal 2147483648 out of range for type i32
-```
+Two spellings of the same quantity disagree: written as a literal it silently becomes
+`255`, computed it is an overflow panic on the debug tier. Both cannot be right.
 
-`i64` and `u64` fail one stage earlier, in the lexer, which cannot tokenize them at
-all:
+**Root cause** — the checker range-checks the literal `1`, which fits `u8`, and then
+types the negation as its operand's type. Nothing ever asks whether the value the
+expression *denotes* is representable. The negation itself lowers to a plain wrapping
+`sub 0, x` with no overflow guard, so the wrap is invisible at run time as well.
 
-```neuro
-val c: i64 = -9223372036854775808i64      // lexical error: invalid number literal
-val d: u64 = 18446744073709551615u64      // lexical error: invalid number literal
-```
+**Workaround** — write the intended value directly (`val x: u8 = 255`), or use a signed
+type if a negative value is what was meant.
 
-**Workaround** — build the value instead of writing it: `mut b: i32 = -2147483647`
-followed by `b = b - 1`, or `mut d: u64 = 9223372036854775807u64` followed by
-`d = d * 2u64 + 1u64`.
-
-**Root cause** — two layers, which is why this is one bug and not two. A negation is a
-unary operator over a literal rather than part of it, so the checker range-checks the
-*positive* magnitude, and `2147483648` does not fit `i32` even though `-2147483648`
-does. Underneath that, the lexer carries every integer literal as an `i64`
-(`TokenKind::Integer(i64)`), so magnitudes above `i64::MAX` cannot be represented
-before a type is even known — which takes out `i64::MIN` and the whole upper half of
-`u64` regardless of what the checker does.
-
-**Fix sketch** — the lexer has to carry the magnitude as a `u64` (or a `u128`) and let
-the checker decide what it means, which is the change both halves need. The checker then
-range-checks a negation over an integer literal against the negated value rather than
-the magnitude. Doing only the checker half fixes `i8`/`i16`/`i32` and leaves
-`i64`/`u64` broken, which is worse than either end state.
+**Fix sketch** — needs a ruling first. Rejecting `-1` for an unsigned type is what the
+range check would do if it looked at the denoted value, and is what most languages
+choose, but it turns programs that compile today into compile errors. The alternative is
+to declare unary `-` on an unsigned type a defined wrapping operation and say so in the
+language reference, which then leaves it inconsistent with `-` the binary operator on
+the debug tier. The checker already has the hook: `check_unary_expr` range-checks a
+negation over a literal against the negated value, and deliberately restricts that to
+signed targets.
 
 ## BUG-018 — a tensor larger than 32768 elements cannot be compiled at `-O 0`
 
@@ -122,6 +86,12 @@ it shipped the ownership *surface* (`.clone()`, `.to(device)`) on the existing b
 buffer, which is orthogonal to how that buffer is stored. The storage change is the
 pool-allocator item's work, and the cap should be deleted when it lands rather than
 patched around before it.
+
+Running the middle-end `sroa` pass at `-O 0` is **not** a shortcut past that work. With
+the cap lifted, adding it does let a large tensor be constructed and cloned inside one
+function, but a function *returning* a large tensor by value still fails to compile —
+there is no `sret`, so the value has to cross the call boundary whole. The by-value
+representation is the defect at every level, not just in one lowering path.
 
 ## Taking one of these on
 

@@ -391,6 +391,42 @@ impl TypeChecker {
         span: &Span,
         expected: Option<&Type>,
     ) -> Option<Type> {
+        // `-2147483648` is a negation over the literal `2147483648`, so range-checking
+        // that literal on its own rejects the most negative value of every signed type:
+        // the magnitude is one past the type's maximum, while the value the expression
+        // denotes is in range. Check the negated value instead.
+        //
+        // Only signed targets take this path. Negating an unsigned literal keeps its
+        // existing wrapping meaning rather than becoming an out-of-range error, which
+        // would be a language change and not this fix.
+        if let (
+            UnaryOp::Negate,
+            Expr::Literal(shared_types::Literal::Integer(magnitude, suffix), lit_span),
+        ) = (op, operand)
+        {
+            let target = match suffix {
+                Some(suffix) => crate::type_checkers::literals::suffix_to_type(suffix),
+                None => expected
+                    .filter(|t| t.is_integer())
+                    .cloned()
+                    // A literal with no annotation and no suffix defaults to `i32`,
+                    // exactly as an un-negated one does.
+                    .unwrap_or(Type::I32),
+            };
+            if Self::is_signed_integer(&target) {
+                let negated = -*magnitude;
+                if self.check_integer_range(negated, &target) {
+                    return Some(target);
+                }
+                self.record_error(TypeError::IntegerLiteralOutOfRange {
+                    value: negated,
+                    ty: target,
+                    span: *lit_span,
+                });
+                return Some(Type::Unknown);
+            }
+        }
+
         // For unary operations, propagate expected type to operand if appropriate
         let expected_operand = match op {
             UnaryOp::Negate => expected.filter(|t| t.is_numeric()),

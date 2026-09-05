@@ -4,26 +4,37 @@ use crate::types::Type;
 use shared_types::{FloatSuffix, IntSuffix, Span};
 
 impl TypeChecker {
-    /// Check if an integer literal fits within the range of a target type
-    pub(crate) fn check_integer_range(&self, value: i64, target_ty: &Type) -> bool {
-        match target_ty {
-            Type::I8 => value >= i8::MIN as i64 && value <= i8::MAX as i64,
-            Type::I16 => value >= i16::MIN as i64 && value <= i16::MAX as i64,
-            Type::I32 => value >= i32::MIN as i64 && value <= i32::MAX as i64,
-            Type::I64 => true, // All i64 values fit in i64
-            Type::U8 => value >= 0 && value <= u8::MAX as i64,
-            Type::U16 => value >= 0 && value <= u16::MAX as i64,
-            Type::U32 => value >= 0 && value <= u32::MAX as i64,
-            Type::U64 => value >= 0, // Positive i64 values fit in u64
-            _ => false,              // Not an integer type
-        }
+    /// Whether an integer literal's value fits the range of a target type.
+    ///
+    /// The value is an `i128` so both ends of every type are expressible: `u64::MAX`
+    /// exceeds an `i64`, and the most negative value of a signed type is written as a
+    /// negation whose magnitude is one past that type's maximum.
+    pub(crate) fn check_integer_range(&self, value: i128, target_ty: &Type) -> bool {
+        let (min, max) = match target_ty {
+            Type::I8 => (i8::MIN as i128, i8::MAX as i128),
+            Type::I16 => (i16::MIN as i128, i16::MAX as i128),
+            Type::I32 => (i32::MIN as i128, i32::MAX as i128),
+            Type::I64 => (i64::MIN as i128, i64::MAX as i128),
+            Type::U8 => (0, u8::MAX as i128),
+            Type::U16 => (0, u16::MAX as i128),
+            Type::U32 => (0, u32::MAX as i128),
+            Type::U64 => (0, u64::MAX as i128),
+            _ => return false, // Not an integer type
+        };
+        value >= min && value <= max
+    }
+
+    /// Whether `ty` is a signed integer type, and so has a most negative value one
+    /// past its maximum in magnitude.
+    pub(crate) fn is_signed_integer(ty: &Type) -> bool {
+        matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64)
     }
 
     /// Infer the type of an integer literal based on expected type
     /// Returns the inferred type and whether it's valid
     pub(crate) fn infer_integer_type(
         &mut self,
-        value: i64,
+        value: i128,
         expected: Option<&Type>,
         span: Span,
     ) -> Type {
@@ -63,7 +74,7 @@ impl TypeChecker {
     /// the value against the suffix type.
     pub(crate) fn infer_suffixed_integer_type(
         &mut self,
-        value: i64,
+        value: i128,
         suffix: &IntSuffix,
         span: Span,
     ) -> Type {

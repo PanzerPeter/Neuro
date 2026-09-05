@@ -46,18 +46,18 @@ fn suppressed(name: &str) -> Parameter {
     }
 }
 
-fn int(value: i64) -> Expr {
+fn int(value: i128) -> Expr {
     Expr::Literal(Literal::Integer(value, None), span())
 }
 
 /// One argument as written: its optional call-site name and its value.
 type Arg = (Option<Identifier>, Expr);
 
-fn positional(value: i64) -> Arg {
+fn positional(value: i128) -> Arg {
     (None, int(value))
 }
 
-fn named(label: &str, value: i64) -> Arg {
+fn named(label: &str, value: i128) -> Arg {
     (Some(ident(label)), int(value))
 }
 
@@ -124,7 +124,7 @@ fn impl_block(type_name: &str, methods: Vec<MethodDef>) -> Item {
 }
 
 /// The single call in `main`'s body after binding, as the integer literals it holds.
-fn bound_values(items: &[Item]) -> Vec<i64> {
+fn bound_values(items: &[Item]) -> Vec<i128> {
     let Some(Item::Function(main)) = items.last() else {
         panic!("expected a trailing function item");
     };
@@ -412,7 +412,7 @@ fn a_call_nested_in_an_argument_is_bound_too() {
         panic!("expected a nested call");
     };
     assert!(arg_labels.is_empty(), "a label survived binding");
-    let values: Vec<i64> = inner
+    let values: Vec<i128> = inner
         .iter()
         .map(|a| match a {
             Expr::Literal(Literal::Integer(v, _), _) => *v,
@@ -591,7 +591,7 @@ fn a_call_nested_in_a_hoisted_argument_is_bound_too() {
         panic!("expected the nested call in the first temporary: {stmts:?}");
     };
     assert!(arg_labels.is_empty(), "a label survived binding");
-    let values: Vec<i64> = args
+    let values: Vec<i128> = args
         .iter()
         .map(|a| match a {
             Expr::Literal(Literal::Integer(v, _), _) => *v,
