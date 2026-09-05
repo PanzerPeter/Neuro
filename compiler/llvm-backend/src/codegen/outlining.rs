@@ -73,26 +73,21 @@ impl<'ctx> CodegenContext<'ctx> {
         self.emit_cold_call(thunk, &[ptr.into(), len.into()])
     }
 
-    /// Mark a two-way branch's edges as hot and cold.
+    /// Mark a runtime guard's two edges as hot and cold.
     ///
-    /// `cold_edge_is_true` says which side of the `build_conditional_branch` call is the
-    /// panic path: guards branch to the continuation on true, the overflow check branches
-    /// to its trap on true.
-    pub(crate) fn mark_cold_branch(
-        &self,
-        branch: InstructionValue<'ctx>,
-        cold_edge_is_true: bool,
-    ) -> CodegenResult<()> {
-        let (true_weight, false_weight) = match cold_edge_is_true {
-            true => (COLD_EDGE_WEIGHT, HOT_EDGE_WEIGHT),
-            false => (HOT_EDGE_WEIGHT, COLD_EDGE_WEIGHT),
-        };
+    /// Every guard in the language has the same shape — branch to the continuation when
+    /// the condition holds, to the failure path when it does not — so the false edge is
+    /// always the cold one.
+    pub(crate) fn mark_cold_branch(&self, branch: InstructionValue<'ctx>) -> CodegenResult<()> {
         let weights = self.context.metadata_node(&[
             self.context.metadata_string(BRANCH_WEIGHT_TAG).into(),
-            self.context.i32_type().const_int(true_weight, false).into(),
             self.context
                 .i32_type()
-                .const_int(false_weight, false)
+                .const_int(HOT_EDGE_WEIGHT, false)
+                .into(),
+            self.context
+                .i32_type()
+                .const_int(COLD_EDGE_WEIGHT, false)
                 .into(),
         ]);
         branch

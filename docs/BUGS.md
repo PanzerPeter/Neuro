@@ -5,6 +5,84 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-020 — an out-of-range float-to-integer cast produces an arbitrary value
+
+**Repro**
+
+```neuro
+func main() -> i32 {
+    mut f: f64 = 1e300
+    println("1e300 as i32 = {f as i32}")
+    return 0
+}
+```
+
+The value printed depends on the optimization level, on the surrounding code, and on
+the contents of the stack. `-O 0` happens to print `-2147483648`; `-O 3` prints
+whatever the register held. `nan as i32` and an out-of-range cast to an unsigned type
+behave the same way.
+
+**Root cause** — the cast lowers to LLVM's `fptosi` / `fptoui`, which are defined only
+when the truncated value is representable in the target type and yield `poison`
+otherwise. Poison is not a wrong number, it is the absence of a number: the optimizer
+is free to fold anything that consumes it, which is why the answer changes with the
+build.
+
+The language reference says an out-of-range float-to-integer cast is a compile
+*warning* and points at a `.to_checked::<T>()` escape hatch. Neither exists: no warning
+is emitted, and `.to_checked` is not implemented. So the case the spec expects to be
+diagnosed is instead silently undefined.
+
+**Fix sketch** — needs a ruling first, because three answers are defensible and no two
+of them agree: saturate (LLVM has `llvm.fptosi.sat.*` for exactly this, at a cost of a
+couple of instructions on x86), panic on the debug tier the way integer overflow and
+array bounds do, or keep truncation and add the promised compile warning plus
+`.to_checked`. Whichever wins, the poison has to go: today the program's output is not a
+function of its source.
+
+## BUG-019 — the most negative value of a signed type has no literal spelling
+
+**Repro**
+
+```neuro
+func main() -> i32 {
+    val a: i8  = -128            // rejected
+    val b: i32 = -2147483648     // rejected
+    return 0
+}
+```
+
+```
+integer literal 128 out of range for type i8
+integer literal 2147483648 out of range for type i32
+```
+
+`i64` and `u64` fail one stage earlier, in the lexer, which cannot tokenize them at
+all:
+
+```neuro
+val c: i64 = -9223372036854775808i64      // lexical error: invalid number literal
+val d: u64 = 18446744073709551615u64      // lexical error: invalid number literal
+```
+
+**Workaround** — build the value instead of writing it: `mut b: i32 = -2147483647`
+followed by `b = b - 1`, or `mut d: u64 = 9223372036854775807u64` followed by
+`d = d * 2u64 + 1u64`.
+
+**Root cause** — two layers, which is why this is one bug and not two. A negation is a
+unary operator over a literal rather than part of it, so the checker range-checks the
+*positive* magnitude, and `2147483648` does not fit `i32` even though `-2147483648`
+does. Underneath that, the lexer carries every integer literal as an `i64`
+(`TokenKind::Integer(i64)`), so magnitudes above `i64::MAX` cannot be represented
+before a type is even known — which takes out `i64::MIN` and the whole upper half of
+`u64` regardless of what the checker does.
+
+**Fix sketch** — the lexer has to carry the magnitude as a `u64` (or a `u128`) and let
+the checker decide what it means, which is the change both halves need. The checker then
+range-checks a negation over an integer literal against the negated value rather than
+the magnitude. Doing only the checker half fixes `i8`/`i16`/`i32` and leaves
+`i64`/`u64` broken, which is worse than either end state.
+
 ## BUG-018 — a tensor larger than 32768 elements cannot be compiled at `-O 0`
 
 **Repro**

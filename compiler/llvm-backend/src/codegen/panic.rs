@@ -94,7 +94,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_conditional_branch(ok, cont_bb, fail_bb)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.mark_cold_branch(branch, false)?;
+        self.mark_cold_branch(branch)?;
 
         self.builder.position_at_end(fail_bb);
         let location = self.panic_location_suffix(offset);
@@ -118,7 +118,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_conditional_branch(cond_val, cont_bb, fail_bb)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.mark_cold_branch(branch, false)?;
+        self.mark_cold_branch(branch)?;
 
         self.builder.position_at_end(fail_bb);
         self.emit_outlined_panic(&format!("assertion failed{}\n", location))?;

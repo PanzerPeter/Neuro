@@ -474,25 +474,65 @@ impl<'ctx> CodegenContext<'ctx> {
             return Ok((text, PieceOwner::Owned));
         }
 
-        let (operand, conversion) = match spec.kind {
-            FormatKind::LowerHex => (widened_unsigned, "llx"),
-            FormatKind::UpperHex => (widened_unsigned, "llX"),
-            FormatKind::Octal => (widened_unsigned, "llo"),
-            _ if ty.is_unsigned_int() => (widened_unsigned, "llu"),
+        // The renderer takes a magnitude and a sign byte rather than a printf
+        // conversion. Only signed decimal can carry a sign at all: the checker rejects
+        // `+` on an unsigned value and on every radix conversion, and a radix rendering
+        // shows the bit pattern, which is never negative.
+        let i8_type = self.context.i8_type();
+        let no_sign = i8_type.const_zero();
+        let (magnitude, sign, radix, upper) = match spec.kind {
+            FormatKind::LowerHex => (widened_unsigned, no_sign, 16, false),
+            FormatKind::UpperHex => (widened_unsigned, no_sign, 16, true),
+            FormatKind::Octal => (widened_unsigned, no_sign, 8, false),
+            _ if ty.is_unsigned_int() => (widened_unsigned, no_sign, 10, false),
             _ => {
                 let signed = self
                     .builder
                     .build_int_s_extend(raw, i64_type, "interp.int")
                     .map_err(llvm_err)?;
-                (signed, "lld")
+                let negative = self
+                    .builder
+                    .build_int_compare(
+                        inkwell::IntPredicate::SLT,
+                        signed,
+                        i64_type.const_zero(),
+                        "interp.int.neg",
+                    )
+                    .map_err(llvm_err)?;
+                // Plain wrapping negation: `0 - i64::MIN` is `i64::MIN`'s own bit
+                // pattern, which read as unsigned is the magnitude wanted.
+                let negated = self
+                    .builder
+                    .build_int_sub(i64_type.const_zero(), signed, "interp.int.abs")
+                    .map_err(llvm_err)?;
+                let magnitude = self
+                    .builder
+                    .build_select(negative, negated, signed, "interp.int.mag")
+                    .map_err(llvm_err)?
+                    .into_int_value();
+                let positive = if spec.plus_sign {
+                    i8_type.const_int(u64::from(b'+'), false)
+                } else {
+                    no_sign
+                };
+                let sign = self
+                    .builder
+                    .build_select(
+                        negative,
+                        i8_type.const_int(u64::from(b'-'), false),
+                        positive,
+                        "interp.int.sign",
+                    )
+                    .map_err(llvm_err)?
+                    .into_int_value();
+                (magnitude, sign, 10, false)
             }
         };
 
-        let format = self.format_string(spec, conversion, None)?;
-        let helper = self.get_or_define_fmt_int()?;
+        let helper = self.get_or_define_fmt_int(radix, upper)?;
         let text = self
             .builder
-            .build_call(helper, &[operand.into(), format.into()], "interp.int.text")
+            .build_call(helper, &[magnitude.into(), sign.into()], "interp.int.text")
             .map_err(llvm_err)?
             .try_as_basic_value()
             .basic()

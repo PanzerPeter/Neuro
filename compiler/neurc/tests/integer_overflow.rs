@@ -1,6 +1,6 @@
 // End-to-end tests for integer overflow semantics.
 //
-// Debug builds (`-O0`) trap on `+`/`-`/`*` overflow; release builds (`-O1..-O3`)
+// Debug builds (`-O0`) panic on `+`/`-`/`*` overflow; release builds (`-O1..-O3`)
 // wrap (two's complement). These tests compile the same overflowing program at
 // both optimization levels and assert the runtime behavior differs accordingly.
 use std::path::PathBuf;
@@ -46,10 +46,16 @@ fn run(exe: &PathBuf) -> ExitStatus {
     Command::new(exe).output().expect("run executable").status
 }
 
-/// True if the process was aborted by `llvm.trap` rather than exiting normally.
+/// What the program wrote to stderr before it stopped.
+fn stderr_of(exe: &PathBuf) -> String {
+    let output = Command::new(exe).output().expect("run executable");
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// True if the process was aborted by the panic runtime rather than exiting normally.
 ///
-/// On Unix the trap is delivered as a signal (SIGILL), so there is no exit code
-/// (`code()` is `None`). Windows has no signals: the trap surfaces as an NTSTATUS
+/// On Unix the abort is delivered as a signal (SIGABRT), so there is no exit code
+/// (`code()` is `None`). Windows has no signals: `abort` surfaces as an NTSTATUS
 /// exception code in the `0xC000_0000+` range, which `ExitStatus::code` returns as
 /// a negative `i32`. A normal/wrapped exit always yields a small non-negative code.
 fn trapped(status: ExitStatus) -> bool {
@@ -88,12 +94,12 @@ func main() -> i32 {
 "#;
 
 #[test]
-fn unsigned_overflow_traps_in_debug() {
+fn unsigned_overflow_aborts_in_debug() {
     let exe = compile_source(UNSIGNED_OVERFLOW, "u_dbg", "0");
     let status = run(&exe);
     assert!(
         trapped(status),
-        "expected debug build to trap, but it exited with {:?}",
+        "expected debug build to abort, but it exited with {:?}",
         status.code()
     );
 }
@@ -107,12 +113,12 @@ fn unsigned_overflow_wraps_in_release() {
 }
 
 #[test]
-fn signed_overflow_traps_in_debug() {
+fn signed_overflow_aborts_in_debug() {
     let exe = compile_source(SIGNED_OVERFLOW, "s_dbg", "0");
     let status = run(&exe);
     assert!(
         trapped(status),
-        "expected debug build to trap, but it exited with {:?}",
+        "expected debug build to abort, but it exited with {:?}",
         status.code()
     );
 }
@@ -123,4 +129,17 @@ fn signed_overflow_wraps_in_release() {
     let status = run(&exe);
     // 2147483647 * 2 wraps to -2; the low byte of the exit code is 254.
     assert_eq!(exit_low_byte(status), Some(254));
+}
+
+#[test]
+fn an_overflow_says_what_failed_and_where() {
+    // An overflow is a panic like any other, so it prints a located diagnostic. It used
+    // to execute a bare `llvm.trap`, which reaches the programmer only as
+    // `SIGILL` / `Illegal instruction` and names neither the failure nor its line.
+    let exe = compile_source(SIGNED_OVERFLOW, "s_msg", "0");
+    let stderr = stderr_of(&exe);
+    assert!(
+        stderr.contains("panic: integer overflow at"),
+        "an overflow must name itself and its source location, got:\n{stderr}"
+    );
 }
