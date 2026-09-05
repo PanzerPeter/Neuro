@@ -1544,14 +1544,63 @@ func twice(t: Tensor<f32, [2, 2]>) {
 `Tensor` shadows it; a shape argument is what marks a type application as a tensor, and
 writing one under any other name is a parse error.
 
+### Building a tensor
+
+A nested array literal becomes a tensor wherever an explicit `Tensor<...>` annotation is
+in scope. The annotation supplies the element type and every extent, and it types the
+literal's leaves — `1.0` under a `Tensor<f32, ...>` annotation is an `f32` literal, not
+an `f64` one being narrowed, exactly as `val x: f32 = 0.01` types its literal.
+
+```neuro
+val v: Tensor<f32, [3]> = [1.0, 2.0, 3.0]
+
+val m: Tensor<f32, [2, 3]> = [
+    [1.0, 2.0, 3.0],
+    [4.0, 5.0, 6.0]
+]
+
+val arr = [1.0, 2.0, 3.0]          // no annotation: a plain [f64; 3], not a tensor
+```
+
+A nested literal must be **rectangular**: every sub-array at a given depth has the length
+the corresponding extent declares, and the nesting is as deep as the shape is long. A
+ragged literal, a wrong extent, and a literal shallower than the shape are all compile
+errors. A value that already has a type is not converted for the annotation's benefit — a
+non-literal element must already be the element type.
+
+Where no annotation reaches, name the type with a turbofish and use a constructor:
+
+```neuro
+val zeros = Tensor::<f32, [3, 3]>::zeros()
+val ones  = Tensor::<f32, [3, 3]>::ones()
+val eye   = Tensor::<f32, [4, 4]>::identity()
+val w     = Tensor::<f32, [128, 64]>::random_normal(mean: 0.0f32, std: 0.02f32)
+val v     = Tensor::<f32, [3]>::from([1.0, 2.0, 3.0])
+val loss: Tensor<f32, []> = Tensor::scalar(0.5)
+```
+
+`identity()` applies only to a square rank-2 shape, `random_normal` draws only into `f32`
+or `f64`, `scalar` builds only the rank-0 tensor, and `from` takes the same nested literal
+the annotated form coerces. A rank-0 tensor has no array-literal form at all — it is
+written with `Tensor::scalar(value)`. The generator behind `random_normal` is seeded from a
+fixed constant, so a compiled program draws the same values on every run.
+
+A tensor's runtime value is its buffer: a flat, row-major run of its elements, held by
+value. It lives in host memory; device placement and DLPack handles are later work.
+
+Because a tensor is held by value, a very large one cannot be compiled at `-O 0` — the
+default. A tensor of more than 32768 elements is rejected there with a diagnostic naming
+the limit; compile with `-O 1` or higher, where the copy becomes a `memcpy` and any size
+works. See `BUG-018` in [docs/BUGS.md](../BUGS.md).
+
 ### What tensors cannot do yet
 
-Only the *type* exists at this stage. There is no way to build a tensor value: literals,
-the `Tensor::<T, [...]>::zeros()` family, tensor arithmetic, slicing, and reductions are
-all later work. A program that annotates a tensor passes `neurc check` but cannot be
-compiled to a binary — the backend reports that a tensor has no runtime representation
-yet. Symbolic extents (`Tensor<f32, [M, K]>`), named dimensions, and dynamic axes
-(`Tensor<f32, [?, 768]>`) are not accepted; a non-literal extent is a parse error.
+A tensor can be built, bound, moved, passed, returned, and stored in a struct — but not yet
+read back. Indexing and slicing (`t[i, j]`, `t[1..3, ..]`), tensor arithmetic (`a + b`,
+`a @ b`), in-place compound assignment, `.t()`, `.reshape(...)`, `.clone()`, `.to(device)`,
+and the reductions (`.sum()`, `.mean()`, `.max()`, `.min()`) are all later work. Symbolic
+extents (`Tensor<f32, [M, K]>`), named dimensions, and dynamic axes (`Tensor<f32, [?, 768]>`)
+are not accepted; a non-literal extent is a parse error.
 
 ## Standard Collections
 

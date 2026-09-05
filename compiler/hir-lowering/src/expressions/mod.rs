@@ -367,9 +367,16 @@ impl Lowerer {
                 span,
             } => self.lower_range(start, end, *inclusive, *span),
 
-            Expr::ArrayLiteral { elements, span } => {
-                self.lower_array_literal(elements, expected, *span)
-            }
+            // A `Tensor<T, [...]>` expectation turns the literal into a tensor
+            // literal; anything else leaves it a plain array.
+            Expr::ArrayLiteral { elements, span } => match expected {
+                Some(HirType::Tensor { element, shape }) => {
+                    let element = (**element).clone();
+                    let shape = shape.clone();
+                    self.lower_tensor_literal(elements, &element, &shape, *span)
+                }
+                _ => self.lower_array_literal(elements, expected, *span),
+            },
 
             Expr::TupleLiteral { elements, span } => {
                 self.lower_tuple_literal(elements, expected, *span)

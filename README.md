@@ -112,7 +112,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | **Closures & lambdas** | `\|x: i32\| x * x`, `move` closures, `(T) -> R` function types, higher-order functions; compiled to `{ fn_ptr, env_ptr }`, no heap |
 | **Structs & methods** | Fields, shorthand init, functional update `..base`, `impl` blocks with `&self` / `&mut self` methods and associated functions; `@derive(Copy, Clone, Debug, PartialEq)` for copying, `{p:?}` rendering, and structural equality |
 | **Enums & newtypes** | Unit, tuple, and struct-field variants; generic enums monomorphized per type argument; `newtype` for distinct nominal wrappers |
-| **Arrays, tuples & collections** | Fixed-size `[T; N]` and anonymous tuples over `Copy` elements; borrowed slices `&[T]` / `&mut [T]` with zero-copy `.slice(range)` over an array or a `Vec`; heap-backed `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, `String` that move on assignment and free at scope exit |
+| **Arrays, tuples & collections** | Fixed-size `[T; N]` and anonymous tuples over `Copy` elements; borrowed slices `&[T]` / `&mut [T]` with zero-copy `.slice(range)` over an array or a `Vec`; heap-backed `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, `String` that move on assignment and free at scope exit; statically shaped `Tensor<T, [d0, ...]>` built from an annotated nested literal or `Tensor::<T, [...]>::zeros()` / `ones()` / `identity()` / `random_normal()` / `scalar()` / `from()` |
 | **Pattern matching** | Exhaustive `match` expressions over variant / literal / or / range / wildcard patterns with `if` guards, plus `val Point { x, y } = p` and `val [a, ..rest] = arr` destructuring |
 | **`Option` / `Result`** | `Option<T>` and `Result<T, E>` from the implicit prelude. They are ordinary generic enums, available with no declaration and no import, variants included; `??` unwraps either with a lazy fallback; `?` propagates the failure to the caller; `val-else` unwraps or exits the scope; `checked_add` / `checked_sub` / `checked_mul` report integer overflow as `Option::None` |
 | **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop`, `&T` / `&mut T` with flow-sensitive exclusivity, lifetime elision and annotations |
@@ -485,7 +485,7 @@ func main() -> i32 {
 }
 ```
 
-Every runnable program in [examples/showcase/](examples/showcase/) combines several features at once and is pinned twice: to an expected exit code in [examples/expected.txt](examples/expected.txt), and to the exact text it prints in a sibling `.out` file. Tensor types, `@grad`, and GPU kernels are not shown here because they do not exist yet. See the [Quick Roadmap](#quick-roadmap).
+Every runnable program in [examples/showcase/](examples/showcase/) combines several features at once and is pinned twice: to an expected exit code in [examples/expected.txt](examples/expected.txt), and to the exact text it prints in a sibling `.out` file. Tensor arithmetic, `@grad`, and GPU kernels are not shown here because they do not exist yet; tensor *construction* does, in [`showcase/model_shapes.nr`](examples/showcase/model_shapes.nr). See the [Quick Roadmap](#quick-roadmap).
 
 ---
 

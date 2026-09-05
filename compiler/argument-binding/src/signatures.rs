@@ -113,8 +113,32 @@ pub(crate) enum Lookup<'a> {
 impl SignatureTable {
     pub(crate) fn build(items: &[Item]) -> Self {
         let mut table = SignatureTable::default();
+        table.seed_builtins();
+        // A program's own declarations are collected second so one that declares its
+        // own `Tensor` overwrites the builtin entry rather than fighting it.
         table.collect(items);
         table
+    }
+
+    /// Record the parameter names of the builtin associated functions a caller may name.
+    ///
+    /// `Tensor::random_normal(mean:, std:)` is spelled with its labels in the specification,
+    /// and the constructor is compiler-known rather than declared in the prelude, so
+    /// there is no `Item` for `collect` to read them off.
+    fn seed_builtins(&mut self) {
+        let params = ["mean", "std"]
+            .into_iter()
+            .map(|name| ParamBinding {
+                name: Some(name.to_string()),
+                internal: name.to_string(),
+                required: false,
+                ty: None,
+            })
+            .collect();
+        self.assoc.insert(
+            ("Tensor".to_string(), "random_normal".to_string()),
+            Signature { params },
+        );
     }
 
     fn collect(&mut self, items: &[Item]) {

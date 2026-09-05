@@ -1,6 +1,6 @@
 // Static tensor type syntax (Phase 2B): `Tensor<T, [d0, ...]>` in every type position.
-// Tensor *values* cannot be built yet, so these drive `neurc check` and pin the
-// diagnostic a compile attempt produces.
+// These cover the annotation itself; construction of tensor *values* is covered by
+// `tensor_values.rs`.
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
@@ -116,10 +116,10 @@ func main() -> i32 {
     );
 }
 
-/// A program using tensor types type-checks but has no runtime form yet. The compile
-/// path must say that rather than reporting the type as unresolved.
+/// A tensor annotation reaches the backend as a real type: a program that only names
+/// one, without building a value, still compiles.
 #[test]
-fn compiling_a_tensor_program_reports_the_missing_runtime_form() {
+fn a_tensor_annotation_compiles() {
     let source = r#"
 func forward(x: Tensor<f32, [4]>) { }
 
@@ -128,9 +128,5 @@ func main() -> i32 {
 }
 "#;
     let (ok, out) = run("compile", source);
-    assert!(!ok, "a tensor program cannot be compiled yet; got: {out}");
-    assert!(
-        out.contains("no runtime representation yet"),
-        "diagnostic should explain the limitation; got: {out}"
-    );
+    assert!(ok, "a tensor annotation should compile; got: {out}");
 }

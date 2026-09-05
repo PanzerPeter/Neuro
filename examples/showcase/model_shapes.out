@@ -1,0 +1,4 @@
+embeddings [3, 4] via literal   =   12 params
+projection [4, 4] via identity  =   16 params
+dense      [8, 4] + bias [8]    =   40 params
+total parameters                =   84

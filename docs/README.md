@@ -78,9 +78,11 @@ Key design goals:
 - Contextual numeric literal inference with range validation
 - Struct types: definition, instantiation, field access, field mutation
 - Statically shaped tensors: `Tensor<T, [d0, ...]>`, rank-0 through rank-N, over any
-  fixed-width scalar element. Type-level only so far — the annotation type-checks and a
-  shape or element mismatch is a compile error, but no tensor value can be constructed,
-  so a program using one is limited to `neurc check`
+  fixed-width scalar element; a shape or element mismatch is a compile error. Values are
+  built from a nested array literal under a `Tensor<...>` annotation, or with
+  `Tensor::<T, [...]>::zeros()` / `ones()` / `identity()` / `random_normal(mean:, std:)` /
+  `scalar()` / `from()`. A tensor moves rather than copies. Reading one back — indexing,
+  arithmetic, reductions — is later work
 
 ### Variables
 

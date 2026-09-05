@@ -227,6 +227,8 @@ fn build_module<'ctx>(
 
     // Debug builds (-O0) trap on integer overflow; release builds wrap.
     codegen_ctx.set_overflow_checks(optimization == OptimizationLevelSetting::O0);
+    // A tensor is copied as one LLVM value, which only `-O1`'s SROA turns into a memcpy.
+    codegen_ctx.set_tensor_limit(optimization == OptimizationLevelSetting::O0);
 
     // Emit module-level constants as LLVM global constants before any function.
     // This ensures all globals are defined before function bodies reference them.
@@ -984,5 +986,98 @@ mod tests {
             OptimizationLevelSetting::O3
         );
         assert!(OptimizationLevelSetting::from_u8(4).is_err());
+    }
+
+    /// A statically shaped tensor has its whole shape in its type, so the buffer is a
+    /// flat row-major array and a literal reaches the binding as one constant.
+    #[test]
+    fn a_tensor_literal_lowers_to_a_flat_row_major_buffer() {
+        let source = r#"
+            func main() -> i32 {
+                val m: Tensor<f32, [2, 3]> = [
+                    [1.0, 2.0, 3.0],
+                    [4.0, 5.0, 6.0]
+                ]
+                return 0
+            }
+        "#;
+
+        let ir = optimized_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        assert!(
+            body.contains("[6 x float]"),
+            "a [2, 3] tensor is a 6-element buffer:\n{body}"
+        );
+        assert!(
+            body.contains("float 3.000000e+00") && body.contains("float 6.000000e+00"),
+            "the literal's values must reach the buffer:\n{body}"
+        );
+    }
+
+    /// `zeros()` is a constant fill, so nothing per-element survives to run time.
+    #[test]
+    fn a_zeros_tensor_lowers_to_a_zero_initializer() {
+        let source = r#"
+            func main() -> i32 {
+                val z = Tensor::<f32, [4, 4]>::zeros()
+                return 0
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        assert!(
+            body.contains("[16 x float] zeroinitializer"),
+            "zeros() is a zero-initialized 16-element buffer:\n{body}"
+        );
+    }
+
+    /// The diagonal is what distinguishes `identity()` from `ones()`, and it is folded
+    /// at compile time rather than written by a loop.
+    #[test]
+    fn an_identity_tensor_carries_ones_only_on_its_diagonal() {
+        let source = r#"
+            func main() -> i32 {
+                val e = Tensor::<i32, [3, 3]>::identity()
+                return 0
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        assert!(
+            body.contains(
+                "[9 x i32] [i32 1, i32 0, i32 0, i32 0, i32 1, i32 0, i32 0, i32 0, i32 1]"
+            ),
+            "identity() puts ones on the diagonal of a row-major buffer:\n{body}"
+        );
+    }
+
+    /// `random_normal` is the one construction with a runtime cost: a counted loop over
+    /// the buffer, drawing through the module's own generator.
+    #[test]
+    fn random_normal_fills_the_buffer_through_the_module_generator() {
+        let source = r#"
+            func main() -> i32 {
+                val r = Tensor::<f32, [8, 4]>::random_normal(0.0f32, 0.02f32)
+                return 0
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        assert!(
+            ir.contains("@__neuro_rng_state = private global i64"),
+            "the generator keeps its state in a private module global:\n{ir}"
+        );
+        assert!(
+            ir.contains("define internal double @__neuro_rng_normal_f64()"),
+            "the normal draw is emitted once per module:\n{ir}"
+        );
+        let body = function_body(&ir, "main");
+        assert!(
+            body.contains("call double @__neuro_rng_normal_f64()")
+                && body.contains("tensor.rand.head"),
+            "the fill is a counted loop over the buffer:\n{body}"
+        );
     }
 }

@@ -13,14 +13,14 @@ pub(super) type AssocBindings = (Vec<(Identifier, Type)>, Option<Span>);
 /// A parsed `[d0, d1, ...]` shape argument: its extents and the span of the brackets.
 /// Only `Tensor<T, [...]>` accepts one, so `parse_generic_type_args` hands it back
 /// separately rather than widening [`GenericArg`] for a single type.
-type ShapeArg = (Vec<usize>, Span);
+pub(super) type ShapeArg = (Vec<usize>, Span);
 
 /// The only form `Self` takes in a type annotation: bare `Self` is not one, because the
 /// implementing type is always nameable where an annotation is written.
 /// The one type name that accepts a `[...]` shape argument. It is a prelude name
 /// rather than a keyword, so the parser only claims it once a shape appears — a module
 /// that shadows `Tensor` with its own generic type keeps parsing as before.
-const TENSOR_TYPE_NAME: &str = "Tensor";
+pub(super) const TENSOR_TYPE_NAME: &str = "Tensor";
 
 const SELF_ASSOC_FORM: &str = "`Self::` followed by an associated type name — bare `Self` is not a type annotation, name the type itself";
 
@@ -314,7 +314,7 @@ impl Parser {
     /// Returns the arguments and the span of the closing `>`, so the caller can
     /// span the whole application: ending at the last argument leaves the `>` out
     /// of every diagnostic that points at the type.
-    fn parse_generic_type_args(
+    pub(super) fn parse_generic_type_args(
         &mut self,
     ) -> ParseResult<(Vec<GenericArg>, Option<ShapeArg>, Span)> {
         self.consume(TokenKind::Less, "'<'")?;
@@ -425,7 +425,7 @@ impl Parser {
     /// The shape is what marks the application as a tensor, so a shape under any other
     /// name is rejected here rather than left for the type checker: no other type in the
     /// language accepts one, and the parser already knows the name.
-    fn build_tensor_type(
+    pub(super) fn build_tensor_type(
         name: Identifier,
         args: Vec<GenericArg>,
         shape: Vec<usize>,
@@ -650,5 +650,82 @@ mod tests {
         };
         assert_eq!(ident.name, "Self::Item");
         assert_eq!(&src[ident.span.start..ident.span.end], "Self::Item");
+    }
+
+    /// The initializer expression of the first `val` in the first function body.
+    fn first_var_init(items: &[Item]) -> Option<crate::ast::Expr> {
+        for item in items {
+            if let Item::Function(func) = item {
+                for stmt in &func.body {
+                    if let Stmt::VarDecl { init, .. } = stmt {
+                        return init.clone();
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn a_tensor_turbofish_constructor_parses_as_a_call_on_a_path() {
+        let src = "func main() -> i32 { val z = Tensor::<f32, [3, 3]>::zeros()\n return 0 }";
+        let items = parse(src).expect("parses");
+        let init = first_var_init(&items).expect("has a var decl");
+        let crate::ast::Expr::Call {
+            func,
+            type_args,
+            args,
+            ..
+        } = init
+        else {
+            panic!("expected a call, got {init:?}");
+        };
+        assert!(args.is_empty());
+        let [GenericArg::Type(Type::Tensor {
+            element_type,
+            shape,
+            ..
+        })] = &type_args[..]
+        else {
+            panic!("expected one tensor type argument, got {type_args:?}");
+        };
+        assert!(matches!(**element_type, Type::Named(ref i) if i.name == "f32"));
+        assert_eq!(*shape, vec![3, 3]);
+        let crate::ast::Expr::Path {
+            type_name, member, ..
+        } = *func
+        else {
+            panic!("expected a path callee");
+        };
+        assert_eq!(type_name.name, "Tensor");
+        assert_eq!(member.name, "zeros");
+    }
+
+    /// A rank-0 constructor is spelled with an empty shape, which is also the one
+    /// shape argument that carries no integer to key on.
+    #[test]
+    fn a_rank_zero_turbofish_constructor_parses() {
+        let src = "func main() -> i32 { val s = Tensor::<f32, []>::scalar(1.0)\n return 0 }";
+        let items = parse(src).expect("parses");
+        let init = first_var_init(&items).expect("has a var decl");
+        let crate::ast::Expr::Call { type_args, .. } = init else {
+            panic!("expected a call");
+        };
+        let [GenericArg::Type(Type::Tensor { shape, .. })] = &type_args[..] else {
+            panic!("expected one tensor type argument");
+        };
+        assert!(shape.is_empty());
+    }
+
+    /// Without a shape the turbofish names no tensor, so the arity error fires rather
+    /// than the form being read as a plain generic application.
+    #[test]
+    fn a_tensor_turbofish_without_a_shape_is_an_arity_error() {
+        let src = "func main() -> i32 { val z = Tensor::<f32>::zeros()\n return 0 }";
+        let err = parse(src).expect_err("should not parse");
+        assert!(
+            matches!(&err, ParseError::TensorTypeArity { .. }),
+            "unexpected error: {err:?}"
+        );
     }
 }

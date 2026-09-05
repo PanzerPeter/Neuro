@@ -35,6 +35,17 @@ impl Lowerer {
             Expr::FieldAccess { object, field, .. } => {
                 self.lower_method_call(object, &field.name, args, span)
             }
+            // `Tensor::<f32, [3, 3]>::zeros()` and the five other construction helpers, unless
+            // the program declares its own `Tensor`.
+            Expr::Path {
+                type_name, member, ..
+            } if type_name.name == crate::tensors::TENSOR_TYPE_NAME
+                && crate::tensors::is_tensor_constructor(&member.name)
+                && !self.structs.contains_key(&type_name.name)
+                && !self.enums.contains_key(&type_name.name) =>
+            {
+                self.lower_tensor_construction(&member.name, type_args, args, expected, span)
+            }
             // `Vec::new()` and friends build an empty standard collection, unless the
             // program declares its own type of that name.
             Expr::Path {

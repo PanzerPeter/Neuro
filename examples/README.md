@@ -38,6 +38,13 @@ of its own to pin.
 These exist specifically to prove features work *together*, not just in
 isolation:
 
+- [`showcase/model_shapes.nr`](showcase/model_shapes.nr) — a network's layer stack
+  declared with real tensor parameters. Tensor literal coercion and the
+  construction helpers (`zeros`, `identity`, `random_normal`, `scalar`) working together
+  with structs holding tensor fields, an enum matched to pick an initializer, a trait
+  with an `impl` per layer kind, a fixed-size array walked by `for`-in, and string
+  interpolation with the format mini-language. A tensor is not `Copy`, so each `match`
+  arm's buffer *moves* into the struct that keeps it. Exit `84`.
 - [`showcase/perceptron.nr`](showcase/perceptron.nr) — a two-neuron feed-forward
   pass. Structs + `impl` (method calling method) + `f64` math + ReLU branch +
   `while` loop + `as` cast. Exit `8`.
@@ -300,6 +307,13 @@ No Rust edits are needed — discovery is automatic.
   literals, `.0` / `.1` index access, and destructuring binds `val (a, b) = t`
   (with `_` wildcards and nesting). Elements are limited to `Copy` types for now,
   so tuples holding a `string` or other non-Copy value are a later phase.
+- Tensor *construction* is supported (`types/tensor_construction.nr`): a nested array
+  literal coerces to `Tensor<T, [d0, ...]>` wherever an annotation says so, and
+  `Tensor::<T, [...]>::zeros()` / `ones()` / `identity()` / `random_normal(mean:, std:)` /
+  `scalar()` / `from()` build one where no annotation reaches. Tensors move rather than
+  copy. Reading a tensor back — indexing, arithmetic, reductions — is later work, so an
+  example builds and passes tensors rather than computing with them. A tensor of more than
+  32768 elements needs `-O 1` or higher (`BUG-018`), so the examples stay well under that.
 - Newtypes are supported (`types/newtype.nr`): `newtype Meters = i32` creates a
   distinct nominal type wrapping an inner type, constructed `Meters(30)` and read
   back with `.0`. Unlike a `type` alias, a newtype is *not* interchangeable with

@@ -319,10 +319,13 @@ declarations in v2.7.0, the `Trait<Assoc = T>` bound form in v2.8.0, and the
 adapters in v2.10.0, the codepoint iterators `.chars()` / `.char_indices()` in v2.11.0, and
 `@derive` argument validation with the `Debug` / `PartialEq` derives in v2.12.0.
 `2B — Tensor Core` holds the next open item. Its first line — the static tensor type
-syntax `Tensor<T, [...]>` — shipped in v2.13.0 as a *type-level* landing: the annotation
-parses and type-checks everywhere a type is written, but no tensor value can be built, so
-such a program is limited to `neurc check`. Tensor literals and constructors are the next
-open item — start at the top of 2B in the roadmap.
+syntax `Tensor<T, [...]>` — shipped in v2.13.0 as a *type-level* landing, and v2.14.0 gave
+tensors a runtime representation: a nested array literal coerces under a `Tensor<...>`
+annotation, and `Tensor::<T, [...]>::zeros()` / `ones()` / `identity()` /
+`random_normal(mean:, std:)` / `scalar()` / `from()` build one where no annotation reaches.
+A tensor can now be built, bound, moved, passed, returned, and stored in a struct — but not
+read back: ownership and `.to(device)`, DLPack, in-place compound assignment, slicing and
+indexing, and the reductions are all still open. Start at the top of 2B in the roadmap.
 
 Nothing links `TokenKind` to the editor grammar, so any lexer change must also update
 `neuro-language-support/syntaxes/neuro.tmLanguage.json` by hand in the same commit.

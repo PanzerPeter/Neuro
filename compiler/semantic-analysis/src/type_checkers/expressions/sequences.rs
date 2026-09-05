@@ -19,6 +19,15 @@ impl TypeChecker {
         span: &Span,
         expected: Option<&Type>,
     ) -> Option<Type> {
+        // A `Tensor<T, [...]>` annotation reaching an array literal makes it a tensor
+        // literal of that type. Without one the literal is a plain array, which
+        // is what keeps `val arr = [1.0, 2.0, 3.0]` a `[f64; 3]`.
+        if let Some(Type::Tensor { element, shape }) = expected {
+            let element = (**element).clone();
+            let shape = shape.clone();
+            return Some(self.check_tensor_literal(elements, &element, &shape, *span));
+        }
+
         let expected_element = match expected {
             Some(Type::Array { element, .. }) => Some((**element).clone()),
             _ => None,
