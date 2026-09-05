@@ -79,9 +79,11 @@ impl Parser {
         })?;
 
         match token.kind {
-            TokenKind::Integer(n) => Ok(Expr::Literal(Literal::Integer(n, None), token.span)),
+            TokenKind::Integer(n) => {
+                Ok(Expr::Literal(Literal::Integer(n as i128, None), token.span))
+            }
             TokenKind::IntegerSuffix(tok) => Ok(Expr::Literal(
-                Literal::Integer(tok.value, Some(tok.suffix)),
+                Literal::Integer(tok.value as i128, Some(tok.suffix)),
                 token.span,
             )),
             TokenKind::Float(f) => Ok(Expr::Literal(Literal::Float(f, None), token.span)),
@@ -652,13 +654,9 @@ impl Parser {
                     let TokenKind::Integer(n) = idx_token.kind else {
                         unreachable!("guarded by peek above")
                     };
-                    if n < 0 {
-                        return Err(ParseError::UnexpectedToken {
-                            found: idx_token.kind,
-                            expected: "a non-negative tuple index".to_string(),
-                            span: idx_token.span,
-                        });
-                    }
+                    // No sign check: an integer token carries a magnitude, so a
+                    // negative index is a `-` token followed by one and never reaches
+                    // here as a single token.
                     let span = left.span().merge(idx_token.span);
                     return Ok(Expr::TupleIndex {
                         object: Box::new(left),
@@ -949,13 +947,9 @@ impl Parser {
                     .ok_or(ParseError::UnexpectedEof {
                         expected: "const argument".to_string(),
                     })?;
-                if value < 0 {
-                    return Err(ParseError::UnexpectedToken {
-                        found: TokenKind::Integer(value),
-                        expected: "a non-negative const argument".to_string(),
-                        span,
-                    });
-                }
+                // An integer token carries a magnitude, so a negative const argument
+                // is a `-` token followed by one and is rejected as an unexpected token
+                // before reaching here.
                 args.push(GenericArg::Const {
                     value: value as i128,
                     span,

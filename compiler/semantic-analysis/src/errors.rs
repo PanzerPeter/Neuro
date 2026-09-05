@@ -363,7 +363,7 @@ pub enum TypeError {
     AssignToImmutable { name: String, span: Span },
 
     #[error("integer literal {value} out of range for type {ty} at {span:?}")]
-    IntegerLiteralOutOfRange { value: i64, ty: Type, span: Span },
+    IntegerLiteralOutOfRange { value: i128, ty: Type, span: Span },
 
     #[error("'break' used outside of a loop at {span:?}")]
     BreakOutsideLoop { span: Span },

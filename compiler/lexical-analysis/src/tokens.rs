@@ -13,9 +13,11 @@ use crate::errors::LexError;
 
 /// Carries both the numeric value and the explicit type suffix of a suffixed
 /// integer literal (e.g. `42i64`, `255u8`).
+///
+/// See [`TokenKind::Integer`] for why the magnitude is a `u64`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IntegerSuffixToken {
-    pub value: i64,
+    pub value: u64,
     pub suffix: IntSuffix,
 }
 
@@ -187,7 +189,12 @@ pub enum TokenKind {
     #[regex(r"0[oO][0-7][0-7_]*", parse_octal)]
     #[regex(r"0[xX][0-9a-fA-F][0-9a-fA-F_]*", parse_hex)]
     #[regex(r"[0-9][0-9_]*", parse_decimal)]
-    Integer(i64),
+    /// The **magnitude** of an integer literal. A literal is never negative in
+    /// source — `-1` is a negation over `1` — so the widest magnitude the language
+    /// can spell is `u64::MAX`, and an `i64` here would reject both that and
+    /// `9223372036854775808`, the magnitude `i64::MIN` is written with. Deciding
+    /// what a magnitude means is the type checker's job, not the lexer's.
+    Integer(u64),
 
     // String literals (including potentially malformed ones for better error messages).
     // All three patterns route through the same chunk decoder: a literal with no
@@ -871,36 +878,36 @@ fn parse_float(lex: &mut logos::Lexer<TokenKind>) -> Result<f64, LexError> {
 }
 
 /// Helper function to parse decimal integer literals
-fn parse_decimal(lex: &mut logos::Lexer<TokenKind>) -> Result<i64, LexError> {
+fn parse_decimal(lex: &mut logos::Lexer<TokenKind>) -> Result<u64, LexError> {
     let slice = lex.slice().replace('_', "");
-    slice.parse::<i64>().map_err(|_| LexError::InvalidNumber {
+    slice.parse::<u64>().map_err(|_| LexError::InvalidNumber {
         text: lex.slice().to_string(),
         span: Span::new(lex.span().start, lex.span().end),
     })
 }
 
 /// Helper function to parse binary integer literals
-fn parse_binary(lex: &mut logos::Lexer<TokenKind>) -> Result<i64, LexError> {
+fn parse_binary(lex: &mut logos::Lexer<TokenKind>) -> Result<u64, LexError> {
     let slice = lex.slice()[2..].replace('_', ""); // Skip "0b" prefix
-    i64::from_str_radix(&slice, 2).map_err(|_| LexError::InvalidNumber {
+    u64::from_str_radix(&slice, 2).map_err(|_| LexError::InvalidNumber {
         text: lex.slice().to_string(),
         span: Span::new(lex.span().start, lex.span().end),
     })
 }
 
 /// Helper function to parse octal integer literals
-fn parse_octal(lex: &mut logos::Lexer<TokenKind>) -> Result<i64, LexError> {
+fn parse_octal(lex: &mut logos::Lexer<TokenKind>) -> Result<u64, LexError> {
     let slice = lex.slice()[2..].replace('_', ""); // Skip "0o" prefix
-    i64::from_str_radix(&slice, 8).map_err(|_| LexError::InvalidNumber {
+    u64::from_str_radix(&slice, 8).map_err(|_| LexError::InvalidNumber {
         text: lex.slice().to_string(),
         span: Span::new(lex.span().start, lex.span().end),
     })
 }
 
 /// Helper function to parse hexadecimal integer literals
-fn parse_hex(lex: &mut logos::Lexer<TokenKind>) -> Result<i64, LexError> {
+fn parse_hex(lex: &mut logos::Lexer<TokenKind>) -> Result<u64, LexError> {
     let slice = lex.slice()[2..].replace('_', ""); // Skip "0x" prefix
-    i64::from_str_radix(&slice, 16).map_err(|_| LexError::InvalidNumber {
+    u64::from_str_radix(&slice, 16).map_err(|_| LexError::InvalidNumber {
         text: lex.slice().to_string(),
         span: Span::new(lex.span().start, lex.span().end),
     })
@@ -973,7 +980,7 @@ fn parse_decimal_suffix(lex: &mut logos::Lexer<TokenKind>) -> Result<IntegerSuff
     let raw = lex.slice();
     let suffix_start = raw.find(|c: char| c.is_alphabetic()).unwrap_or(raw.len());
     let digits = raw[..suffix_start].replace('_', "");
-    let value = digits.parse::<i64>().map_err(|_| LexError::InvalidNumber {
+    let value = digits.parse::<u64>().map_err(|_| LexError::InvalidNumber {
         text: raw.to_string(),
         span: Span::new(lex.span().start, lex.span().end),
     })?;
@@ -990,7 +997,7 @@ fn parse_binary_suffix(lex: &mut logos::Lexer<TokenKind>) -> Result<IntegerSuffi
         .map(|i| i + 2)
         .unwrap_or(raw.len());
     let digits = raw[2..suffix_start].replace('_', "");
-    let value = i64::from_str_radix(&digits, 2).map_err(|_| LexError::InvalidNumber {
+    let value = u64::from_str_radix(&digits, 2).map_err(|_| LexError::InvalidNumber {
         text: raw.to_string(),
         span: Span::new(lex.span().start, lex.span().end),
     })?;
@@ -1007,7 +1014,7 @@ fn parse_octal_suffix(lex: &mut logos::Lexer<TokenKind>) -> Result<IntegerSuffix
         .map(|i| i + 2)
         .unwrap_or(raw.len());
     let digits = raw[2..suffix_start].replace('_', "");
-    let value = i64::from_str_radix(&digits, 8).map_err(|_| LexError::InvalidNumber {
+    let value = u64::from_str_radix(&digits, 8).map_err(|_| LexError::InvalidNumber {
         text: raw.to_string(),
         span: Span::new(lex.span().start, lex.span().end),
     })?;
@@ -1065,7 +1072,7 @@ fn parse_hex_suffix(lex: &mut logos::Lexer<TokenKind>) -> Result<IntegerSuffixTo
         .map(|i| i + 2)
         .unwrap_or(raw.len());
     let digits = raw[2..suffix_start].replace('_', "");
-    let value = i64::from_str_radix(&digits, 16).map_err(|_| LexError::InvalidNumber {
+    let value = u64::from_str_radix(&digits, 16).map_err(|_| LexError::InvalidNumber {
         text: raw.to_string(),
         span: Span::new(lex.span().start, lex.span().end),
     })?;

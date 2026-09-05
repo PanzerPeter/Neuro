@@ -148,7 +148,13 @@ the cascade.
   is `NonCopyArrayElement` / `NonCopyTupleElement`.
 - Unsuffixed integer literals over the `i32` range error (`IntegerLiteralOutOfRange`) rather than
   silently promoting to `i64`; suffixed literals infer through `infer_suffixed_integer_type` /
-  `infer_suffixed_float_type`.
+  `infer_suffixed_float_type`. `check_integer_range` takes an `i128` and compares against the
+  target type's own bounds, so both ends of `i64` and `u64` are expressible.
+- A negation directly over an integer literal is range-checked as the **negated** value, in
+  `check_unary_expr` ahead of the general operand walk. Checking the magnitude alone rejects the
+  most negative value of every signed type, whose magnitude is one past that type's maximum
+  (`-2147483648` for `i32`). Only signed targets take this path: negating an unsigned literal
+  keeps its existing wrapping meaning.
 - Bitwise `BitAnd`/`BitOr`/`BitXor`/`Shl` require integer operands and return the operand type;
   `BitNot` requires an integer.
 

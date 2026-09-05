@@ -392,7 +392,7 @@ fn variable(name: &str, ty: HirType, span: Span) -> HirExpr {
 
 fn int_literal(value: u64, ty: HirType, span: Span) -> HirExpr {
     HirExpr::new(
-        HirExprKind::Literal(Literal::Integer(value as i64, None)),
+        HirExprKind::Literal(Literal::Integer(value as i128, None)),
         ty,
         span,
     )

@@ -182,7 +182,7 @@ impl Lowerer {
             HirType::F16 | HirType::BF16 | HirType::F32 | HirType::F64 => {
                 Literal::Float(value, None)
             }
-            _ => Literal::Integer(value as i64, None),
+            _ => Literal::Integer(value as i128, None),
         };
         Ok(HirExpr::new(
             HirExprKind::Literal(literal),

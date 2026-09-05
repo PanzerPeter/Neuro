@@ -20,9 +20,13 @@ a diagnostic can point at exact source. `Identifier` pairs a `String` name with 
 
 `Literal` enumerates every compile-time constant kind. Three of them carry an **optional**
 suffix, and `None` vs `Some` is the whole inference contract:
-- `Literal::Integer(i64, Option<IntSuffix>)` — `IntSuffix` is a `Copy` enum of the eight
+- `Literal::Integer(i128, Option<IntSuffix>)` — `IntSuffix` is a `Copy` enum of the eight
   integer suffixes (`I8`–`U64`). `None` means no suffix was written and contextual inference
-  applies; `Some(s)` pins the type and overrides inference.
+  applies; `Some(s)` pins the type and overrides inference. The value is an `i128` because no
+  narrower type spans every integer the language can spell: `u64::MAX` overflows an `i64`, and
+  so does the magnitude `9223372036854775808` that `i64::MIN` is written with. The value is
+  non-negative as it arrives from the parser — a literal has no sign, `-1` being a negation
+  over `1` — except where the parser folds a negation into a match-pattern literal.
 - `Literal::Float(f64, Option<FloatSuffix>)` — `FloatSuffix` is `F16` / `BF16` / `F32` / `F64`,
   same semantics (`None` defaults to `f64`). Half-precision literals must always carry their
   suffix: they have no contextual default.

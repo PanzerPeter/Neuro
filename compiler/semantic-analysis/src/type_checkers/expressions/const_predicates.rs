@@ -50,7 +50,7 @@ pub(crate) fn eval_const_predicate(expr: &Expr, subst: &HashMap<String, Type>) -
 /// fully resolved const integer.
 fn eval_const_int(expr: &Expr, subst: &HashMap<String, Type>) -> Option<i128> {
     match expr {
-        Expr::Literal(Literal::Integer(v, _), _) => Some(*v as i128),
+        Expr::Literal(Literal::Integer(v, _), _) => Some(*v),
         Expr::Paren(inner, _) => eval_const_int(inner, subst),
         Expr::Identifier(id) => match subst.get(&id.name) {
             Some(Type::ConstValue(v)) => Some(*v as i128),

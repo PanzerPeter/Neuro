@@ -30,6 +30,11 @@ Several tokens depend on that and will silently regress if reordered:
 - `+=` / `-=` / `*=` / `/=` / `%=` are single tokens, never operator-then-`=`.
 - `<<` is declared before `<`; `=>` is distinct from `=` then `>`; `??` stays one coalescing
   token, so `a ?? b` never lexes as two `?` propagations.
+- `TokenKind::Integer(u64)` and `IntegerSuffixToken::value` carry a literal's **magnitude**,
+  not a signed value. No integer regex admits a sign, so `-1` is a `Minus` token followed by
+  `Integer(1)` and the lexer never produces a negative payload. A `u64` is what makes both
+  `18446744073709551615` and `9223372036854775808` (the magnitude `i64::MIN` is spelled with)
+  lexable at all; deciding what a magnitude *means* belongs to the type checker.
 - `TokenKind::IntegerSuffix(IntegerSuffixToken)` is emitted by four regexes (decimal, binary,
   octal, hex, each with a `(i8|…|u64)` suffix group) at `priority = 2`, and
   `TokenKind::FloatSuffix(FloatSuffixToken)` by two (fractional and exponent-only) matching

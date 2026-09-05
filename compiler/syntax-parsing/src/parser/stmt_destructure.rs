@@ -352,7 +352,7 @@ impl Parser {
                 for (i, elem) in elems.iter().enumerate() {
                     match elem {
                         ArrayPatternElem::Pattern(sub) => {
-                            let index = Expr::Literal(Literal::Integer(i as i64, None), span);
+                            let index = Expr::Literal(Literal::Integer(i as i128, None), span);
                             let access_i = Expr::Index {
                                 object: Box::new(access.clone()),
                                 index: Box::new(index),

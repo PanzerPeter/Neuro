@@ -34,7 +34,7 @@ fn unknown_builtin_method_reports_method_not_found() {
 }
 
 // Build `<recv>.<method>(<arg>)` where recv and arg are u8-suffixed literals.
-fn int_intrinsic_call(method: &str, recv: i64, arg: i64) -> Expr {
+fn int_intrinsic_call(method: &str, recv: i128, arg: i128) -> Expr {
     Expr::Call {
         func: Box::new(Expr::FieldAccess {
             object: Box::new(Expr::Literal(

@@ -104,7 +104,7 @@ impl Lowerer {
                     .cloned()
                     .unwrap_or(HirType::U64);
                 Ok(HirExpr::new(
-                    HirExprKind::Literal(Literal::Integer(value as i64, None)),
+                    HirExprKind::Literal(Literal::Integer(value as i128, None)),
                     ty,
                     ident.span,
                 ))

@@ -48,7 +48,7 @@ impl Parser {
                 expected: "array length".to_string(),
             })?;
             let size = match size_token.kind {
-                TokenKind::Integer(n) if n >= 0 => ArraySize::Literal(n as u64),
+                TokenKind::Integer(n) => ArraySize::Literal(n),
                 TokenKind::Identifier(name) => ArraySize::Const(Identifier {
                     name,
                     span: size_token.span,
@@ -339,13 +339,9 @@ impl Parser {
                     .ok_or(ParseError::UnexpectedEof {
                         expected: "const argument".to_string(),
                     })?;
-                if value < 0 {
-                    return Err(ParseError::UnexpectedToken {
-                        found: TokenKind::Integer(value),
-                        expected: "a non-negative const argument".to_string(),
-                        span,
-                    });
-                }
+                // An integer token carries a magnitude, so a negative const argument
+                // is a `-` token followed by one and is rejected as an unexpected token
+                // before reaching here.
                 args.push(GenericArg::Const {
                     value: value as i128,
                     span,

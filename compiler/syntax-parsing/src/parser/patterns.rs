@@ -240,10 +240,11 @@ impl Parser {
                 })?;
                 let span = token.span.merge(num.span);
                 match num.kind {
-                    TokenKind::Integer(n) => Ok((Literal::Integer(-n, None), span)),
-                    TokenKind::IntegerSuffix(tok) => {
-                        Ok((Literal::Integer(-tok.value, Some(tok.suffix)), span))
-                    }
+                    TokenKind::Integer(n) => Ok((Literal::Integer(-(n as i128), None), span)),
+                    TokenKind::IntegerSuffix(tok) => Ok((
+                        Literal::Integer(-(tok.value as i128), Some(tok.suffix)),
+                        span,
+                    )),
                     TokenKind::Float(f) => Ok((Literal::Float(-f, None), span)),
                     TokenKind::FloatSuffix(tok) => {
                         Ok((Literal::Float(-tok.value, Some(tok.suffix)), span))
@@ -255,10 +256,11 @@ impl Parser {
                     }),
                 }
             }
-            TokenKind::Integer(n) => Ok((Literal::Integer(n, None), token.span)),
-            TokenKind::IntegerSuffix(tok) => {
-                Ok((Literal::Integer(tok.value, Some(tok.suffix)), token.span))
-            }
+            TokenKind::Integer(n) => Ok((Literal::Integer(n as i128, None), token.span)),
+            TokenKind::IntegerSuffix(tok) => Ok((
+                Literal::Integer(tok.value as i128, Some(tok.suffix)),
+                token.span,
+            )),
             TokenKind::Float(f) => Ok((Literal::Float(f, None), token.span)),
             TokenKind::FloatSuffix(tok) => {
                 Ok((Literal::Float(tok.value, Some(tok.suffix)), token.span))
