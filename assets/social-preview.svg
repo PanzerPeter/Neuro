@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+<defs>
+  <radialGradient id="wash" cx="30%" cy="35%" r="75%">
+    <stop offset="0%" stop-color="#1a1030"/><stop offset="100%" stop-color="#0a0a0a"/>
+  </radialGradient>
+  <radialGradient id="glow">
+    <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.42"/>
+    <stop offset="60%" stop-color="#8b5cf6" stop-opacity="0.1"/>
+    <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0"/>
+  </radialGradient>
+  <filter id="drop" x="-40%" y="-40%" width="180%" height="180%">
+    <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#4c1d95" flood-opacity="0"/>
+  </filter>
+</defs>
+<rect width="1280" height="640" fill="url(#wash)"/>
+<g stroke="#8b5cf6" stroke-width="1.4" opacity="0.2" fill="none"><path d="M422 111 L228 90"/><path d="M422 111 L566 130"/><path d="M422 111 L328 186"/><path d="M422 111 L331 29"/><path d="M422 111 L502 40"/><path d="M827 63 L699 58"/><path d="M827 63 L751 178"/><path d="M827 63 L919 122"/><path d="M827 63 L973 24"/><path d="M92 324 L95 441"/><path d="M92 324 L55 188"/><path d="M92 324 L184 186"/><path d="M107 74 L228 90"/><path d="M107 74 L55 188"/><path d="M107 74 L184 186"/><path d="M546 516 L403 510"/><path d="M546 516 L671 545"/><path d="M546 516 L511 615"/><path d="M798 589 L671 545"/><path d="M798 589 L908 547"/><path d="M798 589 L823 479"/><path d="M1231 48 L1188 176"/><path d="M1231 48 L1111 29"/><path d="M403 510 L227 483"/><path d="M403 510 L292 592"/><path d="M403 510 L511 615"/><path d="M699 58 L751 178"/><path d="M699 58 L566 130"/><path d="M671 545 L823 479"/><path d="M671 545 L511 615"/><path d="M1062 587 L1035 464"/><path d="M1062 587 L1182 613"/><path d="M1062 587 L908 547"/><path d="M95 441 L52 545"/><path d="M95 441 L227 483"/><path d="M95 441 L150 616"/><path d="M228 90 L328 186"/><path d="M228 90 L331 29"/><path d="M228 90 L184 186"/><path d="M751 178 L919 122"/><path d="M751 178 L566 130"/><path d="M1202 434 L1035 464"/><path d="M1202 434 L1206 288"/><path d="M1202 434 L1182 613"/><path d="M1202 434 L1258 534"/><path d="M52 545 L227 483"/><path d="M52 545 L150 616"/><path d="M1048 117 L919 122"/><path d="M1048 117 L1188 176"/><path d="M1048 117 L1111 29"/><path d="M1048 117 L973 24"/><path d="M227 483 L292 592"/><path d="M227 483 L150 616"/><path d="M1035 464 L908 547"/><path d="M55 188 L184 186"/><path d="M1206 288 L1188 176"/><path d="M1182 613 L1258 534"/><path d="M919 122 L973 24"/><path d="M566 130 L502 40"/><path d="M328 186 L331 29"/><path d="M328 186 L184 186"/><path d="M1188 176 L1111 29"/><path d="M292 592 L150 616"/><path d="M331 29 L502 40"/><path d="M908 547 L823 479"/><path d="M1111 29 L973 24"/></g>
+<g fill="#a78bfa" opacity="0.42"><circle cx="422" cy="111" r="2.8"/><circle cx="827" cy="63" r="2.7"/><circle cx="92" cy="324" r="3.0"/><circle cx="107" cy="74" r="2.7"/><circle cx="546" cy="516" r="4.3"/><circle cx="798" cy="589" r="3.0"/><circle cx="1231" cy="48" r="4.7"/><circle cx="403" cy="510" r="4.6"/><circle cx="699" cy="58" r="4.4"/><circle cx="671" cy="545" r="4.8"/><circle cx="1062" cy="587" r="3.1"/><circle cx="95" cy="441" r="4.8"/><circle cx="228" cy="90" r="3.5"/><circle cx="751" cy="178" r="3.5"/><circle cx="1202" cy="434" r="2.9"/><circle cx="52" cy="545" r="2.8"/><circle cx="1048" cy="117" r="3.6"/><circle cx="227" cy="483" r="3.4"/><circle cx="1035" cy="464" r="3.6"/><circle cx="55" cy="188" r="5.0"/><circle cx="1206" cy="288" r="3.5"/><circle cx="1182" cy="613" r="3.7"/><circle cx="919" cy="122" r="4.9"/><circle cx="566" cy="130" r="3.8"/><circle cx="328" cy="186" r="2.7"/><circle cx="1188" cy="176" r="4.7"/><circle cx="292" cy="592" r="4.3"/><circle cx="331" cy="29" r="3.9"/><circle cx="908" cy="547" r="4.3"/><circle cx="823" cy="479" r="2.8"/><circle cx="511" cy="615" r="4.0"/><circle cx="150" cy="616" r="2.7"/><circle cx="1111" cy="29" r="4.3"/><circle cx="502" cy="40" r="4.2"/><circle cx="184" cy="186" r="4.6"/><circle cx="973" cy="24" r="4.6"/><circle cx="1258" cy="534" r="4.9"/></g>
+<circle cx="216" cy="320" r="150" fill="url(#glow)"/>
+<g transform="translate(120,224) scale(3.0)" filter="url(#drop)"><rect width="64" height="64" rx="14" fill="#0a0a0a"/>
+  <defs><linearGradient id="card-dark" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="#a78bfa"/><stop offset="100%" stop-color="#7c3aed"/>
+  </linearGradient></defs>
+  <g stroke="#8b5cf6" stroke-width="2.6" stroke-linecap="round" fill="none" opacity="0.72">
+    <path d="M18 46 L18 18"/><path d="M46 46 L46 18"/>
+  </g>
+  <polygon points="16.94,19.06 43.45,48.55 48.55,43.45 19.06,16.94" fill="url(#card-dark)" stroke="url(#card-dark)" stroke-width="1.4" stroke-linejoin="round"/>
+  <g fill="#8b5cf6" opacity="0.85"><circle cx="18" cy="46" r="2.4"/><circle cx="46" cy="18" r="2.4"/></g>
+  <g fill="none" opacity="0.34" stroke-width="1">
+    <circle cx="18" cy="18" r="8.8" stroke="#a78bfa"/>
+    <circle cx="46" cy="46" r="8.8" stroke="#7c3aed"/>
+  </g>
+  <circle cx="18" cy="18" r="5" fill="#0a0a0a" stroke="#a78bfa" stroke-width="2.6"/>
+  <circle cx="46" cy="46" r="5.4" fill="#7c3aed"/></g>
+<text x="360" y="342" font-family="Fira Sans, DejaVu Sans, sans-serif" font-size="126" font-weight="800"
+      letter-spacing="6" fill="#fafafa">NEURO</text>
+<text x="364" y="404" font-family="Fira Sans, DejaVu Sans, sans-serif" font-size="29" font-weight="400"
+      letter-spacing="0.5" fill="#a78bfa">AOT-compiled language for high-performance AI</text>
+</svg>

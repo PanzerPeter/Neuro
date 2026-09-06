@@ -10,6 +10,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.16.3] - 2026-09-06
+
+### Added
+
+- **Brand assets.** `assets/icon.svg` is the project mark: an N whose diagonal is a weighted
+  edge -- it tapers from thin at the input node to thick at the output, the two nodes carry
+  activation halos, and the free stem ends are terminals, so the letter reads as a small
+  directed network rather than a glyph. `assets/icon-light.svg` is the same mark for light
+  backgrounds, with the deepest node darkened to hold contrast on white. Raster exports and a
+  multi-size `favicon.ico` are in `assets/logo/`.
+
+- **GitHub social preview cards** at `assets/social-preview.png` and
+  `assets/social-preview-light.png` (1280x640), with their `.svg` sources next to them. The
+  mark and wordmark sit over a node-and-edge field kept out of the centre so nothing collides
+  with the lockup. Upload one under Settings -> General -> Social preview.
+
+  The `.svg` sources set type in Fira Sans and fall back to DejaVu Sans; re-rendering them
+  without either installed will shift the metrics. Regenerate the PNGs with
+  `rsvg-convert -w 1280 -h 640 -o <name>.png <name>.svg`.
+
+
 ## [2.16.2] - 2026-09-06
 
 ### Changed

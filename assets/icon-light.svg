@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Neuro">
+  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" fill="#f7f5ff" stroke="#e6dfff" stroke-width="1"/>
+  <defs><linearGradient id="neuro-light" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#5b21b6"/>
+  </linearGradient></defs>
+  <g stroke="#7c3aed" stroke-width="2.6" stroke-linecap="round" fill="none" opacity="0.72">
+    <path d="M18 46 L18 18"/><path d="M46 46 L46 18"/>
+  </g>
+  <polygon points="16.94,19.06 43.45,48.55 48.55,43.45 19.06,16.94" fill="url(#neuro-light)" stroke="url(#neuro-light)" stroke-width="1.4" stroke-linejoin="round"/>
+  <g fill="#7c3aed" opacity="0.85"><circle cx="18" cy="46" r="2.4"/><circle cx="46" cy="18" r="2.4"/></g>
+  <g fill="none" opacity="0.28" stroke-width="1">
+    <circle cx="18" cy="18" r="8.8" stroke="#8b5cf6"/>
+    <circle cx="46" cy="46" r="8.8" stroke="#5b21b6"/>
+  </g>
+  <circle cx="18" cy="18" r="5" fill="#f7f5ff" stroke="#8b5cf6" stroke-width="2.6"/>
+  <circle cx="46" cy="46" r="5.4" fill="#5b21b6"/>
+</svg>

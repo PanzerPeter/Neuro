@@ -7,7 +7,7 @@
 </p>
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
-[![Documentation](https://img.shields.io/badge/docs-neuro--docs.netlify.app-blue.svg)](https://neuro-docs.netlify.app/)
+[![Documentation](https://img.shields.io/badge/docs-neuro--lang.netlify.app-blue.svg)](https://neuro-lang.netlify.app)
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
 [![CI](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml)
 
@@ -101,7 +101,7 @@ input 1.0 -> 0.40  fires: true
 
 ## Current Capabilities
 
-Every row below is implemented, tested, and usable today. Depth lives elsewhere: the [documentation site](https://neuro-docs.netlify.app/) and [docs/](docs/) for reference material, [CHANGELOG.md](CHANGELOG.md) for the per-release detail, and the [Quick Roadmap](#quick-roadmap) for what is still ahead.
+Every row below is implemented, tested, and usable today. Depth lives elsewhere: the [documentation site](https://neuro-lang.netlify.app/) and [docs/](docs/) for reference material, [CHANGELOG.md](CHANGELOG.md) for the per-release detail, and the [Quick Roadmap](#quick-roadmap) for what is still ahead.
 
 | Feature | Summary |
 |---|---|
