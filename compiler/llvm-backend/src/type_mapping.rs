@@ -13,17 +13,6 @@ use crate::types::Type;
 /// self-referential layout into a diagnostic instead of a stack overflow.
 const MAX_STRUCT_DEPTH: u32 = 64;
 
-/// How many elements a tensor buffer may hold before `-O0` gives up on it.
-///
-/// A tensor is a first-class `[N x T]` LLVM aggregate, so copying one is a `load` and a
-/// `store` of the whole buffer. At `-O1` and above SROA rewrites that pair into a
-/// `memcpy` and any size works; at `-O0` nothing does, and SelectionDAG crashes trying to
-/// legalize the monolithic value somewhere above 50k elements — not at a clean threshold,
-/// since it depends on the whole function's DAG. This cap sits well under the smallest
-/// failure observed so the limit is a diagnostic naming the `-O1` workaround rather than a
-/// compiler segfault. It goes away when a tensor's buffer moves off the value stack.
-const MAX_O0_TENSOR_ELEMENTS: usize = 32_768;
-
 /// Maps Neuro semantic types to LLVM types
 pub(crate) struct TypeMapper<'ctx> {
     context: &'ctx LLVMContext,
@@ -37,9 +26,6 @@ pub(crate) struct TypeMapper<'ctx> {
     /// this table to build the LLVM aggregate for one — as a function parameter, a
     /// return type, or a field of another struct.
     struct_fields: HashMap<String, Vec<Type>>,
-    /// The largest tensor buffer this module may build, or `None` when the optimization
-    /// level lifts the limit. See [`MAX_O0_TENSOR_ELEMENTS`].
-    max_tensor_elements: Option<usize>,
 }
 
 impl<'ctx> TypeMapper<'ctx> {
@@ -48,13 +34,7 @@ impl<'ctx> TypeMapper<'ctx> {
             context,
             enum_words: HashMap::new(),
             struct_fields: HashMap::new(),
-            max_tensor_elements: None,
         }
-    }
-
-    /// Cap the tensor buffer size, or lift the cap. See [`MAX_O0_TENSOR_ELEMENTS`].
-    pub(crate) fn set_tensor_limit(&mut self, limited: bool) {
-        self.max_tensor_elements = limited.then_some(MAX_O0_TENSOR_ELEMENTS);
     }
 
     /// Record each enum's payload word count before code generation begins.
@@ -152,6 +132,24 @@ impl<'ctx> TypeMapper<'ctx> {
         )
     }
 
+    /// The LLVM layout of the buffer a `Tensor<T, [d0, ...]>` points at: a flat,
+    /// row-major `[d0*d1*... x T]` array.
+    ///
+    /// The rank-0 tensor holds one element — the empty product — which is why
+    /// `Tensor<f32, []>` is `[1 x float]` and not a zero-length array. Host memory only;
+    /// device buffers arrive with the GPU backend.
+    pub(crate) fn tensor_buffer_type(&self, ty: &Type) -> CodegenResult<BasicTypeEnum<'ctx>> {
+        let Type::Tensor { element, shape } = ty else {
+            return Err(CodegenError::UnsupportedType(format!(
+                "`{}` is not a tensor and has no buffer layout",
+                ty.mangle()
+            )));
+        };
+        let elem_llvm = self.map_type(element)?;
+        let count: usize = shape.iter().product();
+        Ok(elem_llvm.array_type(count as u32).into())
+    }
+
     /// Convert a Neuro semantic type to an LLVM type
     pub(crate) fn map_type(&self, ty: &Type) -> CodegenResult<BasicTypeEnum<'ctx>> {
         self.map_type_at_depth(ty, 0)
@@ -237,30 +235,17 @@ impl<'ctx> TypeMapper<'ctx> {
                 "`[{}]` is unsized and must be used behind a reference",
                 element.mangle()
             ))),
-            // A statically shaped tensor carries its whole shape in its type, so the
-            // value is exactly its buffer: a flat, row-major `[d0*d1*... x T]`
-            // aggregate. The rank-0 tensor holds one element — the empty product —
-            // which is why `Tensor<f32, []>` is `[1 x float]` and not a zero-length
-            // array. Device buffers and DLPack handles arrive with the ownership and
-            // DLPack items; a tensor is host memory until then.
-            Type::Tensor { element, shape } => {
-                let elem_llvm = self.map_type_at_depth(element, depth)?;
-                let count: usize = shape.iter().product();
-                if self.max_tensor_elements.is_some_and(|max| count > max) {
-                    let extents: Vec<String> = shape.iter().map(|d| d.to_string()).collect();
-                    return Err(CodegenError::UnsupportedType(format!(
-                        "`Tensor<{}, [{}]>` holds {} elements, more than the {} a tensor may \
-                         hold at `-O 0`: a tensor is copied as one LLVM value there, and the \
-                         backend cannot lower a buffer that large. Compile with `-O 1` or \
-                         higher, where the copy becomes a memcpy and any size works",
-                        element.mangle(),
-                        extents.join(", "),
-                        count,
-                        MAX_O0_TENSOR_ELEMENTS
-                    )));
-                }
-                Ok(elem_llvm.array_type(count as u32).into())
-            }
+            // A tensor value is an owning pointer to its buffer, not the buffer itself.
+            // The shape is entirely in the type, so the pointer is the whole value: a
+            // tensor needs no length or stride word at run time, and the buffer it
+            // addresses keeps one address for its whole life — which is what owning a
+            // buffer and guaranteeing its address across an in-place update both require,
+            // and what a DLPack `data` field can be filled from. See
+            // [`tensor_buffer_type`] for the buffer's own layout.
+            Type::Tensor { .. } => Ok(self
+                .context
+                .ptr_type(inkwell::AddressSpace::default())
+                .into()),
             // Fixed-size array `[T; N]` → LLVM `[N x T]` aggregate.
             Type::Array { element, size } => {
                 let elem_llvm = self.map_type_at_depth(element, depth)?;

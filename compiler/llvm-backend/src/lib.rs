@@ -227,8 +227,6 @@ fn build_module<'ctx>(
 
     // Debug builds (-O0) trap on integer overflow; release builds wrap.
     codegen_ctx.set_overflow_checks(optimization == OptimizationLevelSetting::O0);
-    // A tensor is copied as one LLVM value, which only `-O1`'s SROA turns into a memcpy.
-    codegen_ctx.set_tensor_limit(optimization == OptimizationLevelSetting::O0);
 
     // Emit module-level constants as LLVM global constants before any function.
     // This ensures all globals are defined before function bodies reference them.
@@ -995,7 +993,8 @@ mod tests {
     }
 
     /// A statically shaped tensor has its whole shape in its type, so the buffer is a
-    /// flat row-major array and a literal reaches the binding as one constant.
+    /// flat row-major array. It lives out of line: the constant lands in `.rodata` and
+    /// the binding gets an owning copy of it.
     #[test]
     fn a_tensor_literal_lowers_to_a_flat_row_major_buffer() {
         let source = r#"
@@ -1008,15 +1007,42 @@ mod tests {
             }
         "#;
 
-        let ir = optimized_ir(source, OptimizationLevelSetting::O0);
-        let body = function_body(&ir, "main");
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
         assert!(
-            body.contains("[6 x float]"),
-            "a [2, 3] tensor is a 6-element buffer:\n{body}"
+            ir.contains("private constant [6 x float]"),
+            "a [2, 3] tensor is a 6-element buffer:\n{ir}"
         );
         assert!(
-            body.contains("float 3.000000e+00") && body.contains("float 6.000000e+00"),
-            "the literal's values must reach the buffer:\n{body}"
+            ir.contains("float 3.000000e+00") && ir.contains("float 6.000000e+00"),
+            "the literal's values must reach the buffer:\n{ir}"
+        );
+        let body = function_body(&ir, "main");
+        assert!(
+            body.contains("call ptr @malloc(") && body.contains("@memcpy"),
+            "the buffer is allocated and copied into, not held as a value:\n{body}"
+        );
+    }
+
+    /// A tensor owns its buffer, so a binding releases it when its scope ends — under the
+    /// same drop flag a move clears.
+    #[test]
+    fn a_tensor_binding_frees_its_buffer_at_scope_exit() {
+        let source = r#"
+            func main() -> i32 {
+                val z = Tensor::<f32, [4, 4]>::zeros()
+                return 0
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        assert!(
+            body.contains("call void @free("),
+            "the binding releases its buffer at scope exit:\n{body}"
+        );
+        assert!(
+            body.contains("drop.run"),
+            "the release is guarded by the binding's drop flag:\n{body}"
         );
     }
 
@@ -1031,10 +1057,9 @@ mod tests {
         "#;
 
         let ir = module_ir(source, OptimizationLevelSetting::O0);
-        let body = function_body(&ir, "main");
         assert!(
-            body.contains("[16 x float] zeroinitializer"),
-            "zeros() is a zero-initialized 16-element buffer:\n{body}"
+            ir.contains("private constant [16 x float] zeroinitializer"),
+            "zeros() is a zero-initialized 16-element buffer:\n{ir}"
         );
     }
 
@@ -1050,12 +1075,37 @@ mod tests {
         "#;
 
         let ir = module_ir(source, OptimizationLevelSetting::O0);
-        let body = function_body(&ir, "main");
         assert!(
-            body.contains(
+            ir.contains(
                 "[9 x i32] [i32 1, i32 0, i32 0, i32 0, i32 1, i32 0, i32 0, i32 0, i32 1]"
             ),
-            "identity() puts ones on the diagonal of a row-major buffer:\n{body}"
+            "identity() puts ones on the diagonal of a row-major buffer:\n{ir}"
+        );
+    }
+
+    /// `.clone()` duplicates the allocation rather than aliasing it, which is what makes
+    /// the copy independent and both buffer addresses stable.
+    #[test]
+    fn a_tensor_clone_duplicates_the_allocation() {
+        let source = r#"
+            func main() -> i32 {
+                val a = Tensor::<f32, [4, 4]>::zeros()
+                val b = a.clone()
+                return 0
+            }
+        "#;
+
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        assert_eq!(
+            body.matches("call ptr @malloc(").count(),
+            2,
+            "the clone allocates a buffer of its own:\n{body}"
+        );
+        assert_eq!(
+            body.matches("call ptr @memcpy(").count(),
+            2,
+            "the clone copies the elements rather than aliasing them:\n{body}"
         );
     }
 

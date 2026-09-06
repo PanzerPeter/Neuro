@@ -186,6 +186,10 @@ pub(crate) enum DropTarget {
     /// Only a binding whose initializer was proven to allocate carries this, so
     /// a `.rodata` literal is never handed to `free`.
     HeapString,
+    /// A tensor binding: release the buffer its owning pointer addresses. Unlike
+    /// `HeapString`, a tensor's type alone proves the ownership — every construction
+    /// allocates, and there is no borrowed spelling of an owned tensor.
+    TensorBuffer,
 }
 
 /// Central state container for LLVM IR code generation.
@@ -428,9 +432,12 @@ impl<'ctx> CodegenContext<'ctx> {
         self.overflow_checks = enabled;
     }
 
-    /// Enable or disable the `-O0` cap on how large a tensor buffer may be.
-    pub(crate) fn set_tensor_limit(&mut self, limited: bool) {
-        self.type_mapper.set_tensor_limit(limited);
+    /// The `[N x T]` layout of the buffer a tensor value points at.
+    pub(crate) fn tensor_buffer_type(
+        &self,
+        ty: &crate::types::Type,
+    ) -> CodegenResult<inkwell::types::BasicTypeEnum<'ctx>> {
+        self.type_mapper.tensor_buffer_type(ty)
     }
 
     /// Provide the module source so panic-family diagnostics can render `file:line:col`.

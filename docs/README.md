@@ -84,7 +84,9 @@ Key design goals:
   `scalar()` / `from()`. A tensor owns its buffer and moves rather than copies: `.clone()`
   is the explicit copy, `&Tensor<T, S>` shares one without consuming it, and
   `.to(device)` consumes it and hands it back on the requested `Device` (the host is the
-  only one this compiler can lower to). Reading one back — indexing, arithmetic,
+  only one this compiler can lower to). The buffer is an out-of-line allocation with a
+  stable address, released when its last owner leaves scope, so a tensor of any size
+  compiles at any optimization level. Reading one back — indexing, arithmetic,
   reductions — is later work
 
 ### Variables

@@ -314,8 +314,9 @@ No Rust edits are needed — discovery is automatic.
   `Tensor::<T, [...]>::zeros()` / `ones()` / `identity()` / `random_normal(mean:, std:)` /
   `scalar()` / `from()` build one where no annotation reaches. Tensors move rather than
   copy. Reading a tensor back — indexing, arithmetic, reductions — is later work, so an
-  example builds and passes tensors rather than computing with them. A tensor of more than
-  32768 elements needs `-O 1` or higher (`BUG-018`), so the examples stay well under that.
+  example builds and passes tensors rather than computing with them. A tensor owns its
+  buffer out of line, so one of any size compiles at any optimization level;
+  `showcase/model_shapes.nr` returns a 100352-parameter weight matrix by value.
 - Newtypes are supported (`types/newtype.nr`): `newtype Meters = i32` creates a
   distinct nominal type wrapping an inner type, constructed `Meters(30)` and read
   back with `.0`. Unlike a `type` alias, a newtype is *not* interchangeable with

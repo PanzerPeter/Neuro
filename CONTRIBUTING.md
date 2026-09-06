@@ -325,9 +325,11 @@ annotation, and `Tensor::<T, [...]>::zeros()` / `ones()` / `identity()` /
 `random_normal(mean:, std:)` / `scalar()` / `from()` build one where no annotation reaches.
 v2.15.0 then shipped the ownership surface: `.clone()` for a second owner, `&Tensor<T, S>`
 for zero-cost sharing, and the consuming `.to(device)` transfer over the prelude's `Device`
-enum. A tensor can now be built, bound, moved, cloned, passed, returned, and stored in a
-struct — but not read back: DLPack, in-place compound assignment, slicing and indexing, and
-the reductions are all still open. Start at the top of 2B in the roadmap.
+enum. v2.16.0 moved the buffer itself out of line — a tensor value is an owning pointer to a
+heap allocation released at scope exit, which closed `BUG-018` and lifted the size limit at
+every optimization level. A tensor can now be built, bound, moved, cloned, passed, returned,
+and stored in a struct — but not read back: DLPack, in-place compound assignment, slicing and
+indexing, and the reductions are all still open. Start at the top of 2B in the roadmap.
 
 Nothing links `TokenKind` to the editor grammar, so any lexer change must also update
 `neuro-language-support/syntaxes/neuro.tmLanguage.json` by hand in the same commit.

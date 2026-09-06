@@ -38,6 +38,9 @@ impl<'ctx> CodegenContext<'ctx> {
             // A collection always owns a heap buffer, independently of whether the
             // program declares any user `Drop` type.
             Type::Collection { .. } => Some(DropTarget::Collection),
+            // So does a tensor: every construction allocates its buffer, and the type
+            // says so — there is no borrowed value of tensor type to confuse it with.
+            Type::Tensor { .. } => Some(DropTarget::TensorBuffer),
             Type::Struct(name) if self.drop_types.contains(&name) => {
                 Some(DropTarget::UserDrop(name))
             }
@@ -91,6 +94,27 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder
             .build_call(free_fn, &[buffer.into()], "")
             .map_err(|e| CodegenError::LlvmError(format!("failed to free string: {}", e)))?;
+        Ok(())
+    }
+
+    /// Release the heap buffer a tensor binding held in `storage_ptr` owns.
+    ///
+    /// The binding's storage holds the owning pointer itself, so the buffer is one load
+    /// away. Emitted only for a binding registered as [`DropTarget::TensorBuffer`], whose
+    /// flag a move at any of the move sites has already cleared.
+    fn emit_tensor_buffer_free(&mut self, storage_ptr: PointerValue<'ctx>) -> CodegenResult<()> {
+        let buffer = self
+            .builder
+            .build_load(
+                self.context.ptr_type(inkwell::AddressSpace::default()),
+                storage_ptr,
+                "tensor.drop.buf",
+            )
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let free_fn = self.get_or_declare_free();
+        self.builder
+            .build_call(free_fn, &[buffer.into()], "")
+            .map_err(|e| CodegenError::LlvmError(format!("failed to free tensor buffer: {}", e)))?;
         Ok(())
     }
 
@@ -226,6 +250,7 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             DropTarget::Collection => self.emit_collection_free(storage_ptr)?,
             DropTarget::HeapString => self.emit_heap_string_free(storage_ptr)?,
+            DropTarget::TensorBuffer => self.emit_tensor_buffer_free(storage_ptr)?,
         }
         // Clear the flag so a re-reachable drop site cannot run the destructor twice.
         self.builder

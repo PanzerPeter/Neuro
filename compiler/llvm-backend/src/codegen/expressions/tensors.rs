@@ -1,15 +1,23 @@
-// Codegen for tensor construction. A statically shaped tensor carries its
-// whole shape in its type, so the value is exactly its buffer: a flat, row-major
-// `[d0*d1*... x T]` aggregate, built and passed by value like `[T; N]`.
+// Codegen for tensor construction. A statically shaped tensor carries its whole shape in
+// its type, so the value carries no metadata: it is an owning pointer to a heap buffer
+// holding a flat, row-major `[d0*d1*... x T]` run of elements.
 //
-// Three of the four construction nodes fold to an LLVM constant — a fill, an identity
-// matrix, and a literal whose elements are themselves constant all land in `.rodata`
-// and reach the binding as one copy. Only `random_normal` needs a runtime loop.
+// The buffer is out of line rather than a first-class LLVM aggregate because the language
+// has a tensor *own* its buffer, and promises that buffer a stable address across an
+// in-place update — neither is expressible for an SSA value, which has no address at all.
+// It is also what makes a large tensor compilable: an aggregate copy is a whole-buffer
+// `load`/`store` pair that only `-O1`'s SROA can turn into a `memcpy`, and SelectionDAG
+// crashes legalizing one above ~50k elements at `-O0`.
+//
+// Three of the four construction nodes still fold to an LLVM constant — a fill, an
+// identity matrix, and a literal whose elements are themselves constant all land in
+// `.rodata` and reach the buffer as one `memcpy`. Only `random_normal` needs a runtime
+// loop, and it now writes straight into the heap buffer.
 
 use inkwell::intrinsics::Intrinsic;
 use inkwell::module::Linkage;
 use inkwell::types::{BasicType, BasicTypeEnum};
-use inkwell::values::{BasicValueEnum, FunctionValue, IntValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::IntPredicate;
 use neuro_hir::HirExpr;
 
@@ -60,9 +68,76 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(((**element).clone(), shape.iter().product()))
     }
 
+    /// The byte size of a tensor's buffer, as an `i64`.
+    fn tensor_buffer_size(&self, tensor_ty: &Type) -> CodegenResult<IntValue<'ctx>> {
+        self.tensor_buffer_type(tensor_ty)?
+            .size_of()
+            .ok_or_else(|| CodegenError::InternalError("a tensor buffer has no size".to_string()))
+    }
+
+    /// Allocate the owning buffer for a tensor of `tensor_ty` and return the pointer that
+    /// *is* the tensor value. Every construction node routes through here, so there is
+    /// exactly one place the allocator is chosen — the hook 2D's arena replaces.
+    fn alloc_tensor_buffer(
+        &self,
+        tensor_ty: &Type,
+        name: &str,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        let size = self.tensor_buffer_size(tensor_ty)?;
+        self.build_malloc(size, name)
+    }
+
+    /// Copy a compile-time-constant buffer into a fresh allocation.
+    ///
+    /// The constant is emitted once as a private `.rodata` global and `memcpy`'d into the
+    /// tensor's own buffer, so a `zeros()` of any size costs one call rather than an
+    /// instruction per element — and the tensor still owns writable storage afterwards.
+    fn emit_const_tensor_buffer(
+        &mut self,
+        tensor_ty: &Type,
+        constant: BasicValueEnum<'ctx>,
+        name: &str,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let global = self
+            .module
+            .add_global(constant.get_type(), None, "tensor.const");
+        global.set_linkage(Linkage::Private);
+        global.set_constant(true);
+        global.set_initializer(&constant);
+
+        let buffer = self.alloc_tensor_buffer(tensor_ty, name)?;
+        let size = self.tensor_buffer_size(tensor_ty)?;
+        self.build_memcpy_call(buffer, global.as_pointer_value(), size)?;
+        Ok(buffer.into())
+    }
+
+    /// The address of buffer slot `index`, for a buffer of `buffer_ty`.
+    fn tensor_slot(
+        &self,
+        buffer_ty: BasicTypeEnum<'ctx>,
+        buffer: PointerValue<'ctx>,
+        index: IntValue<'ctx>,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        // SAFETY: every caller derives `index` from the buffer's own element count, so
+        // the GEP stays inside the allocation.
+        unsafe {
+            self.builder
+                .build_in_bounds_gep(
+                    buffer_ty,
+                    buffer,
+                    &[self.context.i64_type().const_zero(), index],
+                    "tensor.slot",
+                )
+                .map_err(llvm_err)
+        }
+    }
+
     /// Lower a tensor literal — a coerced nested array literal, `Tensor::from(...)`, or
-    /// `Tensor::scalar(v)` — to the flat buffer aggregate. `elements` is already in
-    /// row-major order, so the insert index is the buffer index.
+    /// `Tensor::scalar(v)` — into a fresh buffer. `elements` is already in row-major
+    /// order, so the element index is the buffer index.
+    ///
+    /// A literal whose elements are all constants becomes one `.rodata` blob and one
+    /// `memcpy`; a literal mentioning a runtime value is written slot by slot instead.
     pub(crate) fn codegen_tensor_literal(
         &mut self,
         elements: &[HirExpr],
@@ -77,17 +152,31 @@ impl<'ctx> CodegenContext<'ctx> {
             )));
         }
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
-        let mut agg = elem_llvm.array_type(count as u32).get_undef();
-        for (index, element) in elements.iter().enumerate() {
+        let mut values = Vec::with_capacity(count);
+        for element in elements {
             let value = self.codegen_expr(element)?;
-            let value = self.coerce_if_needed(value, elem_llvm, &element_ty)?;
-            agg = self
-                .builder
-                .build_insert_value(agg, value, index as u32, "tensor.elem")
-                .map_err(llvm_err)?
-                .into_array_value();
+            values.push(self.coerce_if_needed(value, elem_llvm, &element_ty)?);
         }
-        Ok(agg.into())
+
+        let all_constant = values.iter().all(|value| match value {
+            BasicValueEnum::IntValue(v) => v.is_const(),
+            BasicValueEnum::FloatValue(v) => v.is_const(),
+            _ => false,
+        });
+        if all_constant {
+            let constant = Self::const_array_of(elem_llvm, values.into_iter())?;
+            return self.emit_const_tensor_buffer(tensor_ty, constant, "tensor.literal");
+        }
+
+        let buffer = self.alloc_tensor_buffer(tensor_ty, "tensor.literal")?;
+        let buffer_ty = self.tensor_buffer_type(tensor_ty)?;
+        let i64_type = self.context.i64_type();
+        for (index, value) in values.into_iter().enumerate() {
+            let slot =
+                self.tensor_slot(buffer_ty, buffer, i64_type.const_int(index as u64, false))?;
+            self.builder.build_store(slot, value).map_err(llvm_err)?;
+        }
+        Ok(buffer.into())
     }
 
     /// Lower `zeros()` / `ones()`: one constant repeated across the buffer.
@@ -100,7 +189,8 @@ impl<'ctx> CodegenContext<'ctx> {
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let value = self.codegen_expr(value)?;
         let value = self.coerce_if_needed(value, elem_llvm, &element_ty)?;
-        Self::const_array_of(elem_llvm, std::iter::repeat_n(value, count))
+        let constant = Self::const_array_of(elem_llvm, std::iter::repeat_n(value, count))?;
+        self.emit_const_tensor_buffer(tensor_ty, constant, "tensor.fill")
     }
 
     /// Lower `identity()`: ones on the diagonal of a square rank-2 buffer, zeros
@@ -136,7 +226,8 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         };
         let values = (0..rows * cols).map(|i| if i / cols == i % cols { one } else { zero });
-        Self::const_array_of(elem_llvm, values)
+        let constant = Self::const_array_of(elem_llvm, values)?;
+        self.emit_const_tensor_buffer(tensor_ty, constant, "tensor.identity")
     }
 
     /// Lower `random_normal(mean, std)`: a counted loop that writes one draw per buffer
@@ -160,8 +251,8 @@ impl<'ctx> CodegenContext<'ctx> {
         let std = self.codegen_expr(std)?.into_float_value();
 
         let normal_fn = self.get_or_define_rng_normal()?;
-        let buffer_ty = elem_llvm.array_type(count as u32);
-        let buffer = self.entry_alloca(buffer_ty, "tensor.rand")?;
+        let buffer_ty = self.tensor_buffer_type(tensor_ty)?;
+        let buffer = self.alloc_tensor_buffer(tensor_ty, "tensor.rand")?;
         let i64_type = self.context.i64_type();
         let index = self.entry_alloca(i64_type, "tensor.rand.i")?;
         self.builder
@@ -227,18 +318,9 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_float_add(mean, scaled, "tensor.rand.value")
             .map_err(llvm_err)?;
-        // SAFETY: `i` is below `count` on this edge (the loop head's `ULT` test is what
-        // branches here), so the GEP stays inside the buffer.
-        let slot = unsafe {
-            self.builder
-                .build_in_bounds_gep(
-                    buffer_ty,
-                    buffer,
-                    &[i64_type.const_zero(), i],
-                    "tensor.rand.slot",
-                )
-                .map_err(llvm_err)?
-        };
+        // `i` is below `count` on this edge — the loop head's `ULT` test is what branches
+        // here — so the slot address stays inside the buffer.
+        let slot = self.tensor_slot(buffer_ty, buffer, i)?;
         self.builder.build_store(slot, value).map_err(llvm_err)?;
         let next = self
             .builder
@@ -250,17 +332,18 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(llvm_err)?;
 
         self.builder.position_at_end(done);
-        self.builder
-            .build_load(buffer_ty, buffer, "tensor.rand.value")
-            .map_err(llvm_err)
+        Ok(buffer.into())
     }
 
-    /// Lower `tensor.clone()`: a copy of the buffer aggregate.
+    /// Lower `tensor.clone()`: a second buffer holding the same elements.
     ///
-    /// A tensor value *is* its buffer — there is no separate heap block to duplicate — so
-    /// copying the aggregate copies every element. A `&Tensor<T, S>` receiver arrives as a
-    /// pointer and is loaded through first, which is what makes cloning a borrowed weight
-    /// yield an independent tensor rather than the borrow.
+    /// The clone allocates and `memcpy`s, so the result owns storage of its own and the
+    /// receiver keeps its address — the deep copy the language specifies, rather than a
+    /// second name for one buffer.
+    ///
+    /// An owned receiver lowers to the tensor pointer itself; a `&Tensor<T, S>` receiver
+    /// lowers to the *address of* that pointer, so it is loaded through first. Both are
+    /// `ptr` in LLVM, so the distinction comes from `recv_ty`, not from the value.
     pub(crate) fn codegen_tensor_clone(
         &mut self,
         recv_ty: &Type,
@@ -268,12 +351,27 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let value = self.codegen_expr(receiver)?;
         let BasicValueEnum::PointerValue(ptr) = value else {
-            return Ok(value);
+            return Err(CodegenError::InternalError(
+                "a tensor receiver does not lower to a pointer".to_string(),
+            ));
         };
-        let buffer_ty = self.get_any_llvm_type(recv_ty.referent())?;
-        self.builder
-            .build_load(buffer_ty, ptr, "tensor.clone")
-            .map_err(llvm_err)
+        let tensor_ty = recv_ty.referent();
+        let source = if matches!(recv_ty, Type::Reference { .. }) {
+            self.builder
+                .build_load(
+                    self.context.ptr_type(inkwell::AddressSpace::default()),
+                    ptr,
+                    "tensor.clone.src",
+                )
+                .map_err(llvm_err)?
+                .into_pointer_value()
+        } else {
+            ptr
+        };
+        let copy = self.alloc_tensor_buffer(tensor_ty, "tensor.clone")?;
+        let size = self.tensor_buffer_size(tensor_ty)?;
+        self.build_memcpy_call(copy, source, size)?;
+        Ok(copy.into())
     }
 
     /// Lower `tensor.to(device)`: the consuming device transfer.
@@ -283,12 +381,16 @@ impl<'ctx> CodegenContext<'ctx> {
     /// and the device is an ordinary run-time value, so the mismatch is caught where the
     /// value is known — a guard on the discriminant that aborts with a diagnostic rather
     /// than letting the program run somewhere it did not ask for.
+    ///
+    /// The result is the receiver's own buffer pointer, so the transfer hands ownership on:
+    /// the receiver's drop flag is cleared here, or the one buffer would be freed twice.
     pub(crate) fn codegen_tensor_to(
         &mut self,
         receiver: &HirExpr,
         args: &[HirExpr],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let tensor = self.codegen_expr(receiver)?;
+        self.mark_moved_for_drop(receiver);
         let device = args.first().ok_or_else(|| {
             CodegenError::InternalError("`.to` reached codegen without a device".to_string())
         })?;

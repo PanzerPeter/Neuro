@@ -295,6 +295,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     Some(DropTarget::UserDrop(name.clone()))
                 }
                 Some(Type::Collection { .. }) => Some(DropTarget::Collection),
+                Some(Type::Tensor { .. }) => Some(DropTarget::TensorBuffer),
                 _ => None,
             };
             if let Some(target) = owns_heap {
@@ -423,6 +424,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     Some(DropTarget::UserDrop(name.clone()))
                 }
                 Some(Type::Collection { .. }) => Some(DropTarget::Collection),
+                Some(Type::Tensor { .. }) => Some(DropTarget::TensorBuffer),
                 _ => None,
             };
             if let Some(target) = owns_heap {

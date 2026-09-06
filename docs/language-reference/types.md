@@ -1650,20 +1650,26 @@ the annotated form coerces. A rank-0 tensor has no array-literal form at all —
 written with `Tensor::scalar(value)`. The generator behind `random_normal` is seeded from a
 fixed constant, so a compiled program draws the same values on every run.
 
-A tensor's runtime value is its buffer: a flat, row-major run of its elements, held by
-value. It lives in host memory; device placement and DLPack handles are later work.
+A tensor **owns** its buffer, and that buffer lives out of line: the value is a pointer to
+a flat, row-major run of its elements, allocated when the tensor is constructed and released
+when its binding leaves scope. The buffer keeps one address for its whole life, and a tensor
+of any size compiles at every optimization level. `.clone()` allocates a second buffer and
+copies into it, so the copy is independent of the original. The buffer is host memory;
+device placement and DLPack handles are later work.
 
-Because a tensor is held by value, a very large one cannot be compiled at `-O 0` — the
-default. A tensor of more than 32768 elements is rejected there with a diagnostic naming
-the limit; compile with `-O 1` or higher, where the copy becomes a `memcpy` and any size
-works. See `BUG-018` in [docs/BUGS.md](../BUGS.md).
+A tensor moves like any other non-`Copy` value, and the move hands the buffer on rather than
+copying it — binding it, passing it to a function, returning it, storing it in a struct
+field, and `.to(device)` all transfer ownership, and only the last owner releases it. A
+tensor held in a struct field is not released when the struct goes out of scope; that gap is
+shared with the standard collections.
 
 ### What tensors cannot do yet
 
-A tensor can be built, bound, moved, passed, returned, and stored in a struct — but not yet
-read back. Indexing and slicing (`t[i, j]`, `t[1..3, ..]`), tensor arithmetic (`a + b`,
-`a @ b`), in-place compound assignment, `.t()`, `.reshape(...)`, `.clone()`, `.to(device)`,
-and the reductions (`.sum()`, `.mean()`, `.max()`, `.min()`) are all later work. Symbolic
+A tensor can be built, bound, moved, cloned, passed, returned, transferred with
+`.to(device)`, and stored in a struct — but not yet read back. Indexing and slicing
+(`t[i, j]`, `t[1..3, ..]`), tensor arithmetic (`a + b`, `a @ b`), in-place compound
+assignment, `.t()`, `.reshape(...)`, and the reductions (`.sum()`, `.mean()`, `.max()`,
+`.min()`) are all later work. Symbolic
 extents (`Tensor<f32, [M, K]>`), named dimensions, and dynamic axes (`Tensor<f32, [?, 768]>`)
 are not accepted; a non-literal extent is a parse error.
 

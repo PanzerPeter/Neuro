@@ -6,14 +6,17 @@
 //   tensor fields · an enum matched to pick an initializer · a trait with an
 //   `impl` per layer kind · a fixed-size array walked by `for`-in · string
 //   interpolation with the format mini-language · tensor ownership: moves,
-//   `.clone()`, and the `.to(device)` transfer.
+//   `.clone()`, and the `.to(device)` transfer · a weight matrix at real scale,
+//   built in one function and returned by value.
 //
 // Every weight below is a real buffer the binary carries or fills at startup;
 // a tensor is not `Copy`, so building a layer MOVES its weights into it, and a
-// second owner has to be asked for explicitly with `.clone()`. What a tensor
-// cannot do yet is be read back — indexing, arithmetic, and reductions are later
-// 2B items — so the report is built from the shapes, which are part of the types,
-// and the exit code is the total parameter count modulo 256.
+// second owner has to be asked for explicitly with `.clone()`. A tensor owns that
+// buffer out of line, which is why `hidden_weights()` below can hand back 100352
+// parameters by value at the default `-O 0`. What a tensor cannot do yet is be
+// read back — indexing, arithmetic, and reductions are later 2B items — so the
+// report is built from the shapes, which are part of the types, and the exit code
+// is the total parameter count modulo 256.
 
 enum Init {
     Zeros,
@@ -86,6 +89,36 @@ impl Dense {
     }
 }
 
+// A hidden layer at the scale a real model uses: 784x128 weights and a 128-wide
+// bias, 100480 parameters between them.
+struct Hidden {
+    weights: Tensor<f32, [784, 128]>,
+    bias: Tensor<f32, [128]>
+}
+
+impl Described for Hidden {
+    func describe(&self) -> string {
+        return "hidden  [784, 128] + bias [128]"
+    }
+
+    func parameters(&self) -> i32 {
+        return 100480
+    }
+}
+
+// The weight matrix is built here and RETURNED by value. Its buffer is an owning
+// heap allocation the tensor points at, so what crosses the call boundary is that
+// pointer, not 392 KB of LLVM value — the reason this compiles at `-O 0`.
+func hidden_weights() -> Tensor<f32, [784, 128]> {
+    return Tensor::<f32, [784, 128]>::random_normal(mean: 0.0f32, std: 0.02f32)
+}
+
+impl Hidden {
+    func new() -> Hidden {
+        return Hidden { weights: hidden_weights(), bias: Tensor::<f32, [128]>::zeros() }
+    }
+}
+
 // A tensor parameter names its full shape, so a caller with any other shape is a
 // compile error rather than a runtime one. Taking the table by value MOVES it.
 func embedding_rows(table: Tensor<f32, [3, 4]>) -> i32 {
@@ -109,6 +142,7 @@ func main() -> i32 {
 
     val projection = Projection::new(Init::Identity)
     val dense = Dense::new()
+    val hidden = Hidden::new()
 
     // Rank-0 tensors have no literal form; they are built directly.
     val scale: Tensor<f32, []> = Tensor::scalar(0.5)
@@ -122,15 +156,19 @@ func main() -> i32 {
     // the host, the only device this compiler can lower to today.
     val on_host = embeddings.clone().to(Device::CPU)
     mut total = embedding_rows(embeddings) * embedding_width(&on_host)
-    println("embeddings [3, 4] via literal   = {total:>4} params")
+    println("embeddings [3, 4] via literal   = {total:>6} params")
 
     val projection_line = projection.describe()
-    println("{projection_line:<32}= {projection.parameters():>4} params")
+    println("{projection_line:<32}= {projection.parameters():>6} params")
     total = total + projection.parameters()
 
     val dense_line = dense.describe()
-    println("{dense_line:<32}= {dense.parameters():>4} params")
+    println("{dense_line:<32}= {dense.parameters():>6} params")
     total = total + dense.parameters()
+
+    val hidden_line = hidden.describe()
+    println("{hidden_line:<32}= {hidden.parameters():>6} params")
+    total = total + hidden.parameters()
 
     for width in widths {
         total = total + width
@@ -139,6 +177,6 @@ func main() -> i32 {
     // `on_host` is still ours: the borrow above read it without taking it.
     total = total + embedding_width(&on_host)
 
-    println("total parameters                = {total:>4}")
+    println("total parameters                = {total:>6}")
     return total % 256
 }

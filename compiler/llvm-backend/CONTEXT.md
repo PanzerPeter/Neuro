@@ -253,16 +253,20 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   verified the `Clone` derive. Lowers to the receiver's aggregate value — faithful while
   stack-allocated, must recurse into heap-owning fields later.
 - `tensor.clone()` → `BuiltinMethod::TensorClone` → `codegen_tensor_clone`
-  (`expressions/tensors.rs`). A tensor value *is* its buffer, so copying the aggregate copies
-  every element; a `&Tensor` receiver arrives as a pointer and is loaded through first. Must
-  duplicate the allocation once a tensor buffer stops being a value.
+  (`expressions/tensors.rs`). A tensor value is an owning pointer, so the clone `malloc`s a second
+  buffer and `memcpy`s into it: the copy is independent and both addresses stay stable. An owned
+  receiver lowers to the tensor pointer; a `&Tensor` receiver lowers to the *address of* that
+  pointer. Both are `ptr` in LLVM, so the distinction comes from `recv_ty`, not from the value —
+  the one auto-deref site the value-driven rule below cannot decide.
 - `tensor.to(device)` → `BuiltinMethod::TensorTo` → `codegen_tensor_to` (same file). The device
   argument is the prelude `Device` enum; its tag (`extractvalue` field 0) is compared against
   `enum_variant_tag("Device", "CPU")` and routed through `codegen_guard_or_panic`, so a transfer
   to any other device aborts with a diagnostic rather than silently leaving the buffer on the
   host. A host transfer is the move itself and emits no copy: the receiver's value is the result.
   `resolve_builtin_method` matches `.to` on the receiver type rather than its referent, so a
-  `&Tensor` resolves to nothing — a borrow cannot be consumed.
+  `&Tensor` resolves to nothing — a borrow cannot be consumed. Because the result *is* the
+  receiver's buffer pointer, `codegen_tensor_to` calls `mark_moved_for_drop` on the receiver;
+  without it the one buffer would be freed by both the source binding and the transfer's result.
 - Integer intrinsics — `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, `.shr(n)` — resolve
   on any integer receiver to its own type and lower in `codegen_int_intrinsic`. Both operands are
   coerced to the receiver int via `coerce_if_needed` (an argument literal may arrive widened to
@@ -343,20 +347,27 @@ than assuming the prelude's declaration order.
 `map_type` lowers a reference to an opaque `ptr`, with three exceptions: an immutable `&string`
 (the fat pointer itself, above), `Reference(DynObject)` (the two-word `dyn_ref_type()` struct),
 and `Reference(Slice)` (the two-word `slice_ref_type()` struct, mutable or not). A bare
-`DynObject` or `Slice` is rejected as unsized. `Type::Tensor { element, shape }` maps to a flat
-row-major `[d0*d1*... x T]` aggregate, passed and returned by value like `[T; N]`: a statically
-shaped tensor carries its whole shape in its type, so the value is exactly its buffer. The
-rank-0 tensor is `[1 x T]` — the empty product — not a zero-length array. Host memory only:
-`.to(device)` guards on the requested device rather than moving anything, and DLPack handles
-arrive with the DLPack item.
+`DynObject` or `Slice` is rejected as unsized. `Type::Tensor { .. }` maps to an opaque `ptr`: the
+value is an **owning pointer** to an out-of-line buffer, and `tensor_buffer_type` gives that
+buffer's own layout — a flat, row-major `[d0*d1*... x T]` array. A statically shaped tensor carries
+its whole shape in its type, so the pointer is the whole value; no length or stride word travels
+with it. The rank-0 tensor's buffer is `[1 x T]` — the empty product — not a zero-length array.
+Host memory only: `.to(device)` guards on the requested device rather than moving anything, and
+DLPack handles arrive with the DLPack item, which needs this pointer to have somewhere to point.
 
-Being a first-class value is also the representation's limit. Copying a tensor is a `load`
-and a `store` of the whole buffer; `-O1`'s SROA rewrites that pair into a `memcpy`, but at
-`-O0` nothing does and SelectionDAG crashes legalizing the monolithic value somewhere above
-50k elements. `map_type` therefore caps a tensor at `MAX_O0_TENSOR_ELEMENTS` when
-`set_tensor_limit(true)` is on (`-O0` only) and reports the limit with the `-O 1` workaround
-instead. The cap is a symptom — see `docs/BUGS.md` BUG-018; it goes away when a tensor's
-buffer stops being a value.
+The buffer is out of line because the language has a tensor *own* it and promises that buffer a
+stable address across an in-place update — neither is expressible for an SSA value, which has no
+address.
+It is also what makes a large tensor compilable: an aggregate copy is a whole-buffer `load`/`store`
+pair that only `-O1`'s SROA turns into a `memcpy`, and SelectionDAG crashed legalizing one above
+~50k elements at `-O0`. There is no size cap any more, at any optimization level.
+
+`expressions/tensors.rs` owns the allocation. `alloc_tensor_buffer` is the single place the
+allocator is chosen — the hook 2D's arena replaces — and every construction node routes through it.
+`zeros()` / `ones()` / `identity()` and a literal whose elements are all constants emit the buffer
+once as a private `.rodata` global and `memcpy` it in, so a fill of any size costs one call rather
+than an instruction per element; a literal mentioning a runtime value is written slot by slot;
+`random_normal` writes its counted loop straight into the heap buffer.
 
 `codegen_reference` returns the borrowed place's storage pointer — mutability is compile-time
 only. `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer.
@@ -698,10 +709,10 @@ binding of a `Drop` type. `drop_types: HashSet<String>` (filled by `compile` fro
 blocks) gates everything: when it is empty the scope stack stays empty and zero IR is emitted, so
 non-Drop programs are unaffected. `drop_scopes: Vec<Vec<DropEntry>>` is a stack of lexical scopes;
 each `DropEntry` records the binding name, storage `alloca`, an `i1` drop flag, and a `DropTarget`
-(`UserDrop(struct)` | `Collection` | `HeapString`).
+(`UserDrop(struct)` | `Collection` | `HeapString` | `TensorBuffer`).
 
-`codegen_function` / `codegen_method` open the body scope and register by-value `Drop` or
-collection parameters for destruction at function exit; `codegen_var_decl` registers a local and
+`codegen_function` / `codegen_method` open the body scope and register by-value `Drop`,
+collection, or tensor parameters for destruction at function exit; `codegen_var_decl` registers a local and
 allocates its flag (initialised `true`). Branch, loop, and block bodies (`codegen_if`,
 `codegen_while`/`loop`/`for_range`, `codegen_arm_into_alloca`, `codegen_block_expr`) push and pop
 their own scope and emit that scope's drops in reverse declaration order at normal fall-through.
@@ -766,6 +777,13 @@ with; without that, the only route to map iteration would leak. This is also wha
 builder's buffer, since it is registered as an ordinary collection. **A `string` inside a
 collection is not freed**, and neither is the heap `string` that `+`, interpolation, or
 `String::to_string` produces; both ride with the heap-string work.
+
+A tensor binding is registered the same way, with `DropTarget::TensorBuffer`: the binding's storage
+holds the owning pointer, so scope exit loads it and `free`s it under the same flag. Unlike
+`HeapString` the ownership comes from the type alone — every tensor construction allocates, and
+there is no borrowed value of tensor type to confuse it with. **A tensor held in a struct field is
+not freed**, exactly as a collection field is not; recursing into a struct's fields is one gap, not
+one per element type.
 
 New libc declarations these need: `free`, `realloc`, `memmove`, `memset` (alongside the existing
 `malloc`, `memcpy`, `memcmp`, `write`, `abort`, `snprintf`), each declared on first use in

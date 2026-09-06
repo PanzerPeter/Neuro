@@ -104,46 +104,72 @@ func main() -> i32 {
     assert_eq!(first, 11);
 }
 
-/// BUG-018: a tensor is a first-class LLVM aggregate, and `-O 0` cannot lower a copy of a
-/// very large one. The limit must be a diagnostic naming the workaround, never a crash —
-/// and the same program must compile at `-O 1`, where the copy becomes a memcpy.
+/// BUG-018, closed by the out-of-line buffer: a tensor's buffer is a heap allocation, not
+/// a first-class LLVM aggregate, so a weight matrix of realistic size compiles and runs at
+/// the default `-O 0` — the level whose monolithic-value lowering the old cap existed for.
 #[test]
-fn an_oversized_tensor_reports_the_limit_at_o0_and_compiles_at_o1() {
+fn a_large_tensor_compiles_and_runs_at_the_default_optimization_level() {
     let source = r#"
 func main() -> i32 {
     val w = Tensor::<f32, [784, 128]>::random_normal(mean: 0.0f32, std: 0.02f32)
     return 0
 }
 "#;
-    let test = CompileTest::new();
-    let path = test.write_source("tensor_oversized.nr", source);
-
-    let at_o0 = compile_at(&path, "0");
-    let message = at_o0.expect_err("`-O 0` cannot lower a buffer this large");
-    assert!(
-        message.contains("100352 elements") && message.contains("`-O 1`"),
-        "the diagnostic should name the size and the workaround; got: {message}"
-    );
-
-    compile_at(&path, "1").expect("`-O 1` lowers the copy as a memcpy");
+    assert_eq!(run_program("tensor_large.nr", source), 0);
 }
 
-/// Compile `path` at one optimization level, returning the compiler's combined output on
-/// failure. The shared `CompileTest::compile` always uses the default level.
-fn compile_at(path: &std::path::Path, level: &str) -> Result<(), String> {
-    let output = std::process::Command::new(std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc")))
-        .arg("compile")
-        .arg(path)
-        .arg("-o")
-        .arg(path.with_extension(format!("out{level}")))
-        .arg("-O")
-        .arg(level)
-        .output()
-        .expect("failed to execute neurc");
-    if output.status.success() {
-        return Ok(());
+/// The other half of the representation change: a large tensor crosses a call boundary by
+/// value. Constructing and cloning one inside a single function was reachable at `-O 0` by
+/// running SROA there; returning one was not, because there was no out-of-line buffer for
+/// the value to be behind.
+#[test]
+fn a_large_tensor_returns_by_value_and_clones() {
+    let source = r#"
+func make_weights() -> Tensor<f32, [784, 128]> {
+    return Tensor::<f32, [784, 128]>::random_normal(mean: 0.0f32, std: 0.02f32)
+}
+
+func count_rows(w: Tensor<f32, [784, 128]>) -> i32 {
+    return 784
+}
+
+func main() -> i32 {
+    val w = make_weights()
+    val copy = w.clone()
+    val on_host = copy.to(Device::CPU)
+    return count_rows(on_host) - count_rows(w)
+}
+"#;
+    assert_eq!(run_program("tensor_large_return.nr", source), 0);
+}
+
+/// A tensor owns its buffer, so every binding releases one and every move hands one on.
+/// The program below moves a tensor through a binding, a call, a `.to()` transfer, a
+/// struct field, and a loop body: a missed move would be a double free and an abort, so
+/// the exit code is the assertion.
+#[test]
+fn moving_a_tensor_through_every_owner_frees_each_buffer_once() {
+    let source = r#"
+struct Holder {
+    weights: Tensor<f32, [16, 16]>
+}
+
+func consume(t: Tensor<f32, [16, 16]>) -> i32 {
+    return 1
+}
+
+func main() -> i32 {
+    mut total = 0
+    for i in 0..8 {
+        val fresh = Tensor::<f32, [16, 16]>::zeros()
+        val moved = fresh
+        val on_host = moved.to(Device::CPU)
+        val copy = on_host.clone()
+        val holder = Holder { weights: on_host }
+        total = total + consume(copy)
     }
-    let mut message = String::from_utf8_lossy(&output.stdout).into_owned();
-    message.push_str(&String::from_utf8_lossy(&output.stderr));
-    Err(message)
+    return total
+}
+"#;
+    assert_eq!(run_program("tensor_moves.nr", source), 8);
 }

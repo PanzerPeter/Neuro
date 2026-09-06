@@ -10,6 +10,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.16.0] - 2026-09-06
+
+### Changed
+
+- **A tensor's buffer moved out of line: the value is now an owning pointer to a heap
+  allocation rather than a first-class LLVM aggregate.** A tensor is specified to *own* its
+  underlying buffer and to keep that buffer's address stable across an in-place update.
+  Neither is expressible for an SSA value, which has no address at all, so both the DLPack
+  descriptor's `data` pointer and the in-place compound-assignment guarantee were unbuildable
+  on the old representation. Construction allocates, `.clone()` allocates a second buffer and
+  `memcpy`s into it, a binding releases its buffer when its scope ends, and every move site --
+  binding, call argument, `return`, struct-field store, `.to(device)` -- hands the buffer on
+  under the drop flag rather than duplicating it. A constant fill or literal still lands in
+  `.rodata` and reaches the buffer as one `memcpy`, so a `zeros()` of any size costs one call
+  rather than an instruction per element.
+
+  No syntax changed and no program's meaning changed. What changed is that tensors of any
+  size now compile.
+
+### Fixed
+
+- **BUG-018: a tensor of more than 32768 elements can now be compiled at `-O 0`.** Copying a
+  first-class aggregate is a whole-buffer `load`/`store` pair that only `-O 1`'s SROA rewrites
+  into a `memcpy`; at `-O 0` nothing did, and SelectionDAG crashed legalizing the monolithic
+  value somewhere above 50k elements, so the backend capped a tensor's size there and reported
+  the limit. The cap was a symptom of the representation and is deleted with it -- there is no
+  size limit at any optimization level. Returning a large tensor by value was the half that no
+  shortcut reached: running the middle-end `sroa` pass at `-O 0` had let one be built and
+  cloned inside a single function, but a value still had to cross the call boundary whole. It
+  no longer does; what crosses is the pointer. `examples/showcase/model_shapes.nr` now builds a
+  100352-parameter weight matrix in one function and returns it to another.
+
+
 ## [2.15.2] - 2026-09-05
 
 ### Fixed
