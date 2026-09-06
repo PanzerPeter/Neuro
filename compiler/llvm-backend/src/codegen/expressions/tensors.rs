@@ -1,6 +1,7 @@
-// Codegen for tensor construction. A statically shaped tensor carries its whole shape in
-// its type, so the value carries no metadata: it is an owning pointer to a heap buffer
-// holding a flat, row-major `[d0*d1*... x T]` run of elements.
+// Codegen for tensor construction. A tensor value is a pointer to its own DLPack handle
+// (`codegen/dlpack.rs`), whose `data` field addresses a flat, row-major
+// `[d0*d1*... x T]` run of elements. Every node here therefore builds two things: the
+// handle it hands back, and the buffer it writes elements into.
 //
 // The buffer is out of line rather than a first-class LLVM aggregate because the language
 // has a tensor *own* its buffer, and promises that buffer a stable address across an
@@ -16,7 +17,7 @@
 
 use inkwell::intrinsics::Intrinsic;
 use inkwell::module::Linkage;
-use inkwell::types::{BasicType, BasicTypeEnum};
+use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::IntPredicate;
 use neuro_hir::HirExpr;
@@ -68,26 +69,22 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(((**element).clone(), shape.iter().product()))
     }
 
-    /// The byte size of a tensor's buffer, as an `i64`.
-    fn tensor_buffer_size(&self, tensor_ty: &Type) -> CodegenResult<IntValue<'ctx>> {
-        self.tensor_buffer_type(tensor_ty)?
-            .size_of()
-            .ok_or_else(|| CodegenError::InternalError("a tensor buffer has no size".to_string()))
-    }
-
-    /// Allocate the owning buffer for a tensor of `tensor_ty` and return the pointer that
-    /// *is* the tensor value. Every construction node routes through here, so there is
-    /// exactly one place the allocator is chosen — the hook 2D's arena replaces.
-    fn alloc_tensor_buffer(
-        &self,
+    /// Allocate a tensor's DLPack handle and its element buffer, returning both: the
+    /// handle *is* the tensor value, and the buffer is where elements are written.
+    ///
+    /// Every construction node routes through here, so there is exactly one place the
+    /// allocator is chosen — the hook 2D's arena replaces.
+    fn alloc_tensor(
+        &mut self,
         tensor_ty: &Type,
         name: &str,
-    ) -> CodegenResult<PointerValue<'ctx>> {
-        let size = self.tensor_buffer_size(tensor_ty)?;
-        self.build_malloc(size, name)
+    ) -> CodegenResult<(PointerValue<'ctx>, PointerValue<'ctx>)> {
+        let handle = self.alloc_dlpack_tensor(tensor_ty, name)?;
+        let data = self.load_dlpack_data(handle)?;
+        Ok((handle, data))
     }
 
-    /// Copy a compile-time-constant buffer into a fresh allocation.
+    /// Copy a compile-time-constant buffer into a freshly allocated tensor.
     ///
     /// The constant is emitted once as a private `.rodata` global and `memcpy`'d into the
     /// tensor's own buffer, so a `zeros()` of any size costs one call rather than an
@@ -105,10 +102,10 @@ impl<'ctx> CodegenContext<'ctx> {
         global.set_constant(true);
         global.set_initializer(&constant);
 
-        let buffer = self.alloc_tensor_buffer(tensor_ty, name)?;
-        let size = self.tensor_buffer_size(tensor_ty)?;
-        self.build_memcpy_call(buffer, global.as_pointer_value(), size)?;
-        Ok(buffer.into())
+        let (handle, data) = self.alloc_tensor(tensor_ty, name)?;
+        let size = self.dlpack_copy_length(tensor_ty)?;
+        self.build_memcpy_call(data, global.as_pointer_value(), size)?;
+        Ok(handle.into())
     }
 
     /// The address of buffer slot `index`, for a buffer of `buffer_ty`.
@@ -168,15 +165,15 @@ impl<'ctx> CodegenContext<'ctx> {
             return self.emit_const_tensor_buffer(tensor_ty, constant, "tensor.literal");
         }
 
-        let buffer = self.alloc_tensor_buffer(tensor_ty, "tensor.literal")?;
+        let (handle, data) = self.alloc_tensor(tensor_ty, "tensor.literal")?;
         let buffer_ty = self.tensor_buffer_type(tensor_ty)?;
         let i64_type = self.context.i64_type();
         for (index, value) in values.into_iter().enumerate() {
             let slot =
-                self.tensor_slot(buffer_ty, buffer, i64_type.const_int(index as u64, false))?;
+                self.tensor_slot(buffer_ty, data, i64_type.const_int(index as u64, false))?;
             self.builder.build_store(slot, value).map_err(llvm_err)?;
         }
-        Ok(buffer.into())
+        Ok(handle.into())
     }
 
     /// Lower `zeros()` / `ones()`: one constant repeated across the buffer.
@@ -252,7 +249,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let normal_fn = self.get_or_define_rng_normal()?;
         let buffer_ty = self.tensor_buffer_type(tensor_ty)?;
-        let buffer = self.alloc_tensor_buffer(tensor_ty, "tensor.rand")?;
+        let (handle, data) = self.alloc_tensor(tensor_ty, "tensor.rand")?;
         let i64_type = self.context.i64_type();
         let index = self.entry_alloca(i64_type, "tensor.rand.i")?;
         self.builder
@@ -320,7 +317,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(llvm_err)?;
         // `i` is below `count` on this edge — the loop head's `ULT` test is what branches
         // here — so the slot address stays inside the buffer.
-        let slot = self.tensor_slot(buffer_ty, buffer, i)?;
+        let slot = self.tensor_slot(buffer_ty, data, i)?;
         self.builder.build_store(slot, value).map_err(llvm_err)?;
         let next = self
             .builder
@@ -332,7 +329,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(llvm_err)?;
 
         self.builder.position_at_end(done);
-        Ok(buffer.into())
+        Ok(handle.into())
     }
 
     /// Lower `tensor.clone()`: a second buffer holding the same elements.
@@ -368,10 +365,11 @@ impl<'ctx> CodegenContext<'ctx> {
         } else {
             ptr
         };
-        let copy = self.alloc_tensor_buffer(tensor_ty, "tensor.clone")?;
-        let size = self.tensor_buffer_size(tensor_ty)?;
-        self.build_memcpy_call(copy, source, size)?;
-        Ok(copy.into())
+        let (handle, data) = self.alloc_tensor(tensor_ty, "tensor.clone")?;
+        let source_data = self.load_dlpack_data(source)?;
+        let size = self.dlpack_copy_length(tensor_ty)?;
+        self.build_memcpy_call(data, source_data, size)?;
+        Ok(handle.into())
     }
 
     /// Lower `tensor.to(device)`: the consuming device transfer.

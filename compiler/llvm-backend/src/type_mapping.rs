@@ -13,6 +13,21 @@ use crate::types::Type;
 /// self-referential layout into a diagnostic instead of a stack overflow.
 const MAX_STRUCT_DEPTH: u32 = 64;
 
+/// DLPack `DLDataTypeCode` values. Only the codes a Neuro element type can carry
+/// are named; the rest of the enum has no Neuro spelling to reach it from.
+const DLPACK_CODE_INT: u8 = 0;
+const DLPACK_CODE_UINT: u8 = 1;
+const DLPACK_CODE_FLOAT: u8 = 2;
+const DLPACK_CODE_BFLOAT: u8 = 4;
+const DLPACK_CODE_BOOL: u8 = 6;
+
+/// A DLPack `DLDataType` minus its `lanes` field, which is always 1 here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DlpackDataType {
+    pub(crate) code: u8,
+    pub(crate) bits: u8,
+}
+
 /// Maps Neuro semantic types to LLVM types
 pub(crate) struct TypeMapper<'ctx> {
     context: &'ctx LLVMContext,
@@ -150,6 +165,107 @@ impl<'ctx> TypeMapper<'ctx> {
         Ok(elem_llvm.array_type(count as u32).into())
     }
 
+    /// The LLVM layout of `DLManagedTensorVersioned` — the structure a tensor
+    /// value points at.
+    ///
+    /// Field order and widths mirror the DLPack 1.1 C header exactly, because the
+    /// pointer is handed to foreign consumers unmodified. The nested `DLDevice`
+    /// (`{ i32, i32 }`), `DLDataType` (`{ i8, i8, i16 }`), and `DLPackVersion`
+    /// (`{ i32, i32 }`) are spelled inline rather than named, since LLVM deduplicates
+    /// anonymous structs structurally and nothing else refers to them by name.
+    pub(crate) fn dlpack_managed_tensor_type(&self) -> inkwell::types::StructType<'ctx> {
+        let i8_ty = self.context.i8_type();
+        let i16_ty = self.context.i16_type();
+        let i32_ty = self.context.i32_type();
+        let i64_ty = self.context.i64_type();
+        let ptr_ty = self.context.ptr_type(inkwell::AddressSpace::default());
+
+        let version = self
+            .context
+            .struct_type(&[i32_ty.into(), i32_ty.into()], false);
+        let device = self
+            .context
+            .struct_type(&[i32_ty.into(), i32_ty.into()], false);
+        let dtype = self
+            .context
+            .struct_type(&[i8_ty.into(), i8_ty.into(), i16_ty.into()], false);
+        let dl_tensor = self.context.struct_type(
+            &[
+                ptr_ty.into(), // data
+                device.into(), // device
+                i32_ty.into(), // ndim
+                dtype.into(),  // dtype
+                ptr_ty.into(), // shape
+                ptr_ty.into(), // strides
+                i64_ty.into(), // byte_offset
+            ],
+            false,
+        );
+        self.context.struct_type(
+            &[
+                version.into(),   // version
+                ptr_ty.into(),    // manager_ctx
+                ptr_ty.into(),    // deleter
+                i64_ty.into(),    // flags
+                dl_tensor.into(), // dl_tensor
+            ],
+            false,
+        )
+    }
+
+    /// The DLPack `dtype` of a tensor element type: its type code and its width in bits.
+    ///
+    /// `lanes` is not returned because it is 1 for every Neuro element type — a vector
+    /// element would be a language feature rather than an encoding of one.
+    pub(crate) fn dlpack_dtype(&self, element: &Type) -> CodegenResult<DlpackDataType> {
+        let (code, bits) = match element {
+            Type::I8 => (DLPACK_CODE_INT, 8),
+            Type::I16 => (DLPACK_CODE_INT, 16),
+            Type::I32 => (DLPACK_CODE_INT, 32),
+            Type::I64 => (DLPACK_CODE_INT, 64),
+            Type::U8 => (DLPACK_CODE_UINT, 8),
+            Type::U16 => (DLPACK_CODE_UINT, 16),
+            Type::U32 => (DLPACK_CODE_UINT, 32),
+            Type::U64 => (DLPACK_CODE_UINT, 64),
+            Type::F16 => (DLPACK_CODE_FLOAT, 16),
+            Type::F32 => (DLPACK_CODE_FLOAT, 32),
+            Type::F64 => (DLPACK_CODE_FLOAT, 64),
+            Type::BF16 => (DLPACK_CODE_BFLOAT, 16),
+            Type::Bool => (DLPACK_CODE_BOOL, 8),
+            other => {
+                return Err(CodegenError::UnsupportedType(format!(
+                    "`{}` has no DLPack dtype and cannot be a tensor element",
+                    other.mangle()
+                )))
+            }
+        };
+        Ok(DlpackDataType { code, bits })
+    }
+
+    /// The byte size of one tensor element.
+    ///
+    /// Computed in Rust rather than from `size_of()` because the element buffer's
+    /// allocation size has to be rounded up to the DLPack alignment, and LLVM 20 has
+    /// been withdrawing the constant-expression arithmetic that would take.
+    pub(crate) fn tensor_element_bytes(&self, element: &Type) -> CodegenResult<u64> {
+        Ok(u64::from(self.dlpack_dtype(element)?.bits) / 8)
+    }
+
+    /// The byte size of a tensor's element buffer: `d0 * d1 * ... * sizeof(T)`.
+    ///
+    /// The rank-0 tensor holds one element — the empty product — so its buffer is one
+    /// element wide, not zero.
+    pub(crate) fn tensor_buffer_bytes(&self, ty: &Type) -> CodegenResult<u64> {
+        let Type::Tensor { element, shape } = ty else {
+            return Err(CodegenError::UnsupportedType(format!(
+                "`{}` is not a tensor and has no buffer size",
+                ty.mangle()
+            )));
+        };
+        let count: u64 = shape.iter().map(|d| *d as u64).product();
+        Ok(count * self.tensor_element_bytes(element)?)
+    }
+
     /// Convert a Neuro semantic type to an LLVM type
     pub(crate) fn map_type(&self, ty: &Type) -> CodegenResult<BasicTypeEnum<'ctx>> {
         self.map_type_at_depth(ty, 0)
@@ -235,13 +351,11 @@ impl<'ctx> TypeMapper<'ctx> {
                 "`[{}]` is unsized and must be used behind a reference",
                 element.mangle()
             ))),
-            // A tensor value is an owning pointer to its buffer, not the buffer itself.
-            // The shape is entirely in the type, so the pointer is the whole value: a
-            // tensor needs no length or stride word at run time, and the buffer it
-            // addresses keeps one address for its whole life — which is what owning a
-            // buffer and guaranteeing its address across an in-place update both require,
-            // and what a DLPack `data` field can be filled from. See
-            // [`tensor_buffer_type`] for the buffer's own layout.
+            // A tensor value is a pointer to its own `DLManagedTensorVersioned`,
+            // so the value a Neuro program passes around is the handle a foreign consumer
+            // takes — there is no wrap step at an FFI boundary. See
+            // [`dlpack_managed_tensor_type`] for the structure and [`tensor_buffer_type`]
+            // for the layout of the buffer its `data` field addresses.
             Type::Tensor { .. } => Ok(self
                 .context
                 .ptr_type(inkwell::AddressSpace::default())
@@ -305,5 +419,94 @@ impl<'ctx> TypeMapper<'ctx> {
     /// Check if a type is an unsigned integer type
     pub(crate) fn is_unsigned_int(ty: &Type) -> bool {
         ty.is_unsigned_int()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every element type a tensor may hold maps to its DLPack code and width, and
+    /// nothing else maps at all — an unmappable element is a diagnostic, not a guess.
+    #[test]
+    fn the_dlpack_dtype_table_covers_every_tensor_element() {
+        let context = LLVMContext::create();
+        let mapper = TypeMapper::new(&context);
+        let cases = [
+            (Type::I8, DLPACK_CODE_INT, 8),
+            (Type::I16, DLPACK_CODE_INT, 16),
+            (Type::I32, DLPACK_CODE_INT, 32),
+            (Type::I64, DLPACK_CODE_INT, 64),
+            (Type::U8, DLPACK_CODE_UINT, 8),
+            (Type::U16, DLPACK_CODE_UINT, 16),
+            (Type::U32, DLPACK_CODE_UINT, 32),
+            (Type::U64, DLPACK_CODE_UINT, 64),
+            (Type::F16, DLPACK_CODE_FLOAT, 16),
+            (Type::F32, DLPACK_CODE_FLOAT, 32),
+            (Type::F64, DLPACK_CODE_FLOAT, 64),
+            (Type::BF16, DLPACK_CODE_BFLOAT, 16),
+            (Type::Bool, DLPACK_CODE_BOOL, 8),
+        ];
+        for (element, code, bits) in cases {
+            let dtype = mapper
+                .dlpack_dtype(&element)
+                .unwrap_or_else(|_| panic!("`{}` is a legal tensor element", element.mangle()));
+            assert_eq!(dtype, DlpackDataType { code, bits });
+        }
+        assert!(mapper.dlpack_dtype(&Type::String).is_err());
+    }
+
+    /// The buffer size is the element count times the element width, with the rank-0
+    /// tensor holding the empty product's one element rather than none.
+    #[test]
+    fn a_tensor_buffer_is_sized_from_its_shape() {
+        let context = LLVMContext::create();
+        let mapper = TypeMapper::new(&context);
+        let tensor = |element: Type, shape: Vec<usize>| Type::Tensor {
+            element: Box::new(element),
+            shape,
+        };
+        assert_eq!(
+            mapper
+                .tensor_buffer_bytes(&tensor(Type::F32, vec![2, 3]))
+                .ok(),
+            Some(24)
+        );
+        assert_eq!(
+            mapper.tensor_buffer_bytes(&tensor(Type::F64, vec![])).ok(),
+            Some(8)
+        );
+        assert_eq!(
+            mapper
+                .tensor_buffer_bytes(&tensor(Type::Bool, vec![7]))
+                .ok(),
+            Some(7)
+        );
+        assert!(mapper.tensor_buffer_bytes(&Type::I32).is_err());
+    }
+
+    /// The exchange structure's field order and widths are the C header's, since the
+    /// pointer is handed to foreign consumers unmodified.
+    #[test]
+    fn the_dlpack_structure_matches_the_c_header() {
+        let context = LLVMContext::create();
+        let mapper = TypeMapper::new(&context);
+        let handle = mapper.dlpack_managed_tensor_type();
+        assert_eq!(handle.count_fields(), 5);
+
+        let dl_tensor: inkwell::types::StructType<'_> = handle
+            .get_field_type_at_index(4)
+            .and_then(|field| field.try_into().ok())
+            .expect("the fifth field is the DLTensor");
+        assert_eq!(dl_tensor.count_fields(), 7);
+        assert!(dl_tensor
+            .get_field_type_at_index(0)
+            .is_some_and(|field| field.is_pointer_type()));
+        assert!(dl_tensor
+            .get_field_type_at_index(2)
+            .is_some_and(|field| field.into_int_type().get_bit_width() == 32));
+        assert!(dl_tensor
+            .get_field_type_at_index(6)
+            .is_some_and(|field| field.into_int_type().get_bit_width() == 64));
     }
 }

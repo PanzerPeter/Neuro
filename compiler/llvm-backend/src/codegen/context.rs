@@ -440,6 +440,24 @@ impl<'ctx> CodegenContext<'ctx> {
         self.type_mapper.tensor_buffer_type(ty)
     }
 
+    /// The `DLManagedTensorVersioned` layout a tensor value points at.
+    pub(crate) fn dlpack_managed_tensor_type(&self) -> inkwell::types::StructType<'ctx> {
+        self.type_mapper.dlpack_managed_tensor_type()
+    }
+
+    /// The DLPack type code and bit width of a tensor element type.
+    pub(crate) fn dlpack_dtype(
+        &self,
+        element: &crate::types::Type,
+    ) -> CodegenResult<crate::type_mapping::DlpackDataType> {
+        self.type_mapper.dlpack_dtype(element)
+    }
+
+    /// The byte size of a tensor's element buffer.
+    pub(crate) fn tensor_buffer_bytes(&self, ty: &crate::types::Type) -> CodegenResult<u64> {
+        self.type_mapper.tensor_buffer_bytes(ty)
+    }
+
     /// Provide the module source so panic-family diagnostics can render `file:line:col`.
     pub(crate) fn set_source(&mut self, source: SourceFile) {
         self.source = Some(source);
@@ -488,6 +506,25 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Get the external libc `malloc` declaration, inserting it on first use.
     /// `malloc(size: i64) -> ptr`. Backs the heap buffer for runtime string
     /// concatenation; `size_t` is 64-bit on every supported target.
+    /// Get the external libc `aligned_alloc` declaration, inserting it on first use.
+    /// `aligned_alloc(alignment: i64, size: i64) -> ptr`. A tensor's element buffer comes
+    /// from here rather than from `malloc` because DLPack requires its `data` pointer to
+    /// be 64-byte aligned, which `malloc` guarantees only up to `max_align_t`.
+    /// The block it returns is released by ordinary `free`.
+    pub(crate) fn get_or_declare_aligned_alloc(&self) -> FunctionValue<'ctx> {
+        if let Some(f) = self.module.get_function("aligned_alloc") {
+            return f;
+        }
+        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let i64_type = self.context.i64_type();
+        let fn_type = ptr_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        self.module.add_function(
+            "aligned_alloc",
+            fn_type,
+            Some(inkwell::module::Linkage::External),
+        )
+    }
+
     pub(crate) fn get_or_declare_malloc(&self) -> FunctionValue<'ctx> {
         if let Some(f) = self.module.get_function("malloc") {
             return f;

@@ -97,25 +97,25 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// Release the heap buffer a tensor binding held in `storage_ptr` owns.
+    /// Release the tensor a binding in `storage_ptr` owns, through the DLPack `deleter`
+    /// its own handle carries.
     ///
-    /// The binding's storage holds the owning pointer itself, so the buffer is one load
-    /// away. Emitted only for a binding registered as [`DropTarget::TensorBuffer`], whose
-    /// flag a move at any of the move sites has already cleared.
+    /// The binding's storage holds the handle itself, so it is one load away. Dispatching
+    /// through the field rather than calling `free` here is what makes the release a
+    /// scope exit performs the same one a foreign owner of the handle performs. Emitted
+    /// only for a binding registered as [`DropTarget::TensorBuffer`], whose flag a move
+    /// at any of the move sites has already cleared.
     fn emit_tensor_buffer_free(&mut self, storage_ptr: PointerValue<'ctx>) -> CodegenResult<()> {
-        let buffer = self
+        let handle = self
             .builder
             .build_load(
                 self.context.ptr_type(inkwell::AddressSpace::default()),
                 storage_ptr,
-                "tensor.drop.buf",
+                "tensor.drop.handle",
             )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let free_fn = self.get_or_declare_free();
-        self.builder
-            .build_call(free_fn, &[buffer.into()], "")
-            .map_err(|e| CodegenError::LlvmError(format!("failed to free tensor buffer: {}", e)))?;
-        Ok(())
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_pointer_value();
+        self.build_dlpack_release(handle)
     }
 
     /// Record an owned `Drop`-typed binding for destruction at scope exit.

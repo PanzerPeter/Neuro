@@ -1650,12 +1650,21 @@ the annotated form coerces. A rank-0 tensor has no array-literal form at all —
 written with `Tensor::scalar(value)`. The generator behind `random_normal` is seeded from a
 fixed constant, so a compiled program draws the same values on every run.
 
-A tensor **owns** its buffer, and that buffer lives out of line: the value is a pointer to
-a flat, row-major run of its elements, allocated when the tensor is constructed and released
-when its binding leaves scope. The buffer keeps one address for its whole life, and a tensor
-of any size compiles at every optimization level. `.clone()` allocates a second buffer and
-copies into it, so the copy is independent of the original. The buffer is host memory;
-device placement and DLPack handles are later work.
+A tensor **owns** its buffer, and that buffer lives out of line. The value itself is a
+[DLPack](https://dmlc.github.io/dlpack/latest/) handle — a pointer to a
+`DLManagedTensorVersioned` whose `data` field addresses a flat, row-major run of the
+elements, allocated when the tensor is constructed and released when its binding leaves
+scope. The handle carries the tensor's rank, shape, strides, element dtype, and device, so
+the pointer a Neuro program passes around is the pointer a foreign consumer such as NumPy or
+PyTorch reads: nothing is wrapped or converted at the boundary. Release runs through the
+handle's own `deleter`, which is the single release path — a tensor leaving scope and a
+foreign owner of the handle call the same function.
+
+The buffer keeps one address for its whole life and is aligned to 64 bytes, which is what
+DLPack requires; a tensor of any size compiles at every optimization level. `.clone()`
+allocates a second handle and a second buffer and copies into it, so the copy is independent
+of the original. The buffer is host memory — the handle reports the `kDLCPU` device, and
+device placement is later work.
 
 A tensor moves like any other non-`Copy` value, and the move hands the buffer on rather than
 copying it — binding it, passing it to a function, returning it, storing it in a struct

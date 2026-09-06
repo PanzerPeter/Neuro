@@ -464,6 +464,135 @@ mod tests {
         }
     }
 
+    /// A tensor value is a filled-in `DLManagedTensorVersioned`, not a bare
+    /// buffer pointer with a conversion step waiting at an FFI boundary.
+    #[test]
+    fn a_tensor_value_is_a_populated_dlpack_handle() {
+        let source = r#"
+            func main() -> i32 {
+                val m: Tensor<f32, [2, 3]> = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+                return 0
+            }
+        "#;
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+
+        // Shape and strides are shared per tensor type; strides count elements, not bytes.
+        assert!(ir
+            .contains("@__neuro_dlpack_shape_f32_2x3 = private constant [2 x i64] [i64 2, i64 3]"));
+        assert!(ir.contains(
+            "@__neuro_dlpack_strides_f32_2x3 = private constant [2 x i64] [i64 3, i64 1]"
+        ));
+
+        let body = function_body(&ir, "main");
+        // version { 1, 1 } — the versioned structure, not the deprecated one.
+        assert!(body.contains("store { i32, i32 } { i32 1, i32 1 }"));
+        // device { kDLCPU, 0 }.
+        assert!(body.contains("store { i32, i32 } { i32 1, i32 0 }"));
+        // dtype { kDLFloat, 32 bits, 1 lane }.
+        assert!(body.contains("store { i8, i8, i16 } { i8 2, i8 32, i16 1 }"));
+        assert!(
+            body.contains("store i32 2, ptr %dlpack.field"),
+            "ndim is the rank"
+        );
+        assert!(body.contains("store ptr @__neuro_dlpack_shape_f32_2x3"));
+        assert!(body.contains("store ptr @__neuro_dlpack_strides_f32_2x3"));
+        assert!(body.contains("store ptr @__neuro_dlpack_deleter"));
+        // `manager_ctx` is null: the deleter needs nothing beyond `self`.
+        assert!(body.contains("store ptr null, ptr %dlpack.field"));
+    }
+
+    /// The element buffer comes from `aligned_alloc` at DLPack's 64-byte alignment, and
+    /// only the elements themselves are copied into it — the padding is the allocator's.
+    #[test]
+    fn a_tensor_buffer_meets_the_dlpack_alignment() {
+        let source = r#"
+            func main() -> i32 {
+                val m: Tensor<f32, [2, 3]> = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+                return 0
+            }
+        "#;
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        assert!(body.contains("call ptr @aligned_alloc(i64 64, i64 64)"));
+        assert!(
+            body.contains("i64 24)"),
+            "six f32 elements are 24 bytes to copy"
+        );
+    }
+
+    /// Release runs through the handle's own `deleter` field, so a tensor leaving scope
+    /// performs exactly the release a foreign owner of the handle would.
+    #[test]
+    fn a_tensor_is_released_through_its_own_deleter() {
+        let source = r#"
+            func main() -> i32 {
+                val m = Tensor::<f32, [4, 4]>::identity()
+                return 0
+            }
+        "#;
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        assert!(body.contains("%dlpack.deleter = load ptr"));
+        assert!(body.contains("call void %dlpack.deleter(ptr %tensor.drop.handle)"));
+
+        // The buffer is freed before the structure that names it.
+        let deleter = function_body(&ir, "__neuro_dlpack_deleter");
+        let data_free = deleter
+            .find("call void @free(ptr %dlpack.data)")
+            .expect("the deleter frees the element buffer");
+        let self_free = deleter
+            .rfind("call void @free(ptr %0)")
+            .expect("the deleter frees the structure");
+        assert!(data_free < self_free);
+    }
+
+    /// Each element type reaches its own DLPack type code and width.
+    #[test]
+    fn every_element_type_carries_its_own_dlpack_dtype() {
+        let cases = [
+            ("i32", "{ i8 0, i8 32, i16 1 }"),
+            ("u8", "{ i8 1, i8 8, i16 1 }"),
+            ("f64", "{ i8 2, i8 64, i16 1 }"),
+            ("bf16", "{ i8 4, i8 16, i16 1 }"),
+            ("bool", "{ i8 6, i8 8, i16 1 }"),
+        ];
+        for (element, dtype) in cases {
+            let source = format!(
+                r#"
+                func main() -> i32 {{
+                    val t = Tensor::<{}, [2, 2]>::zeros()
+                    return 0
+                }}
+            "#,
+                element
+            );
+            let ir = module_ir(&source, OptimizationLevelSetting::O0);
+            let body = function_body(&ir, "main");
+            assert!(
+                body.contains(&format!("store {{ i8, i8, i16 }} {}", dtype)),
+                "`{}` should carry dtype {}",
+                element,
+                dtype
+            );
+        }
+    }
+
+    /// A rank-0 tensor has no axis to describe, so DLPack's spelling for a scalar — null
+    /// `shape` and `strides` with `ndim` 0 — is what it gets.
+    #[test]
+    fn a_rank_zero_tensor_has_null_shape_and_strides() {
+        let source = r#"
+            func main() -> i32 {
+                val s: Tensor<f32, []> = Tensor::scalar(42.0)
+                return 0
+            }
+        "#;
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        assert!(!ir.contains("__neuro_dlpack_shape_f32_"));
+        let body = function_body(&ir, "main");
+        assert!(body.contains("store i32 0, ptr %dlpack.field"), "ndim is 0");
+    }
+
     #[test]
     fn panic_diagnostics_are_outlined_out_of_the_hot_function() {
         let source = r#"
@@ -1037,8 +1166,8 @@ mod tests {
         let ir = module_ir(source, OptimizationLevelSetting::O0);
         let body = function_body(&ir, "main");
         assert!(
-            body.contains("call void @free("),
-            "the binding releases its buffer at scope exit:\n{body}"
+            body.contains("call void %dlpack.deleter("),
+            "the binding releases its tensor through the handle's deleter:\n{body}"
         );
         assert!(
             body.contains("drop.run"),

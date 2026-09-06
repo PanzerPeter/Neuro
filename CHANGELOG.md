@@ -10,6 +10,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.17.0] - 2026-09-06
+
+### Changed
+
+- **A tensor value is a DLPack handle.** `Tensor<T, S>` now lowers to a pointer to a
+  `DLManagedTensorVersioned` -- the exchange structure DLPack 1.1 defines -- whose `data`
+  field addresses the element buffer the tensor owns. The pointer a Neuro program passes
+  around is the pointer a foreign consumer such as NumPy or PyTorch reads: there is no wrap
+  step waiting at an FFI boundary, and no conversion to get wrong. The versioned structure
+  is what new exchanges are meant to use; the unversioned `DLManagedTensor` it replaced is
+  deprecated.
+
+  Every field is filled at construction: `version` `{1, 1}`, `manager_ctx` null, `flags` 0
+  (the buffer is writable), `device` `{kDLCPU, 0}`, `ndim` the rank, `dtype` from a table
+  covering every legal element type -- the four signed and four unsigned integer widths,
+  `f16`, `f32`, `f64`, `bf16`, and `bool` -- with `lanes` 1, `byte_offset` 0, and `shape` /
+  `strides` pointing at private constants shared by every value of that tensor type.
+  Strides count elements rather than bytes, as DLPack specifies. A rank-0 tensor has no
+  axis to describe, so both pointers are null, which is DLPack's own spelling for a scalar.
+
+- **Tensor buffers are allocated at DLPack's 64-byte alignment**, through `aligned_alloc`
+  rather than `malloc`, which guarantees only `max_align_t`. The allocation is rounded up
+  to the alignment; only the unpadded element run is ever copied. The structure and the
+  buffer are two allocations rather than one fused block, because fusing needs the
+  structure's size rounded up to 64 as an IR constant expression and LLVM 20 has been
+  withdrawing constant-expression arithmetic -- the element buffer's size is computable in
+  Rust, the structure's is not.
+
+- **Release runs through the handle's own `deleter`.** A tensor leaving scope loads the
+  field and calls it rather than calling `free` directly, so the release a scope exit
+  performs is provably the release a foreign owner of the handle performs; there is no
+  second, private free path for a consumer to race with. The single emitted
+  `__neuro_dlpack_deleter` frees the element buffer and then the structure, in that order.
+
+  What did NOT change: the drop machinery itself. A tensor binding and a by-value tensor
+  parameter still register `DropTarget::TensorBuffer`, every existing move site still
+  clears the flag, and a tensor held in a struct field is still not freed when the struct
+  goes out of scope -- one gap shared with collection fields, not a tensor-specific one.
+
+  Why this lands here rather than later: in-place compound assignment, the next tensor
+  item, promises that a handle held by an optimizer or a Python consumer survives
+  `w -= lr * w.grad()`. The handle is now the value, so it does by construction. The pool
+  allocator registers a tensor's handle on construction and batches release per device;
+  both the handle and the `device` field now exist to register and to group by. Dynamic
+  shapes swap the shape and stride constants for a per-value vector without touching the
+  layout, since both are already pointer fields, and the Python export hands the pointer
+  straight out.
+
+
 ## [2.16.3] - 2026-09-06
 
 ### Added

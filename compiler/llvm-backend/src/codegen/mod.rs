@@ -2,6 +2,7 @@ pub(crate) mod closures;
 pub(crate) mod collections;
 pub(crate) mod context;
 pub(crate) mod dispatch;
+pub(crate) mod dlpack;
 pub(crate) mod drops;
 pub(crate) mod expressions;
 pub(crate) mod functions;

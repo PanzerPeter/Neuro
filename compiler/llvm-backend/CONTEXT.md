@@ -253,8 +253,9 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   verified the `Clone` derive. Lowers to the receiver's aggregate value — faithful while
   stack-allocated, must recurse into heap-owning fields later.
 - `tensor.clone()` → `BuiltinMethod::TensorClone` → `codegen_tensor_clone`
-  (`expressions/tensors.rs`). A tensor value is an owning pointer, so the clone `malloc`s a second
-  buffer and `memcpy`s into it: the copy is independent and both addresses stay stable. An owned
+  (`expressions/tensors.rs`). A tensor value is a DLPack handle, so the clone allocates a second
+  handle and a second buffer and `memcpy`s the elements across: the copy is independent and both
+  `data` addresses stay stable. An owned
   receiver lowers to the tensor pointer; a `&Tensor` receiver lowers to the *address of* that
   pointer. Both are `ptr` in LLVM, so the distinction comes from `recv_ty`, not from the value —
   the one auto-deref site the value-driven rule below cannot decide.
@@ -348,12 +349,12 @@ than assuming the prelude's declaration order.
 (the fat pointer itself, above), `Reference(DynObject)` (the two-word `dyn_ref_type()` struct),
 and `Reference(Slice)` (the two-word `slice_ref_type()` struct, mutable or not). A bare
 `DynObject` or `Slice` is rejected as unsized. `Type::Tensor { .. }` maps to an opaque `ptr`: the
-value is an **owning pointer** to an out-of-line buffer, and `tensor_buffer_type` gives that
-buffer's own layout — a flat, row-major `[d0*d1*... x T]` array. A statically shaped tensor carries
-its whole shape in its type, so the pointer is the whole value; no length or stride word travels
-with it. The rank-0 tensor's buffer is `[1 x T]` — the empty product — not a zero-length array.
-Host memory only: `.to(device)` guards on the requested device rather than moving anything, and
-DLPack handles arrive with the DLPack item, which needs this pointer to have somewhere to point.
+value is a **DLPack handle** — a pointer to the `DLManagedTensorVersioned` that
+`dlpack_managed_tensor_type` lays out — and its `data` field addresses the element buffer, whose
+own layout `tensor_buffer_type` gives as a flat, row-major `[d0*d1*... x T]` array. The rank-0
+tensor's buffer is `[1 x T]` — the empty product — not a zero-length array. Host memory only:
+`.to(device)` guards on the requested device rather than moving anything, and the handle reports
+`kDLCPU` until a device backend flips that field.
 
 The buffer is out of line because the language has a tensor *own* it and promises that buffer a
 stable address across an in-place update — neither is expressible for an SSA value, which has no
@@ -362,12 +363,45 @@ It is also what makes a large tensor compilable: an aggregate copy is a whole-bu
 pair that only `-O1`'s SROA turns into a `memcpy`, and SelectionDAG crashed legalizing one above
 ~50k elements at `-O0`. There is no size cap any more, at any optimization level.
 
-`expressions/tensors.rs` owns the allocation. `alloc_tensor_buffer` is the single place the
-allocator is chosen — the hook 2D's arena replaces — and every construction node routes through it.
+`codegen/dlpack.rs` owns the handle: it allocates both blocks, fills every field, emits the
+per-tensor-type `shape` and `strides` constants, and defines the one shared `deleter`. See the
+DLPack Representation section below.
+
+`expressions/tensors.rs` owns the construction nodes. `alloc_tensor` is the single place the
+allocator is chosen — the hook 2D's arena replaces — and every construction node routes through it,
+taking back both the handle it returns and the `data` pointer it writes elements through.
 `zeros()` / `ones()` / `identity()` and a literal whose elements are all constants emit the buffer
 once as a private `.rodata` global and `memcpy` it in, so a fill of any size costs one call rather
 than an instruction per element; a literal mentioning a runtime value is written slot by slot;
 `random_normal` writes its counted loop straight into the heap buffer.
+
+## DLPack Representation
+A tensor value *is* the exchange structure DLPack 1.1 defines, so the pointer a Neuro
+program passes around is the pointer a foreign consumer takes — there is no wrap step at an FFI
+boundary. `type_mapping.rs` holds the layout (`dlpack_managed_tensor_type`), the dtype table
+(`dlpack_dtype`, covering every integer, float, `bf16`, and `bool` element), and the buffer sizing
+(`tensor_buffer_bytes`); `codegen/dlpack.rs` holds the emission.
+
+Fields are filled at construction: `version` `{1, 1}`, `manager_ctx` null, `deleter` the shared
+`__neuro_dlpack_deleter`, `flags` 0 (the buffer is writable), `device` `{kDLCPU, 0}`, `ndim` the
+rank, `dtype` from the table with `lanes` 1, `byte_offset` 0, and `shape` / `strides` pointing at
+private constants named `__neuro_dlpack_shape_<mangle>` / `__neuro_dlpack_strides_<mangle>` and
+shared by every value of that tensor type. Strides count **elements, not bytes**. Rank 0 has no
+axis, so both pointers are null — DLPack's own spelling for a scalar. The globals are pointer
+fields, so dynamic shapes can later supply a per-value vector without changing the layout.
+
+Two allocations, not one fused block: the structure comes from `malloc`, the elements from
+`aligned_alloc(64, ...)` because DLPack requires a 64-byte-aligned `data` and `malloc` guarantees
+only `max_align_t`. Fusing them would need the structure's size rounded up to 64 as an IR constant
+expression, and LLVM 20 has been withdrawing constant-expression arithmetic; the element buffer's
+size is computable in Rust (`tensor_buffer_bytes`), the structure's is not. The allocation size is
+rounded up to the alignment, but only the unpadded element run is ever copied
+(`dlpack_copy_length`).
+
+Release goes through the handle's own `deleter` field (`build_dlpack_release`), never through a
+direct `free`, so the release a scope exit performs is provably the one a foreign owner performs.
+`__neuro_dlpack_deleter` frees `data` and then the structure, in that order — reading `data` out of
+a block it had already freed would be a use-after-free.
 
 `codegen_reference` returns the borrowed place's storage pointer — mutability is compile-time
 only. `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer.
@@ -779,15 +813,16 @@ collection is not freed**, and neither is the heap `string` that `+`, interpolat
 `String::to_string` produces; both ride with the heap-string work.
 
 A tensor binding is registered the same way, with `DropTarget::TensorBuffer`: the binding's storage
-holds the owning pointer, so scope exit loads it and `free`s it under the same flag. Unlike
+holds the DLPack handle, so scope exit loads it and calls the handle's own `deleter` under the same
+flag, which releases the element buffer and the structure together. Unlike
 `HeapString` the ownership comes from the type alone — every tensor construction allocates, and
 there is no borrowed value of tensor type to confuse it with. **A tensor held in a struct field is
 not freed**, exactly as a collection field is not; recursing into a struct's fields is one gap, not
 one per element type.
 
-New libc declarations these need: `free`, `realloc`, `memmove`, `memset` (alongside the existing
-`malloc`, `memcpy`, `memcmp`, `write`, `abort`, `snprintf`), each declared on first use in
-`context.rs`.
+New libc declarations these need: `free`, `realloc`, `memmove`, `memset`, `aligned_alloc`
+(alongside the existing `malloc`, `memcpy`, `memcmp`, `write`, `abort`, `snprintf`), each declared
+on first use in `context.rs`.
 
 ## Soft-Float ABI
 On generic x86-64, LLVM lowers `fpext` / `fptrunc` on `half` / `bfloat` — and f16/bf16

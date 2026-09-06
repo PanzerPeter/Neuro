@@ -46,7 +46,8 @@ isolation:
   interpolation with the format mini-language. A tensor is not `Copy`, so each `match`
   arm's buffer *moves* into the struct that keeps it, `.clone()` is what buys a second
   owner, `&Tensor` reads one without consuming it, and `.to(Device::CPU)` is the
-  consuming device transfer. Exit `88`.
+  consuming device transfer — each one moving, copying, or handing on a DLPack handle.
+  Exit `216`.
 - [`showcase/perceptron.nr`](showcase/perceptron.nr) — a two-neuron feed-forward
   pass. Structs + `impl` (method calling method) + `f64` math + ReLU branch +
   `while` loop + `as` cast. Exit `8`.
@@ -314,8 +315,9 @@ No Rust edits are needed — discovery is automatic.
   `Tensor::<T, [...]>::zeros()` / `ones()` / `identity()` / `random_normal(mean:, std:)` /
   `scalar()` / `from()` build one where no annotation reaches. Tensors move rather than
   copy. Reading a tensor back — indexing, arithmetic, reductions — is later work, so an
-  example builds and passes tensors rather than computing with them. A tensor owns its
-  buffer out of line, so one of any size compiles at any optimization level;
+  example builds and passes tensors rather than computing with them. A tensor value is a
+  DLPack handle over an out-of-line buffer, so one of any size compiles at any optimization
+  level and the same pointer is what a foreign consumer would read;
   `showcase/model_shapes.nr` returns a 100352-parameter weight matrix by value.
 - Newtypes are supported (`types/newtype.nr`): `newtype Meters = i32` creates a
   distinct nominal type wrapping an inner type, constructed `Meters(30)` and read
