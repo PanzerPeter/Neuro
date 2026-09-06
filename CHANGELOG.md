@@ -10,6 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.16.1] - 2026-09-06
+
+### Changed
+
+- **Dependencies refreshed to their latest compatible releases, and `inkwell` moved to
+  0.10.0.** The lockfile refresh is semver-compatible throughout (`thiserror`, `anyhow`,
+  `serde`, `serde_json`, `toml`, `clap`, `log`, and the `llvm-sys` 201.x binding), so no
+  manifest requirement moved for those. The `inkwell` bump is the one deliberate change: it
+  drops the pre-LLVM-12 releases and replaces the crate's internal raw pointers with
+  `NonNull`, neither of which reaches the safe wrapper API the backend is written against.
+  LLVM 20 stays the target through the unchanged `llvm20-1` feature. Keeping current here is
+  what leaves a future LLVM 22 move a feature-flag change rather than a crate migration.
+
+  `logos` and `melior` were deliberately left where they are. `logos` 0.16 rewrote the
+  matcher for exact regex semantics, which is precisely what the lexer's explicit
+  `priority` annotations and longest-match tie-breaks depend on, so that upgrade belongs in
+  its own change with the lexer suite as its gate. `melior` 0.26+ requires MLIR 21/22 and
+  would drag the whole toolchain off LLVM 20.
+
+
 ## [2.16.0] - 2026-09-06
 
 ### Changed

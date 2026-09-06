@@ -365,7 +365,7 @@ Key design goals:
 
 ### Compilation
 
-- Full LLVM 20 backend via inkwell 0.9.0
+- Full LLVM 20 backend via inkwell 0.10.0
 - Native executable generation
 - Signedness-aware integer codegen
 - `print` / `println` lower to a module-private buffered writer on fd 1: bytes are copied into a
@@ -544,7 +544,7 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 
 | Component | Library | Version |
 |---|---|---|
-| CPU codegen | inkwell | 0.9.0 (LLVM 20) |
+| CPU codegen | inkwell | 0.10.0 (LLVM 20) |
 | MLIR construction | melior | 0.25.1 (LLVM/MLIR 20), integrated 1D in the `mlir-backend` slice behind the off-by-default `mlir` feature |
 | Autodiff (Phase 3+) | Enzyme (MLIR dialect) | built against LLVM 20 |
 | GPU (Phase 4+) | MLIR nvgpu/rocdl/Triton | LLVM 20 backends |
@@ -559,4 +559,4 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full architecture guide.
 ---
 
 **Status**: see the [Quick Roadmap](../README.md#quick-roadmap)
-**Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.9.0
+**Rust**: 1.85+ | **LLVM**: 20 | **inkwell**: 0.10.0

@@ -118,7 +118,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop`, `&T` / `&mut T` with flow-sensitive exclusivity, lifetime elision and annotations |
 | **Strings** | Immutable fat-pointer `string` with escapes, `&string` slices, `==`, `+` concatenation, `.len()` / `.clone()` / `.slice(a..b)` / `.char_slice(a..b)`, codepoint iteration with `.chars()` and `.char_indices()`, interpolation `"{x:.2}"`, triple-quoted `"""` blocks with dedent; growable `String` buffer for building text — `push_str` / `clear` / `to_string` |
 | **Modules & visibility** | Multi-file programs: every `.nr` file is a module and `mod.nr` directories nest; inline `module { }` blocks group within one file; `import math::{sqrt}`, `import ./utils`, `as` renames, module aliases, variant imports, and `export import` re-export facades; declarations and struct fields are private until `export` opts them in; an implicit prelude puts `Option` / `Result` and `Some` / `None` / `Ok` / `Err` in every module, with `@no_prelude` to opt out |
-| **Toolchain** | Native binaries via inkwell 0.9 / LLVM 20; `neurc check` and `neurc compile`; buffered `print` / `println` to stdout, line-buffered on a terminal and drained on every exit path; `panic` / `assert` / `unreachable` runtime with located diagnostics, covering array bounds, string slices, a zero divisor, and debug-build integer overflow, all outlined off the hot path |
+| **Toolchain** | Native binaries via inkwell 0.10 / LLVM 20; `neurc check` and `neurc compile`; buffered `print` / `println` to stdout, line-buffered on a terminal and drained on every exit path; `panic` / `assert` / `unreachable` runtime with located diagnostics, covering array bounds, string slices, a zero divisor, and debug-build integer overflow, all outlined off the hot path |
 
 ### Current Memory Model
 
@@ -444,7 +444,7 @@ compiler/
 ├── semantic-analysis/       # Type checker, scope analysis
 ├── control-flow/            # CFG data structures; no caller yet
 ├── hir-lowering/            # Type-checked AST → typed HIR
-├── llvm-backend/            # HIR → object code (inkwell 0.9 / LLVM 20)
+├── llvm-backend/            # HIR → object code (inkwell 0.10 / LLVM 20)
 ├── mlir-backend/            # HIR → MLIR scaffold (off-by-default `mlir` feature)
 └── neurc/                   # CLI compiler driver (pipeline orchestration)
 ```

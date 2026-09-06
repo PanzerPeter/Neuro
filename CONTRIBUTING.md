@@ -159,7 +159,7 @@ compiler/
 ├── semantic-analysis/       # Type checker slice
 ├── hir-lowering/            # AST → typed HIR lowering slice (1D)
 ├── control-flow/            # CFG data structures; no caller yet
-├── llvm-backend/            # LLVM 20 / inkwell 0.9 codegen slice
+├── llvm-backend/            # LLVM 20 / inkwell 0.10 codegen slice
 ├── mlir-backend/            # MLIR / melior slice (1D+, off-by-default `mlir` feature)
 │
 └── neurc/                   # Compiler driver, the only crate depending on all slices

@@ -34,7 +34,7 @@ Workspace layout (`compiler/`):
 | `semantic-analysis` | Type checking, scope resolution |
 | `control-flow` | CFG data structures only; no caller yet |
 | `hir-lowering` | AST → typed HIR |
-| `llvm-backend` | Codegen via inkwell 0.9.0 (LLVM 20) |
+| `llvm-backend` | Codegen via inkwell 0.10.0 (LLVM 20) |
 | `mlir-backend` | MLIR/melior codegen, behind the off-by-default `mlir` feature |
 | `neurc` | CLI driver; the only crate allowed to depend on every slice |
 

@@ -53,7 +53,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.16.0"
+version = "2.16.1"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Neuro Contributors"]
@@ -79,13 +79,16 @@ unicode-ident = "1.0"
 # On CachyOS/Arch: sudo pacman -S llvm20
 # LLVM_SYS_201_PREFIX must point to the LLVM 20 installation (e.g. /usr/lib/llvm20).
 # Feature flag is llvm20-1 (inkwell uses the minor-version suffix scheme).
-# inkwell 0.9.0 is ported to Rust edition 2024 (Rust 1.85+) and adds LLVM 21/22
-# support while retaining LLVM 20 via the llvm20-1 feature.
+# inkwell 0.10.0 supports LLVM 12 through 22 and keeps LLVM 20 on the llvm20-1
+# feature. It drops the pre-12 LLVM releases (irrelevant here) and swaps its
+# internal raw pointers for NonNull; the safe wrapper API this backend uses is
+# unchanged. Staying current is also what keeps a later LLVM 22 move a
+# feature-flag change rather than a crate rewrite.
 # default-features = false disables inkwell's `target-all` default, which would
 # otherwise compile in initializers for every LLVM target (ARM, BPF, Mips, ...).
 # That fails to link on Windows CI, whose prebuilt LLVM only ships the x86 target
 # libs. We only ever initialize the native (x86) target, so target-x86 suffices.
-inkwell = { version = "0.9.0", default-features = false, features = ["llvm20-1", "target-x86"] }
+inkwell = { version = "0.10.0", default-features = false, features = ["llvm20-1", "target-x86"] }
 
 # MLIR Backend (Phase 1.8+)
 # Rust MLIR bindings, used alongside inkwell for the tensor / AD / GPU lowering

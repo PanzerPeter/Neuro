@@ -41,7 +41,7 @@ transforms.
 - diagnostics — error type infrastructure
 - source-location — `SourceFile` byte-offset → line/column mapping for panic diagnostics
 
-inkwell 0.9.0 (feature `llvm20-1`) is a third-party crate, not Shared Kernel. Requires LLVM 20;
+inkwell 0.10.0 (feature `llvm20-1`) is a third-party crate, not Shared Kernel. Requires LLVM 20;
 set `LLVM_SYS_201_PREFIX` (e.g. `/usr/lib/llvm20`) before building. `semantic-analysis` is not a
 production dependency — neurc orders type-check then HIR lowering before codegen.
 `syntax-parsing` and `hir-lowering` appear only in `[dev-dependencies]` (tests and benches lower
