@@ -10,6 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.16.2] - 2026-09-06
+
+### Changed
+
+- **`logos` 0.14 -> 0.16, taking the rewritten matcher.** 0.16 replaced the matching engine to
+  get exact regex semantics and fix long-standing backtracking bugs, which is precisely the
+  machinery the lexer's eight `priority` annotations and its longest-match tie-breaks are
+  written against -- `<<` over `<`, `+=` over `+` then `=`, `??` over two `?`, `42i64` and
+  `1.5f32` as one token rather than a literal plus an identifier, `'a'` a char where `'a` is a
+  lifetime, `"""` over the two-quote empty string, and every keyword outranking the identifier
+  pattern it shadows. All of them resolve unchanged: a token-stream dump over the full example
+  corpus plus a stress corpus built to separate exactly those pairs is byte-identical before
+  and after, across 34,440 tokens.
+
+  One source change was required. The new matcher rejects unbounded greedy repetition over a
+  dot-equivalent class, which the line-comment rule `//[^\n]*` trips. That class excludes `\n`,
+  so the run is bounded by the line rather than the file, and the rule now carries
+  `allow_greedy = true` to say so. Nothing else in the lexer moved, and no public API changed.
+
+  The perf regression the 0.16 notes warn about does not appear on this grammar: over four
+  release runs each on a 9.8 MiB corpus, 0.14 averaged 234.4 MiB/s and 0.16 averaged
+  234.5 MiB/s.
+
+  Also recorded, because it is the obvious thing to reach for and it does not work: 0.16
+  parses a lazy `*?` instead of rejecting it, but still matches greedily. The hand-written
+  scanners for triple-quoted strings and nested block comments remain necessary.
+
+
 ## [2.16.1] - 2026-09-06
 
 ### Changed

@@ -24,6 +24,14 @@ its word against use as an identifier.
 reclassifying it (to `UnterminatedString`, for instance) gives the diagnostic layer a precise,
 actionable kind.
 
+### Adding a pattern under logos 0.16
+The matcher rejects unbounded greedy repetition over a dot-equivalent class (`.*`, `[^\n]*`)
+because it would rescan the input for every token. `_LineComment` opts back in with
+`allow_greedy = true`: its class excludes `\n`, so the run is bounded by the line. A new
+pattern that trips the same error wants a narrower class first, and the opt-in only once the
+run is provably bounded. Lazy quantifiers are not an alternative -- `*?` parses but still
+matches greedily.
+
 ### Declaration order and longest-match ties
 Logos resolves overlaps by longest match, then by declaration order and explicit `priority`.
 Several tokens depend on that and will silently regress if reordered:

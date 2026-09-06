@@ -203,7 +203,9 @@ pub enum TokenKind {
     //
     // The triple-quoted form is a bare `"""` token whose callback scans and bumps the
     // body itself. A regex cannot express it: logos has no non-greedy repetition, so a
-    // pattern ending in `"""` would run to the LAST `"""` in the file. Matching only
+    // pattern ending in `"""` would run to the LAST `"""` in the file. (0.16 parses a
+    // lazy `*?` rather than rejecting it, but still matches greedily, so the lazy spelling
+    // is not a way out of this -- it silently swallows every literal in the file.) Matching only
     // the opening delimiter keeps the DFA trivial and hands the body to a hand-written
     // scanner. Three quotes always beat the two-quote empty-string match under logos'
     // longest-match rule, so `""` and `"""` never collide.
@@ -341,8 +343,12 @@ pub enum TokenKind {
     #[token(";")]
     Semicolon,
 
-    // Comments and whitespace
-    #[regex(r"//[^\n]*", logos::skip)]
+    // Comments and whitespace.
+    // `allow_greedy` opts out of the 0.16 lint against unbounded greedy repetition.
+    // The lint targets patterns that force a scan of the whole input per token; this
+    // class excludes `\n`, so the run is bounded by the current line and a line
+    // comment is exactly the "consume to end of line" this spells.
+    #[regex(r"//[^\n]*", logos::skip, allow_greedy = true)]
     _LineComment,
     // Block comments NEST, which no regex can express: logos matches the
     // longest run its DFA accepts, so `/* a /* b */ c */` would close at the first
