@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/PanzerPeter/Neuro/security/advisories/new
+    about: Report compiler crashes on adversarial input, unsafe generated code, or dependency CVEs privately. Never in a public issue. See SECURITY.md for what is in scope.
+  - name: Build or install trouble
+    url: https://github.com/PanzerPeter/Neuro/blob/main/docs/guides/troubleshooting.md
+    about: LLVM_SYS_201_PREFIX errors, linker failures, and missing LLVM 20 are covered here. Open a bug report only if the guide does not resolve it.
+  - name: Roadmap and current status
+    url: https://github.com/PanzerPeter/Neuro/blob/main/README.md#quick-roadmap
+    about: Which phase is open and which features have landed. Check here before filing a missing-feature report.

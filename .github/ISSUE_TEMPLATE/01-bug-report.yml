@@ -1,0 +1,99 @@
+name: Bug report
+description: The compiler rejects valid code, accepts invalid code, crashes, or emits a binary that does the wrong thing.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not use this form for security issues. Crashes on adversarial input, unsafe
+        generated code, and dependency CVEs go through the private advisory link on the
+        issue chooser. SECURITY.md lists what counts.
+
+        Confirmed defects that are already triaged live in `docs/BUGS.md`, each with a
+        repro and a fix sketch. If yours is already there, open a claim issue instead of
+        a second report.
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: The smallest `.nr` program that shows the problem. Cut every line that is not needed to trigger it.
+      render: rust
+      placeholder: |
+        fn main() -> int {
+            let x: int = 1;
+            return x;
+        }
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: How you invoked the compiler.
+      placeholder: neurc compile repro.nr
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: Paste the full output, including any panic message and backtrace. Run with `RUST_BACKTRACE=1` if it panicked.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+      description: If the program should have compiled, say what it should have printed or returned.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where it goes wrong
+      description: Your best guess. Leave it unknown if you are not sure, triage will sort it.
+      options:
+        - Unknown
+        - Lexer (tokenizing)
+        - Parser (syntax error on valid code, or accepts invalid syntax)
+        - Semantic analysis (type checking, scope resolution)
+        - HIR lowering
+        - LLVM backend (bad codegen, wrong runtime behaviour)
+        - Linking or the produced binary
+        - neurc CLI (flags, paths, project config)
+        - Editor support (neuro-language-support)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Compiler build
+      description: Output of `neurc --version`, or the commit hash you built from.
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: OS, Rust, and LLVM
+      description: Output of `rustc -vV` in one line plus your LLVM 20 install path.
+      placeholder: CachyOS, rustc 1.85.0, LLVM_SYS_201_PREFIX=/usr/lib/llvm20
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched open issues and `docs/BUGS.md` for this defect.
+          required: true
+        - label: The reproduction above is minimal and I confirmed it still fails on `main`.
+          required: true

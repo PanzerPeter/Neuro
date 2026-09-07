@@ -88,6 +88,10 @@ Before contributing, read:
 3. Verify your contribution aligns with the current roadmap phase
 4. For architectural changes, open an issue first
 
+The issue chooser has a form for each of these: a bug report, a language or compiler
+feature proposal, a claim on a `BUG-NNN` id or an open roadmap line, and a documentation
+problem. Pick the one that fits, the fields are the questions triage would ask anyway.
+
 ### Working on a Feature
 
 1. `git checkout -b feature/your-feature-name`
@@ -223,6 +227,10 @@ cargo test -- --nocapture
 - Avoid testing implementation details; test observable behavior
 
 ## Submitting Changes
+
+Opening a pull request loads
+[the PR template](.github/PULL_REQUEST_TEMPLATE.md), which repeats the checklist below in
+tickable form.
 
 ### Pre-Submission Checklist
 

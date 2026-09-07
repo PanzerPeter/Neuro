@@ -1,0 +1,57 @@
+name: Language or compiler feature
+description: Propose new syntax, a new type, a standard library addition, or a compiler capability.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read DESIGN.md first. It states the language's non-goals, and a proposal that
+        contradicts one gets closed regardless of how well it is argued.
+
+        The roadmap in the README is dependency-ordered. Most features people want are
+        already on it, scheduled behind something that has to land first. Saying where
+        yours fits saves a round trip.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What can you not express today? Show the code you are forced to write instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed syntax and semantics
+      description: Write it as real Neuro source. Say what it lowers to and what the type checker has to prove.
+      render: rust
+    validations:
+      required: true
+
+  - type: dropdown
+    id: roadmap
+    attributes:
+      label: Roadmap position
+      options:
+        - Already a roadmap item, this issue is to discuss its design
+        - Not on the roadmap, I am proposing it as new work
+        - I could not tell from the roadmap
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including doing nothing. If another language solves this differently, name it and say why that shape does or does not fit here.
+    validations:
+      required: true
+
+  - type: textarea
+    id: breakage
+    attributes:
+      label: What this breaks
+      description: Existing programs, existing syntax, inference behaviour, the ABI of compiled code. Write "nothing I can see" if that is the honest answer.
+    validations:
+      required: true

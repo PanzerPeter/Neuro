@@ -1,0 +1,32 @@
+name: Documentation problem
+description: Something in the docs is wrong, stale, missing, or contradicts the code.
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A slice's `CONTEXT.md` is the authority on that slice. Where `docs/` disagrees with
+        one, `docs/` is the thing to fix.
+
+  - type: input
+    id: where
+    attributes:
+      label: Which page
+      description: Path in the repo, or the URL.
+      placeholder: docs/getting-started/installation.md
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong
+      description: Quote the passage. If it contradicts the code, link the source that proves it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: fix
+    attributes:
+      label: Suggested wording
+      description: Optional. A concrete replacement is faster to merge than a report.

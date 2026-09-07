@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.18.2] - 2026-09-07
+
+### Added
+
+- `docs`: GitHub issue forms and a pull request template. The issue chooser now offers a bug
+  report, a language or compiler feature proposal, a claim on a `BUG-NNN` id or an open
+  roadmap line, and a documentation problem, and it routes security reports to the private
+  advisory form instead of a public issue. Blank issues are off. The PR template carries the
+  quality gates, the `CONTEXT.md` and slice-boundary rules, and the DCO sign-off requirement
+  that `CONTRIBUTING.md` already spelled out in prose.
+
+
 ## [2.18.1] - 2026-09-07
 
 ### Fixed

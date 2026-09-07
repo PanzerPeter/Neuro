@@ -1,0 +1,49 @@
+name: Claim a bug fix or roadmap item
+description: Tell the project you are starting work on a known defect or an open roadmap line, so nobody duplicates it.
+title: "Claim: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Claim before you write code, not after. Fixes for `docs/BUGS.md` entries and the
+        topmost open roadmap items are the two contributions most likely to collide with
+        someone else's branch.
+
+        Some `docs/BUGS.md` entries are language-design decisions rather than patches.
+        Those say so in the entry, and they need a maintainer ruling in this issue before
+        any code changes.
+
+  - type: input
+    id: item
+    attributes:
+      label: What you are claiming
+      description: A `BUG-NNN` id from `docs/BUGS.md`, or the exact roadmap line.
+      placeholder: 'BUG-021, or the roadmap line verbatim'
+    validations:
+      required: true
+
+  - type: textarea
+    id: approach
+    attributes:
+      label: How you plan to fix it
+      description: Which slices you expect to touch and what the shape of the change is. A paragraph is enough. This is where a maintainer catches a wrong approach before you spend a weekend on it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rulings
+    attributes:
+      label: Open questions for a maintainer
+      description: Anything you need decided before you can start. Leave blank if there is nothing.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you start
+      options:
+        - label: I read CONTRIBUTING.md, including the VSA rules and the quality gates.
+          required: true
+        - label: I can sign off my commits under the DCO.
+          required: true
+        - label: I will ship a regression test that fails without the change.
+          required: true
