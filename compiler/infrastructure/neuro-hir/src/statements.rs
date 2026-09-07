@@ -1,5 +1,6 @@
 // Statement nodes
 
+use ast_types::BinaryOp;
 use shared_types::Span;
 
 use crate::expressions::{HirExpr, HirMatchBinding, HirMatchTest};
@@ -22,6 +23,23 @@ pub enum HirStmt {
     Assignment {
         target: String,
         value: HirExpr,
+        span: Span,
+    },
+    /// `target OP= value` on a tensor: an in-place element-wise update of the buffer
+    /// `target`'s DLPack handle already addresses.
+    ///
+    /// Only the types that update in place reach this node; every other compound
+    /// assignment is desugared to [`HirStmt::Assignment`] over a binary expression
+    /// during lowering, so a backend that ignores this variant loses tensors and
+    /// nothing else. `ty` is the target's tensor type, carrying the element type and
+    /// the extents the update loops over. `value` is either that same tensor type or a
+    /// reference to it: an owned operand is consumed by the update, a borrowed one is
+    /// only read.
+    TensorCompoundAssign {
+        target: String,
+        op: BinaryOp,
+        value: HirExpr,
+        ty: HirType,
         span: Span,
     },
     Return {

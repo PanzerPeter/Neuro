@@ -141,7 +141,7 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             }
             fv.bound.insert(name.name.clone());
         }
-        Stmt::Assignment { target, value, .. } => {
+        Stmt::Assignment { target, value, .. } | Stmt::CompoundAssignment { target, value, .. } => {
             fv.reads.push(target.name.clone());
             collect_expr(value, fv);
         }

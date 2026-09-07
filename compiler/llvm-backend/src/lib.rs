@@ -577,6 +577,70 @@ mod tests {
         assert!(data_free < self_free);
     }
 
+    /// The in-place guarantee, read off the IR: a compound assignment allocates nothing.
+    ///
+    /// The update runs against the buffer the target's handle already addresses, so the
+    /// handle and its `data` pointer are the same values after the statement as before —
+    /// which is what keeps a pointer held by an optimizer or a foreign DLPack consumer
+    /// valid. The desugaring this node replaces would build a second tensor here.
+    #[test]
+    fn a_tensor_compound_assignment_allocates_nothing() {
+        let source = r#"
+            func update(w: &mut Tensor<f32, [8, 8]>) { }
+
+            func step(g: &Tensor<f32, [8, 8]>) -> i32 {
+                mut w = Tensor::<f32, [8, 8]>::zeros()
+                w -= g
+                w += g
+                return 0
+            }
+
+            func main() -> i32 {
+                return 0
+            }
+        "#;
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "step");
+        // One allocation for `zeros()`, and none for either update.
+        assert_eq!(
+            body.matches(&format!("call ptr @{ALIGNED_ALLOC_FN}"))
+                .count(),
+            1,
+            "only the construction allocates:\n{body}"
+        );
+        // Block labels are defined at the start of a line; the branches naming them are
+        // indented, so this counts loops rather than mentions.
+        assert_eq!(
+            body.matches("\ntensor.op.head").count(),
+            2,
+            "each update is one counted loop over the buffer:\n{body}"
+        );
+    }
+
+    /// A tensor's arithmetic is its element's arithmetic, so an integer update carries the
+    /// same debug-tier overflow guard the scalar operator does, and a float update does
+    /// not (IEEE-754 has an answer for every pair).
+    #[test]
+    fn an_integer_compound_assignment_keeps_the_scalar_overflow_guard() {
+        let source = r#"
+            func step(g: &Tensor<i32, [4]>) -> i32 {
+                mut w = Tensor::<i32, [4]>::zeros()
+                w += g
+                return 0
+            }
+
+            func main() -> i32 {
+                return 0
+            }
+        "#;
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "step");
+        assert!(
+            body.contains("@llvm.sadd.with.overflow.i32"),
+            "an i32 element overflows the way an i32 scalar does:\n{body}"
+        );
+    }
+
     /// Each element type reaches its own DLPack type code and width.
     #[test]
     fn every_element_type_carries_its_own_dlpack_dtype() {

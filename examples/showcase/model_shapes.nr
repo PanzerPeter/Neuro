@@ -14,10 +14,11 @@
 // second owner has to be asked for explicitly with `.clone()`. A tensor value is a
 // DLPack handle whose `data` field addresses that buffer out of line, which is why
 // `hidden_weights()` below can hand back 100352 parameters by value at the default
-// `-O 0`, and why a foreign consumer would take the same pointer unchanged. What a tensor cannot do yet is be
-// read back (indexing, arithmetic, and reductions are later 2B items), so the
-// report is built from the shapes, which are part of the types, and the exit code
-// is the total parameter count modulo 256.
+// `-O 0`, and why a foreign consumer would take the same pointer unchanged. What a
+// tensor cannot do yet is be read back (indexing and the reductions are later 2B
+// items; the in-place updates are in `optimizer_step.nr`), so the report is built
+// from the shapes, which are part of the types, and the exit code is the total
+// parameter count modulo 256.
 
 enum Init {
     Zeros,

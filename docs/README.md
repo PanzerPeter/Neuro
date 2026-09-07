@@ -87,8 +87,10 @@ Key design goals:
   only one this compiler can lower to). The value is a DLPack handle carrying the tensor's
   rank, shape, strides, dtype, and device over a 64-byte-aligned out-of-line buffer with a
   stable address, released when its last owner leaves scope, so a tensor of any size
-  compiles at any optimization level and a foreign consumer reads the same pointer.
-  Reading one back (indexing, arithmetic, reductions) is later work
+  compiles at any optimization level and a foreign consumer reads the same pointer. The
+  compound operators `+=` / `-=` / `*=` / `/=` / `%=` update a `mut` tensor's buffer in
+  place, allocating nothing and leaving the handle and its `data` pointer unchanged.
+  Reading one back (indexing, by-value arithmetic, reductions) is later work
 
 ### Variables
 

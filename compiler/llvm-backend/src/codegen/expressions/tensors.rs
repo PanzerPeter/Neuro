@@ -1,4 +1,5 @@
-// Codegen for tensor construction. A tensor value is a pointer to its own DLPack handle
+// Codegen for tensor construction and in-place update. A tensor value is a pointer to its
+// own DLPack handle
 // (`codegen/dlpack.rs`), whose `data` field addresses a flat, row-major
 // `[d0*d1*... x T]` run of elements. Every node here therefore builds two things: the
 // handle it hands back, and the buffer it writes elements into.
@@ -14,7 +15,12 @@
 // identity matrix, and a literal whose elements are themselves constant all land in
 // `.rodata` and reach the buffer as one `memcpy`. Only `random_normal` needs a runtime
 // loop, and it now writes straight into the heap buffer.
+//
+// The compound assignment at the end of the file allocates nothing at all: it reuses the
+// buffer the target already owns, which is the guarantee the language makes about a
+// tensor's handle across an in-place update.
 
+use ast_types::BinaryOp;
 use inkwell::intrinsics::Intrinsic;
 use inkwell::module::Linkage;
 use inkwell::types::BasicTypeEnum;
@@ -63,7 +69,7 @@ impl<'ctx> CodegenContext<'ctx> {
     fn tensor_layout(&self, ty: &Type) -> CodegenResult<(Type, usize)> {
         let Type::Tensor { element, shape } = ty else {
             return Err(CodegenError::InternalError(
-                "tensor construction node does not carry a tensor type".to_string(),
+                "tensor node does not carry a tensor type".to_string(),
             ));
         };
         Ok(((**element).clone(), shape.iter().product()))
@@ -414,6 +420,190 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(llvm_err)?;
         self.codegen_guard_or_panic(is_host, DEVICE_UNAVAILABLE, device.span.start)?;
         Ok(tensor)
+    }
+
+    /// Lower `target OP= value` on a tensor: an element-wise update written straight
+    /// into the buffer `target`'s handle already addresses.
+    ///
+    /// Nothing is allocated. That is the point of the node rather than an optimization
+    /// of it: the DLPack handle and its `data` pointer are unchanged across the
+    /// statement, so a raw pointer held by an optimizer, by the runtime, or by a foreign
+    /// consumer stays valid. The desugaring this node exists to avoid would build a second
+    /// tensor and rebind the name to it, invalidating both.
+    ///
+    /// The evaluation order is fixed by the language: the right-hand side is evaluated
+    /// before the target is touched.
+    pub(crate) fn codegen_tensor_compound_assign(
+        &mut self,
+        target: &str,
+        op: BinaryOp,
+        value: &HirExpr,
+        ty: &neuro_hir::HirType,
+        offset: usize,
+    ) -> CodegenResult<()> {
+        let tensor_ty = Type::from_hir(ty);
+        let (element_ty, count) = self.tensor_layout(&tensor_ty)?;
+
+        let rhs_value = self.codegen_expr(value)?;
+        let BasicValueEnum::PointerValue(rhs_ptr) = rhs_value else {
+            return Err(CodegenError::InternalError(
+                "a tensor operand does not lower to a pointer".to_string(),
+            ));
+        };
+        // A borrowed operand lowers to the address of the handle pointer, an owned one
+        // to the handle pointer itself; both are `ptr`, so the type is what tells them
+        // apart.
+        let borrowed = matches!(Type::from_hir(&value.ty), Type::Reference { .. });
+        let rhs_handle = if borrowed {
+            self.builder
+                .build_load(
+                    self.context.ptr_type(inkwell::AddressSpace::default()),
+                    rhs_ptr,
+                    "tensor.op.rhs",
+                )
+                .map_err(llvm_err)?
+                .into_pointer_value()
+        } else {
+            rhs_ptr
+        };
+
+        let target_ptr = *self
+            .variables
+            .get(target)
+            .ok_or_else(|| CodegenError::UndefinedVariable(target.to_string()))?;
+        let lhs_handle = self
+            .builder
+            .build_load(
+                self.context.ptr_type(inkwell::AddressSpace::default()),
+                target_ptr,
+                "tensor.op.lhs",
+            )
+            .map_err(llvm_err)?
+            .into_pointer_value();
+
+        let lhs_data = self.load_dlpack_data(lhs_handle)?;
+        let rhs_data = self.load_dlpack_data(rhs_handle)?;
+        let buffer_ty = self.tensor_buffer_type(&tensor_ty)?;
+        let elem_llvm = self.get_any_llvm_type(&element_ty)?;
+
+        let i64_type = self.context.i64_type();
+        let index = self.entry_alloca(i64_type, "tensor.op.i")?;
+        self.builder
+            .build_store(index, i64_type.const_zero())
+            .map_err(llvm_err)?;
+        let function = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("tensor update outside a function".to_string())
+        })?;
+        let head = self.context.append_basic_block(function, "tensor.op.head");
+        let body = self.context.append_basic_block(function, "tensor.op.body");
+        let done = self.context.append_basic_block(function, "tensor.op.done");
+
+        self.builder
+            .build_unconditional_branch(head)
+            .map_err(llvm_err)?;
+        self.builder.position_at_end(head);
+        let i = self
+            .builder
+            .build_load(i64_type, index, "tensor.op.idx")
+            .map_err(llvm_err)?
+            .into_int_value();
+        let more = self
+            .builder
+            .build_int_compare(
+                IntPredicate::ULT,
+                i,
+                i64_type.const_int(count as u64, false),
+                "tensor.op.more",
+            )
+            .map_err(llvm_err)?;
+        self.builder
+            .build_conditional_branch(more, body, done)
+            .map_err(llvm_err)?;
+
+        self.builder.position_at_end(body);
+        // `i` is below `count` on this edge, because the head's `ULT` test is what
+        // branches here, so both slot addresses stay inside their buffers.
+        let lhs_slot = self.tensor_slot(buffer_ty, lhs_data, i)?;
+        let rhs_slot = self.tensor_slot(buffer_ty, rhs_data, i)?;
+        let lhs_elem = self
+            .builder
+            .build_load(elem_llvm, lhs_slot, "tensor.op.a")
+            .map_err(llvm_err)?;
+        let rhs_elem = self
+            .builder
+            .build_load(elem_llvm, rhs_slot, "tensor.op.b")
+            .map_err(llvm_err)?;
+        let updated = self.tensor_element_arith(op, lhs_elem, rhs_elem, &element_ty, offset)?;
+        self.builder
+            .build_store(lhs_slot, updated)
+            .map_err(llvm_err)?;
+        let next = self
+            .builder
+            .build_int_add(i, i64_type.const_int(1, false), "tensor.op.next")
+            .map_err(llvm_err)?;
+        self.builder.build_store(index, next).map_err(llvm_err)?;
+        // The element arithmetic may have split the body around an overflow or
+        // divide-by-zero guard, so the back edge leaves whichever block is current now.
+        self.builder
+            .build_unconditional_branch(head)
+            .map_err(llvm_err)?;
+
+        self.builder.position_at_end(done);
+        // An owned operand is consumed by the update, so its buffer is released here:
+        // it has no binding left to free it at scope exit.
+        if !borrowed {
+            self.mark_moved_for_drop(value);
+            self.build_dlpack_release(rhs_handle)?;
+        }
+        Ok(())
+    }
+
+    /// One element of a tensor compound assignment, with the same guards the scalar
+    /// operator carries: a tensor's arithmetic is its element's arithmetic, so an
+    /// overflowing element panics exactly where an overflowing scalar would.
+    fn tensor_element_arith(
+        &mut self,
+        op: BinaryOp,
+        lhs: BasicValueEnum<'ctx>,
+        rhs: BasicValueEnum<'ctx>,
+        element_ty: &Type,
+        offset: usize,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        if let (BasicValueEnum::FloatValue(a), BasicValueEnum::FloatValue(b)) = (lhs, rhs) {
+            let value = match op {
+                BinaryOp::Add => self.builder.build_float_add(a, b, "tensor.op.add"),
+                BinaryOp::Subtract => self.builder.build_float_sub(a, b, "tensor.op.sub"),
+                BinaryOp::Multiply => self.builder.build_float_mul(a, b, "tensor.op.mul"),
+                BinaryOp::Divide => self.builder.build_float_div(a, b, "tensor.op.div"),
+                BinaryOp::Modulo => self.builder.build_float_rem(a, b, "tensor.op.rem"),
+                _ => {
+                    return Err(CodegenError::InternalError(
+                        "a compound assignment carries an arithmetic operator".to_string(),
+                    ))
+                }
+            };
+            return Ok(value.map_err(llvm_err)?.into());
+        }
+        let (BasicValueEnum::IntValue(a), BasicValueEnum::IntValue(b)) = (lhs, rhs) else {
+            return Err(CodegenError::InternalError(
+                "a tensor element is an integer or a float".to_string(),
+            ));
+        };
+        let unsigned = crate::type_mapping::TypeMapper::is_unsigned_int(element_ty);
+        let value = match op {
+            BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply => {
+                self.codegen_int_arith(op, a, b, unsigned, offset, "tensor.op.arith")?
+            }
+            BinaryOp::Divide | BinaryOp::Modulo => {
+                self.codegen_int_div_rem(op, a, b, unsigned, offset, "tensor.op.divrem")?
+            }
+            _ => {
+                return Err(CodegenError::InternalError(
+                    "a compound assignment carries an arithmetic operator".to_string(),
+                ))
+            }
+        };
+        Ok(value.into())
     }
 
     /// An LLVM constant array over `values`, which must themselves be constants.

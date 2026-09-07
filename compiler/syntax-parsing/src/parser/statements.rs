@@ -387,6 +387,7 @@ pub(crate) fn stmt_span(stmt: &Stmt) -> shared_types::Span {
         Stmt::ValElse { span, .. } => *span,
         Stmt::Const { span, .. } => *span,
         Stmt::Assignment { span, .. } => *span,
+        Stmt::CompoundAssignment { span, .. } => *span,
         Stmt::Return { span, .. } => *span,
         Stmt::If { span, .. } => *span,
         Stmt::While { span, .. } => *span,

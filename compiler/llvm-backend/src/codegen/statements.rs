@@ -699,6 +699,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.codegen_var_decl(name, ty, init.as_ref())
             }
             HirStmt::Assignment { target, value, .. } => self.codegen_assignment(target, value),
+            HirStmt::TensorCompoundAssign {
+                target,
+                op,
+                value,
+                ty,
+                span,
+            } => self.codegen_tensor_compound_assign(target, *op, value, ty, span.start),
             HirStmt::Return { value, .. } => self.codegen_return(value.as_ref()),
             HirStmt::If {
                 condition,

@@ -49,10 +49,18 @@ importing file's table. A payload-*less* variant (`None`) is indistinguishable f
 parse time and arrives as `Pattern::Binding`, resolved by the same table.
 
 ### What the parser desugars, and what earns a node
-Most sugar never reaches this crate: tuple / struct / array destructuring, compound assignment,
+Most sugar never reaches this crate: tuple / struct / array destructuring,
 type aliases, trait default-method injection, struct field-init shorthand, and
-argument-position `impl Trait` are all expanded at parse time. Two exceptions earn a node, and
+argument-position `impl Trait` are all expanded at parse time. Three exceptions earn a node, and
 the reason is the same each time: the information is not available yet:
+- `Stmt::CompoundAssignment { target, op, value, span }` survives because whether `x OP= v`
+  becomes `x = x OP v` or an in-place update is **type-directed**: a type implementing the
+  matching `*Assign` trait takes the in-place path and every other type takes the desugaring.
+  The parser has no types. Tensors are the only type on the in-place path today, and the
+  difference is observable there: the desugaring would move the tensor out of its own binding
+  and reallocate its buffer. Both the type checker and `hir-lowering` re-form the desugared
+  `Expr::Binary` themselves for the types that take it, which is what keeps a user operator-trait
+  impl reachable through `+=`.
 - `Stmt::ValElse { pattern, value, else_binding, else_block, span }` survives because its pattern
   is **refutable**: the test and the failure branch have to be represented. `pattern` reuses the
   `Pattern` set from `match`; `else_binding` is the optional `|name|`, where an `Identifier` named

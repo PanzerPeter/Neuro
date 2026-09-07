@@ -468,9 +468,20 @@ same check for return-position `impl Trait<Assoc = U>`.
   result type into `operator_binary_impls` (`(struct, BinaryOp)` → `OperatorDispatch { rhs,
   result }`) or `operator_unary_impls`. In `check_expr` a binary or unary operator whose peeled
   left/operand type is a struct with a matching entry takes the impl's result type **before** the
-  built-in numeric and comparison paths. Not yet: the dedicated in-place `*Assign` traits
-  (compound assignment goes through the parse-time desugar to the by-value operator), `MatMul`/`@`,
+  built-in numeric and comparison paths. Not yet: user-declarable `*Assign` traits, `MatMul`/`@`,
   and auto-derived trait default methods: each operator needs its own impl method.
+- **Compound assignment** (`Stmt::CompoundAssignment`) implements the operator-trait dispatch rule in
+  `type_checkers/statements.rs`. A tensor target routes to `check_tensor_compound_assign`
+  (`type_checkers/tensors.rs`), the compiler-known `*Assign` implementation; every other target
+  re-forms the `Expr::Binary` desugar and checks it as an ordinary assignment through
+  `check_assignment`, which is what keeps a user operator-trait impl reachable through `+=`. The
+  tensor path checks the operand **before** the target's mutability, which is the evaluation
+  order the language specifies; requires the element to have arithmetic
+  (`TensorElementNotArithmetic` rejects `bool` and the half-precision types, matching their
+  scalar contract); accepts a `Tensor<T, S>` or a
+  `&Tensor<T, S>` operand of the target's own type and reports any other as `Mismatch`; and moves
+  an owned operand, so a right-hand side that moved the target itself (`w += w`) is
+  `UseOfMovedValue`.
 
 **Dynamic dispatch.** `resolve_type` delegates to a private `resolve_type_ctx(ty, behind_ref)`
 whose flag is set only by the `Reference` arm, so a bare `dyn Trait` is

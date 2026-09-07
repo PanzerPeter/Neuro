@@ -21,7 +21,8 @@ expression already carries the type the checker resolved for it.
 - Implemented: traits, operator traits, and `impl` / `dyn` dispatch
 - Implemented: enums, generic enums, `Option<T>` / `Result<T, E>`, and the standard collections
 - Implemented: statically shaped tensors `Tensor<T, [d0, ...]>`: annotations, literal
-  coercion, the construction helpers, and the ownership surface (`.clone()`, `.to(device)`)
+  coercion, the construction helpers, the ownership surface (`.clone()`, `.to(device)`), and
+  in-place compound assignment (`w -= g`)
 
 ## Primitive Types
 
@@ -1172,8 +1173,9 @@ Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
 ### Phase 2, Tensors
 
 - Implemented: static tensor types `Tensor<f32, [3, 3]>`, literal coercion, the
-  construction helpers, and tensor ownership (see [Tensor Types](#tensor-types))
-- Planned: reading a tensor back (indexing, slicing, arithmetic, and reductions)
+  construction helpers, tensor ownership, and in-place compound assignment
+  (see [Tensor Types](#tensor-types))
+- Planned: reading a tensor back (indexing, slicing, by-value arithmetic, and reductions)
 - Planned: broadcasting rules
 - Planned: shape generics, named dimensions, and dynamic shapes
 
@@ -1680,12 +1682,35 @@ field, and `.to(device)` all transfer ownership, and only the last owner release
 tensor held in a struct field is not released when the struct goes out of scope; that gap is
 shared with the standard collections.
 
+### Updating a tensor in place
+
+The compound assignment operators `+=`, `-=`, `*=`, `/=` and `%=` update a `mut` tensor's
+own buffer element by element. They do not desugar to `w = w OP g` the way they do for
+every other type, so nothing is allocated and the tensor's DLPack handle and `data` pointer
+are unchanged across the statement.
+
+```neuro
+mut w = Tensor::<f32, [784, 128]>::random_normal(mean: 0.0f32, std: 0.02f32)
+val step = Tensor::<f32, [784, 128]>::zeros()
+
+for i in 0..8 {
+    w -= &step                            // in place: one buffer for the whole loop
+}
+```
+
+The operand is a tensor of the same element type and shape, owned or borrowed: `w += g`
+consumes `g`, while `w += &g` reads it, so one operand can serve every iteration of a loop.
+The operand is evaluated before the target is borrowed for the update. The element type
+must have arithmetic (any integer, `f32`, or `f64`), and element arithmetic carries the
+same guards the scalar operator does. See
+[Compound Assignment Operators](operators.md#compound-assignment-operators).
+
 ### What tensors cannot do yet
 
 A tensor can be built, bound, moved, cloned, passed, returned, transferred with
-`.to(device)`, and stored in a struct, but not yet read back. Indexing and slicing
-(`t[i, j]`, `t[1..3, ..]`), tensor arithmetic (`a + b`, `a @ b`), in-place compound
-assignment, `.t()`, `.reshape(...)`, and the reductions (`.sum()`, `.mean()`, `.max()`,
+`.to(device)`, updated in place, and stored in a struct, but not yet read back. Indexing
+and slicing (`t[i, j]`, `t[1..3, ..]`), by-value tensor arithmetic (`a + b`, `a @ b`),
+`.t()`, `.reshape(...)`, and the reductions (`.sum()`, `.mean()`, `.max()`,
 `.min()`) are all later work. Symbolic
 extents (`Tensor<f32, [M, K]>`), named dimensions, and dynamic axes (`Tensor<f32, [?, 768]>`)
 are not accepted; a non-literal extent is a parse error.

@@ -132,6 +132,7 @@ showcase/log_builder.nr     64
 showcase/model_shapes.nr    216
 showcase/mutable_borrows.nr 47
 showcase/num_algorithms.nr  33
+showcase/optimizer_step.nr  32
 showcase/perceptron.nr      8
 showcase/ranked_finish.nr   176
 showcase/render_settings.nr 99

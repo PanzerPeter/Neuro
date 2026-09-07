@@ -196,6 +196,13 @@ pub enum TypeError {
     #[error("`Tensor` has no constructor named '{ctor}' at {span:?}; it provides `zeros`, `ones`, `identity`, `random_normal`, `scalar`, and `from`")]
     UnknownTensorConstructor { ctor: String, span: Span },
 
+    #[error("compound assignment `{op}=` at {span:?} is not defined on a tensor of {element}: `{op}` requires an element type with arithmetic, so use an integer, `f32`, or `f64` tensor")]
+    TensorElementNotArithmetic {
+        op: String,
+        element: Type,
+        span: Span,
+    },
+
     #[error("`Tensor::{ctor}` at {span:?} does not apply to {ty}: {reason}")]
     TensorConstructorNotApplicable {
         ctor: String,

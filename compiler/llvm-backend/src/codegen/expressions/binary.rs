@@ -398,7 +398,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// release. The release path produces that wrap by dividing by `1` instead, since
     /// `MIN / 1` is `MIN` and `MIN % 1` is `0`, exactly the wrapped results, without
     /// ever handing `-1` to the instruction.
-    fn codegen_int_div_rem(
+    pub(super) fn codegen_int_div_rem(
         &mut self,
         op: BinaryOp,
         lhs: IntValue<'ctx>,

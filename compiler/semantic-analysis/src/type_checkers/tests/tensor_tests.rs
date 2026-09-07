@@ -539,3 +539,148 @@ func main() -> i32 {
         "`.to` takes a Device; got {errors:?}"
     );
 }
+
+#[test]
+fn a_compound_assignment_accepts_an_owned_and_a_borrowed_operand() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut w: Tensor<f32, [2, 2]> = [[1.0, 2.0], [3.0, 4.0]]
+    val g: Tensor<f32, [2, 2]> = [[0.5, 0.5], [0.5, 0.5]]
+    w -= &g
+    w += Tensor::<f32, [2, 2]>::ones()
+    w *= &g
+    w /= &g
+    w %= &g
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "every arithmetic compound assignment applies to a tensor; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_borrowed_operand_survives_the_compound_assignment() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut w: Tensor<f32, [2]> = [1.0, 2.0]
+    val g: Tensor<f32, [2]> = [0.5, 0.5]
+    w += &g
+    w += &g
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "a borrowed operand is read, not consumed; got {errors:?}"
+    );
+}
+
+#[test]
+fn an_owned_operand_is_consumed_by_the_compound_assignment() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut w: Tensor<f32, [2]> = [1.0, 2.0]
+    val g: Tensor<f32, [2]> = [0.5, 0.5]
+    w += g
+    w += g
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UseOfMovedValue { .. })),
+        "an owned operand moves into the update; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_compound_assignment_rejects_a_differently_shaped_operand() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut w: Tensor<f32, [2, 2]> = [[1.0, 2.0], [3.0, 4.0]]
+    val g: Tensor<f32, [3, 3]> = [
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0]
+    ]
+    w += &g
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })),
+        "the shape is part of the type; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_compound_assignment_requires_a_mut_target() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val w: Tensor<f32, [2]> = [1.0, 2.0]
+    val g: Tensor<f32, [2]> = [0.5, 0.5]
+    w += &g
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::AssignToImmutable { .. })),
+        "an in-place update needs an exclusive borrow; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_compound_assignment_rejects_an_element_type_without_arithmetic() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut w: Tensor<f16, [2]> = [1.0, 2.0]
+    val g: Tensor<f16, [2]> = [0.5, 0.5]
+    w += &g
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorElementNotArithmetic { .. })),
+        "half precision stops short of arithmetic; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_compound_assignment_cannot_take_its_own_target_as_the_operand() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut w: Tensor<f32, [2]> = [1.0, 2.0]
+    w += w
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UseOfMovedValue { .. })),
+        "the operand moved the target it updates; got {errors:?}"
+    );
+}

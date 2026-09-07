@@ -200,6 +200,12 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             target,
             value,
             span,
+        }
+        | Stmt::CompoundAssignment {
+            target,
+            value,
+            span,
+            ..
         } => {
             fv.assigns.push((target.name.clone(), *span));
             collect_expr(value, fv);

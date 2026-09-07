@@ -34,6 +34,12 @@ it the *typed* contract:
    (elements already flattened row-major), `TensorFill`, `TensorIdentity`, `TensorRandomNormal`.
    A fill and an identity stay separate nodes rather than expanding to elements,
    so a large tensor is one node and one loop instead of one node per element.
+   `HirStmt::TensorCompoundAssign { target, op, value, ty, span }` is the in-place update
+   beside them: `ty` is the target's tensor type and `value` is either that same type or a
+   reference to it, an owned operand being consumed by the update and a borrowed one only
+   read. Every other compound assignment is desugared to `HirStmt::Assignment` over a binary
+   expression during lowering, so a backend that ignores this variant loses tensors and
+   nothing else.
 2. **Syntactic noise is normalized away.** The AST's `Expr::Paren` is dropped (tree structure
    already encodes grouping) and identifiers are resolved to their `String` name, with the source
    span on the enclosing node.

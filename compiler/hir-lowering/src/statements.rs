@@ -1,6 +1,6 @@
 //! Statement lowering.
 
-use ast_types::Stmt;
+use ast_types::{Expr, Stmt};
 use neuro_hir::{HirStmt, HirType};
 
 use crate::iteration::{char_indices_receiver, LoopPosition};
@@ -61,6 +61,42 @@ impl Lowerer {
             } => {
                 let expected = self.lookup(&target.name);
                 let value = self.lower_expr(value, expected.as_ref())?;
+                Ok(HirStmt::Assignment {
+                    target: target.name.clone(),
+                    value,
+                    span: *span,
+                })
+            }
+
+            Stmt::CompoundAssignment {
+                target,
+                op,
+                value,
+                span,
+            } => {
+                // The type-directed half of the operator-trait dispatch rule. A tensor updates the
+                // buffer it already owns; every other target takes the desugaring, which
+                // is re-formed as an AST node here rather than as HIR so that a user
+                // type's operator-trait impl is still found by the ordinary binary-
+                // expression lowering.
+                let target_ty = self.lookup(&target.name);
+                if let Some(ty @ HirType::Tensor { .. }) = target_ty {
+                    let value = self.lower_expr(value, Some(&ty))?;
+                    return Ok(HirStmt::TensorCompoundAssign {
+                        target: target.name.clone(),
+                        op: *op,
+                        value,
+                        ty,
+                        span: *span,
+                    });
+                }
+                let desugared = Expr::Binary {
+                    left: Box::new(Expr::Identifier(target.clone())),
+                    op: *op,
+                    right: Box::new(value.clone()),
+                    span: *span,
+                };
+                let value = self.lower_expr(&desugared, target_ty.as_ref())?;
                 Ok(HirStmt::Assignment {
                     target: target.name.clone(),
                     value,

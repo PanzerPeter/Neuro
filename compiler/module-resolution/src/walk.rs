@@ -200,7 +200,9 @@ fn walk_stmt(stmt: &mut Stmt, f: SiteFn) -> Result<(), ModuleError> {
             }
             Ok(())
         }
-        Stmt::Assignment { value, .. } => walk_expr(value, f),
+        Stmt::Assignment { value, .. } | Stmt::CompoundAssignment { value, .. } => {
+            walk_expr(value, f)
+        }
         Stmt::Return { value, .. } => {
             if let Some(value) = value {
                 walk_expr(value, f)?;

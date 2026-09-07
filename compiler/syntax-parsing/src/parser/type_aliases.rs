@@ -276,7 +276,9 @@ fn rewrite_stmt(stmt: &mut Stmt, resolved: &HashMap<String, Type>) {
                 rewrite_expr(init, resolved);
             }
         }
-        Stmt::Assignment { value, .. } => rewrite_expr(value, resolved),
+        Stmt::Assignment { value, .. } | Stmt::CompoundAssignment { value, .. } => {
+            rewrite_expr(value, resolved)
+        }
         Stmt::Return { value, .. } => {
             if let Some(value) = value {
                 rewrite_expr(value, resolved);

@@ -1,0 +1,2 @@
+counters [4]    updated in place, every element matched
+layer  [64, 32] + bias [32] =   2080 params, one buffer each

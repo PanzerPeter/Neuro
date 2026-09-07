@@ -282,16 +282,17 @@ val x: i32 = 10
 
 ## Compound Assignment Operators
 
-Shorthand for updating a mutable variable in-place. Each form is equivalent to
-a plain assignment with the corresponding binary operator on the right-hand side.
+Shorthand for updating a mutable variable. For every type except a tensor each form is
+equivalent to a plain assignment with the corresponding binary operator on the right-hand
+side; a tensor updates its buffer in place instead (see below).
 
-| Operator | Equivalent to |
-|----------|---------------|
-| `x += n` | `x = x + n`  |
-| `x -= n` | `x = x - n`  |
-| `x *= n` | `x = x * n`  |
-| `x /= n` | `x = x / n`  |
-| `x %= n` | `x = x % n`  |
+| Operator | Equivalent to | On a tensor    |
+|----------|---------------|----------------|
+| `x += n` | `x = x + n`   | `add_assign`   |
+| `x -= n` | `x = x - n`   | `sub_assign`   |
+| `x *= n` | `x = x * n`   | `mul_assign`   |
+| `x /= n` | `x = x / n`   | `div_assign`   |
+| `x %= n` | `x = x % n`   | `rem_assign`   |
 
 ```neuro
 mut score: i32 = 100
@@ -314,6 +315,39 @@ while i <= 10 {
 **Requirement**: Left-hand side must be a `mut` variable
 **Type checking**: Same rules as the underlying binary operator apply
 **Note**: Compound assignment on struct fields (`point.x += 1.0`) is not yet supported
+
+### On tensors: in place, no reallocation
+
+A tensor is the one type whose compound assignment does *not* desugar. `w -= g` updates
+the buffer `w` already owns, element by element:
+
+```neuro
+mut w: Tensor<f32, [2, 2]> = [[1.0, 2.0], [3.0, 4.0]]
+val g: Tensor<f32, [2, 2]> = [[0.5, 0.5], [0.5, 0.5]]
+
+w -= &g          // in place: same buffer, same address, nothing allocated
+w *= &g
+```
+
+Why it is a separate rule rather than an optimization of the desugaring: `w = w - g`
+allocates a fresh tensor and rebinds the name to it on every step, which invalidates any
+pointer the runtime, an optimizer's state, or a foreign DLPack consumer is holding, and
+costs a whole weight buffer per training step. The in-place form guarantees neither
+happens: the tensor's DLPack handle and its `data` pointer are unchanged across the
+statement.
+
+The rules:
+
+- The target must be a `mut` tensor binding.
+- The operand is a tensor of the **same** element type and shape, either owned or
+  borrowed. `w += g` consumes `g`; `w += &g` reads it, so one gradient can serve every
+  iteration of a loop. A different shape is a compile error naming both types.
+- The right-hand side is evaluated **first**, before the target is borrowed for the
+  update.
+- The element type must have arithmetic: any integer, `f32`, or `f64`. `bool` and the
+  half-precision types `f16` / `bf16` are rejected, matching their scalar contract.
+- Element arithmetic carries the scalar guards: an overflowing element panics in debug
+  builds, and a zero divisor panics in every build.
 
 ## Null/Error Coalescing Operator (`??`)
 
@@ -594,8 +628,10 @@ Rules and limits:
 - A declared `type Output` must match the method's return type.
 - The logical `!a` (boolean NOT) is **not** overloadable: it is always boolean negation.
 - Compound assignment (`v += w`) works when the type implements the matching by-value
-  operator: it desugars to `v = v + w`. Dedicated in-place `*Assign` traits, matrix
-  multiply `@`, and auto-derived comparison defaults are planned for later phases.
+  operator: it desugars to `v = v + w`. In-place `*Assign` behaviour is compiler-known on
+  tensors (see [Compound Assignment Operators](#compound-assignment-operators)) but not
+  yet declarable for a user type; matrix multiply `@` and auto-derived comparison defaults
+  are planned for later phases.
 - Operator overloading is fully monomorphized and erased: each operator becomes the
   method call it stands for, with no vtable and no runtime cost.
 

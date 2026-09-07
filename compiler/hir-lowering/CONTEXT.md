@@ -269,7 +269,11 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   takes the referent's tensor type (so a `&Tensor` receiver yields an owned tensor), and
   `.to(device)` lowers its one argument at `HirType::Enum("Device")` and yields the receiver's
   own type. `.to` is matched on `recv` rather than the referent, so a borrow does not resolve:
-  the same verdict the type checker reaches. Operators on tensors do not exist yet.
+  the same verdict the type checker reaches. `Stmt::CompoundAssignment` is the one statement
+  whose lowering is type-directed: a tensor target becomes `HirStmt::TensorCompoundAssign`
+  carrying the target's tensor type, and every other target has its `x = x OP rhs` desugar
+  re-formed as an `Expr::Binary` and lowered through `lower_expr`, which is what keeps a user
+  operator-trait impl reachable through `+=`. By-value operators on tensors do not exist yet.
 - **Enumerated loops**: `ForRange` / `ForEach` carry the position binding through as
   `index: Option<String>` and define it in the loop scope as `LOOP_INDEX_TYPE` (`u64`), ahead of
   the element binding so the two collide rather than shadow. The free-variable walker binds it

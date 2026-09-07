@@ -2,7 +2,7 @@
 
 use shared_types::{Identifier, Span};
 
-use super::expressions::{Expr, Pattern};
+use super::expressions::{BinaryOp, Expr, Pattern};
 use super::types::Type;
 
 /// Which transformation a `for`-head adapter applies to the element stream.
@@ -40,6 +40,18 @@ pub enum Stmt {
     },
     Assignment {
         target: Identifier,
+        value: Expr,
+        span: Span,
+    },
+    /// `target OP= value`, kept distinct from the plain assignment it usually
+    /// desugars to.
+    ///
+    /// The choice between the desugaring and an in-place update is type-directed
+    /// (a type implementing the matching `*Assign` trait takes the in-place path),
+    /// and the parser has no types, so the node survives into the checker.
+    CompoundAssignment {
+        target: Identifier,
+        op: BinaryOp,
         value: Expr,
         span: Span,
     },

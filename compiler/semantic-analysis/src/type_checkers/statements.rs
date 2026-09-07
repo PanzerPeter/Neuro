@@ -396,60 +396,34 @@ impl TypeChecker {
                 target,
                 value,
                 span,
+            } => self.check_assignment(target, value, *span),
+
+            Stmt::CompoundAssignment {
+                target,
+                op,
+                value,
+                span,
             } => {
-                // Lookup the target variable first to get expected type
-                let expected_ty = self.symbols.lookup(&target.name).map(|s| s.ty.clone());
-
-                // If the target was a reference binding, its previous borrow ends
-                // here: release it before the new value is checked so that
-                // re-borrowing the same place (`r = &mut x`) is not a false
-                // conflict against the borrow being overwritten.
-                self.symbols.release_borrow_of(&target.name);
-
-                let value_ty = self
-                    .check_expr(value, expected_ty.as_ref())
-                    .unwrap_or(Type::Unknown);
-
-                // The RHS is moved into the target, and the target now owns a
-                // fresh value, clearing any prior moved-out state on it.
-                self.record_move(value);
-                self.symbols.clear_moved(&target.name);
-
-                // A direct `&place` / `&mut place` RHS makes the target hold a new
-                // persistent borrow of that place.
-                if let Some((place, exclusive)) = borrow_target_of(value) {
-                    self.symbols.attach_borrow(&target.name, &place, exclusive);
+                // The operator-trait dispatch rule: a type implementing the matching `*Assign`
+                // trait updates in place; everything else desugars to
+                // `target = target OP value` and allocates a fresh value. Tensors are
+                // the one type on the first path today, and the one where the
+                // difference is observable: the desugaring would move the tensor out
+                // of its own binding and reallocate its buffer.
+                let target_ty = self
+                    .symbols
+                    .lookup(&target.name)
+                    .map(|info| info.ty.clone());
+                if matches!(target_ty, Some(Type::Tensor { .. })) {
+                    return self.check_tensor_compound_assign(target, *op, value, *span);
                 }
-
-                // Lookup the target variable again for validation
-                if let Some(symbol_info) = self.symbols.lookup(&target.name) {
-                    if !symbol_info.mutable {
-                        self.record_error(TypeError::AssignToImmutable {
-                            name: target.name.clone(),
-                            span: target.span,
-                        });
-                        return None;
-                    }
-
-                    // Check type compatibility (skip if value type is unknown)
-                    if !matches!(value_ty, Type::Unknown)
-                        && !value_ty.is_compatible_with(&symbol_info.ty)
-                    {
-                        self.record_error(TypeError::Mismatch {
-                            expected: symbol_info.ty.clone(),
-                            found: value_ty,
-                            span: *span,
-                        });
-                    }
-
-                    Some(())
-                } else {
-                    self.record_error(TypeError::UndefinedVariable {
-                        name: target.name.clone(),
-                        span: target.span,
-                    });
-                    None
-                }
+                let desugared = Expr::Binary {
+                    left: Box::new(Expr::Identifier(target.clone())),
+                    op: *op,
+                    right: Box::new(value.clone()),
+                    span: *span,
+                };
+                self.check_assignment(target, &desugared, *span)
             }
 
             Stmt::Return { value, span } => {
@@ -1010,6 +984,64 @@ impl TypeChecker {
                 Some(())
             }
         }
+    }
+
+    /// Check `target = value`: the plain assignment, and the form a compound
+    /// assignment desugars to when its target is not updated in place.
+    fn check_assignment(
+        &mut self,
+        target: &Identifier,
+        value: &Expr,
+        span: shared_types::Span,
+    ) -> Option<()> {
+        let expected_ty = self.symbols.lookup(&target.name).map(|s| s.ty.clone());
+
+        // If the target was a reference binding, its previous borrow ends
+        // here: release it before the new value is checked so that
+        // re-borrowing the same place (`r = &mut x`) is not a false
+        // conflict against the borrow being overwritten.
+        self.symbols.release_borrow_of(&target.name);
+
+        let value_ty = self
+            .check_expr(value, expected_ty.as_ref())
+            .unwrap_or(Type::Unknown);
+
+        // The RHS is moved into the target, and the target now owns a
+        // fresh value, clearing any prior moved-out state on it.
+        self.record_move(value);
+        self.symbols.clear_moved(&target.name);
+
+        // A direct `&place` / `&mut place` RHS makes the target hold a new
+        // persistent borrow of that place.
+        if let Some((place, exclusive)) = borrow_target_of(value) {
+            self.symbols.attach_borrow(&target.name, &place, exclusive);
+        }
+
+        // Lookup the target variable again for validation
+        let Some(symbol_info) = self.symbols.lookup(&target.name) else {
+            self.record_error(TypeError::UndefinedVariable {
+                name: target.name.clone(),
+                span: target.span,
+            });
+            return None;
+        };
+        if !symbol_info.mutable {
+            self.record_error(TypeError::AssignToImmutable {
+                name: target.name.clone(),
+                span: target.span,
+            });
+            return None;
+        }
+
+        // Check type compatibility (skip if value type is unknown)
+        if !matches!(value_ty, Type::Unknown) && !value_ty.is_compatible_with(&symbol_info.ty) {
+            self.record_error(TypeError::Mismatch {
+                expected: symbol_info.ty.clone(),
+                found: value_ty,
+                span,
+            });
+        }
+        Some(())
     }
 
     /// Define an enumerated loop's position binding in the already-pushed loop

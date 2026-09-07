@@ -10,6 +10,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.18.0] - 2026-09-07
+
+### Added
+
+- `codegen`: **in-place compound assignment on tensors** (Phase 2B, §4.3). `w += g`, `w -= g`,
+  `w *= g`, `w /= g` and `w %= g` update the buffer a `mut` tensor already owns, element by
+  element. Nothing is allocated: the tensor's DLPack handle and its `data` pointer are the same
+  values after the statement as before, so a pointer held by an optimizer's state, by the
+  runtime, or by a foreign DLPack consumer stays valid across the update. That is the point of
+  the operator rather than an optimization of it — the by-value desugaring `w = w - g` builds a
+  fresh weight buffer per training step and rebinds the name to it, invalidating both.
+
+  The operand is a tensor of the target's own element type and shape, owned or borrowed.
+  `w += g` consumes `g`; `w += &g` reads it, so one gradient serves every iteration of a loop.
+  A different shape is a compile error naming both types. The operand is evaluated **first**,
+  before the target is borrowed for the update, which is what makes the canonical
+  `w -= lr * w.grad()` writable at all: the shared read of the weight finishes before the
+  exclusive update begins. The element type must have arithmetic — any integer, `f32`, or
+  `f64`; `bool` and the half-precision types are rejected with a new diagnostic, matching the
+  scalar contract. Element arithmetic reuses the scalar guards rather than reimplementing them,
+  so an overflowing element panics in debug builds and a zero divisor panics in every build.
+
+### Changed
+
+- `parser`: **compound assignment is no longer desugared at parse time.** The operator-trait
+  dispatch rule is type-directed — a type implementing the matching `*Assign` trait updates in
+  place, everything else becomes `x = x OP rhs` — and the parser has no types, so
+  `target OP= rhs` now reaches the frontend as its own AST statement. The type checker and HIR
+  lowering re-form the desugar themselves for the types that take it, at the AST level, so a
+  user type's operator-trait impl is still reached through `+=`. Scalar and user-type compound
+  assignment are unchanged.
+
 ## [2.17.2] - 2026-09-07
 
 ### Fixed

@@ -33,10 +33,10 @@ has three homes, and missing one fails silently rather than loudly:
 
 ### Parse-time desugars: what never reaches ast-types
 These run before any other slice sees the tree, so downstream passes never learn the sugar
-existed:
-- **Compound assignment**: `target OP= rhs` becomes
-  `Stmt::Assignment { target, value: Expr::Binary { target, OP, rhs } }`, detected by one-token
-  lookahead in `parse_statement`.
+existed. **Compound assignment is not among them**: `target OP= rhs` is detected by one-token
+lookahead in `parse_statement` and emitted as `Stmt::CompoundAssignment { target, op, value }`
+unchanged, because the choice between `target = target OP rhs` and an in-place `*Assign`
+update is type-directed and the parser has no types.
 - **Type aliases**: collected separately from `items`, then `expand_type_aliases`
   (`parser/type_aliases.rs`) resolves alias chains (rejecting cycles, duplicates, and built-in
   shadows) and substitutes every aliased annotation across items/statements/expressions,

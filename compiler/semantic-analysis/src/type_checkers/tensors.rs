@@ -1,14 +1,15 @@
-// Tensor value construction: nested-array-literal coercion and the six
-// `Tensor::<T, [...]>::ctor(...)` construction helpers.
+// Tensor value construction and in-place update: nested-array-literal coercion, the six
+// `Tensor::<T, [...]>::ctor(...)` construction helpers, and the `*Assign` compound
+// assignment path.
 //
-// Reached from the array-literal arm of `check_expr` and from the associated-call arm
-// of `check_call_expr`. Adds methods to the same `impl TypeChecker` block as the rest
-// of `type_checkers`.
+// Reached from the array-literal arm of `check_expr`, the associated-call arm of
+// `check_call_expr`, and the compound-assignment arm of `check_stmt`. Adds methods to
+// the same `impl TypeChecker` block as the rest of `type_checkers`.
 
 use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::Type;
-use ast_types::{Expr, GenericArg};
+use ast_types::{BinaryOp, Expr, GenericArg};
 use shared_types::{Identifier, Span};
 
 /// The prelude name a tensor constructor is qualified by. A module may shadow it with
@@ -286,6 +287,87 @@ impl TypeChecker {
                 });
             }
         }
+    }
+
+    /// Check `target OP= value` where `target` is a tensor: the in-place `*Assign`
+    /// path of the operator-trait dispatch rule.
+    ///
+    /// The language fixes the evaluation order: the right-hand side is evaluated first,
+    /// and only then is the target borrowed mutably. That is what makes the canonical
+    /// weight update writable at all, since the shared read of the weight finishes
+    /// before the exclusive update begins, so the checks below run in that order too.
+    pub(crate) fn check_tensor_compound_assign(
+        &mut self,
+        target: &Identifier,
+        op: BinaryOp,
+        value: &Expr,
+        span: Span,
+    ) -> Option<()> {
+        let Some(tensor_ty) = self
+            .symbols
+            .lookup(&target.name)
+            .map(|info| info.ty.clone())
+        else {
+            self.record_error(TypeError::UndefinedVariable {
+                name: target.name.clone(),
+                span: target.span,
+            });
+            return None;
+        };
+        let Type::Tensor { element, .. } = &tensor_ty else {
+            return None;
+        };
+
+        // The element carries the arithmetic, so the operator is defined exactly where
+        // it is defined on the scalar: `bool` has none, and the half-precision scalar
+        // contract stops short of it.
+        if !element.is_numeric() || element.is_half_float() {
+            self.record_error(TypeError::TensorElementNotArithmetic {
+                op: op.to_string(),
+                element: (**element).clone(),
+                span,
+            });
+            return None;
+        }
+
+        let value_ty = self
+            .check_expr(value, Some(&tensor_ty))
+            .unwrap_or(Type::Unknown);
+        // A borrowed operand is read rather than consumed, which is what lets a weight
+        // be updated from a tensor the caller still owns.
+        let borrowed = matches!(value_ty, Type::Reference { .. });
+        if !matches!(value_ty, Type::Unknown) && !value_ty.referent().is_compatible_with(&tensor_ty)
+        {
+            self.record_error(TypeError::Mismatch {
+                expected: tensor_ty,
+                found: value_ty,
+                span,
+            });
+            return None;
+        }
+        if !borrowed {
+            self.record_move(value);
+        }
+
+        let symbol_info = self.symbols.lookup(&target.name)?;
+        if !symbol_info.mutable {
+            self.record_error(TypeError::AssignToImmutable {
+                name: target.name.clone(),
+                span: target.span,
+            });
+            return None;
+        }
+        // The target is read as well as written, so a right-hand side that moved it out
+        // (`w += w`) leaves nothing to update in place.
+        if let Some(moved_at) = symbol_info.moved_at {
+            self.record_error(TypeError::UseOfMovedValue {
+                name: target.name.clone(),
+                span: target.span,
+                moved_at,
+            });
+            return None;
+        }
+        Some(())
     }
 
     fn reject_tensor_ctor(&mut self, ctor: &Identifier, ty: &Type, reason: &str, span: Span) {

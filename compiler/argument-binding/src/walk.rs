@@ -69,6 +69,7 @@ fn walk_stmt(stmt: &mut Stmt, f: CallFn, errors: &mut Vec<ArgumentError>) {
             }
         }
         Stmt::Assignment { value, .. }
+        | Stmt::CompoundAssignment { value, .. }
         | Stmt::FieldAssignment { value, .. }
         | Stmt::Const { value, .. } => walk_expr(value, f, errors),
         Stmt::Return { value, .. } | Stmt::Break { value, .. } => {

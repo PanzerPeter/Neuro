@@ -335,9 +335,12 @@ for zero-cost sharing, and the consuming `.to(device)` transfer over the prelude
 enum. v2.16.0 moved the buffer itself out of line, which closed `BUG-018` and lifted the size
 limit at every optimization level, and v2.17.0 made the value a DLPack handle: a tensor is a
 pointer to a `DLManagedTensorVersioned` carrying its rank, shape, strides, dtype, and device,
-over a 64-byte-aligned buffer released through the handle's own `deleter`. A tensor can now
-be built, bound, moved, cloned, passed, returned, and stored in a struct, but not read back:
-in-place compound assignment, slicing and indexing, and the reductions are all still open.
+over a 64-byte-aligned buffer released through the handle's own `deleter`. v2.18.0 added the
+in-place compound assignment family: `w -= g` and its siblings update the target's own buffer
+element-wise, so a weight update allocates nothing and every pointer into it stays valid. A
+tensor can now be built, bound, moved, cloned, passed, returned, updated in place, and stored
+in a struct, but not read back: slicing and indexing, shape generics, named dimensions,
+dynamic shapes, and the reductions are all still open.
 Start at the top of 2B in the roadmap.
 
 Nothing links `TokenKind` to the editor grammar, so any lexer change must also update

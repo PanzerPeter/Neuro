@@ -6,7 +6,7 @@
 use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
-use crate::ast::{BinaryOp, Expr, Stmt};
+use crate::ast::{BinaryOp, Stmt};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 
@@ -43,8 +43,11 @@ impl Parser {
         })
     }
 
-    /// Parse a compound assignment statement, desugaring into a plain assignment.
-    /// `target OP= rhs` → `target = target OP rhs`: no new AST nodes required.
+    /// Parse a compound assignment statement `target OP= rhs`.
+    ///
+    /// The node is kept as written rather than desugared here: whether `OP=` becomes
+    /// `target = target OP rhs` or an in-place update depends on the target's type,
+    /// which the parser does not have.
     pub(crate) fn parse_compound_assignment_stmt(&mut self) -> ParseResult<Stmt> {
         let target_token = self.consume(TokenKind::Identifier(String::new()), "identifier")?;
         let target = if let TokenKind::Identifier(name) = target_token.kind {
@@ -84,20 +87,12 @@ impl Parser {
         self.skip_newlines();
 
         let rhs = self.parse_expr(Precedence::Lowest)?;
+        let span = target.span.merge(rhs.span());
 
-        let target_expr = Expr::Identifier(target.clone());
-        let binary_span = target.span.merge(rhs.span());
-        let value = Expr::Binary {
-            left: Box::new(target_expr),
-            op: binary_op,
-            right: Box::new(rhs),
-            span: binary_span,
-        };
-        let span = target.span.merge(value.span());
-
-        Ok(Stmt::Assignment {
+        Ok(Stmt::CompoundAssignment {
             target,
-            value,
+            op: binary_op,
+            value: rhs,
             span,
         })
     }

@@ -375,6 +375,17 @@ once as a private `.rodata` global and `memcpy` it in, so a fill of any size cos
 than an instruction per element; a literal mentioning a runtime value is written slot by slot;
 `random_normal` writes its counted loop straight into the heap buffer.
 
+`codegen_tensor_compound_assign` in the same file is the one tensor node that allocates
+**nothing**: `HirStmt::TensorCompoundAssign` loads the target's own handle out of its variable
+slot and runs a counted loop writing each updated element back into the buffer that handle
+already addresses, so the handle and its `data` pointer are the same values after the statement
+as before. The right-hand side is evaluated before the target is touched, and an owned operand
+is released through `build_dlpack_release` after the loop (`mark_moved_for_drop` first, so the
+buffer is not freed twice) while a borrowed one is only read. Element arithmetic goes through
+`tensor_element_arith`, which reuses the scalar `codegen_int_arith` / `codegen_int_div_rem`
+guards: an overflowing element panics on the debug tier and a zero divisor panics in every
+build, exactly as the scalar operator does.
+
 ## DLPack Representation
 A tensor value *is* the exchange structure DLPack 1.1 defines, so the pointer a Neuro
 program passes around is the pointer a foreign consumer takes: there is no wrap step at an FFI
