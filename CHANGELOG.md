@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.18.1] - 2026-09-07
+
+### Fixed
+
+- `tests`: the tensor compound-assignment tests asserted an abort by comparing the exit code
+  against `-1`, which is only what a Unix abort looks like through the harness: the process is
+  killed by `SIGABRT`, has no exit code at all, and `run_executable` reports the missing code as
+  `-1`. Windows has no signals, so the panic runtime's `abort` arrives as the NTSTATUS exception
+  code `0xC000_0409` and the three guard tests failed there while the compiler behaved
+  identically on both. They now test the property that actually distinguishes an abort from a
+  return on either platform: a negative exit code.
+
+
 ## [2.18.0] - 2026-09-07
 
 ### Added

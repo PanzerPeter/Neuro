@@ -21,8 +21,17 @@ fn compile_and_run(name: &str, source: &str) -> Result<i32, String> {
     CompileTest::new().compile_and_run(name, source)
 }
 
-/// The exit code a program aborted by a panicking guard leaves behind.
-const ABORTED: i32 = -1;
+/// True if a panicking guard stopped the program instead of letting it return a value.
+///
+/// The code comes from `CompileTest::run_executable`, which reports an abort delivered as
+/// a signal (Unix `SIGABRT`, where there is no exit code at all) as `-1`. Windows has no
+/// signals: the panic runtime's `abort` surfaces as an NTSTATUS exception code in the
+/// `0xC000_0000+` range, which the OS hands back as a negative `i32`. Every value these
+/// programs return normally is small and non-negative, so a negative code means aborted
+/// on both platforms.
+fn aborted(exit_code: i32) -> bool {
+    exit_code < 0
+}
 
 /// Every arithmetic operator has a tensor form, and each one computes the element-wise
 /// result: the bracket at the end holds only if `w` matched its expectation exactly.
@@ -75,7 +84,11 @@ func main() -> i32 {
     return 0
 }
 "#;
-    assert_eq!(run_program("tensor_ops_wrong.nr", source), ABORTED);
+    let exit_code = run_program("tensor_ops_wrong.nr", source);
+    assert!(
+        aborted(exit_code),
+        "expected a panicking guard to abort, but the program exited with {exit_code}"
+    );
 }
 
 /// Float elements take the same path; `%` on floats is the IEEE remainder the scalar
@@ -126,7 +139,11 @@ func main() -> i32 {
     return 0
 }
 "#;
-    assert_eq!(run_program("tensor_ops_overflow.nr", source), ABORTED);
+    let exit_code = run_program("tensor_ops_overflow.nr", source);
+    assert!(
+        aborted(exit_code),
+        "expected a panicking guard to abort, but the program exited with {exit_code}"
+    );
 }
 
 /// A zero divisor panics in every build, so an element-wise division by a zeroed tensor
@@ -141,7 +158,11 @@ func main() -> i32 {
     return 0
 }
 "#;
-    assert_eq!(run_program("tensor_ops_divzero.nr", source), ABORTED);
+    let exit_code = run_program("tensor_ops_divzero.nr", source);
+    assert!(
+        aborted(exit_code),
+        "expected a panicking guard to abort, but the program exited with {exit_code}"
+    );
 }
 
 /// The update runs through the target's own handle, so a tensor moved into a struct field
