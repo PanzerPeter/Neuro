@@ -69,7 +69,7 @@ fn result_failure_arm_forwards_the_err_payload() {
         panic!("`?` should desugar to a match");
     };
 
-    // The error is bound out of slot 0 at its own type and handed straight back —
+    // The error is bound out of slot 0 at its own type and handed straight back,
     // `?` forwards it as-is, with no conversion.
     assert_eq!(arms[1].bindings.len(), 1);
     assert_eq!(arms[1].bindings[0].ty, HirType::Char);

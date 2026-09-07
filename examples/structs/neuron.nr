@@ -1,4 +1,4 @@
-// Neuro — AI-first compiled language
+// Neuro: AI-first compiled language
 //
 // A single perceptron (neuron) model demonstrating:
 //   structs · impl blocks · associated functions · instance methods

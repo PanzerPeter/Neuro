@@ -6,7 +6,7 @@
 // nothing at all at `-O3`, and stack garbage for a NaN. The cast now lowers through the
 // saturating intrinsics, so every input has one defined answer.
 //
-// Each program is compiled at both `-O0` and `-O3` and the exit codes must agree — the
+// Each program is compiled at both `-O0` and `-O3` and the exit codes must agree: the
 // disagreement is the defect, independently of which answer is the right one.
 use std::path::PathBuf;
 use std::process::Command;
@@ -15,7 +15,7 @@ use std::process::Command;
 ///
 /// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
 /// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()` — that assumes the legacy
+/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
 /// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
 fn neurc_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_neurc"))

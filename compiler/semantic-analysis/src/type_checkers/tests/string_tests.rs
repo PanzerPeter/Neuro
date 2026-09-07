@@ -34,7 +34,7 @@ fn string_len_resolves_to_u64() {
 fn string_len_with_argument_rejected() {
     let mut checker = TypeChecker::new();
 
-    // "hello".len(1) — len takes no arguments
+    // "hello".len(1): len takes no arguments
     let expr = Expr::Call {
         func: Box::new(Expr::FieldAccess {
             object: Box::new(Expr::Literal(
@@ -95,7 +95,7 @@ fn string_clone_resolves_to_string() {
 fn string_clone_with_argument_rejected() {
     let mut checker = TypeChecker::new();
 
-    // "hello".clone(1) — clone takes no arguments
+    // "hello".clone(1): clone takes no arguments
     let expr = Expr::Call {
         func: Box::new(Expr::FieldAccess {
             object: Box::new(Expr::Literal(
@@ -167,7 +167,7 @@ fn string_slice_resolves_to_string_reference() {
 fn string_slice_without_range_is_rejected() {
     let mut checker = TypeChecker::new();
 
-    // "hello".slice(3) — argument must be a range, not a bare integer
+    // "hello".slice(3): the argument must be a range, not a bare integer
     let expr = Expr::Call {
         func: Box::new(Expr::FieldAccess {
             object: Box::new(Expr::Literal(
@@ -241,7 +241,7 @@ fn char_slice_resolves_to_a_string_reference() {
 fn char_slice_without_range_is_rejected() {
     let mut checker = TypeChecker::new();
 
-    // "hello".char_slice(3) — argument must be a range, not a bare integer
+    // "hello".char_slice(3): the argument must be a range, not a bare integer
     let expr = Expr::Call {
         func: Box::new(Expr::FieldAccess {
             object: Box::new(Expr::Literal(

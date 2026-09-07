@@ -1,7 +1,7 @@
 // `String`: the growable UTF-8 text buffer.
 //
-// The buffer is a plain byte run of `cap` bytes holding `len` live ones — a `Vec<u8>`
-// under a text surface — so `len()` and `clear()` are the shared collection operations
+// The buffer is a plain byte run of `cap` bytes holding `len` live ones, a `Vec<u8>`
+// under a text surface, so `len()` and `clear()` are the shared collection operations
 // and only appending and the copy back out to an immutable `string` are specific here.
 //
 // Growth reserves a whole run of bytes at once rather than one element at a time, which
@@ -21,11 +21,11 @@ use crate::types::Type;
 const RESERVE_HELPER: &str = "__neuro_string_reserve";
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// `s.push_str(text)` — reserve room for the argument's bytes, copy them in after the
+    /// `s.push_str(text)`, which reserves room for the argument's bytes, copy them in after the
     /// live ones, and advance the length.
     ///
     /// The argument is read, never stored, so its own binding keeps ownership of it and
-    /// no move is recorded — the same contract `+` gives its operands.
+    /// no move is recorded, the same contract `+` gives its operands.
     pub(crate) fn codegen_string_push_str(
         &mut self,
         header: PointerValue<'ctx>,
@@ -65,7 +65,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// `s.to_string()` — copy the accumulated bytes into a fresh owned `string`.
+    /// `s.to_string()`, which copies the accumulated bytes into a fresh owned `string`.
     ///
     /// A borrowed view into the builder's buffer would be free, but a later `push_str`
     /// may reallocate and leave it dangling, and the borrow checker does not yet track a
@@ -116,7 +116,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// Both are the `{ ptr, i64 }` fat pointer by value; only a `&mut string`, which is
     /// the referent's address, needs a load, and semantic analysis does not admit one
-    /// here — the load arm exists so a future widening cannot miscompile silently.
+    /// here; the load arm exists so a future widening cannot miscompile silently.
     fn split_string_fatptr(
         &mut self,
         value: BasicValueEnum<'ctx>,

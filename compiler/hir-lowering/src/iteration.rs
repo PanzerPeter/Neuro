@@ -13,7 +13,7 @@
 //! ```
 //!
 //! Every node it produces already exists, so no backend learns that the protocol is
-//! there. The built-in sequence heads — a range, an array, a `Vec`, a borrowed slice —
+//! there. The built-in sequence heads (a range, an array, a `Vec`, a borrowed slice)
 //! never reach this module: they keep their direct counted-loop lowering, which is what
 //! the spec's implementation note permits and what keeps their generated code unchanged.
 
@@ -44,9 +44,9 @@ const CHAR_INDICES_METHOD: &str = "char_indices";
 /// Where a protocol loop's position binding takes its value.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LoopPosition {
-    /// `.enumerate()` — a counter over the steps the loop yielded.
+    /// `.enumerate()`, a counter over the steps the loop yielded.
     Step,
-    /// `.char_indices()` — the iterator's own byte cursor, sampled before each step so
+    /// `.char_indices()`, the iterator's own byte cursor, sampled before each step so
     /// the offset names the code point that step is about to yield.
     ByteOffset,
 }
@@ -222,7 +222,7 @@ impl Lowerer {
 
         // The sample sits ahead of the step because `next` advances the cursor past the
         // code point it returns: read afterwards, every offset would name the following
-        // one. A `continue` cannot skip it — it is the first statement of the body.
+        // one. A `continue` cannot skip it: it is the first statement of the body.
         let mut loop_body = Vec::new();
         if let (LoopPosition::ByteOffset, Some(cursor)) = (position, &cursor_binding) {
             loop_body.push(HirStmt::Assignment {
@@ -260,7 +260,7 @@ impl Lowerer {
 
     /// The iterator a head produces, and the expression that produces it.
     ///
-    /// A type implementing `Iterator` is its own iterator — the blanket
+    /// A type implementing `Iterator` is its own iterator, by the blanket
     /// `impl<I: Iterator> IntoIterator for I` stated as a rule, since a blanket impl has
     /// no syntax yet. `IntoIterator` is consulted first, so a container implementing
     /// both still hands out its dedicated iterator.

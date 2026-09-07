@@ -8,11 +8,11 @@
 // scope everywhere. This file imports nothing at all, and still names all of them.
 //
 // The bindings are the weakest in the language. A module that declares its own `Option`
-// — or its own `None` — keeps its own meaning for that name, and an explicit
+// (or its own `None`) keeps its own meaning for that name, and an explicit
 // `import Enum::{Some}` binds `Some` to that enum instead (see `imports.nr`). Neither is
 // a collision: the prelude is a fallback, not an override.
 //
-// A file that wants none of it writes `@no_prelude` on its first line — see
+// A file that wants none of it writes `@no_prelude` on its first line: see
 // `no_prelude.nr`.
 
 // `Option` names itself, and so do its variants.
@@ -61,7 +61,7 @@ func main() -> i32 {
         Err(reason) => reason           // 9
     }
 
-    // `println` needed no import either — it is a compiler builtin rather than a
+    // `println` needed no import either: it is a compiler builtin rather than a
     // prelude declaration, so even `@no_prelude` leaves it in place.
     println("half(16)     Some -> {eight}")
     println("half(7)      None -> {fallback}")

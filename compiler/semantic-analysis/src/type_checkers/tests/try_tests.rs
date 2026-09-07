@@ -1,6 +1,6 @@
 //! The `?` operator: what it accepts, what it types to, and the three ways to get it
 //! wrong (a non-fallible operand, a function that cannot carry the failure, and an
-//! error type that does not already match — `?` never converts).
+//! error type that does not already match: `?` never converts).
 //!
 //! `Option` / `Result` are prelude source rather than compiler built-ins, so every
 //! program here declares them, which also proves `?` is not wired to one declaration.
@@ -123,7 +123,7 @@ func main() -> i32 {{ 0 }}"
 
 #[test]
 fn the_payload_type_may_differ_from_the_returned_payload() {
-    // Only the error types must agree — the success payloads are independent, since
+    // Only the error types must agree; the success payloads are independent, since
     // the unwrapped value goes on to be used, not returned.
     let errors = semantic_errors(&format!(
         "{FALLIBLE_DECLS}

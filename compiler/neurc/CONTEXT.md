@@ -12,9 +12,9 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 - Tables / Events Published / Events Consumed / Public Read Model: none
 
 ## Shared Kernel
-- diagnostics — pipeline error formatting
-- ast-types — the parsed item list handed between the resolution, binding, and checking steps
-- neuro-hir — the lowered program handed to the backend
+- diagnostics: pipeline error formatting
+- ast-types: the parsed item list handed between the resolution, binding, and checking steps
+- neuro-hir: the lowered program handed to the backend
 
 ## Notes
 neurc is the only crate permitted to depend on every feature slice. It holds **no business
@@ -23,30 +23,30 @@ logic of its own**: every decision is delegated to the owning slice. What it own
 ### Pipeline order, and why it is that order
 Both `check_file` and `compile_file` run the same front half, so neither can skip a step:
 
-1. `load_program` — module resolution plus the prelude. It hands `syntax_parsing::parse` to
+1. `load_program`: module resolution plus the prelude. It hands `syntax_parsing::parse` to
    `module_resolution::resolve_program` and gets back the merged item list of every module the
    root reaches through a qualified path. The parser is **passed in rather than depended on**
    because `module-resolution` may not import a feature slice; neurc is the single place the
    two meet.
-2. `argument_binding::bind_arguments` — after the merge and the prelude, before type checking.
+2. `argument_binding::bind_arguments`: after the merge and the prelude, before type checking.
    A call names a callee that may be declared in any file, so the table cannot be built until
    every module is merged; and the arguments must already sit in declaration order when the
    type checker pairs them with parameter types.
 3. `semantic_analysis::type_check`.
-4. `hir_lowering::lower_program` — the typed HIR. `check` reports the lowered item count;
+4. `hir_lowering::lower_program`: the typed HIR. `check` reports the lowered item count;
    `compile` hands the HIR to `llvm_backend::compile`, which lowers native object code from it
    (the backend does not consume the AST).
 
 `compile_file` then checks the lowered HIR for a function named `main` **before** writing an
 object file. Without that check the pipeline ran to completion and handed a `main`-less object
 to the system linker, so the user saw `undefined reference to 'main'` naming the C runtime's
-startup object rather than their own program. `check` is unaffected — type-checking a module
+startup object rather than their own program. `check` is unaffected: type-checking a module
 with no `main` is legitimate.
 
 ### The prelude
 `prelude::load()` parses `prelude.nr` once into a `Prelude` value that answers two questions:
-`variants()` — every variant of every enum it declares, handed to
-`module_resolution::resolve_program` so each module may write `Some` / `Ok` bare — and
+`variants()`, every variant of every enum it declares, handed to
+`module_resolution::resolve_program` so each module may write `Some` / `Ok` bare, and
 `prepend()`, the declarations themselves. Reading the variant list **off the parsed prelude** is
 what keeps `prelude.nr` the single place the prelude's contents are stated; module resolution is
 *told* them for the same reason it is handed the parser.
@@ -57,7 +57,7 @@ shadows it. The items are otherwise ordinary declarations: nothing downstream sp
 
 Dropping one item takes with it every prelude declaration written against it. `Chars::next`
 returns `Option<char>`, so a program declaring its own `Option` would leave the prelude's own
-body compiled against a type that is no longer there — `PRELUDE_DEPENDENCIES` records that
+body compiled against a type that is no longer there. `PRELUDE_DEPENDENCIES` records that
 edge (`Chars` needs `Option` and `Iterator`), and `dropped_declarations` closes over it.
 `is_dropped` also drops an `impl` block extending a displaced type: those methods belong to the
 prelude's type, not to whatever the program put in its place.
@@ -76,13 +76,13 @@ either in the whole program or absent from all of it.
 validating wrappers, the `Iterator` / `IntoIterator` protocol traits, `Chars`, the codepoint
 iterator `string.chars()` hands out, and `Device`, the enum `tensor.to(device)` takes. The wrappers exist so
 an ordered map can be keyed on a float: IEEE-754 `<` is a partial order, so a raw float key
-could be inserted and never found again — hence `@derive(Copy, Clone)`, a `new` constructor
+could be inserted and never found again. Hence `@derive(Copy, Clone)`, a `new` constructor
 that panics on NaN, and `PartialEq` + `Comparable` impls. They deliberately do **not**
 implement `Hashable`.
 
 The two protocol traits are what `for` desugars against: `Iterator` declares
 `type Item` and `next(&mut self) -> Option<Self::Item>`; `IntoIterator` declares `type Item`,
-`type Iter`, and `into_iter(self) -> Self::Iter`. They are ordinary trait declarations —
+`type Iter`, and `into_iter(self) -> Self::Iter`. They are ordinary trait declarations:
 nothing in the checker or the lowerer treats them as lang items, and a program declaring its
 own `Iterator` shadows them like any other prelude name. `type Iter` carries no `: Iterator`
 bound because an associated-type *declaration* has no bound syntax yet; the requirement is
@@ -91,11 +91,11 @@ enforced where the loop is built, on the type `into_iter` actually returns.
 `Device` is `CPU | GPU(i32)`, and its variant ORDER is load-bearing: the LLVM backend reads
 `CPU`'s discriminant to decide whether a `.to(device)` transfer is the move itself or a runtime
 abort, so reordering the variants changes which devices a program may transfer to. It is
-otherwise an ordinary prelude enum — a program declaring its own `Device` shadows it, and then
+otherwise an ordinary prelude enum: a program declaring its own `Device` shadows it, and then
 `.to` no longer accepts that program's values.
 
 `Chars` holds a `&string` view and a `u64` byte cursor, and its `impl Iterator` is written in
-ordinary Neuro — the one thing it cannot say in source is the decode itself, which it takes from
+ordinary Neuro: the one thing it cannot say in source is the decode itself, which it takes from
 the prelude-private `__char_at(offset)` intrinsic (`in_prelude()` in the type checker gates it on
 `PRELUDE_MODULE`, the constant `ast_types` now owns so both this crate and the checker read the
 same one). The step width follows from the decoded scalar's own magnitude, so a step reads the
@@ -104,7 +104,7 @@ stay private so nothing else can.
 
 ### Remaining pipeline facts
 Lint warnings from `type_check` are forwarded to stderr by `print_warnings` in both entry
-points. Warnings never cause a non-zero exit — they are informational and may be silenced with
+points. Warnings never cause a non-zero exit: they are informational and may be silenced with
 `@allow(...)` on the enclosing function.
 
 The backend is handed the *root* file's source for panic-location rendering. Merged modules
@@ -112,7 +112,7 @@ share one span space, the same approximation the prepended prelude has always ha
 diagnostic from a non-root module reports a position in the root file's coordinates.
 
 The two-step linker strategy (clang on Unix; lld-link / cl.exe on Windows) is required because
-LLVM object files need a platform linker driver to attach the C runtime startup code — neurc
+LLVM object files need a platform linker driver to attach the C runtime startup code: neurc
 cannot ship its own linker. The Unix link passes `-lm` explicitly: `Tensor::random_normal`
 emits `log` and `cos`, and the C math library is a separate archive on the older glibc still in
 wide use. It is a no-op where the platform has folded libm into libc.

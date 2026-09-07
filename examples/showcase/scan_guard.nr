@@ -1,4 +1,4 @@
-// Showcase — deterministic `Drop` and labeled loop exit working together with
+// Showcase: deterministic `Drop` and labeled loop exit working together with
 // earlier features.
 //
 // Cumulative integration example combining:
@@ -81,12 +81,12 @@ func main() -> i32 {
         }
     }
 
-    // Readings are 2, 10, 18, 26 — the last is critical, so the labeled `break`
+    // Readings are 2, 10, 18, 26: the last is critical, so the labeled `break`
     // fires on tick 3 after 10 inner iterations, with score 5. Both guards still
     // run their destructors on that path, so closed == 2.
     //
     // The three counters are packed into one exit code: 100 + 50 + 10 = 160. The
-    // multipliers are kept small deliberately — a process exit status is 8 bits,
+    // multipliers are kept small deliberately: a process exit status is 8 bits,
     // so any total of 256 or more would wrap and silently mis-report the result.
     println("guards closed = {closed}   (destructors ran on the break path)")
     println("score         = {score}")

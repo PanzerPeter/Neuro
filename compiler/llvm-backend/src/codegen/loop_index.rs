@@ -1,14 +1,14 @@
 // The `(index, value)` position binding an enumerated `for` head introduces.
 //
-// Three loop lowerings can carry one — the range loop, the array loop, and the
-// `Vec` loop — and each already computes the position it needs: the range loop's
+// Three loop lowerings can carry one (the range loop, the array loop, and the
+// `Vec` loop) and each already computes the position it needs: the range loop's
 // count of iterations, and the other two's induction variable. So the binding is
 // not a second loop, only a named `u64` slot refreshed at the top of each body,
 // and this module owns the scope bookkeeping the three would otherwise repeat.
 //
 // The slot is separate from any induction variable rather than aliasing it. The
 // binding is immutable, so nothing in the body can write through it, but a slot
-// the loop itself steps is one refactor away from being observably wrong — and
+// the loop itself steps is one refactor away from being observably wrong, and
 // `mem2reg` folds the extra store away before it reaches a register.
 
 use inkwell::types::{BasicType, BasicTypeEnum};

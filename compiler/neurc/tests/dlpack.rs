@@ -1,6 +1,6 @@
 // A tensor value is a DLPack handle. The structure's field values are asserted on
 // the emitted IR inside the backend; what these check is that the representation carries a
-// real program end to end — every element type allocated and released, a clone producing a
+// real program end to end: every element type allocated and released, a clone producing a
 // second handle, and a handle crossing every ownership boundary the language has without a
 // double free or a leak.
 mod common;
@@ -67,8 +67,8 @@ func main() -> i32 {
     assert_eq!(run_program("dlpack_clone.nr", source), 5);
 }
 
-/// The handle crosses every ownership boundary the language has — a call, a return, a
-/// struct field, and a device transfer that hands the same handle on — and is released
+/// The handle crosses every ownership boundary the language has: a call, a return, a
+/// struct field, and a device transfer that hands the same handle on, and is released
 /// exactly once at the end of all of it.
 #[test]
 fn a_handle_survives_every_ownership_boundary() {

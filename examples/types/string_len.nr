@@ -2,7 +2,7 @@
 // Demonstrates the first intrinsic method on a builtin type: string.len()
 //
 // `.len()` reads the byte length stored in the string fat pointer (ptr, len).
-// It is O(1) — no scan — and returns a u64. The length excludes the null terminator.
+// It is O(1) (no scan) and returns a u64. The length excludes the null terminator.
 
 func main() -> i32 {
     val greeting: string = "hello, world"

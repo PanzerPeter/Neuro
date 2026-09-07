@@ -86,7 +86,7 @@ func main() -> i32 {
 }
 
 /// The generator is seeded from a fixed constant, so a compiled program draws the same
-/// weights on every run — a property a training script can rely on.
+/// weights on every run: a property a training script can rely on.
 #[test]
 fn random_normal_is_reproducible_across_runs() {
     let source = r#"
@@ -106,7 +106,7 @@ func main() -> i32 {
 
 /// BUG-018, closed by the out-of-line buffer: a tensor's buffer is a heap allocation, not
 /// a first-class LLVM aggregate, so a weight matrix of realistic size compiles and runs at
-/// the default `-O 0` — the level whose monolithic-value lowering the old cap existed for.
+/// the default `-O 0`: the level whose monolithic-value lowering the old cap existed for.
 #[test]
 fn a_large_tensor_compiles_and_runs_at_the_default_optimization_level() {
     let source = r#"

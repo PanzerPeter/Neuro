@@ -13,7 +13,7 @@ use crate::warnings::{Warning, WarningCode};
 pub(crate) struct TypeChecker {
     /// Symbol table for variables
     symbols: SymbolTable,
-    /// Function signatures (global scope) — includes mangled method names
+    /// Function signatures (global scope): includes mangled method names
     functions: HashMap<String, Type>,
     /// Struct definitions: name → ordered list of (field_name, field_type)
     struct_defs: HashMap<String, Vec<(String, Type)>>,
@@ -52,7 +52,7 @@ pub(crate) struct TypeChecker {
     /// Names of structs that derive `Copy` (`@derive(Copy)`). A Copy struct is
     /// duplicated on assignment instead of moved.
     copy_structs: HashSet<String>,
-    /// Names of structs that derive `Clone` — either explicitly via `@derive(Clone)`
+    /// Names of structs that derive `Clone`, either explicitly via `@derive(Clone)`
     /// or implicitly because they derive `Copy`. A Clone struct supports `.clone()`.
     clone_structs: HashSet<String>,
     /// Names of structs that derive `Debug` (`@derive(Debug)`). Only these render in a
@@ -68,10 +68,10 @@ pub(crate) struct TypeChecker {
     impl_methods: HashMap<String, HashMap<String, String>>,
     /// Mangled keys of `&mut self` methods. Calling one takes an exclusive
     /// borrow of the receiver, so the receiver must be a mutable place and must not
-    /// already be borrowed — checked at the call site like a `&mut place` borrow.
+    /// already be borrowed; checked at the call site like a `&mut place` borrow.
     mut_self_methods: HashSet<String>,
     /// Generic free-function templates, keyed by name. A generic function is
-    /// NOT placed in `functions` — calls to it route through generic inference, which
+    /// NOT placed in `functions`: calls to it route through generic inference, which
     /// substitutes concrete type arguments per call site (monomorphization).
     generic_funcs: HashMap<String, GenericFnSig>,
     /// Generic struct templates, keyed by name. A generic struct is NOT a
@@ -136,7 +136,7 @@ pub(crate) struct TypeChecker {
     current_function_return_type: Option<Type>,
     /// Names of bindings in the current function whose storage outlives the call:
     /// reference-typed parameters and the `self` receiver of an instance method.
-    /// A returned reference is only safe when it ultimately borrows one of these —
+    /// A returned reference is only safe when it ultimately borrows one of these:
     /// borrowing any other (function-local) place dangles.
     current_fn_outliving: HashSet<String>,
     /// Currently active loops, innermost last. Stack depth doubles as the
@@ -206,7 +206,7 @@ pub(crate) struct OperatorDispatch {
 }
 
 /// One resolved trait-method signature. `params` excludes the implicit `self`.
-/// `required` is true when the trait gave no default body — an implementor must provide
+/// `required` is true when the trait gave no default body: an implementor must provide
 /// one. Types are resolved in the trait's (non-generic) scope, where an associated-type
 /// position has no binding yet and therefore resolves to [`Type::Unknown`]; `decl` keeps
 /// the signature as written so conformance can re-resolve it against each impl's
@@ -246,7 +246,7 @@ struct LoopContext {
     /// first one. All value-breaks targeting the same loop must agree on type.
     break_value_ty: Option<Type>,
     /// Whether any `break` at all targeted this loop. A `loop` with none has no
-    /// exit edge, so it never produces a value — it diverges, and adopts its
+    /// exit edge, so it never produces a value: it diverges, and adopts its
     /// context's expected type exactly as the panic-family builtins do.
     has_break: bool,
 }
@@ -394,7 +394,7 @@ impl TypeChecker {
         !self.errors.is_empty()
     }
 
-    /// Whether a value of `ty` is `Copy` — duplicated on assignment rather than moved.
+    /// Whether a value of `ty` is `Copy`: duplicated on assignment rather than moved.
     ///
     /// Primitive scalars are always Copy; `string` never is; a struct is Copy only when it
     /// derives `Copy`. Other type forms (functions, void, unknown) are not Copy receivers
@@ -410,7 +410,7 @@ impl TypeChecker {
                 .get(name)
                 .map(|inner| self.is_type_copy(inner))
                 .unwrap_or(false),
-            // A borrow `&T` / `&mut T` is `Copy` — copying the reference is sound
+            // A borrow `&T` / `&mut T` is `Copy`: copying the reference is sound
             // because it never moves the borrowed value. Note: aliasing
             // exclusivity for `&mut T` is enforced by the borrow checker, not here.
             Type::Reference { .. } => true,
@@ -424,7 +424,7 @@ impl TypeChecker {
             // practice; it keeps the rule honest if that restriction is relaxed.
             Type::Tuple(elements) => elements.iter().all(|e| self.is_type_copy(e)),
             // A collection owns a heap buffer, so duplicating its header would
-            // alias — and later double-free — that buffer.
+            // alias, and later double-free, that buffer.
             Type::Collection { .. } => false,
             // A tensor owns its buffer for the same reason a collection does.
             Type::Tensor { .. } => false,
@@ -446,7 +446,7 @@ impl TypeChecker {
         }
     }
 
-    /// Whether a struct named `name` supports `.clone()` — i.e. it derives `Clone` (or `Copy`,
+    /// Whether a struct named `name` supports `.clone()`: i.e. it derives `Clone` (or `Copy`,
     /// which implies `Clone`).
     pub(crate) fn struct_is_clone(&self, name: &str) -> bool {
         self.clone_structs.contains(name)
@@ -525,7 +525,7 @@ impl TypeChecker {
         self.current_module == ast_types::PRELUDE_MODULE
     }
 
-    /// Whether `name` is a registered generic enum template — usable as a type only
+    /// Whether `name` is a registered generic enum template: usable as a type only
     /// with type arguments.
     pub(crate) fn is_generic_enum(&self, name: &str) -> bool {
         self.generic_enums.contains_key(name)
@@ -550,7 +550,7 @@ impl TypeChecker {
     /// instance of the generic enum `base`.
     ///
     /// This is the fallback context for a construction that sits in a position no
-    /// expected type reaches — a tail `if` branch or a bare statement — where the
+    /// expected type reaches (a tail `if` branch or a bare statement), where the
     /// declared return type is the only thing that can say what `Result::Err(1)` means.
     /// Arguments the payload does determine still win; only the undetermined ones are
     /// taken from here.
@@ -632,12 +632,12 @@ impl TypeChecker {
         }
 
         // Pass 1c: resolve and validate newtype inner types now that every nominal
-        // name is registered — enforces the Copy-inner restriction and rejects cycles
+        // name is registered: enforces the Copy-inner restriction and rejects cycles.
         // Runs before Copy-derive validation so a struct with a newtype field
         // sees the newtype's real Copy-ness.
         self.resolve_newtype_inners(items);
 
-        // Pass 1b: validate `@derive(Copy)` — every field of a Copy struct must itself
+        // Pass 1b: validate `@derive(Copy)`: every field of a Copy struct must itself
         // be Copy. Runs after all structs are registered so a Copy field that is
         // another struct resolves regardless of source order.
         for item in items {
@@ -684,7 +684,7 @@ impl TypeChecker {
         }
 
         // Pass 3b: register every free function's signature before any body is checked,
-        // so a call resolves regardless of source order — and so mutually recursive
+        // so a call resolves regardless of source order, and so mutually recursive
         // functions can name each other at all.
         for item in items {
             if let Item::Function(func) = item {
@@ -727,7 +727,7 @@ impl TypeChecker {
             }
         }
 
-        // Pass 5: lint passes — independent of type errors so the developer
+        // Pass 5: lint passes, independent of type errors so the developer
         // always sees style guidance alongside other diagnostics.
         self.run_lints(items);
 

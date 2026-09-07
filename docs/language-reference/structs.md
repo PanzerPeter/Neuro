@@ -114,7 +114,7 @@ func main() -> i32 {
 }
 ```
 
-A function of any kind may return a struct — free functions, associated functions, and
+A function of any kind may return a struct: free functions, associated functions, and
 methods alike. The by-value struct ABI covers all three, which is what makes both a plain
 factory function and the `Type::new(...)` constructor pattern work.
 
@@ -301,7 +301,7 @@ func main() -> i32 {
 Both derives recurse, and both are generated inline over the fields rather than through a
 method. That has two consequences worth knowing:
 
-- Every field must itself be renderable / comparable — a scalar, `string`, `char`, `bool`, or
+- Every field must itself be renderable / comparable: a scalar, `string`, `char`, `bool`, or
   another struct carrying the same derive. Anything else is a `DeriveFieldUnsupported` error
   naming the field.
 - Deriving `PartialEq` and also writing `impl PartialEq for` the same struct is a
@@ -309,7 +309,7 @@ method. That has two consequences worth knowing:
   when the comparison is not field-wise (or when the struct is a `HashMap` / `BTreeMap` key,
   which calls the trait method and so needs the `impl`).
 
-`{value:?}` is the only hole a struct renders in — a struct has no display form, so `"{p}"`
+`{value:?}` is the only hole a struct renders in. A struct has no display form, so `"{p}"`
 is an error even with `@derive(Debug)`. See [`examples/structs/derives.nr`](../../examples/structs/derives.nr).
 
 ## Definition Order Independence
@@ -471,13 +471,13 @@ impl Channel for Tally {
 
 `Self::Sample` resolves to whatever the impl bound, in a signature, in a method body, and
 nested inside another type (`Option<Self::Sample>`). An impl may spell the position either
-way — `-> i32` above means the same thing. Conformance requires every declared associated
+way: `-> i32` above means the same thing. Conformance requires every declared associated
 type to be bound, and rejects a binding the trait never declared.
 
 ### Constraining an associated type in a bound
 
 A bare `T: Channel` bound erases the implementor, and with it the only thing that says what
-`Sample` is — so a generic body cannot call a method whose signature names it. The
+`Sample` is, so a generic body cannot call a method whose signature names it. The
 `Trait<Assoc = T>` form puts the answer in the bound:
 
 ```neuro

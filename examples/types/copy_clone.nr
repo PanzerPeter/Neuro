@@ -1,4 +1,4 @@
-// Copy trait + @derive(Copy, Clone) — Phase 1.7
+// Copy trait + @derive(Copy, Clone): Phase 1.7
 //
 // A struct that derives Copy is duplicated on assignment, so the source
 // binding stays valid (no move). A struct that derives Clone supports an
@@ -15,7 +15,7 @@ func main() -> i32 {
 
     // Copy: `a` is duplicated into `b`; `a` remains usable afterwards.
     val b = a
-    val sum_a = a.x + a.y       // 7 — `a` is still valid after the copy
+    val sum_a = a.x + a.y       // 7: `a` is still valid after the copy
 
     // Clone: an explicit independent copy via @derive(Clone).
     val c = b.clone()

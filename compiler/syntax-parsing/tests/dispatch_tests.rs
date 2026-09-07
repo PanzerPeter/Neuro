@@ -31,7 +31,7 @@ func measure(s: &impl Shape) -> i32 { 0 }
     assert_eq!(ident.name, param.name.name);
 }
 
-/// Two `impl Trait` parameters are two independent anonymous parameters — not one shared
+/// Two `impl Trait` parameters are two independent anonymous parameters: not one shared
 /// `<T>`, which is the whole point of the sugar.
 #[test]
 fn each_impl_trait_parameter_gets_its_own_type_parameter() {
@@ -114,7 +114,7 @@ func write(s: &mut dyn Shape) -> i32 { 0 }
     assert!(matches!(inner.as_ref(), Type::DynTrait { .. }));
 }
 
-/// `dyn` produces no generic parameter — dynamic dispatch is one runtime type, not a
+/// `dyn` produces no generic parameter: dynamic dispatch is one runtime type, not a
 /// monomorphized family.
 #[test]
 fn dyn_trait_introduces_no_generic_parameter() {

@@ -12,7 +12,7 @@ use shared_types::Span;
 impl TypeChecker {
     /// The root binding name of a place expression, peeling parentheses, field
     /// access, and dereference (`(o).inner` and `*o` both root at `o`). A receiver
-    /// with no place root — a call or literal temporary — yields `None`.
+    /// with no place root (a call or literal temporary) yields `None`.
     pub(crate) fn place_root_name(expr: &Expr) -> Option<String> {
         match expr {
             Expr::Identifier(ident) => Some(ident.name.clone()),
@@ -63,7 +63,7 @@ impl TypeChecker {
             let _ = self.check_expr(operand, None);
             return Some(Type::Unknown);
         };
-        // `&mut` demands a `mut` binding — you cannot acquire write access
+        // `&mut` demands a `mut` binding: you cannot acquire write access
         // through a reference to a value you may not write directly.
         if mutable && !is_mut_binding {
             self.record_error(TypeError::CannotBorrowMutably { name, span: *span });

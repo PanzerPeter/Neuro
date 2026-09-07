@@ -171,7 +171,7 @@ fn test_break_value_type_disagreement_is_rejected() {
 fn test_break_value_in_while_loop_is_rejected() {
     let mut checker = TypeChecker::new();
 
-    // while true { break 5 } — `while` always yields unit.
+    // while true { break 5 }: `while` always yields unit.
     let stmt = Stmt::While {
         label: None,
         condition: Expr::Literal(Literal::Boolean(true), Span::new(0, 1)),

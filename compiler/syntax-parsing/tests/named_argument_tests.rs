@@ -1,8 +1,8 @@
 // Parsing the two halves of named arguments: the external-label parameter forms
 // at a declaration, and `label: expr` at a call site.
 //
-// The parser records what was written and nothing more — matching a label to a parameter
-// needs the callee and happens in `argument-binding` — so these tests only assert on the
+// The parser records what was written and nothing more: matching a label to a parameter
+// needs the callee and happens in `argument-binding`, so these tests only assert on the
 // shape the parser produces.
 
 use syntax_parsing::{parse, parse_expr, Expr, Item, ParamLabel, Parameter, Stmt};
@@ -139,7 +139,7 @@ fn a_named_argument_may_be_an_arbitrary_expression() {
 
 #[test]
 fn a_labelled_parameter_is_bound_by_its_internal_name_in_the_body() {
-    // The body sees `lo`, never `min` — the external label is call-site-only.
+    // The body sees `lo`, never `min`: the external label is call-site-only.
     let items = parse(
         "func f(min lo: i32) -> i32 { return lo }\n\
          func main() -> i32 { return f(min: 1) }",

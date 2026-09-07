@@ -1,4 +1,4 @@
-// Showcase — newtype units of measure working alongside structs, enums, methods,
+// Showcase: newtype units of measure working alongside structs, enums, methods,
 // pattern matching, and arrays.
 //
 // Integration example combining several Phase-1E features:
@@ -8,7 +8,7 @@
 //   fixed-size arrays + for-in iteration · compound assignment.
 //
 // Newtypes make `Meters` and `Seconds` distinct types even though both wrap `i32`,
-// so mixing them up is a compile error — the safety a plain `type` alias cannot
+// so mixing them up is a compile error: the safety a plain `type` alias cannot
 // give. Here they flow through a struct, methods, and functions, and their inner
 // values are combined into a single numeric result.
 

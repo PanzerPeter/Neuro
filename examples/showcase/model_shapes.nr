@@ -1,7 +1,7 @@
-// Showcase — a network's layer stack, declared with real tensor parameters.
+// Showcase: a network's layer stack, declared with real tensor parameters.
 //
 // This is an integration example: it exercises several features *together*
-// rather than in isolation —
+// rather than in isolation:
 //   tensor literal coercion + the construction helpers · structs holding
 //   tensor fields · an enum matched to pick an initializer · a trait with an
 //   `impl` per layer kind · a fixed-size array walked by `for`-in · string
@@ -14,8 +14,8 @@
 // second owner has to be asked for explicitly with `.clone()`. A tensor value is a
 // DLPack handle whose `data` field addresses that buffer out of line, which is why
 // `hidden_weights()` below can hand back 100352 parameters by value at the default
-// `-O 0` — and why a foreign consumer would take the same pointer unchanged. What a tensor cannot do yet is be
-// read back — indexing, arithmetic, and reductions are later 2B items — so the
+// `-O 0`, and why a foreign consumer would take the same pointer unchanged. What a tensor cannot do yet is be
+// read back (indexing, arithmetic, and reductions are later 2B items), so the
 // report is built from the shapes, which are part of the types, and the exit code
 // is the total parameter count modulo 256.
 
@@ -108,7 +108,7 @@ impl Described for Hidden {
 }
 
 // The weight matrix is built here and RETURNED by value. What crosses the call
-// boundary is the tensor's DLPack handle — one pointer — rather than 392 KB of LLVM
+// boundary is the tensor's DLPack handle (one pointer) rather than 392 KB of LLVM
 // value, which is the reason this compiles at `-O 0`.
 func hidden_weights() -> Tensor<f32, [784, 128]> {
     return Tensor::<f32, [784, 128]>::random_normal(mean: 0.0f32, std: 0.02f32)
@@ -151,7 +151,7 @@ func main() -> i32 {
     // Without a tensor annotation this stays a plain `[i32; 3]`, indexable as one.
     val widths = [4, 8, 4]
 
-    // A tensor is not `Copy`, and `embedding_rows` below takes one by value — so a
+    // A tensor is not `Copy`, and `embedding_rows` below takes one by value, so a
     // second owner has to be asked for. `.clone()` is that request, and
     // `.to(Device::CPU)` consumes the copy in turn, handing back the same tensor on
     // the host, the only device this compiler can lower to today.

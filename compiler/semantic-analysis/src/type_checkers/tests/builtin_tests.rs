@@ -124,8 +124,8 @@ fn user_function_shadows_panic_builtin() {
     assert!(!checker.has_errors(), "got: {:?}", checker.into_errors());
 }
 
-/// `println("hi")` is a builtin that returns — unit, not the divergent `Unknown` the
-/// panic family yields — so its result cannot stand in for a value of any other type.
+/// `println("hi")` is a builtin that returns unit, not the divergent `Unknown` the
+/// panic family yields, so its result cannot stand in for a value of any other type.
 #[test]
 fn println_builtin_returns_unit() {
     let mut checker = TypeChecker::new();

@@ -15,14 +15,14 @@ pub(crate) struct ParamBinding {
     pub(crate) internal: String,
     /// Whether omitting that name is an error (the `external internal:` form).
     pub(crate) required: bool,
-    /// The parameter's declared type, when restating it at a call site is meaningful —
+    /// The parameter's declared type, when restating it at a call site is meaningful:
     /// see [`annotatable_type`]. It annotates a temporary the hoisting rewrite binds an
     /// argument to, so the argument is still typed by its parameter rather than by
     /// itself. `None` leaves the temporary to inference, which is always sound.
     pub(crate) ty: Option<Type>,
 }
 
-/// A callee's parameters in declaration order — the order arguments are bound into.
+/// A callee's parameters in declaration order: the order arguments are bound into.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Signature {
     pub(crate) params: Vec<ParamBinding>,
@@ -47,8 +47,8 @@ impl Signature {
     ///
     /// A method is matched by name across every `impl` and `trait` declaring it, and two
     /// declarations that agree on their parameter *names* need not agree on their types.
-    /// Keeping the types would either make such a pair disagree — rejecting a named
-    /// argument that binds correctly today — or annotate a temporary with the wrong
+    /// Keeping the types would either make such a pair disagree (rejecting a named
+    /// argument that binds correctly today) or annotate a temporary with the wrong
     /// type, so a method signature carries none.
     fn without_types(mut self) -> Self {
         for param in &mut self.params {
@@ -103,7 +103,7 @@ pub(crate) struct SignatureTable {
 pub(crate) enum Lookup<'a> {
     /// The callee's parameters are known.
     Known(&'a Signature),
-    /// Nothing in the program declares parameter names under this callee — a closure,
+    /// Nothing in the program declares parameter names under this callee: a closure,
     /// a builtin, an enum variant, a newtype constructor.
     Unknown,
     /// Several methods answer to the name with different parameter names.
@@ -246,7 +246,7 @@ fn is_annotatable(ty: &Type, generics: &[GenericParam]) -> bool {
                 }
         }
         // `&[T]` is reachable at a call site only through the unsizing coercion an
-        // argument position applies, which a `val` annotation does not — the same reason
+        // argument position applies, which a `val` annotation does not: the same reason
         // `dyn Trait` is dropped below.
         Type::Slice { .. } => false,
         Type::Tuple { elements, .. } => elements.iter().all(|e| is_annotatable(e, generics)),

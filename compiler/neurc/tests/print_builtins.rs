@@ -2,7 +2,7 @@
 //
 // `print(text)` / `println(text)` write their argument to stdout (fd 1) and return unit;
 // `println` appends a newline. These tests compile each program and assert on the bytes
-// the process actually wrote, its exit code, and — since the panic runtime owns stderr —
+// the process actually wrote, its exit code, and (since the panic runtime owns stderr)
 // that nothing leaked onto the error stream.
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -11,7 +11,7 @@ use std::process::{Command, Output};
 ///
 /// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
 /// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()` — that assumes the legacy
+/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
 /// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
 fn neurc_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
@@ -73,7 +73,7 @@ fn check_error(source: &str, tag: &str) -> String {
 /// The bytes the program wrote to stdout, with line endings normalized to `\n`.
 ///
 /// On Windows fd 1 is a CRT *text-mode* descriptor, so the one `\n` byte the builtin
-/// writes reaches the pipe as `\r\n` — the same translation a C `printf` gets, and the
+/// writes reaches the pipe as `\r\n`, the same translation a C `printf` gets, and the
 /// convention a native tool is expected to follow. These tests assert *which text* was
 /// written, not the platform's line-ending policy, so the translation is undone here.
 fn stdout(output: &Output) -> String {
@@ -189,8 +189,8 @@ func main() -> i32 {
 
 #[test]
 fn a_large_string_is_written_in_full_through_a_pipe() {
-    // `write` may consume less than it is offered — a pipe with a full buffer does
-    // exactly that — so the whole buffer must survive the retry loop.
+    // `write` may consume less than it is offered: a pipe with a full buffer does
+    // exactly that. So the whole buffer must survive the retry loop.
     let output = run_program(
         r#"
 func main() -> i32 {
@@ -327,7 +327,7 @@ func main() -> i32 {
 
 #[test]
 fn buffered_output_reaches_stdout_before_a_panic_aborts() {
-    // `abort` runs no exit hook, so anything still buffered would be lost — and the
+    // `abort` runs no exit hook, so anything still buffered would be lost, and the
     // diagnostic on stderr would describe a failure the output never led up to.
     let output = run_program(
         r#"

@@ -17,7 +17,7 @@ pub(crate) const CHAR_SLICE_METHOD: &str = "char_slice";
 
 /// The codepoint iterator `string.chars()` hands out, declared in the prelude.
 pub(crate) const CHARS_STRUCT: &str = "Chars";
-/// `string.chars()` — the method that produces one.
+/// `string.chars()`: the method that produces one.
 pub(crate) const CHARS_METHOD: &str = "chars";
 /// The prelude-private decode intrinsic `Chars::next` steps with: the Unicode scalar
 /// whose UTF-8 encoding begins at a byte offset.
@@ -29,8 +29,8 @@ pub(crate) const TENSOR_TO_METHOD: &str = "to";
 impl TypeChecker {
     /// Resolve a compiler-known intrinsic method on a builtin (non-struct) receiver.
     ///
-    /// Returns `Some(return_type)` when `method` names an intrinsic for `recv` — recording
-    /// an arity diagnostic when the argument count is wrong — and `None` when no such
+    /// Returns `Some(return_type)` when `method` names an intrinsic for `recv` (recording
+    /// an arity diagnostic when the argument count is wrong) and `None` when no such
     /// intrinsic exists, so the caller falls through to the standard `MethodNotFound` error.
     ///
     /// `object` is the receiver expression, needed by the borrowing intrinsics: a
@@ -83,7 +83,7 @@ impl TypeChecker {
             }
             // Borrowed sub-slice of a contiguous sequence: `&[T]` over the receiver's
             // own storage, zero copy. The three receivers share one check because they
-            // share one result — only the backend cares that an array's length is a
+            // share one result: only the backend cares that an array's length is a
             // constant, a `Vec`'s a header field, and a slice's already in hand.
             (Type::Array { element, .. }, "slice") | (Type::Slice(element), "slice") => {
                 let slice_ty = Type::Reference {
@@ -120,7 +120,7 @@ impl TypeChecker {
             }
             // Array length, the compile-time `N` of `[T; N]`. Auto-derefs through
             // a borrow of an array (`&[T; N]`). Takes no arguments and yields `u64`.
-            // `.chars()` — the codepoint iterator. Nullary, and a borrow rather
+            // `.chars()`: the codepoint iterator. Nullary, and a borrow rather
             // than a move: the iterator holds a view into the receiver's UTF-8 bytes, so
             // it registers the same transient borrow `.slice` does.
             (Type::String, CHARS_METHOD) => {
@@ -152,7 +152,7 @@ impl TypeChecker {
             }
             // IEEE-754 NaN test. Nullary, yields `bool`. Matched on `recv` (not the
             // referent) like the integer intrinsics below: reading a scalar through `&T`
-            // needs the deref operator. `is_float` covers `f32`/`f64` only — `f16`/`bf16`
+            // needs the deref operator. `is_float` covers `f32`/`f64` only; `f16`/`bf16`
             // carry a storage-and-cast-only scalar contract.
             (_, "is_nan") if recv.is_float() => {
                 if !args.is_empty() {
@@ -184,7 +184,7 @@ impl TypeChecker {
                 Some(self.option_of(recv.clone(), call_span))
             }
             // A tensor owns its buffer and is not `Copy`, so `.clone()` is the explicit
-            // deep-copy path out of move-by-default — the opt-out the use-after-move
+            // deep-copy path out of move-by-default: the opt-out the use-after-move
             // diagnostic already points at. Auto-derefs `&Tensor<T, S>`: copying through
             // a borrow is how a shared weight is duplicated without moving it out of
             // whatever owns it.
@@ -201,7 +201,7 @@ impl TypeChecker {
             // `.to(device)` CONSUMES the tensor: it hands back a tensor whose buffer lives
             // on the requested device and releases the source one, so the receiver is
             // moved rather than borrowed. Matched on `recv` rather than the referent
-            // because a borrow cannot be consumed — `(&t).to(...)` falls through to
+            // because a borrow cannot be consumed: `(&t).to(...)` falls through to
             // `MethodNotFound` instead of quietly moving out of someone else's tensor.
             (Type::Tensor { .. }, TENSOR_TO_METHOD) if !matches!(recv, Type::Reference { .. }) => {
                 self.check_call_args(args, &[Type::Enum(DEVICE_TYPE_NAME.to_string())], call_span);
@@ -320,7 +320,7 @@ impl TypeChecker {
     /// slice calls: `s.slice(a..b).slice(c..d)` borrows `s`, since every view in the
     /// chain points into the same buffer.
     ///
-    /// `None` for a receiver rooted in a temporary — a call result, a literal. Such a
+    /// `None` for a receiver rooted in a temporary (a call result, a literal). Such a
     /// view is sound for the rest of the frame the temporary lives in, and the borrow
     /// tracker's rule throughout is to record only borrows it can name rather than
     /// guess at the ones it cannot.
@@ -376,11 +376,11 @@ impl TypeChecker {
     /// Type-check a call to a compiler-known panic-family builtin:
     /// `panic(msg: string)`, `assert(cond: bool)`, or `unreachable()`.
     ///
-    /// Returns `Some(ty)` when `func_name` names a builtin — recording an arity or
-    /// argument-type diagnostic on violation — and `None` otherwise, so the caller falls
+    /// Returns `Some(ty)` when `func_name` names a builtin (recording an arity or
+    /// argument-type diagnostic on violation) and `None` otherwise, so the caller falls
     /// through to ordinary function resolution. The result type is `Type::Unknown`: these
     /// builtins **diverge** (they abort and never return), so the call must satisfy any
-    /// context — a unit statement, a non-`void` tail return (`func f() -> i32 { panic(..) }`),
+    /// context: a unit statement, a non-`void` tail return (`func f() -> i32 { panic(..) }`),
     /// or a value binding. `Type::Unknown` is the type system's "compatible with everything"
     /// type, which is exactly the divergent (`never`) contract until a dedicated `!` type lands.
     pub(super) fn resolve_panic_builtin(
@@ -425,8 +425,8 @@ impl TypeChecker {
     /// Type-check a call to a compiler-known standard-output builtin:
     /// `print(text: string)` or `println(text: string)`.
     ///
-    /// Returns `Some(Type::Void)` when `func_name` names one — recording an arity or
-    /// argument-type diagnostic on violation — and `None` otherwise, so the caller falls
+    /// Returns `Some(Type::Void)` when `func_name` names one (recording an arity or
+    /// argument-type diagnostic on violation) and `None` otherwise, so the caller falls
     /// through to ordinary function resolution. Unlike the panic family these **return**,
     /// so the result is the real unit type rather than the divergent `Type::Unknown`.
     ///
@@ -477,7 +477,7 @@ impl TypeChecker {
     ///
     /// A receiver reached through a `&mut T` borrow is already write-capable and
     /// passes; a `&T` receiver cannot yield write access, so it is rejected. An
-    /// owned receiver must root in a `mut` binding — mutating `o.inner` needs `o`
+    /// owned receiver must root in a `mut` binding: mutating `o.inner` needs `o`
     /// itself mutable. A receiver with no place root (a call or literal temporary)
     /// is not assignable, so it is rejected like any `&mut` of a value. Exclusivity
     /// is tracked at binding granularity (matching `&place` borrows), so only a

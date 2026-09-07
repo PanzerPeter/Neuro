@@ -51,7 +51,7 @@ fn enum_decl(name: &str, exported: bool) -> Item {
     })
 }
 
-/// A function whose one parameter is annotated with `ty` — the type-position site.
+/// A function whose one parameter is annotated with `ty`: the type-position site.
 fn function_taking(name: &str, ty: &str) -> Item {
     let Item::Function(mut def) = function(name, false, Vec::new()) else {
         unreachable!("function() builds a function")
@@ -151,7 +151,7 @@ fn import_item(rest: &str, exported: bool) -> Result<Item, String> {
 
 /// The stub parser: each line is `func NAME`, `export func NAME`,
 /// `call QUALIFIER::MEMBER`, `bare NAME`, `param NAME: TYPE`, `import ...`,
-/// `export import ...`, `no_prelude`, `pat NAME(BIND)`, or `patbare NAME` — enough surface to drive
+/// `export import ...`, `no_prelude`, `pat NAME(BIND)`, or `patbare NAME`: enough surface to drive
 /// every resolution rule. A `module NAME` line opens an inline block that runs to a
 /// matching `end`. `func` without `export` is private to its file, exactly as in real
 /// source.
@@ -565,8 +565,8 @@ fn an_imported_variant_resolves_in_expression_position() {
         "import Option::{Some, None}\nfunc main\nbare None\n",
     );
 
-    // `Option` names no module — it is an enum the prelude supplies, invisible to this
-    // pass — so the variant is qualified for the type checker rather than resolved here.
+    // `Option` names no module: it is an enum the prelude supplies, invisible to this
+    // pass, so the variant is qualified for the type checker rather than resolved here.
     let program = resolve_with_prelude(&root).expect("resolution succeeds");
     assert_eq!(first_callee(&program).as_deref(), Some("Option::None"));
 }
@@ -661,7 +661,7 @@ fn a_variant_import_whose_head_names_no_enum_is_rejected() {
 fn an_import_reaching_a_sibling_inline_block_names_the_block() {
     let dir = TempDir::new().expect("temp dir");
     // A block sees its own children and its file's siblings, not the file's other
-    // blocks — so this resolves no module, and must say so rather than inventing an enum.
+    // blocks, so this resolves no module, and must say so rather than inventing an enum.
     let root = write(
         dir.path(),
         "main.nr",
@@ -746,7 +746,7 @@ fn a_private_item_cannot_be_imported_under_an_alias() {
 #[test]
 fn a_private_item_is_still_usable_inside_its_own_module() {
     let dir = TempDir::new().expect("temp dir");
-    // `helper` is private, and `math` names itself in the qualifier — a module is never
+    // `helper` is private, and `math` names itself in the qualifier: a module is never
     // closed to itself.
     write(
         dir.path(),

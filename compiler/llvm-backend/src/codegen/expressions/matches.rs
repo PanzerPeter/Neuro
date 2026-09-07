@@ -3,8 +3,8 @@
 // The scrutinee is evaluated once into an alloca. Each arm becomes a test block that
 // ORs its alternatives (variant tag / scalar equality / range), branching to the arm
 // body on a hit and to the next arm otherwise. An arm body first materializes its
-// bindings (the whole scrutinee, or decoded enum payload slots), then — if the arm has
-// a guard — branches on the guard before evaluating the body into the shared result
+// bindings (the whole scrutinee, or decoded enum payload slots), then, if the arm has
+// a guard, branches on the guard before evaluating the body into the shared result
 // slot. The frontend guarantees exhaustiveness, so the final fall-through is
 // `unreachable`.
 
@@ -367,7 +367,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(val.into_int_value())
     }
 
-    /// Decode one packed `i64` payload slot back to a field of `field_ty` — the inverse
+    /// Decode one packed `i64` payload slot back to a field of `field_ty`, the inverse
     /// of the enum construction encoding: truncate to the field's width, then
     /// bitcast back to a float when the field is a float.
     fn decode_enum_payload_field(

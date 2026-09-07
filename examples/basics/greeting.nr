@@ -11,7 +11,7 @@ func main() -> i32 {
     print("hello from ")
     println(name)
 
-    // The argument is one ordinary `string`, so interpolation — format spec and all —
+    // The argument is one ordinary `string`, so interpolation (format spec and all)
     // has already rendered before the call.
     println("version {version}, phase {version} is {ratio:.2} done")
 

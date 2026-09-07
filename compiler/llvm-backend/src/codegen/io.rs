@@ -6,7 +6,7 @@
 //
 // The bytes do not reach the POSIX `write` syscall one call at a time. A `write` is a
 // round trip into the kernel whether it carries four bytes or four thousand, and an
-// unbuffered `println` costs two of them — one for the text, one for the newline — so a
+// unbuffered `println` costs two of them, one for the text and one for the newline, so a
 // printing loop spent effectively all of its time in syscall entry rather than in the
 // program. The bytes are copied into a module-private page-sized buffer instead and
 // drained when it fills, which is what every other language's standard output does.
@@ -24,7 +24,7 @@
 // the text and its newline now leave in one `write` instead of two.
 //
 // The newline is the one byte `\n`. On Windows fd 1 is a CRT text-mode descriptor, so
-// that byte leaves the process as `\r\n` — the translation a C `printf` gets on the same
+// that byte leaves the process as `\r\n`, the translation a C `printf` gets on the same
 // platform. The builtins follow that convention rather than forcing the descriptor into
 // binary mode, so tests and golden files compare text with line endings normalized.
 //
@@ -88,7 +88,7 @@ const MODE_LINE: u64 = 2;
 const NEWLINE_GLOBAL: &str = "neuro.print.newline";
 
 /// The entry function whose every `ret` must drain the buffer. `main` is emitted under
-/// its own name — there is no wrapper around it — so this is the C entry point itself.
+/// its own name and has no wrapper around it, so this is the C entry point itself.
 const ENTRY_FN: &str = "main";
 
 /// libc's terminal test. MSVC's CRT exposes the POSIX name only under its underscored
@@ -117,9 +117,9 @@ impl<'ctx> CodegenContext<'ctx> {
         let value = self.codegen_expr(text)?;
         let (ptr, len) = self.split_printable(value, name)?;
 
-        // An argument the caller built here — `println("n = {n}")`, `print(a + b)` — is a
+        // An argument the caller built here, `println("n = {n}")` or `print(a + b)`, is a
         // temporary nothing else can reach. `emit` has consumed the bytes by the time it
-        // returns — copied into the buffer, or handed to `write` on the bypass path — and
+        // returns, copied into the buffer or handed to `write` on the bypass path, and
         // retains none of them, so the buffer is dead the moment the last one leaves, and
         // the allocation and the free sit in the same block with nothing between them
         // that could escape it. A borrowed argument (a literal, a variable, a slice)
@@ -143,7 +143,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .map_err(llvm_err)?;
 
             // The line terminator is where a line boundary is, and the compiler knows it
-            // here — so a terminal is served without the runtime ever scanning bytes for
+            // here, so a terminal is served without the runtime ever scanning bytes for
             // a newline. `print` writes no terminator and so ends no line, matching what
             // C's line-buffered stdio does with a `printf` that has no `\n`.
             let line_end = self.get_or_build_line_end()?;
@@ -252,7 +252,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// copied; they do not fit, so the buffer is drained first; they are larger than the
     /// buffer will ever be, so they go straight to `write` after that drain rather than
     /// being chopped into page-sized pieces. The bypass is what keeps a single enormous
-    /// string — a rendered tensor, a whole report — at one syscall.
+    /// string, a rendered tensor or a whole report, at one syscall.
     fn get_or_build_emit(&mut self) -> CodegenResult<FunctionValue<'ctx>> {
         if let Some(existing) = self.module.get_function(EMIT_FN) {
             return Ok(existing);
@@ -586,7 +586,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Drain the buffer on every path out of the process.
     ///
     /// Run once, after every body is generated, because only then is it known whether the
-    /// module prints at all — a program that never does keeps its exit paths untouched
+    /// module prints at all. A program that never does keeps its exit paths untouched
     /// and reserves no buffer. The two paths are `main`'s returns and the panic runtime's
     /// `abort`; the latter is recorded as it is emitted, since `abort` runs no exit hook a
     /// buffer could register.
@@ -626,7 +626,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Get the `write_all(ptr, len)` helper, emitting its body on first use.
     ///
     /// Built lazily in the middle of a hot function, so the builder is put back where the
-    /// caller left it before returning — on the failing path too.
+    /// caller left it before returning, on the failing path too.
     fn get_or_build_write_all(&mut self) -> CodegenResult<FunctionValue<'ctx>> {
         if let Some(existing) = self.module.get_function(WRITE_ALL_FN) {
             return Ok(existing);

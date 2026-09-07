@@ -133,7 +133,7 @@ func main() -> i32 {
 
 // An `if`/`else` in value position now carries its context into the arms, the way a
 // `match` always has. Before, the arms were typed against nothing, so an arm that names
-// no type of its own — a bare `None`, an untyped integer literal — had nothing to resolve
+// no type of its own (a bare `None`, an untyped integer literal) had nothing to resolve
 // against and the annotation on the target it initialized was ignored.
 
 #[test]

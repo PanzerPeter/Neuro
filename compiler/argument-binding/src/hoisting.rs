@@ -34,8 +34,8 @@ pub(crate) fn reorders_effects(order: &[usize], args: &[Expr]) -> bool {
 /// past another argument unobservable.
 ///
 /// A literal and a path (an enum's unit variant, an associated constant) are self-contained
-/// values. Everything else — a call, an operator that can panic, and a plain variable read,
-/// which another argument's `&mut` borrow can change under it — keeps its place.
+/// values. Everything else (a call, an operator that can panic, and a plain variable read,
+/// which another argument's `&mut` borrow can change under it) keeps its place.
 fn is_inert(expr: &Expr) -> bool {
     match expr {
         Expr::Literal(_, _) | Expr::Path { .. } => true,
@@ -49,7 +49,7 @@ fn is_inert(expr: &Expr) -> bool {
 /// of it.
 ///
 /// A free function and an associated function are named, not evaluated. A method's
-/// receiver *is* evaluated, and it runs before the arguments do — hoisting them ahead of
+/// receiver *is* evaluated, and it runs before the arguments do: hoisting them ahead of
 /// an expression receiver would invert that pair to fix the argument pair, so a call with
 /// one keeps the binding it has today. A place receiver (`obj.m(...)`, `a.b.m(...)`)
 /// resolves to an address rather than a value, so nothing observable happens to it.
@@ -81,7 +81,7 @@ fn is_place(expr: &Expr) -> bool {
 /// so the arguments run in the order they were written, and the call that follows them is
 /// already bound: its arguments are the temporaries, in the callee's declaration order,
 /// with no labels left. Inert arguments are left in the call rather than bound to a
-/// temporary — nothing can observe when they are evaluated, and a literal that reaches its
+/// temporary: nothing can observe when they are evaluated, and a literal that reaches its
 /// parameter directly still takes its type from it.
 pub(crate) fn hoist(call: &mut Expr, order: &[usize], sig: &Signature) {
     let Expr::Call {
@@ -159,7 +159,7 @@ fn temp_name(source: usize, span: Span) -> Identifier {
 /// at the call site is meaningful.
 ///
 /// A binding infers its type from its initializer alone, while an argument is checked
-/// against its parameter — so an expression that needs the parameter to type it
+/// against its parameter, so an expression that needs the parameter to type it
 /// (`Vec::new()`, an integer literal narrower than its default) would lose that. Copying
 /// the annotation gives it back. It is copied only when it names types a call site can
 /// see: a type parameter of the callee, `Self`, or an `impl Trait` bound means nothing

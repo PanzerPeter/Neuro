@@ -35,9 +35,9 @@ const DERIVE_ATTRIBUTE: &str = "derive";
 const COPY_TRAIT: &str = "Copy";
 /// Derive argument requesting the `Clone` trait.
 const CLONE_TRAIT: &str = "Clone";
-/// Derive argument requesting the `Debug` trait — the `{x:?}` rendering.
+/// Derive argument requesting the `Debug` trait: the `{x:?}` rendering.
 const DEBUG_TRAIT: &str = "Debug";
-/// Derive argument requesting the `PartialEq` trait — field-wise `==` / `!=`.
+/// Derive argument requesting the `PartialEq` trait: field-wise `==` / `!=`.
 const PARTIAL_EQ_TRAIT: &str = "PartialEq";
 /// Derive argument requesting the `Hashable` trait. Named by the spec's derivable
 /// set but not yet generated, so it is a diagnostic rather than a silent no-op.
@@ -58,8 +58,8 @@ impl TypeChecker {
     ///
     /// `__` joins a receiver to its method (`Point__translate`) in the flat function
     /// table, and the LLVM backend recovers the receiver by splitting a method symbol on
-    /// it. Compiler-generated names are built to hold exactly one `__` — monomorphized
-    /// instances use a single-underscore `_g_` marker for that reason — but a user name
+    /// it. Compiler-generated names are built to hold exactly one `__` (monomorphized
+    /// instances use a single-underscore `_g_` marker for that reason), but a user name
     /// carrying its own `__` would break the property from the other side: a method
     /// `a__b` on struct `S` and a method `b` on a struct named `S__a` produce the same
     /// symbol. Reserving the separator closes the collision instead of ranking one

@@ -3,7 +3,7 @@
 // A tensor value is not a buffer pointer with a conversion step waiting at the FFI
 // boundary: it is a `DLManagedTensorVersioned*`, so the pointer a Neuro program moves
 // around is the pointer NumPy, PyTorch, or JAX consumes. That also settles ownership
-// once — the `deleter` field is the single release path, used by a tensor leaving scope
+// once: the `deleter` field is the single release path, used by a tensor leaving scope
 // and by a foreign consumer that took the handle, so there is no private free for a
 // consumer to race with.
 
@@ -32,7 +32,7 @@ const DLPACK_DATA_ALIGN: u64 = 64;
 const DLPACK_LANES: u64 = 1;
 
 /// The release function every tensor handle carries. One definition serves every tensor
-/// type — the structure holds everything the free needs.
+/// type, because the structure holds everything the free needs.
 const DLPACK_DELETER_FN: &str = "__neuro_dlpack_deleter";
 
 /// Field indices into `DLManagedTensorVersioned`, mirroring the C header's order.
@@ -57,7 +57,7 @@ fn llvm_err(e: inkwell::builder::BuilderError) -> CodegenError {
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Allocate a tensor's DLPack handle and its element buffer, fill every field of the
-    /// structure, and return the handle — the pointer that *is* the tensor value.
+    /// structure, and return the handle, the pointer that *is* the tensor value.
     ///
     /// The two allocations are separate rather than one fused block because fusing needs
     /// the structure's size rounded up to [`DLPACK_DATA_ALIGN`] as an IR constant
@@ -215,7 +215,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Store `value` into the handle field reached by walking `path` from the structure
-    /// root — one index for a top-level field, two to reach into the nested `DLTensor`.
+    /// root: one index for a top-level field, two to reach into the nested `DLTensor`.
     fn store_handle_field(
         &self,
         handle_ty: inkwell::types::StructType<'ctx>,
@@ -254,7 +254,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// constants shared by every value of that tensor type.
     ///
     /// Strides are counted in elements, not bytes, which is what DLPack specifies. Rank 0
-    /// has no axis to describe, so both fields are null — the spelling DLPack gives a
+    /// has no axis to describe, so both fields are null, the spelling DLPack gives a
     /// scalar.
     fn dlpack_shape_globals(
         &self,
@@ -309,7 +309,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Define the shared `deleter`, or return the existing definition.
     ///
-    /// It frees the element buffer and then the structure, in that order — reading
+    /// It frees the element buffer and then the structure, in that order, because reading
     /// `data` out of the block it is about to free would be a use-after-free.
     pub(crate) fn get_or_define_dlpack_deleter(&mut self) -> CodegenResult<FunctionValue<'ctx>> {
         if let Some(existing) = self.module.get_function(DLPACK_DELETER_FN) {
@@ -345,7 +345,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(function)
     }
 
-    /// Load a handle's `data` pointer — the address of the element buffer.
+    /// Load a handle's `data` pointer, the address of the element buffer.
     pub(crate) fn load_dlpack_data(
         &self,
         handle: PointerValue<'ctx>,

@@ -129,8 +129,8 @@ impl Lowerer {
         expected: Option<&HirType>,
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
-        // A local binding of function type — a closure or a function-typed
-        // parameter — is called indirectly through its fat pointer. It shadows a
+        // A local binding of function type (a closure or a function-typed
+        // parameter) is called indirectly through its fat pointer. It shadows a
         // same-named top-level function, matching the frontend's precedence.
         if let Some(HirType::Function { params, ret }) = self.lookup_local(name) {
             let args = self.lower_args(args, &params)?;
@@ -450,7 +450,7 @@ impl Lowerer {
                 });
             }
         } else if let HirType::DynObject(trait_name) = recv.referent() {
-            // Dynamic dispatch: the call is typed from the trait's declaration —
+            // Dynamic dispatch: the call is typed from the trait's declaration,
             // no implementor is named here, since the concrete method is selected at
             // runtime through the vtable. The backend keys off the receiver's type.
             let trait_name = trait_name.clone();
@@ -465,7 +465,7 @@ impl Lowerer {
             (self.lower_args(args, &params)?, ret)
         } else if method == SLICE_METHOD && sliceable_element(recv.referent()).is_some() {
             // `.slice(range)` borrows the receiver's buffer, so it is a slice intrinsic
-            // on every contiguous container — a `Vec` included, whose own method surface
+            // on every contiguous container, a `Vec` included, whose own method surface
             // acts on the header rather than handing out a view into it.
             self.lower_sequence_slice(&recv, args)?
         } else if matches!(recv.referent(), HirType::Collection { .. }) {
@@ -604,7 +604,7 @@ impl Lowerer {
             (HirType::Array { .. } | HirType::Slice(_), "len") => {
                 Ok((self.lower_args(args, &[])?, HirType::U64))
             }
-            // `float.is_nan()` — nullary, `bool`. A value receiver only, matching the
+            // `float.is_nan()`: nullary, `bool`. A value receiver only, matching the
             // integer intrinsics below, and full-precision only: `f16`/`bf16` have no
             // scalar arithmetic contract to produce a NaN with.
             (_, "is_nan") if is_full_float(recv) => {
@@ -623,13 +623,13 @@ impl Lowerer {
                 let result = self.option_of(recv.clone())?;
                 Ok((args, result))
             }
-            // `tensor.clone()` — nullary, and the same tensor type as the receiver.
+            // `tensor.clone()`: nullary, and the same tensor type as the receiver.
             // Auto-derefs `&Tensor<T, S>`, so the result is the referent, not the borrow.
             (tensor @ HirType::Tensor { .. }, CLONE_METHOD) => {
                 let cloned = tensor.clone();
                 Ok((self.lower_args(args, &[])?, cloned))
             }
-            // `tensor.to(device)` — one `Device` argument, and the receiver's own type
+            // `tensor.to(device)`: one `Device` argument, and the receiver's own type
             // back. A borrow cannot be consumed, so this matches `recv` rather than the
             // referent, exactly as the type checker does.
             (HirType::Tensor { .. }, TENSOR_TO_METHOD)
@@ -690,7 +690,7 @@ impl Lowerer {
     }
 }
 
-/// The element type of a contiguous container a `.slice(range)` may borrow from —
+/// The element type of a contiguous container a `.slice(range)` may borrow from,
 /// `[T; N]`, `Vec<T>`, or an existing `[T]`. `None` for every other receiver.
 fn sliceable_element(ty: &HirType) -> Option<HirType> {
     match ty {

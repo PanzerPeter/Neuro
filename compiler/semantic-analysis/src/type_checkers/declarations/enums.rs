@@ -58,7 +58,7 @@ impl TypeChecker {
 
     /// Register a generic enum template.
     ///
-    /// Like a generic struct, a generic enum is not itself a usable type — each
+    /// Like a generic struct, a generic enum is not itself a usable type; each
     /// distinct set of type arguments is monomorphized into a distinct nominal enum on
     /// demand. The template's variants (carrying [`Type::Generic`] placeholders) are kept
     /// in `enum_defs` under the base name so a construction site can infer the type
@@ -120,7 +120,7 @@ impl TypeChecker {
     /// arguments and return its distinct nominal [`Type::Enum`]. Idempotent per instance.
     ///
     /// Each payload type is the template's type with the arguments substituted in, and
-    /// must be a scalar `Copy` primitive — the same restriction a non-generic enum's
+    /// must be a scalar `Copy` primitive, the same restriction a non-generic enum's
     /// payload carries, so `Option<i32>` is available while `Option<string>` is not yet.
     pub(crate) fn instantiate_generic_enum(
         &mut self,

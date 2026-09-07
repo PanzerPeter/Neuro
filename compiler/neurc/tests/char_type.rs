@@ -100,7 +100,7 @@ func main() -> i32 {
 
 #[test]
 fn char_arithmetic_is_rejected() {
-    // `char` has no arithmetic — compute on the integer code point instead.
+    // `char` has no arithmetic: compute on the integer code point instead.
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {

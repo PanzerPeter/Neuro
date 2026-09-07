@@ -114,7 +114,7 @@ fn build_module<'ctx>(
     // count, so every value of the enum maps to one `{ i32, [W x i64] }` aggregate.
     let mut enum_words: HashMap<String, u32> = HashMap::new();
     // Variant names in declaration (discriminant) order, so a compiler-generated
-    // construction — the `Option<T>` a collection reader returns — can look a tag up
+    // construction (the `Option<T>` a collection reader returns) can look a tag up
     // by name instead of assuming the prelude's declaration order.
     let mut enum_variants: HashMap<String, Vec<String>> = HashMap::new();
     for item in items {
@@ -238,7 +238,7 @@ fn build_module<'ctx>(
 
     // Pre-declare every function/method signature before generating any body, so a
     // call resolves regardless of definition order. Monomorphized generic instances
-    // may be called by — or call — items appearing before them, so lazy
+    // may be called by (or call) items appearing before them, so lazy
     // per-item declaration is not sufficient.
     for item in items {
         match item {
@@ -278,7 +278,7 @@ fn build_module<'ctx>(
 
     // Drain buffered standard output on every path out of the process. Runs here because
     // only a finished module knows whether it prints at all, and because the exit paths
-    // it edits — `main`'s returns, `abort`, `llvm.trap` — are all emitted by now.
+    // it edits (`main`'s returns, `abort`, `llvm.trap`) are all emitted by now.
     codegen_ctx.finalize_stdout_buffer()?;
 
     // Link self-contained soft-float conversion builtins when the module uses
@@ -306,7 +306,7 @@ impl OptimizationLevelSetting {
     /// selection, or `None` at -O0 where the IR is handed to the backend as emitted.
     ///
     /// `TargetMachine`'s own optimization level only tunes instruction selection and
-    /// register allocation — it runs no IR passes at all. Without this pipeline every
+    /// register allocation: it runs no IR passes at all. Without this pipeline every
     /// local stays in the `alloca` codegen gave it (no mem2reg/SROA), no call is
     /// inlined, and nothing is hoisted out of a loop, so -O1..-O3 emit essentially
     /// the same code as -O0.
@@ -369,7 +369,7 @@ fn optimize_module(
     // Stamp the module with the target it is being compiled for. Without a data layout
     // the optimizer falls back to defaults and cannot reason about the size, alignment,
     // or pointer width of the types it is transforming, which degrades SROA, GVN, and
-    // the vectorizer — and would be outright wrong for any target whose layout differs
+    // the vectorizer, and would be outright wrong for any target whose layout differs
     // from the default guess.
     codegen_ctx
         .module
@@ -437,7 +437,7 @@ mod tests {
     }
 
     /// `source` lowered, compiled, and run through the optimization pipeline for
-    /// `optimization` — the IR instruction selection actually receives, rather than the
+    /// `optimization`: the IR instruction selection actually receives, rather than the
     /// unoptimized IR `module_ir` returns.
     fn optimized_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
         let hir = lower(source);
@@ -484,7 +484,7 @@ mod tests {
         ));
 
         let body = function_body(&ir, "main");
-        // version { 1, 1 } — the versioned structure, not the deprecated one.
+        // version { 1, 1 }: the versioned structure, not the deprecated one.
         assert!(body.contains("store { i32, i32 } { i32 1, i32 1 }"));
         // device { kDLCPU, 0 }.
         assert!(body.contains("store { i32, i32 } { i32 1, i32 0 }"));
@@ -502,7 +502,7 @@ mod tests {
     }
 
     /// The element buffer comes from `aligned_alloc` at DLPack's 64-byte alignment, and
-    /// only the elements themselves are copied into it — the padding is the allocator's.
+    /// only the elements themselves are copied into it: the padding is the allocator's.
     #[test]
     fn a_tensor_buffer_meets_the_dlpack_alignment() {
         let source = r#"
@@ -577,8 +577,8 @@ mod tests {
         }
     }
 
-    /// A rank-0 tensor has no axis to describe, so DLPack's spelling for a scalar — null
-    /// `shape` and `strides` with `ndim` 0 — is what it gets.
+    /// A rank-0 tensor has no axis to describe, so DLPack's spelling for a scalar, null
+    /// `shape` and `strides` with `ndim` 0, is what it gets.
     #[test]
     fn a_rank_zero_tensor_has_null_shape_and_strides() {
         let source = r#"
@@ -733,7 +733,7 @@ mod tests {
     #[test]
     fn an_interpolated_temporary_is_freed() {
         // `println` copies the bytes out to fd 1 and keeps none of them, so both buffers
-        // the argument cost — the rendered hole and the joined result — are dead on
+        // the argument cost (the rendered hole and the joined result) are dead on
         // return. A loop around this is what made the leak unbounded.
         let source = r#"
             func main() -> i32 {
@@ -850,8 +850,8 @@ mod tests {
 
     #[test]
     fn optimization_levels_run_an_ir_pipeline() {
-        // Codegen gives every local an `alloca`. Only an IR pass — not the
-        // `TargetMachine`'s optimization level, which runs none — promotes those to SSA
+        // Codegen gives every local an `alloca`. Only an IR pass promotes those to SSA,
+        // not the `TargetMachine`'s optimization level, which runs none
         // values, so a surviving `alloca` in this loop means no pipeline ran.
         let source = r#"
             func total(n: i32) -> i32 {
@@ -1049,7 +1049,7 @@ mod tests {
     #[test]
     fn a_module_that_never_prints_reserves_no_output_buffer() {
         // The drain is inserted after every body is generated precisely so that a
-        // program with no print keeps its exit paths — and its .bss — untouched.
+        // program with no print keeps its exit paths, and its .bss, untouched.
         let source = r#"
             func main() -> i32 {
                 val n: i32 = 41
@@ -1152,7 +1152,7 @@ mod tests {
         );
     }
 
-    /// A tensor owns its buffer, so a binding releases it when its scope ends — under the
+    /// A tensor owns its buffer, so a binding releases it when its scope ends, under the
     /// same drop flag a move clears.
     #[test]
     fn a_tensor_binding_frees_its_buffer_at_scope_exit() {

@@ -54,7 +54,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.codegen_unary(*op, operand, &operand_ty, expr.span.start)
             }
             HirExprKind::Call { callee, args } => {
-                // In value position a unit-returning call is an error — there is no
+                // In value position a unit-returning call is an error: there is no
                 // value to bind. Statement position discards the result instead
                 // (see `codegen_call_dispatch` callers in `codegen_stmt`).
                 self.codegen_call_dispatch(callee, args, &expr.span)?
@@ -240,8 +240,8 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
         match &callee.kind {
             HirExprKind::Variable(name) => {
-                // A local binding of function type — a closure or a function-typed
-                // parameter — is called indirectly through its fat pointer. It shadows a
+                // A local binding of function type (a closure or a function-typed
+                // parameter) is called indirectly through its fat pointer. It shadows a
                 // same-named top-level function, matching the frontend's precedence.
                 if self.variables.contains_key(name) {
                     return self.codegen_indirect_call(callee, args);
@@ -262,7 +262,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.codegen_call(name, args)
             }
 
-            // Method call: `instance.method(args)` — pass self as first arg.
+            // Method call: `instance.method(args)`, passing self as the first arg.
             HirExprKind::FieldAccess { object, field } => {
                 let recv_ty = Type::from_hir(&object.ty);
                 // A trait-object receiver dispatches dynamically through its vtable
@@ -298,11 +298,11 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 // Non-struct receiver: a compiler-known intrinsic on a builtin type.
                 // Resolved ahead of the collection surface below because `.slice(range)`
-                // borrows a `Vec`'s buffer — it hands back a `&[T]` view rather than
+                // borrows a `Vec`'s buffer, so it hands back a `&[T]` view rather than
                 // performing an operation on the collection header.
                 //
-                // `checked_*` builds an `Option<T>` instance, so the call's result type —
-                // which only the frontend can name — travels on the callee.
+                // `checked_*` builds an `Option<T>` instance, so the call's result type,
+                // which only the frontend can name, travels on the callee.
                 if let Some(kind) = resolve_builtin_method(&recv_ty, field) {
                     let result_ty = Type::from_hir(&callee.ty);
                     return Ok(Some(self.codegen_builtin_method(
@@ -363,7 +363,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// `&string` is the exception: it is the fat pointer by value, so the borrow reads
     /// the place rather than taking its address. `borrow_ty` is the borrow's own type,
-    /// which is what settles that — the operand's type cannot, since `&s` and `&mut s`
+    /// which is what settles that. The operand's type cannot, since `&s` and `&mut s`
     /// name the same place.
     fn codegen_reference(
         &mut self,

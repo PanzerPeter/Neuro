@@ -29,8 +29,8 @@ fn llvm_err(e: inkwell::builder::BuilderError) -> CodegenError {
 
 /// Who owns the buffer behind a rendered piece.
 ///
-/// A rendering either hands back bytes the program already had — a `.rodata` literal,
-/// the caller's own string — or a buffer it allocated. The concatenation copies every
+/// A rendering either hands back bytes the program already had (a `.rodata` literal,
+/// the caller's own string) or a buffer it allocated. The concatenation copies every
 /// piece out and must then release exactly the allocated ones, so each piece carries
 /// the answer rather than the copy loop guessing from the pointer.
 #[derive(Clone, Copy)]
@@ -41,7 +41,7 @@ enum PieceOwner<'ctx> {
     /// A buffer this rendering allocated and nothing else aliases.
     Owned,
     /// The result of a transform that returns its input untouched when the text is
-    /// already in the requested shape — `__neuro_pad`, `__neuro_point`, and
+    /// already in the requested shape: `__neuro_pad`, `__neuro_point`, and
     /// `__neuro_exp` all do. The buffer is ours only when it is not the borrowed one
     /// handed in, which is a runtime pointer comparison.
     OwnedUnlessSameAs(PointerValue<'ctx>),
@@ -80,7 +80,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 HirInterpPart::Formatted { expr, spec } => {
                     let ty = Type::from_hir(&expr.ty);
                     let value = self.codegen_expr(expr)?;
-                    // A hole holding a nested producer — `"{a + b}"` — hands us a buffer
+                    // A hole holding a nested producer, `"{a + b}"`, hands us a buffer
                     // of our own, which a `string` rendering passes straight through.
                     let incoming = if Self::produces_owned_string(expr) {
                         PieceOwner::Owned
@@ -187,7 +187,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// ownership into the result's.
     ///
     /// When the input was ours, it is released here unless the transform handed it
-    /// straight back — in which case it *is* the result and stays ours. When the input
+    /// straight back, in which case it *is* the result and stays ours. When the input
     /// was borrowed, the result is ours only if the transform allocated, which the
     /// consumer settles by the same pointer comparison.
     fn chain_transform(
@@ -266,7 +266,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Render a `@derive(Debug)` struct as `Name { field: value, ... }`.
     ///
-    /// Only reachable under a `{x:?}` hole — a struct has no `Display` form — and every
+    /// Only reachable under a `{x:?}` hole (a struct has no `Display` form) and every
     /// field is rendered with the same Debug kind, which is what quotes a nested
     /// `string` and recurses into a nested struct. A field-less struct renders as its
     /// bare name, with no braces to hold nothing.
@@ -327,7 +327,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .unwrap_or(name)
     }
 
-    /// A `.rodata` literal as a rendered piece — the punctuation a struct's debug form
+    /// A `.rodata` literal as a rendered piece, the punctuation a struct's debug form
     /// is framed with, and the whole rendering of a field-less one.
     fn text_piece(&self, text: &str) -> CodegenResult<Piece<'ctx>> {
         let global = self
@@ -624,7 +624,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Build the `printf` conversion for a spec: sign flag, optional precision,
-    /// and the conversion letters. Width and alignment are deliberately absent —
+    /// and the conversion letters. Width and alignment are deliberately absent:
     /// `__neuro_pad` owns them, so one padding rule covers every type and centring
     /// works even though `printf` has no such flag.
     fn format_string(

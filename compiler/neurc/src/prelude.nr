@@ -1,4 +1,4 @@
-// Implicit standard library — compiled into every program.
+// Implicit standard library: compiled into every program.
 //
 // These declarations are ordinary Neuro source, parsed by the same parser as user
 // code and prepended to the program's items. A user declaration of the same name
@@ -24,7 +24,7 @@ export enum Result<T, E> {
 // everything, including itself. An ordered map keyed on a raw float would therefore be
 // able to hold a key it can never find again. These wrappers restore a total order by
 // excluding NaN at construction, which is why they are validating structs rather than
-// newtypes — a newtype has no construction-time hook. They implement `Comparable`, so
+// newtypes: a newtype has no construction-time hook. They implement `Comparable`, so
 // they are ordered-map keys; hashing a float has no representation-independent answer,
 // so they deliberately do not implement `Hashable`.
 @derive(Copy, Clone)
@@ -130,7 +130,7 @@ export trait IntoIterator {
 // Unicode scalar values.
 //
 // The text is borrowed, never owned, so walking a string neither copies nor consumes
-// it. `.chars()` is the only way to build one — the fields are private, and the
+// it. `.chars()` is the only way to build one: the fields are private, and the
 // compiler fills them in.
 export struct Chars {
     source: &string,

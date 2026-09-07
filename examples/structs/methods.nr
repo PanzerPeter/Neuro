@@ -1,4 +1,4 @@
-// Methods example — Phase 2 feature
+// Methods example: Phase 2 feature
 //
 // Demonstrates impl blocks, instance methods (&self), and
 // associated functions (TypeName::func) on structs.

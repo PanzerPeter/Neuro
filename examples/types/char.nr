@@ -2,7 +2,7 @@
 //
 // A `char` is a single Unicode scalar value (32-bit). Char literals are written
 // with single quotes and support escapes (`'\n'`, `'\u{1F44D}'`). `char` is
-// Copy, has a built-in total order, and `as`-casts to/from integer types — but
+// Copy, has a built-in total order, and `as`-casts to/from integer types, but
 // has no arithmetic (compute on the integer code point instead).
 
 func main() -> i32 {

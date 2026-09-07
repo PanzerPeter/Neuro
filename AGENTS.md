@@ -21,11 +21,11 @@ Workspace layout (`compiler/`):
 
 | Crate | Role |
 | --- | --- |
-| `infrastructure/shared-types` | `Span`, `Identifier`, `Literal` — no business logic |
+| `infrastructure/shared-types` | `Span`, `Identifier`, `Literal`: no business logic |
 | `infrastructure/source-location` | Source mapping |
 | `infrastructure/diagnostics` | Error type infrastructure |
 | `infrastructure/ast-types` | AST node definitions (owned here, not in the parser) |
-| `infrastructure/neuro-hir` | Typed HIR — the frontend/backend contract |
+| `infrastructure/neuro-hir` | Typed HIR: the frontend/backend contract |
 | `infrastructure/project-config` | `neuro.toml` parsing |
 | `lexical-analysis` | Tokenizer (logos + unicode-ident) |
 | `syntax-parsing` | Pratt expression parser + statement parser |
@@ -48,7 +48,7 @@ language feature, not by technical layer. The rules an agent must not break:
   making `neurc` orchestrate the pair. It is named in
   `compiler/syntax-parsing/CONTEXT.md` and enforced by
   `compiler/neurc/tests/architecture_tests.rs`. A second exception requires
-  changing that test first — do not add one casually.
+  changing that test first. Do not add one casually.
 - Feature slices in each other's `[dev-dependencies]` are fine; the
   architecture test reads `[dependencies]` only.
 - No business logic in infrastructure crates.
@@ -56,7 +56,7 @@ language feature, not by technical layer. The rules an agent must not break:
 
 Status (current phase, per-feature progress) lives in the
 [Quick Roadmap](README.md#quick-roadmap) and [CHANGELOG.md](CHANGELOG.md).
-Never restate it elsewhere — it goes stale.
+Never restate it elsewhere. It goes stale.
 
 ## Build and Test Commands
 
@@ -82,6 +82,7 @@ cargo test -- --nocapture              # show test output
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 python tools/check_docs_hygiene.py     # documentation hygiene gate
+python tools/clean_stale_target.py     # garbage-collect stale target/ artifacts
 ```
 
 Running the compiler:
@@ -111,7 +112,7 @@ python tools/check_docs_hygiene.py
 
 ## Code Style Guidelines
 
-Rust, edition 2021, MSRV 1.85. Formatting is whatever `cargo fmt` produces —
+Rust, edition 2021, MSRV 1.85. Formatting is whatever `cargo fmt` produces:
 never hand-format around it.
 
 - **No `unwrap()` / `expect()` in production code paths.** Return
@@ -158,21 +159,21 @@ that fails before the fix.
 
 Where tests go:
 
-- **Unit tests** — `#[cfg(test)] mod tests { ... }` in the source file, for
+- **Unit tests**: `#[cfg(test)] mod tests { ... }` in the source file, for
   internal functions.
-- **Slice integration tests** — the crate's `tests/` directory, exercising the
+- **Slice integration tests**: the crate's `tests/` directory, exercising the
   slice's public entry point.
-- **End-to-end tests** — `compiler/neurc/tests/`, one file per language
+- **End-to-end tests**: `compiler/neurc/tests/`, one file per language
   feature. These compile real `.nr` source with the built `neurc` binary and
   run it. Use the `CompileTest` helper in
   `compiler/neurc/tests/common/mod.rs`; it writes sources to a temp dir and
   resolves the binary through `CARGO_BIN_EXE_neurc`.
-- **Example programs** — `examples/`, grouped by topic. Each program is pinned
+- **Example programs**: `examples/`, grouped by topic. Each program is pinned
   two ways: its `main` return value is its process exit code, registered in
   `examples/expected.txt`, and its stdout is fixed byte for byte in a sibling
   `.out` file. `compiler/neurc/tests/examples.rs` checks both. Adding an
   example means adding both pins.
-- **Architecture tests** — `compiler/neurc/tests/architecture_tests.rs`
+- **Architecture tests**: `compiler/neurc/tests/architecture_tests.rs`
   enforces the VSA dependency rules. If it fails, the fix is the dependency,
   not the test.
 
@@ -194,15 +195,15 @@ nightly, `cargo audit`, benchmark regression budgets, release smoke tests
 Neuro is an alpha-stage compiler. Security-relevant work concentrates in three
 places, and agent changes should be read with them in mind:
 
-- **Compiler integrity** — malformed or adversarial `.nr` input must not
+- **Compiler integrity**: malformed or adversarial `.nr` input must not
   panic, crash, read out of bounds, or hang the compiler. Parser and analysis
   code must handle untrusted input defensively; this is the main reason the
   no-`unwrap()` rule exists.
-- **Generated code safety** — a backend bug that emits incorrect IR is a
+- **Generated code safety**: a backend bug that emits incorrect IR is a
   security bug (uninitialized reads, bad pointer arithmetic, missing overflow
   or bounds guards). Codegen changes need runtime tests that execute the
   produced binary, not just IR inspection.
-- **Dependency vulnerabilities** — run `cargo audit` when touching
+- **Dependency vulnerabilities**: run `cargo audit` when touching
   `Cargo.toml`; CI enforces it. Do not add a dependency without a clear reason,
   and never pin to an unmaintained crate.
 

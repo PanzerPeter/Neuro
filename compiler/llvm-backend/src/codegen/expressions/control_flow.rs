@@ -11,7 +11,7 @@ use crate::types::Type;
 impl<'ctx> CodegenContext<'ctx> {
     /// Codegen a value-producing if-expression using an alloca result slot.
     ///
-    /// `result_ty` is the if-expression's resolved type — `expr.ty` for a value
+    /// `result_ty` is the if-expression's resolved type, `expr.ty` for a value
     /// position `if`, or the function return type when a tail `if` is the implicit
     /// return. `Void` selects the statement form (no result slot).
     pub(crate) fn codegen_if_expr(

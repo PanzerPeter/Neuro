@@ -1,7 +1,7 @@
 // Deterministic destruction (`Drop`): scope-exit destructor insertion.
 //
 // A binding of a `Drop` type runs its `{struct}__drop(&mut self)` destructor when
-// its lexical scope ends on a *normal* exit — fall-through, `return`, `break`, or
+// its lexical scope ends on a *normal* exit: fall-through, `return`, `break`, or
 // `continue` (a panic aborts without running destructors). Each owned
 // binding carries an `i1` drop flag, set `false` when the value is moved out, so a
 // moved value is not dropped twice. Every helper here is inert when the
@@ -39,7 +39,7 @@ impl<'ctx> CodegenContext<'ctx> {
             // program declares any user `Drop` type.
             Type::Collection { .. } => Some(DropTarget::Collection),
             // So does a tensor: every construction allocates its buffer, and the type
-            // says so — there is no borrowed value of tensor type to confuse it with.
+            // says so, and there is no borrowed value of tensor type to confuse it with.
             Type::Tensor { .. } => Some(DropTarget::TensorBuffer),
             Type::Struct(name) if self.drop_types.contains(&name) => {
                 Some(DropTarget::UserDrop(name))
@@ -53,14 +53,14 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// Deliberately conservative: it answers `true` only for the two producers that
     /// allocate unconditionally. A `.rodata` literal, a variable, a `slice` borrowing
-    /// its source, and a value returned by a function — which may have returned either
-    /// a literal or a heap buffer, indistinguishably — all answer `false` and are never
+    /// its source, and a value returned by a function (which may have returned
+    /// either a literal or a heap buffer, indistinguishably) all answer `false` and are never
     /// freed. The asymmetry is the point: a missed `true` leaks a buffer, while a wrong
     /// `true` frees `.rodata` or double-frees, so only provable ownership counts.
     pub(crate) fn produces_owned_string(expr: &HirExpr) -> bool {
         match &expr.kind {
             // `codegen_interp_string` concatenates every piece into one fresh buffer,
-            // and does so unconditionally — even a hole-free interpolation allocates.
+            // and does so unconditionally: even a hole-free interpolation allocates.
             HirExprKind::InterpString { .. } => true,
             // `+` yielding a `string` is `codegen_string_concat`, which always allocates
             // a `len1 + len2` buffer. No numeric addition produces a `string`, so the

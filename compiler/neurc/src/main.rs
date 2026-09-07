@@ -137,7 +137,7 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
     };
 
     // Named arguments are resolved against the whole program, so this runs only once the
-    // prelude and every module are in one list — and before type checking, which is what
+    // prelude and every module are in one list, and before type checking, which is what
     // lets every later pass see an ordinary positional call.
     argument_binding::bind_arguments(&mut items).map_err(|errors| {
         eprintln!("Argument errors found:");
@@ -229,7 +229,7 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
         .context("Type checking failed")?;
     print_warnings(&warnings);
 
-    // Lower to typed HIR (Phase 1.8). The LLVM backend consumes this HIR directly —
+    // Lower to typed HIR (Phase 1.8). The LLVM backend consumes this HIR directly:
     // every node carries its resolved type, so the backend no longer re-derives types
     // from the AST.
     log::debug!("Lowering to typed HIR...");

@@ -165,7 +165,7 @@ func main() -> i32 {
 #[test]
 fn by_value_struct_parameter_with_drop_is_destroyed_once() {
     // A `Drop` value moved into a free function is owned by it and destroyed when the
-    // callee returns — exactly once, as for a method parameter.
+    // callee returns: exactly once, as for a method parameter.
     let test = CompileTest::new();
     let exit = test
         .compile_and_run(

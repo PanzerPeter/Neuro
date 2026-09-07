@@ -2,7 +2,7 @@
 //
 // `f16` (IEEE-754 half) and `bf16` (bfloat16) are first-class scalar primitives
 // with a deliberately narrow contract: binding, copy, `==`/`!=`, and `as`-cast
-// to/from any numeric type. They have NO scalar arithmetic — half-precision ALUs
+// to/from any numeric type. They have NO scalar arithmetic: half-precision ALUs
 // are not portable, so the language directs you to compute in `f32` and cast back.
 // Their payoff is bulk tensor compute (Phase 3), where the restriction lifts.
 //
@@ -30,7 +30,7 @@ func main() -> i32 {
     val three: f16 = scale(0.75f16)          // 0.75 * 4 = 3.0
     val code: i32 = three as i32             // 3
 
-    // `f16` / `bf16` are not interpolatable — the narrow contract covers binding,
+    // `f16` / `bf16` are not interpolatable: the narrow contract covers binding,
     // copy, `==`, and `as`, and rendering is not on that list. Widen to `f32` to
     // report one, exactly as you widen to compute with one.
     val a_out: f32 = a as f32

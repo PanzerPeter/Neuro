@@ -80,7 +80,7 @@ fn for_over_an_iterator_needs_no_into_iterator_impl() {
     assert_eq!(exit, 46, "10 + 11 + 12 + 13");
 }
 
-/// An empty iterator runs the body zero times — the `None` on the very first `next()`
+/// An empty iterator runs the body zero times: the `None` on the very first `next()`
 /// has to leave the loop, not fall into the body with an undefined binding.
 #[test]
 fn an_empty_iterator_runs_the_body_zero_times() {

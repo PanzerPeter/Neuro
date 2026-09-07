@@ -1,4 +1,4 @@
-# Source for assets/demo.gif — regenerate with:  vhs assets/demo.tape
+# Source for assets/demo.gif. Regenerate with:  vhs assets/demo.tape
 #
 # Requires: vhs, ttyd, ffmpeg, and a release build of the compiler:
 #   cargo build --release -p neurc

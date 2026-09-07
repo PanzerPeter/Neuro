@@ -62,7 +62,7 @@ impl TypeChecker {
     ///
     /// `Copy` implies `Clone` (a Copy type is trivially cloneable), matching Rust. A
     /// name outside the spec's derivable set is a diagnostic, and so is one the spec
-    /// lists but no pass generates yet — a derive that quietly does nothing is worse
+    /// lists but no pass generates yet: a derive that quietly does nothing is worse
     /// than one that refuses, because the program then compiles against behavior it
     /// does not have.
     pub(super) fn record_derive_intent(&mut self, def: &StructDef) {
@@ -127,7 +127,7 @@ impl TypeChecker {
     /// renderable / comparable by the same derived rules.
     ///
     /// A derive generates code straight over the fields, so it can only reach a field
-    /// whose type the generated code knows how to handle — a scalar, `string`, or
+    /// whose type the generated code knows how to handle: a scalar, `string`, or
     /// another struct carrying the same derive. Run after all structs are registered so
     /// a field naming a struct declared later still resolves.
     pub(crate) fn validate_field_derives(&mut self, def: &StructDef) {
@@ -244,7 +244,7 @@ impl TypeChecker {
 
     /// Register a generic struct template.
     ///
-    /// A generic struct is not itself a usable type — each distinct set of type
+    /// A generic struct is not itself a usable type: each distinct set of type
     /// arguments is monomorphized into a distinct nominal struct on demand. The
     /// template's field types (carrying [`Type::Generic`] placeholders) are also
     /// stored in `struct_defs` under the base name so generic `impl` method bodies
@@ -303,7 +303,7 @@ impl TypeChecker {
 
     /// Type-check a generic `impl` block's method bodies once, abstractly:
     /// the impl's type parameters are in scope, so a field typed `T` resolves to a
-    /// placeholder — exactly the soundness contract of a bounds-free type parameter.
+    /// placeholder: exactly the soundness contract of a bounds-free type parameter.
     pub(crate) fn check_generic_impl(&mut self, def: &ImplDef) {
         self.enter_generic_scope(&def.generics, &def.lifetimes);
         self.check_impl(def);

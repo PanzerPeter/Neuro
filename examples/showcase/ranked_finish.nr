@@ -1,4 +1,4 @@
-// Showcase — `.enumerate()` carrying a position through earlier features.
+// Showcase: `.enumerate()` carrying a position through earlier features.
 //
 // Cumulative integration example combining:
 //   `.enumerate()` on arrays, on `Vec<T>`, and on a range
@@ -8,7 +8,7 @@
 //
 // The point of the combination: the position `.enumerate()` binds is a `u64`,
 // which is exactly what an index expression takes. So a rank can read BACK into
-// the array that produced it — comparing each runner with the next one — which a
+// the array that produced it (comparing each runner with the next one), which a
 // plain `for runner in runners` cannot do at all. The same head works unchanged
 // over a heap-growable `Vec<T>` and over a range, where the position stays a
 // count from zero rather than the value the range yields.
@@ -38,7 +38,7 @@ func medal(place: i32) -> i32 {
 }
 
 // Count the runners who finished ahead of somebody faster. The comparison needs
-// the NEXT element, so it needs the position — not just the element.
+// the NEXT element, so it needs the position, not just the element.
 func out_of_order(runners: [Runner; 4]) -> i32 {
     mut inversions: i32 = 0
     for (rank, runner) in runners.enumerate() {
@@ -78,7 +78,7 @@ func main() -> i32 {
         adjusted = adjusted + split
     }
 
-    // Over a range, the position is a count from zero — NOT the value yielded.
+    // Over a range, the position is a count from zero: NOT the value yielded.
     mut laps: i32 = 0
     for (step, lap) in (7..10).enumerate() {
         println("step {step} is lap {lap}")

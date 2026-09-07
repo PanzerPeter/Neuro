@@ -27,8 +27,8 @@ use crate::{is_integer, LoopCtx, Lowerer, LoweringError};
 /// call takes on whatever type its context demands.
 const PANIC_BUILTINS: &[&str] = &["panic", "assert", "unreachable"];
 
-/// The standard-output builtins. Each takes one `string` and returns unit, so —
-/// unlike the panic family — the call's type is fixed rather than taken from context.
+/// The standard-output builtins. Each takes one `string` and returns unit, so
+/// (unlike the panic family) the call's type is fixed rather than taken from context.
 const IO_BUILTINS: &[&str] = &["print", "println"];
 
 /// The deep-copy method shared by `string` and `Clone`-deriving structs.
@@ -71,7 +71,7 @@ impl Lowerer {
 
     /// Lower an expression without applying the unsizing coercions. Every contextual
     /// typing rule lives here; [`Lowerer::lower_expr`] wraps the result so the two
-    /// unsizing sites — `&T` → `&dyn Trait` and `&[T; N]` / `&Vec<T>` → `&[T]` — are
+    /// unsizing sites, `&T` → `&dyn Trait` and `&[T; N]` / `&Vec<T>` → `&[T]`, are
     /// applied uniformly wherever an expected type is supplied: call arguments,
     /// returns, and annotated bindings.
     fn lower_expr_uncoerced(
@@ -582,7 +582,7 @@ impl Lowerer {
             hint = Some(then_ty.clone());
         }
         // The first arm that carries a type decides the `if`'s, mirroring the checker.
-        // A divergent arm — a `panic` or an `unreachable` with no context type — lowers
+        // A divergent arm (a `panic` or an `unreachable` with no context type) lowers
         // to `void` and describes nothing, so taking the `then` arm unconditionally made
         // the whole `if` void purely because of the order the arms were written in.
         let mut ty = then_ty;
@@ -621,7 +621,7 @@ impl Lowerer {
     }
 
     /// Lower a block in value position (a bare/`unsafe` block or an `if` arm),
-    /// returning the lowered statements and the block's value type — the type of the
+    /// returning the lowered statements and the block's value type, the type of the
     /// trailing expression, or `void`. The tail is typed under `expected`, matching the
     /// checker's `check_block_expr_type`.
     pub(super) fn lower_block_value(

@@ -1,6 +1,6 @@
 // Newtype declarations: `newtype` creates a DISTINCT nominal type that
 // wraps an inner type. Unlike a transparent `type` alias, a newtype and its inner
-// type are not interchangeable — `Meters` and `i32` are different types. Construct
+// type are not interchangeable: `Meters` and `i32` are different types. Construct
 // a newtype with `Name(value)`; read the wrapped value back with `.0`.
 
 newtype Meters = i32
@@ -13,7 +13,7 @@ struct Trip {
 
 // Newtypes cross function boundaries as parameters and return types. Because the
 // two arguments share the `Meters` type they add cleanly; a `Seconds` here would
-// be a type error — that is the safety a newtype buys over a plain alias.
+// be a type error: that is the safety a newtype buys over a plain alias.
 func add_distance(a: Meters, b: Meters) -> Meters {
     Meters(a.0 + b.0)
 }

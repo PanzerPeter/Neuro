@@ -2,7 +2,7 @@
 //
 // Each case compiles a program whose `main` compares a block string against the
 // text it should dedent to and returns 0 only on an exact match, so a failure
-// means the value reaching codegen differed — not merely that the source lexed.
+// means the value reaching codegen differed: not merely that the source lexed.
 
 mod common;
 use common::CompileTest;
@@ -82,7 +82,7 @@ fn block_string_interpolates_with_format_specs() {
 
 /// The newline before the closing delimiter's line belongs to the delimiter. A block
 /// written on one content line is that line and nothing else, all the way through
-/// codegen — the value the program compares is the value the lexer built.
+/// codegen: the value the program compares is the value the lexer built.
 #[test]
 fn regression_block_string_drops_the_newline_before_its_closing_line() {
     assert_block_equals(

@@ -1,4 +1,4 @@
-// Showcase — a shift report long enough to exercise buffered standard output.
+// Showcase: a shift report long enough to exercise buffered standard output.
 //
 // Integration example combining the features that feed a printing loop:
 //   struct + `@derive(Copy, Clone)` + `impl` methods (`&self`) · `Vec<T>` +

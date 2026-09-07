@@ -104,7 +104,7 @@ impl Lowerer {
     /// Monomorphize a generic enum from the type arguments a construction site's payload
     /// determined, returning the mangled instance name. Arguments the payload leaves
     /// undetermined come from the enclosing return type when it is an instance of the
-    /// same enum — the same fallback the checker applies, so both slices agree on which
+    /// same enum, the same fallback the checker applies, so both slices agree on which
     /// instance a tail-position `Result::Err(1)` builds.
     pub(super) fn instantiate_inferred_enum(
         &mut self,
@@ -178,7 +178,7 @@ impl Lowerer {
         (types, consts)
     }
 
-    /// Lower a unit-variant construction `E::V` — an empty payload. A generic enum's
+    /// Lower a unit-variant construction `E::V`, an empty payload. A generic enum's
     /// instance can only come from the expected type here (a unit variant carries
     /// nothing to infer from), which the checker has already enforced.
     pub(super) fn lower_enum_construct(

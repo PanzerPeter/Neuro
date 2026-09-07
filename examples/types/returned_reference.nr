@@ -4,7 +4,7 @@
 // parameters: under lifetime elision, a single input reference lifetime is
 // applied to the output, so the returned borrow lives as long as the caller's
 // borrow. The borrow checker rejects returning a reference to a function-local
-// value — it would dangle — so only borrows that outlive the call are allowed.
+// value (it would dangle) so only borrows that outlive the call are allowed.
 
 // Returns its borrowed input unchanged; the output lifetime is the input's.
 func identity(r: &i32) -> &i32 {

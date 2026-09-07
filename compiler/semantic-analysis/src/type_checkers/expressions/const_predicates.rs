@@ -75,7 +75,7 @@ fn eval_const_int(expr: &Expr, subst: &HashMap<String, Type>) -> Option<i128> {
 }
 
 /// Whether a resolved type still mentions a generic type parameter, a const-parameter
-/// array length, or an unresolved const value — i.e. it is not fully concrete.
+/// array length, or an unresolved const value, i.e. it is not fully concrete.
 pub(super) fn mentions_type_parameter(ty: &Type) -> bool {
     match ty {
         Type::Generic(_) | Type::ConstValue(_) => true,

@@ -6,16 +6,16 @@ Validate the type correctness and scope rules of a parsed Neuro program before c
 ## Entry Point
 - Type: Library function
 - Input: `items: &[Item]`
-- Output: `Result<Vec<Warning>, Vec<TypeError>>` — `Ok` carries non-fatal lint warnings, `Err`
+- Output: `Result<Vec<Warning>, Vec<TypeError>>`: `Ok` carries non-fatal lint warnings, `Err`
   fatal type errors. Warnings are dropped when errors are present.
 
 ## Data Ownership
 - Tables / Events Published / Events Consumed / Public Read Model: none
 
 ## Shared Kernel
-- ast-types — read-only traversal of `Item` / `Expr` / `Stmt` nodes
-- shared-types — `Span` embedded in every `TypeError`, `FormatSpec` for interpolation holes
-- diagnostics — error type infrastructure
+- ast-types: read-only traversal of `Item` / `Expr` / `Stmt` nodes
+- shared-types: `Span` embedded in every `TypeError`, `FormatSpec` for interpolation holes
+- diagnostics: error type infrastructure
 
 `syntax-parsing` is `[dev-dependencies]` only (integration tests), never production.
 
@@ -34,39 +34,39 @@ module per declaration kind beside it. `tests/` is split by subject.
 (0z/0a/0/1b/1c/1d/2b) as later requirements landed. The full ordering and its rationale live in
 `docs/compiler/components/semantic-analysis.md`; the load-bearing points are:
 
-- **0z — `check_reserved_names`** runs *first, before anything mangles*. It rejects any declared
+- **0z. `check_reserved_names`** runs *first, before anything mangles*. It rejects any declared
   name (function, param, struct, field, enum, variant, trait, method, const, newtype) containing
   `__` with `ReservedNameSeparator`. `__` is the receiver/method separator in the flat function
   table and the backend splits method symbols on it, so a user name carrying its own `__` could
   forge another item's symbol.
-- **1 — structs** pre-registered into `struct_defs`, with `@derive` intent into `copy_structs` /
+- **1. structs** pre-registered into `struct_defs`, with `@derive` intent into `copy_structs` /
   `clone_structs` / `debug_structs` / `partial_eq_structs`, and every derive argument validated
-  (`UnknownDerive`, `UnimplementedDerive`, `DuplicateDerive`). **1b — `validate_copy_derive`** and
+  (`UnknownDerive`, `UnimplementedDerive`, `DuplicateDerive`). **1b. `validate_copy_derive`** and
   **`validate_field_derives`** run per struct once all are registered, so a field that is another
   struct resolves regardless of declaration order.
-- **1d — `register_trait`** runs before impl registration.
-- **2 — impl method signatures** into `functions` (mangled `StructName__methodName`) and
+- **1d. `register_trait`** runs before impl registration.
+- **2. impl method signatures** into `functions` (mangled `StructName__methodName`) and
   `impl_methods` (struct → method → mangled key).
-- **2b — `check_operator_supertraits`** enforces `Comparable: PartialEq` order-independently
-  (`MissingSupertraitImpl`). **2c — `check_derive_impl_conflicts`** rejects a struct that both
+- **2b. `check_operator_supertraits`** enforces `Comparable: PartialEq` order-independently
+  (`MissingSupertraitImpl`). **2c. `check_derive_impl_conflicts`** rejects a struct that both
   derives a trait and declares an `impl` of it (`DeriveConflictsWithImpl`).
-- **3 — consts** into `constants`, giving forward references and cross-function visibility with
-  no ordering constraint. **3b — every function signature** via `register_function_signature`
+- **3. consts** into `constants`, giving forward references and cross-function visibility with
+  no ordering constraint. **3b. every function signature** via `register_function_signature`
   (parameter and return types resolved in the function's generic scope), run over *all* functions
   before any body is checked, so a call resolves regardless of source order and mutually recursive
   functions can name each other. `check_function` reads the signature back via
   `lookup_registered_signature` rather than resolving it twice.
-- **4 — full check**: `check_function` / `check_impl` / `check_const_item`.
-- **5 — lints**: `run_lints` walks bodies collecting non-fatal `Warning`s
+- **4. full check**: `check_function` / `check_impl` / `check_const_item`.
+- **5. lints**: `run_lints` walks bodies collecting non-fatal `Warning`s
   (`prefer-loop-over-while-true` today, silenced by `@allow(prefer_loop_over_while_true)`;
   parenthesised `while (true)` deliberately not matched). Lints run independently of type errors.
 
 ### Expressions are checked exactly once
 This has to be arranged deliberately for the trailing bare expression of a non-void body: it is
 skipped in `check_function`'s statement loop and checked afterwards with the declared return type
-as its expected type. Checking it in both places re-ran its effects — a by-value argument was
+as its expected type. Checking it in both places re-ran its effects: a by-value argument was
 recorded as moved twice, and the second read then reported a use of the value the expression had
-moved itself — and duplicated any diagnostic the tail produced. The method loop in
+moved itself. It also duplicated any diagnostic the tail produced. The method loop in
 `declarations/impls.rs` follows the same rule.
 
 ### The value-position rules for `if` and `match`
@@ -79,8 +79,8 @@ Four rules interlock here, each fixing a shape that silently mis-typed:
    `val r = if a { x } else { if b { y } else { z } }` a spurious mismatch.
 2. **An `if`/`else` in value position carries its context into its arms**, mirroring `check_match`
    exactly: the arm-type hint is the caller's expected type when there is one, else the first
-   arm's type once known. Without it, an arm naming no type of its own — a bare `None`, an untyped
-   integer literal — resolved against nothing even when the `val` it initialized was annotated,
+   arm's type once known. Without it, an arm naming no type of its own (a bare `None`, an untyped
+   integer literal) resolved against nothing even when the `val` it initialized was annotated,
    and `if`/`else` disagreed with the `match` spelling of the same computation.
    `check_bare_block_expr`, `check_unsafe_block_expr`, and `check_block_expr_type` thread the same
    expected type down to the tail.
@@ -88,12 +88,12 @@ Four rules interlock here, each fixing a shape that silently mis-typed:
    `arm_value_type`, and `check_arm` consults `expr_diverges`: a block ending in `return` /
    `break` / `continue` reports `Type::Unknown` instead of the `Void` its trailing statement gives
    it, so it neither supplies the expression's type nor has to match it. Without the rule
-   `if n > 0 { return 1 } else { 2 }` was "expected void, found i32" — naming the diverging arm as
-   the EXPECTED type — while the same shape written with `panic` compiled, because the panic
+   `if n > 0 { return 1 } else { 2 }` was "expected void, found i32" (naming the diverging arm as
+   the EXPECTED type), while the same shape written with `panic` compiled, because the panic
    family was already `Unknown`.
 4. **A divergent arm does not decide the type.** `check_if_expr` and `check_match` take the result
    from the first arm that is not `Type::Unknown` and compare every arm against it. A `panic` /
-   `unreachable` arm is `Unknown` — compatible with everything — so taking it made the whole
+   `unreachable` arm is `Unknown` (compatible with everything), so taking it made the whole
    expression untyped and its binding vanish, purely because of the order the arms were written.
 
 `expr_diverges` / `stmt_diverges` are owned by `val_else.rs` (which needs them for its
@@ -102,9 +102,9 @@ Four rules interlock here, each fixing a shape that silently mis-typed:
 ### Return paths
 A non-void function or method must produce a value on every path, reported as
 `TypeError::MissingReturn`. Two helpers in `declarations/functions.rs` state the rule once:
-`tail_is_implicit_return` recognises the implicit return — a trailing bare expression, or a
+`tail_is_implicit_return` recognises the implicit return: a trailing bare expression, or a
 trailing `if`/`else`, which the parser always shapes as `Stmt::If` and which was therefore never
-checked against the declared return type at all — and `check_implicit_return` checks it. An `if`
+checked against the declared return type at all. `check_implicit_return` then checks it. An `if`
 whose every arm leaves the function carries no value and is a statement, so the divergence check
 covers it instead. Without the rule the backend left the exit block without a return, LLVM
 terminated it with `unreachable` (a legal terminator, so the verifier stayed silent), and the
@@ -116,12 +116,12 @@ error already given; `Unknown` is compatible with everything, so binding it is w
 the cascade.
 
 ### Primitive and reference type contracts
-- Struct types are **nominal** — two `Type::Struct` are compatible iff their names match. The same
+- Struct types are **nominal**: two `Type::Struct` are compatible iff their names match. The same
   holds for `Type::Enum`, `Type::Newtype` (which is NOT compatible with its inner type),
   `Type::Generic` (a type-parameter placeholder compatible only with itself), and
   `Type::DynObject`.
 - `Type::Reference { inner, mutable }` (Display `&T` / `&mut T`) is compatible only when
-  **mutability and referent both match** — there is no `&mut T` → `&T` coercion. References are
+  **mutability and referent both match**: there is no `&mut T` → `&T` coercion. References are
   always `Copy` and never move-tracked. Method-call and field-access resolution auto-deref via
   `referent()`, so `r.len()` / `r.field` / `r.method()` work through a borrow.
 - `Type::Slice(element)` and `Type::DynObject` are the two **unsized** types: valid only as a
@@ -136,7 +136,7 @@ the cascade.
 - `char` is Copy; `is_valid_cast` permits char↔integer and char→char only (no float, no bool);
   ordering comparisons accept it alongside numerics on its built-in total order.
 - `f16` / `bf16` have a deliberately narrow contract: Copy, `==`/`!=` via the compatible-type
-  path, `as`-casts to and from any numeric type and to and from each other — but **no
+  path, `as`-casts to and from any numeric type and to and from each other, but **no
   arithmetic**. `+ - * / %` on a half operand is `TypeError::HalfFloatArithmetic` ("compute in
   f32"), and `is_float()` deliberately still excludes them so arithmetic and inference paths skip
   them.
@@ -164,16 +164,16 @@ the cascade.
   `BitNot` requires an integer.
 
 ### Methods, impls, and dispatch
-`check_impl` binds `self` as a var of the struct type — **mutable for `&mut self`**, immutable for
-`&self` — then the remaining params, before checking the body. A `&mut self` body may therefore
+`check_impl` binds `self` as a var of the struct type (**mutable for `&mut self`**, immutable for
+`&self`), then the remaining params, before checking the body. A `&mut self` body may therefore
 assign to `self.field`.
 
 **Method calls** (`instance.method(args)`) are recognised when a `Call`'s `func` is a
 `FieldAccess`; the object's struct type drives an `impl_methods` lookup for the mangled name, then
 arity and argument types are validated (skipping param[0] = `self`). When the resolved method is
 in `mut_self_methods`, `check_mut_self_receiver` enforces the exclusive borrow: the receiver must
-be a `mut` place (or reached through `&mut T`) and must not already be borrowed — the same
-coexistence rule as a `&mut place` borrow — registering a transient exclusive borrow that clears
+be a `mut` place (or reached through `&mut T`) and must not already be borrowed (the same
+coexistence rule as a `&mut place` borrow), registering a transient exclusive borrow that clears
 at statement end. A `&T` receiver or a non-`mut` binding is `CannotBorrowMutably`; a live borrow is
 `CannotMutablyBorrowWhileBorrowed`.
 
@@ -189,14 +189,14 @@ compiler-known set before `MethodNotFound`, returning the result type (and an ar
 a wrong count):
 - `string.len() -> u64`, `string.clone() -> string` (nullary);
 - `string.slice(a..b) -> &string` and `string.char_slice(a..b) -> &string`, both via
-  `check_string_slice` — one `Expr::Range` argument with integer bounds, else
+  `check_string_slice`: one `Expr::Range` argument with integer bounds, else
   `SliceExpectsRange`. A bare `Expr::Range` anywhere else is `RangeNotAllowed`. The two share a
   check because they share a contract: they differ only in whether the indices count bytes or
   code points, which is a backend concern with no type-level consequence;
 - `string.chars() -> Chars` (nullary), the prelude's codepoint iterator. Like `.slice` it
   registers a transient borrow of the receiver, because the iterator holds a view into the
   receiver's bytes rather than owning them. `Chars` is a prelude declaration, so a program
-  compiled with `@no_prelude` — or one shadowing it — gets `UnknownTypeName` instead;
+  compiled with `@no_prelude` (or one shadowing it) gets `UnknownTypeName` instead;
 - `string.__char_at(offset) -> char`, gated on `in_prelude()` (the declaration being checked
   carries `ast_types::PRELUDE_MODULE`). It is the decode step `Chars::next` is written against;
   the language specifies no byte-indexed read of a string, so every other module sees
@@ -205,7 +205,7 @@ a wrong count):
   each taking one same-typed argument (`check_unary_int_intrinsic_arg`) and returning the receiver
   type;
 - `f32`/`f64`.`is_nan()` (nullary) returns `bool`. Gated on `Type::is_float`, which admits the
-  full-precision floats only — `f16`/`bf16` fall through to `MethodNotFound`, having no scalar
+  full-precision floats only: `f16`/`bf16` fall through to `MethodNotFound`, having no scalar
   arithmetic that could produce a NaN. Like the integer intrinsics it matches on `recv` rather
   than the referent, so a `&f64` receiver needs an explicit deref;
 - `checked_{add,sub,mul}` take the same argument but return `Option<T>` over the receiver,
@@ -218,13 +218,13 @@ a wrong count):
 **Panic-family builtins.** `check_plain_call` consults `resolve_panic_builtin` before ordinary
 resolution, and only when no user function of the same name is registered. `panic(msg: string)`,
 `assert(cond: bool)`, `unreachable()` each validate arity and type
-(`ArgumentCountMismatch` / `Mismatch`) and return `Type::Unknown` — **not** `Void`, because the
+(`ArgumentCountMismatch` / `Mismatch`) and return `Type::Unknown`, **not** `Void`, because the
 call *diverges* and must satisfy any context (unit statement, non-`void` tail return, value
 binding) until a dedicated `!` type lands.
 
 **Standard-output builtins.** `resolve_io_builtin` (`expressions/builtins.rs`) is consulted after
 the panic family under the same shadowing rule. `print(text: string)` and `println(text: string)`
-both return `Type::Void` — they **return**, unlike the panic family, so the result is the real
+both return `Type::Void`: they **return**, unlike the panic family, so the result is the real
 unit type and cannot stand in for a value. The argument is an owned `string` or an immutable
 `&string` (the same fat pointer `.slice(range)` yields); a `&mut string` is a pointer to the fat
 pointer and is a `Mismatch`. No move is recorded: the text is read, not consumed.
@@ -243,12 +243,12 @@ loop.
   on a disagreeing later one.
 - **`Expr::Loop`'s type** is its agreed value-break type; unit when only plain `break`s target it;
   and **the expected type when no `break` targets it at all**. Such a loop never reaches its exit,
-  so it satisfies any context — the same divergent contract the panic-family builtins carry. That
+  so it satisfies any context: the same divergent contract the panic-family builtins carry. That
   is what keeps `func f() -> i32 { loop { ... return x } }` valid now that a trailing `loop` is
   checked as the implicit return.
 
 - **Enumerated heads.** `for (i, x) in xs.enumerate()` reaches the checker as `Stmt::ForRange` /
-  `Stmt::ForEach` with `index: Some(_)` — the parser resolves the adapter, so nothing here checks a
+  `Stmt::ForEach` with `index: Some(_)`: the parser resolves the adapter, so nothing here checks a
   method call. `define_loop_index` binds it as `u64` (matching `.len()` and the index expression,
   so `xs[i]` needs no cast) in the same scope as the element binding, which is what makes
   `for (i, i) in ...` a `VariableAlreadyDefined` rather than a shadow.
@@ -256,11 +256,11 @@ loop.
 - **Adapted heads.** `type_checkers/loop_adapters.rs`. `check_loop_adapters` folds the head's
   `adapters` over the element type the base head produced: `.map(f)` replaces it with `f`'s
   return type, `.filter(p)` leaves it alone. Each function is checked in the scope *enclosing*
-  the loop — it is evaluated once, before the loop, and cannot name the binding it feeds — and is
+  the loop (it is evaluated once, before the loop, and cannot name the binding it feeds), and is
   READ rather than moved, so a closure binding used by a head stays usable afterwards. Four
   rejections: a non-function or wrong-arity argument (`LoopAdapterNotCallable`), a parameter that
   does not accept the element (`LoopAdapterInput`), a `.filter` predicate that does not answer
-  `bool`, and a `.map` returning `void` (both `LoopAdapterOutput`) — the last because the loop
+  `bool`, and a `.map` returning `void` (both `LoopAdapterOutput`): the last because the loop
   binding would otherwise have no type the backend can represent.
 
 ### The iteration protocol
@@ -268,21 +268,21 @@ loop.
 nor a slice falls through to `iteration_item`, which answers what one step binds:
 
 - `IntoIterator` is consulted first (`trait_impls`), and the iterator is the declared return
-  type of that impl's `into_iter`. Otherwise the head is taken to be its own iterator — the
+  type of that impl's `into_iter`. Otherwise the head is taken to be its own iterator: the
   blanket `impl<I: Iterator> IntoIterator for I` stated as a rule, since a blanket impl has no
   syntax yet.
 - The `Item` comes from the ITERATOR's own `impl Iterator` entry in `impl_assoc`, not from the
   container's. That is also what enforces `IntoIterator::Iter: Iterator`: a bound on an
   associated-type declaration has no syntax, so the requirement is checked on the type
   `into_iter` actually returned.
-- The head is a consuming position — the loop takes the value as its iterator — so it is
+- The head is a consuming position: the loop takes the value as its iterator, so it is
   `record_move`d like any other by-value placement.
 - A head implementing neither trait is `TypeError::NotIterable`, which replaced the
   `NotIndexable` this arm used to reuse: iterating and indexing are no longer the same question.
 
 `char_indices_receiver` (same module) recognises the `text.char_indices()` head form ahead of
 the ordinary `check_expr` on the iterable, and `check_char_indices_head` types it as the same
-`Chars` iterator `.chars()` yields — the position it binds is a byte offset the lowering reads
+`Chars` iterator `.chars()` yields: the position it binds is a byte offset the lowering reads
 off that iterator, not a payload it could yield, since an `Option` payload is restricted to
 scalars and a pair is not one. A non-`string` receiver is `MethodNotFound`, matching what the
 call gets anywhere but a `for` head.
@@ -297,13 +297,13 @@ there is no `Stmt::Loop`.
 
 ### Ownership, borrows, and lifetimes
 **Move by default** (`type_checkers/moves.rs`). A non-`Copy` value is moved out of its source
-binding when placed into a new owner — a `val`/`mut` initializer, an assignment RHS, a `return`, a
+binding when placed into a new owner: a `val`/`mut` initializer, an assignment RHS, a `return`, a
 struct-field assignment value, or a by-value call argument. `record_move` marks the source moved,
 but only when the consumed expression is a bare place identifier of a move-tracked type
 (`is_type_move_tracked` is true for `Type::String`, every collection, and any `Type::Struct` not
 deriving `Copy`). Reading a moved binding is `UseOfMovedValue`, carrying the original move span;
 `SymbolInfo.moved_at` holds the per-binding state and reassigning a `mut` clears it. `.clone()`
-borrows rather than moving — the canonical opt-out.
+borrows rather than moving: the canonical opt-out.
 
 The analysis is deliberately conservative: `if`/`while`/`for` bodies and if-expression arms
 snapshot and restore move state, so a conditional move never leaks onto a non-executing path. It
@@ -315,13 +315,13 @@ list: `IMPLEMENTED_DERIVES` (`Copy`, `Clone`, `Debug`, `PartialEq`) are acted up
 `PENDING_DERIVES` (`Hashable`) reports `UnimplementedDerive`, anything else `UnknownDerive`, and a
 repeat is `DuplicateDerive`. Nothing is silently ignored. Pass 1b checks every field of a Copy
 struct is itself Copy (`CopyDeriveNonCopyField`) and every field of a `Debug` / `PartialEq` struct
-is renderable / comparable by the derived rules (`DeriveFieldUnsupported` —
+is renderable / comparable by the derived rules (`DeriveFieldUnsupported`,
 `is_debug_renderable` / `is_derived_comparable`: a scalar, `string`, or another struct carrying the
 same derive, since the generated code reaches inside a field no other way). A generic template's
 fields are type parameters, which no derive rule can judge, so the check runs again per
 monomorphized instance in `instantiate_generic_struct`. Copy implies Clone.
 
-**Derived `Debug` and `PartialEq`.** Neither routes through a method — that is what separates a
+**Derived `Debug` and `PartialEq`.** Neither routes through a method: that is what separates a
 derive from a hand-written `impl PartialEq`, which lands in `operator_binary_impls` and dispatches.
 `==` / `!=` on a `partial_eq_structs` struct is accepted by `has_derived_equality` beside the
 built-in scalar equality, and lowering leaves it a binary node for the backend to expand
@@ -330,15 +330,15 @@ it has no display form, so `{x:?}` renders it and `{x}` does not (`UnrenderableS
 
 **Places, borrows, and derefs.** The `Expr::Reference` arm requires a *place*
 (`is_place_expr`: an identifier or a parenthesised identifier, else `CannotBorrowValue`) and
-yields `&T` **without** moving the operand — borrowing never consumes. `&mut` of a non-`mut`
+yields `&T` **without** moving the operand: borrowing never consumes. `&mut` of a non-`mut`
 binding is `CannotBorrowMutably`. `Expr::Deref` types `*r` to the referent, else
-`CannotDereference`. `Stmt::DerefAssignment` requires `pointer: &mut T` — an immutable reference is
-`CannotAssignThroughRef` and a non-reference is `CannotDereference` — and the stored value is
+`CannotDereference`. `Stmt::DerefAssignment` requires `pointer: &mut T` (an immutable reference is
+`CannotAssignThroughRef` and a non-reference is `CannotDereference`), and the stored value is
 checked against the referent and move-recorded. Flow-sensitive aliasing exclusivity is deferred to
 lifetime inference.
 
 **Borrow exclusivity** (`symbol_table.rs` plus the `Expr::Reference` arm). Each binding tracks
-borrows taken against its place — persistent counts (a borrow held by a reference binding via
+borrows taken against its place: persistent counts (a borrow held by a reference binding via
 `val r = &x`) plus transient counts (a borrow passed to a call, used in a condition, or returned).
 At a `&place` site a `&mut` is rejected while any borrow is live
 (`CannotMutablyBorrowWhileBorrowed`) and a `&` while a `&mut` is live
@@ -350,12 +350,12 @@ its old borrow first. Transient borrows are dropped at the end of every statemen
 
 This is **lexical, not NLL**: only direct-borrow initializers create tracked persistent borrows,
 so the analysis never rejects a valid program, but it may miss borrows escaping through compound
-expressions. Read/move-while-borrowed is not yet checked — it awaits full lifetime inference.
+expressions. Read/move-while-borrowed is not yet checked: it awaits full lifetime inference.
 
 **Returned-reference outlives** (lifetime elision; `declarations/` + `statements.rs`). A
 function or method whose declared return type is a `Type::Reference` must not return a reference
 borrowing a place that dies with the call. `current_fn_outliving` holds the names that outlive the
-call — reference-typed parameters (single-input elision applies the input lifetime to outputs)
+call: reference-typed parameters (single-input elision applies the input lifetime to outputs)
 plus `self` for an instance method. It is rebuilt per function/method and cleared on exit. At each
 `return` and trailing implicit return whose type is a reference, `check_returned_reference` walks
 the returned expression: a `&place` whose root place is local emits `ReturnsReferenceToLocal`; a
@@ -367,14 +367,14 @@ a valid program is never rejected.
 Explicit lifetime annotations are validated and then **erased**: `lifetime_scope` is populated by
 `enter_generic_scope` from each definition's `lifetimes`, an unknown name in a `Type::Reference` is
 `UndeclaredLifetime`, and `&'a T` and `&T` remain the same semantic type. No outlives logic rides
-on them — the elision rule above already accepts returning a borrowed parameter, which is exactly
+on them: the elision rule above already accepts returning a borrowed parameter, which is exactly
 the `longest<'a>` case.
 
 ### Generics
 **Functions.** A generic `FunctionDef` is registered in `generic_funcs` (not `functions`) with a
 signature carrying `Type::Generic` placeholders plus the ordered parameter names; `generic_scope`
 puts its parameters in scope so `resolve_type` maps their names to `Generic`. Generic bodies are
-checked **once, abstractly**, so only type-agnostic operations type-check there — an instantiation
+checked **once, abstractly**, so only type-agnostic operations type-check there: an instantiation
 that needs more is `hir-lowering`'s to refuse. `check_generic_call` infers each type argument by
 unifying declared parameter types against argument types (`unify_generic`), validates arity and
 the `Copy`-argument restriction, checks trait bounds (`check_trait_bounds` /
@@ -386,8 +386,8 @@ since turbofish exists), `GenericArgumentNotCopy`.
 placeholder-typed fields also kept in `struct_defs` under the base name so generic-`impl` method
 bodies check abstractly; the bare name is `GenericStructNeedsArgs`. A generic `impl` goes to
 `generic_impls` and its method signatures register under the base.
-`instantiate_generic_struct` — called from `resolve_type` for a `Type::Generic` annotation and
-from `check_generic_struct_literal` after inferring the arguments from field values — materializes
+`instantiate_generic_struct` (called from `resolve_type` for a `Type::Generic` annotation and
+from `check_generic_struct_literal` after inferring the arguments from field values) materializes
 a distinct nominal `Type::Struct("Base<args>")` with concrete fields (`substitute_generic`) and
 per-instance methods (`remap_method_type`) registered on demand, so downstream field access and
 method dispatch reuse the ordinary struct machinery. Type arguments are `Copy`-restricted. Errors:
@@ -406,10 +406,10 @@ application naming a generic enum and rejects the bare name (`GenericEnumNeedsAr
 The three construction checkers (`check_enum_unit_path`, `check_enum_tuple_call`,
 `check_enum_struct_literal`) take the expected type: the instance comes from the expected type
 when there is one, else the payload is unified against the template and any parameter still
-unbound is taken from the enclosing function's return instance (`enum_return_type_args` — the only
+unbound is taken from the enclosing function's return instance (`enum_return_type_args`, the only
 context a tail `if` branch has), else `GenericEnumNotInferable`. An enum pattern written with the
 base name matches the scrutinee's instance and binds payloads at the instance's concrete types.
-`Option` / `Result` are **not** special-cased anywhere here — `neurc` injects their declarations.
+`Option` / `Result` are **not** special-cased anywhere here: `neurc` injects their declarations.
 
 **Const generics, `where`, turbofish.** `const_scope` holds const params (name → int type) and
 `enter/exit_generic_scope` sets both scopes. `Type::Array.size` is an `ArrayLen`
@@ -428,13 +428,13 @@ carry the trait system. `register_impl` calls `check_trait_conformance` for any
 non-lang-item trait impl: every required method present (`MissingTraitMethod`), each impl method a
 trait member (`NotATraitMethod`) with a matching signature (`TraitMethodSignatureMismatch`), or
 `UnknownTrait`. Method dispatch resolves `obj.m()` on a bounded type parameter via
-`resolve_generic_trait_method`. Traits are otherwise fully erased — the parser injects default
+`resolve_generic_trait_method`. Traits are otherwise fully erased: the parser injects default
 methods into impls, so they check as ordinary methods.
 
 **Associated types.** `TraitInfo.assoc_types` lists what a trait declares (`type Item`);
 `self_assoc` holds what the impl under check bound each one to, installed by `enter_impl_assoc`
 around both `register_impl` and `check_impl` and consulted by `resolve_type` for a
-`Type::Named` spelled `Self::Item`. A declared position is *not* a type at the declaration —
+`Type::Named` spelled `Self::Item`. A declared position is *not* a type at the declaration:
 `register_trait` leaves it `Unknown` and keeps the signature as written in `TraitMethodSig.decl`,
 which `trait_signature_mismatch` then resolves per impl, so the trait's `Self::Item` is compared
 as the type that impl chose. Conformance also requires every declared name bound
@@ -448,7 +448,7 @@ says what the member is.
 parameter list so a constraint may name another parameter of the same list; a binding the trait
 never declared is `UnknownAssociatedType`. `resolve_generic_trait_method` then types a call
 whose signature names an associated type by installing the bound's constraints as `self_assoc`
-and re-resolving `TraitMethodSig.decl` — the same per-impl re-resolution conformance does. A
+and re-resolving `TraitMethodSig.decl`: the same per-impl re-resolution conformance does. A
 bare bound leaves the position open and still reports `UnconstrainedAssociatedType`. At the call
 site `check_assoc_bindings` compares the constraint against `impl_assoc` for the concrete type
 argument (or, for a type parameter passed through from an enclosing generic, against that
@@ -456,10 +456,10 @@ parameter's own bound), reporting `AssociatedTypeBoundMismatch`; `resolve_impl_r
 same check for return-position `impl Trait<Assoc = U>`.
 
 **Lang items** are compiler-known traits the user only ever writes an `impl` for:
-- `Drop` — `register_drop_impl` requires exactly the destructor `drop(&mut self)` (no params, no
+- `Drop`: `register_drop_impl` requires exactly the destructor `drop(&mut self)` (no params, no
   return, else `InvalidDropImpl`) and `T` must not be `Copy` (`DropTypeCannotBeCopy`). No Drop
   state is kept on the checker; the backend recomputes the Drop-type set from the AST.
-- `Hashable` — `register_hashable_impl` enforces the single `hash(&self) -> u64`
+- `Hashable`: `register_hashable_impl` enforces the single `hash(&self) -> u64`
   (`InvalidHashableImpl`).
 - The **operator traits** (`Add`, `Sub`, `Mul`, `Div`, `Rem`, `Neg`, `Not`, `BitAnd`, `BitOr`,
   `BitXor`, `Shl`, `PartialEq`, `Comparable`), defined in `type_checkers/operator_traits.rs`.
@@ -470,7 +470,7 @@ same check for return-position `impl Trait<Assoc = U>`.
   left/operand type is a struct with a matching entry takes the impl's result type **before** the
   built-in numeric and comparison paths. Not yet: the dedicated in-place `*Assign` traits
   (compound assignment goes through the parse-time desugar to the by-value operator), `MatMul`/`@`,
-  and auto-derived trait default methods — each operator needs its own impl method.
+  and auto-derived trait default methods: each operator needs its own impl method.
 
 **Dynamic dispatch.** `resolve_type` delegates to a private `resolve_type_ctx(ty, behind_ref)`
 whose flag is set only by the `Reference` arm, so a bare `dyn Trait` is
@@ -481,7 +481,7 @@ call-argument, return, and annotated-binding checks. A method call on a `DynObje
 against the trait's declared signature. Return-position `impl Trait` resolves transparently in
 `check_function` via `resolve_impl_return`, which reads the concrete type structurally from the
 body's result expression (`shallow_result_type`: struct literal, enum value, newtype
-construction, or a block/`if` tail) and verifies it implements the trait — so callers see the
+construction, or a block/`if` tail) and verifies it implements the trait, so callers see the
 concrete type at zero cost. Errors: `ImplTraitNotAllowedHere`, `ImplReturnNotInferable`,
 `ImplReturnDoesNotImplement`.
 
@@ -494,31 +494,31 @@ analysis (a free-variable walk) rejects capturing a non-Copy enclosing local
 (`ClosureCapturesNonCopy`) or assigning to a captured variable (`ClosureAssignsCapture`); module
 constants and functions are referenced directly, not captured. The body is checked with
 `current_function_return_type` redirected to the closure's return type, so an early `return` binds
-to the closure, and with `loop_stack` emptied for the same reason — an enclosing loop is not a
+to the closure, and with `loop_stack` emptied for the same reason: an enclosing loop is not a
 `break` target from inside a closure, so one written there is `BreakOutsideLoop`. Both are restored
 afterwards. `check_plain_call` dispatches a call on a local binding of function type.
 
 ### Fallible types
 `fallible_kind` (`expressions/operators.rs`) is the shared resolver, so `?` and `??` accept exactly
 the same set of types. It resolves a type to an `Option` / `Result` instance through
-`enum_instance_base` — a shadowing non-generic declaration is its own base.
+`enum_instance_base`: a shadowing non-generic declaration is its own base.
 
 - **`??`** is routed to `check_null_coalesce` **before** the shared operand check, because the
   operator is not operand-symmetric: the right side is typed by the left's *payload*, not by the
   left. `fallible_payload` returns the `Some`/`Ok` slot-0 type; anything else is
-  `NullCoalesceOnNonFallible`. The `Result` error payload is deliberately unconstrained — `??`
+  `NullCoalesceOnNonFallible`. The `Result` error payload is deliberately unconstrained: `??`
   discards it. A mistyped fallback is an ordinary `Mismatch`.
 - **`?`** (`expressions/try_expr.rs`) types `Expr::Try` as the operand's success payload after two
   checks. The operand must be fallible (else `TryOnNonFallible`), and
   `current_function_return_type` must be an instance of the SAME fallible enum, since that is
   where the failure goes (else `TryOutsideFallibleFunction`, which also covers propagating an
-  `Option` out of a `Result` function — the two do not convert). For `Result`, the operand's `Err`
+  `Option` out of a `Result` function, since the two do not convert). For `Result`, the operand's `Err`
   payload must already equal the function's, reported as an ordinary `Mismatch`: the spec forwards
   the error with no implicit `.into()`, so `.map_err(...)` is the explicit conversion path.
   Success payloads are unconstrained; only the error types must agree.
 - **`val-else`** (`val_else.rs`). `check_val_else` checks the scrutinee, runs the pattern through
   `check_pattern`, checks the `else` branch in its own scope, and only THEN defines the pattern's
-  bindings in the enclosing scope — so the branch cannot see bindings its own failure means were
+  bindings in the enclosing scope, so the branch cannot see bindings its own failure means were
   never produced. `else_binding_type` resolves the scrutinee through `enum_instance_base`: a
   `Result` binds the `Err` payload, an `Option` is `ValElseBindingOnOption` (its failure variant is
   empty; `|_|` and the omitted form are filtered out before the check), any other type binds the
@@ -528,7 +528,7 @@ the same set of types. It resolves a type to an `Option` / `Result` instance thr
 `type_checkers/matches.rs`. `check_match` types the scrutinee (restricted to enum / integer /
 `char` / `bool`), checks each arm's patterns against it, introduces pattern bindings into a
 per-arm scope for the guard and body, unifies arm-body types (the first arm drives literal
-inference), and verifies exhaustiveness — enum variant coverage, both `bool` values, or a `_`
+inference), and verifies exhaustiveness: enum variant coverage, both `bool` values, or a `_`
 catch-all, with guarded arms never counting. Payload sub-patterns are restricted to bindings and
 `_` this phase, and or-patterns cannot bind. Errors: `NonExhaustiveMatch`,
 `UnsupportedMatchScrutinee`, `PatternTypeMismatch`, `MatchArmTypeMismatch`, `InvalidRangePattern`,
@@ -537,13 +537,13 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
 ### Enums, newtypes, arrays, tuples
 - **Enums.** `enum_defs` (name → variants with `VariantForm` and resolved fields) is registered in
   a pre-pass before structs. `register_enum` rejects duplicates and non-scalar payloads
-  (`UnsupportedEnumPayload` — payloads are limited to scalar Copy primitives this phase).
+  (`UnsupportedEnumPayload`: payloads are limited to scalar Copy primitives this phase).
   Construction: `E::V` (Path) → unit, `E::V(..)` (Call→Path) → tuple, `E::V { .. }`
   (`EnumStructLiteral`) → struct, with arity/field/form diagnostics.
 - **Newtypes.** `predeclare_newtype` reserves each name (rejecting builtin/struct/enum/newtype
   collisions via `NewtypeAlreadyDefined`), then `resolve_newtype_inners` resolves inner types once
   all nominal names are known, rejecting cyclic (`CyclicNewtype`) and non-Copy
-  (`NewtypeInnerNotCopy`) inners — the inner is restricted to Copy types this phase, so a newtype
+  (`NewtypeInnerNotCopy`) inners: the inner is restricted to Copy types this phase, so a newtype
   forwards Copy. Construction `Name(value)` is handled in `check_plain_call`; `.0` yields the
   inner type in the `TupleIndex` check.
 - **Arrays.** `resolve_type` resolves `[T; N]`; `check_expr` handles array literals (homogeneous,
@@ -554,7 +554,7 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   (`ArrayPatternLengthMismatch`). Other errors: `ArrayLengthMismatch`, `CannotInferEmptyArray`.
 - **Slices.** `Type::Slice(element)` is `[T]`, the unsized run behind `&[T]` / `&mut [T]`.
   `resolve_type_ctx` accepts it only `behind_ref`, exactly as it does `dyn Trait`, and reports
-  `SliceNotBehindReference` otherwise. Two slice types are compatible when their elements are —
+  `SliceNotBehindReference` otherwise. Two slice types are compatible when their elements are:
   a length is not part of the type. `assignable` carries the unsizing coercion
   `&[T; N]` / `&Vec<T>` / `&[T]` → `&[T]` (`unsizes_to_slice`), with mutability matching exactly,
   and every argument, return, and annotated-binding site routes through it. `.slice(range)` on an
@@ -564,7 +564,7 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   A `.slice` call registers a shared borrow of the place its receiver roots at
   (`slice_borrow_root` sees through a chain of slice calls), so a live view blocks a `&mut` of
   the source and `borrow_target_of` promotes it to a persistent borrow when it initializes a
-  binding — which is what makes returning a view of a local a `ReturnsReferenceToLocal`.
+  binding, which is what makes returning a view of a local a `ReturnsReferenceToLocal`.
 - **Tensors.** `Type::Tensor { element, shape }` is the statically shaped `Tensor<T, [d0, ...]>`.
   Rank and every extent are part of the type, so two tensors are compatible only when their
   elements match and their shapes are equal extent for extent; an empty `shape` is the rank-0
@@ -576,11 +576,11 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   `Tensor` reports `TensorShapeRequired` rather than `NotAGenericType`.
 - **Tensor ownership, in `type_checkers/expressions/builtins.rs`.** Two intrinsic methods sit on
   a tensor receiver. `.clone()` is nullary, auto-derefs `&Tensor<T, S>` (the result is the
-  referent, so cloning through a borrow yields an owned tensor), and moves nothing — it is the
+  referent, so cloning through a borrow yields an owned tensor), and moves nothing: it is the
   opt-out `UseOfMovedValue`'s own text points at. `.to(device)` takes one argument of the prelude
   enum `Device` (`DEVICE_TYPE_NAME` in `type_checkers/tensors.rs`), returns the receiver's type,
   and calls `record_move` on the receiver: it consumes the tensor. It matches on `recv` rather
-  than the referent, so a `&Tensor` receiver falls through to `MethodNotFound` — a borrow cannot
+  than the referent, so a `&Tensor` receiver falls through to `MethodNotFound`: a borrow cannot
   be consumed.
 - **Tensor values, in `type_checkers/tensors.rs`.** Two ways in, one checker.
   An array literal reaching `check_array_literal_expr` with a `Type::Tensor` expectation is a
@@ -588,7 +588,7 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   together, so each leaf is checked at the annotation's element type (a literal is typed *by*
   it, a value that already has a type is not converted) and every axis must be rectangular.
   Wrong extent is `TensorExtentMismatch`, wrong nesting depth is `TensorRankMismatch`, and a
-  rank-0 annotation is `TensorScalarNeedsConstructor` — a rank-0 tensor has no array form.
+  rank-0 annotation is `TensorScalarNeedsConstructor`: a rank-0 tensor has no array form.
   Nothing changes when no tensor annotation is in scope, which is what keeps `[1.0, 2.0]` an
   `[f64; 2]`.
   A call whose callee is `Path { Tensor, ctor }` routes to `check_tensor_construction`, guarded
@@ -616,7 +616,7 @@ compiler-known nominal type, never `Copy` and always move-tracked.
 - `check_collection_new` types `Vec::new()` from the expected type, else
   `CollectionTypeNotInferable`.
 - `resolve_collection_method` types the method surface, requiring a mutable receiver for the
-  mutating half and taking ownership only of *stored* arguments — a lookup key is read, like a
+  mutating half and taking ownership only of *stored* arguments: a lookup key is read, like a
   `==` operand. Fallible readers instantiate the prelude `Option<T>`.
 - Raw float keys are rejected toward `OrderedF32` / `OrderedF64` (IEEE-754 `<` is a partial
   order); a struct key requires `impl PartialEq` plus `impl Hashable` (hashed) or `impl
@@ -625,10 +625,10 @@ compiler-known nominal type, never `Copy` and always move-tracked.
 
 `String` is a fourth, **nullary** kind (`arity() == 0`), so `Collection { kind: String, args: [] }`
 reuses every existing collection rule with no new `Type` variant. The bare name resolves as a
-complete type in `resolution.rs` — the "collection needs type arguments" arm applies only to
-`arity() > 0`, so a user-declared `struct String` still shadows it — and `check_collection_new`
+complete type in `resolution.rs`: the "collection needs type arguments" arm applies only to
+`arity() > 0`, so a user-declared `struct String` still shadows it, and `check_collection_new`
 returns the type directly rather than demanding an annotation. `ParamSlot::Text` (accepting
-`string` or an immutable `&string`, and not moving it — the latitude `+` gives its operands) and
+`string` or an immutable `&string`, and not moving it: the latitude `+` gives its operands) and
 `ResultShape::OwnedString` back `push_str` and `to_string`; `len` / `clear` fall out of the
 existing kind-agnostic entries. `Type`'s `Display` omits `<>` for a nullary collection.
 
@@ -637,7 +637,7 @@ Errors: `CollectionTypeNotInferable`, `InvalidCollectionElement`, `InvalidCollec
 
 ### String interpolation
 `type_checkers/expressions/interpolation.rs`. Each hole's expression is checked, its type
-auto-dereferenced through a borrow, and its written spec validated against that type — radix kinds
+auto-dereferenced through a borrow, and its written spec validated against that type: radix kinds
 need an integer, fixed-point and scientific need a float, `+` needs a signed integer or float,
 zero fill cannot combine with `<`/`^`, and width and precision are bounded. The literal always
 types as `string`, so a rejected hole does not cascade. A struct hole answers through
@@ -647,7 +647,7 @@ Errors: `UnformattableType`, `UnrenderableStruct`, `FormatSpecMismatch`, `Format
 
 ### Visibility
 A struct field is private to its declaring module unless it carries `export`, and **this slice is
-where that is enforced** — the rule needs the receiver's type, so module-resolution (which runs
+where that is enforced**: the rule needs the receiver's type, so module-resolution (which runs
 first) cannot state it. `register_struct` / `register_generic_struct` record each struct's `module`
 and its private field names, and `instantiate_generic_struct` copies both onto every monomorphized
 instance. `current_module` is set from the item being checked in pass 4, and `reject_private_field`
@@ -659,7 +659,7 @@ copy private ones out. New error: `PrivateField`. Nothing else reads `current_mo
 single-file program is one module, so the rule is inert there.
 
 ### Modules
-Nothing about imports reaches this slice — module-resolution consumes every `Item::Import` and
+Nothing about imports reaches this slice: module-resolution consumes every `Item::Import` and
 rewrites every name it bound. The one exception is `Pattern::UnqualifiedEnum`, which the resolver
 rejects when no import accounts for it; reaching the checker means the resolver did not run,
 reported as `UnimportedVariantPattern` and contributing no exhaustiveness coverage.
@@ -675,7 +675,7 @@ consts); a body `Stmt::Const` is validated in `check_stmt`. `Expr::Identifier` f
 Each closed a path where a program type-checked and then aborted codegen with an internal error:
 
 - **`VoidBinding`** (BUG-016). A binding whose initializer has type `void` is rejected in the
-  `Stmt::VarDecl` arm, beside the existing `Type::Unknown` guard and mirroring it — the error is
+  `Stmt::VarDecl` arm, beside the existing `Type::Unknown` guard and mirroring it: the error is
   recorded and the name left undefined. Testing the binding's TYPE rather than its initializer's
   shape is what makes one check cover every spelling: a `void` call is only two of them, the
   others being an `if`, a `match`, a bare block, a `loop { break }`, and an explicit `: void`
@@ -683,7 +683,7 @@ Each closed a path where a program type-checked and then aborted codegen with an
 - **`MissingPartialEqImpl`** (BUG-015). `check_binary_expr`'s equality arm asks
   `has_builtin_equality` (`expressions/operators.rs`) whether the operand type has equality
   without an impl: the scalars (half-precision included), `string` after `peel_string_ref`, and a
-  newtype forwarding one of those. A `Type::Generic` answers yes — a generic body is checked once
+  newtype forwarding one of those. A `Type::Generic` answers yes: a generic body is checked once
   as a template, so the instantiation is `hir-lowering`'s to refuse. A struct operand is reported
   as the missing trait; every other operand (array, tuple, enum, collection, non-string reference)
   reuses `InvalidBinaryOperator`, which is what the ordering comparisons already gave. The
@@ -691,5 +691,5 @@ Each closed a path where a program type-checked and then aborted codegen with an
   before.
 - **`FunctionUsedAsValue`** (BUG-013). `Expr::Identifier` resolution consults `functions` and
   `generic_funcs` before falling through to `UndefinedVariable`, so a function name in value
-  position is told apart from a name that does not exist. No coercion was added — a function is
+  position is told apart from a name that does not exist. No coercion was added: a function is
   still not a value.

@@ -28,7 +28,7 @@ fn int_type_range(ty: &Type) -> Option<(i128, i128)> {
 }
 
 /// Truncate `f` toward zero into `ty`, clamping to the type's bounds and mapping NaN
-/// to zero — the same total function `llvm.fpto{s,u}i.sat` computes at run time.
+/// to zero, the same total function `llvm.fpto{s,u}i.sat` computes at run time.
 fn saturating_float_to_int(f: f64, ty: &Type) -> i128 {
     let Some((min, max)) = int_type_range(ty) else {
         return 0;
@@ -48,15 +48,85 @@ fn saturating_float_to_int(f: f64, ty: &Type) -> i128 {
     }
 }
 
+/// The Neuro spelling of an integer type, for diagnostics.
+fn int_type_name(ty: &Type) -> Option<&'static str> {
+    Some(match ty {
+        Type::I8 => "i8",
+        Type::I16 => "i16",
+        Type::I32 => "i32",
+        Type::I64 => "i64",
+        Type::U8 => "u8",
+        Type::U16 => "u16",
+        Type::U32 => "u32",
+        Type::U64 => "u64",
+        _ => return None,
+    })
+}
+
+/// Reduce `v` to the value `ty` actually stores, discarding the bits above its width.
+///
+/// The folder computes in `i128` so no intermediate is lost, but a bitwise operator
+/// applied to an unsigned operand produces a value the type cannot hold (`!0u8` is
+/// `-1` in `i128`, `255` in `u8`). Truncating here keeps every folded value inside its
+/// own type's range, which is what makes the arithmetic range check below meaningful.
+fn truncate_int_to(v: i128, ty: &Type) -> i128 {
+    match ty {
+        Type::I8 => v as i8 as i128,
+        Type::I16 => v as i16 as i128,
+        Type::I32 => v as i32 as i128,
+        Type::I64 => v as i64 as i128,
+        Type::U8 => v as u8 as i128,
+        Type::U16 => v as u16 as i128,
+        Type::U32 => v as u32 as i128,
+        Type::U64 => v as u64 as i128,
+        _ => v,
+    }
+}
+
+/// Apply `op` unless the division would overflow `ty`.
+///
+/// `MIN / -1` and `MIN % -1` both panic on the debug tier, but neither is caught by
+/// the range check on its own: the remainder is `0`, which every type holds, and the
+/// `i128` the folder computes in is far wider than the operands' type. The overflowing
+/// pair is therefore recognised against the operand type's own minimum and reported as
+/// the overflow it is.
+fn divides_evenly(a: i128, b: i128, ty: &Type, op: fn(i128, i128) -> Option<i128>) -> Option<i128> {
+    if b == -1 && int_type_range(ty).is_some_and(|(min, _)| a == min) {
+        return None;
+    }
+    op(a, b)
+}
+
+/// Accept `value` only if it is representable in `ty`, else report the overflow.
+///
+/// A `const` initializer is evaluated by the compiler, so it never reaches the run-time
+/// tier that would decide between panicking and wrapping. Both rules cannot hold at once
+/// for the same written constant, and picking either would make the tier observable in a
+/// value, so an overflowing constant expression is rejected outright.
+///
+/// `value` is `None` when the `i128` computation itself overflowed, which only the widest
+/// `u64` operands can do.
+fn checked_arith(value: Option<i128>, ty: &Type, op: &'static str) -> CodegenResult<FoldedConst> {
+    let overflow = || CodegenError::ConstOverflow {
+        op,
+        ty: int_type_name(ty).unwrap_or("the target integer type"),
+    };
+    let v = value.ok_or_else(overflow)?;
+    match int_type_range(ty) {
+        Some((min, max)) if v < min || v > max => Err(overflow()),
+        _ => Ok(FoldedConst::Int(v)),
+    }
+}
+
 /// Trailing byte appended to a string literal's `.rodata` storage so the pointer
 /// doubles as a valid C string for FFI. It is deliberately **excluded** from the
 /// fat pointer's `len` field: `len` is the UTF-8 byte count of the literal's
 /// content, and consumers must treat `len` as authoritative rather than scanning
-/// for this terminator — interior NUL bytes (`"a\0b"`) are legal content.
+/// for this terminator: interior NUL bytes (`"a\0b"`) are legal content.
 const STRING_NULL_TERMINATOR: u8 = 0;
 
 enum FoldedConst {
-    /// Widened past `i64` so every integer type the language has — `u64` included —
+    /// Widened past `i64` so every integer type the language has, `u64` included,
     /// and every saturated float-to-integer cast is represented exactly.
     Int(i128),
     Float(f64),
@@ -103,7 +173,7 @@ impl FoldedConst {
 
     fn cast_to(self, target: &Type) -> Self {
         match (self, target) {
-            (FoldedConst::Int(i), t) if t.is_integer() => FoldedConst::Int(i),
+            (FoldedConst::Int(i), t) if t.is_integer() => FoldedConst::Int(truncate_int_to(i, t)),
             (FoldedConst::Int(i), t) if t.is_float() => FoldedConst::Float(i as f64),
             (FoldedConst::Float(f), t) if t.is_integer() => {
                 FoldedConst::Int(saturating_float_to_int(f, t))
@@ -119,7 +189,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a literal expression.
     ///
     /// `ty` is the literal's *resolved* type, taken from its HIR node. An unsuffixed
-    /// literal has no width of its own — the frontend picks one from the context
+    /// literal has no width of its own. The frontend picks one from the context
     /// (`take(0.75)` where `take` wants `f32`), and the emitted constant must use that
     /// type. Falling back to the suffix default here would produce a `double` where the
     /// callee expects a `float`, which nothing downstream coerces at a call or return.
@@ -263,9 +333,10 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::Literal(lit) => Ok(FoldedConst::from_literal(lit)),
             HirExprKind::Unary { op, operand } => {
                 let v = Self::fold_const(operand, consts)?;
+                let ty = crate::types::Type::from_hir(&expr.ty);
                 match op {
                     ast_types::UnaryOp::Negate => match v {
-                        FoldedConst::Int(i) => Ok(FoldedConst::Int(i.wrapping_neg())),
+                        FoldedConst::Int(i) => checked_arith(i.checked_neg(), &ty, "-"),
                         FoldedConst::Float(f) => Ok(FoldedConst::Float(-f)),
                         _ => Err(CodegenError::InternalError(
                             "negate on non-numeric const".into(),
@@ -276,7 +347,10 @@ impl<'ctx> CodegenContext<'ctx> {
                         _ => Err(CodegenError::InternalError("not on non-bool const".into())),
                     },
                     ast_types::UnaryOp::BitNot => match v {
-                        FoldedConst::Int(i) => Ok(FoldedConst::Int(!i)),
+                        // `!` cannot overflow: every bit pattern of the type is a value
+                        // of the type. Truncating keeps `!0u8` at `255` rather than the
+                        // `i128` `-1`.
+                        FoldedConst::Int(i) => Ok(FoldedConst::Int(truncate_int_to(!i, &ty))),
                         _ => Err(CodegenError::InternalError(
                             "bitnot on non-integer const".into(),
                         )),
@@ -287,16 +361,24 @@ impl<'ctx> CodegenContext<'ctx> {
                 let l = Self::fold_const(left, consts)?;
                 let r = Self::fold_const(right, consts)?;
                 use ast_types::BinaryOp;
+                // The node's own resolved type bounds the arithmetic below. A comparison
+                // resolves to `bool`, for which `int_type_range` yields no bounds and the
+                // check is a no-op, so the arithmetic arms are the only ones it reaches.
+                let ty = crate::types::Type::from_hir(&expr.ty);
                 match (l, r) {
                     (FoldedConst::Int(a), FoldedConst::Int(b)) => match op {
-                        BinaryOp::Add => Ok(FoldedConst::Int(a.wrapping_add(b))),
-                        BinaryOp::Subtract => Ok(FoldedConst::Int(a.wrapping_sub(b))),
-                        BinaryOp::Multiply => Ok(FoldedConst::Int(a.wrapping_mul(b))),
+                        BinaryOp::Add => checked_arith(a.checked_add(b), &ty, "+"),
+                        BinaryOp::Subtract => checked_arith(a.checked_sub(b), &ty, "-"),
+                        BinaryOp::Multiply => checked_arith(a.checked_mul(b), &ty, "*"),
                         BinaryOp::Divide => {
                             if b == 0 {
                                 Err(CodegenError::InternalError("const division by zero".into()))
                             } else {
-                                Ok(FoldedConst::Int(a.wrapping_div(b)))
+                                checked_arith(
+                                    divides_evenly(a, b, &ty, i128::checked_div),
+                                    &ty,
+                                    "/",
+                                )
                             }
                         }
                         BinaryOp::Modulo => {
@@ -305,7 +387,11 @@ impl<'ctx> CodegenContext<'ctx> {
                                     "const remainder by zero".into(),
                                 ))
                             } else {
-                                Ok(FoldedConst::Int(a.wrapping_rem(b)))
+                                checked_arith(
+                                    divides_evenly(a, b, &ty, i128::checked_rem),
+                                    &ty,
+                                    "%",
+                                )
                             }
                         }
                         BinaryOp::Equal => Ok(FoldedConst::Bool(a == b)),
@@ -316,10 +402,16 @@ impl<'ctx> CodegenContext<'ctx> {
                         BinaryOp::GreaterEqual => Ok(FoldedConst::Bool(a >= b)),
                         BinaryOp::And => Ok(FoldedConst::Bool(a != 0 && b != 0)),
                         BinaryOp::Or => Ok(FoldedConst::Bool(a != 0 || b != 0)),
-                        BinaryOp::BitAnd => Ok(FoldedConst::Int(a & b)),
-                        BinaryOp::BitOr => Ok(FoldedConst::Int(a | b)),
-                        BinaryOp::BitXor => Ok(FoldedConst::Int(a ^ b)),
-                        BinaryOp::Shl => Ok(FoldedConst::Int(a.wrapping_shl(b as u32))),
+                        // Bitwise operators and `<<` have no overflow rule at run time:
+                        // bits shifted out are discarded. Truncating to the node's type
+                        // reproduces that instead of keeping the wider `i128` result.
+                        BinaryOp::BitAnd => Ok(FoldedConst::Int(truncate_int_to(a & b, &ty))),
+                        BinaryOp::BitOr => Ok(FoldedConst::Int(truncate_int_to(a | b, &ty))),
+                        BinaryOp::BitXor => Ok(FoldedConst::Int(truncate_int_to(a ^ b, &ty))),
+                        BinaryOp::Shl => Ok(FoldedConst::Int(truncate_int_to(
+                            a.wrapping_shl(b as u32),
+                            &ty,
+                        ))),
                         BinaryOp::NullCoalesce => Err(CodegenError::InternalError(
                             "operator '??' is not valid in const expressions".into(),
                         )),
@@ -412,7 +504,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 global.set_constant(true);
                 global.set_linkage(inkwell::module::Linkage::Private);
                 let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-                // Length excludes the appended terminator — identical contract to the
+                // Length excludes the appended terminator, an identical contract to the
                 // runtime-literal path above.
                 let len = self.context.i64_type().const_int(s.len() as u64, false);
                 let fat_type = self
@@ -458,8 +550,8 @@ impl<'ctx> CodegenContext<'ctx> {
             // out-of-range cast made the program's output a function of the optimizer
             // rather than of its source: `1e300 as i32` printed one value at `-O 0`,
             // another at `-O 3`, and a NaN cast printed stack garbage. The saturating
-            // intrinsics are total — every in-range value still truncates toward zero,
-            // an out-of-range one clamps to the target's bound, and NaN maps to zero —
+            // intrinsics are total: every in-range value still truncates toward zero,
+            // an out-of-range one clamps to the target's bound, and NaN maps to zero,
             // which is also what the constant folder computes, so a folded cast and a
             // run-time one now agree.
             (t1, t2) if t1.is_float() && t2.is_integer() => {
@@ -525,7 +617,7 @@ impl<'ctx> CodegenContext<'ctx> {
             // Float to Float. Direction is chosen by bit width, not a fixed
             // F32/F64 pair, so f16/bf16 widen and narrow correctly:
             // widening uses `fpext`, narrowing `fptrunc`. f16<->bf16 share a width
-            // but differ in format — LLVM has no direct conversion, so route
+            // but differ in format, and LLVM has no direct conversion, so route
             // through f32 (widen then narrow).
             (t1, t2) if t1.is_float() && t2.is_float() => {
                 let float_value = value.into_float_value();

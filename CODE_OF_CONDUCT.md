@@ -22,7 +22,7 @@ Examples of unacceptable behavior:
 - Trolling, insulting or derogatory comments, and personal or political attacks
 - Public or private harassment
 - Publishing others' private information, such as a physical or electronic address, without their explicit permission
-- Misrepresenting authorship or attribution — in particular, claiming contributions as your own without crediting the original author, or removing attribution required by the [Neuro Shared Source License v2.1](LICENSE)
+- Misrepresenting authorship or attribution, in particular claiming contributions as your own without crediting the original author, or removing attribution required by the [Neuro Shared Source License v2.1](LICENSE)
 - Other conduct which could reasonably be considered inappropriate in a professional setting
 
 ## Enforcement Responsibilities

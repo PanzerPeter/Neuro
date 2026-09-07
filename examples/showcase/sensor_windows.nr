@@ -1,4 +1,4 @@
-// Showcase — windowed sensor readings behind one slice signature.
+// Showcase: windowed sensor readings behind one slice signature.
 //
 // Integration example combining borrowed slices with features that shipped
 // before them:
@@ -9,7 +9,7 @@
 //   mini-language · `as` casts.
 //
 // The point of the slice type is that `Window::over` is written once and reads
-// a raw array, a window into that array, and a heap-backed `Vec` alike — none of
+// a raw array, a window into that array, and a heap-backed `Vec` alike: none of
 // which copies a single element.
 
 struct Window {
@@ -68,7 +68,7 @@ func report(label: string, w: &Window) {
 func main() -> i32 {
     mut readings: [i32; 6] = [12, 45, 7, 91, 23, 60]
 
-    // The whole array, then a sub-range of it — same signature, no copy.
+    // The whole array, then a sub-range of it: same signature, no copy.
     val all = Window::over(&readings)
     report("all", &all)
     val midday = Window::over(readings.slice(2..5))

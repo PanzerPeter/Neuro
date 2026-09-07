@@ -20,7 +20,7 @@ func identity<T>(x: T) -> T {
 
 func main() -> i32 {
     val a = identity(40)      // identity<i32>
-    val f = identity(2.5)     // identity<f64> — distinct instance, not used in the result
+    val f = identity(2.5)     // identity<f64>: distinct instance, not used in the result
     val b = identity(a)       // reuse identity<i32>
     return identity(b) + 2    // 40 + 2 = 42
 }

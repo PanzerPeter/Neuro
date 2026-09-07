@@ -1,6 +1,6 @@
 # Integer division throughput with a divisor the optimizer cannot pin down.
 #
-# `/` and `%` are the two operators that carry runtime guards — a zero divisor
+# `/` and `%` are the two operators that carry runtime guards: a zero divisor
 # and `MIN / -1` are undefined for the hardware instruction, so the backend
 # tests for them. Every divisor here comes out of a list, so no range analysis
 # can fold those tests away, which makes this the worst case for their cost.

@@ -11,7 +11,7 @@ use neuro_hir::{
 use crate::{Lowerer, LoweringError};
 
 /// The two fallible enums, each paired with the variant that carries a value.
-/// A `Result`'s `Err` payload has no slot in the desugar — `??` discards it.
+/// A `Result`'s `Err` payload has no slot in the desugar: `??` discards it.
 const FALLIBLE_ENUMS: &[(&str, &str)] = &[("Option", "Some"), ("Result", "Ok")];
 
 impl Lowerer {
@@ -73,7 +73,7 @@ impl Lowerer {
         ))
     }
 
-    /// The prelude enum a fallible value is an instance of — `Option` or `Result`.
+    /// The prelude enum a fallible value is an instance of, `Option` or `Result`.
     ///
     /// A monomorphized `Option<i32>` answers with the template it came from; a program
     /// that shadows the prelude with a non-generic `Option` is its own base.
@@ -95,7 +95,7 @@ impl Lowerer {
     /// The success variant's tag and payload type for a fallible enum instance.
     ///
     /// The checker has already rejected every other left operand, so a miss here means
-    /// the two passes disagree — reported as a lowering error rather than a panic.
+    /// the two passes disagree, reported as a lowering error rather than a panic.
     pub(crate) fn success_variant(&self, ty: &HirType) -> Result<(u32, HirType), LoweringError> {
         let HirType::Enum(instance) = ty.referent() else {
             return Err(Self::not_fallible(ty));

@@ -11,7 +11,7 @@ use std::process::{Command, Output};
 ///
 /// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
 /// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()` — that assumes the legacy
+/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
 /// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
 fn neurc_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
@@ -124,7 +124,7 @@ func main() -> i32 {
     );
 }
 
-/// A field-less struct renders as its bare name — there are no braces to hold nothing.
+/// A field-less struct renders as its bare name: there are no braces to hold nothing.
 #[test]
 fn derived_debug_renders_a_field_less_struct_as_its_name() {
     let output = run_program(
@@ -354,7 +354,7 @@ func main() -> i32 { return 0 }
     );
 }
 
-/// The hand-written impl still works — it is only the *combination* that is rejected.
+/// The hand-written impl still works: it is only the *combination* that is rejected.
 #[test]
 fn a_hand_written_partial_eq_impl_still_dispatches() {
     let output = run_program(

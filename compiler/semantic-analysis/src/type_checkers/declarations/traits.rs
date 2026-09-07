@@ -205,7 +205,7 @@ impl TypeChecker {
 
     /// Compare one impl method's signature against its trait declaration, returning a
     /// human-readable reason when they differ. Both sides are resolved in the impl's
-    /// scope — the trait's signature as written, not as registered — so an associated-type
+    /// scope (the trait's signature as written, not as registered) so an associated-type
     /// position is compared as the type this impl bound it to, and an impl may spell that
     /// position either way.
     pub(super) fn trait_signature_mismatch(

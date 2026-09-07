@@ -1,4 +1,4 @@
-// Showcase — associated types: one trait, three implementors, three sample types.
+// Showcase: associated types: one trait, three implementors, three sample types.
 //
 // Cumulative integration example combining:
 //   associated types (`type Sample`) and `Self::Sample` paths
@@ -15,7 +15,7 @@
 //
 // A generic reader needs the other half. `T: Channel` erases the instrument, and with it
 // the only thing that says what `Sample` is, so `T: Channel<Sample = i32>` puts the
-// answer in the bound — one body serving every counted channel and no float channel.
+// answer in the bound: one body serving every counted channel and no float channel.
 //
 // Expected exit code: 108
 
@@ -82,7 +82,7 @@ impl Channel for Cycle {
 
 // One body, every counted channel. The bound is what makes `sample()` typeable here:
 // the trait declaration alone says only that `Sample` exists. Passing the thermocouple
-// would be rejected — its impl binds `Sample` to f64.
+// would be rejected: its impl binds `Sample` to f64.
 func scaled<T: Channel<Sample = i32>>(source: &T, factor: i32) -> i32 {
     source.sample() * factor
 }

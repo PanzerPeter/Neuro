@@ -11,7 +11,7 @@ use super::context::{CodegenContext, DropTarget};
 impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a function call
     /// Lower a free/associated function call. Returns `None` when the callee
-    /// returns unit `()` — such a call is valid only in statement position, where
+    /// returns unit `()`. Such a call is valid only in statement position, where
     /// the result is discarded (see `codegen_call_dispatch`).
     pub(crate) fn codegen_call(
         &mut self,
@@ -45,8 +45,8 @@ impl<'ctx> CodegenContext<'ctx> {
     /// `None` when the method returns unit `()`.
     ///
     /// A `&self` method takes the struct by value (read-only, so mutations do not
-    /// escape). A `&mut self` method takes the struct by pointer — detected by its
-    /// first LLVM parameter being a pointer — so the receiver's storage address is
+    /// escape). A `&mut self` method takes the struct by pointer (detected by its
+    /// first LLVM parameter being a pointer), so the receiver's storage address is
     /// passed and field writes in the body propagate back to the caller.
     pub(crate) fn codegen_method_call(
         &mut self,
@@ -125,7 +125,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let struct_name = &impl_def.type_name;
         for method in &impl_def.methods {
             // An owned `self` reaches codegen only on a `Copy` receiver (operator-trait
-            // methods); it is emitted like `&self` — the struct is passed by value.
+            // methods); it is emitted like `&self`: the struct is passed by value.
             self.codegen_method(method, struct_name, func_types)?;
         }
         Ok(())
@@ -309,7 +309,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Declare a function's LLVM signature (no body) and record it so call sites can
     /// resolve it. Run in a pre-pass over every item before any body is generated, so
-    /// that a call resolves regardless of definition order — required because a
+    /// that a call resolves regardless of definition order, which is required because a
     /// monomorphized generic instance may be called by, or call, items that
     /// appear before it in the program.
     pub(crate) fn declare_function(
@@ -415,7 +415,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         // Open the function-body drop scope. A by-value parameter that owns heap
         // storage was moved into this function, which now owns it, so it is destroyed
-        // at function exit — the same rule the method path applies. Locals are
+        // at function exit, the same rule the method path applies. Locals are
         // registered as their declarations are lowered.
         self.push_drop_scope();
         for (i, param) in func_def.params.iter().enumerate() {
@@ -460,7 +460,7 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             // A preceding statement may have diverged (e.g. an unconditional `panic`),
             // terminating the block before the tail expression. Skip the tail and the
-            // return in that case — there is no live block to emit into.
+            // return in that case: there is no live block to emit into.
             if !self.current_block_terminated() {
                 let tail = body.last();
                 let ret_val = match tail {
@@ -473,7 +473,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 };
                 // The tail expression itself may diverge (`func f() -> i32 { panic("x") }`),
                 // in which case the block is already terminated and `ret_val` is a discarded
-                // placeholder — do not append a `ret` after the `unreachable`.
+                // placeholder, so do not append a `ret` after the `unreachable`.
                 if !self.current_block_terminated() {
                     // A tail `HirStmt::Expr(<place>)` is an implicit return that moves the
                     // place out, so it must not be dropped here.
@@ -495,7 +495,7 @@ impl<'ctx> CodegenContext<'ctx> {
             // If the current block has no terminator it is either dead code (a merge
             // block whose predecessors all returned/broke) or a genuine missing return.
             // In both cases we emit `unreachable`; dead blocks are eliminated by LLVM
-            // later, while genuine missing returns produce undefined behaviour — the
+            // later, while genuine missing returns produce undefined behaviour. The
             // correct long-term fix is return-path analysis in semantic analysis.
             if let Some(current_bb) = self.builder.get_insert_block() {
                 if current_bb.get_terminator().is_none() {

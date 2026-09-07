@@ -170,7 +170,7 @@ val abs_neg: i32 = -abs(x)
 
 On an integer, `-x` is `0 - x` and follows the same overflow rule as the subtraction: it
 panics in debug builds and wraps in release ones. That makes it an overflow at a signed
-type's `MIN`, and at every nonzero value of an unsigned type — see
+type's `MIN`, and at every nonzero value of an unsigned type. See
 [integer overflow](types.md#integer-overflow).
 
 ### Logical NOT (`!`)
@@ -467,7 +467,7 @@ Nothing else has comparison built in. A struct gets `==` / `!=` from `impl Parti
 the ordering operators from `impl Comparable` (see [Operator Overloading](#operator-overloading));
 comparing one that implements neither is a type error naming the missing trait. Arrays,
 tuples, enums and collections have no equality at all yet, and neither does a reference to
-anything but a string — read through it with `*` first.
+anything but a string. Read through it with `*` first.
 
 ### Logical Operators
 

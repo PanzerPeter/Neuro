@@ -1,6 +1,6 @@
 // End-to-end tests for newtype declarations: `newtype Name = T` creates a
 // distinct nominal type wrapping `T`. Construction is `Name(value)`, the inner
-// value is read via `.0`, and — unlike a transparent `type` alias — the newtype is
+// value is read via `.0`, and (unlike a transparent `type` alias) the newtype is
 // not interchangeable with its inner type. These tests exercise the full pipeline:
 // parse → type-check → HIR lowering → LLVM codegen → native run.
 mod common;

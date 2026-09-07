@@ -1,7 +1,7 @@
 // End-to-end tests for the guards integer `/` and `%` carry.
 //
 // Two operand pairs are undefined behaviour for LLVM's division instructions: a zero
-// divisor, and `MIN / -1`. Unguarded they do not merely give a surprising answer — at
+// divisor, and `MIN / -1`. Unguarded they do not merely give a surprising answer: at
 // `-O0` the process dies of `SIGFPE` with nothing printed, and at `-O1` and above the
 // optimizer folds the surrounding code around a poison value and the program prints
 // garbage and carries on. Both are checked here at both ends of the optimization range,
@@ -9,7 +9,7 @@
 // guard at all.
 //
 // The zero divisor panics in every build; `MIN / -1` is an integer overflow and so
-// follows the same rule the arithmetic operators do — a panic in debug builds, the
+// follows the same rule the arithmetic operators do: a panic in debug builds, the
 // two's-complement wrap in release.
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -121,7 +121,7 @@ fn min_over_minus_one_panics_in_debug_builds() {
 
 #[test]
 fn min_over_minus_one_wraps_in_release_builds() {
-    // The wrapped quotient is `MIN` itself and the wrapped remainder is `0` — the same
+    // The wrapped quotient is `MIN` itself and the wrapped remainder is `0`: the same
     // answers two's complement gives, reached without handing `-1` to the instruction.
     let quotient = compile_and_run(MIN_OVER_MINUS_ONE, "ovf", "3");
     assert!(quotient.status.success(), "release build must not abort");

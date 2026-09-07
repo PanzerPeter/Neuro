@@ -1,7 +1,7 @@
 // Self-contained soft-float half/bfloat conversion builtins.
 //
-// LLVM lowers `fpext`/`fptrunc` on `half`/`bfloat` — and f16/bf16 comparisons,
-// which widen to f32 first — to runtime calls (`__extendhfsf2`, `__truncsfhf2`,
+// LLVM lowers `fpext`/`fptrunc` on `half`/`bfloat`, and f16/bf16 comparisons
+// (which widen to f32 first), to runtime calls (`__extendhfsf2`, `__truncsfhf2`,
 // `__truncdfhf2`, `__truncsfbf2`, `__truncdfbf2`) on targets without native
 // half-precision instructions (generic x86-64). On Linux/macOS those come from
 // libgcc/compiler-rt, which the C driver links automatically. On Windows we

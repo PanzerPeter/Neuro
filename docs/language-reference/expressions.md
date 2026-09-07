@@ -51,7 +51,7 @@ compile error rather than a surprising rendering: radix kinds (`d x X b o`)
 require an integer, fixed-point and scientific (`.N`, `e`) require a float, and
 the `+` flag requires a signed integer or a float. Interpolation renders
 integers, floats, `bool`, `char`, and `string` directly, and a struct that
-derives `Debug` under the `:?` specifier — `"{p:?}"` yields `Point { x: 1, y: 2 }`,
+derives `Debug` under the `:?` specifier: `"{p:?}"` yields `Point { x: 1, y: 2 }`,
 recursing into a nested struct and quoting a `string` or `char` field. A struct
 has no display form, so the bare `"{p}"` is a compile error either way. Other
 aggregates (arrays, tuples, enums) do not render yet.
@@ -83,10 +83,10 @@ The rules:
   directly after the opening `"""`, and the one that separates the last content
   line from the closing delimiter's line. A block is therefore its content lines
   with no leading or trailing blank. To end a block with a newline, leave a blank
-  line before the closing delimiter — that blank line's own terminator is then the
+  line before the closing delimiter: that blank line's own terminator is then the
   last one, and it survives.
   Text trailing the opening delimiter on the same line is content, and is exempt
-  from the dedent rule — it sits flush against the delimiter and cannot be
+  from the dedent rule: it sits flush against the delimiter and cannot be
   indented.
 - The closing `"""` must be alone on its line. The whitespace before it is the
   prefix stripped from every content line; indentation beyond that prefix
@@ -95,7 +95,7 @@ The rules:
 - A non-blank line indented less than the closing delimiter is a compile error.
 - A single `"` or `""` inside the block needs no escape; only `"""` ends it.
 
-Escapes and `{...}` interpolation holes work exactly as in a `"…"` literal — a
+Escapes and `{...}` interpolation holes work exactly as in a `"…"` literal. A
 block string produces the same `string` value and carries no runtime cost of its
 own.
 

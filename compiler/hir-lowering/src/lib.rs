@@ -12,7 +12,7 @@
 //!
 //! The HIR's defining property is that **every expression carries its resolved
 //! type** ([`neuro_hir::HirExpr::ty`]). The frontend type checker computes those
-//! types but does not expose them — and importing its internal `Type` would couple
+//! types but does not expose them, and importing its internal `Type` would couple
 //! two feature slices, which VSA forbids. This slice therefore re-derives each
 //! expression's type from the AST, mirroring the checker's rules. Because lowering
 //! only runs on a program that already type-checked, it assumes well-typedness:
@@ -91,13 +91,13 @@ struct EnumVariantData {
 struct LoopCtx {
     /// The loop's label (`outer:`), or `None` when unlabeled.
     label: Option<String>,
-    /// Whether the loop can yield a value via `break v` — only a `loop` can.
+    /// Whether the loop can yield a value via `break v`. Only a `loop` can.
     is_value: bool,
     /// The agreed type of value-carrying `break`s seen so far, `None` until the
     /// first one. The loop expression evaluates to this (or `void` when absent).
     value_ty: Option<HirType>,
     /// Whether any `break` targeted this loop. With none the loop has no exit
-    /// edge and diverges, so it takes its context's expected type — the checker
+    /// edge and diverges, so it takes its context's expected type, which the checker
     /// applies the same rule.
     has_break: bool,
 }
@@ -124,7 +124,7 @@ struct Lowerer {
     enum_instance_base: HashMap<String, String>,
     /// Monomorphized enum instance name → the arguments it was built with, so the
     /// enclosing return type can supply arguments a construction's payload leaves
-    /// undetermined — mirroring the checker's fallback.
+    /// undetermined, mirroring the checker's fallback.
     enum_instance_args: HashMap<String, Vec<MonoArg>>,
     /// Generic-enum instances discovered but whose HIR items are not yet emitted.
     mono_enum_pending: Vec<MonoEnum>,
@@ -134,7 +134,7 @@ struct Lowerer {
     /// Structs that support `.clone()` (derive `Clone`, or `Copy` which implies it).
     clone_structs: HashSet<String>,
     /// Structs that derive `PartialEq`. `==` / `!=` on one lowers to a plain binary
-    /// node the backend expands field-wise, NOT to a method call — a derived comparison
+    /// node the backend expands field-wise, NOT to a method call. A derived comparison
     /// has no `eq` to dispatch to, which is what distinguishes it from an `impl`.
     partial_eq_structs: HashSet<String>,
     /// Struct name → method name → mangled key into [`Self::functions`].
@@ -343,14 +343,14 @@ impl Lowerer {
 
     /// Define a binding in the innermost scope. A missing scope is a lowering bug
     /// (every body opens a scope first), so the define is silently dropped rather
-    /// than panicking — the subsequent lookup would surface it as an error.
+    /// than panicking; the subsequent lookup would surface it as an error.
     fn define(&mut self, name: String, ty: HirType) {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name, ty);
         }
     }
 
-    /// Resolve a binding's type: innermost scope outward, then module constants —
+    /// Resolve a binding's type: innermost scope outward, then module constants,
     /// matching the checker's "locals shadow constants" precedence.
     fn lookup(&self, name: &str) -> Option<HirType> {
         for scope in self.scopes.iter().rev() {
@@ -479,7 +479,7 @@ fn resolve_array_size(
 /// The result is a valid symbol (alphanumerics and `_` only).
 ///
 /// The marker deliberately avoids `__`, which is reserved workspace-wide as the
-/// receiver/method separator — codegen recovers a method's receiver struct by splitting
+/// receiver/method separator; codegen recovers a method's receiver struct by splitting
 /// its symbol on `__`, so an instance name containing one would be misread as a method
 /// of a struct that does not exist. [`mangle_struct_instance`] uses the same marker.
 fn mangle_instance(
@@ -561,7 +561,7 @@ fn mangle_type(ty: &HirType) -> String {
 /// Like [`mangle_instance`], this never contains `__`: codegen recovers a method's
 /// receiver struct by splitting the method symbol on `__`, so a struct name with `__`
 /// in it would corrupt that recovery. Once 1F puts generic methods on generic structs,
-/// a method of this instance is keyed `<instance>__<method>` — exactly one `__`, which
+/// a method of this instance is keyed `<instance>__<method>`, with exactly one `__`, which
 /// only holds because neither half can introduce another.
 fn mangle_struct_instance(base: &str, args: &[MonoArg]) -> String {
     let parts: Vec<String> = args

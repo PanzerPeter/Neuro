@@ -56,8 +56,8 @@ impl Lowerer {
                 hint = Some(body.ty.clone());
             }
             // The first arm that carries a type decides the match's, mirroring the
-            // checker. A divergent arm — a `panic` or an `unreachable` with no context
-            // type — lowers to `void` and describes nothing, so taking it made the whole
+            // checker. A divergent arm (a `panic` or an `unreachable` with no context
+            // type) lowers to `void` and describes nothing, so taking it made the whole
             // match void purely because of the order the arms were written in.
             if matches!(result_ty, HirType::Void) {
                 result_ty = body.ty.clone();

@@ -1,6 +1,6 @@
 //! Bind every call site's arguments to the callee's parameters in declaration order.
 //!
-//! Neuro lets a caller name an argument — `connect("localhost", port: 8080)` — and lets a
+//! Neuro lets a caller name an argument (`connect("localhost", port: 8080)`) and lets a
 //! declaration *require* the name with an external label (`func clamp(_ v: f32, min lo: f32)`).
 //! Both are pure surface syntax: this pass matches each label against the callee's
 //! parameter list, permutes the arguments into declaration order, and clears the labels,
@@ -10,7 +10,7 @@
 //! Permuting the arguments also permutes the order they are evaluated in, which a program
 //! whose arguments carry effects can tell apart from the order it wrote. Such a call is
 //! rewritten into a block that binds its arguments to temporaries in source order and
-//! passes them in declaration order instead — see `hoisting`.
+//! passes them in declaration order instead: see `hoisting`.
 
 mod binding;
 mod errors;
@@ -32,8 +32,8 @@ use signatures::{Lookup, SignatureTable};
 /// Rewrite `items` so every call's arguments sit in the callee's declaration order with
 /// no labels left, reporting every call that cannot be bound.
 ///
-/// `items` is the whole program — module resolution has already merged every file and the
-/// driver has prepended the prelude — because a call names its callee and the callee's
+/// `items` is the whole program (module resolution has already merged every file and the
+/// driver has prepended the prelude), because a call names its callee and the callee's
 /// declaration may be anywhere in that list.
 pub fn bind_arguments(items: &mut [Item]) -> Result<(), Vec<ArgumentError>> {
     let table = SignatureTable::build(items);
@@ -75,7 +75,7 @@ fn bind_call(expr: &mut Expr, table: &SignatureTable) -> Result<Bound, ArgumentE
             table.assoc_function(&type_name.name, &member.name),
         ),
         Expr::FieldAccess { field, .. } => (field.name.clone(), table.method(&field.name)),
-        // Calling the result of an arbitrary expression — a returned closure, an element
+        // Calling the result of an arbitrary expression: a returned closure, an element
         // of an array of functions. Nothing names its parameters.
         _ => ("this call".to_string(), Lookup::Unknown),
     };

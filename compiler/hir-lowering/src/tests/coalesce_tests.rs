@@ -48,7 +48,7 @@ fn coalesce_lowers_to_a_two_arm_match() {
 
 #[test]
 fn result_coalesce_tests_the_ok_tag() {
-    // `Ok` is `Result`'s first variant, so the success test is tag 0 — and the `Err`
+    // `Ok` is `Result`'s first variant, so the success test is tag 0, and the `Err`
     // payload appears nowhere in the desugar, which is how `??` discards it.
     let program = lower(&format!(
         "{FALLIBLE_DECLS}
@@ -69,7 +69,7 @@ fn result_coalesce_tests_the_ok_tag() {
 #[test]
 fn a_chain_nests_in_the_fallback_arm() {
     // Right-to-left associativity means the second `??` lands inside the first's
-    // fallback arm — the reason each fallback is only reached after the one before it.
+    // fallback arm, the reason each fallback is only reached after the one before it.
     let program = lower(&format!(
         "{FALLIBLE_DECLS}
          func maybe(n: i32) -> Option<i32> {{ Option::Some(n) }}

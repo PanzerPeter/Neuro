@@ -62,7 +62,7 @@ fn reserved_names(errors: &[TypeError]) -> Vec<String> {
 
 #[test]
 fn single_underscore_names_are_accepted() {
-    // The reservation covers `__` only — ordinary snake_case must stay legal.
+    // The reservation covers `__` only; ordinary snake_case must stay legal.
     let mut checker = TypeChecker::new();
     let items = vec![
         struct_item("my_point", &[("x_pos", "i32")]),
@@ -96,7 +96,7 @@ fn double_underscore_in_declared_names_is_rejected() {
 fn a_user_method_cannot_forge_a_generic_instance_symbol() {
     // `Pair_g_i32` is the mangled name of `Pair<i32>`; a method `push` on it lowers to
     // `Pair_g_i32__push`. A user method named `g_i32__push` on a struct `Pair` would
-    // lower to the identical symbol — rejecting `__` in the method name closes it.
+    // lower to the identical symbol, and rejecting `__` in the method name closes it.
     let mut checker = TypeChecker::new();
     let items = vec![
         struct_item("Pair", &[("first", "i32")]),

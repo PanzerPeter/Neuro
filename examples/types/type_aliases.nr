@@ -1,5 +1,5 @@
 // Type aliases: `type` introduces a transparent name for an existing
-// type. The alias and its target are interchangeable — no new nominal type is
+// type. The alias and its target are interchangeable: no new nominal type is
 // created. Aliases here stand in for primitive and struct types across field,
 // parameter, return, local-annotation, and cast positions.
 

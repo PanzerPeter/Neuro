@@ -1,4 +1,4 @@
-// Showcase — a tiny integer-math toolkit.
+// Showcase: a tiny integer-math toolkit.
 //
 // Integration example combining several control-flow and operator features:
 //   recursion · while loops · modulo (%) · compound assignment (+=)
@@ -19,7 +19,7 @@ func isqrt(n: i32) -> i32 {
 
 /* Shelved: Newton's method converges in far fewer steps, but it needs a
    division-by-zero guard the linear scan above does not, so it stays parked
-   here until the guard is worth writing. The whole block is inert — including
+   here until the guard is worth writing. The whole block is inert, including
    the ordinary comment inside it, which is why the outer comment has to nest.
 
 func isqrt_newton(n: i32) -> i32 {
@@ -35,7 +35,7 @@ func isqrt_newton(n: i32) -> i32 {
 }
 */
 
-// Greatest common divisor — Euclid's algorithm, recursive.
+// Greatest common divisor: Euclid's algorithm, recursive.
 func gcd(a: i32, b: i32) -> i32 {
     if b == 0 { return a }
     return gcd(b, a % b)

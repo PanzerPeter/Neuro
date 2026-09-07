@@ -2,7 +2,7 @@
 //
 // Free-function signatures used to be registered by `check_function` itself, which
 // runs per body in source order, so any call to a function defined further down was
-// `undefined function` — and mutual recursion could not be written at all. Every
+// `undefined function`, and mutual recursion could not be written at all. Every
 // other item kind (structs, enums, traits, constants) was already order-independent,
 // and the LLVM backend already pre-declared every signature; only the type checker
 // insisted on definition-before-use.

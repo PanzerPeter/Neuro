@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "Neuro",
   "scopeName": "source.neuro",
-  "comment": "Rule order in this array is load-bearing. TextMate breaks ties between rules that match at the same offset by array position, NOT by match length, so every rule that names a declaration (`func f`, `struct S`) must precede `#keywords` — otherwise `#keywords` claims the leading keyword first and the declaration rule never runs. The same applies inside `#operators`, where longer forms are listed before the prefixes they contain.",
+  "comment": "Rule order in this array is load-bearing. TextMate breaks ties between rules that match at the same offset by array position, NOT by match length, so every rule that names a declaration (`func f`, `struct S`) must precede `#keywords`; otherwise `#keywords` claims the leading keyword first and the declaration rule never runs. The same applies inside `#operators`, where longer forms are listed before the prefixes they contain.",
   "patterns": [
     {
       "include": "#comments"
@@ -135,7 +135,7 @@
       ]
     },
     "format_spec": {
-      "comment": "`{value:>8.2f}` — align, sign, zero, width, precision, kind, as parsed by the interpolation slice.",
+      "comment": "`{value:>8.2f}`: align, sign, zero, width, precision, kind, as parsed by the interpolation slice.",
       "match": "(:)([<>^]?\\+?0?[0-9]*(?:\\.[0-9]+)?[?edxXbo]?)(?=\\})",
       "captures": {
         "1": {
@@ -499,7 +499,7 @@
       }
     },
     "parameters": {
-      "comment": "A name introduced by `(` or `,` and annotated with `:` — function parameters, and by extension the trailing fields of a struct definition or literal, which carry the same variable-ish colour.",
+      "comment": "A name introduced by `(` or `,` and annotated with `:`, so function parameters and by extension the trailing fields of a struct definition or literal, which carry the same variable-ish colour.",
       "match": "(?<=[(,])\\s*([_\\p{L}][\\p{L}\\p{N}_]*)\\s*(?=:(?!:))",
       "captures": {
         "1": {

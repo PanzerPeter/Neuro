@@ -95,20 +95,20 @@ def main() -> int:
             for pattern in TEST_COUNT_PATTERNS:
                 if pattern.search(line):
                     problems.append(
-                        f"{where}: hard-coded test count — the CI badge is the source of truth"
+                        f"{where}: hard-coded test count; the CI badge is the source of truth"
                     )
             if is_markdown and version_pattern.search(line):
                 problems.append(
-                    f"{where}: hard-coded workspace version — cite Cargo.toml instead"
+                    f"{where}: hard-coded workspace version; cite Cargo.toml instead"
                 )
             for pattern in PRIVATE_PATH_PATTERNS:
                 if pattern.search(line):
                     problems.append(
-                        f"{where}: reference to a local-only path — it does not exist for other readers"
+                        f"{where}: reference to a local-only path; it does not exist for other readers"
                     )
             if SPEC_MARKER.search(line):
                 problems.append(
-                    f"{where}: internal spec section marker — describe the feature in plain terms"
+                    f"{where}: internal spec section marker; describe the feature in plain terms"
                 )
 
     if problems:

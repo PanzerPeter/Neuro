@@ -22,7 +22,7 @@ impl<'ctx> CodegenContext<'ctx> {
         offset: usize,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         // A negation directly over an integer literal is a constant, and the checker
-        // has already range-checked it against the value it DENOTES — so it is in range
+        // has already range-checked it against the value it DENOTES, so it is in range
         // for its type by the time codegen runs, and there is nothing to guard. It must
         // be materialized rather than computed: the most negative value of a signed type
         // is written as a magnitude one past that type's maximum, which narrows to the
@@ -50,7 +50,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 // Integer negation IS `0 - x`, so it overflows exactly where that
                 // subtraction does: at a signed type's `MIN`, and at every nonzero
                 // value of an unsigned type. Routing it through the same guard is what
-                // makes `-x` and `0 - x` agree — emitted separately, `build_int_neg`
+                // makes `-x` and `0 - x` agree. Emitted separately, `build_int_neg`
                 // wrapped silently on the debug tier while the subtraction panicked.
                 let int_val = val.into_int_value();
                 let zero = int_val.get_type().const_zero();

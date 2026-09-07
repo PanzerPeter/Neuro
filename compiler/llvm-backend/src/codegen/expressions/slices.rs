@@ -2,7 +2,7 @@
 // sized container, `.slice(range)`, `.len()`, indexing, element assignment, and
 // `for x in xs` iteration.
 //
-// A slice is a `{ ptr, i64 }` fat pointer held by value — the buffer address of the
+// A slice is a `{ ptr, i64 }` fat pointer held by value: the buffer address of the
 // borrowed run and its element count. Every operation here re-derives the element
 // stride from the slice's semantic element type, because LLVM 20 pointers are untyped.
 
@@ -34,7 +34,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Lower `seq.slice(a..b)` / `seq.slice(a..=b)` to a `&[T]` view into the receiver's
-    /// buffer — zero copy, whether the receiver is an array, a `Vec`, or another slice.
+    /// buffer, zero copy, whether the receiver is an array, a `Vec`, or another slice.
     ///
     /// The bounds are validated in every build, not only in debug ones: unlike an index,
     /// an out-of-range slice hands back a *view* that would outlive the check and read
@@ -401,7 +401,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Address of element `index` in a borrowed run, emitting the same debug-build
-    /// bounds guard the owning container gets — only the bound is a runtime length.
+    /// bounds guard the owning container gets; only the bound is a runtime length.
     fn slice_element_ptr(
         &mut self,
         base: PointerValue<'ctx>,

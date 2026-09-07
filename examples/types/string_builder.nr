@@ -3,8 +3,8 @@
 //
 // `string` is immutable, so building text with `s = s + piece` in a loop
 // reallocates and recopies everything accumulated so far on every step. `String`
-// is the growable counterpart — one owned heap buffer that appends in amortized
-// O(1) — the same relationship `Vec<T>` has to `[T; N]`.
+// is the growable counterpart: one owned heap buffer that appends in amortized
+// O(1), the same relationship `Vec<T>` has to `[T; N]`.
 //
 // Surface: `String::new()`, `.push_str(text)`, `.len()`, `.clear()`, and
 // `.to_string()`, which copies the accumulated bytes back out as an ordinary
@@ -23,7 +23,7 @@ func main() -> i32 {
     report.push_str(&status)
     report.push_str(" (")
 
-    // Appending in a loop is what the buffer exists for — no intermediate
+    // Appending in a loop is what the buffer exists for: no intermediate
     // string is allocated per step.
     mut i: i32 = 0
     while i < 3 {

@@ -1,6 +1,6 @@
 //! One mutable traversal reaching every place a module-qualified name can be written.
 //!
-//! Discovery and rewriting are the same walk with different callbacks — writing it twice
+//! Discovery and rewriting are the same walk with different callbacks: writing it twice
 //! is how the two would drift apart and leave a qualifier standing in a corner of the
 //! grammar nobody re-checked.
 
@@ -20,7 +20,7 @@ pub(crate) enum Site<'a> {
     Expr(&'a mut Expr),
     /// The name of a `Type::Named` or `Type::Generic`.
     TypeName(&'a mut Identifier),
-    /// A `match` / `val-else` pattern that names a variant — qualified, imported, or (for a
+    /// A `match` / `val-else` pattern that names a variant: qualified, imported, or (for a
     /// payload-less variant) still indistinguishable from a binding.
     Pattern(&'a mut Pattern),
 }
@@ -134,7 +134,7 @@ fn walk_item(item: &mut Item, f: SiteFn) -> Result<(), ModuleError> {
         // Imports are lifted out of the item list as each module is loaded, so the walk
         // never meets one.
         // An import is consumed at load time, an inline block is lifted into a module of
-        // its own there too, and the `@no_prelude` marker is dropped there — none survives
+        // its own there too, and the `@no_prelude` marker is dropped there: none survives
         // to be walked.
         Item::Import(_) | Item::Module(_) | Item::NoPrelude(_) => Ok(()),
     }

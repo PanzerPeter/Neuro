@@ -10,12 +10,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.17.1] - 2026-09-06
+
+### Fixed
+
+- **An overflowing `const` initializer is now rejected instead of silently wrapping**
+  (BUG-022). `const C: u8 = 200u8 + 100u8` folded to `44`, while the same arithmetic in a
+  function body aborted on the debug tier. A `const` is evaluated by the compiler, so it
+  never reaches the tier that would choose between panicking and wrapping, and no single
+  folded value can satisfy both rules at once. Rejecting the initializer is the only answer
+  that keeps the tier from being observable in a value:
+
+  ```
+  error: constant expression overflows u8: `+` produces a value outside the range of u8
+  ```
+
+  Every arithmetic operator moved together, because fixing one alone would recreate the
+  asymmetry BUG-021 closed. `+`, `-`, `*`, `/`, `%` and unary `-` are all range-checked
+  against the node's own resolved type, and `MIN / -1` and `MIN % -1` are recognised
+  against the operand type's minimum, which the range check alone does not catch: the
+  remainder is `0`, a value every type holds. Folding still happens in `i128`, so nothing
+  in range lost precision before or after.
+
+  Operators with no run-time overflow rule keep their run-time meaning. `&`, `|`, `^`, `~`
+  and `<<` truncate to the node's type, which also fixed a second-order defect: `~0u8`
+  used to fold to the `i128` value `-1` and only came out as `255` because emission
+  truncated it, so `~0u8 - 100u8` computed from the wrong operand. An explicit `as` cast
+  still narrows, in a `const` exactly as in a function body.
+
+  `docs/language-reference/types.md` documented the old wrapping behaviour and now
+  documents this one. The same paragraph claimed division and modulo were exempt from the
+  run-time overflow check, which they are not.
+
+### Changed
+
+- **The type-inference tests no longer shell out to Cargo.** `compiler/neurc/tests/type_inference.rs`
+  ran `cargo run -p neurc` from inside a test and read its source from a `tests/` directory
+  at the repository root, the only test in the workspace to do either. A test that invokes
+  Cargo contends with the build lock of the run that started it and depends on the working
+  directory it was launched from. The eight fixtures are now inline sources checked through
+  a new `CompileTest::check` helper, which runs the `neurc` binary Cargo already built for
+  the test. The root `tests/` directory is gone; every test is now a Cargo target inside
+  its own crate.
+
+- **`.cargo/config.toml` names both vcpkg triplets.** The MSVC link search path pointed
+  only at `x64-windows-static`, which builds against the static CRT (`/MT`), while Rust's
+  `x86_64-pc-windows-msvc` target uses the dynamic CRT (`/MD`) that the documentation
+  elsewhere requires. `x64-windows-static-md` is listed first; a directory that does not
+  exist is ignored by the linker, so the setting stays free on a machine without vcpkg.
+  The installation, troubleshooting and CLI guides name the `-md` triplet to match, and
+  state that libxml2 is needed only if a particular LLVM package links against it.
+
+- **Prose across the repository drops the em dash.** Every one of the roughly 2,200
+  occurrences outside the two `LICENSE` files was rewritten: source comments in all nine
+  slices, the slice `CONTEXT.md` files, the language reference and guides, the root
+  documents, the examples, the CI workflow, and this changelog's own history. Each was
+  replaced with a period, a comma, a colon or parentheses, never with another dash, and
+  the spaced double hyphens that a few entries used the same way went with them. Where
+  the character appeared in a user-facing diagnostic string it was rewritten there too,
+  so the compiler's own output is consistent with its prose. The `LICENSE` files keep
+  theirs, being verbatim legal text.
+
+### Documentation
+
+- `tools/clean_stale_target.py` is listed in `CONTRIBUTING.md` and `AGENTS.md`. It has
+  worked since it was added and was mentioned only in this changelog, so nobody looking
+  for a way to reclaim the tens of gigabytes Cargo leaves in `target/` would have found it.
+
+- `CONTRIBUTING.md` no longer promises that `docs/BUGS.md` always has entries in it. The
+  register lists open defects only, so it is empty whenever every confirmed defect is
+  fixed, and it points at the Phase 2 items when it is.
+
+
 ## [2.17.0] - 2026-09-06
 
 ### Changed
 
 - **A tensor value is a DLPack handle.** `Tensor<T, S>` now lowers to a pointer to a
-  `DLManagedTensorVersioned` -- the exchange structure DLPack 1.1 defines -- whose `data`
+  `DLManagedTensorVersioned` (the exchange structure DLPack 1.1 defines), whose `data`
   field addresses the element buffer the tensor owns. The pointer a Neuro program passes
   around is the pointer a foreign consumer such as NumPy or PyTorch reads: there is no wrap
   step waiting at an FFI boundary, and no conversion to get wrong. The versioned structure
@@ -24,8 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Every field is filled at construction: `version` `{1, 1}`, `manager_ctx` null, `flags` 0
   (the buffer is writable), `device` `{kDLCPU, 0}`, `ndim` the rank, `dtype` from a table
-  covering every legal element type -- the four signed and four unsigned integer widths,
-  `f16`, `f32`, `f64`, `bf16`, and `bool` -- with `lanes` 1, `byte_offset` 0, and `shape` /
+  covering every legal element type (the four signed and four unsigned integer widths,
+  `f16`, `f32`, `f64`, `bf16`, and `bool`), with `lanes` 1, `byte_offset` 0, and `shape` /
   `strides` pointing at private constants shared by every value of that tensor type.
   Strides count elements rather than bytes, as DLPack specifies. A rank-0 tensor has no
   axis to describe, so both pointers are null, which is DLPack's own spelling for a scalar.
@@ -35,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to the alignment; only the unpadded element run is ever copied. The structure and the
   buffer are two allocations rather than one fused block, because fusing needs the
   structure's size rounded up to 64 as an IR constant expression and LLVM 20 has been
-  withdrawing constant-expression arithmetic -- the element buffer's size is computable in
+  withdrawing constant-expression arithmetic: the element buffer's size is computable in
   Rust, the structure's is not.
 
 - **Release runs through the handle's own `deleter`.** A tensor leaving scope loads the
@@ -47,7 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   What did NOT change: the drop machinery itself. A tensor binding and a by-value tensor
   parameter still register `DropTarget::TensorBuffer`, every existing move site still
   clears the flag, and a tensor held in a struct field is still not freed when the struct
-  goes out of scope -- one gap shared with collection fields, not a tensor-specific one.
+  goes out of scope, one gap shared with collection fields, not a tensor-specific one.
 
   Why this lands here rather than later: in-place compound assignment, the next tensor
   item, promises that a handle held by an optimizer or a Python consumer survives
@@ -64,7 +136,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Brand assets.** `assets/icon.svg` is the project mark: an N whose diagonal is a weighted
-  edge -- it tapers from thin at the input node to thick at the output, the two nodes carry
+  edge: it tapers from thin at the input node to thick at the output, the two nodes carry
   activation halos, and the free stem ends are terminals, so the letter reads as a small
   directed network rather than a glyph. `assets/icon-light.svg` is the same mark for light
   backgrounds, with the deepest node darkened to hold contrast on white. Raster exports and a
@@ -87,7 +159,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`logos` 0.14 -> 0.16, taking the rewritten matcher.** 0.16 replaced the matching engine to
   get exact regex semantics and fix long-standing backtracking bugs, which is precisely the
   machinery the lexer's eight `priority` annotations and its longest-match tie-breaks are
-  written against -- `<<` over `<`, `+=` over `+` then `=`, `??` over two `?`, `42i64` and
+  written against: `<<` over `<`, `+=` over `+` then `=`, `??` over two `?`, `42i64` and
   `1.5f32` as one token rather than a literal plus an identifier, `'a'` a char where `'a` is a
   lifetime, `"""` over the two-quote empty string, and every keyword outranking the identifier
   pattern it shadows. All of them resolve unchanged: a token-stream dump over the full example
@@ -138,8 +210,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Neither is expressible for an SSA value, which has no address at all, so both the DLPack
   descriptor's `data` pointer and the in-place compound-assignment guarantee were unbuildable
   on the old representation. Construction allocates, `.clone()` allocates a second buffer and
-  `memcpy`s into it, a binding releases its buffer when its scope ends, and every move site --
-  binding, call argument, `return`, struct-field store, `.to(device)` -- hands the buffer on
+  `memcpy`s into it, a binding releases its buffer when its scope ends, and every move site
+  (binding, call argument, `return`, struct-field store, `.to(device)`) hands the buffer on
   under the drop flag rather than duplicating it. A constant fill or literal still lands in
   `.rodata` and reaches the buffer as one `memcpy`, so a `zeros()` of any size costs one call
   rather than an instruction per element.
@@ -153,7 +225,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first-class aggregate is a whole-buffer `load`/`store` pair that only `-O 1`'s SROA rewrites
   into a `memcpy`; at `-O 0` nothing did, and SelectionDAG crashed legalizing the monolithic
   value somewhere above 50k elements, so the backend capped a tensor's size there and reported
-  the limit. The cap was a symptom of the representation and is deleted with it -- there is no
+  the limit. The cap was a symptom of the representation and is deleted with it. There is no
   size limit at any optimization level. Returning a large tensor by value was the half that no
   shortcut reached: running the middle-end `sroa` pass at `-O 0` had let one be built and
   cloned inside a single function, but a value still had to cross the call boundary whole. It
@@ -174,7 +246,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wrapped silently at `-O 0`, while `a - 1` at the same value panicked. Integer negation is
   `0 - x` and now lowers through the same guard, so it panics on the debug tier and wraps in
   release exactly where the subtraction does. A negation written directly over a literal stays
-  a compile-time constant and is materialized rather than computed -- it has already been
+  a compile-time constant and is materialized rather than computed: it has already been
   range-checked, and computing it would overflow at precisely the most negative value that
   literals are able to spell.
 - **A negative literal written for an unsigned type is rejected instead of wrapping.** A
@@ -182,7 +254,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   magnitude, so `val x: u8 = -1` is now a compile error rather than a silent `255`. The
   diagnostic names the type's signedness and the spelling that does produce the wrap
   (`0u8.wrapping_sub(1u8)`). `val x: u8 = -0` still compiles, since `-0` denotes zero, and an
-  out-of-range negation for a *signed* type is unchanged -- `val x: i8 = -200` remains an
+  out-of-range negation for a *signed* type is unchanged: `val x: i8 = -200` remains an
   ordinary range error, not a signedness one.
 
   This turns programs that compiled before into compile errors. Both halves are spec
@@ -201,9 +273,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its source: `1e300 as i32` printed `-2147483648` at `-O 0` and, at `-O 3`, the enclosing
   `println` disappeared and printed nothing at all; a NaN cast printed stack garbage; and
   the constant folder computed a third answer again for the same expression written as a
-  `const`. The cast now lowers to `llvm.fptosi.sat` / `llvm.fptoui.sat`, which are total --
+  `const`. The cast now lowers to `llvm.fptosi.sat` / `llvm.fptoui.sat`, which are total:
   an in-range value still truncates toward zero, an out-of-range one clamps to the target
-  type's bound, and NaN maps to zero -- and the constant folder computes the same function,
+  type's bound, and NaN maps to zero. The constant folder computes the same function,
   so a folded cast and a run-time one agree at every optimization level.
 - **The most negative value of every signed integer type can now be written as a literal.**
   `val b: i32 = -2147483648` was rejected as out of range, because a negation is an
@@ -211,8 +283,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   magnitude, which is one past the type's maximum. `i64` and `u64` failed a stage earlier
   still: the lexer carried every integer literal in an `i64`, so `-9223372036854775808i64`
   and `18446744073709551615u64` were not tokenizable at all. Integer tokens now carry an
-  unsigned magnitude, `Literal::Integer` carries an `i128` -- the narrowest type that spans
-  every integer the language can spell -- and a negation directly over an integer literal
+  unsigned magnitude, `Literal::Integer` carries an `i128` (the narrowest type that spans
+  every integer the language can spell), and a negation directly over an integer literal
   is range-checked against the negated value. Values one step outside a type are still
   rejected, in both directions and in every literal base.
 
@@ -233,21 +305,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   should live. Both now exist.
   - `tensor.clone()` yields an independent tensor of the same type and leaves the receiver
     usable. It auto-derefs a borrow, so `t.clone()` on a `&Tensor<T, S>` hands back an
-    *owned* tensor — the copy path for a tensor someone else holds. Until now the
+    *owned* tensor: the copy path for a tensor someone else holds. Until now the
     use-after-move diagnostic advised a `.clone()` that tensors did not have.
   - `tensor.to(device)` consumes the tensor and returns it on the requested device. Its
     argument is `Device`, a new prelude enum (`CPU`, `GPU(i32)`). Calling it on a
     `&Tensor<T, S>` is rejected: a borrow cannot be consumed.
   - The host is the only device this compiler lowers to, so `.to(Device::CPU)` is the move
     itself and copies nothing. A transfer to any other device aborts at run time with a
-    diagnostic rather than silently leaving the buffer on the host — the device is an
+    diagnostic rather than silently leaving the buffer on the host: the device is an
     ordinary runtime value, so that is where the mismatch can be caught.
 
 ### Note
 
 - BUG-018 (a tensor over 32768 elements cannot be compiled at `-O 0`) stays open. Its fix
-  sketch attributed the underlying representation change — an owning heap or arena buffer,
-  `llvm.memcpy` copies, a drop with move-out suppression, and `sret` returns — jointly to
+  sketch attributed the underlying representation change (an owning heap or arena buffer,
+  `llvm.memcpy` copies, a drop with move-out suppression, and `sret` returns) jointly to
   this item and the pool allocator. That work is about how a tensor buffer is *stored*, not
   about who owns it, and none of it shipped here; `docs/BUGS.md` now attributes it to the
   pool-allocator item alone.
@@ -322,7 +394,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Two benchmarks.** `format_floats` covers the float-to-text path a training loop
   exercises every time it reports a loss, which `print_lines` (integer holes) did not
   reach. `int_divide` covers guarded `/` and `%` with a divisor no range analysis can pin
-  down — the worst case for the new division guards, and the one place this release costs
+  down: the worst case for the new division guards, and the one place this release costs
   rather than saves: about a tenth of that loop.
 
 - **`docs/BUGS.md`: BUG-019 and BUG-020**, both found by this pass and both reported
@@ -357,7 +429,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The annotation supplies the element type *and* every extent, and it types the literal's
   leaves: `1.0` under a `Tensor<f32, ...>` annotation is an `f32` literal, not an `f64`
-  one being narrowed — the same rule `val x: f32 = 0.01` follows. A value that already has
+  one being narrowed: the same rule `val x: f32 = 0.01` follows. A value that already has
   a type is not converted for the annotation's benefit. With no annotation in scope,
   `[1.0, 2.0, 3.0]` is still a plain `[f64; 3]`.
 
@@ -374,7 +446,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its buffer; the rank-0 tensor is a one-element buffer, the empty product. Tensors are
   not `Copy`, so building one and storing it *moves* it. A fill, an identity matrix, and a
   constant literal fold to an LLVM constant in `.rodata`; only `random_normal` costs
-  anything at run time — a counted loop over an `xorshift64` + Box–Muller generator
+  anything at run time: a counted loop over an `xorshift64` + Box–Muller generator
   emitted once per module and seeded from a fixed constant, so a compiled program draws
   the same weights on every run.
 
@@ -387,8 +459,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Known limitation
 
 - A tensor is a first-class LLVM value, so copying one is a whole-buffer `load` and
-  `store`. `-O 1` and above rewrite that into a `memcpy` and any size works; `-O 0` — the
-  default — cannot, so a tensor of more than 32768 elements is **rejected there** with a
+  `store`. `-O 1` and above rewrite that into a `memcpy` and any size works; `-O 0` (the
+  default) cannot, so a tensor of more than 32768 elements is **rejected there** with a
   diagnostic naming the limit and the `-O 1` workaround, rather than crashing the backend.
   Filed as `BUG-018`; it goes away when a tensor's buffer stops being a value.
 
@@ -397,7 +469,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A tensor still cannot be **read back**. Indexing and slicing, tensor arithmetic and the
   `@` operator, in-place compound assignment, `.t()` / `.reshape()` / `.clone()` /
   `.to(device)`, and the reductions are the remaining 2B items. The MLIR path has no
-  tensor mapping either — that is 2C.
+  tensor mapping either: that is 2C.
 
 
 ## [2.13.0] - 2026-09-04
@@ -406,18 +478,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Static tensor type syntax `Tensor<T, [d0, ...]>` (Phase 2B).** The first tensor
   construct in the language, and a **type-level** one: the annotation parses, resolves,
-  and type-checks anywhere a type may be written — `val` bindings, parameters, return
-  types, struct fields, and type aliases — for rank 0 (`Tensor<f32, []>`) through
+  and type-checks anywhere a type may be written (`val` bindings, parameters, return
+  types, struct fields, and type aliases) for rank 0 (`Tensor<f32, []>`) through
   rank-N. Rank and every extent are part of the type, so `Tensor<f32, [2, 2]>` and
   `Tensor<f32, [3, 3]>` are distinct and a mismatch is reported with both spelled out.
   A tensor owns its buffer, so it is not `Copy`: passing one moves it, and passing it
-  twice is a use-after-move. The element type is restricted to a fixed-width scalar —
+  twice is a use-after-move. The element type is restricted to a fixed-width scalar:
   any integer, `f16` / `bf16` / `f32` / `f64`, or `bool`.
 
   `Tensor` remains a prelude *name* rather than a keyword: the parser claims it only
   once a bracketed shape appears, so a module declaring its own generic `Tensor<T>`
-  still shadows it. That also lets `Box<[T; N]>` keep parsing as an array type argument
-  — a shape is recognised by the token after `[`, which for a type can never be an
+  still shadows it. That also lets `Box<[T; N]>` keep parsing as an array type argument:
+  a shape is recognised by the token after `[`, which for a type can never be an
   integer or a closing bracket.
 
   **Not yet:** there is no way to construct a tensor value. Literals, the
@@ -438,7 +510,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   statically links LLVM, a few months of iteration had grown `target/` past 100 GB across
   tens of thousands of dead files. The script groups files into `<crate>-<hash>` build
   units, keeps the newest per crate, and deletes the rest together with their matching
-  `.fingerprint/` and `build/` entries. Deleting a live artifact is not a hazard — Cargo
+  `.fingerprint/` and `build/` entries. Deleting a live artifact is not a hazard: Cargo
   rebuilds whatever is missing.
 
 
@@ -450,7 +522,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `match` accepts enums, integers, `char` and `bool`; anything else is rejected once at the
   scrutinee. The arms were then still checked against the scrutinee's real type, so a `string`
   scrutinee with string-literal arms also produced "this pattern matches a `string` but the
-  value being matched has type string" — a mismatch report between a type and itself. The arms
+  value being matched has type string": a mismatch report between a type and itself. The arms
   now see `Unknown`, which every pattern accepts, leaving only the one accurate diagnostic.
 
 ### Documentation
@@ -471,7 +543,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiles; it also gave the string method set without the codepoint APIs. `types.md` still
   carried a "Remaining Phase 1 work" entry for the growable `String` buffer that shipped in
   v1.80.0, while listing the same feature as landed twelve lines above it. `operators.md` said a
-  concatenated heap string is never freed "until `Drop` lands (1C)" — 1C landed, and the buffer
+  concatenated heap string is never freed "until `Drop` lands (1C)": 1C landed, and the buffer
   is freed wherever ownership is provable. `docs/README.md` pointed contributors at Phase 1
   priorities. A stale `(Phase 1)` label on a binary-size answer is gone too.
 
@@ -483,7 +555,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The one allowlisted cross-slice dependency is documented where the rule is stated.**
   `AGENTS.md` gave `@architect` the no-cross-slice rule with no exceptions, while
-  `syntax-parsing` depends on `lexical-analysis` by design — recorded in that slice's
+  `syntax-parsing` depends on `lexical-analysis` by design, recorded in that slice's
   `CONTEXT.md` and allowlisted by name in the architecture test. Stating the rule without its
   single exception invites either a spurious violation report or a second exception added
   without touching the test that gates them.
@@ -498,9 +570,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A block string no longer keeps the newline before its closing delimiter.** The
-  specification says both newlines that touch a delimiter are punctuation — the one right
+  specification says both newlines that touch a delimiter are punctuation (the one right
   after the opening `"""` and the one separating the last content line from the closing
-  line — so a block is its content lines "with no leading or trailing blank". Only the
+  line), so a block is its content lines "with no leading or trailing blank". Only the
   first was dropped, and every block string in the language was one byte long. The value
   of a block written on one content line is now that line and nothing else.
 
@@ -508,7 +580,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because the two are not symmetric: under the old behaviour a value *without* a trailing
   newline could not be written at all short of slicing the result, whereas under the
   specified rule a trailing newline is still written by leaving a blank line before the
-  closing delimiter — that blank line's own terminator becomes the surviving one. The
+  closing delimiter: that blank line's own terminator becomes the surviving one. The
   dedent rule already came from the same design, which strips against the closing
   delimiter's column.
 
@@ -531,7 +603,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closure written inside a loop inherited that loop as a `break` target, so
   `for i in 0..3 { val f = || -> i32 { break } }` type-checked and then aborted in code
   generation with an internal compiler error. A closure body is a separate control-flow
-  body — the checker already redirects `return` to it for exactly that reason — so the
+  body (the checker already redirects `return` to it for exactly that reason), so the
   enclosing loops are now hidden while the body is checked and restored afterwards. The
   program is rejected with `'break' used outside of a loop`, and a loop written *inside*
   the closure still accepts its own `break`.
@@ -549,7 +621,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value suggested wrapping it as `|x| f(x)`, which fails on the same checker's rule that a
   closure parameter needs a type annotation; it now shows the annotated form. A field that
   blocks `@derive(Debug)` / `@derive(PartialEq)` was always told to derive the trait "too",
-  which is impossible when the field is an array, a collection, or a reference — the
+  which is impossible when the field is an array, a collection, or a reference: the
   remedy is now offered only when the offending field is itself a struct.
 
 
@@ -558,32 +630,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`@derive(Debug)` and `@derive(PartialEq)`, and every `@derive` argument is now
-  validated.** `@derive(Debug)` gives a struct its `{p:?}` rendering — the struct's name
-  followed by each field in declaration order, `Point { x: 1, y: 2 }` — recursing into a
+  validated.** `@derive(Debug)` gives a struct its `{p:?}` rendering (the struct's name
+  followed by each field in declaration order, `Point { x: 1, y: 2 }`), recursing into a
   nested struct and quoting a `string` or `char` field; a field-less struct renders as its
   bare name, and a monomorphized generic instance renders under the name the programmer
   wrote rather than its mangled key. `@derive(PartialEq)` gives a struct field-wise `==`
   and `!=`, recursing the same way and comparing through a borrow. Both are generated
   inline over the fields rather than through a method, which is what lets them work on a
-  struct that does not derive `Copy` — the operator-trait `impl` route requires a `Copy`
+  struct that does not derive `Copy`: the operator-trait `impl` route requires a `Copy`
   receiver, and the specification's own example derives `PartialEq` without one.
 
   Every name in a `@derive` list is now checked. The derivable-and-implemented set is
   `Copy`, `Clone`, `Debug`, `PartialEq`; `Hashable` is specified but not generated yet and
-  says so, and anything else is rejected outright. Previously an unrecognized argument —
-  `Debug`, `PartialEq`, and `Bogus` alike — was silently ignored, so a program could
+  says so, and anything else is rejected outright. Previously an unrecognized argument
+  (`Debug`, `PartialEq`, and `Bogus` alike) was silently ignored, so a program could
   compile against behavior it did not have.
 
 ### Changed
 
 - **A struct in an interpolation hole gets its own diagnostic.** A struct has no display
-  form, so `"{p}"` is an error even with `@derive(Debug)` — write `"{p:?}"`. The message
+  form, so `"{p}"` is an error even with `@derive(Debug)`: write `"{p:?}"`. The message
   distinguishes a missing derive from a missing specifier, because the general
   "interpolation renders integers, floats, `bool`, `char`, and `string`" list answers
   neither question for a struct.
 - **A field a derive cannot reach is a diagnostic naming the field.** Both derives are
   emitted straight over the fields, so each field must itself be renderable / comparable
-  by the same rules — a scalar, `string`, `char`, `bool`, or another struct carrying the
+  by the same rules: a scalar, `string`, `char`, `bool`, or another struct carrying the
   same derive. A nested struct with a hand-written `impl PartialEq` does not qualify: the
   generated comparison calls nothing. For the same reason, deriving `PartialEq` *and*
   declaring `impl PartialEq for` the same struct is rejected rather than silently letting
@@ -596,9 +668,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A derived `PartialEq` does not satisfy the `impl PartialEq` a `HashMap` / `BTreeMap`
   struct key requires. A collection key calls the trait method, and a derive provides
-  none — such a key still needs the hand-written `impl`.
+  none: such a key still needs the hand-written `impl`.
 
-This completes sub-phase **2A — Standard I/O & Spec Stragglers**. Sub-phase 2B (Tensor
+This completes sub-phase **2A: Standard I/O & Spec Stragglers**. Sub-phase 2B (Tensor
 Core) is next.
 
 ## [2.11.1] - 2026-09-04
@@ -609,7 +681,7 @@ Core) is next.
   the program's whole result riding in the process exit code, so the demo padded it with
   an `echo "exit=$?"` and a `time` run to have something to show. `perceptron` now prints
   its per-input forward pass and the summed output itself, so the tape drops both filler
-  commands and records the three real steps — check, compile, run — with the window sized
+  commands and records the three real steps (check, compile, run) with the window sized
   to the output it actually produces.
 
 
@@ -621,7 +693,7 @@ Core) is next.
   API on it counted bytes: `.len()` is a byte length and `.slice(range)` takes byte offsets.
   Walking text one character at a time had no answer at all short of `.char_slice(i..i+1)`
   per character, which rescans from the start on every step. `.chars()` now hands out an
-  iterator over Unicode scalar values whose every step is O(1) — it decodes the code point
+  iterator over Unicode scalar values whose every step is O(1): it decodes the code point
   standing at its byte offset and advances by that code point's own width, so no part of the
   text is read twice.
 
@@ -637,7 +709,7 @@ Core) is next.
 
   It is an ordinary iterator from the prelude, not a special form: `.enumerate()` numbers
   the scalars, `.map(f)` / `.filter(p)` decorate them, and the iterator itself is a value
-  that can be held and stepped by hand — `walk.next()` answers `Option<char>`. The receiver
+  that can be held and stepped by hand. `walk.next()` answers `Option<char>`. The receiver
   is borrowed rather than consumed, so the text stays usable, and a `&string` walks exactly
   as an owned `string` does.
 
@@ -648,7 +720,7 @@ Core) is next.
   ```neuro
   mut cut: u64 = 0
   for (offset, c) in "aé漢".char_indices() {
-      if c == '漢' { cut = offset }       // 3 — 'a' is one byte, 'é' two
+      if c == '漢' { cut = offset }       // 3: 'a' is one byte, 'é' two
   }
   ```
 
@@ -657,13 +729,13 @@ Core) is next.
   `for`-head form rather than a method: it binds a pair, and a pair cannot travel through
   `Iterator::next`, whose `Option` payload is restricted to scalar primitives in this phase.
   So it appears only in a `for` head, binds a pair there, and takes no `.enumerate()` and no
-  adapters — it already carries a position of its own. Reach for `.chars()` when a chain is
+  adapters. It already carries a position of its own. Reach for `.chars()` when a chain is
   what you want.
 
 ### Fixed
 
 - A program that declared its own `Option` dropped the prelude's, which had always been the
-  rule — but nothing in the prelude used to depend on another prelude declaration, and now
+  rule, but nothing in the prelude used to depend on another prelude declaration, and now
   `Chars` does. Shadowing a prelude name now also withdraws the prelude declarations written
   against it, along with any `impl` block extending a type the program displaced, instead of
   leaving them to be compiled against a replacement they were never written for.
@@ -688,9 +760,9 @@ Core) is next.
   }
   ```
 
-  They apply to every head shape — a range (parenthesised, since `..` binds looser than a
+  They apply to every head shape: a range (parenthesised, since `..` binds looser than a
   call), a fixed-size array, a `Vec<T>`, a borrowed slice, and any type implementing
-  `IntoIterator` or `Iterator` — because they are part of the head's grammar rather than
+  `IntoIterator` or `Iterator`, because they are part of the head's grammar rather than
   methods resolved against a receiver, exactly as `.enumerate()` has always been. That is
   what reaches the arrays and ranges the specification's own examples use: neither is an
   `Iterator` impl, so neither has a method to call.
@@ -716,12 +788,12 @@ Core) is next.
   `.next()` until it answers `None`, binding each `Some` payload to the loop variable. The two
   traits it dispatches against ship in the prelude, so a type stands in a `for` head after one
   `impl Iterator for MyCursor { type Item = i32; func next(&mut self) -> Option<i32> { … } }`
-  and nothing else — no import, and no second impl: a type implementing `Iterator` is its own
+  and nothing else, no import, and no second impl: a type implementing `Iterator` is its own
   iterator. Implement `IntoIterator` when the container and the cursor are different types,
   which is what lets a container be walked more than once.
 
-  Adapters compose. An iterator that wraps another one — a transform, a filter that pulls
-  several elements per step — is an iterator itself, so it stands in a `for` head exactly like
+  Adapters compose. An iterator that wraps another one (a transform, a filter that pulls
+  several elements per step) is an iterator itself, so it stands in a `for` head exactly like
   the source it wraps, and several stack over one source with nothing between them
   materialized. The `Iterator<Item = T>` bound added in 2.8.0 is what types the wrapped
   `self.inner.next()` call.
@@ -730,7 +802,7 @@ Core) is next.
   to counted loops, which is a lowering choice rather than a difference in meaning, and their
   generated code is byte-for-byte what it was. `break`, `continue`, labels, and `.enumerate()`
   all work on a protocol head, the last counting the loop's own steps. A head implementing
-  neither trait now says so — the diagnostic names the protocol instead of reporting that the
+  neither trait now says so: the diagnostic names the protocol instead of reporting that the
   value cannot be indexed.
 
   Not shipped: adapter *methods* on an arbitrary iterator (`.map(f)`, `.filter(p)`). The
@@ -753,7 +825,7 @@ Core) is next.
 - **`Trait<Assoc = T>` bounds.** A trait could declare an associated type, but a bound could
   not say what it was: `T: Channel` erases the implementor, and with it the only thing that
   answers `Self::Sample`, so a generic body could not call a method whose signature names
-  one. A bound now constrains it — `func scaled<T: Channel<Sample = i32>>(source: &T)` types
+  one. A bound now constrains it: `func scaled<T: Channel<Sample = i32>>(source: &T)` types
   `source.sample()` as `i32`, including where the associated type sits nested inside another
   type. The constraint is written in every place a bound is: the parameter list, a `where`
   clause, argument-position `impl Channel<Sample = i32>`, and return position, where it
@@ -765,7 +837,7 @@ Core) is next.
   an enclosing generic has no impl to read, so its own bound has to answer for it.
 
   A signature naming an associated type is typed by re-resolving the trait's declaration
-  under the bound's constraints — the same per-impl re-resolution conformance already does,
+  under the bound's constraints (the same per-impl re-resolution conformance already does),
   which is why a nested position needs no special case. A bare `T: Trait` bound still cannot
   type such a call, and its diagnostic now names the form that fixes it. `dyn Trait<Assoc = T>`
   remains unsupported: a trait declaring an associated type is not object-safe.
@@ -780,7 +852,7 @@ Core) is next.
   for every implementor: a thermocouple reporting `f64`, a tally reporting `i32`, and an
   interlock reporting `bool` could not share a trait at all. A trait now declares a member
   type with `type Item`, each impl answers with `type Item = u32`, and both sides name it as
-  `Self::Item` — in a parameter, in a return type, in a method body, and nested inside another
+  `Self::Item`: in a parameter, in a return type, in a method body, and nested inside another
   type, which is what the spec's `func next(&mut self) -> Option<Self::Item>` needs. An impl may
   spell such a position concretely instead; the two mean the same thing. Conformance requires
   every declared associated type to be bound and rejects a binding the trait never declared,
@@ -788,7 +860,7 @@ Core) is next.
 
   A declaration is not a type: the trait says which member exists, and only an implementor
   says what it is. Two positions erase the implementor and are therefore rejected rather than
-  guessed — a trait declaring an associated type is not object-safe, and a method whose
+  guessed: a trait declaring an associated type is not object-safe, and a method whose
   signature names one cannot be called through a bare `T: Trait` bound. Both diagnostics name
   the `Trait<Assoc = T>` bound form.
 
@@ -804,19 +876,19 @@ Core) is next.
 - The MLIR scaffold backend did not know about the borrowed slice type added in 2.6.0, so
   the `--all-features` build stopped compiling: `map_type` matches `HirType` with no
   wildcard by design, and `HirType::Slice` had no arm. `[T]` is unsized, so it takes the
-  same answer as `dyn Trait` — rejected in value position, since it reaches one only behind
+  same answer as `dyn Trait`: rejected in value position, since it reaches one only behind
   a reference, which already maps to an opaque pointer.
 
 ## [2.6.0] - 2026-09-01
 
 ### Added
 
-- **Borrowed slices `&[T]` / `&mut [T]` — one signature over an array, a sub-range, and a
+- **Borrowed slices `&[T]` / `&mut [T]`: one signature over an array, a sub-range, and a
   `Vec`.** A function that only reads or writes elements had to pick a container and commit
   to it: `[i32; 4]` and `Vec<i32>` are different types, and `[i32; 4]` and `[i32; 5]` are two
   more, so a `sum` worth writing once had to be written four times or made generic over
-  something it does not actually care about. A slice is the shape it does care about — a
-  pointer and a length — and it is the array-and-`Vec` analogue of the `&string` that has
+  something it does not actually care about. A slice is the shape it does care about (a
+  pointer and a length), and it is the array-and-`Vec` analogue of the `&string` that has
   served text since 1C.
 
   ```neuro
@@ -832,7 +904,7 @@ Core) is next.
   ```
 
   `&[T; N]`, `&Vec<T>`, and `&[T]` all satisfy a `&[T]` parameter, and the `&mut` forms a
-  `&mut [T]` one. Mutability matches exactly — there is no weakening in either direction.
+  `&mut [T]` one. Mutability matches exactly: there is no weakening in either direction.
   Nothing is copied at the boundary: the conversion reads the container's buffer address and
   its element count, which the container was already holding.
 
@@ -842,7 +914,7 @@ Core) is next.
   writes into the owner's buffer, so an in-place pass over an array is a function that takes
   a slice and returns nothing. `for x in xs` and `.enumerate()` work as they do on an array.
 
-  The range check runs in **every** build, debug and release alike — unlike the index check,
+  The range check runs in **every** build, debug and release alike, unlike the index check,
   which stays debug-only. The asymmetry is the point: a bad index is one bad read, while a
   bad range hands back a *view* that outlives the check and misreads on every later access,
   so there is no later moment at which a release build could still catch it.
@@ -867,7 +939,7 @@ Core) is next.
 
 ### Added
 
-- **`.enumerate()` in a `for` head — iterating a sequence and its position at once.**
+- **`.enumerate()` in a `for` head: iterating a sequence and its position at once.**
   `for (place, score) in scores.enumerate()` binds the position alongside the element.
   Until now the only way to know where you were in a sequence was to keep a counter by
   hand next to the loop, which is both noise and a place to get the increment wrong; the
@@ -876,12 +948,12 @@ Core) is next.
 
   The position is a `u64` counting from zero. That is the type `.len()` returns and the
   type an index expression takes, so it reads back into the sequence it walks without a
-  cast — `scores[place] == score` holds every iteration — which is what makes the loop
+  cast: `scores[place] == score` holds every iteration, which is what makes the loop
   able to compare an element with its neighbour rather than only look at it.
 
   It applies to a fixed-size array, a `Vec<T>`, a borrow of either, and a range. A range
   must be parenthesised, because `..` binds looser than a method call: `(10..13)` gives
-  positions 0, 1, 2 for values 10, 11, 12 — the position is a count of iterations, never a
+  positions 0, 1, 2 for values 10, 11, 12: the position is a count of iterations, never a
   value the sequence holds. `for i in (0..n)` now compiles for the same reason.
 
   The pair head and `.enumerate()` imply each other, and either one alone is a parse error
@@ -898,23 +970,23 @@ Core) is next.
 
 ### Added
 
-- **`.char_slice(range)` on strings — slicing by character instead of by byte.**
+- **`.char_slice(range)` on strings: slicing by character instead of by byte.**
   `.slice(0..3)` on `"héllo"` returns `"hé"`, because `é` costs two bytes and the range
   counts bytes. That is the right answer when the offsets came from a byte position and the
   wrong one whenever they came from counting characters, which is most of the time in
-  tokenizer and text-processing code — where the same range is just as likely to land in the
+  tokenizer and text-processing code, where the same range is just as likely to land in the
   middle of a code point and panic. `.char_slice(0..3)` returns `"hél"`.
 
   It is otherwise the method it sits beside: a borrowed, zero-copy `&string` view under the
   same borrow rules, exclusive (`a..b`) or inclusive (`a..=b`), chainable, comparable, and
   usable anywhere a `&string` is. It costs a walk of the string's bytes to find each
-  endpoint, where `.slice` is a pointer addition — pay it when the indices are characters,
+  endpoint, where `.slice` is a pointer addition. Pay it when the indices are characters,
   keep `.slice` when they are bytes or the text is ASCII.
 
   Only one runtime rule applies instead of `.slice`'s two: the range must stay within the
   string's character count and must not run backwards, and violating that panics with
   `string char slice out of bounds`. There is no code-point-boundary rule to break, because
-  a character index cannot name a position inside a character — which is the reason to use
+  a character index cannot name a position inside a character, which is the reason to use
   the method at all. The character count itself is a legal upper bound, so the empty slice at
   the end of a string is addressable rather than an error.
 
@@ -923,7 +995,7 @@ Core) is next.
 ### Added
 
 - **Standard output is buffered.** `print` / `println` handed every call straight to the
-  `write` syscall — two of them for a `println`, one for the text and one for the newline —
+  `write` syscall (two of them for a `println`, one for the text and one for the newline),
   so a printing loop spent essentially all of its time entering the kernel. 600,000
   `println`s through a pipe took 157 ms; they now take 2 ms, and the `print_lines`
   benchmark moves from 10.6x `clang -O2` to 2.0x. What is left of that gap is string
@@ -936,7 +1008,7 @@ Core) is next.
   The buffer is drained on every path out of the program, so nothing is ever traded away
   for the speed: when `main` returns, when the panic runtime aborts, and when debug-build
   arithmetic overflows and traps. Draining ahead of a panic also fixes an ordering the
-  unbuffered version got for free — the diagnostic on standard error now follows the
+  unbuffered version got for free: the diagnostic on standard error now follows the
   output that led up to it instead of racing ahead of it.
 
   When standard output is a terminal, the buffer is drained at the end of every `println`
@@ -950,7 +1022,7 @@ Core) is next.
 
 - **`-O1`/`-O2`/`-O3` now run an LLVM optimization pipeline.** The backend set the
   optimization level on the `TargetMachine` and nothing else. That level governs only
-  instruction selection, scheduling, and register allocation — it runs no IR passes — so
+  instruction selection, scheduling, and register allocation (it runs no IR passes), so
   every local stayed in the `alloca` codegen gave it, no call was inlined, and no
   loop-invariant work was hoisted. A `-O3` binary was within a few percent of a `-O0` one.
   The module is now run through `default<O1|O2|O3>` before instruction selection. On the
@@ -968,7 +1040,7 @@ Core) is next.
 
 - **A heap `string` is released when its owner is known.** `+` concatenation and string
   interpolation allocate, and nothing ever freed the result, so a loop that formatted
-  output grew without bound — 3.2 million interpolated lines held roughly 200 MB. Peak
+  output grew without bound: 3.2 million interpolated lines held roughly 200 MB. Peak
   memory is now flat across that range.
 
   The fat pointer describes a `.rodata` literal and a `malloc`'d buffer identically, so
@@ -978,7 +1050,7 @@ Core) is next.
   flag-guarded against a move exactly as a collection binding is; an argument to
   `print` / `println` is released after the write, which retains none of the bytes it
   copies. Interpolation also frees the scratch buffer behind each rendered hole once the
-  concatenation has copied it out — and because `__neuro_pad`, `__neuro_point`, and
+  concatenation has copied it out, and because `__neuro_pad`, `__neuro_point`, and
   `__neuro_exp` hand their input straight back when the text already has the requested
   shape, a result that may alias its source is released under a pointer comparison rather
   than outright.
@@ -986,7 +1058,7 @@ Core) is next.
   The test answers conservatively: a value returned by a function may have been either a
   literal or a heap buffer, so it is never freed. A heap string that escapes into a
   collection, a struct field, or a return value therefore still leaks, as does the prior
-  value of a reassigned binding — the same limit the Drop ABI already carries.
+  value of a reassigned binding: the same limit the Drop ABI already carries.
 
 ### Changed
 
@@ -1004,9 +1076,9 @@ Core) is next.
 ### Added
 
 - **`.is_nan()` on `f32` and `f64`** (roadmap 2A). IEEE-754 makes every comparison against
-  NaN false — `NaN == NaN` included — so no operator can detect it; `.is_nan()` is the
+  NaN false (`NaN == NaN` included), so no operator can detect it; `.is_nan()` is the
   documented test and is now implemented. A nullary builtin method returning `bool`, taking
-  a value receiver like the integer intrinsics, and lowering to `fcmp uno x, x` — the
+  a value receiver like the integer intrinsics, and lowering to `fcmp uno x, x`: the
   self-comparison is the whole check, since NaN is the only value unordered with itself.
   `f16` / `bf16` are excluded: their scalar contract is storage and casts only, with no
   arithmetic that could produce a NaN, so `h.is_nan()` stays a `MethodNotFound` diagnostic.
@@ -1016,7 +1088,7 @@ Core) is next.
 ### Changed
 
 - **Every slice's `CONTEXT.md` compacted and de-rotted.** The files had accumulated an
-  append-only, dated "Recent Updates" log beside their contract sections — a changelog in a
+  append-only, dated "Recent Updates" log beside their contract sections: a changelog in a
   file that VSA defines as a contract, duplicating what `CHANGELOG.md` and git history already
   hold. Each file is now organized by subject and states current behaviour with the design
   rationale that the source cannot; the dates, the "added field X" announcements, and the
@@ -1025,9 +1097,9 @@ Core) is next.
 ### Fixed
 
 - **Stale claims in `llvm-backend/CONTEXT.md`.** Roughly a hundred lines described machinery
-  the move to HIR deleted — a backend type-collection pass (`type_pass.rs`, `expr_types`), the
+  the move to HIR deleted: a backend type-collection pass (`type_pass.rs`, `expr_types`), the
   span-keyed side tables that fed it (`builtin_methods`, `fa_struct_names`, `binary_left_types`,
-  `index_object_types`), and `global_const_types` — while the file's own header already said no
+  `index_object_types`), and `global_const_types`, while the file's own header already said no
   such pass exists. The Struct ABI section still said a struct was unusable as a function
   parameter or return type, which the by-value struct work had made false.
 - **`ast-types/CONTEXT.md` misreported method receiver support**, claiming `&self` was the only
@@ -1044,8 +1116,8 @@ Core) is next.
 ### Fixed
 
 - **Binding a `void` initializer is a type error now, not an internal compiler error.**
-  `val x = println("hi")` — and `val x = nothing()` for any user function with no return
-  type — passed `neurc check` and then aborted code generation with `function call returned
+  `val x = println("hi")` (and `val x = nothing()` for any user function with no return
+  type) passed `neurc check` and then aborted code generation with `function call returned
   void when value expected`. A combination sweep found the same class reachable through six
   more spellings that BUG-016's report did not cover and its fix sketch would have missed:
   a `mut` binding, an `if` whose branches are both `void`, a `match` whose arms are, a bare
@@ -1053,8 +1125,8 @@ Core) is next.
   four produce a different backend message (`void type cannot be used as a value`), which is
   why they read as a separate defect and were not.
 
-  The check is on the binding's **type**, not on whether its initializer is a call — only two
-  of the eight spellings have a callee at all — so one guard in `semantic-analysis`
+  The check is on the binding's **type**, not on whether its initializer is a call (only two
+  of the eight spellings have a callee at all), so one guard in `semantic-analysis`
   (`type_checkers/statements.rs`, the `Stmt::VarDecl` arm, beside the existing `Type::Unknown`
   guard) covers every one of them with the new `TypeError::VoidBinding`. The backend is
   unchanged: its two errors were the right last line of defence in the wrong place, and are now
@@ -1068,7 +1140,7 @@ Core) is next.
 
 - **Windows CI: the `print` / `println` tests no longer fail on line endings.** On Windows
   fd 1 is a CRT text-mode descriptor, so the one `\n` byte the builtin writes leaves the
-  process as `\r\n` — the same translation a C `printf` gets there. The builtins keep that
+  process as `\r\n`: the same translation a C `printf` gets there. The builtins keep that
   platform convention; the `print_builtins` and `examples` harnesses now compare stdout
   with line endings normalized, which also stops the example golden files from depending
   on how git was configured to check them out.
@@ -1082,7 +1154,7 @@ Core) is next.
 ### Documentation
 
 - Corrected a false limitation in the struct reference: a *free* function may return a
-  struct, and does — the by-value ABI covers free functions, associated functions, and
+  struct, and does: the by-value ABI covers free functions, associated functions, and
   methods alike. Consuming `self` methods remain unsupported.
 - Retired stale "Phase 1" framing across `docs/` where it described the project's current
   state rather than a design decision.
@@ -1106,7 +1178,7 @@ Core) is next.
   (`factorial.nr` each multiplication, `fibonacci.nr` every term); the self-checking ones
   print a labelled line per check plus a verdict, so a failure names itself instead of
   collapsing into a bare exit `1`; and the examples that previously computed values and
-  discarded them — `extended_types.nr`, `float_suffixes.nr`, `strings.nr` — now report
+  discarded them (`extended_types.nr`, `float_suffixes.nr`, `strings.nr`) now report
   them, which is the only thing that ever made those files worth running.
 - `types/string_interpolation.nr` and `types/triple_quoted.nr` print every rendering they
   check, so their golden files are now readable tables of the format mini-language and of
@@ -1128,10 +1200,10 @@ Core) is next.
 
 ### Added
 
-- **`print` / `println` — standard output.** A compiled program can now say something to a
+- **`print` / `println`: standard output.** A compiled program can now say something to a
   terminal without dying: both builtins take one `string` and write it to stdout (fd 1),
   `println` appending a newline, and both return `void`. The exit code is no longer a
-  program's only result channel. They mirror the panic family — resolved by name in
+  program's only result channel. They mirror the panic family: resolved by name in
   semantic analysis with a hard-coded twin in the backend, so a user function of the same
   name shadows one, and neither is a prelude declaration, so `@no_prelude` does not remove
   them.
@@ -1141,17 +1213,17 @@ Core) is next.
     call-site format string, and no `Display` trait.
   - The argument is an owned `string` or an immutable `&string` sub-slice (what
     `.slice(range)` returns). A non-string argument is a type error rather than an implicit
-    interpolation, and `&mut string` — a pointer to the fat pointer rather than the fat
-    pointer itself — is rejected with it.
+    interpolation, and `&mut string` (a pointer to the fat pointer rather than the fat
+    pointer itself) is rejected with it.
   - The text is **read, not consumed**: no move is recorded, so a value stays usable after
     being printed.
   - Output is **unbuffered**; a buffered standard-output type remains later work. Both
     builtins route through one module-private helper carrying a short-write retry loop, so a
-    large buffer written to a pipe — where `write` routinely consumes less than it is
-    offered — is not silently truncated.
+    large buffer written to a pipe (where `write` routinely consumes less than it is
+    offered) is not silently truncated.
 - `examples/basics/greeting.nr`, a runnable tour of both builtins including an interpolated
   line and a printed `&string` slice.
-- `docs/BUGS.md`: **BUG-016** — binding a `void`-returning call (`val x = println("hi")`, or
+- `docs/BUGS.md`: **BUG-016**: binding a `void`-returning call (`val x = println("hi")`, or
   any user function with no return type) passes the type checker and then aborts code
   generation with `function call returned void when value expected`. Pre-existing for user
   `void` functions; the new builtins make the shape easier to write by accident. Statement
@@ -1174,25 +1246,25 @@ Core) is next.
 
 - **BUG-015: `==` on a type with no equality passed the type checker and crashed the
   backend.** `a == b` was accepted for any two operands of compatible type, so a struct
-  with no `impl PartialEq` — and equally an array, a tuple, an enum, a collection, or a
-  non-string reference — reached codegen, which asked the aggregate value for its integer
+  with no `impl PartialEq` (and equally an array, a tuple, an enum, a collection, or a
+  non-string reference) reached codegen, which asked the aggregate value for its integer
   variant and aborted the compiler with `Found StructValue ... but expected the IntValue
   variant`. Equality is now checked against the types that have it: the scalars, `string`
   (and a `&string` slice), and a newtype forwarding one of those. A struct without the
   impl is named along with the trait it is missing; every other operand is reported as the
-  operator error the ordering comparisons already gave. The supported path — a `Copy`
-  struct with an explicit `impl PartialEq` — is unchanged, and so is `==` on a newtype
+  operator error the ordering comparisons already gave. The supported path (a `Copy`
+  struct with an explicit `impl PartialEq`) is unchanged, and so is `==` on a newtype
   over a scalar.
 - A generic body types `a == b` as its type parameter and is checked once as a template,
   so an instantiation whose argument is an aggregate could still reach the backend. HIR
   lowering now refuses a binary operator whose operand type has no instruction sequence
   and no operator-trait impl, and the LLVM backend answers an operand that is neither an
-  integer nor a float with an error rather than panicking — the whole family of
+  integer nor a float with an error rather than panicking: the whole family of
   `into_int_value` aborts on this path is closed.
 - **BUG-014: a named argument was evaluated in declaration order, not source order.**
   Binding permuted the arguments into the callee's declaration order, which is also the
   order every later stage evaluates them in, so `combine(second: b(), first: a())` ran
-  `a()` first — the positional form `combine(b(), a())` ran `b()` first, and the two call
+  `a()` first: the positional form `combine(b(), a())` ran `b()` first, and the two call
   forms the specification calls equivalent could compute different answers. A call whose
   permutation would reorder arguments that carry (or can observe) an effect is now
   rewritten into a block that binds each of them to a temporary in the order it was
@@ -1211,7 +1283,7 @@ Core) is next.
 
 - **Documentation: `print` / `println` were documented as available and do not exist.**
   Three documents stated that the implicit prelude puts `println` and `print` in scope in
-  every module. No such builtin is implemented in any slice — `neurc check` on a call to
+  every module. No such builtin is implemented in any slice: `neurc check` on a call to
   either reports `undefined function 'println'`. The prelude claim is corrected in the
   documentation index, the quick-start feature list, and the modules reference, and the
   quick-start now says plainly that a program's exit code is currently its only result
@@ -1222,12 +1294,12 @@ Core) is next.
 
 ### Added
 
-- `docs/BUGS.md`: **BUG-015** — `==` on a struct that implements no `PartialEq` passes the
+- `docs/BUGS.md`: **BUG-015**: `==` on a struct that implements no `PartialEq` passes the
   type checker and then crashes the backend with an internal `Found StructValue ... but
   expected the IntValue variant` error. The supported path (`@derive(Copy, Clone)` plus an
   explicit `impl PartialEq`) compiles and runs correctly; what is missing is the rejection
-  of the unimplemented one. Also records that `@derive(PartialEq)` — and any unknown
-  derive — is currently accepted and silently ignored.
+  of the unimplemented one. Also records that `@derive(PartialEq)` (and any unknown
+  derive) is currently accepted and silently ignored.
 
 ### Changed
 
@@ -1256,23 +1328,23 @@ fixes it and the open bug register called for, and one new register entry.
   (BUG-012). `0 => return 1,` failed with `unexpected token Return, expected expression`
   while `0 => { return 1 }` compiled and ran, so the braces carried no information. The arm
   body now wraps such a statement in the single-statement block the braced form already
-  produced — the arm-divergence rule types it unchanged, and no existing program changes
+  produced: the arm-divergence rule types it unchanged, and no existing program changes
   meaning. A comma additionally terminates a valueless `return` / `break`, which is what a
   comma-separated arm needs and which no expression can begin with.
 - `semantic`: a function name in value position reports that it is a function (BUG-013).
-  `apply_twice(inc, 10)` claimed `undefined variable 'inc'` — denying a name the program
-  declares — because functions live in their own namespace and resolution fell through to
+  `apply_twice(inc, 10)` claimed `undefined variable 'inc'` (denying a name the program
+  declares) because functions live in their own namespace and resolution fell through to
   the variable lookup. The new `TypeError::FunctionUsedAsValue` names the function and
   suggests the closure wrapper. There is still no fn-item-to-fn-pointer coercion; only the
   diagnostic changed.
 
 ### Added
 
-- `tests`: regression coverage for both fixes — four `match` arm bodies in
+- `tests`: regression coverage for both fixes: four `match` arm bodies in
   `pattern_matching.rs` (valued and valueless `return`, `break` with a value, `continue`,
   valueless `break`) and three diagnostics in `functions.rs`, including one asserting that
   a genuinely undeclared name still reports `undefined variable`.
-- `docs`: BUG-014 filed in `docs/BUGS.md` — a named call evaluates its arguments in the
+- `docs`: BUG-014 filed in `docs/BUGS.md`: a named call evaluates its arguments in the
   callee's declaration order while the positional form evaluates them in source order,
   because argument binding permutes the argument expressions themselves. The specification
   calls the two forms equivalent and does not define evaluation order, so the entry asks
@@ -1280,13 +1352,13 @@ fixes it and the open bug register called for, and one new register entry.
 
 ## [2.0.0] - 2026-08-29
 
-**Phase 1 — Core Language is complete.** Every sub-phase 1A–1H has shipped, so this is the
+**Phase 1: Core Language is complete.** Every sub-phase 1A–1H has shipped, so this is the
 milestone release that closes the phase and opens Phase 2 (Tensors). The language surface a
 general-purpose program needs is in: primitives and casts, ownership with a borrow checker,
 arrays, tuples, structs, enums and pattern matching, generics, traits with static and dynamic
 dispatch, closures, `Option` / `Result` with `?` and `??`, the standard collections, multi-file
 modules with an implicit prelude, string interpolation, and named arguments. No language feature
-is added here — the version number is the deliverable, alongside the cleanup below.
+is added here: the version number is the deliverable, alongside the cleanup below.
 
 ### Removed
 
@@ -1298,7 +1370,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   `shared-types` and `diagnostics`; `neurc` dropped `shared-types`, `source-location`,
   `project-config`, `lexical-analysis`, `control-flow`, and `clap_complete`. `neurc` reaches the
   lexer through `syntax-parsing::parse`, which is why it never named the lexer itself.
-- `build`: eleven `[workspace.dependencies]` declarations no member ever claimed — `miette`,
+- `build`: eleven `[workspace.dependencies]` declarations no member ever claimed: `miette`,
   `unicode-segmentation`, `clap_complete`, `proptest`, and the whole Concurrency (`rayon`,
   `crossbeam`), Utilities (`itertools`, `once_cell`, `parking_lot`), and LSP (`tower-lsp`,
   `lsp-types`) blocks. A phase that needs one declares it then.
@@ -1312,14 +1384,14 @@ is added here — the version number is the deliverable, alongside the cleanup b
 - `docs`: `compiler/neurc/CONTEXT.md` Shared Kernel matches its manifest again after the
   dependency removals.
 - `docs`: `docs/compiler/components/lexical-analysis.md` dropped two claims the slice does not
-  make good on — a `unicode-segmentation` dependency it no longer has, and string interning for
+  make good on: a `unicode-segmentation` dependency it no longer has, and string interning for
   identifiers, which it has never done.
 
 ## [1.80.0] - 2026-08-29
 
 ### Added
 - `semantic`: **growable strings** (§2.8). `String` is the mutable, heap-backed counterpart
-  to the immutable `string` — the same pair `[T; N]` / `Vec<T>` already is — for text that is
+  to the immutable `string` (the same pair `[T; N]` / `Vec<T>` already is), for text that is
   assembled rather than passed around. Surface: `String::new()`, `.push_str(text)`, `.len()`,
   `.clear()`, and `.to_string()`. Building an n-piece string with `+` copies everything
   accumulated so far on every step; a `String` appends in amortized O(1) into one buffer.
@@ -1328,7 +1400,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   in an annotation. A program that declares its own `String` still shadows the built-in one.
 - `codegen`: new `codegen/collections/strings.rs` and the shared
   `__neuro_string_reserve(header, extra)` helper, which grows capacity to
-  `max(cap * 2, len + extra, 8)` — so appending one large string is a single `realloc`
+  `max(cap * 2, len + extra, 8)`, so appending one large string is a single `realloc`
   rather than a chain of doublings, while repeated small appends stay amortized O(1).
 - `tests`: `compiler/neurc/tests/string_builder.rs` covers construction, owned and borrowed
   appends, byte length, buffer-retaining `clear`, the copy back out, `&mut String`
@@ -1342,8 +1414,8 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ### Changed
 - `infra`: `HirCollectionKind` gains a `String` variant plus `arity()` and `mangle_tag()`.
   `String` is the one **nullary** collection kind, so it reuses the entire standard-collection
-  machine — the shared `{ buffer, len, cap, used }` header, `realloc` growth, move-on-assign,
-  never `Copy`, and the `DropTarget::Collection` scope-exit `free` — and needs no new
+  machine (the shared `{ buffer, len, cap, used }` header, `realloc` growth, move-on-assign,
+  never `Copy`, and the `DropTarget::Collection` scope-exit `free`) and needs no new
   `Type` / `HirType` variant in any slice. Its buffer is a byte run, so `len` and `clear` fall
   out of the existing kind-agnostic entries and only appending is new. `String` mangles as
   `strbuf`, which cannot collide with the primitive `string`.
@@ -1359,7 +1431,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   it, the same latitude `+` gives its operands.
 - `.to_string()` copies. A borrowed view into the builder's buffer would be free, but a later
   `push_str` may reallocate and leave it dangling, and the borrow checker does not yet track a
-  builder's outstanding views — undefined behavior is not a valid outcome for well-formed input.
+  builder's outstanding views: undefined behavior is not a valid outcome for well-formed input.
 - Deferred and documented in §2.8: `.push(char)`, `String::with_capacity`, `String::from`,
   `.is_empty()`, a borrowed `.as_str()`, `String` as a collection element or map key, and
   `String` in an interpolation hole or as a `+` operand (each gives a clean diagnostic today).
@@ -1367,11 +1439,11 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ## [1.79.0] - 2026-08-29
 
 ### Added
-- `parser`: **named arguments** (§3.13). An argument may be passed by name —
-  `connect("localhost", port: 8080)` — in any order, after any number of positional ones.
+- `parser`: **named arguments** (§3.13). An argument may be passed by name
+  (`connect("localhost", port: 8080)`) in any order, after any number of positional ones.
   A parameter may be declared with two names, `external internal: T`: the caller writes the
   external label, the body uses the internal name, and the label is **required** at every
-  call site. An external label of `_` (`_ value: f32`) is the opposite — the argument is
+  call site. An external label of `_` (`_ value: f32`) is the opposite: the argument is
   positional and naming it is an error. Free functions, associated functions, and instance
   methods all accept named arguments; closures, the panic builtins, enum variants, and
   newtype constructors declare no parameter names, so a label on one is rejected.
@@ -1380,7 +1452,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   order and drops the labels. It runs after module resolution has merged every file and the
   prelude is in place (a callee may be declared anywhere in that list) and before type
   checking (which would otherwise pair the wrong argument with the wrong parameter), so
-  semantic analysis, HIR lowering, and both backends are unchanged — a named argument
+  semantic analysis, HIR lowering, and both backends are unchanged: a named argument
   produces exactly the IR the positional call produces. A call that named nothing, and whose
   callee requires no label, is left byte-identical.
 - `docs`: `docs/compiler/components/argument-binding.md`; a Named Arguments section in
@@ -1394,7 +1466,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 - `parser`: the three duplicated parameter-list loops (free function, method, trait method)
   collapsed into one `parse_parameter_list`. Methods and trait methods consequently gained
   the duplicate-parameter-name check that only free functions had. Two parameters answering
-  to one call-site name is a new `DuplicateParameterLabel` error — a named argument must
+  to one call-site name is a new `DuplicateParameterLabel` error: a named argument must
   identify exactly one parameter.
 - `infra`: `ast_types::Parameter` gains `label: ParamLabel`; `Expr::Call` gains
   `arg_labels: Vec<Option<Identifier>>` beside `args`, empty when the call named nothing.
@@ -1403,7 +1475,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   downstream keeps reading `args` as the positional list it always was.
 - `codegen`: HIR lowering refuses a call whose `arg_labels` survived. A label reaching
   lowering would mean the binding pass never visited that call, and the arguments would then
-  lower in the order they were written rather than the callee's — a wrong program instead of
+  lower in the order they were written rather than the callee's: a wrong program instead of
   a failed build.
 - `infra`: the editor TextMate grammar gained a `parameter_labels` rule so the
   `external internal: T` form is coloured. The existing `#parameters` rule keys on a name
@@ -1425,8 +1497,8 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ### Fixed
 - `infra`: seven rules in the editor TextMate grammar were unreachable. TextMate breaks a
   tie between two rules matching at the same offset by their position in the top-level
-  `patterns` array, never by match length, so `#keywords` — listed ahead of every
-  declaration rule — claimed the leading `func` / `struct` / `enum` / `trait` / `impl` /
+  `patterns` array, never by match length, so `#keywords` (listed ahead of every
+  declaration rule) claimed the leading `func` / `struct` / `enum` / `trait` / `impl` /
   `type` / `newtype` and the rule naming the declared symbol never ran. Declared type
   names were left unscoped entirely; a declared function name was picked up by the
   call rule and coloured as a call. The declaration rules now precede `#keywords`.
@@ -1445,7 +1517,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   `@`. The `&mut` and dereference rules were likewise unreachable behind the bitwise and
   arithmetic rules.
 - `infra`: interpolation holes included `$self`, which admitted a `"` string literal the
-  lexer rejects — a quote ends the enclosing token. Holes now use a restricted rule set,
+  lexer rejects: a quote ends the enclosing token. Holes now use a restricted rule set,
   balance nested braces, and scope a `{value:>8.2}` format specifier as one, rather than
   as a comparison operator followed by a float.
 - `infra`: the grammar matched ASCII identifiers only, while the lexer accepts
@@ -1473,7 +1545,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 
 ### Removed
 - `infra`: vocabulary the compiler does not accept is no longer highlighted as though it
-  did — the keywords `async`, `await`, `spawn`, `defer` and `pool`, the operators `>>`
+  did: the keywords `async`, `await`, `spawn`, `defer` and `pool`, the operators `>>`
   (compose), `|>` (pipeline) and `@` (matmul), the type names `Tensor`, `Future`,
   `ParameterList`, `KernelOut` and `Device`, and the constants `NaN` and `Inf`. None of
   them is a token the lexer produces. `Option`, `Result`, `Some`, `None`, `Ok` and `Err`
@@ -1487,7 +1559,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   that already contains a comment can be commented out wholesale. Each `/*` needs its
   own `*/`, and a file that ends while a comment is still open is
   `LexError::UnterminatedBlockComment` spanning from the opening delimiter to EOF.
-  A comment body is scanned as raw text — `/*` and `*/` inside a string or char literal
+  A comment body is scanned as raw text: `/*` and `*/` inside a string or char literal
   within a comment still count toward depth, matching how `//` already swallows a quote
   to end of line.
 
@@ -1496,7 +1568,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   logos matches the longest run its DFA accepts, so the old pattern closed at the first
   `*/` and left the remaining body to lex as garbage. It is now a bare `#[token("/*")]`
   whose callback counts depth over the remainder and returns `FilterResult::Skip` or
-  `FilterResult::Error` — the same "match the opener, hand the body to a scanner" shape
+  `FilterResult::Error`: the same "match the opener, hand the body to a scanner" shape
   triple-quoted strings use. Comments still produce no tokens, so no parser, semantic,
   or codegen behavior changed.
 - `lexer`: `Lexer::classify_error` no longer rewrites a lex failure sitting on `/*` into
@@ -1528,7 +1600,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   logos has no non-greedy repetition, so a regex ending in `"""` would run to the
   last one in the file. `decode_string_literal` now delegates to a shared
   `decode_chunks` over `(absolute_offset, char)` pairs, which lets dedent work by
-  omitting characters rather than rebuilding text — so interpolation holes inside a
+  omitting characters rather than rebuilding text, so interpolation holes inside a
   block string still report at real source columns. The token payload is an ordinary
   `StringValue`, so the parser, type checker, and backend are unchanged.
 
@@ -1560,7 +1632,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 
 ### Added
 - `lexer`, `parser`, `semantic`, `codegen`: string interpolation with the format
-  mini-language — sub-phase 1H, item 1. A string literal may embed expressions in `{...}`
+  mini-language: sub-phase 1H, item 1. A string literal may embed expressions in `{...}`
   holes and render each through an optional `:spec`:
 
   ```neuro
@@ -1573,8 +1645,8 @@ is added here — the version number is the deliverable, alongside the cleanup b
   alignment, `0W` zero fill, and the `+` sign flag. Interpolation renders integers,
   floats, `bool`, `char`, and `string`.
 
-  A hole holds any expression — a call, a field access, a struct literal, an `if`, a
-  nested block — because the lexer only locates the hole's bounds by brace matching and
+  A hole holds any expression (a call, a field access, a struct literal, an `if`, a
+  nested block) because the lexer only locates the hole's bounds by brace matching and
   the parser re-parses its text as ordinary code, with spans shifted onto real file
   coordinates so diagnostics inside a hole point at the right column. Write a literal `{`
   as `\{`; an unpaired `}` needs no escape.
@@ -1588,7 +1660,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   inlined at every hole: `snprintf`-backed integer and float conversion, hand-written
   binary digits, sign-aware field padding (`-42` to width 6 is `-00042`), UTF-8 encoding
   of a `char`, and the two fix-ups that reconcile C's float output with the specifier
-  table — restoring the point `%g` drops (`2.0`, not `2`) and normalizing `e+00` to `e0`.
+  table: restoring the point `%g` drops (`2.0`, not `2`) and normalizing `e+00` to `e0`.
 
   Two limits, both documented and diagnosed: a hole may not contain a `"` string literal,
   because the quote ends the enclosing token (reported as an unterminated hole); and an
@@ -1609,8 +1681,8 @@ is added here — the version number is the deliverable, alongside the cleanup b
 
 ### Changed
 - `docs`: the open-defect register is now public and tracked at `docs/BUGS.md` instead of
-  living in internal notes. Each entry is a self-contained task — minimal reproduction,
-  known root cause, workaround, fix sketch — so contributors can pick up bug fixes
+  living in internal notes. Each entry is a self-contained task (minimal reproduction,
+  known root cause, workaround, fix sketch), so contributors can pick up bug fixes
   without reading compiler internals first. Entries are removed once fixed; ids are never
   reused.
 - `docs`: CONTRIBUTING.md now leads its contribution priorities with "fix a known bug"
@@ -1618,7 +1690,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   the register from its Contributing line.
 
 ### Added
-- `docs`: BUG-013 filed in `docs/BUGS.md` — using a named function as a value where a
+- `docs`: BUG-013 filed in `docs/BUGS.md`: using a named function as a value where a
   closure-typed parameter is expected fails with a misleading `undefined variable`
   diagnostic (no fn-item-to-fn-pointer coercion exists, and nothing says so). Workaround:
   wrap it in a closure literal.
@@ -1634,7 +1706,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 - `docs`: the README badge row links the documentation site.
 
 ### Added
-- `docs`: `assets/demo.tape` — the VHS script the demo GIF is recorded from, so the
+- `docs`: `assets/demo.tape`: the VHS script the demo GIF is recorded from, so the
   recording is reproducible instead of hand-made. Regenerate with `vhs assets/demo.tape`
   from the repository root after `cargo build --release -p neurc`.
 
@@ -1643,7 +1715,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ### Fixed
 - `semantic`: an `if` or `match` arm that leaves the scope no longer forces its type on the
   arms that stay. `if n > 0 { return 1 } else { 2 }` was rejected as `expected void, found
-  i32` — the returning arm typed as `void`, so the arm carrying the actual value became the
+  i32`: the returning arm typed as `void`, so the arm carrying the actual value became the
   error, and the diagnostic named the diverging arm as what was expected. A `return`,
   `break`, or `continue` never reaches the point where the expression has a value, so it
   describes nothing about it: such an arm now contributes no type at all, which is the
@@ -1654,10 +1726,10 @@ is added here — the version number is the deliverable, alongside the cleanup b
 - `parser`: a newline before a line beginning with `(` or `[` ends the statement. The
   expression parser skipped newlines before consulting the next token's precedence, so the
   *following* line decided whether the expression continued, inverting the documented rule
-  that the line which just *ended* decides — by ending with an operator, a comma, or an
+  that the line which just *ended* decides: by ending with an operator, a comma, or an
   opening delimiter. `val a = f()` followed by a line `(2 + 3)` therefore parsed as
   `f()(2 + 3)`, and a following `[1, 2]` as an index into it. When the value on the left was
-  callable — a closure binding — the misparse type-checked, and the program silently computed
+  callable (a closure binding), the misparse type-checked, and the program silently computed
   something its source never asked for. A leading `.` still continues a method chain, and a
   leading `*` was already handled.
 - `semantic`: a parameter whose type failed to resolve is still bound, so its uses in the
@@ -1665,7 +1737,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   was already reported.
 
 ### Changed
-- `docs`: the compiler-architecture documents now describe the pipeline that exists — module
+- `docs`: the compiler-architecture documents now describe the pipeline that exists: module
   resolution has its own component document and appears in the compilation pipeline, the
   parser and semantic-analysis documents no longer reproduce AST and type definitions that
   had drifted from the source, the operator-precedence table covers the whole ladder, and the
@@ -1681,9 +1753,9 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ### Fixed
 - `semantic`: a non-void function or method that falls off the end of its body is now a
   compile error instead of undefined behaviour. The checker recognised only a trailing
-  bare expression as the implicit return, so a body ending in anything else — a trailing
-  `if` (which the parser always shapes as a statement), a loop, a binding, nothing at all
-  — was neither checked against the declared return type nor checked for producing a
+  bare expression as the implicit return, so a body ending in anything else: a trailing
+  `if` (which the parser always shapes as a statement), a loop, a binding, or nothing at all,
+  was neither checked against the declared return type nor checked for producing a
   value. The backend left the exit block without a return, LLVM terminated it with
   `unreachable`, and the verifier stayed silent because `unreachable` is a legal
   terminator; the compiled program then ran off the end of the function and crashed. The
@@ -1691,21 +1763,21 @@ is added here — the version number is the deliverable, alongside the cleanup b
   did return, so the crash depended on the argument, not the program. Inherent methods and
   trait default methods had the same hole.
 - `semantic`: a trailing `if`/`else` is now checked against the declared return type. It is
-  the function's implicit return and always was — lowering has treated it as one all along
-  — but nothing type-checked it, so `func f(n: i32) -> i32 { if n > 0 { true } else { false } }`
+  the function's implicit return and always was (lowering has treated it as one all along),
+  but nothing type-checked it, so `func f(n: i32) -> i32 { if n > 0 { true } else { false } }`
   reached the LLVM verifier and failed there as an internal error. Mixing a `return` and a
   value across the arms (`if n > 0 { return 1 } else { 2 }`) silently evaluated to `0` on
   the else path; it is now the same type error the identical expression already was when
   bound to a `val`.
 - `semantic`, `codegen`: a divergent arm no longer decides an `if`'s or a `match`'s type.
   `panic` and `unreachable` never return, so they adopt whatever type their context
-  demands and describe nothing about the expression around them — yet both the checker and
+  demands and describe nothing about the expression around them, yet both the checker and
   HIR lowering took the first arm's type unconditionally. With the divergent arm written
   first, `val v = if c { panic("x") } else { 2 }` was rejected as an undefined variable,
   while the same two arms in the other order compiled. Both now take the type from the
   first arm that carries one.
 - `parser`: the span of a generic type application covers its closing `>`. It ended at the
-  last type argument, so every diagnostic pointing at one underlined a byte short —
+  last type argument, so every diagnostic pointing at one underlined a byte short:
   `Box<i32, i32` for `Box<i32, i32>`.
 - `lexer`: `/*` with no closing `*/` reports an unterminated block comment. The comment
   regex consumes to end-of-file without completing, so logos failed sitting on the opening
@@ -1720,8 +1792,8 @@ is added here — the version number is the deliverable, alongside the cleanup b
 
 ### Fixed
 - `codegen`: a `&string` returned from a function no longer points into the dead
-  callee frame. `&string` is now the `{ ptr, i64 }` fat pointer **by value** — the
-  representation the string ABI already documented — rather than a pointer to one.
+  callee frame. `&string` is now the `{ ptr, i64 }` fat pointer **by value** (the
+  representation the string ABI already documented) rather than a pointer to one.
   A borrow of a live binding was always fine, but `s.slice(a..b)` computes a fat
   pointer with no home, so it was spilled to a function-local stack slot whose
   address was handed back; the value survived only until the next call reused that
@@ -1734,8 +1806,8 @@ is added here — the version number is the deliverable, alongside the cleanup b
 - `parser`: `val Some(v) = f() else { ... }` parses. The `val-else` marker was
   `val Name::`, so only the qualified spelling reached it, while the implicit
   prelude had made the unqualified variant idiomatic in value position, in `match`
-  arms, and in every other pattern. `val Name(` is now a second marker — a binding
-  name is never followed by `(` — and a `val-else` missing its `else` reports the
+  arms, and in every other pattern. `val Name(` is now a second marker (a binding
+  name is never followed by `(`), and a `val-else` missing its `else` reports the
   missing `else` instead of an unexpected `=`. `val Name { ... }` remains a struct
   destructure and a payload-less `val None = ...` remains a binding, both because
   they cannot be told from the alternative without an import table.
@@ -1744,7 +1816,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   `import Option::{Some}` resolve before the prelude is prepended; it now requires
   the head to be a declared `enum` or a prelude enum, so `import Nothing::{AtAll}`
   is reported rather than silently bound to nothing. A path naming a sibling inline
-  `module { }` block — which a block cannot see — says exactly that, instead of
+  `module { }` block (which a block cannot see) says exactly that, instead of
   claiming the imported name is an enum variant. Under `export import` that claim
   was doubly wrong: it named a `const` or a `func` as a variant, and advised
   dropping the `export`, which only exchanged the error for the silence.
@@ -1754,13 +1826,13 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ### Fixed
 - `semantic`, `codegen`: an `if`/`else` in value position now carries its context
   into its arms, the way a `match` always has. The arms were typed against
-  nothing, so an arm naming no type of its own — a bare `None`, an untyped
-  integer literal — had nothing to resolve against even when the `val` it
+  nothing, so an arm naming no type of its own (a bare `None`, an untyped
+  integer literal) had nothing to resolve against even when the `val` it
   initialized was annotated or the parameter it was passed to was typed. The two
   spellings of one computation disagreed: `match n { 0 => None, _ => Some(4) }`
   compiled where `if n > 0 { Some(4) } else { None }` did not, and the diagnostic
   advised annotating the target, which did not help. The type checker and HIR
-  lowering both mirror `match` now — the arm hint is the caller's expected type
+  lowering both mirror `match` now: the arm hint is the caller's expected type
   if there is one, else the first arm's type once known.
 
 ## [1.75.0] - 2026-08-23
@@ -1770,8 +1842,8 @@ is added here — the version number is the deliverable, alongside the cleanup b
   `Result`, their variants `Some` / `None` / `Ok` / `Err`, and `println` / `print`
   in scope with no `import` of any kind, so `Some(n)` and `Err(e)` read bare in
   value and pattern position alike. Module resolution seeds each module's import
-  scope with the prelude's variants — the same table an explicit
-  `import Option::{Some}` fills — so nothing after that pass learns a new concept.
+  scope with the prelude's variants (the same table an explicit
+  `import Option::{Some}` fills), so nothing after that pass learns a new concept.
 - `parser`: `@no_prelude`, written on a file's first line, opts that file out of
   the prelude. It is rejected after a declaration and inside a `module { }` block,
   which is not a file (`ParseError::MisplacedNoPrelude`). On a non-root file it
@@ -1781,7 +1853,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   module resolution like `Item::Import` and `Item::Module`.
 - `semantic`: `module-resolution` gains the public `PreludeVariant` input and
   reports the root file's opt-out as `ResolvedProgram.no_prelude`. The prelude's
-  contents are injected by the driver for the same reason the parser is — a
+  contents are injected by the driver for the same reason the parser is: a
   feature slice may not reach into another one.
 
 ### Changed
@@ -1791,33 +1863,33 @@ is added here — the version number is the deliverable, alongside the cleanup b
   stated.
 - `docs`: a variant import of a prelude name is now redundant rather than
   required. An explicit import of one still wins over the implicit binding, as
-  does a local declaration of the same name — neither is a collision.
+  does a local declaration of the same name: neither is a collision.
 
 ## [1.74.0] - 2026-08-23
 
 ### Added
 - `parser`: inline `module Name { ... }` blocks. A block groups items inside one
-  file and is a module in every sense a `.nr` file is one — its items are private
+  file and is a module in every sense a `.nr` file is one: its items are private
   unless written with `export`, a qualified path reaches into it, an `import` binds
   from it, and blocks nest. `parse_program` now delegates to a shared item-list
   parse that runs to end of input at file level and to the closing brace inside a
   block, so a block's body is parsed by exactly the code the file around it is.
 - `parser`: `export import` re-exports. `export` before an `import` marks the
   declaration as a re-export instead of being rejected, and is now rejected on a
-  `module` block instead — an inline module's name is reached only from the file
+  `module` block instead: an inline module's name is reached only from the file
   that declares it.
 - `infra`: `ast-types` gains `ModuleDef` / `Item::Module` and `ImportDef.exported`.
   Both are consumed by module resolution, so no pass after it sees either.
 - `semantic`: a re-exported name is reachable *through* the module that re-exported
   it. A facade may re-export what another facade re-exported, and an `as` rename is
-  undone on the way through — the program is built with the declaration's own name.
+  undone on the way through: the program is built with the declaration's own name.
 
 ### Changed
 - `semantic`: module resolution registers each inline block as a module of its own
   rather than special-casing it, so the visibility rule, the flat merge, the
   collision check, and the `ModuleId` stamp reach a block unchanged. A block
   resolves paths against the containing file's directory, holds no file children,
-  and wins over a same-named file beside it — the rule a locally declared type
+  and wins over a same-named file beside it, the rule a locally declared type
   already follows.
 
 ### Fixed
@@ -1832,14 +1904,14 @@ is added here — the version number is the deliverable, alongside the cleanup b
 - Only an item can be re-exported. `export import` naming a module or an enum
   variant is an error rather than a silent no-op.
 - A nested block reaches its own children and the declaring file's siblings, not
-  its parent's other blocks — there is no `super`.
+  its parent's other blocks: there is no `super`.
 
 ## [1.73.0] - 2026-08-22
 
 ### Added
 - `parser`: `export` visibility markers. A `func`, `struct`, `enum`, `trait`,
   `const`, or `newtype` declaration is private to its own module unless written
-  with `export`, and each struct field carries the marker independently — an
+  with `export`, and each struct field carries the marker independently. An
   exported struct may still keep a field to itself. `export` goes between any
   `@derive(...)` attributes and the item keyword. It is rejected on an `impl`
   block (which declares no name of its own), on a `type` alias (expanded at parse
@@ -1857,7 +1929,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   a variant carries the visibility of the type it belongs to. New `PrivateItem`
   diagnostic.
 - `infra`: `ast_types::ModuleId`. The merge is flat, so the file a declaration
-  came from is otherwise unrecoverable downstream — and field visibility needs
+  came from is otherwise unrecoverable downstream, and field visibility needs
   both it and the receiver's type. Module resolution stamps each `FunctionDef`,
   `StructDef`, `ImplDef`, and `ConstDef`; the parser alone leaves 0, so a
   single-file program is one module and the rule is inert there. HIR lowering and
@@ -1869,7 +1941,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 - `ci`: bounded the Linux LLVM install. GitHub's Ubuntu runners reach
   `archive.ubuntu.com` through an Azure mirror list that intermittently
   blackholes connections, and apt applies no network timeout by default, so
-  `apt-get update` could wait indefinitely — the Benchmark Regression and Test
+  `apt-get update` could wait indefinitely, so the Benchmark Regression and Test
   Suite jobs sat in "Setup LLVM 20" for over an hour without failing. The
   composite action now writes an apt config with fetch retries and 20s
   transport timeouts, waits up to five minutes for the dpkg lock instead of
@@ -1883,7 +1955,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ## [1.72.0] - 2026-08-18
 
 ### Added
-- `parser`: `import` declarations, in every form the module system specifies —
+- `parser`: `import` declarations, in every form the module system specifies:
   `import math`, the explicitly relative `import ./utils::io`, the name list
   `import math::{sqrt, sin}`, the renames `import math::sin as sine` and
   `import math::sqrt as root`, the module alias `import math::matrix as mat`, and
@@ -1893,7 +1965,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   so module resolution answers it.
 - `infra`: import binding in `module-resolution`. The new `imports.rs` walks each
   import's path greedily as modules and binds its selection against however far
-  that reached, producing one `ImportScope` per file — module aliases, item
+  that reached, producing one `ImportScope` per file: module aliases, item
   renames, and variant bindings. An import's path is a discovery chain like any
   other, and each `{...}` entry extends it, so an import pulls its module into the
   build when no qualified path reaches it and a listed name may be a child module
@@ -1927,7 +1999,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   into one item list: `resolve_program(root, parse)` loads each reachable module,
   verifies every qualified path against the module that owns the name, and strips
   the qualifier. Semantic analysis, HIR lowering, and both backends are unchanged
-  — they still see a single-file program.
+  and they still see a single-file program.
 - `infra`: reference-driven module discovery. There is no `import` yet, so
   writing a qualified path is what pulls a module into the build:
   `math::sqrt`, `utils::io::read`, `geometry::Point` in value and type position
@@ -1938,12 +2010,12 @@ is added here — the version number is the deliverable, alongside the cleanup b
   over a same-named file, so `Point::new` keeps meaning the associated function.
 - `parser`: paths accept more than two segments (`utils::io::read`) and type
   annotations accept a module qualifier (`geometry::Point`). No AST node changed
-  — the qualifier rides inside the identifier until module resolution splits and
+  The qualifier rides inside the identifier until module resolution splits and
   erases it, and the `::<` turbofish check still wins at every step.
 - `tests`: `compiler/neurc/tests/modules.rs` compiles and runs multi-file
-  programs end to end — a sibling module supplying functions, structs, methods
+  programs end to end: a sibling module supplying functions, structs, methods
   and constants; a directory module and its child; two modules referencing each
-  other; a module enum matched from the root — plus the three module
+  other; a module enum matched from the root, plus the three module
   diagnostics. The slice carries its own unit tests against a stub parser.
 - `docs`: `docs/language-reference/modules.md`, the `examples/modules/` teaching
   program (exit `40`), and the `examples/showcase/telemetry/` cumulative
@@ -1954,7 +2026,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 - `neurc`: `check` and `compile` no longer parse the input themselves; both call
   `resolve_modules`, which hands `syntax_parsing::parse` to the resolver. The
   parser is injected rather than imported because a feature slice may not depend
-  on another — neurc is the one place the two meet. `check` now reports how many
+  on another, and neurc is the one place the two meet. `check` now reports how many
   modules were loaded.
 - `tests`: the example manifest accepts `module` in place of an exit code,
   marking a non-root module that is compiled as part of its root rather than on
@@ -1969,15 +2041,15 @@ is added here — the version number is the deliverable, alongside the cleanup b
   a module-qualified trait in `impl` / `dyn` position and the functional-update
   form `mod::Point { x: 1.0, ..base }` do not parse.
 - Merged modules share one span space, so a panic diagnostic from a non-root
-  module reports a position in the root file's coordinates — the same
+  module reports a position in the root file's coordinates, the same
   approximation the implicit prelude already carries.
 
 ## [1.70.0] - 2026-08-13
 
 ### Added
-- `codegen`: error-path outlining. Every panic-family failure path — `panic`,
+- `codegen`: error-path outlining. Every panic-family failure path (`panic`,
   `assert`, `unreachable`, and the array / `Vec` bounds, string-slice bounds, and
-  UTF-8 codepoint-boundary guards — is emitted into a module-private cold
+  UTF-8 codepoint-boundary guards) is emitted into a module-private cold
   function (`cold noreturn noinline minsize`), leaving a single call behind at
   the failure site. The diagnostic machinery is several `write(2, …)` calls plus
   `abort()` plus the string globals they reference, and it previously sat inline
@@ -1987,12 +2059,12 @@ is added here — the version number is the deliverable, alongside the cleanup b
 - `codegen`: `!prof` branch weights on every guard branch and on the `-O0`
   integer-overflow check, marking the failure edge as the improbable one so block
   placement keeps it off the fall-through path. The overflow check is weighted
-  but not outlined — its trap block is a single `llvm.trap`, so a call would
+  but not outlined: its trap block is a single `llvm.trap`, so a call would
   trade one instruction for another.
 - `tests`: `compiler/neurc/tests/cold_outlining.rs` drives a failure through an
   outlined thunk at both `-O0` and `-O2` in programs combining collections,
   structs, methods, enums, and `match`, asserting the diagnostic text and the
-  abort are unchanged — and that a runtime `panic` message, which travels to its
+  abort are unchanged, and that a runtime `panic` message, which travels to its
   thunk as a `(ptr, len)` pair rather than being baked in, still prints in full.
 
 ### Changed
@@ -2007,13 +2079,13 @@ is added here — the version number is the deliverable, alongside the cleanup b
   `Result<T, E>` to its success payload, or leaves the enclosing function
   immediately carrying the failure variant (`None` / `Err(e)`) on. It is postfix
   and binds as tightly as a call, so `f(x)? + 1` adds to the unwrapped payload
-  and `parse(s)?.field` reads a field of it. New `TokenKind::Question` — logos'
+  and `parse(s)?.field` reads a field of it. New `TokenKind::Question`, and logos'
   longest-match rule keeps `??` a single coalescing token.
 - `semantic`: `?` requires the enclosing function to return the same fallible
   enum the operand is (`TryOutsideFallibleFunction`), and the operand itself to
   be an `Option` / `Result` (`TryOnNonFallible`). A `Result`'s error must already
-  be the function's error type — the error is propagated as-is, with no implicit
-  conversion — so a mismatch is an ordinary type error, resolved explicitly.
+  be the function's error type. The error is propagated as-is, with no implicit
+  conversion, so a mismatch is an ordinary type error, resolved explicitly.
   Success payloads are unconstrained: `?` on a `Result<bool, E>` inside a
   `-> Result<i32, E>` function is fine.
 - `docs`: `examples/operators/error_propagation.nr` and
@@ -2024,7 +2096,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ### Changed
 - `codegen`: unchanged. `?` desugars during HIR lowering into a two-arm `match`
   whose failure arm is a block terminating in a `return`, so both backends stay
-  unaware of the operator — the same treatment `??` received.
+  unaware of the operator, the same treatment `??` received.
 
 ## [1.68.3] - 2026-07-31
 
@@ -2057,8 +2129,8 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ### Fixed
 - `semantic`, `codegen`: a **nested** trailing `if`/`else` is now the value of the
   block that contains it. Only the function-body tail recognised a trailing `if` as
-  value-producing, so an `if` written as the last thing inside another block — an
-  if-branch, a bare block, a block with statements before it — lowered as a plain
+  value-producing, so an `if` written as the last thing inside another block (an
+  if-branch, a bare block, a block with statements before it) lowered as a plain
   statement and whatever it evaluated to was discarded:
 
   ```neuro
@@ -2073,8 +2145,8 @@ is added here — the version number is the deliverable, alongside the cleanup b
   template. Both are the one defect. The checker also typed such an `if` as `void`,
   making `val r = if a { x } else { if b { y } else { z } }` a spurious type error.
 
-  The promotion now lives in exactly one place — hir-lowering, for the function-body
-  tail and for every nested block alike — and the backend's separate copy of the rule
+  The promotion now lives in exactly one place: hir-lowering, for the function-body
+  tail and for every nested block alike, and the backend's separate copy of the rule
   is gone.
 
 - `semantic`: a function may now be **called before it is defined**. Free-function
@@ -2087,7 +2159,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   func is_odd(n: i32) -> bool { if n == 0 { false } else { is_even(n - 1) } }
   ```
 
-  Every other item kind — structs, enums, traits, constants — was already
+  Every other item kind (structs, enums, traits, constants) was already
   order-independent, and the LLVM backend already pre-declared every signature; only
   the type checker insisted on definition-before-use. Signatures are now registered in
   their own pass ahead of any body check.
@@ -2105,8 +2177,8 @@ is added here — the version number is the deliverable, alongside the cleanup b
   }
   ```
 
-  `mem2reg` could not rescue it — the pass only promotes allocas already in the entry
-  block — so the crash reproduced at every optimization level, `-O0` through `-O3`. All
+  `mem2reg` could not rescue it, because the pass only promotes allocas already in the entry
+  block, so the crash reproduced at every optimization level, `-O0` through `-O3`. All
   such slots now go through a new `entry_alloca`, which allocates in the function's entry
   block and leaves the initializing store where it was. Recursion is unaffected (each call
   gets its own frame), and the loops become promotable, so they optimize as well.
@@ -2121,7 +2193,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   it is correct; only returning one across a call boundary is affected. The real fix is to
   give `&string` the by-value `{ ptr, i64 }` representation the string ABI already
   documents, which is an ABI change and gets its own pass. This is also why the one
-  `slice.slot` allocation is deliberately left out of the entry-block hoisting above — the
+  `slice.slot` allocation is deliberately left out of the entry-block hoisting above. The
   code comment there explains it.
 
 - `tests`: dropped an internal spec-section marker from a parser test comment, which
@@ -2130,7 +2202,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ## [1.68.0] - 2026-07-31
 
 ### Added
-- `semantic`: `val-else` binding — `val PATTERN = value else |binding| { ... }`
+- `semantic`: `val-else` binding: `val PATTERN = value else |binding| { ... }`
   unwraps a refutable pattern or leaves the enclosing scope.
 
   ```neuro
@@ -2141,7 +2213,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   ```
 
   The pattern's bindings live for the **rest of the enclosing block**, not just one
-  arm — the difference from a one-armed `match`, and the reason the construct exists.
+  arm, the difference from a one-armed `match`, and the reason the construct exists.
   The `else` branch must **exit the scope** (`return`, `break`, `continue`,
   `panic(...)`, `unreachable()`); one that can fall through is rejected with
   `ValElseMustDiverge`, which is what guarantees the binding is initialized on the
@@ -2149,7 +2221,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 
   The optional `else |name|` is a dedicated production, **not** a closure literal, and
   what it names is decided by the scrutinee's type: a `Result<T, E>` binds the `Err`
-  payload, an `Option<T>` binds nothing (only `|_|` or a bare `else` is accepted —
+  payload, an `Option<T>` binds nothing (only `|_|` or a bare `else` is accepted,
   `None` is empty, so a named binding is `ValElseBindingOnOption`), and any other enum
   binds the whole scrutinee, unmodified, for the else branch to discriminate with a
   nested `match`. Because `break` counts as leaving the scope, `val-else` is also the
@@ -2163,8 +2235,8 @@ is added here — the version number is the deliverable, alongside the cleanup b
   }
   ```
 
-  Parsing keys off the two-token marker `val Name::` — a binding name is always
-  followed by `:`, `=`, or a newline — so `val Point { x, y } = p` still desugars as a
+  Parsing keys off the two-token marker `val Name::`. A binding name is always
+  followed by `:`, `=`, or a newline, so `val Point { x, y } = p` still desugars as a
   struct destructure. The pattern, its success test, and its bindings reuse the `match`
   machinery unchanged (`Pattern`, `HirMatchTest`, `HirMatchBinding`); the one new node
   is `Stmt::ValElse` / `HirStmt::ValElse`, a *statement* rather than a `Match` variant
@@ -2179,18 +2251,18 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ## [1.67.0] - 2026-07-28
 
 ### Added
-- `semantic`: `??` full implementation — the operator unwraps an `Option<T>` or
+- `semantic`: `??` full implementation: the operator unwraps an `Option<T>` or
   `Result<T, E>` to its payload and otherwise evaluates a fallback.
 
   ```neuro
   val present = lookup(1) ?? 0        // the Some payload
-  val absent  = lookup(7) ?? 5        // 5 — the fallback
-  val failed  = divide(1, 0) ?? 4     // 4 — the Err payload is discarded
+  val absent  = lookup(7) ?? 5        // 5, the fallback
+  val failed  = divide(1, 0) ?? 4     // 4, the Err payload is discarded
   val chained = lookup(7) ?? lookup(1) ?? 99
   ```
 
   The expression's type is the unwrapped payload `T`, and the fallback must produce
-  that `T`. For a `Result` the error payload is discarded — `??` says "I do not care
+  that `T`. For a `Result` the error payload is discarded: `??` says "I do not care
   why it failed, use this instead"; `match` remains the way to inspect it. The
   fallback is **lazy**: it is only evaluated when the left operand is absent or
   failed. `a ?? b ?? c` associates right-to-left, so every operand but the last must
@@ -2202,7 +2274,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ### Changed
 - `semantic`: `check_binary_expr` routes `??` to `check_null_coalesce` before the
   shared operand check. `??` is the one binary operator whose operands are not
-  symmetric — the right side is typed by the left's *payload*, not by the left — so
+  symmetric: the right side is typed by the left's *payload*, not by the left, so
   the general path would have typed a bare fallback literal as an `Option`.
 - `parser`/`codegen`: no change. HIR lowering desugars `lhs ?? fallback` into a
   two-arm `match` (success-tag test binding payload slot 0; wildcard → fallback), so
@@ -2216,7 +2288,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ## [1.66.1] - 2026-07-28
 
 ### Fixed
-- `codegen`: a `loop` in tail position — the function's implicit return — spun forever
+- `codegen`: a `loop` in tail position (the function's implicit return) spun forever
   instead of exiting on `break`. Binding the same loop to a `val` and returning that
   worked, so the defect was in the tail path.
 
@@ -2230,8 +2302,8 @@ is added here — the version number is the deliverable, alongside the cleanup b
   }
   ```
 
-  Root cause: `loop` had two AST shapes — `Stmt::Loop` in statement position and
-  `Expr::Loop` in value position — while every "is the trailing statement
+  Root cause: `loop` had two AST shapes, `Stmt::Loop` in statement position and
+  `Expr::Loop` in value position, while every "is the trailing statement
   value-producing?" test in the pipeline keys on `Stmt::Expr`. A trailing `loop` was
   therefore lowered as a discard-value statement, and the backend terminated its exit
   block with `unreachable`, which emits no instruction at `-O0` and leaves the `break`
@@ -2243,7 +2315,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 
 ### Changed
 - `semantic`: a `loop` that no `break` targets now takes its context's expected type.
-  Such a loop never reaches its exit block — it runs forever or leaves via `return` — so
+  Such a loop never reaches its exit block, since it runs forever or leaves via `return`, so
   it satisfies any declared return type, the same divergent contract the panic-family
   builtins carry. This keeps `func f() -> i32 { loop { ... return x } }` valid now that a
   trailing `loop` is checked as the implicit return.
@@ -2259,8 +2331,8 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ### Added
 - `semantic`/`codegen`: `checked_add`, `checked_sub`, and `checked_mul` on every integer
   type. Each takes one same-typed argument and returns `Option<T>` over the receiver's
-  own type — `Option::Some(result)` when the arithmetic fits, `Option::None` when it
-  would overflow — so an overflow is reported to the caller instead of wrapping,
+  own type: `Option::Some(result)` when the arithmetic fits, `Option::None` when it
+  would overflow, so an overflow is reported to the caller instead of wrapping,
   clamping, or trapping.
 
   ```neuro
@@ -2291,17 +2363,17 @@ is added here — the version number is the deliverable, alongside the cleanup b
   instead of the suffix default. `take(0.75)` where `take` wants `f32` no longer emits a
   `double` the LLVM verifier rejects, and the same applies in return position
   (`func half() -> f32 { 0.5 }`) and to integers reaching an `i64`/`u8` parameter.
-- `parser`: a struct literal is accepted inside a delimiter pair in a guarded header —
+- `parser`: a struct literal is accepted inside a delimiter pair in a guarded header,
   `match grid.get(Point { x: 3, y: 4 }) { ... }`, and the same in `if`, `while`, and both
   `for` forms. The guard that keeps `if x {` from reading `x {` as a struct literal is now
   lifted inside `( ... )` and `[ ... ]`, where a `{` is unambiguous, and restored on the
-  way out — it is scoped rather than assigned, so nesting no longer drops it.
+  way out: it is scoped rather than assigned, so nesting no longer drops it.
 - `codegen`: a struct can be a free function's parameter and return type. The type mapper
   holds a struct-layout table, so a struct also works as a *field* of another struct, and
   a return-position `impl Trait` yielding a struct now compiles. A by-value `Drop`
   parameter of a free function is destroyed at function exit, as it already was for
   methods.
-- `codegen`: chained field reads (`o.inner.v`) — an intermediate struct value is read
+- `codegen`: chained field reads (`o.inner.v`): an intermediate struct value is read
   with `extractvalue` rather than requiring a named binding to address.
 - `semantic`: a move in a tail (implicit-return) expression is no longer reported as a use
   of the value it moved itself. The trailing expression was type-checked twice; it is now
@@ -2311,34 +2383,34 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ## [1.65.0] - 2026-07-27
 
 ### Added
-- `semantic`, `codegen`: standard collections — `Vec<T>`, `HashMap<K, V>`, and
+- `semantic`, `codegen`: standard collections: `Vec<T>`, `HashMap<K, V>`, and
   `BTreeMap<K, V>`. They are specified as library types, but the language exposes no
   allocator and no raw pointers, so nothing in `.nr` source could implement them: all
   three are compiler-known, with a new `Type::Collection { kind, args }` in semantic
   analysis, `HirType::Collection` + `HirExprKind::CollectionNew` in the HIR, and a
-  `codegen/collections/` module in the backend. None is `Copy` — assignment moves them,
+  `codegen/collections/` module in the backend. None is `Copy`: assignment moves them,
   and each frees its buffer at scope exit.
   - `Vec<T>`: `Vec::new()`, `push`, `pop`, `get`, `len`, `clear`, `v[i]` read and write,
     and `for x in v`. Indexing is bounds-checked in *every* build, unlike `[T; N]`, whose
     length is a compile-time constant the optimizer can fold.
   - `HashMap<K, V>`: open-addressed with linear probing over `{ state, key, value }`
     slots, a power-of-two capacity, tombstoned removal, and a rehash at a 3/4 load factor
-    measured on occupied slots — so a table churned by insert/remove reclaims its
+    measured on occupied slots, so a table churned by insert/remove reclaims its
     tombstones instead of growing its probe runs without bound.
   - `BTreeMap<K, V>`: key-sorted slots with binary-search lookup, so its entries are
-    ordered. `keys()` returns a `Vec<K>` — ascending for the ordered map — which is how
+    ordered. `keys()` returns a `Vec<K>`, ascending for the ordered map, which is how
     both maps are iterated.
   - Elements and values may be any `Copy` type or `string`. Keys are int-like or `string`
     (the compiler supplies equality, order, and hash), or a struct that supplies them
     itself via `impl PartialEq` plus `impl Hashable` or `impl Comparable`.
-- `semantic`: `Hashable` — a compiler-known lang-item trait like `Drop` and the operator
+- `semantic`: `Hashable`, a compiler-known lang-item trait like `Drop` and the operator
   traits, holding exactly `func hash(&self) -> u64`. Write the `impl`, never a `trait`
   declaration.
-- `semantic`: `OrderedF32` / `OrderedF64` in the prelude — validating wrapper structs whose
+- `semantic`: `OrderedF32` / `OrderedF64` in the prelude: validating wrapper structs whose
   `new` panics on NaN. A raw float key is now rejected with a diagnostic naming them:
   IEEE-754 comparison is a partial order, so a map keyed on a raw float could hold a key it
   could never find again.
-- `tests`: `compiler/neurc/tests/collections.rs` — 18 end-to-end tests covering the method
+- `tests`: `compiler/neurc/tests/collections.rs`, with 18 end-to-end tests covering the method
   surface, `Option`-returning readers, growth and tombstone churn, ordered iteration, struct
   keys, `OrderedF32` keys, the move rule, and the bounds panic.
 - `docs`: `examples/types/collections.nr` (exit 101) and
@@ -2347,7 +2419,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 
 ### Changed
 - `codegen`: the drop machinery is no longer struct-only. `DropEntry` carries a
-  `DropTarget` — a user `impl Drop for T`, or a collection whose buffer is `free`d — so a
+  `DropTarget` (a user `impl Drop for T`, or a collection whose buffer is `free`d) so a
   collection binding is destroyed through the same flag-guarded, move-aware path.
 - `codegen`: `codegen_enum_construct` was split so `codegen_enum_value` can build a tagged
   union from already-evaluated values, which is how a fallible collection reader returns
@@ -2358,7 +2430,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 
 ### Changed
 - `docs`: README trimmed to a shop window. The "Current Capabilities" table went from
-  30 rows — several paragraph-length — to 14 one-line rows grouped by area; per-feature
+  30 rows, several of them paragraph-length, to 14 one-line rows grouped by area; per-feature
   detail now lives in `docs/` and this changelog. The alpha memory-model warning was cut
   to three lines and given an explicit removal trigger. The status line no longer
   enumerates sub-phases: the Quick Roadmap table is the single public statement of
@@ -2372,7 +2444,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   with each other. The new gate scans every tracked text file and fails on a hard-coded
   test count, a hard-coded workspace version in prose, a reference to a gitignored
   local-only path, or an internal spec-section marker.
-- `docs`: the README test-count badge became a CI status badge — the workflow result is
+- `docs`: the README test-count badge became a CI status badge. The workflow result is
   the only test claim that cannot go stale. Counts removed from `docs/README.md` and
   `docs/getting-started/installation.md` (which still said 806).
 
@@ -2385,18 +2457,18 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ### Added
 - `parser`, `semantic`, `codegen`: **`Option<T>` and `Result<T, E>`.** The standard
   library's absence and failure types are now available in **every program without a
-  declaration** — the compiler prepends an implicit prelude holding
+  declaration**: the compiler prepends an implicit prelude holding
   `enum Option<T> { Some(T), None }` and `enum Result<T, E> { Ok(T), Err(E) }`. A program
   that declares its own `Option` or `Result` shadows the prelude entry. Construct with
   `Option::Some(3)` / `Option::None` / `Result::Ok(v)` / `Result::Err(e)`, deconstruct with
   `match`, and pass or return them across functions and struct fields.
 - `parser`, `semantic`, `codegen`: **Generic enums.** An enum may take type parameters
-  (`enum Slot<T> { Filled(T), Vacant }`, `enum Tagged<T, U> { Left(T), Right(U) }`) — the
+  (`enum Slot<T> { Filled(T), Vacant }`, `enum Tagged<T, U> { Left(T), Right(U) }`). The
   machinery `Option` and `Result` are built from. Each distinct set of type arguments is
   monomorphized into its own nominal tagged union, so `Slot<i32>` and `Slot<i64>` are
   different types with their own payload widths and no runtime cost. Type arguments come
   from the expected type, from the payload (`Slot::Filled(4)` gives `T = i32`), or from the
-  enclosing function's declared return type — the last of which is what makes the common
+  enclosing function's declared return type, the last of which is what makes the common
   fallible shape work, where a tail `if` branch has no other context:
   `func divide(a: i32, b: i32) -> Result<i32, i32> { if b == 0 { Result::Err(1) } else { Result::Ok(a / b) } }`.
   A `match` pattern names the base enum and binds payloads at the scrutinee instance's
@@ -2409,7 +2481,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
     and therefore helper methods such as `.map_err`; non-scalar payloads
     (`Option<string>`, `Option<Point>`); and lifetime parameters on an enum.
 - `tests`: `examples/types/option_result.nr` (focused walkthrough of both types plus a
-  user-declared generic enum) and `examples/showcase/sensor_pipeline.nr` — a lookup that may
+  user-declared generic enum) and `examples/showcase/sensor_pipeline.nr`, a lookup that may
   find nothing and a validation that may fail, combined with structs + `impl` methods, a
   borrowed struct parameter, arrays + `for`-in, a generic function used at two type
   arguments, and a guarded `match` arm.
@@ -2421,7 +2493,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   return type.
 
 ### Added (previously unreleased)
-- `tests`: `examples/showcase/scan_guard.nr` — deterministic `Drop` and labeled loop breaks
+- `tests`: `examples/showcase/scan_guard.nr`, covering deterministic `Drop` and labeled loop breaks
   had showcase coverage nowhere, so both were only ever exercised in isolation. The new
   program runs two `Drop` guards over a shared `&mut i32` while a labeled `break` exits two
   nested loops at once, asserting the destructors still fire on that path, and combines it
@@ -2433,7 +2505,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ### Fixed (previously unreleased)
 - `docs`: corrected claims that no longer matched the compiler. Operator overloading was
   documented as unsupported, trait bounds as unenforced, turbofish as unavailable, and
-  generics/higher-order functions as unimplemented — all have shipped. Struct return types
+  generics/higher-order functions as unimplemented. All have shipped. Struct return types
   are now described accurately (rejected for free functions, allowed for associated
   functions and methods), as is consuming `self` (rejected only on non-`Copy` structs).
 - `docs`: the quick-start feature summary was frozen at sub-phase 1D and omitted the type
@@ -2444,7 +2516,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 
 ### Fixed
 - `codegen`: The MLIR scaffold (`mlir-backend`, feature `mlir`) failed to compile after
-  closures landed — `lower_program`'s `HirItem` match did not cover the new
+  closures landed: `lower_program`'s `HirItem` match did not cover the new
   `HirItem::Closure` variant. Lifted closures now emit a `func.func` declaration whose
   implicit first parameter is the captured-environment pointer, matching the LLVM
   backend's calling convention for `__closure_N`.
@@ -2455,7 +2527,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 
 ### Added
 - `parser`, `semantic`, `codegen`: **Closures and lambdas.** Anonymous callable values with
-  the `|params| body` syntax — `|x: i32| x * x` (single-expression), `|x: i32| -> i32 { ... }`
+  the `|params| body` syntax: `|x: i32| x * x` (single-expression), `|x: i32| -> i32 { ... }`
   (block body with an explicit return type), the zero-parameter `|| expr`, and the `move`
   capture prefix. A closure captures the free variables its body reads from the enclosing
   scope **by value** (they must be `Copy` this phase); the captured variable stays usable
@@ -2483,19 +2555,19 @@ is added here — the version number is the deliverable, alongside the cleanup b
   (`identity__g_i32`), and a user-declared name was free to contain one. The instance marker
   is now the single-underscore `_g_` already used for generic-struct instances
   (`identity_g_i32`), and any declared name containing `__` is rejected with
-  `ReservedNameSeparator`. Without this, a generic method on a generic struct — the next
-  combination on the way — could mint a symbol already spoken for.
+  `ReservedNameSeparator`. Without this, a generic method on a generic struct, the next
+  combination on the way, could have minted a symbol already spoken for.
 - `tests`: `type_checkers/tests/{decl,expr,stmt}_tests.rs` were never declared as modules, so
   ~40 type-checker tests had not run since they were written. Declared them (all pass) and
   deleted the empty `stmt_tests.rs` stub.
 - `lexer`: added `dyn` to the editor grammar's keyword pattern, and `f16`/`bf16` to its
-  primitive-type and numeric-suffix patterns — all three were in the lexer but unhighlighted.
+  primitive-type and numeric-suffix patterns. All three were in the lexer but unhighlighted.
 
 ### Added
 - `tests`: `lexical-analysis/tests/tmlanguage_sync.rs` links the lexer to the editor's
   TextMate grammar, which nothing in the build referenced before. It scans `tokens.rs` for
   `#[token("…")]` literals and fails when a keyword is absent from the grammar, so a new
-  keyword can no longer land silently unhighlighted. Keyword words only — string-body and
+  keyword can no longer land silently unhighlighted. Keyword words only: string-body and
   escape rules still need hand-updating, which is what the coming stateful-lexer rewrite for
   string interpolation will touch.
 
@@ -2528,7 +2600,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   `HirType::DynObject` type introduced with trait dispatch, so `mlir-backend` failed to
   compile under `--all-features`. Trait items now lower to nothing (their methods reach
   the module through implementors' `impl` blocks), and an unsized `dyn Trait` in value
-  position reports `UnsupportedType` — it is only ever the referent of a reference.
+  position reports `UnsupportedType`: it is only ever the referent of a reference.
 
 ---
 
@@ -2540,7 +2612,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   (`func train(m: &impl Model)`) and return position (`func make() -> impl Shape`); the
   new `dyn` keyword introduces a trait object, written `&dyn Trait` or `&mut dyn Trait`.
 - `parser`: each `impl Trait` parameter is its own anonymous type parameter, so a single
-  call may bind two different concrete types — unlike one shared `<T>`.
+  call may bind two different concrete types, unlike one shared `<T>`.
 - `semantic`: `impl Trait` is static dispatch and costs nothing at runtime. In argument
   position it is shorthand for a trait-bounded type parameter and is monomorphized like
   one. In return position it resolves to the single concrete type the body constructs,
@@ -2573,7 +2645,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   match the method's return type; and `Comparable` requires `PartialEq` on the same type.
   Using an operator on a type without the matching impl is still a clear error.
 - `codegen`: operator overloading carries no runtime cost. Each operator lowers to the
-  ordinary method call it stands for and is monomorphized to a plain call — no vtable.
+  ordinary method call it stands for and is monomorphized to a plain call, with no vtable.
 - `docs`: new `operators/operator_overloading.nr` example and `showcase/vector_physics.nr`
   showcase (a `Vec2` with `+`/`-`/unary `-`/`==` driving a small physics step loop).
 
@@ -2588,19 +2660,19 @@ is added here — the version number is the deliverable, alongside the cleanup b
 
 ### Added
 - `parser`: trait declarations. A `trait` groups method signatures that types can
-  implement — either **required** methods (a signature with no body) or **default**
+  implement, either **required** methods (a signature with no body) or **default**
   methods (a signature with a body that implementors inherit). Implement one with
   `impl Trait for Type`. An omitted default method is inherited automatically; writing it
   explicitly overrides the default.
 - `semantic`: trait-impl conformance checking. A trait implementation must provide every
   required method, may only contain methods the trait declares, and each method's
-  signature must match the trait's — otherwise the compiler reports a precise error
+  signature must match the trait's; otherwise the compiler reports a precise error
   (missing method, non-member method, signature mismatch, or unknown trait).
 - `semantic`: trait bounds on generics are now enforced. A generic parameter bounded by a
   trait (`func f<T: Shape>(x: &T)`) may call the trait's methods on the parameter, and the
   call site is checked to ensure the concrete type argument implements the trait.
 - `codegen`: traits carry no runtime cost. Each implementation lowers to ordinary methods
-  and each trait-bounded generic is specialized per concrete type — there is no vtable and
+  and each trait-bounded generic is specialized per concrete type, so there is no vtable and
   no pointer indirection. (Supertraits, associated types, dynamic dispatch, and the
   operator traits are planned follow-ups.)
 
@@ -2616,7 +2688,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
   type/const parameters drive monomorphization.
 - `semantic`: lifetime well-formedness checking. Every lifetime used on a reference must
   be declared in the enclosing generic-parameter list; an undeclared lifetime is a compile
-  error. Annotations are then erased — `&'a T` and `&T` are the same type, so a lifetime
+  error. Annotations are then erased: `&'a T` and `&T` are the same type, so a lifetime
   carries zero runtime cost and never changes which values a signature accepts. The
   existing returned-reference outlives analysis does the real borrow checking.
 
@@ -2639,12 +2711,12 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ### Added
 - `parser`/`semantic`/`codegen`: **const generic parameters, `where` clauses, and
   turbofish**. A generic parameter list may now declare a compile-time *value*
-  parameter — `func sum<const N: u32>(a: [i32; N]) -> i32` and
-  `struct Buffer<T, const CAP: u32> { data: [T; CAP] }` — usable as an array length and
+  parameter: `func sum<const N: u32>(a: [i32; N]) -> i32` and
+  `struct Buffer<T, const CAP: u32> { data: [T; CAP] }`, usable as an array length and
   as a value in the body. Each distinct value is monomorphized into its own specialized
   code, so a const parameter carries zero runtime cost. Const parameters are inferred
   from array-argument lengths (or a struct literal's field values) and may also be
-  supplied explicitly by a **turbofish** — `identity::<i32>(x)`, `zeros::<4>()` — the
+  supplied explicitly by a **turbofish**, `identity::<i32>(x)` or `zeros::<4>()`, and the
   only call-site form for explicit generic arguments, useful when inference cannot reach
   a parameter. A **`where` clause** keeps complex signatures readable: it carries trait
   bounds (parsed, still unenforced until traits land) and **value predicates** over const
@@ -2663,9 +2735,9 @@ is added here — the version number is the deliverable, alongside the cleanup b
 
 ### Added
 - `parser`/`semantic`/`codegen`: **generic structs and generic impls** with
-  monomorphization. A struct may declare type parameters —
-  `struct Pair<T, U> { first: T, second: U }` — and an inherent `impl` block may be
-  generic — `impl<T> Wrapper<T> { func get(&self) -> T { self.value } }`. Each distinct
+  monomorphization. A struct may declare type parameters,
+  `struct Pair<T, U> { first: T, second: U }`, and an inherent `impl` block may be
+  generic, `impl<T> Wrapper<T> { func get(&self) -> T { self.value } }`. Each distinct
   set of concrete type arguments produces its own specialized struct and methods, so
   type parameters carry zero runtime cost. Type arguments are inferred from the field
   values at a struct literal (`Pair { first: 1, second: 2.0 }`) or written explicitly
@@ -2679,15 +2751,15 @@ is added here — the version number is the deliverable, alongside the cleanup b
 
 ### Added
 - `parser`/`semantic`/`codegen`: **generic functions** with monomorphization.
-  A function may declare type parameters in angle brackets —
+  A function may declare type parameters in angle brackets,
   `func identity<T>(x: T) -> T { x }`, `func choose<T>(c: bool, a: T, b: T) -> T`,
-  multiple parameters `<T, U>` — and the compiler emits one specialized copy per
+  multiple parameters `<T, U>`, and the compiler emits one specialized copy per
   distinct set of concrete type arguments, so a type parameter carries zero
   runtime cost. Type arguments are inferred from the call's value arguments (for
   example `identity(5)` selects the `i32` instance and `identity(2.0)` the `f64`
   instance). Trait bounds (`<T: Bound>`) parse but are not yet enforced (the trait
   system is a separate, later feature), so a generic body may use only operations
-  valid for any type — binding, returning, passing to another function, and
+  valid for any type: binding, returning, passing to another function, and
   building/observing tuples. Type arguments are restricted to `Copy` types this
   phase. Generic structs, generic `impl` blocks, const (value) parameters, `where`
   clauses, and explicit turbofish type arguments are tracked as follow-on work.
@@ -2697,7 +2769,7 @@ is added here — the version number is the deliverable, alongside the cleanup b
 ### Changed
 - `codegen`: the LLVM backend now declares every function/method signature in a
   pre-pass before emitting any body, so a call resolves regardless of definition
-  order — required so a monomorphized generic instance can be called by, or call,
+  order, required so a monomorphized generic instance can be called by, or call,
   items that appear before it.
 
 ---
@@ -2714,12 +2786,12 @@ Documentation-accuracy audit follow-up. No code or behavior change.
   `Type::is_float` linked to the `pub(crate)` `Type::is_half_float`; all three are
   now plain code spans.
 - `docs`: refreshed the `README.md` **Workspace Layout** diagram, which had gone
-  stale — it now lists every workspace member, including the `neuro-hir`,
+  stale. It now lists every workspace member, including the `neuro-hir`,
   `source-location`, and `project-config` infrastructure crates and the
   `hir-lowering` and `mlir-backend` slices added in sub-phase 1D.
 - `docs`: corrected the `README.md` compilation-pipeline diagram to show HIR
-  lowering (`neuro-hir`) in the **current** Phase-1 path — the LLVM backend has
-  consumed typed HIR since v1.49.0 — instead of listing HIR only under the
+  lowering (`neuro-hir`) in the **current** Phase-1 path (the LLVM backend has
+  consumed typed HIR since v1.49.0) instead of listing HIR only under the
   Phase-2+ planned extension.
 - `docs`: updated `AGENTS.md` (the `@compiler-dev` scope and `@architect`
   infrastructure-crate list now include `hir-lowering`, `mlir-backend`, and
@@ -2734,7 +2806,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 
 ### Added
 - Newtype declarations. `newtype Name = T` creates a **distinct nominal type**
-  that wraps an inner type — unlike a transparent `type` alias, the newtype and its inner
+  that wraps an inner type. Unlike a transparent `type` alias, the newtype and its inner
   type are not interchangeable, so `Meters` and `Seconds` over `i32` are different types.
   Construct a value with `Name(value)` and read the wrapped value back with `.0`. A newtype
   forwards `Copy`/`Clone` from its inner type and may be a binding, a function parameter or
@@ -2827,7 +2899,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.51.0] - 2026-06-28
 
 ### Added
-- `parser`: tuples and destructuring (Phase 2A). Adds the anonymous tuple type `(T1, T2, ...)`, tuple literals `(e0, e1, ...)` (a single `(x)` stays grouping), constant element access `t.0` / `t.1`, and destructuring binds `val (a, b) = e` — with `_` wildcards and arbitrary nesting (`val ((a, b), c) = ...`). Tuples cross function boundaries, so a function may take and return them (`func swap(a, b) -> (i32, i32)`). The feature spans the pipeline: new `Type::Tuple` / `Expr::TupleLiteral` / `Expr::TupleIndex` AST nodes, the `HirType::Tuple` / `HirExprKind::TupleLiteral` / `HirExprKind::TupleIndex` typed-HIR mirror, and an LLVM lowering to an anonymous struct (`insert_value` for a literal, `extract_value` for an index). Destructuring needs no new node downstream — the parser desugars it to a fresh temp binding plus one projection per leaf, so semantic analysis, HIR, and codegen see ordinary bindings. Tuple elements are restricted to `Copy` types for now (so a tuple is itself `Copy`), mirroring the array element rule; non-Copy element tuples (e.g. `(i32, string)`) are a documented follow-on, as are struct/array destructuring patterns. New diagnostics: `NonCopyTupleElement`, `NotATuple`, `TupleIndexOutOfBounds`. 762 tests pass (+16); new example `examples/types/tuples.nr` (exit 62).
+- `parser`: tuples and destructuring (Phase 2A). Adds the anonymous tuple type `(T1, T2, ...)`, tuple literals `(e0, e1, ...)` (a single `(x)` stays grouping), constant element access `t.0` / `t.1`, and destructuring binds `val (a, b) = e`, with `_` wildcards and arbitrary nesting (`val ((a, b), c) = ...`). Tuples cross function boundaries, so a function may take and return them (`func swap(a, b) -> (i32, i32)`). The feature spans the pipeline: new `Type::Tuple` / `Expr::TupleLiteral` / `Expr::TupleIndex` AST nodes, the `HirType::Tuple` / `HirExprKind::TupleLiteral` / `HirExprKind::TupleIndex` typed-HIR mirror, and an LLVM lowering to an anonymous struct (`insert_value` for a literal, `extract_value` for an index). Destructuring needs no new node downstream: the parser desugars it to a fresh temp binding plus one projection per leaf, so semantic analysis, HIR, and codegen see ordinary bindings. Tuple elements are restricted to `Copy` types for now (so a tuple is itself `Copy`), mirroring the array element rule; non-Copy element tuples (e.g. `(i32, string)`) are a documented follow-on, as are struct/array destructuring patterns. New diagnostics: `NonCopyTupleElement`, `NotATuple`, `TupleIndexOutOfBounds`. 762 tests pass (+16); new example `examples/types/tuples.nr` (exit 62).
 
 ---
 
@@ -2841,7 +2913,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.50.0] - 2026-06-28
 
 ### Added
-- `infra`: scaffold the `mlir-backend` HIR lowering path (Phase 1.8, final item). The `mlir`-gated slice gains `lower_program(&HirProgram) -> Result<String, MlirError>`: it walks the typed HIR and emits a trivial, verifier-clean MLIR module — one `func.func` *declaration* (empty region, private visibility) per free function and per `impl` method — proving the HIR → `melior` → verified MLIR pipeline end-to-end. HIR types map to their MLIR scalars (`i8`–`i64`, `i1` for `bool`, `i32` for `char`, `f16`/`bf16`/`f32`/`f64`); every aggregate / reference / string type maps to an opaque `!llvm.ptr` until real tensor and struct lowering arrives (Phase 3+). A method receiver lowers to a pointer parameter; `void` is the empty result list in return position and a new `MlirError::UnsupportedType` anywhere else. Function bodies are intentionally **not** lowered yet — that is the Phase 3 linalg/tensor work. The slice gains an `mlir`-gated infrastructure dependency on `neuro-hir` (the typed HIR contract it consumes), keeping the default placeholder build free of both MLIR and `neuro-hir`. The pre-existing HIR-independent `emit_smoke_module` wiring check is retained. CI now runs `cargo test -p mlir-backend --features mlir` on the MLIR-provisioned Linux job, so the scaffold is exercised, not just clippy-checked. Three new unit tests cover free-function lowering, method-with-receiver / `void`-return lowering, and scalar type mapping. **This completes Phase 1.8** (HIR & MLIR backend plumbing); the default `cargo test --workspace` stays at 746 (the `mlir` tests are feature-gated).
+- `infra`: scaffold the `mlir-backend` HIR lowering path (Phase 1.8, final item). The `mlir`-gated slice gains `lower_program(&HirProgram) -> Result<String, MlirError>`: it walks the typed HIR and emits a trivial, verifier-clean MLIR module: one `func.func` *declaration* (empty region, private visibility) per free function and per `impl` method, proving the HIR → `melior` → verified MLIR pipeline end-to-end. HIR types map to their MLIR scalars (`i8`–`i64`, `i1` for `bool`, `i32` for `char`, `f16`/`bf16`/`f32`/`f64`); every aggregate / reference / string type maps to an opaque `!llvm.ptr` until real tensor and struct lowering arrives (Phase 3+). A method receiver lowers to a pointer parameter; `void` is the empty result list in return position and a new `MlirError::UnsupportedType` anywhere else. Function bodies are intentionally **not** lowered yet; that is the Phase 3 linalg/tensor work. The slice gains an `mlir`-gated infrastructure dependency on `neuro-hir` (the typed HIR contract it consumes), keeping the default placeholder build free of both MLIR and `neuro-hir`. The pre-existing HIR-independent `emit_smoke_module` wiring check is retained. CI now runs `cargo test -p mlir-backend --features mlir` on the MLIR-provisioned Linux job, so the scaffold is exercised, not just clippy-checked. Three new unit tests cover free-function lowering, method-with-receiver / `void`-return lowering, and scalar type mapping. **This completes Phase 1.8** (HIR & MLIR backend plumbing); the default `cargo test --workspace` stays at 746 (the `mlir` tests are feature-gated).
 
 ---
 
@@ -2855,66 +2927,66 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.48.0] - 2026-06-27
 
 ### Added
-- `infra`: implement the AST → HIR lowering strategy (Phase 1.8 item 3). New `compiler/hir-lowering` feature slice with the entry point `lower_program(items: &[Item]) -> Result<HirProgram, LoweringError>`: it consumes the type-checked surface AST and produces the typed HIR (`neuro-hir`) every backend will lower from. Because the HIR's defining property is that **every expression carries its resolved type** and the frontend type checker does not expose those types, the slice **re-derives** each expression's type from the AST rather than importing `semantic_analysis::Type` — importing it would couple two feature slices, which VSA forbids (duplication over coupling). Lowering assumes well-typedness (it computes types, not validates them) and a shape the checker should have rejected surfaces as a `LoweringError` instead of a panic. It faithfully mirrors the checker's contextual rules: literal inference (suffix → expected-type → `i32`/`f64` default), a body's trailing expression typed against the declared return type, builtin-method dispatch (`string`/array `.len()`, `.clone()`, `.slice(range)`, integer `wrapping_*`/`saturating_*`/`.shr`), struct/associated-method signatures via mangled keys, and `loop`-as-value typing via a loop-context stack. Three nodes carry a deliberately-chosen type the source has no first-class form for (a `loop` value-expression takes its `break v` type; a method-name callee carries the call's result type; a `Range` carries `void`), and divergent panic-family calls adopt their context's expected type. `neurc` runs the lowering after type-check in both `check` and `compile`; the LLVM backend still consumes the AST — the backend migration onto HIR is the next roadmap item. New slice `CONTEXT.md`, 11 slice unit tests, and `neurc/tests/hir_lowering.rs` end-to-end coverage; the architecture test enforces the slice's infrastructure-only dependencies.
+- `infra`: implement the AST → HIR lowering strategy (Phase 1.8 item 3). New `compiler/hir-lowering` feature slice with the entry point `lower_program(items: &[Item]) -> Result<HirProgram, LoweringError>`: it consumes the type-checked surface AST and produces the typed HIR (`neuro-hir`) every backend will lower from. Because the HIR's defining property is that **every expression carries its resolved type** and the frontend type checker does not expose those types, the slice **re-derives** each expression's type from the AST rather than importing `semantic_analysis::Type`, since importing it would couple two feature slices, which VSA forbids (duplication over coupling). Lowering assumes well-typedness (it computes types, not validates them) and a shape the checker should have rejected surfaces as a `LoweringError` instead of a panic. It faithfully mirrors the checker's contextual rules: literal inference (suffix → expected-type → `i32`/`f64` default), a body's trailing expression typed against the declared return type, builtin-method dispatch (`string`/array `.len()`, `.clone()`, `.slice(range)`, integer `wrapping_*`/`saturating_*`/`.shr`), struct/associated-method signatures via mangled keys, and `loop`-as-value typing via a loop-context stack. Three nodes carry a deliberately-chosen type the source has no first-class form for (a `loop` value-expression takes its `break v` type; a method-name callee carries the call's result type; a `Range` carries `void`), and divergent panic-family calls adopt their context's expected type. `neurc` runs the lowering after type-check in both `check` and `compile`; the LLVM backend still consumes the AST, and the backend migration onto HIR is the next roadmap item. New slice `CONTEXT.md`, 11 slice unit tests, and `neurc/tests/hir_lowering.rs` end-to-end coverage; the architecture test enforces the slice's infrastructure-only dependencies.
 
 ---
 
 ## [1.47.0] - 2026-06-26
 
 ### Added
-- `infra`: introduce the `neuro-hir` typed HIR infrastructure crate (Phase 1.8 item 2). New `compiler/infrastructure/neuro-hir` defines the typed High-Level IR — the stable, backend-agnostic contract between the frontend (parser + type checker) and all backends (`llvm-backend`, `mlir-backend`). The HIR mirrors the surface AST (`ast-types`) one-to-one with two defining differences: every expression node carries its resolved type (`HirExpr { kind, ty, span }`, with a `HirType` that has **no `Unknown` variant** — reaching the HIR implies the program type-checked), and syntactic noise is normalized away (the `Expr::Paren` grouping node is dropped). `HirType`'s variant set mirrors the resolved types the semantic analyzer produces today; no tensor/generic variants are added ahead of those language features. The crate is pure data (like `ast-types`), depending only on `shared-types` (`Span`, `Literal`) and `ast-types` (the `BinaryOp` / `UnaryOp` operator enums, reused unchanged). The AST → HIR lowering (item 3) and the backend migration onto HIR (item 4) are separate, later pipeline steps and are intentionally not part of this crate.
+- `infra`: introduce the `neuro-hir` typed HIR infrastructure crate (Phase 1.8 item 2). New `compiler/infrastructure/neuro-hir` defines the typed High-Level IR, the stable, backend-agnostic contract between the frontend (parser + type checker) and all backends (`llvm-backend`, `mlir-backend`). The HIR mirrors the surface AST (`ast-types`) one-to-one with two defining differences: every expression node carries its resolved type (`HirExpr { kind, ty, span }`, with a `HirType` that has **no `Unknown` variant**, since reaching the HIR implies the program type-checked), and syntactic noise is normalized away (the `Expr::Paren` grouping node is dropped). `HirType`'s variant set mirrors the resolved types the semantic analyzer produces today; no tensor/generic variants are added ahead of those language features. The crate is pure data (like `ast-types`), depending only on `shared-types` (`Span`, `Literal`) and `ast-types` (the `BinaryOp` / `UnaryOp` operator enums, reused unchanged). The AST → HIR lowering (item 3) and the backend migration onto HIR (item 4) are separate, later pipeline steps and are intentionally not part of this crate.
 
 ---
 
 ## [1.46.0] - 2026-06-19
 
 ### Added
-- `infra`: integrate `melior` (Rust MLIR bindings) alongside inkwell (Phase 1.8). New `compiler/mlir-backend` slice hosts `melior 0.25.1` — the newest release targeting MLIR 20 (via `mlir-sys 0.5.0`; melior 0.26+ moved to MLIR 21/22) — behind an off-by-default `mlir` feature. With the feature disabled the crate is an empty placeholder, so the default `cargo build/test --workspace` still works on a stock LLVM 20 install with no MLIR toolchain; enabling `mlir` pulls in melior and exposes `emit_smoke_module`, which builds and verifies `func.func @neuro_smoke(index, index) -> index` (func/arith dialects) as the integration smoke test. `mlir-sys` carries no `llvm-sys` dependency and links its own `MLIR` key, so it coexists with inkwell's `llvm-20` link without a Cargo `links` conflict; pointing `MLIR_SYS_200_PREFIX` / `TABLEGEN_200_PREFIX` at the same LLVM 20 build as `LLVM_SYS_201_PREFIX` makes both bindings share one `libLLVM-20` dylib. CI gains an opt-in MLIR + matching libclang 20 install on Linux (`setup-llvm` `mlir` input) for the `--all-features` lint job; the Windows/macOS test legs build the placeholder. The HIR-consuming lowering entry point and a dedicated CI smoke job remain open (pending typed HIR, Phase 1.8 items 2–5).
+- `infra`: integrate `melior` (Rust MLIR bindings) alongside inkwell (Phase 1.8). New `compiler/mlir-backend` slice hosts `melior 0.25.1`, the newest release targeting MLIR 20 (via `mlir-sys 0.5.0`; melior 0.26+ moved to MLIR 21/22), behind an off-by-default `mlir` feature. With the feature disabled the crate is an empty placeholder, so the default `cargo build/test --workspace` still works on a stock LLVM 20 install with no MLIR toolchain; enabling `mlir` pulls in melior and exposes `emit_smoke_module`, which builds and verifies `func.func @neuro_smoke(index, index) -> index` (func/arith dialects) as the integration smoke test. `mlir-sys` carries no `llvm-sys` dependency and links its own `MLIR` key, so it coexists with inkwell's `llvm-20` link without a Cargo `links` conflict; pointing `MLIR_SYS_200_PREFIX` / `TABLEGEN_200_PREFIX` at the same LLVM 20 build as `LLVM_SYS_201_PREFIX` makes both bindings share one `libLLVM-20` dylib. CI gains an opt-in MLIR + matching libclang 20 install on Linux (`setup-llvm` `mlir` input) for the `--all-features` lint job; the Windows/macOS test legs build the placeholder. The HIR-consuming lowering entry point and a dedicated CI smoke job remain open (pending typed HIR, Phase 1.8 items 2–5).
 
 ---
 
 ## [1.45.0] - 2026-06-19
 
 ### Added
-- `codegen`: fixed-size arrays `[T; N]` (Phase 2A). Array types `[T; N]`, array literals `[e0, e1, ...]` (with element-type inference and length from the element count), index read `arr[i]` and element assignment `arr[i] = v`, the `arr.len()` builtin (compile-time `u64` length), and direct array iteration `for x in arr` / `for x in &arr` (lowered as a counted loop over the storage — no iterator protocol). Element types are restricted to `Copy` scalar primitives (i8–u64, f16/bf16/f32/f64, bool, char), so an array is itself `Copy` and needs no move/Drop tracking. Out-of-bounds index access panics with a located diagnostic in debug builds (`-O0`); release builds omit the check, matching the integer-overflow policy. New diagnostics: `NonCopyArrayElement`, `NotIndexable`, `IndexNotInteger`, `ArrayLengthMismatch`, `CannotInferEmptyArray`. New AST nodes (`Type::Array`, `Expr::ArrayLiteral`, `Expr::Index`, `Stmt::ForEach`, `Stmt::IndexAssignment`), semantic and backend `Type::Array`, `BuiltinMethod::ArrayLen`, `examples/types/arrays.nr`, end-to-end coverage in `neurc/tests/arrays.rs`, and semantic unit tests. Deferred: arrays of non-`Copy` elements (strings, structs), `.enumerate()` indexed iteration (needs tuples), and a compile-time bounds-elision pass.
+- `codegen`: fixed-size arrays `[T; N]` (Phase 2A). Array types `[T; N]`, array literals `[e0, e1, ...]` (with element-type inference and length from the element count), index read `arr[i]` and element assignment `arr[i] = v`, the `arr.len()` builtin (compile-time `u64` length), and direct array iteration `for x in arr` / `for x in &arr` (lowered as a counted loop over the storage, with no iterator protocol). Element types are restricted to `Copy` scalar primitives (i8–u64, f16/bf16/f32/f64, bool, char), so an array is itself `Copy` and needs no move/Drop tracking. Out-of-bounds index access panics with a located diagnostic in debug builds (`-O0`); release builds omit the check, matching the integer-overflow policy. New diagnostics: `NonCopyArrayElement`, `NotIndexable`, `IndexNotInteger`, `ArrayLengthMismatch`, `CannotInferEmptyArray`. New AST nodes (`Type::Array`, `Expr::ArrayLiteral`, `Expr::Index`, `Stmt::ForEach`, `Stmt::IndexAssignment`), semantic and backend `Type::Array`, `BuiltinMethod::ArrayLen`, `examples/types/arrays.nr`, end-to-end coverage in `neurc/tests/arrays.rs`, and semantic unit tests. Deferred: arrays of non-`Copy` elements (strings, structs), `.enumerate()` indexed iteration (needs tuples), and a compile-time bounds-elision pass.
 
 ---
 
 ## [1.44.0] - 2026-06-18
 
 ### Added
-- `codegen`: `Drop` trait + deterministic destruction (Phase 1.7). `impl Drop for T { func drop(&mut self) { ... } }` defines a destructor that runs automatically when an owned binding of `T` leaves its lexical scope, in reverse declaration order, on **normal** exit only — fall-through, `return`, `break`, and `continue`. A panic aborts without running destructors (no stack unwinding, no landing pads). `Drop` is recognized as a compiler-known lang-item (like `Copy`/`Clone`), without the general trait system: the parser accepts `impl TraitName for Type` (`ImplDef::trait_name`); semantic analysis validates the destructor shape (`drop(&mut self)`, no params, no return → `InvalidDropImpl`) and rejects a `Copy` type that implements `Drop` (`DropTypeCannotBeCopy`). The backend (`llvm-backend/src/codegen/drops.rs`) tracks a lexical drop-scope stack and inserts flag-guarded `{struct}__drop` calls at scope exit; each owned binding carries an `i1` drop flag, cleared at every move site, so a value moved out (rebind, return, `break` value, by-value call argument, struct-field store) is dropped exactly once — never double-dropped. All drop machinery is inert for programs that declare no `Drop` types. New `examples/types/drop.nr`, `neurc/tests/drop_destructors.rs`, and semantic/parser unit tests. Known limitations (deferred): reassigning a `Drop` binding does not drop its prior value, and a struct's `Drop`-typed fields are not auto-dropped (no recursive drop glue).
+- `codegen`: `Drop` trait + deterministic destruction (Phase 1.7). `impl Drop for T { func drop(&mut self) { ... } }` defines a destructor that runs automatically when an owned binding of `T` leaves its lexical scope, in reverse declaration order, on **normal** exit only: fall-through, `return`, `break`, and `continue`. A panic aborts without running destructors (no stack unwinding, no landing pads). `Drop` is recognized as a compiler-known lang-item (like `Copy`/`Clone`), without the general trait system: the parser accepts `impl TraitName for Type` (`ImplDef::trait_name`); semantic analysis validates the destructor shape (`drop(&mut self)`, no params, no return → `InvalidDropImpl`) and rejects a `Copy` type that implements `Drop` (`DropTypeCannotBeCopy`). The backend (`llvm-backend/src/codegen/drops.rs`) tracks a lexical drop-scope stack and inserts flag-guarded `{struct}__drop` calls at scope exit; each owned binding carries an `i1` drop flag, cleared at every move site, so a value moved out (rebind, return, `break` value, by-value call argument, struct-field store) is dropped exactly once, never double-dropped. All drop machinery is inert for programs that declare no `Drop` types. New `examples/types/drop.nr`, `neurc/tests/drop_destructors.rs`, and semantic/parser unit tests. Known limitations (deferred): reassigning a `Drop` binding does not drop its prior value, and a struct's `Drop`-typed fields are not auto-dropped (no recursive drop glue).
 
 ---
 
 ## [1.43.0] - 2026-06-18
 
 ### Added
-- `codegen`: string `.slice(range)` (Phase 1.7). `s.slice(a..b)` (exclusive) and `s.slice(a..=b)` (inclusive) return a borrowed `&string` view into the receiver's UTF-8 data — zero copy, since strings are immutable; the slice is just `(ptr + start, len)`. Indices are byte offsets. Both build modes run a runtime check that panics (abort, no unwinding) on an out-of-bounds range (`start > end`, `end > len`, negative `start`) or a range endpoint that splits a multi-byte UTF-8 code point. A `&string` receiver auto-derefs, and the result is itself a `&string` (so `.slice(...).len()` and `==` work). Range expressions `a..b` / `a..=b` are now a parse node (precedence below `??`), accepted by semantic analysis **only** as a `.slice` argument — used anywhere else they are a `RangeNotAllowed` error; `for`-range loops are unchanged. New `BuiltinMethod::StringSlice`, a `codegen_guard_or_panic` panic-runtime helper, `examples/types/string_slice_method.nr`, and end-to-end coverage in `neurc/tests/string_slice.rs`.
+- `codegen`: string `.slice(range)` (Phase 1.7). `s.slice(a..b)` (exclusive) and `s.slice(a..=b)` (inclusive) return a borrowed `&string` view into the receiver's UTF-8 data, zero copy, since strings are immutable; the slice is just `(ptr + start, len)`. Indices are byte offsets. Both build modes run a runtime check that panics (abort, no unwinding) on an out-of-bounds range (`start > end`, `end > len`, negative `start`) or a range endpoint that splits a multi-byte UTF-8 code point. A `&string` receiver auto-derefs, and the result is itself a `&string` (so `.slice(...).len()` and `==` work). Range expressions `a..b` / `a..=b` are now a parse node (precedence below `??`), accepted by semantic analysis **only** as a `.slice` argument. Used anywhere else they are a `RangeNotAllowed` error; `for`-range loops are unchanged. New `BuiltinMethod::StringSlice`, a `codegen_guard_or_panic` panic-runtime helper, `examples/types/string_slice_method.nr`, and end-to-end coverage in `neurc/tests/string_slice.rs`.
 
 ---
 
 ## [1.42.1] - 2026-06-18
 
 ### Changed
-- `docs`: reorganized the private roadmap and synced `CONTRIBUTING.md` so each phase is implementable strictly in order — every open item's prerequisites land in an earlier or the same phase. Resolved `Drop` as a **Phase 1.7 compiler-known lang-item** (recognized specially like `Copy`/`Clone`, reusing impl-blocks + scope/move tracking) rather than gating it on the Phase 2B trait system, making it the keystone next item. Relocated three misplaced items to where their prerequisites live: explicit lifetime annotations `<'a>` → Phase 2B (after Generics, which provides the parse surface); `String.slice(range)` → Phase 1.7 (a string op depending only on `&string` + the panic runtime, both landed); `Layer::require_grad(bool)` → Phase 6 (depends on the Layer trait + `.parameters()`, not the GPU backend). Demoted the duplicate `await`-in-`pool` checkbox in Phase 3 to a forward-dependency note (it is implemented in Phase 7, where `await` exists). No compiler code changed.
+- `docs`: reorganized the private roadmap and synced `CONTRIBUTING.md` so each phase is implementable strictly in order: every open item's prerequisites land in an earlier or the same phase. Resolved `Drop` as a **Phase 1.7 compiler-known lang-item** (recognized specially like `Copy`/`Clone`, reusing impl-blocks + scope/move tracking) rather than gating it on the Phase 2B trait system, making it the keystone next item. Relocated three misplaced items to where their prerequisites live: explicit lifetime annotations `<'a>` → Phase 2B (after Generics, which provides the parse surface); `String.slice(range)` → Phase 1.7 (a string op depending only on `&string` + the panic runtime, both landed); `Layer::require_grad(bool)` → Phase 6 (depends on the Layer trait + `.parameters()`, not the GPU backend). Demoted the duplicate `await`-in-`pool` checkbox in Phase 3 to a forward-dependency note (it is implemented in Phase 7, where `await` exists). No compiler code changed.
 
 ---
 
 ## [1.42.0] - 2026-06-18
 
 ### Added
-- `codegen`: string concatenation with `+` (Phase 1.7). `a + b` on two strings allocates a fresh heap buffer via libc `malloc`, copies both operands' bytes in with `memcpy`, and returns a new owned, immutable `string` `{ ptr, len }` (no NUL terminator, consistent with the `len` contract). A `&string` slice may stand in for either operand; the result is always an owned `string`, never a reference. Operands are read, not consumed — like `==`, `+` borrows-to-read and never moves, so both stay usable afterward. Semantic analysis peels a single string reference in the arithmetic arm (`string + string -> string`); any other arithmetic operator on a string, or mixing a string with a non-string, is `InvalidBinaryOperator`. `malloc`/`memcpy` join the existing first-use libc externs (`memcmp`/`write`/`abort`). New `neurc/tests/string_concat.rs` end-to-end coverage and `examples/types/string_concat.nr`.
+- `codegen`: string concatenation with `+` (Phase 1.7). `a + b` on two strings allocates a fresh heap buffer via libc `malloc`, copies both operands' bytes in with `memcpy`, and returns a new owned, immutable `string` `{ ptr, len }` (no NUL terminator, consistent with the `len` contract). A `&string` slice may stand in for either operand; the result is always an owned `string`, never a reference. Operands are read, not consumed. Like `==`, `+` borrows-to-read and never moves, so both stay usable afterward. Semantic analysis peels a single string reference in the arithmetic arm (`string + string -> string`); any other arithmetic operator on a string, or mixing a string with a non-string, is `InvalidBinaryOperator`. `malloc`/`memcpy` join the existing first-use libc externs (`memcmp`/`write`/`abort`). New `neurc/tests/string_concat.rs` end-to-end coverage and `examples/types/string_concat.nr`.
 
 ### Notes
-- Concatenated buffers are heap-allocated and **not yet freed** — runtime heap strings leak until `Drop` / deterministic destruction lands (Phase 1.7). The growable-builder half of "Runtime string ops" (`String::new` / `.push_str` / `.clear`) stays open: it needs a mutable growable string type, which contradicts the current immutable-`string` spec and depends on `Drop`.
+- Concatenated buffers are heap-allocated and **not yet freed**: runtime heap strings leak until `Drop` / deterministic destruction lands (Phase 1.7). The growable-builder half of "Runtime string ops" (`String::new` / `.push_str` / `.clear`) stays open: it needs a mutable growable string type, which contradicts the current immutable-`string` spec and depends on `Drop`.
 
 ---
 
 ## [1.41.6] - 2026-06-18
 
 ### Changed
-- `docs`: closed the Phase 1.7 "Remove ARC" roadmap item as an audit. A whole-repo scan (`Arc`/`Rc<`/`Arc::new`/`Rc::new`, the `refcount`/`strong_count`/`retain`/`release_ref` vocabulary, and arc-like crate dependencies) returns zero hits — no reference-counting plumbing was ever introduced. The alpha memory model has always been owned-or-borrowed (move-by-default plus `&T`/`&mut T`), so there is nothing to strip. Marked complete in the roadmap and CONTRIBUTING priorities; the `Drop` half is tracked separately and lands with the trait system (Phase 2B).
+- `docs`: closed the Phase 1.7 "Remove ARC" roadmap item as an audit. A whole-repo scan (`Arc`/`Rc<`/`Arc::new`/`Rc::new`, the `refcount`/`strong_count`/`retain`/`release_ref` vocabulary, and arc-like crate dependencies) returns zero hits, so no reference-counting plumbing was ever introduced. The alpha memory model has always been owned-or-borrowed (move-by-default plus `&T`/`&mut T`), so there is nothing to strip. Marked complete in the roadmap and CONTRIBUTING priorities; the `Drop` half is tracked separately and lands with the trait system (Phase 2B).
 
 ---
 
@@ -2938,17 +3010,17 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.41.3] - 2026-06-17
 
 ### Fixed
-- `build`: `compiler/llvm-backend/src/softfloat/builtins.ll` — baked into the build via `include_str!` — was silently excluded from git by the broad `*.ll` ignore rule, so it existed locally but was missing on every CI runner. This broke the build (`couldn't read builtins.ll`), failing Clippy, Architecture Boundaries, the test matrix, and the dependabot PRs. The file is now committed and `.gitignore` carries a negation (`!.../builtins.ll`) so the source IR is tracked while generated `.ll` artifacts stay ignored.
+- `build`: `compiler/llvm-backend/src/softfloat/builtins.ll`, baked into the build via `include_str!`, was silently excluded from git by the broad `*.ll` ignore rule, so it existed locally but was missing on every CI runner. This broke the build (`couldn't read builtins.ll`), failing Clippy, Architecture Boundaries, the test matrix, and the dependabot PRs. The file is now committed and `.gitignore` carries a negation (`!.../builtins.ll`) so the source IR is tracked while generated `.ll` artifacts stay ignored.
 
 ### Changed
-- `ci`: dropped dead `develop` branch triggers (only `main` exists) and merged the duplicate `release_smoke` and `build_artifacts` jobs — each rebuilt the release binary on all three OSes — into a single `release` job that builds once, runs smoke tests, then uploads artifacts.
+- `ci`: dropped dead `develop` branch triggers (only `main` exists) and merged the duplicate `release_smoke` and `build_artifacts` jobs, each of which rebuilt the release binary on all three OSes, into a single `release` job that builds once, runs smoke tests, then uploads artifacts.
 
 ---
 
 ## [1.41.2] - 2026-06-17
 
 ### Fixed
-- `codegen`: `examples/types/half_precision.nr` failed to link on Windows CI — `Failed to execute MSVC cl.exe`. Root cause: LLVM lowers `fpext`/`fptrunc` on `half`/`bfloat` (and f16/bf16 comparisons, which widen to f32 first) to soft-float runtime calls (`__extendhfsf2`, `__truncsfhf2`, `__truncdfhf2`, `__truncsfbf2`, `__truncdfbf2`). Linux/macOS resolve these from libgcc/compiler-rt via the `cc` driver; the Windows linkers (clang → lld-link → MSVC) link no such runtime, so the symbols were undefined and linking fell through to a `cl.exe` that is not on `PATH`. The backend now ships its own definitions: `src/softfloat/` (`builtins.ll`, generated from `reference.c`) is linked into any module that uses `half`/`bfloat`, making the emitted object self-contained on every target. Definitions are `weak_odr` (a platform runtime may still override) and integer-only (they never recursively re-emit these libcalls), and were exhaustively verified against clang's native `_Float16`/`__bf16` — f32↔f16 and f32→bf16 over all 2³² inputs, f16→f32 over all 2¹⁶, and the f64 paths over 200M random inputs, with zero mismatches.
+- `codegen`: `examples/types/half_precision.nr` failed to link on Windows CI with `Failed to execute MSVC cl.exe`. Root cause: LLVM lowers `fpext`/`fptrunc` on `half`/`bfloat` (and f16/bf16 comparisons, which widen to f32 first) to soft-float runtime calls (`__extendhfsf2`, `__truncsfhf2`, `__truncdfhf2`, `__truncsfbf2`, `__truncdfbf2`). Linux/macOS resolve these from libgcc/compiler-rt via the `cc` driver; the Windows linkers (clang → lld-link → MSVC) link no such runtime, so the symbols were undefined and linking fell through to a `cl.exe` that is not on `PATH`. The backend now ships its own definitions: `src/softfloat/` (`builtins.ll`, generated from `reference.c`) is linked into any module that uses `half`/`bfloat`, making the emitted object self-contained on every target. Definitions are `weak_odr` (a platform runtime may still override) and integer-only (they never recursively re-emit these libcalls), and were exhaustively verified against clang's native `_Float16`/`__bf16`: f32↔f16 and f32→bf16 over all 2³² inputs, f16→f32 over all 2¹⁶, and the f64 paths over 200M random inputs, with zero mismatches.
 
 ### Security
 - `ci`: hardened the GitHub Actions workflows against the OpenSSF Scorecard findings. All third-party actions in `ci.yml` and `scorecard.yml` are now pinned by commit SHA (Pinned-Dependencies); `osv-scanner.yml` drops its workflow-wide `security-events: write` to `permissions: read-all` and grants the write scope per-job (Token-Permissions); and a new `.github/dependabot.yml` keeps the pinned actions and Cargo crates updated weekly (Dependency-Update-Tool).
@@ -2959,159 +3031,159 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 
 ### Fixed
 - `build`: workspace manifest declared `license = "GPL-3.0"`, which both misidentified the project (it ships under the custom **Neuro Shared Source License v2.1**, per `LICENSE`, README, and `CONTRIBUTING.md`) and used a now-deprecated SPDX form. Switched to `license-file = "LICENSE"` in `[workspace.package]`; all member crates now inherit `license-file.workspace = true`.
-- `docs`: corrected the LLVM dependency comment in `Cargo.toml` that claimed LLVM must be built "with MLIR enabled" — the current backend emits LLVM IR via inkwell and needs no MLIR, which only arrives with the Phase 3 tensor dialects.
+- `docs`: corrected the LLVM dependency comment in `Cargo.toml` that claimed LLVM must be built "with MLIR enabled". The current backend emits LLVM IR via inkwell and needs no MLIR, which only arrives with the Phase 3 tensor dialects.
 
 ---
 
 ## [1.41.0] - 2026-06-17
 
 ### Added
-- `semantic` + `codegen`: `&mut self` instance methods — the Phase 1.7 ownership-gated receiver that was previously rejected. A method may now take `&mut self` and assign to `self.field`; the receiver is passed **by pointer** so the write propagates to the caller's value (a `&self` method stays by-value/read-only, and consuming `self` is still rejected pending the by-value struct ABI). Semantic: `register_impl` no longer rejects `&mut self` and records its mangled key in the new `mut_self_methods` set; `check_impl` binds `self` as a *mutable* variable for `&mut self`; the method-call site runs `check_mut_self_receiver`, which enforces the borrow — the receiver must be a `mut` place (or reached through `&mut T`) and must not already be borrowed (`CannotBorrowMutably` / `CannotMutablyBorrowWhileBorrowed`), registering a transient exclusive borrow that clears at statement end. Codegen: `codegen_method` lowers a `&mut self` method's first LLVM parameter as `ptr`, binds `self` directly to it without a copy (recorded type still the struct, so field reads/writes pass through), and seeds `type_env["self"]`; `codegen_method_call` detects a by-pointer callee from its first param type and passes the receiver place's address via `get_struct_ptr_and_type`. Tests: 5 semantic unit (`moves.rs`), 3 `neurc` integration (`methods.rs`), example `structs/mut_self_accumulator.nr`. 677 tests pass.
+- `semantic` + `codegen`: `&mut self` instance methods, the Phase 1.7 ownership-gated receiver that was previously rejected. A method may now take `&mut self` and assign to `self.field`; the receiver is passed **by pointer** so the write propagates to the caller's value (a `&self` method stays by-value/read-only, and consuming `self` is still rejected pending the by-value struct ABI). Semantic: `register_impl` no longer rejects `&mut self` and records its mangled key in the new `mut_self_methods` set; `check_impl` binds `self` as a *mutable* variable for `&mut self`; the method-call site runs `check_mut_self_receiver`, which enforces the borrow: the receiver must be a `mut` place (or reached through `&mut T`) and must not already be borrowed (`CannotBorrowMutably` / `CannotMutablyBorrowWhileBorrowed`), registering a transient exclusive borrow that clears at statement end. Codegen: `codegen_method` lowers a `&mut self` method's first LLVM parameter as `ptr`, binds `self` directly to it without a copy (recorded type still the struct, so field reads/writes pass through), and seeds `type_env["self"]`; `codegen_method_call` detects a by-pointer callee from its first param type and passes the receiver place's address via `get_struct_ptr_and_type`. Tests: 5 semantic unit (`moves.rs`), 3 `neurc` integration (`methods.rs`), example `structs/mut_self_accumulator.nr`. 677 tests pass.
 
 ---
 
 ## [1.40.0] - 2026-06-17
 
 ### Added
-- `semantic`: returned-reference outlives / lifetime elision — the borrow checker now verifies that a function or method whose declared return type is a reference does not return a reference borrowing a place that dies with the call. Under lifetime elision a single input reference lifetime is applied to the output, and the `&self` lifetime is applied to method outputs, so returning one of the reference parameters (or a borrow of `&self`) is sound; borrowing a body-local or a by-value parameter and returning it — directly (`return &local`) or through a local reference binding (`val r = &local; r`) — is rejected with the new `ReturnsReferenceToLocal` diagnostic. New surface: `current_fn_outliving: HashSet<String>` on the type checker (reference-typed parameters plus `self`, rebuilt per function/method and cleared on exit), `SymbolTable::borrow_provenance` (the place a `val r = &x` binding recorded), and `check_returned_reference` (with helpers `tail_expr` / `root_place_name` / `is_local_to_function`) invoked from `Stmt::Return` and both trailing implicit-return sites when the return type is a `Type::Reference`. The walk follows `if`/`else` arms and bare/`unsafe` blocks into their tail expressions. Elision-only — no annotation syntax; ambiguous multi-reference signatures are accepted as long as the borrowee is a parameter (explicit `<'a>` lands with generics, Phase 2B). Conservative: a name absent from the symbol table is treated as non-local, so a valid program is never rejected. Tests: 6 semantic unit, 5 `neurc` integration (`returned_reference.rs`), example `types/returned_reference.nr`. 668 tests pass.
+- `semantic`: returned-reference outlives / lifetime elision: the borrow checker now verifies that a function or method whose declared return type is a reference does not return a reference borrowing a place that dies with the call. Under lifetime elision a single input reference lifetime is applied to the output, and the `&self` lifetime is applied to method outputs, so returning one of the reference parameters (or a borrow of `&self`) is sound; borrowing a body-local or a by-value parameter and returning it, directly (`return &local`) or through a local reference binding (`val r = &local; r`), is rejected with the new `ReturnsReferenceToLocal` diagnostic. New surface: `current_fn_outliving: HashSet<String>` on the type checker (reference-typed parameters plus `self`, rebuilt per function/method and cleared on exit), `SymbolTable::borrow_provenance` (the place a `val r = &x` binding recorded), and `check_returned_reference` (with helpers `tail_expr` / `root_place_name` / `is_local_to_function`) invoked from `Stmt::Return` and both trailing implicit-return sites when the return type is a `Type::Reference`. The walk follows `if`/`else` arms and bare/`unsafe` blocks into their tail expressions. Elision-only, with no annotation syntax; ambiguous multi-reference signatures are accepted as long as the borrowee is a parameter (explicit `<'a>` lands with generics, Phase 2B). Conservative: a name absent from the symbol table is treated as non-local, so a valid program is never rejected. Tests: 6 semantic unit, 5 `neurc` integration (`returned_reference.rs`), example `types/returned_reference.nr`. 668 tests pass.
 
 ---
 
 ## [1.39.0] - 2026-06-16
 
 ### Added
-- `semantic`: flow-sensitive borrow exclusivity — the aliasing rule split out of the lifetime-inference roadmap item because it needs only borrow-region tracking, not full lifetime inference. The borrow checker now enforces that **at most one `&mut` borrow** of a place may be live at a time and that **no `&` borrow coexists with a live `&mut`**; any number of shared `&` borrows may coexist. Borrow regions are lexical: a borrow held by a binding (`val r = &x`) lives until that binding leaves scope; a borrow passed to a call, used in a condition, or returned ends with the statement that took it. New surface: per-binding persistent/transient borrow counters and a borrow-provenance field on `SymbolInfo`; `SymbolTable` methods `borrow_counts` / `add_transient_borrow` / `attach_borrow` / `release_borrow_of` / `clear_transient_borrows`, with `pop_scope` now releasing a dying reference binding's borrow. The `Expr::Reference` arm checks coexistence and registers each borrow; `check_stmt` clears transient borrows at statement end; `VarDecl` / `Assignment` promote a direct `&place` initializer to a persistent borrow (reassigning a `mut` reference releases its old borrow first). New diagnostics `CannotMutablyBorrowWhileBorrowed` / `CannotBorrowWhileMutablyBorrowed`. Lexical, not NLL: only direct-borrow initializers create tracked persistent borrows, so the analysis never rejects a valid program; read/move-while-borrowed and returned-reference outlives are deferred to lifetime inference. Tests: 8 semantic unit, 5 `neurc` integration (`borrow_exclusivity.rs`), example `types/borrow_exclusivity.nr`. 657 tests pass.
+- `semantic`: flow-sensitive borrow exclusivity, the aliasing rule split out of the lifetime-inference roadmap item because it needs only borrow-region tracking, not full lifetime inference. The borrow checker now enforces that **at most one `&mut` borrow** of a place may be live at a time and that **no `&` borrow coexists with a live `&mut`**; any number of shared `&` borrows may coexist. Borrow regions are lexical: a borrow held by a binding (`val r = &x`) lives until that binding leaves scope; a borrow passed to a call, used in a condition, or returned ends with the statement that took it. New surface: per-binding persistent/transient borrow counters and a borrow-provenance field on `SymbolInfo`; `SymbolTable` methods `borrow_counts` / `add_transient_borrow` / `attach_borrow` / `release_borrow_of` / `clear_transient_borrows`, with `pop_scope` now releasing a dying reference binding's borrow. The `Expr::Reference` arm checks coexistence and registers each borrow; `check_stmt` clears transient borrows at statement end; `VarDecl` / `Assignment` promote a direct `&place` initializer to a persistent borrow (reassigning a `mut` reference releases its old borrow first). New diagnostics `CannotMutablyBorrowWhileBorrowed` / `CannotBorrowWhileMutablyBorrowed`. Lexical, not NLL: only direct-borrow initializers create tracked persistent borrows, so the analysis never rejects a valid program; read/move-while-borrowed and returned-reference outlives are deferred to lifetime inference. Tests: 8 semantic unit, 5 `neurc` integration (`borrow_exclusivity.rs`), example `types/borrow_exclusivity.nr`. 657 tests pass.
 
 ---
 
 ## [1.38.0] - 2026-06-16
 
 ### Added
-- `lexer`/`semantic`/`codegen`: `f16` / `bf16` half-precision scalar primitives — the final Phase 1.5 item. `f16` is the IEEE-754 half float; `bf16` is bfloat16 (`f32`-sized exponent range, fewer mantissa bits). Both are first-class scalar primitives with a deliberately **narrow contract**: binding, move/copy (`Copy`), equality (`==` / `!=`), and `as`-cast to/from any numeric type and to/from each other — but **no scalar arithmetic** (`a + b` on a half operand is a compile error directing you to compute in `f32`: `(a as f32 + b as f32)`) and no ordering. Half-precision literals always carry a suffix (`1.5f16`, `0.02bf16`) — there is no contextual default. Full support as tensor element dtypes is separate and lands with the tensor type system (Phase 3A). New surface: lexer `FloatSuffix::F16`/`BF16` (the two float-suffix regexes now match `(bf16|f16|f32|f64)`, split via `split_float_suffix`), semantic `Type::F16`/`BF16` (`is_half_float()`; new `HalfFloatArithmetic` diagnostic), and backend `Type::F16`/`BF16` lowered to LLVM `half` / `bfloat` (float→float casts and `coerce_if_needed` now pick `fpext`/`fptrunc` by bit width; an `f16`↔`bf16` cast routes through `f32`). Tests: 1 lexer unit, 1 semantic unit, 7 `neurc` integration (`half_precision.rs`), example `types/half_precision.nr`. 644 tests pass. **Phase 1.5 (Syntax & Semantics Stabilization) is now complete.**
+- `lexer`/`semantic`/`codegen`: `f16` / `bf16` half-precision scalar primitives, the final Phase 1.5 item. `f16` is the IEEE-754 half float; `bf16` is bfloat16 (`f32`-sized exponent range, fewer mantissa bits). Both are first-class scalar primitives with a deliberately **narrow contract**: binding, move/copy (`Copy`), equality (`==` / `!=`), and `as`-cast to/from any numeric type and to/from each other, but **no scalar arithmetic** (`a + b` on a half operand is a compile error directing you to compute in `f32`: `(a as f32 + b as f32)`) and no ordering. Half-precision literals always carry a suffix (`1.5f16`, `0.02bf16`); there is no contextual default. Full support as tensor element dtypes is separate and lands with the tensor type system (Phase 3A). New surface: lexer `FloatSuffix::F16`/`BF16` (the two float-suffix regexes now match `(bf16|f16|f32|f64)`, split via `split_float_suffix`), semantic `Type::F16`/`BF16` (`is_half_float()`; new `HalfFloatArithmetic` diagnostic), and backend `Type::F16`/`BF16` lowered to LLVM `half` / `bfloat` (float→float casts and `coerce_if_needed` now pick `fpext`/`fptrunc` by bit width; an `f16`↔`bf16` cast routes through `f32`). Tests: 1 lexer unit, 1 semantic unit, 7 `neurc` integration (`half_precision.rs`), example `types/half_precision.nr`. 644 tests pass. **Phase 1.5 (Syntax & Semantics Stabilization) is now complete.**
 
 ---
 
 ## [1.37.0] - 2026-06-15
 
 ### Added
-- `lexer`/`parser`/`semantic`/`codegen`: `char` primitive type. A `char` is a single 32-bit Unicode scalar value. Char literals are written with single quotes and support escapes — `'a'`, `'\n'`, `'\t'`, `'\\'`, `'\''`, `'\0'`, the `\xNN` byte escape, and the `\u{...}` unicode escape (`'\u{1F44D}'`). `char` is `Copy` (binding it does not move the source), has a built-in total order so all six comparison operators work directly (`'a' < 'b'`), and `as`-casts to and from integer types in both directions (`'A' as i32` → 65, `97 as char` → `'a'`); it is **not** castable to/from `float` or `bool` and has **no** arithmetic (`'a' + 1` is a compile error — compute on the integer code point instead). New surface: lexer `TokenKind::Char(char)` (single-scalar regex; `''`/`'ab'`/unterminated `'a` are lex errors via the new `LexError::InvalidCharLiteral`), `Literal::Char(char)`, semantic `Type::Char`, and backend `Type::Char` lowered to LLVM `i32`. Tests: 3 lexer unit, 1 semantic unit, 6 `neurc` integration (`char_type.rs`), example `types/char.nr`. 635 tests pass.
+- `lexer`/`parser`/`semantic`/`codegen`: `char` primitive type. A `char` is a single 32-bit Unicode scalar value. Char literals are written with single quotes and support escapes: `'a'`, `'\n'`, `'\t'`, `'\\'`, `'\''`, `'\0'`, the `\xNN` byte escape, and the `\u{...}` unicode escape (`'\u{1F44D}'`). `char` is `Copy` (binding it does not move the source), has a built-in total order so all six comparison operators work directly (`'a' < 'b'`), and `as`-casts to and from integer types in both directions (`'A' as i32` → 65, `97 as char` → `'a'`); it is **not** castable to/from `float` or `bool` and has **no** arithmetic (`'a' + 1` is a compile error; compute on the integer code point instead). New surface: lexer `TokenKind::Char(char)` (single-scalar regex; `''`/`'ab'`/unterminated `'a` are lex errors via the new `LexError::InvalidCharLiteral`), `Literal::Char(char)`, semantic `Type::Char`, and backend `Type::Char` lowered to LLVM `i32`. Tests: 3 lexer unit, 1 semantic unit, 6 `neurc` integration (`char_type.rs`), example `types/char.nr`. 635 tests pass.
 
 ---
 
 ## [1.36.0] - 2026-06-15
 
 ### Added
-- `parser`/`semantic`/`codegen`: `loop` as a value expression — `break value`. A `loop` used in expression position evaluates to the value carried out by its `break`: `val first = loop { ... break v }`. All value-carrying `break`s for one loop must agree on type; `break value` targeting a `while`/`for` is rejected, since those always yield unit (only `loop` is guaranteed to leave solely via a `break`). `break label value` carries a value out of a labeled outer loop, and a labeled loop may itself appear in expression position (`val x = outer: loop { ... }`). New surface: `Expr::Loop { label, body, span }` (distinct from the statement `Stmt::Loop`, whose value is discarded) and a `value: Option<Expr>` field on `Stmt::Break`. The parser disambiguates `break ident` — an identifier is read as a label only when it names an in-scope loop (tracked in a new parser label stack), otherwise it begins the value expression. Semantic analysis replaces the `loop_labels` stack with a `loop_stack` of per-loop contexts that accumulate the agreed value-break type (new `BreakValueInUnitLoop` error; type disagreement reuses `Mismatch`). Codegen allocates a result slot per value loop; a value `break` stores into it before branching and the loop expression loads it at exit. Tests: 2 parser unit, 3 semantic unit, 4 `neurc` integration (`loop_value.rs`), example `control_flow/loop_value.nr`. 626 tests pass.
+- `parser`/`semantic`/`codegen`: `loop` as a value expression, via `break value`. A `loop` used in expression position evaluates to the value carried out by its `break`: `val first = loop { ... break v }`. All value-carrying `break`s for one loop must agree on type; `break value` targeting a `while`/`for` is rejected, since those always yield unit (only `loop` is guaranteed to leave solely via a `break`). `break label value` carries a value out of a labeled outer loop, and a labeled loop may itself appear in expression position (`val x = outer: loop { ... }`). New surface: `Expr::Loop { label, body, span }` (distinct from the statement `Stmt::Loop`, whose value is discarded) and a `value: Option<Expr>` field on `Stmt::Break`. The parser disambiguates `break ident`: an identifier is read as a label only when it names an in-scope loop (tracked in a new parser label stack), otherwise it begins the value expression. Semantic analysis replaces the `loop_labels` stack with a `loop_stack` of per-loop contexts that accumulate the agreed value-break type (new `BreakValueInUnitLoop` error; type disagreement reuses `Mismatch`). Codegen allocates a result slot per value loop; a value `break` stores into it before branching and the loop expression loads it at exit. Tests: 2 parser unit, 3 semantic unit, 4 `neurc` integration (`loop_value.rs`), example `control_flow/loop_value.nr`. 626 tests pass.
 
 ---
 
 ## [1.35.0] - 2026-06-15
 
 ### Added
-- `parser`/`semantic`/`codegen`: loop labels with `break label` / `continue label`. A `for`, `while`, or `loop` may be prefixed with a label — an identifier followed by a colon (`outer:`) — and a nested `break outer` / `continue outer` then targets the labeled loop rather than the innermost one. This is the construct that lets an inner loop exit or re-enter an enclosing loop directly. New surface: an `Option<Identifier>` `label` field on `Stmt::While` / `ForRange` / `Loop` and on `Stmt::Break` / `Continue` (labels reuse the existing `Identifier` + `Colon` tokens, so the lexer is unchanged). The parser dispatches `ident : <loop-keyword>` to the matching loop parser and reads an optional same-line label after `break` / `continue`. Semantic analysis replaces the `loop_depth` counter with a `loop_labels` stack: an unlabeled `break`/`continue` still requires an enclosing loop, and a labeled one requires a matching active label (else the new `UndefinedLabel` error). Codegen adds a `label` to `LoopTargets` and resolves a labeled jump by scanning the loop-target stack from innermost outward. Tests: 3 parser unit, 3 semantic unit, 4 `neurc` integration (`labeled_breaks.rs`), example `control_flow/labeled_breaks.nr`. 617 tests pass.
+- `parser`/`semantic`/`codegen`: loop labels with `break label` / `continue label`. A `for`, `while`, or `loop` may be prefixed with a label, an identifier followed by a colon (`outer:`), and a nested `break outer` / `continue outer` then targets the labeled loop rather than the innermost one. This is the construct that lets an inner loop exit or re-enter an enclosing loop directly. New surface: an `Option<Identifier>` `label` field on `Stmt::While` / `ForRange` / `Loop` and on `Stmt::Break` / `Continue` (labels reuse the existing `Identifier` + `Colon` tokens, so the lexer is unchanged). The parser dispatches `ident : <loop-keyword>` to the matching loop parser and reads an optional same-line label after `break` / `continue`. Semantic analysis replaces the `loop_depth` counter with a `loop_labels` stack: an unlabeled `break`/`continue` still requires an enclosing loop, and a labeled one requires a matching active label (else the new `UndefinedLabel` error). Codegen adds a `label` to `LoopTargets` and resolves a labeled jump by scanning the loop-target stack from innermost outward. Tests: 3 parser unit, 3 semantic unit, 4 `neurc` integration (`labeled_breaks.rs`), example `control_flow/labeled_breaks.nr`. 617 tests pass.
 
 ---
 
 ## [1.34.0] - 2026-06-09
 
 ### Added
-- `lexer`/`parser`/`semantic`/`codegen`: `loop { ... }` infinite-loop statement. `loop` is the canonical infinite loop — the form the `prefer-loop-over-while-true` lint already recommended in place of `while true { ... }`, but which previously did not exist, so following the compiler's own advice produced broken code. `loop` has no condition: the only exit is `break`, and `continue` re-enters the body from the top. New surface: the `loop` keyword (`TokenKind::Loop`) and the `Stmt::Loop { body, span }` AST node. Semantic analysis increments `loop_depth` for the body (so `break`/`continue` inside are in-loop) and the lint walker recurses into `loop` bodies; codegen lowers it to an unconditional back-edge (`loop.body` branches to itself), mirroring `while` minus the condition block. A `loop` statement evaluates to unit; the value-producing `break value` form is not yet modelled (tracked on the roadmap). Tests: 1 lexer unit, 1 parser unit, 2 semantic integration, 2 `neurc` integration (`control_flow.rs`), example `control_flow/loop_statement.nr`. 607 tests pass.
+- `lexer`/`parser`/`semantic`/`codegen`: `loop { ... }` infinite-loop statement. `loop` is the canonical infinite loop, the form the `prefer-loop-over-while-true` lint already recommended in place of `while true { ... }`, but which previously did not exist, so following the compiler's own advice produced broken code. `loop` has no condition: the only exit is `break`, and `continue` re-enters the body from the top. New surface: the `loop` keyword (`TokenKind::Loop`) and the `Stmt::Loop { body, span }` AST node. Semantic analysis increments `loop_depth` for the body (so `break`/`continue` inside are in-loop) and the lint walker recurses into `loop` bodies; codegen lowers it to an unconditional back-edge (`loop.body` branches to itself), mirroring `while` minus the condition block. A `loop` statement evaluates to unit; the value-producing `break value` form is not yet modelled (tracked on the roadmap). Tests: 1 lexer unit, 1 parser unit, 2 semantic integration, 2 `neurc` integration (`control_flow.rs`), example `control_flow/loop_statement.nr`. 607 tests pass.
 
 ---
 
 ## [1.33.0] - 2026-06-09
 
 ### Added
-- `parser`/`semantic`/`codegen`: mutable borrows `&mut T` and the dereference operator `*` (Phase 1.7). A `&mut T` reference grants write access to a `mut` binding without taking ownership; values are read and written through the new prefix `*` operator. New surface: the `&mut place` borrow expression, the `&mut T` type annotation (params/returns/locals), the `*expr` dereference expression, and the `*place = value` assignment-through-a-reference statement. Borrow rules enforced in semantic analysis: `&mut` requires a `mut` binding (`CannotBorrowMutably`); `*` applies only to a reference (`CannotDereference`); writing through `*` requires a `&mut` (`CannotAssignThroughRef`). `&mut T` and `&T` are distinct types with no implicit coercion (explicit over implicit). Codegen lowers a borrow to the place's storage pointer (mutability is a compile-time-only distinction) and a deref to a load/store through that pointer. Side fix needed by the canonical example: unit-returning function calls in statement position no longer error (`codegen_call`/`codegen_method_call` now return `Option`, discarded in statement position); and a new line beginning with `*` is parsed as a dereference statement rather than glued to the previous expression as a continued multiplication. **Deferred** (mirrors how `&T` shipped without lifetime checking): flow-sensitive aliasing exclusivity — the "at most one `&mut` at a time, no `&` may coexist" rule — lands with lifetime inference, which shares the same borrow-region analysis. Tests: 4 semantic unit, 1 type-system unit, 8 integration (`neurc/tests/mutable_borrows.rs`), example `showcase/mutable_borrows.nr`. 601 tests pass.
+- `parser`/`semantic`/`codegen`: mutable borrows `&mut T` and the dereference operator `*` (Phase 1.7). A `&mut T` reference grants write access to a `mut` binding without taking ownership; values are read and written through the new prefix `*` operator. New surface: the `&mut place` borrow expression, the `&mut T` type annotation (params/returns/locals), the `*expr` dereference expression, and the `*place = value` assignment-through-a-reference statement. Borrow rules enforced in semantic analysis: `&mut` requires a `mut` binding (`CannotBorrowMutably`); `*` applies only to a reference (`CannotDereference`); writing through `*` requires a `&mut` (`CannotAssignThroughRef`). `&mut T` and `&T` are distinct types with no implicit coercion (explicit over implicit). Codegen lowers a borrow to the place's storage pointer (mutability is a compile-time-only distinction) and a deref to a load/store through that pointer. Side fix needed by the canonical example: unit-returning function calls in statement position no longer error (`codegen_call`/`codegen_method_call` now return `Option`, discarded in statement position); and a new line beginning with `*` is parsed as a dereference statement rather than glued to the previous expression as a continued multiplication. **Deferred** (mirrors how `&T` shipped without lifetime checking): flow-sensitive aliasing exclusivity, the "at most one `&mut` at a time, no `&` may coexist" rule, lands with lifetime inference, which shares the same borrow-region analysis. Tests: 4 semantic unit, 1 type-system unit, 8 integration (`neurc/tests/mutable_borrows.rs`), example `showcase/mutable_borrows.nr`. 601 tests pass.
 
 ---
 
 ## [1.32.0] - 2026-06-09
 
 ### Added
-- `semantic`/`codegen`: `&string` slice equality (Phase 1.7). `&string` is now usable as a borrowed string slice: the equality operators `==` / `!=` compare the underlying UTF-8 bytes for any combination of an owned `string` and a `&string` slice (`&a == &b`, `&a == "lit"`, `"lit" == &a`). Semantic analysis normalizes a single string reference via `Type::peel_string_ref` in the `Equal`/`NotEqual` arm, so a slice and an owned string are equality-compatible; peeling is limited to `string`, so `i32 == &string` and `&i32 == i32` stay type errors (reading other `&T` through `==` needs the deref operator, which lands with `&mut T`). Codegen handles string equality before the numeric coercion: each operand is normalized to its `{ ptr, len }` fat pointer by the new `load_string_fatptr` helper (a borrow is loaded through its pointer; an owned struct value passes through) and compared with the existing `codegen_string_eq` — the ABI is unchanged, only the borrowed operand is auto-dereferenced. Borrowing for a comparison never moves, so both operands stay usable afterward. Tests: 1 semantic-type unit, 7 integration (`neurc/tests/string_slice.rs`), example `types/string_slice.nr`. 588 tests pass.
+- `semantic`/`codegen`: `&string` slice equality (Phase 1.7). `&string` is now usable as a borrowed string slice: the equality operators `==` / `!=` compare the underlying UTF-8 bytes for any combination of an owned `string` and a `&string` slice (`&a == &b`, `&a == "lit"`, `"lit" == &a`). Semantic analysis normalizes a single string reference via `Type::peel_string_ref` in the `Equal`/`NotEqual` arm, so a slice and an owned string are equality-compatible; peeling is limited to `string`, so `i32 == &string` and `&i32 == i32` stay type errors (reading other `&T` through `==` needs the deref operator, which lands with `&mut T`). Codegen handles string equality before the numeric coercion: each operand is normalized to its `{ ptr, len }` fat pointer by the new `load_string_fatptr` helper (a borrow is loaded through its pointer; an owned struct value passes through) and compared with the existing `codegen_string_eq`. The ABI is unchanged, only the borrowed operand is auto-dereferenced. Borrowing for a comparison never moves, so both operands stay usable afterward. Tests: 1 semantic-type unit, 7 integration (`neurc/tests/string_slice.rs`), example `types/string_slice.nr`. 588 tests pass.
 
 ---
 
 ## [1.31.1] - 2026-06-08
 
 ### Changed
-- `codegen`: audit cleanup — replace the banned `unimplemented!()` stub on the tensor arm of `Type::from_ast` (`llvm-backend`) with a documented `unreachable!()` invariant. Tensor annotations are rejected by semantic analysis before codegen, so the arm asserts an invariant rather than stubbing a missing feature (AC-004 compliance). No behavioral change; 580 tests pass.
+- `codegen`: audit cleanup, replacing the banned `unimplemented!()` stub on the tensor arm of `Type::from_ast` (`llvm-backend`) with a documented `unreachable!()` invariant. Tensor annotations are rejected by semantic analysis before codegen, so the arm asserts an invariant rather than stubbing a missing feature (AC-004 compliance). No behavioral change; 580 tests pass.
 
 ---
 
 ## [1.31.0] - 2026-06-08
 
 ### Added
-- `semantic`/`codegen`: immutable borrows `&T` (Phase 1.7). A new reference type `&T` is accepted in any type-annotation position (parameters, returns, locals), and a prefix `&place` borrow expression takes a non-owning reference to a variable. Borrowing **does not move** the borrowed value — `length(&msg); msg.len()` compiles — and `&T` is itself `Copy`, so a reference can be passed and re-borrowed freely. Method and field access auto-deref through a borrow: `s.len()` / `s.clone()` work on `&string`, and `r.field` / `r.method()` work on `&Struct`. Borrowing a temporary (a literal, a call result) or a `const` (an inlined value, not a place) is a new `CannotBorrowValue` error. References lower to opaque LLVM 20 pointers; a borrow of a place is its alloca pointer, and consuming sites load through the pointer when the receiver is a borrow (value-driven, so owned and borrowed receivers share one path). Integer intrinsics (`wrapping_*`, `.shr`) intentionally still require a value receiver — reading a scalar through `&T` needs the deref operator, which lands with `&mut T`. Implementation spans `ast-types` (`Type::Reference`, `Expr::Reference`), `syntax-parsing` (`&T` type + prefix `&` borrow), `semantic-analysis` (`Type::Reference`, no-move/Copy rules, auto-deref, `CannotBorrowValue`), and `llvm-backend` (`Type::Reference` → `ptr`, borrow + auto-deref codegen). Tests: 1 semantic-type unit, 3 move-checker unit, 6 integration (`neurc/tests/immutable_borrows.rs`), example `types/immutable_borrows.nr`. 580 tests pass.
+- `semantic`/`codegen`: immutable borrows `&T` (Phase 1.7). A new reference type `&T` is accepted in any type-annotation position (parameters, returns, locals), and a prefix `&place` borrow expression takes a non-owning reference to a variable. Borrowing **does not move** the borrowed value (`length(&msg); msg.len()` compiles) and `&T` is itself `Copy`, so a reference can be passed and re-borrowed freely. Method and field access auto-deref through a borrow: `s.len()` / `s.clone()` work on `&string`, and `r.field` / `r.method()` work on `&Struct`. Borrowing a temporary (a literal, a call result) or a `const` (an inlined value, not a place) is a new `CannotBorrowValue` error. References lower to opaque LLVM 20 pointers; a borrow of a place is its alloca pointer, and consuming sites load through the pointer when the receiver is a borrow (value-driven, so owned and borrowed receivers share one path). Integer intrinsics (`wrapping_*`, `.shr`) intentionally still require a value receiver: reading a scalar through `&T` needs the deref operator, which lands with `&mut T`. Implementation spans `ast-types` (`Type::Reference`, `Expr::Reference`), `syntax-parsing` (`&T` type + prefix `&` borrow), `semantic-analysis` (`Type::Reference`, no-move/Copy rules, auto-deref, `CannotBorrowValue`), and `llvm-backend` (`Type::Reference` → `ptr`, borrow + auto-deref codegen). Tests: 1 semantic-type unit, 3 move-checker unit, 6 integration (`neurc/tests/immutable_borrows.rs`), example `types/immutable_borrows.nr`. 580 tests pass.
 
 ---
 
 ## [1.30.0] - 2026-06-07
 
 ### Added
-- `semantic`: `Copy` trait + `@derive(Copy, Clone)` for structs (Phase 1.7). A struct that derives `Copy` is duplicated on assignment instead of moved, so `val b = a` leaves `a` usable; a struct that does *not* derive `Copy` is now move-tracked like `string` — binding/assigning/returning/passing it by value moves the source, and reading it afterward is a `UseOfMovedValue` error. Deriving `Copy` requires every field to be `Copy` (primitive scalars are `Copy`, `string` is not, a struct field is `Copy` only when it derives `Copy`); a violation is a new `CopyDeriveNonCopyField` error. `Copy` implies `Clone`. `@derive(Clone)` (or `Copy`) enables `struct.clone()` as a compiler-known builtin deep copy; a user-defined `clone` method shadows it. Unknown derive arguments (e.g. `Debug`) are accepted and ignored for forward compatibility. Move-tracking is now context-aware (`TypeChecker::is_type_move_tracked` / `is_type_copy`) rather than a property of the type alone. `@derive(...)` attributes now attach to struct definitions (parser + `StructDef.attributes`). Implementation spans `ast-types` (`StructDef.attributes`), `syntax-parsing` (struct attribute parsing), `semantic-analysis` (`copy_structs`/`clone_structs` registries, Copy-field validation pass, struct `.clone()` resolution), and `llvm-backend` (`BuiltinMethod::StructClone` — loads the aggregate value, a faithful copy while structs are stack-allocated). Tests: 3 parser unit, 5 semantic unit, 5 integration (`neurc/tests/copy_clone.rs`), example `types/copy_clone.nr`. 570 tests pass.
+- `semantic`: `Copy` trait + `@derive(Copy, Clone)` for structs (Phase 1.7). A struct that derives `Copy` is duplicated on assignment instead of moved, so `val b = a` leaves `a` usable; a struct that does *not* derive `Copy` is now move-tracked like `string`: binding, assigning, returning or passing it by value moves the source, and reading it afterward is a `UseOfMovedValue` error. Deriving `Copy` requires every field to be `Copy` (primitive scalars are `Copy`, `string` is not, a struct field is `Copy` only when it derives `Copy`); a violation is a new `CopyDeriveNonCopyField` error. `Copy` implies `Clone`. `@derive(Clone)` (or `Copy`) enables `struct.clone()` as a compiler-known builtin deep copy; a user-defined `clone` method shadows it. Unknown derive arguments (e.g. `Debug`) are accepted and ignored for forward compatibility. Move-tracking is now context-aware (`TypeChecker::is_type_move_tracked` / `is_type_copy`) rather than a property of the type alone. `@derive(...)` attributes now attach to struct definitions (parser + `StructDef.attributes`). Implementation spans `ast-types` (`StructDef.attributes`), `syntax-parsing` (struct attribute parsing), `semantic-analysis` (`copy_structs`/`clone_structs` registries, Copy-field validation pass, struct `.clone()` resolution), and `llvm-backend` (`BuiltinMethod::StructClone`, which loads the aggregate value, a faithful copy while structs are stack-allocated). Tests: 3 parser unit, 5 semantic unit, 5 integration (`neurc/tests/copy_clone.rs`), example `types/copy_clone.nr`. 570 tests pass.
 
 ---
 
 ## [1.29.0] - 2026-06-07
 
 ### Added
-- `semantic`: move semantics by default (Phase 1.7). Non-`Copy` owned values are *moved* out of their source binding when bound (`val s2 = s1`), assigned, returned, passed by value to a call, or stored into a struct field; reading the source afterward is a new `UseOfMovedValue` error pointing at where the move happened. `.clone()` (already a builtin) borrows its receiver and is the canonical opt-out. Move tracking is limited to `string` — the only non-`Copy` type the language can construct today; structs stay freely duplicable until `Copy`/`@derive(Copy)` lands (the next Phase 1.7 item). The checker is conservative: it flags only direct place expressions in a consuming position, and `if`/`while`/`for` bodies and `if`-expression arms snapshot/restore move state so a conditional move never leaks onto a path that did not execute it (no false positives; may miss e.g. second-iteration loop moves). Implementation: new `type_checkers/moves.rs` (`record_move`), `SymbolInfo.moved_at` plus `mark_moved`/`clear_moved`/`snapshot_moves`/`restore_moves` on `SymbolTable`, `Type::is_move_tracked()`. Tests: 6 unit (`semantic-analysis`), 5 integration (`neurc/tests/move_semantics.rs`), example `types/move_semantics.nr`. 557 tests pass.
+- `semantic`: move semantics by default (Phase 1.7). Non-`Copy` owned values are *moved* out of their source binding when bound (`val s2 = s1`), assigned, returned, passed by value to a call, or stored into a struct field; reading the source afterward is a new `UseOfMovedValue` error pointing at where the move happened. `.clone()` (already a builtin) borrows its receiver and is the canonical opt-out. Move tracking is limited to `string`, the only non-`Copy` type the language can construct today; structs stay freely duplicable until `Copy`/`@derive(Copy)` lands (the next Phase 1.7 item). The checker is conservative: it flags only direct place expressions in a consuming position, and `if`/`while`/`for` bodies and `if`-expression arms snapshot/restore move state so a conditional move never leaks onto a path that did not execute it (no false positives; may miss e.g. second-iteration loop moves). Implementation: new `type_checkers/moves.rs` (`record_move`), `SymbolInfo.moved_at` plus `mark_moved`/`clear_moved`/`snapshot_moves`/`restore_moves` on `SymbolTable`, `Type::is_move_tracked()`. Tests: 6 unit (`semantic-analysis`), 5 integration (`neurc/tests/move_semantics.rs`), example `types/move_semantics.nr`. 557 tests pass.
 
 ---
 
 ## [1.28.1] - 2026-06-05
 
 ### Fixed
-- `docs`: corrected a pervasive, user-facing error — the getting-started tutorial, troubleshooting guide, and language reference all claimed semicolons were *required* to terminate statements (`val x: i32 = 10  // Semicolon required`). Neuro has **no semicolons**: statements are newline-terminated and a trailing `;` is an `unexpected token Semicolon` parse error. A beginner following `first-program.md` verbatim would hit an immediate parse failure. Rewrote the statement/implicit-return explanation in `docs/getting-started/first-program.md`, `docs/guides/troubleshooting.md`, `docs/language-reference/expressions.md`, and `docs/language-reference/functions.md` to describe newline termination and positional implicit return.
+- `docs`: corrected a pervasive, user-facing error: the getting-started tutorial, troubleshooting guide, and language reference all claimed semicolons were *required* to terminate statements (`val x: i32 = 10  // Semicolon required`). Neuro has **no semicolons**: statements are newline-terminated and a trailing `;` is an `unexpected token Semicolon` parse error. A beginner following `first-program.md` verbatim would hit an immediate parse failure. Rewrote the statement/implicit-return explanation in `docs/getting-started/first-program.md`, `docs/guides/troubleshooting.md`, `docs/language-reference/expressions.md`, and `docs/language-reference/functions.md` to describe newline termination and positional implicit return.
 - `docs`: fixed stale example paths left over from the v1.23.1 `examples/` reorg into topic subdirectories. README, CONTRIBUTING, and the getting-started/CLI/compilation guides told users to run `cargo run -p neurc -- compile examples/hello.nr`, which no longer exists (now `examples/basics/hello.nr`); the README "compiles and runs today" link pointed at `examples/neuron.nr` instead of `examples/structs/neuron.nr`. Historical CHANGELOG entries and illustrative `bad.nr`/`mismatch.nr` error-output paths left untouched.
-- `docs`: refreshed `docs/README.md` version/footer metadata — version 1.27.0 → 1.28.0, last-updated date, and inkwell 0.8.0 → 0.9.0 (two spots) to match the v1.26.2 bump.
+- `docs`: refreshed `docs/README.md` version/footer metadata: version 1.27.0 → 1.28.0, last-updated date, and inkwell 0.8.0 → 0.9.0 (two spots) to match the v1.26.2 bump.
 
 ### Added
-- `tests`: 3 parser regression tests (`syntax-parsing/tests/error_tests.rs`) asserting that a trailing semicolon after a binding, an expression, or a `return` is a parse error — locking in the no-semicolon language decision so it cannot silently drift from the docs. 546 tests pass.
+- `tests`: 3 parser regression tests (`syntax-parsing/tests/error_tests.rs`) asserting that a trailing semicolon after a binding, an expression, or a `return` is a parse error, locking in the no-semicolon language decision so it cannot silently drift from the docs. 546 tests pass.
 
 ---
 
 ## [1.28.0] - 2026-06-05
 
 ### Added
-- `parser`: struct field-init shorthand and functional-update syntax (Phase 2A). `Point { x, y }` desugars each bare field to `x: x` at parse time (a `FieldInit` whose value is `Expr::Identifier(field_name)` — no AST node, so semantic analysis and codegen are unchanged for shorthand; an undefined name surfaces as the ordinary undefined-variable error). `Point { x: 1.0, ..p }` adds a functional-update base: `Expr::StructLiteral` gained `base: Option<Box<Expr>>`, and the parser stops the field scan at a trailing `..expr`. Semantic analysis checks the base against `Type::Struct(name)` (wrong struct → `Mismatch`) and, when a base is present, skips the missing-field scan since `..base` supplies every unlisted field; a base-less literal still requires all fields (`MissingStructField`). Codegen seeds the LLVM aggregate from the base struct value instead of `undef`, then `insert_value` overwrites each explicit field, so unlisted fields keep the base's values with no reallocation. The type-alias rewrite pass recurses into `base`. Tests: 5 parser unit (`syntax-parsing/tests/expression_tests.rs`), 8 integration (`neurc/tests/struct_shorthand_update.rs`), example `structs/struct_update.nr`. 543 tests pass.
+- `parser`: struct field-init shorthand and functional-update syntax (Phase 2A). `Point { x, y }` desugars each bare field to `x: x` at parse time (a `FieldInit` whose value is `Expr::Identifier(field_name)`), so no AST node is added and semantic analysis and codegen are unchanged for shorthand; an undefined name surfaces as the ordinary undefined-variable error). `Point { x: 1.0, ..p }` adds a functional-update base: `Expr::StructLiteral` gained `base: Option<Box<Expr>>`, and the parser stops the field scan at a trailing `..expr`. Semantic analysis checks the base against `Type::Struct(name)` (wrong struct → `Mismatch`) and, when a base is present, skips the missing-field scan since `..base` supplies every unlisted field; a base-less literal still requires all fields (`MissingStructField`). Codegen seeds the LLVM aggregate from the base struct value instead of `undef`, then `insert_value` overwrites each explicit field, so unlisted fields keep the base's values with no reallocation. The type-alias rewrite pass recurses into `base`. Tests: 5 parser unit (`syntax-parsing/tests/expression_tests.rs`), 8 integration (`neurc/tests/struct_shorthand_update.rs`), example `structs/struct_update.nr`. 543 tests pass.
 
 ---
 
 ## [1.27.0] - 2026-06-05
 
 ### Added
-- `codegen`: `string.clone()` builtin method (Phase 1.7). Returns a fresh `string` equal to its receiver — the canonical opt-out of move-by-default for non-`Copy` types. Resolved on a `string` receiver in both `semantic-analysis` (`resolve_builtin_method` → `Type::String`) and `llvm-backend` (`BuiltinMethod::StringClone`), duplicated per VSA so neither slice depends on the other. Lowering copies the `{ ptr, len }` fat-pointer value: today strings are immutable and `.rodata`-backed (no heap string type yet), so a value copy is observationally a deep copy; when runtime heap strings land this must duplicate the underlying buffer. Takes no arguments (`ArgumentCountMismatch` otherwise); `.clone()` on a non-`string` receiver remains `MethodNotFound` (`Copy` scalars take the assignment path). Also fixed a latent `span.start` collision: chaining two builtin calls (`s.clone().len()`) nests two `Call` nodes sharing `span.start`, so the `builtin_methods` dispatch map is now keyed by the full span `(start, end)` — unique per node — matching the existing `binary_left_types` workaround. Tests: 2 semantic unit, 1 backend unit, 3 integration (`neurc/tests/builtin_methods.rs`), example `types/string_clone.nr` (exit 5). 530 tests pass.
+- `codegen`: `string.clone()` builtin method (Phase 1.7). Returns a fresh `string` equal to its receiver, the canonical opt-out of move-by-default for non-`Copy` types. Resolved on a `string` receiver in both `semantic-analysis` (`resolve_builtin_method` → `Type::String`) and `llvm-backend` (`BuiltinMethod::StringClone`), duplicated per VSA so neither slice depends on the other. Lowering copies the `{ ptr, len }` fat-pointer value: today strings are immutable and `.rodata`-backed (no heap string type yet), so a value copy is observationally a deep copy; when runtime heap strings land this must duplicate the underlying buffer. Takes no arguments (`ArgumentCountMismatch` otherwise); `.clone()` on a non-`string` receiver remains `MethodNotFound` (`Copy` scalars take the assignment path). Also fixed a latent `span.start` collision: chaining two builtin calls (`s.clone().len()`) nests two `Call` nodes sharing `span.start`, so the `builtin_methods` dispatch map is now keyed by the full span `(start, end)`, unique per node, matching the existing `binary_left_types` workaround. Tests: 2 semantic unit, 1 backend unit, 3 integration (`neurc/tests/builtin_methods.rs`), example `types/string_clone.nr` (exit 5). 530 tests pass.
 
 ---
 
 ## [1.26.2] - 2026-06-04
 
 ### Changed
-- `build`: dependency maintenance pass. Removed three dead dependencies from `syntax-parsing` — `lalrpop`, `lalrpop-util`, and `chumsky` — which were declared but never imported (the parser is hand-written Pratt; there was no `.lalrpop` grammar or `build.rs`). This drops their transitive build-time tree (`petgraph`, `regex`, `string_cache`, `bit-set`, `term`, …), trimming the dependency surface and build time. Upgraded `inkwell` 0.8.0 → 0.9.0 (still LLVM 20 via `llvm20-1`; 0.9 adds LLVM 21/22 support and ports to Rust edition 2024 — no backend code changes required), `thiserror` 1 → 2, `toml` 0.8 → 1.1, and `criterion` 0.5 → 0.8 (dev/bench only). `cargo update` swept caret-range drift (unicode-segmentation 1.13, unicode-ident 1.0.24, tempfile 3.27, etc.). `logos` deliberately held at 0.14 — the 0.16 engine rewrite trades a slight lexer perf regression for regex correctness we do not currently need. All 526 tests pass; clippy clean.
+- `build`: dependency maintenance pass. Removed three dead dependencies from `syntax-parsing` (`lalrpop`, `lalrpop-util`, and `chumsky`) which were declared but never imported (the parser is hand-written Pratt; there was no `.lalrpop` grammar or `build.rs`). This drops their transitive build-time tree (`petgraph`, `regex`, `string_cache`, `bit-set`, `term`, …), trimming the dependency surface and build time. Upgraded `inkwell` 0.8.0 → 0.9.0 (still LLVM 20 via `llvm20-1`; 0.9 adds LLVM 21/22 support and ports to Rust edition 2024, with no backend code changes required), `thiserror` 1 → 2, `toml` 0.8 → 1.1, and `criterion` 0.5 → 0.8 (dev/bench only). `cargo update` swept caret-range drift (unicode-segmentation 1.13, unicode-ident 1.0.24, tempfile 3.27, etc.). `logos` deliberately held at 0.14: the 0.16 engine rewrite trades a slight lexer perf regression for regex correctness we do not currently need. All 526 tests pass; clippy clean.
 
 ---
 
 ## [1.26.1] - 2026-06-04
 
 ### Fixed
-- `codegen`: short-circuit `&&` / `||` with a comparison as the **left** operand miscompiled. The type pass stored each binary node's left-operand type at `expr_types[span.start + 1]`, but a binary node and its leftmost descendant share the same `span.start`; the parent's write (e.g. `&&`, left type `Bool`) clobbered the left child comparison's entry (e.g. `i32`). The leftmost comparison was then generated with `left_ty = Bool`, truncating its i32 operands to i1 — so `c >= 48 && c <= 57` with `c = 51` wrongly evaluated to `false` (the i1 `-1 >= 0` is false), while `c == 51 && …` and parenthesized `(c >= 48) && …` happened to work. Left-operand types now live in a dedicated `binary_left_types` map keyed by the full span `(start, end)`, which is unique per node and immune to the `span.start` collision. Regression test: `compiler/neurc/tests/short_circuit_runtime.rs`.
+- `codegen`: short-circuit `&&` / `||` with a comparison as the **left** operand miscompiled. The type pass stored each binary node's left-operand type at `expr_types[span.start + 1]`, but a binary node and its leftmost descendant share the same `span.start`; the parent's write (e.g. `&&`, left type `Bool`) clobbered the left child comparison's entry (e.g. `i32`). The leftmost comparison was then generated with `left_ty = Bool`, truncating its i32 operands to i1, so `c >= 48 && c <= 57` with `c = 51` wrongly evaluated to `false` (the i1 `-1 >= 0` is false), while `c == 51 && …` and parenthesized `(c >= 48) && …` happened to work. Left-operand types now live in a dedicated `binary_left_types` map keyed by the full span `(start, end)`, which is unique per node and immune to the `span.start` collision. Regression test: `compiler/neurc/tests/short_circuit_runtime.rs`.
 
 ---
 
 ## [1.26.0] - 2026-06-04
 
 ### Added
-- `codegen`: panic runtime — `panic` / `assert` / `unreachable` (Phase 1.7, syntax). The three panic-family builtins now lower end-to-end with the **abort, no unwinding** contract: `panic(msg: string)` and `unreachable()` print a diagnostic to stderr and terminate via libc `abort()` (SIGABRT); `assert(cond: bool)` branches and aborts only when the condition is false. Diagnostics carry the source location (`message at file:line:col`), threaded into `llvm_backend::compile` via two new `source` / `source_path` parameters and rendered through `source_location::SourceFile`. The diagnostic is written with the POSIX `write` syscall to stderr (fd 2) so it reaches the terminal before the process dies; no unwinding landing pads are emitted, so `Drop`/`defer` (future) will fire only on normal scope exit. The builtins are recognized in both `semantic-analysis` (`resolve_panic_builtin`, returning the divergent `Unknown` type so a panic satisfies any return/binding context, e.g. `func f() -> i32 { panic("x") }`) and `llvm-backend` (`is_panic_builtin` + `panic.rs`); a user function of the same name shadows the builtin. Statements after a divergent call are dropped via new terminated-block guards in `codegen_stmt`/`codegen_return`/`codegen_body`. `checked_*`-style value-position panics and rerouting integer-overflow/bounds checks through this runtime remain follow-ups.
+- `codegen`: panic runtime, covering `panic` / `assert` / `unreachable` (Phase 1.7, syntax). The three panic-family builtins now lower end-to-end with the **abort, no unwinding** contract: `panic(msg: string)` and `unreachable()` print a diagnostic to stderr and terminate via libc `abort()` (SIGABRT); `assert(cond: bool)` branches and aborts only when the condition is false. Diagnostics carry the source location (`message at file:line:col`), threaded into `llvm_backend::compile` via two new `source` / `source_path` parameters and rendered through `source_location::SourceFile`. The diagnostic is written with the POSIX `write` syscall to stderr (fd 2) so it reaches the terminal before the process dies; no unwinding landing pads are emitted, so `Drop`/`defer` (future) will fire only on normal scope exit. The builtins are recognized in both `semantic-analysis` (`resolve_panic_builtin`, returning the divergent `Unknown` type so a panic satisfies any return/binding context, e.g. `func f() -> i32 { panic("x") }`) and `llvm-backend` (`is_panic_builtin` + `panic.rs`); a user function of the same name shadows the builtin. Statements after a divergent call are dropped via new terminated-block guards in `codegen_stmt`/`codegen_return`/`codegen_body`. `checked_*`-style value-position panics and rerouting integer-overflow/bounds checks through this runtime remain follow-ups.
 
 ---
 
 ## [1.25.0] - 2026-06-04
 
 ### Added
-- `parser`: `unsafe { }` block infrastructure (Phase 1.7 groundwork, syntax). `unsafe` is now a reserved keyword (`TokenKind::Unsafe`) and `unsafe { … }` parses to a dedicated `Expr::Unsafe { stmts, span }` AST node. The block is an ordinary statement block: it introduces a scope and evaluates to its trailing expression, so it works as an implicit return, a `val` initializer, or a void statement. `unsafe` is deliberately **inert** — it carries no special semantics yet and lowers to identical IR as a bare block (`codegen_block_expr`). The distinct node exists so the Phase 5 GPU-kernel aliasing model can later gate raw `KernelOut` index writes behind `unsafe { }` without re-shaping the grammar. Reserving the keyword means it can no longer be used as an identifier.
+- `parser`: `unsafe { }` block infrastructure (Phase 1.7 groundwork, syntax). `unsafe` is now a reserved keyword (`TokenKind::Unsafe`) and `unsafe { … }` parses to a dedicated `Expr::Unsafe { stmts, span }` AST node. The block is an ordinary statement block: it introduces a scope and evaluates to its trailing expression, so it works as an implicit return, a `val` initializer, or a void statement. `unsafe` is deliberately **inert**: it carries no special semantics yet and lowers to identical IR as a bare block (`codegen_block_expr`). The distinct node exists so the Phase 5 GPU-kernel aliasing model can later gate raw `KernelOut` index writes behind `unsafe { }` without re-shaping the grammar. Reserving the keyword means it can no longer be used as an identifier.
 
 ---
 
@@ -3125,7 +3197,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.24.0] - 2026-06-03
 
 ### Added
-- `parser`: type aliases. `type Name = TargetType` introduces a transparent alias — the alias and its target are interchangeable and no new nominal type is created. Aliases resolve in every type-annotation position (variable/const annotations, function parameters and return types, struct fields, and `as` cast targets) and collapse through chains (`type A = B; type B = i32`). Resolution happens entirely at parse time by substituting each aliased annotation with its target type (the same desugaring strategy used for compound assignment), so semantic analysis and codegen are unchanged and never observe an alias. New `TokenKind::Type` keyword and `ParseError::{DuplicateTypeAlias, TypeAliasShadowsBuiltin, CyclicTypeAlias}` diagnostics reject duplicate aliases, aliases that shadow a built-in type, and cyclic alias chains; an unknown target type is still reported by the existing semantic `UnknownTypeName` check against the resolved type, with the span anchored at the alias use site. Scope note: alias substitution applies to type positions only — using an alias as a value-position constructor or path name is not part of this feature.
+- `parser`: type aliases. `type Name = TargetType` introduces a transparent alias: the alias and its target are interchangeable and no new nominal type is created. Aliases resolve in every type-annotation position (variable/const annotations, function parameters and return types, struct fields, and `as` cast targets) and collapse through chains (`type A = B; type B = i32`). Resolution happens entirely at parse time by substituting each aliased annotation with its target type (the same desugaring strategy used for compound assignment), so semantic analysis and codegen are unchanged and never observe an alias. New `TokenKind::Type` keyword and `ParseError::{DuplicateTypeAlias, TypeAliasShadowsBuiltin, CyclicTypeAlias}` diagnostics reject duplicate aliases, aliases that shadow a built-in type, and cyclic alias chains; an unknown target type is still reported by the existing semantic `UnknownTypeName` check against the resolved type, with the span anchored at the alias use site. Scope note: alias substitution applies to type positions only. Using an alias as a value-position constructor or path name is not part of this feature.
 
 ---
 
@@ -3141,15 +3213,15 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.23.3] - 2026-06-02
 
 ### Fixed
-- `codegen`: logical `&&` and `||` now short-circuit, as the language spec and `docs/language-reference/operators.md` have always promised. The backend previously evaluated **both** operands eagerly and combined them with a plain `and`/`or` on the two `i1` values, so the right-hand side always ran — meaning a guard like `if x != 0 && 10 / x > 0` still executed the division when `x == 0` (SIGFPE), and any RHS side effect fired unconditionally. `codegen_binary` now intercepts `&&`/`||` before operand evaluation and lowers them through `codegen_short_circuit`, which branches on the LHS and only evaluates the RHS on the deciding edge, merging the two results with a phi node (`&&` → `if lhs { rhs } else { false }`, `||` → `if lhs { true } else { rhs }`). The phi captures the true predecessor blocks after each side is emitted, so a RHS that itself appends blocks (e.g. a nested `if`-expression) is handled correctly.
-- `codegen`: a `bool`-typed constant whose initializer is a binary expression — `const FLAG: bool = true && false`, `const OK: bool = (1 < 2) && (3 < 4)`, `const E: bool = true == true`, including function-scope `const` — no longer aborts compilation with an `internal compiler error: type mismatch in const binary expression`. The const folder (`fold_const`) only had arms for two-integer and two-float operands; bool operands fell through to the catch-all error even though semantic analysis accepted the program. Added a `(Bool, Bool)` arm handling `&&`, `||`, `==`, and `!=`.
+- `codegen`: logical `&&` and `||` now short-circuit, as the language spec and `docs/language-reference/operators.md` have always promised. The backend previously evaluated **both** operands eagerly and combined them with a plain `and`/`or` on the two `i1` values, so the right-hand side always ran, meaning a guard like `if x != 0 && 10 / x > 0` still executed the division when `x == 0` (SIGFPE), and any RHS side effect fired unconditionally. `codegen_binary` now intercepts `&&`/`||` before operand evaluation and lowers them through `codegen_short_circuit`, which branches on the LHS and only evaluates the RHS on the deciding edge, merging the two results with a phi node (`&&` → `if lhs { rhs } else { false }`, `||` → `if lhs { true } else { rhs }`). The phi captures the true predecessor blocks after each side is emitted, so a RHS that itself appends blocks (e.g. a nested `if`-expression) is handled correctly.
+- `codegen`: a `bool`-typed constant whose initializer is a binary expression, such as `const FLAG: bool = true && false`, `const OK: bool = (1 < 2) && (3 < 4)`, `const E: bool = true == true`, including function-scope `const`, no longer aborts compilation with an `internal compiler error: type mismatch in const binary expression`. The const folder (`fold_const`) only had arms for two-integer and two-float operands; bool operands fell through to the catch-all error even though semantic analysis accepted the program. Added a `(Bool, Bool)` arm handling `&&`, `||`, `==`, and `!=`.
 
 ---
 
 ## [1.23.2] - 2026-06-02
 
 ### Fixed
-- `codegen`: a tail-position `if`/`else` used as a function's or method's implicit return value is now lowered correctly. A statement-position `if` parses to `Stmt::If`, so the backend's implicit-return detection — which only recognised `Stmt::Expr` — fell through to a void `if` statement and emitted `unreachable` for the non-void return, producing no instruction at `-O0` and letting execution run off the end of the function (segfault or garbage). `codegen_body` now treats a trailing `Stmt::If { else_block: Some(..), .. }` as a value-producing if-expression, and the type pass records its result type at the `if` span so the result slot is allocated. Restores the idiomatic `func f() -> T { if c { a } else { b } }` form, including recursion (`gcd`) and `&self` methods. `examples/structs/neuron.nr` reverts to the idiomatic tail if-expr.
+- `codegen`: a tail-position `if`/`else` used as a function's or method's implicit return value is now lowered correctly. A statement-position `if` parses to `Stmt::If`, so the backend's implicit-return detection, which only recognised `Stmt::Expr`, fell through to a void `if` statement and emitted `unreachable` for the non-void return, producing no instruction at `-O0` and letting execution run off the end of the function (segfault or garbage). `codegen_body` now treats a trailing `Stmt::If { else_block: Some(..), .. }` as a value-producing if-expression, and the type pass records its result type at the `if` span so the result slot is allocated. Restores the idiomatic `func f() -> T { if c { a } else { b } }` form, including recursion (`gcd`) and `&self` methods. `examples/structs/neuron.nr` reverts to the idiomatic tail if-expr.
 
 ---
 
@@ -3159,7 +3231,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 - `tests`/`docs`: reorganized the `examples/` directory into topic subdirectories (`basics/`, `types/`, `operators/`, `control_flow/`, `structs/`, `showcase/`) and made the example test harness self-expanding. `compiler/neurc/tests/examples.rs` now discovers every `.nr` file recursively and checks its exit code against a single manifest, `examples/expected.txt`; adding an example is one new file plus one manifest line, with no Rust edits. The harness fails loudly on an unregistered file, a stale manifest entry, or any exit-code mismatch, so `cargo test --workspace` exercises all examples automatically.
 
 ### Added
-- `tests`: four "showcase" examples that exercise multiple features together — `showcase/perceptron.nr` (structs + methods + `f64` + branches + loop), `showcase/num_algorithms.nr` (recursion + loops + modulo + saturating arithmetic), `showcase/running_stats.nr` (struct state + field mutation + `&self` method + `f64` division), and `showcase/simulation.nr` (bitwise flags + struct state + `.shr` + `break`).
+- `tests`: four "showcase" examples that exercise multiple features together: `showcase/perceptron.nr` (structs + methods + `f64` + branches + loop), `showcase/num_algorithms.nr` (recursion + loops + modulo + saturating arithmetic), `showcase/running_stats.nr` (struct state + field mutation + `&self` method + `f64` division), and `showcase/simulation.nr` (bitwise flags + struct state + `.shr` + `break`).
 
 ### Fixed
 - `examples`: rewrote example functions that relied on a tail-position `if`/`else` *expression* as the implicit return value to use explicit `return` instead, since that codegen path is currently miscompiled (segfault / wrong value when the result is consumed). `structs/neuron.nr` previously masked the issue by discarding the result; it now observes its activation in the exit code. Removed stray compiled binaries from `examples/` (including a tracked one) and tightened the `.gitignore` rules to cover the new subdirectories.
@@ -3169,14 +3241,14 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.23.0] - 2026-06-02
 
 ### Changed
-- `codegen`/`docs`: formalized the string literal vs runtime string distinction (Phase 1.5). String literals are emitted to `.rodata` (never heap-allocated); the trailing NUL is now the named `STRING_NULL_TERMINATOR` constant in `literals.rs`, documented as a C-string/FFI convenience that the fat-pointer `len` deliberately excludes. `len` is the authoritative UTF-8 byte count — interior NUL bytes are legal content and are counted, so consumers must not treat string data as NUL-terminated. Behaviour is unchanged (codegen already computed `len` this way); this item formalizes, documents, and tests the guarantee. New end-to-end tests cover multibyte UTF-8 (`"héllo".len() == 6`) and an interior NUL (`"a\0b".len() == 3`). 506 tests passing.
+- `codegen`/`docs`: formalized the string literal vs runtime string distinction (Phase 1.5). String literals are emitted to `.rodata` (never heap-allocated); the trailing NUL is now the named `STRING_NULL_TERMINATOR` constant in `literals.rs`, documented as a C-string/FFI convenience that the fat-pointer `len` deliberately excludes. `len` is the authoritative UTF-8 byte count: interior NUL bytes are legal content and are counted, so consumers must not treat string data as NUL-terminated. Behaviour is unchanged (codegen already computed `len` this way); this item formalizes, documents, and tests the guarantee. New end-to-end tests cover multibyte UTF-8 (`"héllo".len() == 6`) and an interior NUL (`"a\0b".len() == 3`). 506 tests passing.
 
 ---
 
 ## [1.22.1] - 2026-05-31
 
 ### Changed
-- `build`/`tests`: refactored the three largest source files into focused modules with no behaviour change (504 tests still pass). `llvm-backend/src/codegen/expressions.rs` (1609 lines) split into an `expressions/` submodule — `mod.rs` (dispatch + shared helpers), `literals.rs`, `binary.rs`, `unary.rs`, `methods.rs`, `control_flow.rs` — each adding to the same `impl CodegenContext` block. `semantic-analysis/tests/integration_tests.rs` (980 lines) split into seven feature suites (`semantics_{functions,control_flow,integers,errors,expression_returns,strings,lints}.rs`). The lexer's `lib.rs` test module (≈540 lines) moved to `lexical-analysis/src/tests.rs`, leaving the slice entry point at 137 lines.
+- `build`/`tests`: refactored the three largest source files into focused modules with no behaviour change (504 tests still pass). `llvm-backend/src/codegen/expressions.rs` (1609 lines) split into an `expressions/` submodule of `mod.rs` (dispatch + shared helpers), `literals.rs`, `binary.rs`, `unary.rs`, `methods.rs`, `control_flow.rs`, each adding to the same `impl CodegenContext` block. `semantic-analysis/tests/integration_tests.rs` (980 lines) split into seven feature suites (`semantics_{functions,control_flow,integers,errors,expression_returns,strings,lints}.rs`). The lexer's `lib.rs` test module (≈540 lines) moved to `lexical-analysis/src/tests.rs`, leaving the slice entry point at 137 lines.
 
 ---
 
@@ -3215,7 +3287,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 
 ### Changed
 - `docs`: reorganized the roadmap by dependency order. Three Phase 1.5 tail items had forward dependencies on later phases and were relocated: `*Assign` traits → Phase 2B (need the trait system), `&string` slice type → Phase 1.7 (needs the `&T` reference type), and `checked_*` integer methods → Phase 2C (need `Option`). Added an explicit "builtin method dispatch on primitive & string types" prerequisite that gates the integer methods and the `.shr(n)` shift method.
-- `docs`: corrected the bitwise-operators note — `.shr(n)` is specified as a method but is **not yet implemented** (it needs builtin-method dispatch); the roadmap and CONTRIBUTING.md previously implied it had shipped.
+- `docs`: corrected the bitwise-operators note: `.shr(n)` is specified as a method but is **not yet implemented** (it needs builtin-method dispatch); the roadmap and CONTRIBUTING.md previously implied it had shipped.
 - `docs`: CONTRIBUTING.md now lists only the active phase (Phase 1.5) and links to the README Quick Roadmap for the full multi-phase plan, instead of duplicating phases 1.7/1.8/2.
 
 ---
@@ -3223,25 +3295,25 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.19.2] - 2026-05-29
 
 ### Added
-- `tests`: dedicated coverage for underscore digit separators in numeric literals — 5 lexer unit tests (decimal, hex/binary/octal, float fractional + exponent, suffixed int/float, leading-underscore boundary) and 4 end-to-end compile-and-run integration tests.
+- `tests`: dedicated coverage for underscore digit separators in numeric literals: 5 lexer unit tests (decimal, hex/binary/octal, float fractional + exponent, suffixed int/float, leading-underscore boundary) and 4 end-to-end compile-and-run integration tests.
 - `docs`: `examples/underscore_separators.nr` plus a "Digit Separators" note in the type-system reference.
 
 ### Notes
-- Lexer support for `_` separators already shipped incidentally with the literal-suffix regexes (every numeric pattern carries `_` in its character class and each parser strips it). This release formally validates, documents, and closes out the Phase 1.5 roadmap item — no production code changed.
+- Lexer support for `_` separators already shipped incidentally with the literal-suffix regexes (every numeric pattern carries `_` in its character class and each parser strips it). This release formally validates, documents, and closes out the Phase 1.5 roadmap item. No production code changed.
 
 ---
 
 ## [1.19.1] - 2026-05-27
 
 ### Fixed
-- `build`: Windows CI link failure — 79 unresolved LLVM symbols (`LLVMInitializeARMTarget`, `LLVMInitializeAArch64Target`, etc.). Root cause: `inkwell` was built with `target-all` which compiles init stubs for every LLVM backend, but `vovkos/llvm-package-windows` ships only `X86;NVPTX;AMDGPU` targets. Fix: `target-all` → `target-x86`; Neuro calls only `initialize_native()` so this is sufficient on all CI platforms.
+- `build`: Windows CI link failure: 79 unresolved LLVM symbols (`LLVMInitializeARMTarget`, `LLVMInitializeAArch64Target`, etc.). Root cause: `inkwell` was built with `target-all` which compiles init stubs for every LLVM backend, but `vovkos/llvm-package-windows` ships only `X86;NVPTX;AMDGPU` targets. Fix: `target-all` → `target-x86`; Neuro calls only `initialize_native()` so this is sufficient on all CI platforms.
 
 ### Changed
 - `ci`: `security_audit` job now uses `taiki-e/install-action` (prebuilt `cargo-audit` binary, ~2 min faster) instead of `cargo install cargo-audit` from source.
 - `ci`: `coverage` job uses `taiki-e/install-action` for `cargo-tarpaulin` (prebuilt binary) and fixes deprecated `--all` flag → `--workspace`. Updates `codecov/codecov-action` v4 → v5.
 - `ci`: `test` job toolchain action pinned to `@stable` (was `@master`).
 - `ci`: Removed dead `allow_failure: true` matrix label and empty `exclude: []` array from `test` matrix.
-- `ci`: `lint` job — removed redundant `cargo check --workspace` (already covered by clippy).
+- `ci`: `lint` job, removing the redundant `cargo check --workspace` (already covered by clippy).
 - `ci`: `build_artifacts` matrix now has `fail-fast: false` so one OS failure doesn't cancel the others.
 - `ci`: Windows LLVM install now cached via `actions/cache@v4` keyed on the pinned version string, saving ~5 min per Windows job on cache hit. Install/configure steps separated for clarity.
 
@@ -3250,7 +3322,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.19.0] - 2026-05-27
 
 ### Added
-- `semantic`: comparison chain rejection — `a < b < c` is now a compile error with an actionable "use `&&` to combine separate comparisons" suggestion. Covers all six comparison operators (`<`, `>`, `<=`, `>=`, `==`, `!=`). Detection fires in semantic analysis when a comparison operator's LHS is itself a comparison expression.
+- `semantic`: comparison chain rejection: `a < b < c` is now a compile error with an actionable "use `&&` to combine separate comparisons" suggestion. Covers all six comparison operators (`<`, `>`, `<=`, `>=`, `==`, `!=`). Detection fires in semantic analysis when a comparison operator's LHS is itself a comparison expression.
 - `infra`: `BinaryOp::is_comparison()` helper on the AST `BinaryOp` enum.
 - `tests`: 5 unit tests in semantic-analysis and 6 integration tests in neurc validating rejection of chained comparisons and acceptance of valid patterns (`a < b`, `a < b && b < c`).
 
@@ -3259,16 +3331,16 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.18.2] - 2026-05-25
 
 ### Changed
-- `docs`: `docs/README.md` "Current Features" section rewritten — now covers all Phase 1.5 and Phase 2 features (const, compound assignment, `as` casts, inclusive range `..=`, bitwise ops, integer/float literal suffixes, if/block expressions, attribute system, `??` operator, string equality, structs, methods); stale "Phase 1 Complete" heading removed; example programs section expanded with a Neuron (struct + method + if-expression) snippet; Last Updated date corrected to 2026-05-25.
-- `docs`: `docs/language-reference/operators.md` Common Patterns section updated — removed three stale "if-as-expression not yet implemented" notes from the Clamping, Sign Determination, and Absolute Value examples; each now shows the idiomatic if-expression form (landed in v1.13.0).
-- `docs`: `examples/README.md` updated — added entries for `structs.nr`, `methods.nr`, `neuron.nr`, and `compound_assignment.nr`; fixed Windows `.exe` paths to Unix paths; updated Known Limitations (borrow checker phase 1.7, `&mut self` deferred); Exit Codes table extended with all missing examples.
+- `docs`: `docs/README.md` "Current Features" section rewritten. It now covers all Phase 1.5 and Phase 2 features (const, compound assignment, `as` casts, inclusive range `..=`, bitwise ops, integer/float literal suffixes, if/block expressions, attribute system, `??` operator, string equality, structs, methods); stale "Phase 1 Complete" heading removed; example programs section expanded with a Neuron (struct + method + if-expression) snippet; Last Updated date corrected to 2026-05-25.
+- `docs`: `docs/language-reference/operators.md` Common Patterns section updated, removing three stale "if-as-expression not yet implemented" notes from the Clamping, Sign Determination, and Absolute Value examples; each now shows the idiomatic if-expression form (landed in v1.13.0).
+- `docs`: `examples/README.md` updated, adding entries for `structs.nr`, `methods.nr`, `neuron.nr`, and `compound_assignment.nr`; fixed Windows `.exe` paths to Unix paths; updated Known Limitations (borrow checker phase 1.7, `&mut self` deferred); Exit Codes table extended with all missing examples.
 
 ---
 
 ## [1.18.1] - 2026-05-25
 
 ### Changed
-- `docs`: `CONTRIBUTING.md` now carries the detailed Phase 1.5 — Syntax & Semantics Stabilization checklist (Parser & Syntax Fixes, Language Semantics, String Memory Model) so contributors can see at a glance which items have landed and which are open. Replaces the brief three-bullet Phase 1.5 summary.
+- `docs`: `CONTRIBUTING.md` now carries the detailed Phase 1.5 Syntax & Semantics Stabilization checklist (Parser & Syntax Fixes, Language Semantics, String Memory Model) so contributors can see at a glance which items have landed and which are open. Replaces the brief three-bullet Phase 1.5 summary.
 - `docs`: `docs/README.md` roadmap table removed; replaced with a pointer to `README.md#quick-roadmap` (public quick view) and `CONTRIBUTING.md` (detailed checklists). Roadmap content now lives in exactly three places: `README.md`, `CONTRIBUTING.md`, `.idea/roadmap.md`.
 
 ---
@@ -3276,7 +3348,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.18.0] - 2026-05-25
 
 ### Added
-- `lexer`: float literal type suffixes `f32` / `f64` — `1.5f32`, `2.0f64`, `1e10f32`, `1.5e-5f64` now tokenize to a dedicated `TokenKind::FloatSuffix(FloatSuffixToken { value, suffix })` token, mirroring the existing integer-suffix encoding. Two new `priority = 3` regexes (fractional and exponent-only forms) sit above the bare-float patterns so logos longest-match always picks the suffixed token.
+- `lexer`: float literal type suffixes `f32` / `f64`: `1.5f32`, `2.0f64`, `1e10f32`, `1.5e-5f64` now tokenize to a dedicated `TokenKind::FloatSuffix(FloatSuffixToken { value, suffix })` token, mirroring the existing integer-suffix encoding. Two new `priority = 3` regexes (fractional and exponent-only forms) sit above the bare-float patterns so logos longest-match always picks the suffixed token.
 - `parser`: `parse_prefix` handles `TokenKind::FloatSuffix(tok)` → `Literal::Float(tok.value, Some(tok.suffix))`; plain `TokenKind::Float(f)` now produces `Literal::Float(f, None)`.
 - `semantic`: `infer_suffixed_float_type` short-circuits contextual inference when a suffix is present and pins the literal to `Type::F32` / `Type::F64` via `float_suffix_to_type`. Annotation mismatches (e.g. `val x: f32 = 1.5f64`) surface through the existing assignment type-check path.
 - `codegen`: `codegen_literal` and the type pass route `Literal::Float(_, Some(F32))` to `f32_type().const_float(_)` and the `None`/`Some(F64)` paths to `f64_type().const_float(_)`.
@@ -3289,23 +3361,23 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.17.8] - 2026-05-24
 
 ### Changed
-- `docs`: README "Current Memory Model" warning rewritten for accuracy — verified that the compiler currently emits zero heap allocations (string literals land in `.rodata` via `build_global_string_ptr`; no `malloc`/`build_malloc`/`build_free` call sites anywhere in `compiler/`), so the previous "every string value is currently leaked" wording overstated the present-day risk. The new wording explains that no leak exists today because no heap ops exist, but every future heap value will leak until ownership semantics (Phase 1.7) ship.
-- `docs`: README roadmap table rebalanced to match the new `.idea/roadmap.md` structure — Phase 1.5 narrowed to syntax/semantics stabilization; new Phase 1.7 (ownership & borrow checker) and Phase 1.8 (HIR + `melior` plumbing) extracted from the old Phase 1.5 mega-bucket; async runtime split out of Phase 6 into Phase 7; Python FFI / advanced syntax bundled as Phase 8; developer experience (LSP, formatter) promoted to its own Phase 9; package manager + opt passes as Phase 10.
+- `docs`: README "Current Memory Model" warning rewritten for accuracy, having verified that the compiler currently emits zero heap allocations (string literals land in `.rodata` via `build_global_string_ptr`; no `malloc`/`build_malloc`/`build_free` call sites anywhere in `compiler/`), so the previous "every string value is currently leaked" wording overstated the present-day risk. The new wording explains that no leak exists today because no heap ops exist, but every future heap value will leak until ownership semantics (Phase 1.7) ship.
+- `docs`: README roadmap table rebalanced to match the new `.idea/roadmap.md` structure: Phase 1.5 narrowed to syntax/semantics stabilization; new Phase 1.7 (ownership & borrow checker) and Phase 1.8 (HIR + `melior` plumbing) extracted from the old Phase 1.5 mega-bucket; async runtime split out of Phase 6 into Phase 7; Python FFI / advanced syntax bundled as Phase 8; developer experience (LSP, formatter) promoted to its own Phase 9; package manager + opt passes as Phase 10.
 
-### Changed (private — not in git)
+### Changed (private, not in git)
 - `.idea/roadmap.md` rewritten and rebalanced against `.idea/syntax.md` v4.5
   - All previously-checked items preserved verbatim (parser fixes, `const`, compound assignment, `as` casts, `..=`, bitwise ops, integer suffixes, if/block expressions, IEEE-754, integer magnitude rule, `while true` lint, `??` associativity, string fat pointers, string equality, LLVM 20 upgrade)
   - Phase 1.5 scope reduced to frontend / type-checker / scalar-codegen work; added missing items (float literal suffixes, comparison chain rejection, digit separators, integer overflow semantics, `&string` slice type)
-  - Phase 1.7 (ownership + borrow checker) extracted as its own multi-month milestone — move semantics, `Copy`, `.clone()`, `&T` / `&mut T`, lifetimes, `Drop`, ARC removal, `unsafe { }` infra, runtime string ops
-  - Phase 1.8 (HIR + `melior` plumbing) extracted — `neuro-hir` crate, `mlir-backend` scaffold, HIR-routed lowering
+  - Phase 1.7 (ownership + borrow checker) extracted as its own multi-month milestone: move semantics, `Copy`, `.clone()`, `&T` / `&mut T`, lifetimes, `Drop`, ARC removal, `unsafe { }` infra, runtime string ops
+  - Phase 1.8 (HIR + `melior` plumbing) extracted: `neuro-hir` crate, `mlir-backend` scaffold, HIR-routed lowering
   - Phase 2 subdivided into 2A (arrays, tuples, enums, pattern matching, type aliases, newtypes, struct shorthand/update), 2B (generics, traits, operator traits, closures), 2C (Option/Result, `??`, `?`, `val-else`, modules, `import`/`export`, prelude), 2D (string interpolation, triple-quoted strings, nested comments, named arguments)
   - Phase 3 subdivided into 3A (tensor core + ownership + DLPack + reductions + sort/argsort/topk), 3B (MLIR linalg lowering + matmul), 3C (pool allocator, `PoolAware`, LIFO, await-in-pool diagnostic), 3D (pipeline `|>`, composition `>>`, einsum, functional ops)
-  - Phase 4 picked up higher-order derivatives and `@no_grad` / `@detach` — previously missing
+  - Phase 4 picked up higher-order derivatives and `@no_grad` / `@detach`, previously missing
   - Phase 5 picked up device management primitives
-  - Phase 7 created from the async/concurrency cluster previously buried in Phase 6 — `async func`, `Future<T>`, `spawn`, `JoinHandle`, `join`/`race`, executor
-  - Phase 8 created — Python FFI + DLPack + spread + advanced pattern matching + custom attributes + `defer`, all previously absent
-  - Phase 9 created — LSP + diagnostic polish + `neuro-fmt`
-  - Phase 10 — `neurpm` + optimization passes
+  - Phase 7 created from the async/concurrency cluster previously buried in Phase 6: `async func`, `Future<T>`, `spawn`, `JoinHandle`, `join`/`race`, executor
+  - Phase 8 created: Python FFI + DLPack + spread + advanced pattern matching + custom attributes + `defer`, all previously absent
+  - Phase 9 created: LSP + diagnostic polish + `neuro-fmt`
+  - Phase 10: `neurpm` + optimization passes
   - Cross-cutting tracks documented at top: diagnostics, tests/benchmarks, docs
 
 ---
@@ -3313,8 +3385,8 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.17.7] - 2026-05-24
 
 ### Fixed
-- `docs`: README license references updated from NSSL v2.0 to v2.1 (badge, License section heading, and license link) — actual `LICENSE` file is v2.1 since 1.17.5 but README was not updated at the time
-- `docs`: README Current Capabilities table — added missing rows for compound assignment operators (`+=`, `-=`, `*=`, `/=`, `%=`, implemented in v1.11.7) and the attribute/lint system (`@allow(...)` + `while true` lint, implemented in v1.17.0)
+- `docs`: README license references updated from NSSL v2.0 to v2.1 (badge, License section heading, and license link). The actual `LICENSE` file is v2.1 since 1.17.5 but README was not updated at the time
+- `docs`: README Current Capabilities table, adding missing rows for compound assignment operators (`+=`, `-=`, `*=`, `/=`, `%=`, implemented in v1.11.7) and the attribute/lint system (`@allow(...)` + `while true` lint, implemented in v1.17.0)
 
 ---
 
@@ -3328,10 +3400,10 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.17.5] - 2026-05-24
 
 ### Changed (License v2.0 → v2.1)
-- Removed `Non-Public Proprietary Elements` concept (§ 1.7, § 9.3, § 13.1(g), checklist line) and the dependency on a non-existent `PROPRIETARY.md` file — license scope is now fully self-contained and no longer expandable via an external mutable file
+- Removed `Non-Public Proprietary Elements` concept (§ 1.7, § 9.3, § 13.1(g), checklist line) and the dependency on a non-existent `PROPRIETARY.md` file. License scope is now fully self-contained and no longer expandable via an external mutable file
 - Tightened § 12.3 contributor relicensing: dropped GPL v3 from the enumerated future-license list (semantic mismatch with a source-available project); kept future NSSL versions, Apache 2.0, and mutually agreed licenses; any other relicensing now requires explicit per-contributor written consent
-- Added explicit acceptance mechanism for § 12.3 via DCO sign-off — contributors must use `git commit -s`, and unsigned contributions are not accepted
-- Added § 12.5 **Patent Grant**: Apache-2.0-style perpetual, worldwide, royalty-free patent license from each Contributor, with defensive patent-retaliation termination — closes a material gap as the project matures
+- Added explicit acceptance mechanism for § 12.3 via DCO sign-off: contributors must use `git commit -s`, and unsigned contributions are not accepted
+- Added § 12.5 **Patent Grant**: Apache-2.0-style perpetual, worldwide, royalty-free patent license from each Contributor, with defensive patent-retaliation termination, closing a material gap as the project matures
 - Added § 1.12 `Patent Claims` definition to support § 12.5
 - Softened § 4.3(c) alpha-notice exemption: distributors now assume liability only for their own certification statement and user-facing warranties, not for the upstream Software (which remains governed by §§ 14–15), making the exemption practically usable
 - Added § 16.5 mandatory-law / consumer-protection carveout: forum, choice-of-law, and arbitration provisions of § 16 do not override non-waivable mandatory rules in a natural-person Recipient's habitual residence
@@ -3348,7 +3420,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.17.4] - 2026-05-24
 
 ### Changed
-- `docs`: replaced factorial Quick Example in README with a compilable `Neuron` perceptron example (`examples/neuron.nr`) that demonstrates structs, `impl` blocks, associated functions, instance methods, if-expressions, and implicit returns — verified to compile and run
+- `docs`: replaced factorial Quick Example in README with a compilable `Neuron` perceptron example (`examples/neuron.nr`) that demonstrates structs, `impl` blocks, associated functions, instance methods, if-expressions, and implicit returns, verified to compile and run
 - `docs`: elevated memory leak warning from buried table paragraph to a prominent blockquote with contributor call-to-action
 - `docs`: rewrote License section with plain-language summary, explicit "what you can do" / "what requires a license" breakdown, and Apache 2.0 transition commitment
 - `docs`: updated license badge to reflect "Neuro Shared Source → Apache 2.0" framing
@@ -3365,14 +3437,14 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.17.3] - 2026-05-24
 
 ### Fixed
-- `ci`: Windows LLVM setup — replaced the official LLVM NSIS installer (which omits `llvm-config.exe`, headers, and static `.lib` files, making it unusable for `llvm-sys`) with the full MSVC dev build from `vovkos/llvm-package-windows` 20.1.8 (`msvcrt`/`/MD` variant matching Rust's default CRT linkage); fixes "llvm-config.exe not found at C:\\LLVM\\bin\\llvm-config.exe" on `windows-latest` runners
+- `ci`: Windows LLVM setup, replacing the official LLVM NSIS installer (which omits `llvm-config.exe`, headers, and static `.lib` files, making it unusable for `llvm-sys`) with the full MSVC dev build from `vovkos/llvm-package-windows` 20.1.8 (`msvcrt`/`/MD` variant matching Rust's default CRT linkage); fixes "llvm-config.exe not found at C:\\LLVM\\bin\\llvm-config.exe" on `windows-latest` runners
 
 ---
 
 ## [1.17.2] - 2026-05-20
 
 ### Fixed
-- `ci`: Windows LLVM setup — detect existing LLVM 20.x dev install before attempting installation; fall back to official NSIS installer (20.1.8) instead of Chocolatey, which fails when a newer runtime-only version is already present on the runner
+- `ci`: Windows LLVM setup, detecting an existing LLVM 20.x dev install before attempting installation; fall back to official NSIS installer (20.1.8) instead of Chocolatey, which fails when a newer runtime-only version is already present on the runner
 - `docs`: updated Windows installation guide to LLVM 20.1.8 and clarified install path constraint
 
 ---
@@ -3380,9 +3452,9 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ## [1.17.1] - 2026-05-20
 
 ### Added
-- `docs`: `SECURITY.md` — vulnerability reporting via GitHub private advisory, response timeline, security surface definition
-- `docs`: `CODE_OF_CONDUCT.md` — Contributor Covenant v2.1
-- `docs`: `DESIGN.md` — language design principles, non-goals, and AI-first rationale
+- `docs`: `SECURITY.md`, covering vulnerability reporting via GitHub private advisory, response timeline, security surface definition
+- `docs`: `CODE_OF_CONDUCT.md`, Contributor Covenant v2.1
+- `docs`: `DESIGN.md`, covering language design principles, non-goals, and AI-first rationale
 - `docs`: `DESIGN.md` linked from `README.md` ToC and `CONTRIBUTING.md` codebase reading list
 
 ### Fixed
@@ -3395,8 +3467,8 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ### Added
 - `infra`: `Attribute { name, args, span }` AST node; `FunctionDef` and `MethodDef` now carry `attributes: Vec<Attribute>` (Phase 1.5)
 - `parser`: `parse_attributes` consumes `@name` / `@name(arg, ...)` prefixes before any `func` definition, including methods in `impl` blocks
-- `semantic`: lint infrastructure — `Warning` / `WarningCode` public types; `type_check` now returns `Result<Vec<Warning>, Vec<TypeError>>`
-- `semantic`: `prefer-loop-over-while-true` lint — fires on bare `while true { ... }`; suppressed by `@allow(prefer_loop_over_while_true)` on the enclosing function/method
+- `semantic`: lint infrastructure: `Warning` / `WarningCode` public types; `type_check` now returns `Result<Vec<Warning>, Vec<TypeError>>`
+- `semantic`: `prefer-loop-over-while-true` lint, which fires on bare `while true { ... }`; suppressed by `@allow(prefer_loop_over_while_true)` on the enclosing function/method
 - `codegen`: lint warnings forwarded to stderr by `neurc check` and `neurc compile`; never block compilation
 - `tests`: attribute parsing coverage (free functions, methods, multi-arg, bare, struct-rejection) and lint emission/suppression coverage in semantic-analysis and neurc integration tests
 - `docs`: lint section in `docs/language-reference/control-flow.md`; `examples/while_true_lint.nr` runnable demo
@@ -3453,7 +3525,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
   `codegen_stmt`).
 
 ### Tests
-- Added `compiler/neurc/tests/if_block_expressions.rs` — 7 integration tests.
+- Added `compiler/neurc/tests/if_block_expressions.rs`, with 7 integration tests.
 - Added `examples/if_block_expressions.nr` example; wired into `examples.rs` test suite.
   Total test count raised from 428 to 436.
 
@@ -3468,7 +3540,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
   constants are now emitted at the correct declared bit-width.
 
 ### Tests
-- Added `compiler/neurc/tests/examples.rs` — 22 integration tests that compile and
+- Added `compiler/neurc/tests/examples.rs`, with 22 integration tests that compile and
   execute every `.nr` file in `examples/` and assert the expected exit code.
   Total test count raised from 406 to 428.
 
@@ -3512,7 +3584,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 
 ### Added
 
-- **lexer**: Integer literal type suffixes — `42i64`, `255u8`, `0xFFu8`, `0b1010i32`
+- **lexer**: Integer literal type suffixes: `42i64`, `255u8`, `0xFFu8`, `0b1010i32`
   - All eight suffix variants: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
   - New `TokenKind::IntegerSuffix(IntegerSuffixToken)` emitted by four new regexes (decimal,
     binary, octal, hex) at `priority = 2`; logos maximal munch picks `42i64` as one token
@@ -3580,7 +3652,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
     to all functions via a pre-registration pass (forward references work regardless
     of source order)
   - Function-body consts folded in Rust (`FoldedConst`) and stored as compile-time
-    values — no `alloca` emitted
+    values, with no `alloca` emitted
   - RHS must be a constant expression (literals, arithmetic/unary/cast on literals,
     or identifiers of previously declared consts); function calls and runtime values
     are rejected with `InvalidConstExpr`
@@ -3604,11 +3676,11 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 
 ### Fixed
 
-- **parser**: `else if` condition — `no_struct_lit` guard missing
+- **parser**: `else if` condition: `no_struct_lit` guard missing
   - Setting `no_struct_lit = true` around each `else if` condition prevents a bare
     identifier (e.g. `else if isValid {`) from having its block-opening `{` consumed
     as a struct literal opener, corrupting the parse tree
-- **codegen**: `else if … else` chain — final `else` body executed unconditionally
+- **codegen**: `else if … else` chain: final `else` body executed unconditionally
   - Replaced the flat loop over `else_if_blocks` with a recursive `split_first` call
     that passes the remaining arms and the `else_block` down, keeping each arm
     mutually exclusive with all subsequent arms
@@ -3619,7 +3691,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 
 ### Added
 
-- **parser/semantic/codegen**: `impl` blocks — methods and associated functions on structs
+- **parser/semantic/codegen**: `impl` blocks: methods and associated functions on structs
   - `impl TypeName { func method(&self) ... func assoc(args) ... }` parsed as `Item::Impl`
   - `&self` instance methods lowered to LLVM free functions under mangled names `StructName__methodName`; struct passed by value as first parameter
   - Associated functions (no `self`) called via `TypeName::func(args)` path syntax; `Expr::Path` AST node added
@@ -3629,7 +3701,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
   - `Amp` (`&`) token added to lexer; logos longest-match keeps `&&` as `AmpAmp`
   - 8 new integration tests covering all acceptance criteria
 
-- **parser/semantic/codegen**: Struct types — definition, instantiation, field access, and field mutation
+- **parser/semantic/codegen**: Struct types: definition, instantiation, field access, and field mutation
   - `struct Name { field: Type, ... }` declarations parsed as `Item::Struct`
   - Struct literal expressions `Name { field: value, ... }` with full type checking
   - Field read via `.field` infix (`Expr::FieldAccess`), codegen via LLVM `build_struct_gep` + `build_load`
@@ -3722,10 +3794,10 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 ### Fixed
 
 - **codegen**: `codegen_if` branch check used the stale `then_bb`/`else_bb` reference
-  after nested control flow moved the builder to an inner merge block — replaced with
+  after nested control flow moved the builder to an inner merge block, replaced with
   `builder.get_insert_block()` check (mirrors the existing pattern in `codegen_while`)
 - **codegen**: `codegen_binary` read `span.start` (result type, e.g. `Bool`) instead of
-  `span.start + 1` (left-operand type) — this silently broke float comparisons and
+  `span.start + 1` (left-operand type). This silently broke float comparisons and
   prevented string equality dispatch
 
 ### Changed
@@ -3748,7 +3820,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
   - Updated `.idea/roadmap.md` (v4.1) and `.idea/idea.md` with accurate backend stack,
     MLIR lowering strategy, Enzyme MLIR dialect plan, and GPU dialect paths
 - **architecture-tests**: Renamed `test_all_slices_have_readme` → `test_all_slices_have_context_md`
-  — README.md files replaced by CONTEXT.md across all slices; required sections updated to
+  README.md files replaced by CONTEXT.md across all slices; required sections updated to
   `Purpose`, `Entry Point`, `Data Ownership`, `Shared Kernel`
 - **workspace**: Repository and homepage URLs updated to `github.com/PanzerPeter/Neuro`
 - **workspace**: `Cargo.lock` format upgraded to version 4 (Cargo 1.85+)
@@ -3781,14 +3853,14 @@ Documentation-accuracy audit follow-up. No code or behavior change.
 - CI: dedicated `Architecture` gate runs `cargo test -p neurc --test architecture_tests`
 - CI: docs-consistency gate (`tools/check_docs_consistency.py`) on every push/PR
 - CI: benchmark regression gate (`tools/check_benchmark_regression.py`) for `llvm-backend`
-- CI: cross-platform release smoke gate — builds `neurc` on Linux, macOS, Windows
+- CI: cross-platform release smoke gate, building `neurc` on Linux, macOS, Windows
   and executes representative examples via `tools/run_release_smoke_tests.py`
 
 ---
 
 ## [0.1.0] - 2025-01-21
 
-### Initial Release — Lexer and Expression Parser
+### Initial Release: Lexer and Expression Parser
 
 ### Added
 
@@ -3802,7 +3874,7 @@ Documentation-accuracy audit follow-up. No code or behavior change.
   - 26 tests
 
 - **infrastructure**: Workspace setup with Vertical Slice Architecture (VSA)
-  - inkwell 0.6.0 (LLVM 18 bindings) — replaced by LLVM 20 in Unreleased
+  - inkwell 0.6.0 (LLVM 18 bindings), replaced by LLVM 20 in Unreleased
 
 ### Fixed
 

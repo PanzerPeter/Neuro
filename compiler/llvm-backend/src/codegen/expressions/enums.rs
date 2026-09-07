@@ -3,7 +3,7 @@
 //
 // An enum value is a tagged union `{ i32 tag, [W x i64] payload }`. The tag is the
 // variant discriminant; each scalar payload field is packed losslessly into its own
-// 64-bit slot — integers/`char`/`bool` zero-extend, floats bitcast to their integer
+// 64-bit slot: integers/`char`/`bool` zero-extend, floats bitcast to their integer
 // width then zero-extend. Packing into fixed `i64` slots gives every value of an enum
 // one identical LLVM type without computing a target-specific union size, and the
 // encoding round-trips bit-exactly for the eventual `match` extraction.

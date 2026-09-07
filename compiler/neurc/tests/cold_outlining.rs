@@ -5,7 +5,7 @@
 // path. The transformation must be invisible from the outside: these tests drive a
 // failure through an outlined thunk in programs that combine several language features,
 // and assert the diagnostic text and the abort are exactly what they were when the
-// machinery was inline. The `-O2` cases matter most — the thunks are `noinline`, so the
+// machinery was inline. The `-O2` cases matter most: the thunks are `noinline`, so the
 // optimizer must not fold them back in and must not lose the message.
 
 use std::path::PathBuf;

@@ -41,8 +41,8 @@ func main() -> i32 {
 
 #[test]
 fn every_bound_position_takes_the_constraint() {
-    // The three places a bound is written — the parameter list, a `where` clause, and
-    // argument-position `impl Trait` — are one form, so all three must carry it.
+    // The three places a bound is written (the parameter list, a `where` clause, and
+    // argument-position `impl Trait`) are one form, so all three must carry it.
     let test = CompileTest::new();
     let source = r#"
 trait Source {

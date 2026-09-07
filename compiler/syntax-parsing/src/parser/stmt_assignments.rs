@@ -44,7 +44,7 @@ impl Parser {
     }
 
     /// Parse a compound assignment statement, desugaring into a plain assignment.
-    /// `target OP= rhs` → `target = target OP rhs` — no new AST nodes required.
+    /// `target OP= rhs` → `target = target OP rhs`: no new AST nodes required.
     pub(crate) fn parse_compound_assignment_stmt(&mut self) -> ParseResult<Stmt> {
         let target_token = self.consume(TokenKind::Identifier(String::new()), "identifier")?;
         let target = if let TokenKind::Identifier(name) = target_token.kind {

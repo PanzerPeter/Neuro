@@ -55,8 +55,8 @@ impl TypeChecker {
             }
         }
 
-        // A local binding of function type — a closure or a function-typed
-        // parameter — is callable directly: `f(args)`. It shadows a same-named
+        // A local binding of function type (a closure or a function-typed
+        // parameter) is callable directly: `f(args)`. It shadows a same-named
         // top-level function, matching the usual locals-over-globals precedence.
         if let Some(Type::Function { params, ret }) =
             self.symbols.lookup(func_name).map(|info| info.ty.clone())
@@ -115,7 +115,7 @@ impl TypeChecker {
     /// method of this name wins. Returns `None` when no bound trait declares it.
     ///
     /// A signature naming an associated type is typed under the bound's
-    /// `Trait<Assoc = T>` constraints — the trait's declaration is re-resolved with them
+    /// `Trait<Assoc = T>` constraints; the trait's declaration is re-resolved with them
     /// in scope, exactly as an impl's own bindings resolve it. A bare bound constrains
     /// nothing, so such a call is reported instead.
     pub(super) fn resolve_generic_trait_method(
@@ -433,7 +433,7 @@ impl TypeChecker {
 
     /// Evaluate every value predicate from a `where` clause against the concrete
     /// const values in `subst`. A predicate that resolves to `false` is an error; one that
-    /// cannot be fully evaluated (still symbolic) is skipped — it is re-checked at the
+    /// cannot be fully evaluated (still symbolic) is skipped; it is re-checked at the
     /// concrete instantiation.
     pub(crate) fn check_where_predicates(
         &mut self,
@@ -558,7 +558,7 @@ impl TypeChecker {
                     Some(k) => k.clone(),
                     None => {
                         // `.clone()` on a struct that derives `Clone` (or `Copy`) is a
-                        // compiler-known builtin — a deep copy yielding the same
+                        // compiler-known builtin, a deep copy yielding the same
                         // struct type. A user-defined `clone` method shadows it (handled
                         // above by the impl_methods lookup).
                         if field.name == CLONE_METHOD && self.struct_is_clone(&struct_name) {

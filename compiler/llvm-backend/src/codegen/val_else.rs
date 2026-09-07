@@ -4,7 +4,7 @@
 // the success block with the pattern's bindings materialized there, a miss enters the
 // else block with its own binding in scope. The frontend has verified the else block
 // diverges, so its tail is `unreachable` and the success block is the only path that
-// reaches the statements after this one — which is exactly why those statements may
+// reaches the statements after this one, which is exactly why those statements may
 // use the bindings unconditionally.
 
 use neuro_hir::{HirExpr, HirMatchBinding, HirMatchTest, HirStmt};

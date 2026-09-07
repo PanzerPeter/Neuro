@@ -10,7 +10,7 @@
 //     trait Iterator     { type Item; func next(&mut self) -> Option<Self::Item> }
 //     trait IntoIterator { type Item; type Iter; func into_iter(self) -> Self::Iter }
 //
-// A type implementing `Iterator` needs no second `IntoIterator` impl — it is its
+// A type implementing `Iterator` needs no second `IntoIterator` impl: it is its
 // own iterator, and the loop uses it directly.
 
 // A cursor over the even numbers below a limit. This is the `Iterator` half.
@@ -34,7 +34,7 @@ impl Iterator for EvensIter {
 }
 
 // The container half: `Evens` holds no cursor of its own, so it may be iterated
-// more than once — each `for` head asks it for a fresh `EvensIter`.
+// more than once: each `for` head asks it for a fresh `EvensIter`.
 @derive(Copy, Clone)
 struct Evens {
     limit: i32

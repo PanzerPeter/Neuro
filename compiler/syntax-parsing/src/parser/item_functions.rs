@@ -122,7 +122,7 @@ impl Parser {
             let first = self.consume_identifier("parameter name")?;
             self.skip_newlines();
 
-            // `external internal:` — a second identifier before the colon is the
+            // `external internal:`. A second identifier before the colon is the
             // internal name, which makes the first one the call-site label.
             let (label, param_name) = if matches!(self.peek_kind(), Some(TokenKind::Identifier(_)))
             {
@@ -255,7 +255,7 @@ impl Parser {
             let mut bounds: Vec<TraitBound> = Vec::new();
             let mut end_span = name.span;
             let kind = if is_const {
-                // `const N: T` — the declared integer type is mandatory.
+                // `const N: T`. The declared integer type is mandatory.
                 self.consume(
                     TokenKind::Colon,
                     "':' and a type after a const parameter name",
@@ -319,7 +319,7 @@ impl Parser {
     ///
     /// Each comma-separated item is either a **trait bound** (`T: A + B`, folded into the
     /// matching generic parameter's `bounds` and left unenforced this phase) or a **value
-    /// predicate** — a boolean expression over const parameters (`N > 0`) returned for
+    /// predicate**: a boolean expression over const parameters (`N > 0`) returned for
     /// per-instantiation checking. Returns an empty vector when no `where` follows.
     pub(super) fn parse_where_clause(
         &mut self,
@@ -377,8 +377,8 @@ impl Parser {
         Ok(predicates)
     }
 
-    /// Parse one trait bound — `Trait`, or `Trait<Assoc = T>` constraining an associated
-    /// type the trait declares — returning it with the span of its last token.
+    /// Parse one trait bound: `Trait`, or `Trait<Assoc = T>` constraining an associated
+    /// type the trait declares, returning it with the span of its last token.
     fn parse_trait_bound(&mut self) -> ParseResult<(TraitBound, Span)> {
         let token = self.consume(TokenKind::Identifier(String::new()), "trait bound name")?;
         let TokenKind::Identifier(name) = token.kind else {
@@ -421,9 +421,9 @@ impl Parser {
     /// Parse a single method definition inside an `impl` block.
     ///
     /// Handles three self-parameter forms:
-    ///   `&self`     — immutable borrow (SelfParam::Ref)
-    ///   `&mut self` — mutable borrow   (SelfParam::RefMut)
-    ///   `self`      — owned/consuming  (SelfParam::Owned)
+    ///   `&self`     : immutable borrow (SelfParam::Ref)
+    ///   `&mut self` : mutable borrow   (SelfParam::RefMut)
+    ///   `self`      : owned/consuming  (SelfParam::Owned)
     ///
     /// Associated functions have no self parameter and use the same syntax as
     /// free functions. The distinction is detected by checking the first parameter.

@@ -129,7 +129,7 @@ func main() -> i32 {
     assert_eq!(exit, 36);
 }
 
-/// `continue` jumps to the step block, which is where the position advances —
+/// `continue` jumps to the step block, which is where the position advances:
 /// skipping a body must not skip a position.
 #[test]
 fn continue_still_advances_the_position() {

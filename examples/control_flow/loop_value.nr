@@ -3,7 +3,7 @@
 // Because blocks are expressions, a `loop` can produce a value: `break v`
 // exits the loop and makes `v` the value of the whole `loop` expression. All
 // value-carrying `break`s for one loop must agree on type. `while` and `for`
-// always yield unit — only `loop` can yield a value, because only `loop` is
+// always yield unit: only `loop` can yield a value, because only `loop` is
 // guaranteed to leave solely via a `break`.
 //
 // Here the first loop searches for the first even candidate (2) and the second

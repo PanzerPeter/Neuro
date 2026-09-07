@@ -202,7 +202,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(func)
     }
 
-    /// `{ptr, len} __neuro_quote(i8* s, i64 len, i8 quote)` — wrap text in the
+    /// `{ptr, len} __neuro_quote(i8* s, i64 len, i8 quote)`, which wraps text in the
     /// given delimiter for `:?` rendering of `string` and `char`.
     pub(crate) fn get_or_define_quote(&self) -> CodegenResult<FunctionValue<'ctx>> {
         const NAME: &str = "__neuro_quote";
@@ -239,7 +239,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(func)
     }
 
-    /// `{ptr, len} __neuro_utf8(i32 codepoint)` — encode one Unicode scalar value.
+    /// `{ptr, len} __neuro_utf8(i32 codepoint)`, which encodes one Unicode scalar value.
     /// A `char` is a code point, but a `string` is UTF-8 bytes, so interpolating a
     /// `char` has to encode rather than copy.
     pub(crate) fn get_or_define_utf8(&self) -> CodegenResult<FunctionValue<'ctx>> {
@@ -369,8 +369,8 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(func)
     }
 
-    /// Write `marker | ((code >> shift) & 0x3F)` — or the whole low byte when
-    /// `marker` is 0 — into `buf[index]`.
+    /// Write `marker | ((code >> shift) & 0x3F)`, or the whole low byte when
+    /// `marker` is 0, into `buf[index]`.
     fn store_utf8_byte(
         &self,
         buf: inkwell::values::PointerValue<'ctx>,

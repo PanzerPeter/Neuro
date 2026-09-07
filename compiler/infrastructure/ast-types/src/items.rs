@@ -9,7 +9,7 @@ use super::types::Type;
 /// Which module a declaration came from.
 ///
 /// Module resolution merges every loaded file into one flat item list, so the module a
-/// declaration was written in is otherwise unrecoverable downstream — and visibility is
+/// declaration was written in is otherwise unrecoverable downstream, and visibility is
 /// exactly the rule that needs it. The parser stamps 0 on everything it produces.
 pub type ModuleId = u32;
 
@@ -64,7 +64,7 @@ pub struct GenericParam {
 /// Function definition.
 ///
 /// `generics` is the `<T, U>` type-parameter list; it is empty for an ordinary
-/// (non-generic) function. A generic function is a *template* — later passes
+/// (non-generic) function. A generic function is a *template*: later passes
 /// monomorphize it into one concrete function per distinct set of type arguments.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDef {
@@ -73,13 +73,13 @@ pub struct FunctionDef {
     /// unless they opt in; the flag is inert in a single-module program.
     pub exported: bool,
     /// The module this declaration was loaded from, stamped during module resolution.
-    /// Everything the parser produces is module 0 — a single-file program is one module —
+    /// Everything the parser produces is module 0 (a single-file program is one module),
     /// so a program that never reaches the resolver behaves as it always did.
     pub module: ModuleId,
     pub generics: Vec<GenericParam>,
     /// Explicit lifetime parameters, the `'a` names in `func f<'a>(...)`.
     /// Kept separate from `generics` because lifetimes are a distinct namespace and,
-    /// unlike type/const parameters, do NOT drive monomorphization — a function with
+    /// unlike type/const parameters, do NOT drive monomorphization: a function with
     /// only lifetime parameters is an ordinary concrete function. Erased after
     /// borrow-check; the elision-based outlives analysis does the real work.
     pub lifetimes: Vec<Identifier>,
@@ -116,11 +116,11 @@ pub struct Attribute {
 /// obligations are fixed by the signature alone.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParamLabel {
-    /// `name: T` — the caller may pass positionally *or* write `name: value`.
+    /// `name: T`: the caller may pass positionally *or* write `name: value`.
     Implicit,
-    /// `external name: T` — the caller MUST write `external: value`.
+    /// `external name: T`: the caller MUST write `external: value`.
     External(Identifier),
-    /// `_ name: T` — the caller MUST pass positionally; the name is not accepted.
+    /// `_ name: T`: the caller MUST pass positionally; the name is not accepted.
     Suppressed,
 }
 
@@ -157,7 +157,7 @@ pub struct Parameter {
 pub struct FieldDef {
     pub name: Identifier,
     /// `true` when the field carries `export`, or when it belongs to an enum
-    /// struct-variant — a variant's shape is part of the enum it is matched through,
+    /// struct-variant: a variant's shape is part of the enum it is matched through,
     /// so its fields follow the enum rather than carrying visibility of their own.
     pub exported: bool,
     pub ty: Type,
@@ -173,7 +173,7 @@ pub struct StructDef {
     /// The module this declaration was loaded from. See [`FunctionDef::module`].
     pub module: ModuleId,
     /// `generics` is the `<T, U>` type-parameter list; empty for a
-    /// non-generic struct. A generic struct is a *template* — later passes
+    /// non-generic struct. A generic struct is a *template*: later passes
     /// monomorphize it into one concrete struct per distinct set of type arguments.
     pub generics: Vec<GenericParam>,
     /// Explicit lifetime parameters, the `'a` names in `struct S<'a> { ... }`.
@@ -196,12 +196,12 @@ pub struct StructDef {
 /// the by-value struct ABI lands; `&self` and `&mut self` are supported.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SelfParam {
-    /// `&self` — immutable borrow; lowered to pass-by-value in codegen.
+    /// `&self`: immutable borrow; lowered to pass-by-value in codegen.
     Ref,
-    /// `&mut self` — mutable borrow; lowered to pass-by-pointer so field writes
+    /// `&mut self`: mutable borrow; lowered to pass-by-pointer so field writes
     /// in the method body propagate to the caller's value.
     RefMut,
-    /// `self` — consuming; not yet supported (needs the by-value struct ABI).
+    /// `self`: consuming; not yet supported (needs the by-value struct ABI).
     Owned,
 }
 
@@ -303,7 +303,7 @@ pub struct EnumVariant {
 /// carrying associated data.
 ///
 /// `generics` is the `<T, E>` type-parameter list; empty for a non-generic enum.
-/// A generic enum is a *template* — later passes monomorphize it into one concrete
+/// A generic enum is a *template*: later passes monomorphize it into one concrete
 /// tagged union per distinct set of type arguments, exactly as they do for a generic
 /// struct. `Option<T>` and `Result<T, E>` are ordinary generic enums built this way.
 #[derive(Debug, Clone, PartialEq)]
@@ -319,7 +319,7 @@ pub struct EnumDef {
 /// A `newtype` declaration: a distinct nominal type wrapping `inner`.
 ///
 /// Unlike a transparent `type` alias (which is expanded away at parse time), a
-/// newtype survives to semantic analysis as its own type — the wrapper and the
+/// newtype survives to semantic analysis as its own type: the wrapper and the
 /// inner type are not interchangeable. Construction is `Name(value)` and the inner
 /// value is read via `.0`.
 #[derive(Debug, Clone, PartialEq)]
@@ -333,7 +333,7 @@ pub struct NewtypeDef {
 
 /// A single method declaration inside a `trait` block.
 ///
-/// A `default_body` of `None` is a **required** method — implementors must provide
+/// A `default_body` of `None` is a **required** method: implementors must provide
 /// one. `Some(body)` is a **provided** (default) method whose body is copied into any
 /// implementor that omits it. The signature mirrors [`MethodDef`] minus `attributes`
 /// (traits carry no per-method attributes this phase).
@@ -350,7 +350,7 @@ pub struct TraitMethod {
 
 /// A `trait` declaration: a set of method signatures defining shared behavior.
 ///
-/// Traits are fully monomorphized and erased — there is no vtable and no runtime trait
+/// Traits are fully monomorphized and erased: there is no vtable and no runtime trait
 /// object this phase (`dyn` dispatch is). A trait produces no code on its own;
 /// each `impl Trait for Type` block lowers to ordinary inherent methods, and any default
 /// method the implementor omits is copied in as a concrete method.
@@ -371,13 +371,13 @@ pub struct TraitDef {
 /// What an `import` declaration takes from the path it names.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportSelection {
-    /// `import math` — the module itself, brought in under its own name.
+    /// `import math`: the module itself, brought in under its own name.
     Module,
-    /// `import math::matrix as mat` / `import math::sqrt as root` — the last path
+    /// `import math::matrix as mat` / `import math::sqrt as root`: the last path
     /// segment under a new name. Whether that segment is a module or an item is a
     /// question about the file system, so it is settled during module resolution.
     Alias(Identifier),
-    /// `import math::{sqrt, sin}` — a brace list of names taken from the path.
+    /// `import math::{sqrt, sin}`: a brace list of names taken from the path.
     List(Vec<ImportName>),
 }
 
@@ -411,8 +411,8 @@ pub struct ImportDef {
 
 /// An inline `module Name { ... }` block.
 ///
-/// A block is a module in every sense a file is one — its items are private unless
-/// written with `export`, and a qualified path reaches into it — so module resolution
+/// A block is a module in every sense a file is one: its items are private unless
+/// written with `export`, and a qualified path reaches into it, so module resolution
 /// treats it as a module that happens to have no file of its own, and nothing about the
 /// block survives that pass.
 #[derive(Debug, Clone, PartialEq)]

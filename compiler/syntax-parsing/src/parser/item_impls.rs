@@ -14,7 +14,7 @@ use super::Parser;
 /// What a trait's `type` item must look like, for the diagnostic that rejects a binding
 /// where a declaration belongs.
 const TRAIT_ASSOC_DECL_FORM: &str =
-    "a newline — a trait declares `type Name`, an impl binds it with `type Name = T`";
+    "a newline; a trait declares `type Name`, an impl binds it with `type Name = T`";
 
 impl Parser {
     /// Parse an `impl TypeName { … }` block
@@ -150,7 +150,7 @@ impl Parser {
     ///
     /// Each method is either **required** (signature terminated by a newline, no body)
     /// or a **default** method (signature followed by a `{ ... }` block). An associated
-    /// type is declared as a bare `type Name` — the trait names the member, each
+    /// type is declared as a bare `type Name`: the trait names the member, each
     /// implementor binds it with `type Name = T`. Traits carry no generic parameters of
     /// their own this phase.
     pub(crate) fn parse_trait_def(&mut self) -> ParseResult<TraitDef> {
@@ -186,7 +186,7 @@ impl Parser {
     /// Parse an associated-type declaration inside a `trait` block: `type Name`.
     ///
     /// A declaration names a member and stops there; the `= T` form is the impl's
-    /// binding, so writing one here is rejected rather than read as a default — a trait
+    /// binding, so writing one here is rejected rather than read as a default: a trait
     /// that could supply one would let an impl silently skip the binding the
     /// conformance check exists to demand.
     fn parse_assoc_type_decl(&mut self) -> ParseResult<Identifier> {

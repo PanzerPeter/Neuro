@@ -1,7 +1,7 @@
 // Regression: a tail-position `if/else` used as a function's implicit return value.
 // The parser represents a statement-position `if` as `Stmt::If`, so the backend's
 // implicit-return lowering must recognise a trailing `Stmt::If` (with an `else`)
-// and yield its value — not fall through with `unreachable` (which segfaulted).
+// and yield its value: not fall through with `unreachable` (which segfaulted).
 mod common;
 use common::CompileTest;
 
@@ -141,7 +141,7 @@ func main() -> i32 {
 }
 
 // Regression: the same rule one level down. A trailing `if/else` inside another
-// block — an if-branch, a bare block, or the tail of a nested block — is that
+// block (an if-branch, a bare block, or the tail of a nested block) is that
 // block's value too. Recognising it only at the function-body tail meant a nested
 // tail `if` lowered as a statement and the enclosing block yielded garbage.
 

@@ -18,7 +18,7 @@ func main() -> i32 {
     // Reading `original` here would be a compile error: use of moved value.
     // val bad: u64 = original.len()   // <- rejected by the borrow checker
 
-    // `.clone()` sidesteps the move — both bindings stay valid.
+    // `.clone()` sidesteps the move: both bindings stay valid.
     val a: string = "hello"
     val b: string = a.clone()
     val both_ok: bool = a == b          // reads `a` after cloning: fine

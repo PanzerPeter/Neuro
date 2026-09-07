@@ -3,7 +3,7 @@
 mod common;
 use common::CompileTest;
 
-// ── AC1/AC2: &self method — compiles and returns correct value ───────────────
+// ── AC1/AC2: &self method, compiles and returns correct value ───────────────
 
 #[test]
 fn self_method_returns_field_value() {

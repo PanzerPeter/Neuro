@@ -8,7 +8,7 @@ Phase 1 (Core Language) is complete: the full general-purpose language surface s
 **v2.0.0**. Neuro is now in Phase 2 (Tensors, v2.x). A phase is divided into lettered
 sub-phases implemented strictly in dependency order; finishing all of Phase 2 ships v3.0.0.
 
-Per-phase status lives in exactly one place — the
+Per-phase status lives in exactly one place: the
 [Quick Roadmap](README.md#quick-roadmap). What each release changed is in
 [CHANGELOG.md](CHANGELOG.md); neither is restated here, so neither can go stale here.
 
@@ -266,6 +266,11 @@ cargo doc --no-deps --workspace --open
 
 # Security audit
 cargo audit
+
+# Reclaim disk: Cargo never deletes the artifacts of previous builds, and a test
+# binary here statically links LLVM, so `target/` grows without bound.
+python tools/clean_stale_target.py --dry-run   # report first
+python tools/clean_stale_target.py             # keep the newest unit per crate
 ```
 
 ### Debugging
@@ -283,33 +288,35 @@ cargo run -p neurc -- compile examples/basics/hello.nr
 
 ## Current Contribution Priorities
 
-### Fix a known bug — start here
+### Fix a known bug: start here
 
-The highest-value first contribution is a bug fix, and the queue already exists:
+A bug fix is the highest-value first contribution, and the queue lives in one file:
 [docs/BUGS.md](docs/BUGS.md) is the register of open, confirmed defects. Every entry is a
-self-contained task with a minimal reproduction, the known root cause, a workaround, and
-a fix sketch — several are sized for a first-time compiler contributor.
+self-contained task carrying a minimal reproduction, the known root cause, a workaround,
+and a fix sketch, and they are often sized for a first-time compiler contributor. The
+register is empty whenever every confirmed defect has been fixed, so check the
+[Phase 2](#phase-2-tensor-foundation--mlir) items below if it is.
 
 How to take one on:
 
 1. Claim it in an issue naming the `BUG-NNN` id so work isn't duplicated.
-2. Some entries are language-design decisions rather than patches — those say so, and
+2. Some entries are language-design decisions rather than patches. Those say so, and
    need a maintainer ruling in the issue before any code changes.
 3. Ship the fix with a regression test that fails without it (see
    [Testing Requirements](#testing-requirements)) and follow the normal workflow above.
 
-Found a new bug? Open an issue with a minimal reproducible example instead of a PR —
-confirmed defects get filed into `docs/BUGS.md` from there.
+Found a new bug? Open an issue with a minimal reproducible example instead of a PR.
+Confirmed defects get filed into `docs/BUGS.md` from there.
 
-### Phase 2 — Tensor Foundation & MLIR
+### Phase 2: Tensor Foundation & MLIR
 
 The roadmap is dependency-ordered, so pick the **topmost open item**: its prerequisites
 are already done. Coordinate on an issue before starting a large one.
 
-**Every Phase 1 sub-phase (1A–1H) is complete**, including the last flagged 1C item —
-growable `String` — which shipped in v1.80.0 after the type was specified in the language
-spec. **Phase 2 — Tensor Foundation & MLIR** holds the next open items, and its first
-sub-phase was not tensor work: `2A — Standard I/O & Spec Stragglers` cleared constructs the
+**Every Phase 1 sub-phase (1A–1H) is complete**, including the last flagged 1C item
+(growable `String`), which shipped in v1.80.0 after the type was specified in the language
+spec. **Phase 2: Tensor Foundation & MLIR** holds the next open items, and its first
+sub-phase was not tensor work: `2A: Standard I/O & Spec Stragglers` cleared constructs the
 specification names that no Phase 1 item ever tracked, and **2A is now complete**. `print` /
 `println` shipped in v2.1.0, `.is_nan()` in v2.2.0, buffered standard output in v2.3.0, the
 codepoint-indexed `.char_slice(range)` in v2.4.0, `.enumerate()` on arrays and ranges in
@@ -318,8 +325,8 @@ declarations in v2.7.0, the `Trait<Assoc = T>` bound form in v2.8.0, and the
 `IntoIterator` / `Iterator` protocol in v2.9.0, the `.map()` / `.filter()` head
 adapters in v2.10.0, the codepoint iterators `.chars()` / `.char_indices()` in v2.11.0, and
 `@derive` argument validation with the `Debug` / `PartialEq` derives in v2.12.0.
-`2B — Tensor Core` holds the next open item. Its first line — the static tensor type
-syntax `Tensor<T, [...]>` — shipped in v2.13.0 as a *type-level* landing, and v2.14.0 gave
+`2B: Tensor Core` holds the next open item. Its first line, the static tensor type
+syntax `Tensor<T, [...]>`, shipped in v2.13.0 as a *type-level* landing, and v2.14.0 gave
 tensors a runtime representation: a nested array literal coerces under a `Tensor<...>`
 annotation, and `Tensor::<T, [...]>::zeros()` / `ones()` / `identity()` /
 `random_normal(mean:, std:)` / `scalar()` / `from()` build one where no annotation reaches.
@@ -329,7 +336,7 @@ enum. v2.16.0 moved the buffer itself out of line, which closed `BUG-018` and li
 limit at every optimization level, and v2.17.0 made the value a DLPack handle: a tensor is a
 pointer to a `DLManagedTensorVersioned` carrying its rank, shape, strides, dtype, and device,
 over a 64-byte-aligned buffer released through the handle's own `deleter`. A tensor can now
-be built, bound, moved, cloned, passed, returned, and stored in a struct — but not read back:
+be built, bound, moved, cloned, passed, returned, and stored in a struct, but not read back:
 in-place compound assignment, slicing and indexing, and the reductions are all still open.
 Start at the top of 2B in the roadmap.
 
@@ -340,7 +347,7 @@ invented one, and a declaration rule ordered behind the keyword rule; run
 `tools/tmlanguage_scopes.mjs <file.nr>` to see the scopes the grammar really produces.
 
 Every item ships with integration tests, a `CHANGELOG.md` entry, and its slice's
-`CONTEXT.md` updated in the same commit — see [Acceptance Criteria](#acceptance-criteria).
+`CONTEXT.md` updated in the same commit: see [Acceptance Criteria](#acceptance-criteria).
 
 ### Non-Code Contributions
 

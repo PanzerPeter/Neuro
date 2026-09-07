@@ -234,7 +234,7 @@ fn derive_and_hand_written_impl_conflict() {
     );
 }
 
-/// A generic template's fields are type parameters, which no derive rule can judge —
+/// A generic template's fields are type parameters, which no derive rule can judge,
 /// the concrete substitution is the first point at which it can, so the template passes
 /// and the instantiation is what reports.
 #[test]

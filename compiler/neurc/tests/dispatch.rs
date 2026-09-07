@@ -36,7 +36,7 @@ func main() -> i32 {
 }
 
 /// Each `impl Trait` parameter is its own anonymous type parameter, so one call may bind
-/// two different concrete types — the defining difference from a single named `<T>`.
+/// two different concrete types: the defining difference from a single named `<T>`.
 #[test]
 fn two_impl_trait_parameters_bind_independently() {
     let test = CompileTest::new();
@@ -146,7 +146,7 @@ func main() -> i32 {
 }
 
 /// `&mut dyn Trait` reaches a `&mut self` method and the mutation is visible to the
-/// caller — the trait object forwards the receiver by pointer.
+/// caller: the trait object forwards the receiver by pointer.
 #[test]
 fn mut_dyn_trait_mutates_through_the_vtable() {
     let test = CompileTest::new();
@@ -252,7 +252,7 @@ func main() -> i32 { 0 }
     );
 }
 
-/// Object safety: a method consuming `self` by value cannot go behind a trait object —
+/// Object safety: a method consuming `self` by value cannot go behind a trait object:
 /// the spec's `Add`-style case.
 #[test]
 fn trait_consuming_self_is_not_object_safe() {

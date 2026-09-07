@@ -38,7 +38,7 @@ pub(crate) struct TypeMapper<'ctx> {
     enum_words: HashMap<String, u32>,
     /// Struct name → its field types in declaration order. A struct's layout is not
     /// carried by [`Type::Struct`] (which holds only the name), so the mapper needs
-    /// this table to build the LLVM aggregate for one — as a function parameter, a
+    /// this table to build the LLVM aggregate for one, as a function parameter, a
     /// return type, or a field of another struct.
     struct_fields: HashMap<String, Vec<Type>>,
 }
@@ -96,7 +96,7 @@ impl<'ctx> TypeMapper<'ctx> {
 
     /// The LLVM tagged-union type for a named enum: `{ i32 tag, [W x i64] payload }`
     /// The tag is the variant discriminant; the payload reserves `W` 64-bit
-    /// slots — one per field of the widest variant — into which scalar payload
+    /// slots, one per field of the widest variant, into which scalar payload
     /// values are packed. `W == 0` (an all-unit enum) yields a zero-length array.
     pub(crate) fn enum_struct_type(
         &self,
@@ -136,7 +136,7 @@ impl<'ctx> TypeMapper<'ctx> {
     /// `{ ptr buffer, i64 len, i64 cap, i64 used }`.
     ///
     /// `len` counts live elements/entries and `cap` the allocated slots. `used` counts
-    /// occupied *slots* — for the hash map that includes tombstones, which is what the
+    /// occupied *slots*. For the hash map that includes tombstones, which is what the
     /// load factor must be measured against; the other kinds leave it zero.
     pub(crate) fn collection_header_type(&self) -> inkwell::types::StructType<'ctx> {
         let ptr = self.context.ptr_type(inkwell::AddressSpace::default());
@@ -150,7 +150,7 @@ impl<'ctx> TypeMapper<'ctx> {
     /// The LLVM layout of the buffer a `Tensor<T, [d0, ...]>` points at: a flat,
     /// row-major `[d0*d1*... x T]` array.
     ///
-    /// The rank-0 tensor holds one element — the empty product — which is why
+    /// The rank-0 tensor holds one element, the empty product, which is why
     /// `Tensor<f32, []>` is `[1 x float]` and not a zero-length array. Host memory only;
     /// device buffers arrive with the GPU backend.
     pub(crate) fn tensor_buffer_type(&self, ty: &Type) -> CodegenResult<BasicTypeEnum<'ctx>> {
@@ -165,7 +165,7 @@ impl<'ctx> TypeMapper<'ctx> {
         Ok(elem_llvm.array_type(count as u32).into())
     }
 
-    /// The LLVM layout of `DLManagedTensorVersioned` — the structure a tensor
+    /// The LLVM layout of `DLManagedTensorVersioned`, the structure a tensor
     /// value points at.
     ///
     /// Field order and widths mirror the DLPack 1.1 C header exactly, because the
@@ -215,7 +215,7 @@ impl<'ctx> TypeMapper<'ctx> {
 
     /// The DLPack `dtype` of a tensor element type: its type code and its width in bits.
     ///
-    /// `lanes` is not returned because it is 1 for every Neuro element type — a vector
+    /// `lanes` is not returned because it is 1 for every Neuro element type. A vector
     /// element would be a language feature rather than an encoding of one.
     pub(crate) fn dlpack_dtype(&self, element: &Type) -> CodegenResult<DlpackDataType> {
         let (code, bits) = match element {
@@ -253,7 +253,7 @@ impl<'ctx> TypeMapper<'ctx> {
 
     /// The byte size of a tensor's element buffer: `d0 * d1 * ... * sizeof(T)`.
     ///
-    /// The rank-0 tensor holds one element — the empty product — so its buffer is one
+    /// The rank-0 tensor holds one element, the empty product, so its buffer is one
     /// element wide, not zero.
     pub(crate) fn tensor_buffer_bytes(&self, ty: &Type) -> CodegenResult<u64> {
         let Type::Tensor { element, shape } = ty else {
@@ -312,7 +312,7 @@ impl<'ctx> TypeMapper<'ctx> {
                 Ok(self.dyn_ref_type().into())
             }
             // An immutable borrow of a string is the `{ ptr, i64 }` fat pointer itself,
-            // held by value — the string ABI, not a pointer to it.
+            // held by value: the string ABI, not a pointer to it.
             //
             // `string` is immutable, so the referent's address carries no information the
             // fat pointer does not, and requiring one forces every computed slice
@@ -322,12 +322,12 @@ impl<'ctx> TypeMapper<'ctx> {
             //
             // `&mut string` is excluded: a store through it has to reach the referent, so
             // it stays the referent's address. `&&string` is excluded for the same reason
-            // this arm matches one level only — the outer reference borrows a reference.
+            // this arm matches one level only: the outer reference borrows a reference.
             Type::Reference {
                 inner,
                 mutable: false,
             } if matches!(**inner, Type::String) => self.map_type_at_depth(inner, depth),
-            // A borrow of a slice — `&[T]` or `&mut [T]` — is the `{ ptr, i64 }` fat
+            // A borrow of a slice, `&[T]` or `&mut [T]`, is the `{ ptr, i64 }` fat
             // pointer itself, held by value: the length is not recoverable from the
             // referent's address, so it has to travel with the pointer. Unlike
             // `&string` this includes the mutable form, because a write through a slice
@@ -353,7 +353,7 @@ impl<'ctx> TypeMapper<'ctx> {
             ))),
             // A tensor value is a pointer to its own `DLManagedTensorVersioned`,
             // so the value a Neuro program passes around is the handle a foreign consumer
-            // takes — there is no wrap step at an FFI boundary. See
+            // takes: there is no wrap step at an FFI boundary. See
             // [`dlpack_managed_tensor_type`] for the structure and [`tensor_buffer_type`]
             // for the layout of the buffer its `data` field addresses.
             Type::Tensor { .. } => Ok(self
@@ -427,7 +427,7 @@ mod tests {
     use super::*;
 
     /// Every element type a tensor may hold maps to its DLPack code and width, and
-    /// nothing else maps at all — an unmappable element is a diagnostic, not a guess.
+    /// nothing else maps at all: an unmappable element is a diagnostic, not a guess.
     #[test]
     fn the_dlpack_dtype_table_covers_every_tensor_element() {
         let context = LLVMContext::create();

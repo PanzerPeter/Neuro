@@ -1,4 +1,4 @@
-// An inventory ledger — the standard collections working with prior features.
+// An inventory ledger: the standard collections working with prior features.
 //
 // Combines: `Vec<T>` holding `Copy` structs, a second `Vec<string>` of names, a
 // `HashMap<string, i32>` name index, a key-ordered `BTreeMap<i32, i32>` report,

@@ -18,14 +18,14 @@ use crate::errors::{CodegenError, CodegenResult};
 const ASCII_ZERO: u64 = b'0' as u64;
 
 /// Scratch bytes the integer renderer reserves. The widest rendering it can produce is
-/// a 64-bit magnitude in octal — 22 digits — plus a sign, and octal is the sparsest
+/// a 64-bit magnitude in octal (22 digits) plus a sign, and octal is the sparsest
 /// radix it handles, so 24 leaves the loop unable to run off the front of the buffer.
 const MAX_INT_TEXT_BYTES: u64 = 24;
 
 /// Scratch bytes the float renderer renders into before copying the text out. The
 /// widest conversion the format mini-language admits is `%.Nf` on an `f64` of full
 /// magnitude: a sign, 309 integer digits, the point, and `N` decimals, where `N` is
-/// capped at [`MAX_FORMAT_PRECISION`] by semantic analysis. The rest is slack — a
+/// capped at [`MAX_FORMAT_PRECISION`] by semantic analysis. The rest is slack, a
 /// wrong guess here costs a second render, not correctness.
 const SCRATCH_TEXT_BYTES: u64 = 512 + MAX_FORMAT_PRECISION as u64;
 
@@ -205,14 +205,14 @@ impl<'ctx> CodegenContext<'ctx> {
             .map(|value| value.into_int_value())
     }
 
-    /// `{ptr, len} __neuro_fmt_int_<radix>(i64 magnitude, i8 sign)` — render an
+    /// `{ptr, len} __neuro_fmt_int_<radix>(i64 magnitude, i8 sign)`, which renders an
     /// unsigned magnitude in `radix`, prefixed by the ASCII byte `sign` unless that
     /// byte is zero.
     ///
     /// This used to go through `snprintf`, twice: once against `(NULL, 0)` to learn the
     /// rendered length and once more to render it. That is two traversals of a printf
     /// format string, two variadic calls, and a locale consultation to turn an integer
-    /// into at most twenty digits — and it dominated the cost of every interpolated
+    /// into at most twenty digits, and it dominated the cost of every interpolated
     /// hole, which is the most common thing a Neuro program does with a number. The
     /// digits are produced directly here instead: one pass, no probe, and the divisor
     /// is a compile-time constant per radix, so instruction selection turns it into a
@@ -413,7 +413,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// `{ptr, len} __neuro_fmt_flt(double value, i8* fmt)` — the float twin of
+    /// `{ptr, len} __neuro_fmt_flt(double value, i8* fmt)`, the float twin of
     /// [`Self::get_or_define_fmt_int`].
     pub(crate) fn get_or_define_fmt_float(&self) -> CodegenResult<FunctionValue<'ctx>> {
         const NAME: &str = "__neuro_fmt_flt";
@@ -440,8 +440,8 @@ impl<'ctx> CodegenContext<'ctx> {
     /// `snprintf` returns the length it *would* have written whatever it was given, so
     /// one call into a scratch buffer large enough for every conversion the format
     /// mini-language admits yields both the text and its length. The obvious
-    /// alternative — a `(NULL, 0)` probe call for the length, then a second call to
-    /// render — costs two traversals of the format string and two `double`-to-decimal
+    /// alternative (a `(NULL, 0)` probe call for the length, then a second call to
+    /// render) costs two traversals of the format string and two `double`-to-decimal
     /// conversions for one result, and float rendering is hot enough in a language that
     /// prints numbers for a living to be worth the stack.
     ///
@@ -550,7 +550,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.build_string_value(buf.as_basic_value().into_pointer_value(), len)
     }
 
-    /// `{ptr, len} __neuro_fmt_bin(i64 masked)` — base-2 digits of an already
+    /// `{ptr, len} __neuro_fmt_bin(i64 masked)`, the base-2 digits of an already
     /// width-masked value, most significant first, with no leading zeros.
     /// `printf` has no binary conversion, so this is written out by hand.
     pub(crate) fn get_or_define_fmt_binary(&self) -> CodegenResult<FunctionValue<'ctx>> {

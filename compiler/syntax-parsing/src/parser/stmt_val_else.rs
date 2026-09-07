@@ -15,8 +15,8 @@ impl Parser {
     /// Two markers, both unambiguous without further lookahead, because a binding
     /// name after `val` is only ever followed by `:`, `=`, or a newline:
     ///
-    /// - `Name::` — the qualified head of a variant pattern.
-    /// - `Name(`  — the unqualified head, which an import (the prelude included)
+    /// - `Name::`: the qualified head of a variant pattern.
+    /// - `Name(`  : the unqualified head, which an import (the prelude included)
     ///   brings into scope. Its payload is what settles the reading.
     ///
     /// `Name {` is deliberately absent: it stays a struct destructure. So does a
@@ -63,7 +63,7 @@ impl Parser {
     }
 
     /// Parse the optional `|name|` that may follow `else`. This is a dedicated
-    /// `val-else` production, not a closure literal — the block that follows is the
+    /// `val-else` production, not a closure literal: the block that follows is the
     /// else branch, not a closure body.
     fn parse_else_binding(&mut self) -> ParseResult<Option<Identifier>> {
         if !self.check(&TokenKind::Pipe) {

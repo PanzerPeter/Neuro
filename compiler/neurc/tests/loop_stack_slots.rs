@@ -3,7 +3,7 @@
 //
 // Every local binding and every result/scratch slot used to be `alloca`'d at the
 // current builder position, so a slot inside a loop body grew the stack by one slot per
-// iteration until the process ran out of it — an ordinary counted loop segfaulted once
+// iteration until the process ran out of it: an ordinary counted loop segfaulted once
 // it ran long enough. LLVM's `mem2reg` could not rescue it either: the pass only
 // promotes allocas already in the entry block, so the leak survived `-O3`.
 //

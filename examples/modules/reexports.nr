@@ -5,8 +5,8 @@
 //     api.nr           <- module `api`, which re-exports from `geometry`
 //     geometry.nr      <- module `geometry`, where the declarations really live
 //
-// The names arrive by two routes below — qualified through the facade, and imported from
-// it — and both land on the same declaration in `geometry`. The rename rides along: what
+// The names arrive by two routes below: qualified through the facade, and imported from
+// it, and both land on the same declaration in `geometry`. The rename rides along: what
 // `api` calls `SHIFT` is `geometry`'s `ORIGIN_SHIFT`.
 
 import api::{Point}

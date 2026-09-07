@@ -18,7 +18,7 @@ impl Point {
     }
 }
 
-// `s` is borrowed, not moved — the caller's string stays valid.
+// `s` is borrowed, not moved: the caller's string stays valid.
 func describe(s: &string) -> u64 {
     s.len()                       // auto-deref: `.len()` on a &string
 }
@@ -35,7 +35,7 @@ func read_sum(p: &Point) -> i64 {
 
 func main() -> i32 {
     val msg: string = "Neuro"
-    val n: u64 = describe(&msg)   // borrow — msg is NOT moved
+    val n: u64 = describe(&msg)   // borrow: msg is NOT moved
     val again: u64 = msg.len()    // still valid: borrowing never consumes
 
     val pt = Point { x: 3, y: 4 }

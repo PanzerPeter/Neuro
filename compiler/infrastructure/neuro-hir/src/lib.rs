@@ -13,9 +13,9 @@
 //!
 //! - **Every expression carries its resolved type** ([`HirExpr::ty`]). Types are
 //!   fully resolved [`HirType`]s, never unresolved name annotations, and there is
-//!   no error-recovery `Unknown` variant — a program that reaches the HIR has
+//!   no error-recovery `Unknown` variant: a program that reaches the HIR has
 //!   type-checked.
-//! - **Syntactic noise is normalized away** — the parenthesis grouping node is
+//! - **Syntactic noise is normalized away**: the parenthesis grouping node is
 //!   dropped, since tree structure already encodes grouping.
 //!
 //! This crate is pure data with no business logic, following the same VSA

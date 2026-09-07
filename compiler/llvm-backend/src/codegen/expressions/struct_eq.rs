@@ -1,6 +1,6 @@
 // Field-wise equality for a struct that derives `PartialEq`.
 //
-// The derive has no `eq` method to dispatch to — the comparison is generated here,
+// The derive has no `eq` method to dispatch to; the comparison is generated here,
 // straight over the aggregate's fields, which is what separates it from a hand-written
 // `impl PartialEq` (that route lowers to an ordinary method call before reaching codegen).
 
@@ -22,7 +22,7 @@ fn llvm_err(e: inkwell::builder::BuilderError) -> CodegenError {
 impl<'ctx> CodegenContext<'ctx> {
     /// Compare two values of a `@derive(PartialEq)` struct, field by field.
     ///
-    /// Every field comparison is evaluated — none of them can have a side effect, so
+    /// Every field comparison is evaluated. None of them can have a side effect, so
     /// an `and` chain is cheaper than the branching a short-circuit would need.
     pub(crate) fn codegen_derived_struct_eq(
         &self,

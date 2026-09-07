@@ -203,7 +203,7 @@ fn export_is_rejected_on_a_block() {
 #[test]
 fn a_sibling_block_in_an_import_path_is_reported_as_an_invisible_module() {
     // A block sees its own children and the file's siblings, not its parent's other
-    // blocks. The path therefore resolves no module — but it must not be silently
+    // blocks. The path therefore resolves no module, but it must not be silently
     // re-read as an enum whose variants are being imported.
     let error = run_single(
         "module leaf   { export const BASE: i32 = 8 }\n\
@@ -242,7 +242,7 @@ fn a_plain_import_of_a_sibling_block_is_reported_the_same_way() {
 
 #[test]
 fn an_import_whose_head_names_nothing_is_reported() {
-    // The single-segment fallback exists for enums — `import Option::{Some}`, whose
+    // The single-segment fallback exists for enums: `import Option::{Some}`, whose
     // enum the prelude supplies later. A head that names no module and no enum
     // anywhere must not slip through it unnoticed.
     let error = run_single("import Nothing::{AtAll}\nfunc main() -> i32 { 0 }\n")

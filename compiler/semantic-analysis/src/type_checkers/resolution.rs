@@ -79,7 +79,7 @@ impl TypeChecker {
             ast_types::Type::Named(ident) => match ident.name.as_str() {
                 // An associated-type path `Self::Item`. It is a type only where an impl
                 // says what it is, so resolution is a lookup in the bindings of the impl
-                // being checked — inside the trait declaration itself there is nothing to
+                // being checked: inside the trait declaration itself there is nothing to
                 // look up, and the position stays untyped until an implementor answers it.
                 name if name.starts_with(SELF_ASSOC_PREFIX) => {
                     let assoc = &name[SELF_ASSOC_PREFIX.len()..];
@@ -114,7 +114,7 @@ impl TypeChecker {
                 "void" => Some(Type::Void),
                 // A collection's bare name is not a type, exactly like a generic
                 // struct's: `Vec` alone says nothing about what it holds. `String` is the
-                // exception — it takes no arguments, so its bare name is already complete.
+                // exception: it takes no arguments, so its bare name is already complete.
                 name if CollectionKind::from_name(name).is_some_and(|k| k.arity() == 0)
                     && !self.generic_scope.contains(name)
                     && !self.struct_defs.contains_key(name)
@@ -150,7 +150,7 @@ impl TypeChecker {
                         None
                     } else if self.is_generic_enum(name) {
                         // Like a generic struct, a generic enum's bare name is not a
-                        // type — the template lives in `enum_defs` only so construction
+                        // type: the template lives in `enum_defs` only so construction
                         // sites can infer its arguments.
                         self.record_error(TypeError::GenericEnumNeedsArgs {
                             name: name.to_string(),
@@ -174,7 +174,7 @@ impl TypeChecker {
             },
             // Borrow `&T` / `&mut T`: resolve the referent recursively,
             // preserving mutability. An explicit lifetime `&'a T` is validated for
-            // well-formedness against the in-scope lifetime parameters, then erased — a
+            // well-formedness against the in-scope lifetime parameters, then erased: a
             // reference type's identity does not depend on its lifetime.
             ast_types::Type::Reference {
                 inner,
@@ -196,7 +196,7 @@ impl TypeChecker {
                 })
             }
             // Fixed-size array `[T; N]`. The element must be a `Copy` scalar
-            // primitive in this phase — non-Copy element arrays (strings, structs)
+            // primitive in this phase: non-Copy element arrays (strings, structs)
             // need per-element move/Drop tracking, which is a documented follow-on.
             ast_types::Type::Array {
                 element,
@@ -219,7 +219,7 @@ impl TypeChecker {
             }
             // Unsized slice `[T]`: valid only behind a reference, giving `&[T]` /
             // `&mut [T]`. The element carries no `Copy` restriction the owning
-            // container did not already impose — a slice never owns what it points at,
+            // container did not already impose: a slice never owns what it points at,
             // so it cannot be the thing that drops or moves an element.
             ast_types::Type::Slice { element, span } => {
                 let element_ty = self.resolve_type(element)?;
@@ -232,8 +232,8 @@ impl TypeChecker {
                 }
                 Some(Type::Slice(Box::new(element_ty)))
             }
-            // Tuple `(T1, T2, ...)`. Each element must be `Copy` in this phase
-            // — non-Copy element tuples (e.g. holding a `string` or a non-Copy struct)
+            // Tuple `(T1, T2, ...)`. Each element must be `Copy` in this phase:
+            // non-Copy element tuples (e.g. holding a `string` or a non-Copy struct)
             // need per-element move/Drop tracking, a documented follow-on (mirrors the
             // array element rule).
             ast_types::Type::Tuple { elements, span } => {
@@ -266,7 +266,7 @@ impl TypeChecker {
                     }
                 }
                 // A compiler-known collection resolves to its own type, unless the
-                // program declares a generic type of that name — a local declaration
+                // program declares a generic type of that name: a local declaration
                 // shadows the standard library, as it does for the prelude enums.
                 if let Some(kind) = CollectionKind::from_name(&name.name) {
                     if !self.is_generic_struct(&name.name) && !self.is_generic_enum(&name.name) {
@@ -367,7 +367,7 @@ impl TypeChecker {
         }
     }
 
-    /// Whether `name` is a registered generic struct template — a type that is
+    /// Whether `name` is a registered generic struct template: a type that is
     /// usable only with type arguments.
     pub(crate) fn is_generic_struct(&self, name: &str) -> bool {
         self.generic_structs.contains_key(name)
@@ -408,7 +408,7 @@ impl TypeChecker {
     /// This is ordinary type compatibility plus the two unsizing coercions the language
     /// has: `&T` → `&dyn Trait`, permitted when `T` implements `Trait`, and
     /// `&[T; N]` / `&Vec<T>` → `&[T]`, which forgets a compile-time length in favour of
-    /// a runtime one. Both require the reference mutabilities to agree — there is no
+    /// a runtime one. Both require the reference mutabilities to agree: there is no
     /// `&mut T` → `&T` weakening, so the mutability match is exact.
     pub(crate) fn assignable(&self, found: &Type, expected: &Type) -> bool {
         if found.is_compatible_with(expected) {

@@ -1,31 +1,31 @@
 //! Keeps the editor's TextMate grammar in sync with the lexer.
 //!
 //! `neuro-language-support/syntaxes/neuro.tmLanguage.json` is a hand-written regex
-//! grammar with no structural link to `TokenKind` — nothing else in the workspace
+//! grammar with no structural link to `TokenKind`: nothing else in the workspace
 //! fails when a keyword is added to the lexer and not to the grammar. These tests are
 //! that link.
 //!
 //! Three properties are asserted, each standing for a bug class the grammar has
 //! actually shipped:
 //!
-//! 1. **Coverage** — every `#[token("word")]` keyword appears in the grammar.
-//! 2. **No invention** — the grammar's `#keywords` rule lists *only* words the lexer
+//! 1. **Coverage**: every `#[token("word")]` keyword appears in the grammar.
+//! 2. **No invention**: the grammar's `#keywords` rule lists *only* words the lexer
 //!    tokenizes, so a keyword planned for a later phase cannot be highlighted as if
 //!    the compiler already accepted it.
-//! 3. **Reachability** — the rules that name a declaration precede `#keywords` in the
+//! 3. **Reachability**: the rules that name a declaration precede `#keywords` in the
 //!    top-level `patterns` array. TextMate breaks a tie between two rules matching at
 //!    the same offset by array position, never by match length, so `#keywords` listed
 //!    first silently makes every `func f` / `struct S` rule dead code. Nothing about
 //!    such a grammar looks wrong on inspection; only the order gives it away.
 //!
 //! Reading the lexer's source text (rather than reflecting over `TokenKind`) is
-//! deliberate — logos consumes the attributes at compile time, so the literals are not
+//! deliberate: logos consumes the attributes at compile time, so the literals are not
 //! observable at runtime any other way, and a source scan needs no upkeep when a
 //! keyword lands.
 //!
 //! Scope note: these cover keyword *words* and rule order. Grammar rules with no
-//! one-to-one token counterpart — string bodies, escapes, interpolation holes, number
-//! literal shapes — must still be updated by hand, and the names in `#types` and
+//! one-to-one token counterpart (string bodies, escapes, interpolation holes, number
+//! literal shapes) must still be updated by hand, and the names in `#types` and
 //! `#constants` answer to the prelude and the type checker rather than to the lexer.
 //! To inspect what the grammar actually produces, run `tools/tmlanguage_scopes.mjs`.
 
@@ -69,7 +69,7 @@ fn lexer_keywords(source: &str) -> Vec<String> {
     out
 }
 
-/// True when `keyword` appears in the grammar delimited by non-word characters —
+/// True when `keyword` appears in the grammar delimited by non-word characters:
 /// i.e. as its own alternative inside a `\b(a|b|c)\b` match, not as a substring of
 /// a longer word (`in` inside `continue`).
 fn grammar_matches(grammar: &str, keyword: &str) -> bool {
@@ -133,7 +133,7 @@ fn textmate_grammar_covers_every_lexer_keyword() {
     let keywords = lexer_keywords(&tokens);
     assert!(
         keywords.len() > 20,
-        "keyword extraction found only {} literals — the `#[token(\"...\")]` \
+        "keyword extraction found only {} literals; the `#[token(\"...\")]` \
          attribute layout in tokens.rs changed and this test no longer sees them",
         keywords.len()
     );
@@ -146,7 +146,7 @@ fn textmate_grammar_covers_every_lexer_keyword() {
     assert!(
         missing.is_empty(),
         "lexer keywords absent from {GRAMMAR_PATH}: {missing:?}\nAdd them to the matching \
-         `keywords` or `constants` pattern — editor highlighting has no other link to the lexer."
+         `keywords` or `constants` pattern; editor highlighting has no other link to the lexer."
     );
 }
 

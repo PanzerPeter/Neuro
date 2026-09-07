@@ -12,7 +12,7 @@ use common::CompileTest;
 #[test]
 fn val_else_unwraps_a_result_and_forwards_the_error() {
     let test = CompileTest::new();
-    // `doubled` is bound for the remainder of `handle`, not just one arm — the whole
+    // `doubled` is bound for the remainder of `handle`, not just one arm: the whole
     // point of the construct over a `match`.
     let source = r#"
 func parse(n: i32) -> Result<i32, i32> {
@@ -133,7 +133,7 @@ func main() -> i32 {
 fn the_else_branch_may_panic() {
     let test = CompileTest::new();
     // `panic` ends the scope just as `return` does, and the success path is the only
-    // one that reaches the binding — so a present value still exits cleanly.
+    // one that reaches the binding, so a present value still exits cleanly.
     let source = r#"
 func present() -> Option<i32> {
     Option::Some(9)
@@ -200,7 +200,7 @@ func main() -> i32 {
 fn val_else_takes_an_unqualified_prelude_variant() {
     let test = CompileTest::new();
     // The prelude makes `Some(v)` the idiomatic spelling in value position, `match`
-    // arms, and here — the qualified form must not be the only one that parses.
+    // arms, and here: the qualified form must not be the only one that parses.
     let source = r#"
 func half(n: i32) -> Option<i32> {
     if n % 2 == 0 {

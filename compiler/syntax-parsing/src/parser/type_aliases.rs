@@ -1,6 +1,6 @@
 // Type-alias declarations: `type Name = TargetType`.
 //
-// A `type` alias is *transparent* — the alias and its target are interchangeable
+// A `type` alias is *transparent*: the alias and its target are interchangeable
 // and no new nominal type is introduced. We therefore resolve aliases entirely at
 // parse time by substituting every aliased type annotation with its target type,
 // exactly as compound assignment desugars before reaching later stages. The result
@@ -235,7 +235,7 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
         }
         // A trait's method signatures may reference aliased types; default
         // bodies are expanded when the defaults are injected into impls, which run
-        // after this pass — so only the signatures are rewritten here.
+        // after this pass, so only the signatures are rewritten here.
         Item::Trait(def) => {
             for method in &mut def.methods {
                 for param in &mut method.params {

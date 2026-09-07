@@ -62,17 +62,23 @@ Download and extract the full development package:
 LINK : fatal error LNK1181: cannot open input file 'libxml2s.lib'
 ```
 
-**Cause**: libxml2 not installed via vcpkg.
+**Cause**: your LLVM package links against libxml2 and vcpkg has not provided it.
 
 **Solution**:
 ```powershell
 cd C:\vcpkg
-.\vcpkg install libxml2:x64-windows-static
+# The -md triplet builds against the dynamic CRT (/MD), matching Rust's
+# x86_64-pc-windows-msvc target. The plain x64-windows-static triplet is /MT
+# and will produce CRT conflicts in a default Rust build.
+.\vcpkg install libxml2:x64-windows-static-md
 .\vcpkg integrate install
 
 # Verify installation
 .\vcpkg list | findstr libxml2
 ```
+
+`.cargo/config.toml` already puts both vcpkg library directories on the MSVC link
+search path, so no further configuration is needed once the package is installed.
 
 ### Build fails with linker errors (Unix)
 
@@ -115,7 +121,7 @@ error: evaluation of constant value failed: attempt to compute `0_usize - 8_usiz
 
 **Cause**: two separate gaps.
 
-1. Most distro LLVM 20 packages (Arch/CachyOS `llvm20` included) ship **no MLIR** — no
+1. Most distro LLVM 20 packages (Arch/CachyOS `llvm20` included) ship **no MLIR**: no
    `mlir-c` headers, no `libMLIR*`. Check with `ls $LLVM_SYS_201_PREFIX/include/mlir-c`.
 2. `mlir-sys` runs bindgen over the MLIR-C headers. A **newer libclang than 20** misparses
    LLVM 20's `DEFINE_C_API_STRUCT` macro, yielding opaque 1-byte structs and the
@@ -664,7 +670,7 @@ Use `neurc check` for rapid feedback without code generation.
 
 ### Can I use Neuro for production?
 
-Not yet — the language is alpha. The core language (Phase 1) is complete and tensor values
+Not yet. The language is alpha. The core language (Phase 1) is complete and tensor values
 can be built, but tensor arithmetic, autodiff, and the GPU path are still ahead; see the
 [Quick Roadmap](../../README.md#quick-roadmap).
 

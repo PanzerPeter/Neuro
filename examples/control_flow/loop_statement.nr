@@ -1,6 +1,6 @@
 // The `loop { ... }` infinite-loop statement.
 //
-// `loop` is the canonical infinite loop — the form the `prefer-loop-over-
+// `loop` is the canonical infinite loop: the form the `prefer-loop-over-
 // while-true` lint suggests in place of `while true { ... }`. It has no
 // condition: the only way out is `break`. `continue` re-enters the body
 // from the top.

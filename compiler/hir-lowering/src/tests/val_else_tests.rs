@@ -49,7 +49,7 @@ func main() -> i32 {{
         HirBindingSource::EnumPayload { slot: 0 }
     );
 
-    // `Result` binds the `Err` payload, which is also slot 0 — of the other variant.
+    // `Result` binds the `Err` payload, which is also slot 0, of the other variant.
     let binding = else_binding.as_ref().expect("expected an else binding");
     assert_eq!(binding.name, "err");
     assert_eq!(binding.ty, HirType::I32);

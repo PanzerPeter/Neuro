@@ -136,7 +136,7 @@ impl Parser {
     /// `<head>` is one loop variable, or the pair `(index, value)` that
     /// `.enumerate()` and `.char_indices()` bind. `<iterable>` is a numeric range, an expression
     /// yielding a sequence, or either of those wearing a chain of `.map(f)` /
-    /// `.filter(p)` adapters and an outermost `.enumerate()` — the adapters are
+    /// `.filter(p)` adapters and an outermost `.enumerate()`: the adapters are
     /// recognised here rather than type-checked as methods because a range is not a
     /// first-class value, so `(0..n).map(f)` has no receiver to resolve a method
     /// against.
@@ -167,12 +167,12 @@ impl Parser {
             self.advance();
             false
         } else {
-            // No range operator follows, so the whole iterable is already parsed —
+            // No range operator follows, so the whole iterable is already parsed:
             // either a sequence expression or a parenthesised range, each possibly
             // wearing an adapter chain.
             let (iterable, adapters, enumerated) = strip_adapters(start)?;
             // `.char_indices()` binds its own position, so a chain around one would have
-            // two sources for a single binding — and an adapter that drops or replaces
+            // two sources for a single binding, and an adapter that drops or replaces
             // elements would leave the offsets naming text no longer being yielded.
             let char_indices = is_char_indices_head(&iterable);
             if char_indices && (enumerated || !adapters.is_empty()) {
@@ -311,7 +311,7 @@ impl Parser {
     /// after `break`), so a leading identifier is consumed as a label only when it
     /// names a loop currently in scope ([`Parser::active_labels`]); otherwise it
     /// begins the value expression. The value, like the label, must sit on the
-    /// same logical line — a `break` at end of line carries neither.
+    /// same logical line: a `break` at end of line carries neither.
     pub(super) fn parse_break_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
         let label = match self.peek_kind() {
             Some(TokenKind::Identifier(name)) if self.active_labels.iter().any(|l| l == name) => {
@@ -355,7 +355,7 @@ impl Parser {
     /// Parse a trailing loop label on `break` / `continue` (`break outer`).
     ///
     /// The label, when present, sits on the same logical line as the keyword, so
-    /// the immediately following token is inspected without skipping newlines —
+    /// the immediately following token is inspected without skipping newlines:
     /// a `break` at the end of a line is never mistaken for a labeled break.
     pub(super) fn parse_optional_loop_label(&mut self) -> Option<Identifier> {
         let Some(TokenKind::Identifier(name)) = self.peek_kind() else {
@@ -578,7 +578,7 @@ mod tests {
     }
 
     /// The `.enumerate()` receiver is the iterable, not a method call left in the
-    /// tree — nothing downstream resolves methods on a sequence.
+    /// tree: nothing downstream resolves methods on a sequence.
     #[test]
     fn enumerated_array_loop_keeps_the_receiver_as_the_iterable() {
         let stmt = first_stmt("func main() -> i32 { for (i, x) in xs.enumerate() { }\n 0 }");

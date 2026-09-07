@@ -1,4 +1,4 @@
-// The `?` operator — propagate a failure out of the enclosing function.
+// The `?` operator: propagate a failure out of the enclosing function.
 //
 // `expr?` unwraps an `Option<T>` / `Result<T, E>` to its payload, or leaves the
 // function immediately carrying `None` / `Err(e)` on. The error travels as-is:
@@ -53,7 +53,7 @@ func main() -> i32 {
     // The forwarded payload is the original one, unchanged by the trip.
     val reason = match quarter(6) {
         Result::Ok(v) => v,
-        Result::Err(e) => e              // 3 — the odd value halve() rejected
+        Result::Err(e) => e              // 3: the odd value halve() rejected
     }
     println("propagated Err    = {reason}")
 

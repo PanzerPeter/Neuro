@@ -102,7 +102,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// in with `memcpy`, returning a fresh `{ ptr, len }`. The result is a new,
     /// immutable, heap-backed string; the operands are read, not consumed. The
     /// buffer has no null terminator (consistent with the fat-pointer `len`
-    /// contract) and is not yet freed — runtime heap strings leak until
+    /// contract) and is not yet freed: runtime heap strings leak until
     /// `Drop` lands (Phase 1.7); see the alpha memory warning in the README.
     pub(crate) fn codegen_string_concat(
         &self,
@@ -243,8 +243,8 @@ impl<'ctx> CodegenContext<'ctx> {
         };
 
         // RHS block: evaluate the RHS, then branch to merge. Capture the block we
-        // actually end up in — RHS codegen may append further blocks (e.g. a nested
-        // if-expression) — so the phi uses the current block, not `rhs_bb`.
+        // actually end up in, because RHS codegen may append further blocks (a nested
+        // if-expression, say), so the phi uses the current block, not `rhs_bb`.
         self.builder.position_at_end(rhs_bb);
         let rhs = self.codegen_expr(right)?.into_int_value();
         let rhs_end_bb = self.builder.get_insert_block().ok_or_else(|| {
@@ -381,14 +381,14 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// Two operand pairs are undefined behaviour for those instructions rather than
     /// merely surprising: a zero divisor, and `MIN / -1`, whose quotient is not
-    /// representable. Unguarded they do not misbehave quietly — at `-O0` the hardware
+    /// representable. Unguarded they do not misbehave quietly: at `-O0` the hardware
     /// raises `SIGFPE` and the process dies with no diagnostic, and at `-O1` and above
     /// the optimizer takes the operation for unreachable, folds the surrounding code
     /// around a poison value, and the program prints a garbage answer and carries on.
     ///
     /// A zero divisor panics in **every** build. It is not an overflow and has no
     /// two's-complement answer to wrap to, so there is no defined release behaviour the
-    /// check could be omitted in favour of — the only alternative to the guard is the
+    /// check could be omitted in favour of. The only alternative to the guard is the
     /// undefined behaviour above. The cost is one never-taken branch in front of an
     /// instruction that already costs tens of cycles, and it folds away entirely
     /// whenever the divisor is a constant or its range is known.
@@ -396,7 +396,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// `MIN / -1` *is* an integer overflow and so follows the same rule the other
     /// arithmetic operators do: a panic in debug builds, the two's-complement wrap in
     /// release. The release path produces that wrap by dividing by `1` instead, since
-    /// `MIN / 1` is `MIN` and `MIN % 1` is `0` — exactly the wrapped results — without
+    /// `MIN / 1` is `MIN` and `MIN % 1` is `0`, exactly the wrapped results, without
     /// ever handing `-1` to the instruction.
     fn codegen_int_div_rem(
         &mut self,
@@ -437,7 +437,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         // `MIN` is the bit pattern with only the sign bit set, which sits at a different
-        // place in each width — `const_int` truncates rather than sign-extends, so the
+        // place in each width, and `const_int` truncates rather than sign-extends, so the
         // shift has to be by this operand's own width less one.
         let min = int_ty.const_int(1u64 << (int_ty.get_bit_width() - 1), false);
         let lhs_is_min = self
@@ -912,7 +912,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                 .into()),
             // HIR lowering desugars `??` into a `match`, so no binary node ever carries it.
-            // Reaching here means the HIR was not produced by that pass — an ICE, not a panic.
+            // Reaching here means the HIR was not produced by that pass: an ICE, not a panic.
             BinaryOp::NullCoalesce => Err(CodegenError::InternalError(
                 "operator '??' reached codegen; HIR lowering must desugar it to a match".into(),
             )),

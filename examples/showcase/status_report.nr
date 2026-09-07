@@ -1,4 +1,4 @@
-// Showcase — a formatted status report built from live readings.
+// Showcase: a formatted status report built from live readings.
 //
 // Integration example combining string interpolation with the features that
 // produce the values it renders:
@@ -9,7 +9,7 @@
 //
 // Every rendered line is checked against the exact text it should produce and
 // then printed, and `main` returns the total width of the report's aligned
-// column as its exit code — a number that only comes out right if every field
+// column as its exit code: a number that only comes out right if every field
 // padded correctly.
 
 enum Level {
@@ -53,7 +53,7 @@ func describe(level: Level) -> string {
 }
 
 // The report line each sensor is expected to produce, keyed by position.
-// A `[string; N]` is not available yet — arrays hold Copy elements only.
+// A `[string; N]` is not available yet: arrays hold Copy elements only.
 func expected_line(index: i32) -> string {
     match index {
         0 => "sensor 0x0011 @ 42.50 | nominal",

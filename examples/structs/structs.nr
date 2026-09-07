@@ -1,4 +1,4 @@
-// Structs example — Phase 2 feature
+// Structs example: Phase 2 feature
 //
 // Demonstrates struct definition, instantiation, field access, and mutation.
 // Each field is read back and printed, so the assignment into `origin` is
@@ -31,7 +31,7 @@ func main() -> i32 {
     val oy = origin.y
     println("origin  = ({ox}, {oy})")
 
-    // Struct with integer fields — area computed inline
+    // Struct with integer fields: area computed inline
     // (struct as function parameter is a Phase 2 feature)
     val rect = Rectangle { width: 10, height: 5 }
     val result = rect.width * rect.height

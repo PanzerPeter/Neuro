@@ -31,7 +31,7 @@ pub enum Expr {
         /// callee's generic parameter list.
         type_args: Vec<GenericArg>,
         args: Vec<Expr>,
-        /// The call-site names of named arguments, one entry per argument —
+        /// The call-site names of named arguments, one entry per argument,
         /// or empty when nothing was named, which is every call in a program that does
         /// not use the feature.
         ///
@@ -39,7 +39,7 @@ pub enum Expr {
         /// parameter needs the callee, which the parser does not know. The
         /// `argument-binding` pass permutes `args` into the callee's declaration order
         /// and empties this, so type checking, HIR lowering, and the backends only ever
-        /// see the positional call — which is why a named argument costs nothing.
+        /// see the positional call, which is why a named argument costs nothing.
         arg_labels: Vec<Option<Identifier>>,
         span: Span,
     },
@@ -79,7 +79,7 @@ pub enum Expr {
         fields: Vec<FieldInit>,
         span: Span,
     },
-    /// Path expression: `TypeName::member` — used for associated function references.
+    /// Path expression: `TypeName::member`, used for associated function references.
     /// Appears as the `func` of `Expr::Call` when calling `Point::new(args)`.
     Path {
         type_name: Identifier,
@@ -108,7 +108,7 @@ pub enum Expr {
     /// Infinite loop: `loop { ... }`, optionally `label`ed, optionally yielding a
     /// value via `break v`.
     ///
-    /// `loop` is the sole loop form that can yield a non-unit value — it has no
+    /// `loop` is the sole loop form that can yield a non-unit value: it has no
     /// fall-through exit, so it leaves solely via `break`, and the loop evaluates
     /// to the value carried by its value-producing `break`s (which must all agree
     /// on type). `while`/`for` always yield unit and so have no expression form.
@@ -127,7 +127,7 @@ pub enum Expr {
     /// Unsafe block expression: `unsafe { stmts; trailing_expr }`.
     ///
     /// Phase 1.7 groundwork: the keyword is reserved and the block parses, but
-    /// `unsafe` carries no special semantics yet — it is inert outside `@kernel`
+    /// `unsafe` carries no special semantics yet: it is inert outside `@kernel`
     /// bodies (which do not exist until Phase 5). It type-checks and lowers
     /// exactly like a bare [`Expr::Block`]; the distinct node lets later phases
     /// attach the kernel-aliasing relaxation without reparsing.
@@ -192,7 +192,7 @@ pub enum Expr {
     /// The trailing remainder of an array destructuring pattern: the
     /// `..rest` sub-slice produced when desugaring `val [a, b, ..rest] = arr`.
     ///
-    /// Compiler-internal — never written in source. `array` is the source array
+    /// Compiler-internal: never written in source. `array` is the source array
     /// `[T; N]`; the result is a fresh `[T; N - start]` holding elements
     /// `start..N`. `exact` records that the pattern had no rest binding, so the
     /// length must match precisely (`N == start`); when `false` the pattern only
@@ -226,7 +226,7 @@ pub enum Expr {
     },
     /// Error propagation `operand?`: unwraps an `Option<T>` / `Result<T, E>` to its
     /// success payload, or leaves the enclosing function carrying the failure variant
-    /// on (`None` / `Err(e)`) unchanged — the error is never converted.
+    /// on (`None` / `Err(e)`) unchanged: the error is never converted.
     ///
     /// A postfix operator rather than a binary one, which is why it is a node of its
     /// own instead of a [`BinaryOp`]: it has a single operand and its result type is
@@ -237,8 +237,8 @@ pub enum Expr {
     },
     /// String interpolation `"Sum: {a + b}, Product: {pi:.2}"`.
     ///
-    /// The lexer splits the literal into [`InterpPart`]s — decoded text chunks and
-    /// raw hole sources — and the parser re-parses each hole as a full expression
+    /// The lexer splits the literal into [`InterpPart`]s (decoded text chunks and
+    /// raw hole sources), and the parser re-parses each hole as a full expression
     /// plus an optional format spec, so holes carry ordinary typed expressions.
     /// The whole node has type `string`; the result is a fresh owned string.
     InterpString {
@@ -291,9 +291,9 @@ pub struct MatchArm {
 /// a payload position is expressed with a guard instead.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
-    /// `_` — matches anything, binds nothing.
+    /// `_`: matches anything, binds nothing.
     Wildcard(Span),
-    /// A bare identifier — matches anything and binds the whole scrutinee to `name`.
+    /// A bare identifier: matches anything and binds the whole scrutinee to `name`.
     Binding(Identifier),
     /// A literal value pattern: `0`, `'a'`, `true`.
     Literal(Literal, Span),

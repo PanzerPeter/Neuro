@@ -108,7 +108,7 @@ func main() -> i32 {
 
 #[test]
 fn non_scalar_enum_payload_is_rejected() {
-    // Phase 1E — payloads are scalar Copy primitives; a string payload is rejected.
+    // Phase 1E: payloads are scalar Copy primitives; a string payload is rejected.
     let errors = semantic_errors(
         r#"
 enum Bad { Holds(string) }

@@ -1,4 +1,4 @@
-// Showcase — an online mean accumulator.
+// Showcase: an online mean accumulator.
 //
 // Integration example combining struct state with float math:
 //   struct with mixed i32/f64 fields · direct field mutation on a `mut`

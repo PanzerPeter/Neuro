@@ -43,7 +43,7 @@ impl Parser {
         Ok(items)
     }
 
-    /// Parse items until the input runs out, or — inside an inline `module` block —
+    /// Parse items until the input runs out, or (inside an inline `module` block)
     /// until the closing brace.
     ///
     /// Alias declarations are collected into the caller's list rather than expanded per
@@ -186,8 +186,8 @@ impl Parser {
     /// Consume `@no_prelude`, rejecting it anywhere but the top of a file.
     ///
     /// The marker opts a *file* out of the implicit prelude, so it is meaningless after a
-    /// declaration — everything above it would already have been compiled with the
-    /// prelude — and meaningless inside a `module` block, which is not a file.
+    /// declaration (everything above it would already have been compiled with the
+    /// prelude) and meaningless inside a `module` block, which is not a file.
     fn parse_no_prelude(
         &mut self,
         nesting: Nesting,
@@ -374,7 +374,7 @@ fn reject_export(export: Option<shared_types::Span>, what: &str) -> ParseResult<
 ///
 /// After this pass every trait impl carries a concrete method for each trait method it
 /// is expected to provide, so semantic analysis and HIR lowering treat trait methods as
-/// ordinary inherent methods — traits are fully erased. A method the implementor writes
+/// ordinary inherent methods: traits are fully erased. A method the implementor writes
 /// explicitly is left untouched (it overrides the default).
 fn inject_trait_defaults(items: &mut [Item]) {
     use std::collections::HashMap;
@@ -448,8 +448,8 @@ fn apply_trait_defaults(
 }
 
 /// Rewrite argument-position `impl Trait` into fresh trait-bounded generic
-/// parameters. Each `impl Trait` occurrence — including one nested inside a reference,
-/// array, tuple, or generic application — becomes a distinct anonymous type parameter
+/// parameters. Each `impl Trait` occurrence (including one nested inside a reference,
+/// array, tuple, or generic application) becomes a distinct anonymous type parameter
 /// `__implN: Trait` appended to `generics`, and the annotation is replaced by a plain
 /// named reference to it. This desugar lets static dispatch reuse the ordinary
 /// monomorphized-generic machinery unchanged.

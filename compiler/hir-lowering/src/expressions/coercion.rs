@@ -23,7 +23,7 @@ pub(super) fn apply_unsizing_coercion(expr: HirExpr, expected: Option<&HirType>)
         return expr;
     };
     // Only a reference can be unsized, and one that already has the target referent
-    // shape is the coercion's own output — re-wrapping it would double the conversion.
+    // shape is the coercion's own output; re-wrapping it would double the conversion.
     let HirType::Reference { inner: found, .. } = &expr.ty else {
         return expr;
     };
@@ -102,8 +102,8 @@ pub(super) fn binary_result_type(
     left: &HirType,
     right: &HirType,
 ) -> Result<HirType, LoweringError> {
-    // Every operator below is emitted as one scalar instruction, or — for `==`, `!=`
-    // and `+` on strings — as a byte compare or a concatenation. An aggregate operand
+    // Every operator below is emitted as one scalar instruction, or (for `==`, `!=`
+    // and `+` on strings) as a byte compare or a concatenation. An aggregate operand
     // has no such lowering; it reaches here only from a monomorphized generic body,
     // since the checker rejects a concrete one. Refusing it keeps the backend from
     // asking an aggregate value for its integer variant and aborting the compiler.

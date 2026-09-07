@@ -111,7 +111,7 @@ impl Parser {
                     let enum_name = Identifier { name, span };
                     return self.parse_enum_pattern(enum_name);
                 }
-                // `Some(n)` — a variant an import brought into scope. A payload settles
+                // `Some(n)`: a variant an import brought into scope. A payload settles
                 // the reading; a bare `None` cannot be told from a binding here and is
                 // resolved against the same import table during module resolution.
                 if self.check(&TokenKind::LeftParen) || self.check(&TokenKind::LeftBrace) {

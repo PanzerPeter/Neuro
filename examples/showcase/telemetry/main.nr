@@ -1,4 +1,4 @@
-// Showcase — multi-file compilation and `import` working alongside prior features.
+// Showcase: multi-file compilation and `import` working alongside prior features.
 //
 // Cumulative integration example combining:
 //   file-based modules: a sibling module (`stats`), a directory module (`report`,
@@ -12,7 +12,7 @@
 //   · a heap-backed `Vec<T>` that frees its buffer at scope exit
 //   · `Option<T>` unwrapped with a lazy `??` fallback and by pattern
 //   · enums with pattern matching
-//   · `export` visibility: each module publishes a surface and keeps the rest private —
+//   · `export` visibility: each module publishes a surface and keeps the rest private:
 //     `Summary.total` and `report`'s `Band` never leave the file that declares them
 //   · an inline `module { }` block: logical grouping inside one file, under the same
 //     visibility rule a file module follows
@@ -35,10 +35,10 @@ import report::format as fmt
 
 // No import brings `Some` and `None` into scope: the implicit prelude binds them in every
 // module, so the match arms below name them directly. `stats` shows the other side of the
-// rule — a file that wants none of it writes `@no_prelude` on its first line.
+// rule: a file that wants none of it writes `@no_prelude` on its first line.
 
 // An inline module: a grouping worth a name but not a file. Its items follow the same
-// rule a file's do — private unless written with `export`.
+// rule a file's do: private unless written with `export`.
 module scoring {
     export const BONUS: i32 = 2
 
@@ -83,7 +83,7 @@ func main() -> i32 {
     // A grandchild module, reached through the alias its import bound.
     val weighted = fmt::scale(score, 4)                          // 28
 
-    // `clamp` lives in that same grandchild, but `report` re-exports it — so this route
+    // `clamp` lives in that same grandchild, but `report` re-exports it, so this route
     // stops one level short and never mentions `format`.
     val capped = report::clamp(weighted, 30)                     // 28
 

@@ -18,8 +18,8 @@ use super::TypeChecker;
 impl TypeChecker {
     /// Record the move that occurs when `expr` appears in a consuming position.
     ///
-    /// Moves apply only to a bare place expression — an identifier, possibly
-    /// wrapped in parentheses — whose binding has a move-tracked type. A literal,
+    /// Moves apply only to a bare place expression (an identifier, possibly
+    /// wrapped in parentheses) whose binding has a move-tracked type. A literal,
     /// a `.clone()` call, or any compound expression produces a fresh value and
     /// moves nothing here; nested consuming positions (e.g. an argument inside a
     /// call) are handled where that call's arguments are checked.
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn a_real_use_after_move_in_a_tail_expression_is_reported_once() {
-        // The genuine error still fires — and only once, since the tail is no
+        // The genuine error still fires, and only once, since the tail is no
         // longer checked twice.
         let errs = errors(
             r#"
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn mut_self_on_field_of_immutable_binding_is_rejected() {
         // Mutating `o.inner` through a `&mut self` method needs the *root* binding
-        // `o` to be mutable; a `val` root is rejected. Semantic-only — nested
+        // `o` to be mutable; a `val` root is rejected. Semantic-only: nested
         // struct fields are not lowered yet, so this exercises the check in isolation.
         let errs = errors(
             r#"

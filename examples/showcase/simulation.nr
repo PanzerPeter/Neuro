@@ -1,4 +1,4 @@
-// Showcase — a tiny bit-flag state machine.
+// Showcase: a tiny bit-flag state machine.
 //
 // Integration example combining bitwise operators with struct state:
 //   bit-flag constants via `<<` · set/clear/toggle with `|`, `&`, `^`

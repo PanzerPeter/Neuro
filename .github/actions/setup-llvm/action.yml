@@ -20,8 +20,8 @@ runs:
     # in a stuck log). apt applies no network timeout by default, so a blackholed
     # mirror leaves `apt-get update` waiting indefinitely and the job burns its
     # whole budget without ever producing a failure. Every fetch below is
-    # therefore bounded and retried, and apt waits for the dpkg lock — held early
-    # in a runner's life by unattended-upgrades — instead of aborting on it.
+    # therefore bounded and retried, and apt waits for the dpkg lock (held early
+    # in a runner's life by unattended-upgrades) instead of aborting on it.
     - name: Install LLVM 20 (Linux)
       if: runner.os == 'Linux'
       shell: bash
@@ -44,7 +44,7 @@ runs:
             if sudo timeout -k 30 600 "$@"; then
               return 0
             fi
-            echo "::warning::'$*' failed (attempt ${attempt}/3) — retrying in 15s"
+            echo "::warning::'$*' failed (attempt ${attempt}/3), retrying in 15s"
             # A killed apt can leave half-unpacked packages behind; clear that
             # before the next attempt so the retry is not doomed from the start.
             sudo dpkg --configure -a || true
@@ -99,7 +99,7 @@ runs:
             if sudo timeout -k 30 600 "$@"; then
               return 0
             fi
-            echo "::warning::'$*' failed (attempt ${attempt}/3) — retrying in 15s"
+            echo "::warning::'$*' failed (attempt ${attempt}/3), retrying in 15s"
             # A killed apt can leave half-unpacked packages behind; clear that
             # before the next attempt so the retry is not doomed from the start.
             sudo dpkg --configure -a || true
@@ -143,11 +143,11 @@ runs:
         {
           echo "LLVM_SYS_201_PREFIX=$LLVM_PREFIX"
           echo "PATH=$LLVM_PREFIX/bin:$PATH"
-          # macOS links statically by default — do NOT set LLVM_LINK_LLVM_DYLIB
+          # macOS links statically by default: do NOT set LLVM_LINK_LLVM_DYLIB
         } >> "$GITHUB_ENV"
 
     # ── Windows ────────────────────────────────────────────────────────────────
-    # The official LLVM Windows NSIS installer ships only Clang + LLVM-C.dll —
+    # The official LLVM Windows NSIS installer ships only Clang + LLVM-C.dll:
     # it does NOT include llvm-config.exe, headers, or static .lib files, so
     # llvm-sys (used by inkwell) cannot build against it. KyleMayes/install-
     # llvm-action repackages the same NSIS installer for Windows and has the
@@ -160,7 +160,7 @@ runs:
     #
     # IMPORTANT: vovkos builds with LLVM_TARGETS_TO_BUILD=X86;NVPTX;AMDGPU.
     # Non-X86 backends (ARM, AArch64, RISCV, Mips, etc.) are NOT included.
-    # inkwell must therefore use `target-x86` only — not `target-all`.
+    # inkwell must therefore use `target-x86` only, not `target-all`.
     #
     # Notes:
     #   - 7z.exe is preinstalled on windows-latest runners.
@@ -230,12 +230,12 @@ runs:
         $detected = & $llvmConfig --version
         Write-Host "Detected LLVM version: $detected"
         if ($detected -notmatch '^20\.') {
-          throw "Unexpected LLVM version '$detected' — expected 20.x"
+          throw "Unexpected LLVM version '$detected'; expected 20.x"
         }
         Write-Host "LLVM prefix: $prefix"
 
         # Persist env for subsequent steps.
-        # llvm-sys on Windows/MSVC links statically — do NOT set
+        # llvm-sys on Windows/MSVC links statically: do NOT set
         # LLVM_LINK_LLVM_DYLIB. Default CRT linkage (/MD) matches the
         # `msvcrt` variant we downloaded.
         "LLVM_SYS_201_PREFIX=$prefix" | Out-File $env:GITHUB_ENV  -Append -Encoding utf8
@@ -244,7 +244,7 @@ runs:
     - name: Verify LLVM prefix is set
       shell: bash
       run: |
-        : "${LLVM_SYS_201_PREFIX:?LLVM_SYS_201_PREFIX is not set — LLVM install failed}"
+        : "${LLVM_SYS_201_PREFIX:?LLVM_SYS_201_PREFIX is not set, LLVM install failed}"
         echo "LLVM_SYS_201_PREFIX = $LLVM_SYS_201_PREFIX"
         # Use llvm-config from PATH (bin dir was added above) to avoid
         # backslash path issues on Windows runners using Git Bash.

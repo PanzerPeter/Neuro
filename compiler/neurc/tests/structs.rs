@@ -124,7 +124,7 @@ func main() -> i32 {
     );
 }
 
-// ── AC5: type errors — missing field ─────────────────────────────────────────
+// ── AC5: type errors, missing field ─────────────────────────────────────────
 
 #[test]
 fn struct_literal_missing_field_is_rejected() {
@@ -154,7 +154,7 @@ func main() -> i32 {
     );
 }
 
-// ── AC5: type errors — unknown field ─────────────────────────────────────────
+// ── AC5: type errors, unknown field ─────────────────────────────────────────
 
 #[test]
 fn struct_literal_unknown_field_is_rejected() {
@@ -184,7 +184,7 @@ func main() -> i32 {
     );
 }
 
-// ── AC5: type errors — wrong field type ──────────────────────────────────────
+// ── AC5: type errors, wrong field type ──────────────────────────────────────
 
 #[test]
 fn struct_literal_wrong_field_type_is_rejected() {

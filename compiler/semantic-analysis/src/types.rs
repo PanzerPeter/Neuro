@@ -39,7 +39,7 @@ pub enum Type {
     U32,
     U64,
     // Half-precision floating point. Narrow scalar contract: binding,
-    // move/copy, `==`/`!=`, and `as`-cast only — no scalar arithmetic or ordering.
+    // move/copy, `==`/`!=`, and `as`-cast only: no scalar arithmetic or ordering.
     F16,
     BF16,
     // Floating point
@@ -63,7 +63,7 @@ pub enum Type {
     /// an enum is `Copy`.
     Enum(std::string::String),
     /// User-defined newtype, identified by name (nominal typing). A distinct
-    /// wrapper over an inner type — not interchangeable with it. In Phase 1E the
+    /// wrapper over an inner type, not interchangeable with it. In Phase 1E the
     /// inner type is restricted to `Copy` types, so a newtype is `Copy`; the inner
     /// type is looked up in the checker's newtype table rather than embedded here.
     Newtype(std::string::String),
@@ -76,7 +76,7 @@ pub enum Type {
     },
     /// Fixed-size array `[T; N]`: `size` elements of `element`. Two array
     /// types are compatible only when their element types match and their sizes
-    /// are equal — length is part of the type.
+    /// are equal: length is part of the type.
     Array {
         element: Box<Type>,
         size: ArrayLen,
@@ -84,7 +84,7 @@ pub enum Type {
     /// Unsized slice `[T]`: a contiguous run of `T` whose length is a runtime
     /// value rather than part of the type. It is **unsized**, so like
     /// [`Type::DynObject`] it only ever appears as the referent of a [`Type::Reference`]
-    /// — `&[T]` / `&mut [T]` — and a bare `[T]` annotation is rejected during type
+    /// (`&[T]` / `&mut [T]`), and a bare `[T]` annotation is rejected during type
     /// resolution. Two slice types are compatible when their element types are.
     Slice(Box<Type>),
     /// A monomorphization-internal const generic *argument* value: the concrete
@@ -103,7 +103,7 @@ pub enum Type {
     /// when they name the same trait (nominal).
     DynObject(std::string::String),
     /// An unresolved generic type parameter `T` inside a generic function body.
-    /// It is nominal — `Generic("T")` is compatible only with itself — and supports no
+    /// It is nominal (`Generic("T")` is compatible only with itself) and supports no
     /// concrete operations (arithmetic, field access, …), which is exactly what a
     /// type parameter with no trait bounds soundly permits. It never escapes a generic
     /// template: monomorphization substitutes each `Generic` with a concrete type, so a
@@ -133,13 +133,13 @@ pub enum Type {
 /// Which standard collection a [`Type::Collection`] denotes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CollectionKind {
-    /// Growable contiguous array `Vec<T>` — the dynamic counterpart to `[T; N]`.
+    /// Growable contiguous array `Vec<T>`: the dynamic counterpart to `[T; N]`.
     Vec,
     /// Average-O(1) hash map `HashMap<K, V>`; keys are `Hashable + PartialEq`.
     HashMap,
     /// Key-ordered map `BTreeMap<K, V>`; keys are `Comparable` (a total order).
     BTreeMap,
-    /// Growable UTF-8 text buffer `String` — the mutable counterpart to the immutable
+    /// Growable UTF-8 text buffer `String`: the mutable counterpart to the immutable
     /// `string`. It takes no type arguments, so its bare name is already a complete type.
     String,
 }
@@ -243,7 +243,7 @@ impl Type {
             (Type::ConstValue(a), Type::ConstValue(b)) => a == b,
 
             // References match when their referents match and their mutability
-            // agrees. There is no implicit `&mut T` → `&T` coercion —
+            // agrees. There is no implicit `&mut T` → `&T` coercion:
             // the language is explicit over implicit.
             (
                 Type::Reference {
@@ -274,7 +274,7 @@ impl Type {
             (Type::Slice(a), Type::Slice(b)) => a.is_compatible_with(b),
 
             // Collections match when they are the same kind over the same
-            // element/key/value types — `Vec<i32>` and `Vec<i64>` are distinct.
+            // element/key/value types: `Vec<i32>` and `Vec<i64>` are distinct.
             (Type::Collection { kind: ak, args: aa }, Type::Collection { kind: bk, args: ba }) => {
                 ak == bk
                     && aa.len() == ba.len()
@@ -285,7 +285,7 @@ impl Type {
             }
 
             // Tensors match when their element types match and their shapes are
-            // identical extent for extent — rank and every extent are part of the type.
+            // identical extent for extent: rank and every extent are part of the type.
             (
                 Type::Tensor {
                     element: a,
@@ -320,7 +320,7 @@ impl Type {
 
     /// Normalize a string operand for equality: a `&string` slice and an owned
     /// `string` compare the same UTF-8 bytes, so a single string reference
-    /// is peeled to `string`. Other `&T` are left intact — reading them through
+    /// is peeled to `string`. Other `&T` are left intact: reading them through
     /// `==` needs the deref operator (`*`).
     pub(crate) fn peel_string_ref(&self) -> Type {
         match self {
@@ -365,7 +365,7 @@ impl Type {
             // Bool to integer
             (Type::Bool, t2) if t2.is_integer() => true,
             // char to/from integer, and char to char. char is not castable
-            // to/from float or bool — the only conversions are integer-valued.
+            // to/from float or bool: the only conversions are integer-valued.
             (Type::Char, t2) if t2.is_integer() => true,
             (t1, Type::Char) if t1.is_integer() => true,
             (Type::Char, Type::Char) => true,
@@ -711,7 +711,7 @@ mod tests {
 
     #[test]
     fn mutable_and_immutable_references_are_distinct() {
-        // `&mut T` and `&T` are distinct types — no implicit coercion.
+        // `&mut T` and `&T` are distinct types: no implicit coercion.
         let mut_ref = mut_ref_to(Type::I32);
         let imm_ref = ref_to(Type::I32);
         assert!(!mut_ref.is_compatible_with(&imm_ref));
@@ -731,7 +731,7 @@ mod tests {
             .peel_string_ref()
             .is_compatible_with(&Type::String.peel_string_ref()));
 
-        // Non-string references are left intact — reading them through `==` needs
+        // Non-string references are left intact: reading them through `==` needs
         // the deref operator (`*`), so `&i32` stays incompatible.
         let ref_i32 = ref_to(Type::I32);
         assert_eq!(ref_i32.peel_string_ref(), ref_i32);

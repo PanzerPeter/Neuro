@@ -173,7 +173,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))
     }
 
-    /// Load the value out of slot `slot`, predicated on the lookup having hit — the
+    /// Load the value out of slot `slot`, predicated on the lookup having hit. The
     /// buffer may be null, so the load itself must be guarded.
     fn load_slot_value(
         &mut self,
@@ -218,7 +218,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))
     }
 
-    /// `m.remove(k)` — `true` when the key was present. The hashed map leaves a
+    /// `m.remove(k)`, which is `true` when the key was present. The hashed map leaves a
     /// tombstone (its `used` count is unchanged, so the slot is still probed through);
     /// the ordered map closes the gap so the slots stay sorted and dense.
     fn emit_map_remove(
@@ -266,7 +266,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(present)
     }
 
-    /// `m.keys()` — a fresh `Vec<K>` of the live keys, in slot order. For the ordered
+    /// `m.keys()`, a fresh `Vec<K>` of the live keys, in slot order. For the ordered
     /// map that order is ascending, which is what makes its ordering observable.
     fn emit_map_keys(
         &mut self,

@@ -1,4 +1,4 @@
-// Showcase — the codepoint iterators driving a small tokenizer.
+// Showcase: the codepoint iterators driving a small tokenizer.
 //
 // Cumulative integration example combining:
 //   `.char_indices()` byte offsets and `.chars()` codepoint walks
@@ -10,7 +10,7 @@
 //   · string interpolation with the format mini-language
 //
 // The point of the combination: a scanner needs both units at once. It decides where a
-// token ends by reading *characters* — a space is a character, and so is 'é' — but it
+// token ends by reading *characters* (a space is a character, and so is 'é') but it
 // cuts the token out by *bytes*, because that is what a zero-copy view takes. Getting
 // one of the two wrong is invisible on ASCII and corrupts every accented word, which is
 // why the text below is deliberately not ASCII.
@@ -43,7 +43,7 @@ impl Token {
 }
 
 // Split on spaces. The cut points come from `.char_indices()`, so they are byte
-// offsets — exactly what `.slice(range)` consumes.
+// offsets: exactly what `.slice(range)` consumes.
 func scan(line: &string) -> Vec<string> {
     mut tokens: Vec<string> = Vec::new()
     mut start: u64 = 0

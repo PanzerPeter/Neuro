@@ -39,7 +39,7 @@ fn workspace_root() -> PathBuf {
 ///
 /// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
 /// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()` — that assumes the legacy
+/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
 /// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
 fn neurc_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
@@ -159,7 +159,7 @@ fn run_example(exe: &Path) -> Result<(i32, String), String> {
 /// The stdout `examples/<rel>` must produce.
 ///
 /// It lives in the sibling `.out` file. No such file means the example is a silent
-/// one and must print nothing, so the absence is itself the expectation — that is
+/// one and must print nothing, so the absence is itself the expectation: that is
 /// what keeps a program which quietly starts printing from passing unnoticed.
 fn expected_stdout(examples_dir: &Path, rel: &str) -> Result<String, String> {
     let golden = examples_dir.join(rel).with_extension("out");

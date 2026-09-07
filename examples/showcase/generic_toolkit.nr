@@ -1,4 +1,4 @@
-// Showcase — generics, const generics, turbofish, and where-clauses working together
+// Showcase: generics, const generics, turbofish, and where-clauses working together
 // with prior features.
 //
 // Cumulative integration example combining:
@@ -44,7 +44,7 @@ struct Buffer<T, const CAP: u32> {
     count: u32,
 }
 
-// The classic identity template — reused here at i32 and at a tuple type.
+// The classic identity template: reused here at i32 and at a tuple type.
 func identity<T>(x: T) -> T {
     x
 }
@@ -86,7 +86,7 @@ func main() -> i32 {
 
     val p = Pair { first: 6, second: 9 }   // Pair<i32, i32> (inferred)
     val cell = Cell { value: 7 }           // Cell<i32>
-    val flag = Cell { value: true }        // Cell<bool> — distinct instance
+    val flag = Cell { value: true }        // Cell<bool>: distinct instance
     val cv = cell.get()                    // generic impl method     -> 7
     val bonus = if flag.get() { p.first } else { 0 }   // -> 6
 

@@ -4,7 +4,7 @@
 // reference that outlives the call. Under lifetime elision a single input
 // reference lifetime is applied to the output, so returning one of the
 // reference parameters (or a borrow of `&self`) is sound; returning a borrow of
-// a function-local value — or of a by-value parameter — would dangle and is
+// a function-local value (or of a by-value parameter) would dangle and is
 // rejected at compile time. Covers both end-to-end accept+run and the rejection
 // diagnostics emitted by `neurc compile`.
 mod common;

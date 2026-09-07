@@ -9,7 +9,7 @@
 // clearest way to show it really is just a block.
 
 func main() -> i32 {
-    // unsafe block bound to a value — evaluates to its trailing expression
+    // unsafe block bound to a value: evaluates to its trailing expression
     val base = unsafe {
         val a = 10
         val b = 7

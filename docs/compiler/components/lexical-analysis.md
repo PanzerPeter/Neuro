@@ -44,8 +44,8 @@ user-facing syntax and format mini-language. An unterminated `{` hole is the lex
 
 A triple-quoted `"""…"""` block string decodes to the same `StringValue`, so nothing
 downstream of the lexer distinguishes the two forms. Logos matches only the opening
-delimiter — it has no non-greedy repetition, so a regex ending in `"""` would run to the
-last one in the file — and a callback scans the body, strips the closing delimiter's
+delimiter. It has no non-greedy repetition, so a regex ending in `"""` would run to the
+last one in the file. A callback scans the body, strips the closing delimiter's
 indentation, and reuses the ordinary chunk decoder. Dedent drops characters from an
 indexed `(offset, char)` view rather than rebuilding the text, which is how holes inside a
 block string keep true source spans. See
@@ -125,7 +125,7 @@ false
 Nesting means a block comment ends only at the `*/` that unwinds it to depth zero,
 so a block already containing a comment can be commented out wholesale. Each `/*`
 therefore needs its own `*/`; a file that ends while a comment is still open is
-`LexError::UnterminatedBlockComment`. A comment body is raw text — `/*` and `*/`
+`LexError::UnterminatedBlockComment`. A comment body is raw text: `/*` and `*/`
 inside a string or char literal within it are still counted, exactly as `//`
 already swallows a quote to end of line.
 
@@ -317,7 +317,7 @@ The excerpt above shows representative variants; the full set lives in
 
 Nothing links `TokenKind` to `neuro-language-support/syntaxes/neuro.tmLanguage.json`, so any
 change to the token set has to update that editor grammar by hand in the same commit.
-`tests/tmlanguage_sync.rs` checks what it can without a tokenizer — that every keyword is
+`tests/tmlanguage_sync.rs` checks what it can without a tokenizer: that every keyword is
 covered, that the grammar's keyword rule invents none of its own, and that the rules
 naming a declaration are ordered ahead of the keyword rule so they stay reachable.
 `tools/tmlanguage_scopes.mjs` prints the scopes the grammar actually assigns to a source

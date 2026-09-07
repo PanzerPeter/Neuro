@@ -1,13 +1,13 @@
 // Deriving `Debug` and `PartialEq`
 //
-// `@derive(Debug)` gives a struct the `{value:?}` rendering — its name, then each
+// `@derive(Debug)` gives a struct the `{value:?}` rendering: its name, then each
 // field in declaration order. `@derive(PartialEq)` gives it `==` / `!=`, compared
 // field by field. Both recurse: a field that is itself a struct needs the same
 // derive, which is what lets `Reading` render and compare through `Sensor`.
 //
 // Every name in a `@derive` list is checked. `@derive(Debug, PartialEq)` is the whole
-// derivable-and-implemented set beyond `Copy` / `Clone`; anything else — a misspelling,
-// or a trait no pass generates yet — is a compile error rather than a silent no-op.
+// derivable-and-implemented set beyond `Copy` / `Clone`; anything else (a misspelling,
+// or a trait no pass generates yet) is a compile error rather than a silent no-op.
 
 @derive(Debug, PartialEq)
 struct Sensor {
@@ -28,7 +28,7 @@ func main() -> i32 {
         value: 21.5,
         valid: true
     }
-    // Same fields, built independently — equality is structural, not identity.
+    // Same fields, built independently: equality is structural, not identity.
     val b = Reading {
         sensor: Sensor { id: 7, label: "intake" },
         value: 21.5,

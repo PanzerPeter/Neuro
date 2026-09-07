@@ -8,9 +8,9 @@ use super::types::Type;
 /// Which transformation a `for`-head adapter applies to the element stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoopAdapterKind {
-    /// `.map(f)` — replaces each element with `f(element)`.
+    /// `.map(f)`: replaces each element with `f(element)`.
     Map,
-    /// `.filter(p)` — drops each element for which `p(element)` is false.
+    /// `.filter(p)`: drops each element for which `p(element)` is false.
     Filter,
 }
 
@@ -18,7 +18,7 @@ pub enum LoopAdapterKind {
 ///
 /// The adapter is recognised by the parser rather than resolved as a method
 /// because a range is not a first-class value, so `(0..n).map(f)` has no receiver
-/// to dispatch against — the same reason `.enumerate()` is a head form.
+/// to dispatch against: the same reason `.enumerate()` is a head form.
 /// `callee` is the single argument: a closure literal, a function name, or any
 /// expression of function type.
 #[derive(Debug, Clone, PartialEq)]
@@ -92,7 +92,7 @@ pub enum Stmt {
     ///
     /// `iterable` evaluates to an array (or a borrow of one); `iterator` binds each
     /// element in turn. Lowered directly in codegen as a counted loop over the
-    /// array storage — it does not dispatch through an iterator protocol. An
+    /// array storage: it does not dispatch through an iterator protocol. An
     /// optional `label` names the loop for labeled break/continue.
     ///
     /// `index` carries the position binding of `for (i, x) in xs.enumerate()`:
@@ -140,7 +140,7 @@ pub enum Stmt {
     ///
     /// `pointer` is the reference expression being dereferenced (the `r` in
     /// `*r = value`); the value is stored at the location it points at. Requires
-    /// `pointer` to have a `&mut T` type — enforced in semantic analysis.
+    /// `pointer` to have a `&mut T` type; enforced in semantic analysis.
     DerefAssignment {
         pointer: Expr,
         value: Expr,
@@ -155,7 +155,7 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
-    /// `val PATTERN = value else |binding| { ... }` — bind a refutable pattern or
+    /// `val PATTERN = value else |binding| { ... }`: bind a refutable pattern or
     /// leave the enclosing scope.
     ///
     /// The pattern's bindings are introduced into the *enclosing* block, not just a
@@ -163,7 +163,7 @@ pub enum Stmt {
     /// the optional `|name|` after `else`; what it names depends on the scrutinee's
     /// type: a `Result`'s `Err` payload, nothing for an `Option` (only `_` is
     /// accepted), and the whole scrutinee for any other enum. `else_block` must
-    /// diverge — semantic analysis rejects one that can fall through.
+    /// diverge; semantic analysis rejects one that can fall through.
     ValElse {
         pattern: Pattern,
         value: Expr,

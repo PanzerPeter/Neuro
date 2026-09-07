@@ -1,4 +1,4 @@
-// Showcase — the iteration protocol carrying a small stream pipeline.
+// Showcase: the iteration protocol carrying a small stream pipeline.
 //
 // Integration example combining several features at once:
 //   the `IntoIterator` / `Iterator` protocol · the `.map(f)` / `.filter(p)` head
@@ -10,7 +10,7 @@
 //
 // The point is composition: a source, a transform, and a filter are three separate
 // types, each implementing `Iterator`, and a single `for` head drives the whole chain
-// one element at a time — no intermediate array is ever built.
+// one element at a time: no intermediate array is ever built.
 
 // A container. It holds no cursor, so it may be walked more than once: each `for`
 // head asks it for a fresh iterator through `into_iter()`.
@@ -163,7 +163,7 @@ func main() -> i32 {
 
     // The same pipeline written with the compiler's own adapters. `.map` and
     // `.filter` are part of the `for` head rather than values, so one head
-    // expresses what `Scaled` + `Above` needed two types for — and the head they
+    // expresses what `Scaled` + `Above` needed two types for, and the head they
     // decorate is the very same `IntoIterator` container.
     mut inline_total = 0
     for value in readings

@@ -1,7 +1,7 @@
 // Neuro Programming Language - String `.char_slice(range)` (Phase 2A)
 //
 // `.char_slice(range)` is the codepoint-indexed companion to `.slice(range)`. Both
-// return a borrowed `&string` view — zero copy, since strings are immutable — but
+// return a borrowed `&string` view (zero copy, since strings are immutable) but
 // `.slice` counts bytes while `.char_slice` counts Unicode code points, walking the
 // UTF-8 bytes to find each endpoint. On ASCII the two agree; on anything else they do
 // not, which is the whole reason `.char_slice` exists.

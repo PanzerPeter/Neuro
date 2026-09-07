@@ -78,7 +78,7 @@ pub enum HirType {
     /// Statically shaped tensor `Tensor<T, [d0, ...]>`. Every extent is known at
     /// compile time and is part of the type; an empty `shape` is the rank-0 scalar
     /// tensor. The HIR carries the type so the contract is complete, but no backend
-    /// has a runtime representation for it yet — a tensor buffer's layout arrives with
+    /// has a runtime representation for it yet: a tensor buffer's layout arrives with
     /// tensor construction.
     Tensor {
         element: Box<HirType>,

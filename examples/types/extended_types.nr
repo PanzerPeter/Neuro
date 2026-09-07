@@ -50,7 +50,7 @@ func test_unsigned_comparison(a: u32, b: u32) -> bool {
 
 func main() -> i32 {
     // The i8 helper also computes `a * b` internally, so the inputs are chosen to
-    // keep that product inside i8 — a debug build traps on overflow.
+    // keep that product inside i8: a debug build traps on overflow.
     val i8_sum: i8 = test_i8_arithmetic(10i8, 3i8)            // 13
     val i16_quot: i16 = test_i16_operations(1000i16, 8i16)    // 125
     val u8_sum: u8 = test_u8_arithmetic(200u8, 55u8)          // 255

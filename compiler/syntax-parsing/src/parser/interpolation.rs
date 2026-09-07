@@ -14,8 +14,8 @@ use super::Parser;
 ///
 /// Each hole's raw source is re-lexed and parsed as a standalone expression by a
 /// nested [`Parser`]. Token spans are shifted onto the hole's absolute file
-/// coordinates *before* parsing, so every node inside a hole — and every
-/// diagnostic later attached to one — points at the real column of the real file
+/// coordinates *before* parsing, so every node inside a hole, and every
+/// diagnostic later attached to one, points at the real column of the real file
 /// rather than at an offset inside a detached snippet.
 pub(super) fn parse_interp_string(chunks: &[InterpChunk], span: Span) -> ParseResult<Expr> {
     let mut parts = Vec::with_capacity(chunks.len());
@@ -87,7 +87,7 @@ fn parse_hole(source: &str, span: Span) -> ParseResult<InterpPart> {
 /// Grammar, every part optional but strictly ordered:
 /// `[< > ^] [+] [0] [width] [. precision] [? e d x X b o]`
 ///
-/// Applicability to the value's type is *not* decided here — the parser has no
+/// Applicability to the value's type is *not* decided here: the parser has no
 /// types. This produces the written spec; semantic analysis rejects the
 /// combinations that no type can satisfy (`{s:x}`, `{n:.2}`).
 fn parse_format_spec(text: &str, span: Span) -> ParseResult<FormatSpec> {
@@ -172,7 +172,7 @@ fn parse_format_spec(text: &str, span: Span) -> ParseResult<FormatSpec> {
         };
         i += 1;
     } else if spec.precision.is_some() {
-        // `.N` with no kind letter is fixed-point — the `{pi:.2}` row of the table.
+        // `.N` with no kind letter is fixed-point: the `{pi:.2}` row of the table.
         spec.kind = FormatKind::Fixed;
     }
 

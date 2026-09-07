@@ -1,4 +1,4 @@
-// Codegen for the prelude-private `string.__char_at(offset)` — the Unicode scalar whose
+// Codegen for the prelude-private `string.__char_at(offset)`, the Unicode scalar whose
 // UTF-8 encoding begins at a byte offset.
 //
 // This is the one step `Chars::next` cannot take in source: the language exposes no
@@ -9,8 +9,8 @@
 // Decoding is a scan over the code point's own bytes rather than a four-way branch on the
 // lead byte: a continuation byte is recognisable on its own (`0b10xxxxxx`), so the loop
 // consumes exactly as many as the scalar has and needs no width computed up front. The
-// text is well-formed UTF-8 by construction — literals are validated at parse time and
-// every borrowed view lands on a code point boundary — so the loop's own bound is the
+// text is well-formed UTF-8 by construction (literals are validated at parse time and
+// every borrowed view lands on a code point boundary) so the loop's own bound is the
 // string length rather than a validity check.
 
 use inkwell::module::Linkage;

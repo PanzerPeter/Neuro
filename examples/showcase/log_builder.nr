@@ -1,4 +1,4 @@
-// Showcase — a run transcript assembled in a single growable buffer.
+// Showcase: a run transcript assembled in a single growable buffer.
 //
 // Integration example combining the growable `String` with the features that
 // feed it:
@@ -11,7 +11,7 @@
 // recopy the whole transcript once per event instead.
 //
 // The finished transcript is checked against the exact text it should produce,
-// and `main` returns the transcript's byte length as its exit code — a number
+// and `main` returns the transcript's byte length as its exit code: a number
 // that only comes out right if every field rendered and padded correctly.
 
 @derive(Copy, Clone)

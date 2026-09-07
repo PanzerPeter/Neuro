@@ -1,8 +1,8 @@
 // Code generation for the standard collections `Vec<T>`, `HashMap<K, V>`,
 // `BTreeMap<K, V>`, and the growable text buffer `String`.
 //
-// All are values of one header type — `{ ptr buffer, i64 len, i64 cap, i64 used }`
-// — held in the owner's stack slot, with the elements in a single heap buffer. The
+// All are values of one header type, `{ ptr buffer, i64 len, i64 cap, i64 used }`,
+// held in the owner's stack slot, with the elements in a single heap buffer. The
 // buffer's layout is per kind: a plain element array for `Vec`, an array of
 // `{ i8 state, K key, V value }` probe slots for `HashMap`, a key-sorted array of
 // `{ K key, V value }` slots for `BTreeMap`, and a byte run for `String`.
@@ -123,7 +123,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// `collection.clear()` — reset the counts and wipe the allocated slots. The buffer
+    /// `collection.clear()`, which resets the counts and wipe the allocated slots. The buffer
     /// is retained so refilling does not reallocate, and the elements themselves are
     /// `Copy`-or-`string`-or-byte values with nothing of their own to release.
     ///
@@ -187,7 +187,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// for any other collection-valued expression (`for k in m.keys()`, `m.keys().len()`).
     ///
     /// A temporary owns its buffer with no binding to free it, so it is registered in the
-    /// enclosing drop scope like a named collection — that is what keeps map iteration,
+    /// enclosing drop scope like a named collection. That is what keeps map iteration,
     /// whose only route is the `Vec` `keys()` builds, from leaking.
     pub(super) fn collection_place_ptr(
         &mut self,

@@ -110,8 +110,8 @@ val c = connect("localhost", timeout: 30, port: 8080) // same call as b
 
 ### External labels
 
-A parameter may be declared with two names — an **external label** the caller writes and
-an **internal name** the body uses — written `external internal: T`. The external label is
+A parameter may be declared with two names: an **external label** the caller writes and
+an **internal name** the body uses, written `external internal: T`. The external label is
 then **required** at every call site.
 
 ```neuro
@@ -167,7 +167,7 @@ func main() -> i32 {
 }
 ```
 
-A call that only passes values costs nothing at runtime — it produces exactly the IR the
+A call that only passes values costs nothing at runtime: it produces exactly the IR the
 equivalent positional call produces. A call that reorders arguments carrying effects binds
 each of them to a temporary first, which is one binding per argument and no other cost.
 
@@ -775,7 +775,7 @@ phase 2 is 0.88 done
 
 Each takes **exactly one** argument, and that argument is text: an owned `string` or an
 immutable `&string` sub-slice (`text.slice(1..4)`). There is no variadic form and no
-format string at the call site, because there is no need for one — [string
+format string at the call site, because there is no need for one: [string
 interpolation](expressions.md#string-interpolation) has already rendered every hole, with
 its full format mini-language, into one ordinary `string` before the call is reached:
 
@@ -788,7 +788,7 @@ The text is **read, not consumed**, so the value stays usable afterwards:
 ```neuro
 val text: string = "kept"
 println(text)
-println(text)     // still valid — printing does not move its argument
+println(text)     // still valid: printing does not move its argument
 ```
 
 A user-defined function named `print` or `println` shadows the builtin within the program,
@@ -796,7 +796,7 @@ exactly as one named `panic` does. Both are compiler builtins rather than declar
 `@no_prelude` does not take them away.
 
 Output is **buffered**. A call copies its bytes into a page-sized buffer, and the buffer
-reaches the operating system when it fills — so a printing loop pays one write for
+reaches the operating system when it fills. So a printing loop pays one write for
 thousands of lines rather than one, or for `println` two, per call.
 
 That buffer is emptied on every path out of the program, so buffering never costs output:

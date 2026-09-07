@@ -1,6 +1,6 @@
 //! Resolving a `for` head against the `IntoIterator` / `Iterator` protocol.
 //!
-//! The built-in sequence heads — a range, an array, a `Vec`, a borrowed slice — are
+//! The built-in sequence heads (a range, an array, a `Vec`, a borrowed slice) are
 //! answered before this module is consulted and keep their counted-loop lowering. What
 //! reaches here is a head whose type is a user nominal type, which is iterable exactly
 //! when the protocol says so.
@@ -30,7 +30,7 @@ impl TypeChecker {
     ///
     /// The call is not a method anywhere else in the language: it is a head form, like
     /// `.enumerate()`, and the position it binds is a byte offset read off the iterator
-    /// rather than a payload it can yield — `Iterator::next` answers `Option<Self::Item>`,
+    /// rather than a payload it can yield: `Iterator::next` answers `Option<Self::Item>`,
     /// and an `Option` payload may only be a scalar, so a pair cannot travel through it.
     pub(crate) fn check_char_indices_head(&mut self, receiver: &Expr, span: Span) -> Type {
         let receiver_ty = self.check_expr(receiver, None).unwrap_or(Type::Unknown);
@@ -50,7 +50,7 @@ impl TypeChecker {
     /// What one step of iterating over `head` binds, or `None` when `head` does not
     /// implement the protocol.
     ///
-    /// A type implementing `Iterator` is its own iterator — the blanket
+    /// A type implementing `Iterator` is its own iterator, by the blanket
     /// `impl<I: Iterator> IntoIterator for I` stated as a rule, since a blanket impl has
     /// no syntax yet. `IntoIterator` is consulted first, so a container that implements
     /// both still hands out its dedicated iterator.

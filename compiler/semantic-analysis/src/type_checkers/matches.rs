@@ -47,9 +47,9 @@ impl TypeChecker {
         }
 
         // An unmatchable scrutinee has been reported once. Checking the patterns
-        // against its real type only restates that in worse words — a `string`
+        // against its real type only restates that in worse words: a `string`
         // literal pattern would read "matches a `string` but the value has type
-        // string" — so the arms see `Unknown`, which every pattern accepts.
+        // string", so the arms see `Unknown`, which every pattern accepts.
         let pattern_ty = if matchable {
             scrut_ty.clone()
         } else {
@@ -57,7 +57,7 @@ impl TypeChecker {
         };
 
         // Each arm runs on its own path, so snapshot the move state after the
-        // scrutinee and restore it between arms — mirroring `if`.
+        // scrutinee and restore it between arms, mirroring `if`.
         let move_snapshot = self.symbols.snapshot_moves();
 
         // The body-type hint: the caller's expected type if any, else the first arm's
@@ -79,8 +79,8 @@ impl TypeChecker {
         }
 
         // Unify arm body types, mirroring the `if`-expression rule: the result is the
-        // first arm that carries a type. A divergent arm — one that panics or leaves
-        // the scope — is `Unknown`, compatible with everything, and describes nothing.
+        // first arm that carries a type. A divergent arm (one that panics or leaves
+        // the scope) is `Unknown`, compatible with everything, and describes nothing.
         if arm_types.is_empty() {
             return Type::Void;
         }
@@ -145,7 +145,7 @@ impl TypeChecker {
         self.symbols.pop_scope();
         // An arm that leaves the enclosing scope never reaches the point where the
         // `match` has a value, so it says nothing about that value and must not
-        // constrain its siblings — the contract `panic` / `unreachable` already have.
+        // constrain its siblings: the contract `panic` / `unreachable` already have.
         if expr_diverges(&arm.body) {
             return Type::Unknown;
         }

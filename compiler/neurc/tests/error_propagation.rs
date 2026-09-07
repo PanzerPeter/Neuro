@@ -43,7 +43,7 @@ func main() -> i32 {
 #[test]
 fn the_error_payload_travels_unchanged() {
     let test = CompileTest::new();
-    // `?` forwards the original `Err` value — there is no conversion step — so the
+    // `?` forwards the original `Err` value (there is no conversion step), so the
     // caller sees the exact payload the callee produced.
     let source = r#"
 func reject(n: i32) -> Result<i32, i32> {

@@ -91,7 +91,7 @@ impl Lowerer {
     /// Lower `Tensor::<T, [...]>::ctor(args)` and its annotation-driven spelling.
     ///
     /// The tensor type comes from the turbofish when one was written and from the
-    /// surrounding expectation otherwise — the same two sources the type checker used
+    /// surrounding expectation otherwise, the same two sources the type checker used
     /// to accept the call.
     pub(crate) fn lower_tensor_construction(
         &mut self,

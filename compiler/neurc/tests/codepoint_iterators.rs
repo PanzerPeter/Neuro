@@ -1,7 +1,7 @@
 // End-to-end tests for the codepoint iterators: `.chars()` and `.char_indices()`.
 //
 // The two answer different questions about the same walk. `.chars()` hands out an
-// iterator over Unicode scalar values, so it composes with the rest of the protocol —
+// iterator over Unicode scalar values, so it composes with the rest of the protocol:
 // `.enumerate()` numbers the code points, an adapter transforms them, and the iterator
 // itself is a value that can be stepped by hand. `.char_indices()` is a `for` head that
 // binds the *byte* offset of each scalar, which is what a tokenizer feeds back into
@@ -109,7 +109,7 @@ func main() -> i32 {
     run_expecting(source, 0);
 }
 
-/// `.chars()` is an iterator like any other, so `.enumerate()` numbers its steps — and
+/// `.chars()` is an iterator like any other, so `.enumerate()` numbers its steps, and
 /// those numbers count code points, which is exactly where they differ from the byte
 /// offsets `.char_indices()` binds.
 #[test]

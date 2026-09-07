@@ -1,7 +1,7 @@
 // End-to-end tests for operator traits: operators on user types are sugar for
 // trait method calls. A `Copy` struct that implements `Add`/`Sub`/…/`Neg`/`Not`/
 // `PartialEq`/`Comparable` gets the matching operator, dispatched to its impl method and
-// monomorphized to a plain call — no vtable. These exercise the full pipeline:
+// monomorphized to a plain call: no vtable. These exercise the full pipeline:
 // parse → type-check → HIR lowering → LLVM codegen → native run.
 mod common;
 use common::CompileTest;

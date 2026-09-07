@@ -14,8 +14,8 @@ use super::Parser;
 impl Parser {
     /// Parse an enum definition: `enum Name<T, ...> { Unit, Tuple(T, ...), Named { f: T, ... } }`.
     ///
-    /// Each variant is one of three shapes — a bare tag, a parenthesised tuple of
-    /// payload types, or a brace block of named fields — distinguished by the token
+    /// Each variant is one of three shapes: a bare tag, a parenthesised tuple of
+    /// payload types, or a brace block of named fields, distinguished by the token
     /// following the variant name. The optional `<...>` list makes the enum a template
     /// monomorphized per set of type arguments.
     pub(crate) fn parse_enum_def(&mut self) -> ParseResult<EnumDef> {

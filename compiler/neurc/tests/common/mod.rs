@@ -10,7 +10,7 @@ use tempfile::TempDir;
 ///
 /// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
 /// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()` — that assumes the legacy
+/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
 /// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
 fn neurc_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
@@ -77,6 +77,30 @@ impl CompileTest {
             .map_err(|e| format!("Failed to execute {}: {}", exe_path.display(), e))?;
 
         Ok(output.status.code().unwrap_or(-1))
+    }
+
+    /// Type-check a program without generating code, returning the diagnostics on failure.
+    ///
+    /// This is `neurc check`, the front-end-only path. Use it for a test whose subject is
+    /// what the type checker accepts or rejects: it skips LLVM entirely, so it neither
+    /// needs a linker nor reports a backend error as if it were a type error.
+    #[allow(dead_code)]
+    pub fn check(&self, filename: &str, source: &str) -> Result<(), String> {
+        let source_path = self.write_source(filename, source);
+        let output = Command::new(neurc_path())
+            .arg("check")
+            .arg(&source_path)
+            .output()
+            .expect("Failed to execute neurc");
+
+        if output.status.success() {
+            return Ok(());
+        }
+        Err(format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ))
     }
 
     /// Compile and run a program, returning its exit code

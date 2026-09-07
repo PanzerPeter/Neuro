@@ -1,5 +1,18 @@
-# Cargo configuration for NEURO compiler
+# Cargo configuration for the NEURO compiler.
 
 [target.x86_64-pc-windows-msvc]
-# Add vcpkg library path for libxml2 and other LLVM dependencies
-rustflags = ["-L", "C:/vcpkg/installed/x64-windows-static/lib"]
+# Some Windows LLVM 20 development packages link against libxml2, which the LLVM
+# tree does not ship. When that is the case the build fails at link time with
+# "cannot open input file 'libxml2s.lib'", and the fix is to install the library
+# with vcpkg. Both search paths below are listed because the triplet has to match
+# the CRT: Rust's x86_64-pc-windows-msvc target uses the dynamic CRT (/MD), which
+# pairs with `x64-windows-static-md`, while `x64-windows-static` is the static-CRT
+# (/MT) build kept here for a toolchain configured that way.
+#
+# A path that does not exist is ignored by the linker, so this costs nothing on a
+# machine without vcpkg and on every non-Windows target. See
+# docs/guides/troubleshooting.md for the full recipe.
+rustflags = [
+    "-L", "C:/vcpkg/installed/x64-windows-static-md/lib",
+    "-L", "C:/vcpkg/installed/x64-windows-static/lib",
+]

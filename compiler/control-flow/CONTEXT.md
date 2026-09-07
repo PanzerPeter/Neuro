@@ -17,13 +17,13 @@ None. The slice owns its own `ControlFlowError` and touches no infrastructure cr
 ## Notes
 **This slice has no caller.** `neurc` does not depend on it and no other crate imports it, so
 nothing it computes reaches a compiled program. `build_cfg()` takes no input and returns an
-empty graph — a placeholder, not an analysis.
+empty graph: a placeholder, not an analysis.
 
 The two things the slice's name suggests it does are both implemented elsewhere and are not
 waiting on it:
-- **Return-path analysis** — `semantic-analysis` (`type_checkers/declarations/functions.rs`),
+- **Return-path analysis**: `semantic-analysis` (`type_checkers/declarations/functions.rs`),
   which rejects a non-void function whose body can fall off the end.
-- **Divergence / dead-arm reasoning** — `semantic-analysis`
+- **Divergence / dead-arm reasoning**: `semantic-analysis`
   (`type_checkers/val_else.rs::stmts_diverge`) plus the per-arm basic-block chain
   `llvm-backend` emits.
 

@@ -107,7 +107,7 @@ impl TypeChecker {
 
     /// Check a block-bodied closure like a function body: every statement is checked,
     /// and a trailing expression must match the declared return type. A trailing
-    /// `return`/`if` statement needs no value check — its `return`s are validated
+    /// `return`/`if` statement needs no value check; its `return`s are validated
     /// against the redirected return-type context.
     fn check_closure_block(&mut self, stmts: &[Stmt], declared: &Type) {
         self.symbols.push_scope();
@@ -429,7 +429,7 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
     }
 }
 
-/// Record the names a match pattern binds — they are locals of the arm body,
+/// Record the names a match pattern binds. They are locals of the arm body,
 /// never captures.
 fn collect_pattern_bindings(pattern: &Pattern, fv: &mut FreeVars) {
     match pattern {

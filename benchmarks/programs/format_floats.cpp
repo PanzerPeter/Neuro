@@ -2,7 +2,7 @@
 //
 // Rendering a double at a fixed precision is what a training loop does every time
 // it reports a loss, and it is a different code path from `print_lines`'s integer
-// hole — the digits come from the C library's conversion rather than from a digit
+// hole: the digits come from the C library's conversion rather than from a digit
 // loop. The value is irrational-looking on purpose: a short decimal expansion
 // would let the conversion finish early and measure the wrong thing.
 

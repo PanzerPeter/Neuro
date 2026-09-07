@@ -3,7 +3,7 @@
 //! The chain transforms the element type the loop binding receives: `.map(f)`
 //! replaces it with `f`'s return type, `.filter(p)` leaves it alone. Each adapter's
 //! argument is an ordinary expression of function type, checked in the scope
-//! *outside* the loop — it cannot see the loop binding it feeds.
+//! *outside* the loop, so it cannot see the loop binding it feeds.
 
 use ast_types::{LoopAdapter, LoopAdapterKind};
 
@@ -20,7 +20,7 @@ impl TypeChecker {
     /// Fold an adapter chain over the element type the head produces.
     ///
     /// `element` is `None` when the base head failed to type, in which case the
-    /// adapters are still checked — their arguments may hold errors of their own —
+    /// adapters are still checked, since their arguments may hold errors of their own,
     /// but no element-type mismatch is reported against a type nobody knows.
     pub(crate) fn check_loop_adapters(
         &mut self,

@@ -1,6 +1,6 @@
 // Dynamic dispatch: vtable emission, trait-object construction, and virtual calls.
 //
-// Static dispatch (`impl Trait`) needs nothing here — it is monomorphized away before the
+// Static dispatch (`impl Trait`) needs nothing here: it is monomorphized away before the
 // HIR reaches this backend. Dynamic dispatch is the one place the compiler emits a runtime
 // method table: a `&dyn Trait` is a `{ data ptr, vtable ptr }` fat pointer, and a call
 // through it loads a fixed slot from the vtable and jumps.

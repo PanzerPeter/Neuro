@@ -34,6 +34,11 @@ pub enum CodegenError {
 
     #[error("invalid optimization level: {0} (expected 0..=3)")]
     InvalidOptimizationLevel(u8),
+
+    #[error(
+        "constant expression overflows {ty}: `{op}` produces a value outside the range of {ty}"
+    )]
+    ConstOverflow { op: &'static str, ty: &'static str },
 }
 
 /// Result type for code generation operations

@@ -338,7 +338,7 @@ fn underscore_separators_suffixed() {
 
 #[test]
 fn leading_underscore_is_identifier_not_number() {
-    // A leading underscore must bind as an identifier, never a numeric literal —
+    // A leading underscore must bind as an identifier, never a numeric literal:
     // the digit-separator rule applies only between digits.
     let result = tokenize("_1000").unwrap();
     match &result[0].kind {
@@ -853,7 +853,7 @@ fn adjacent_block_comment_delimiters_lex() {
     }
 }
 
-/// `/*/*/` opens twice and closes never — the classic maximal-munch trap.
+/// `/*/*/` opens twice and closes never: the classic maximal-munch trap.
 #[test]
 fn a_lone_opener_pair_is_unterminated() {
     let err = tokenize("/*/*/").expect_err("`/*/*/` never closes");
@@ -970,7 +970,7 @@ fn triple_quoted_string_decodes_escapes() {
     assert_eq!(plain_string(&result[0].kind), "a\tb!");
 }
 
-/// Text after the opening `"""` is content, and is exempt from the dedent rule —
+/// Text after the opening `"""` is content, and is exempt from the dedent rule:
 /// it sits flush against the delimiter and cannot carry the closing indentation.
 #[test]
 fn triple_quoted_string_keeps_text_on_the_opening_line() {

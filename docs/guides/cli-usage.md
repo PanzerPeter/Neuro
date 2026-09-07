@@ -262,7 +262,8 @@ itself is slower:
 **Requirements**:
 - MSVC Build Tools 2022 OR MinGW-w64
 - LLVM 20 (full development package)
-- vcpkg with libxml2
+- vcpkg with libxml2, only if your LLVM package needs it (see
+  [troubleshooting](troubleshooting.md))
 
 **Executable extension**: Always `.exe`
 

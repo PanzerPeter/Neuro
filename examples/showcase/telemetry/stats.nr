@@ -2,7 +2,7 @@
 
 // Module `stats`: turns a batch of raw readings into a summary value.
 //
-// Nothing here is fallible — a batch always has a count, a total, and a peak — so this
+// Nothing here is fallible (a batch always has a count, a total, and a peak), so this
 // file opts out of the implicit prelude entirely. `Some` and `None` are ordinary names
 // again inside it, while `main.nr` and `report/mod.nr` beside it still get them bound.
 //

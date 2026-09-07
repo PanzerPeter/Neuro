@@ -1,6 +1,6 @@
 // Inline `module { }` blocks: a module that needs no file of its own.
 //
-// A block is a module in every sense a file is one — its items are private unless written
+// A block is a module in every sense a file is one: its items are private unless written
 // with `export`, a qualified path reaches into it, and blocks nest. Use one for a grouping
 // that belongs with the code around it; use a file when the unit is worth compiling apart.
 
@@ -33,7 +33,7 @@ module counter {
     }
 
     // No `export`: the file below declares this block but is still outside it, so this
-    // name is unreachable from `main` — that is the point of writing a block at all.
+    // name is unreachable from `main`: that is the point of writing a block at all.
     func step(amount: i32) -> i32 {
         amount * 2
     }

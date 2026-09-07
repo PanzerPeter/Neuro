@@ -16,7 +16,7 @@ impl TypeChecker {
     /// Register a function's signature without checking its body.
     ///
     /// Run over every function before any body is checked, so a call resolves
-    /// regardless of source order — the same order-independence structs, enums,
+    /// regardless of source order: the same order-independence structs, enums,
     /// traits, and constants already get, and what mutual recursion requires.
     ///
     /// A generic function (non-empty `func.generics`) is a template: its type
@@ -88,7 +88,7 @@ impl TypeChecker {
             // A generic template is registered separately; its signature carries the
             // `Type::Generic` placeholders and is instantiated at each call site. A
             // parameter that cannot be inferred from the arguments must be supplied by a
-            // turbofish at the call — enforced per call, not here.
+            // turbofish at the call; enforced per call, not here.
             let const_types: HashMap<String, Type> = func
                 .generics
                 .iter()
@@ -167,7 +167,7 @@ impl TypeChecker {
             .collect();
 
         // Define parameters in function scope (parameters are immutable by default).
-        // A parameter whose type failed to resolve is still bound, at `Unknown` — the
+        // A parameter whose type failed to resolve is still bound, at `Unknown`: the
         // error is already reported, and leaving the name undefined turns every use of
         // it in the body into a second, misleading "undefined variable" report.
         for (param, param_ty) in func.params.iter().zip(param_types.iter()) {
@@ -184,7 +184,7 @@ impl TypeChecker {
         }
 
         // Check function body. The implicit return is checked once, below, against the
-        // declared return type — checking it here as well would run its effects twice:
+        // declared return type: checking it here as well would run its effects twice:
         // a by-value argument would be recorded as moved a second time (and then
         // reported as a use of the value it moved itself), and any diagnostic it
         // produced would be recorded twice.
@@ -205,7 +205,7 @@ impl TypeChecker {
         } else if !matches!(return_type, Type::Void) && !stmts_diverge(&func.body) {
             // Nothing produces the declared value and control can reach the end of the
             // body. The backend leaves that block without a return, LLVM terminates it
-            // with `unreachable` — a legal terminator, so the verifier stays silent —
+            // with `unreachable` (a legal terminator, so the verifier stays silent),
             // and the program runs off the end of the function at runtime.
             self.record_error(TypeError::MissingReturn {
                 expected: return_type.clone(),
@@ -228,7 +228,7 @@ impl TypeChecker {
     /// always shapes an `if` in statement position as `Stmt::If`, and HIR lowering
     /// already lowers a trailing one as the body's value, so leaving it out here meant
     /// the declared return type was never checked against it at all. An `if` whose
-    /// every arm leaves the function carries no value of its own — it is a statement,
+    /// every arm leaves the function carries no value of its own: it is a statement,
     /// and the caller's return-path check is what covers it.
     pub(super) fn tail_is_implicit_return(body: &[Stmt], return_type: &Type) -> bool {
         if matches!(return_type, Type::Void) {
@@ -315,7 +315,7 @@ impl TypeChecker {
     ///
     /// `impl Trait` in return position is static dispatch: exactly one concrete type
     /// flows out of the function, so it is resolved transparently rather than kept
-    /// opaque — the caller receives that concrete type at zero runtime cost. The
+    /// opaque: the caller receives that concrete type at zero runtime cost. The
     /// concrete type is read structurally from the body's result expression, which this
     /// phase restricts to a direct constructor (struct literal or enum value); richer
     /// forms await closures and iterators.
@@ -378,8 +378,8 @@ impl TypeChecker {
 
     /// The concrete type of a directly-constructed expression, read structurally without
     /// full type checking. Only the forms whose nominal type is evident from the
-    /// syntax are recognized — a struct literal, an enum value, or a newtype
-    /// construction — plus the tail of a block or `if`. Any other shape yields `None`,
+    /// syntax are recognized (a struct literal, an enum value, or a newtype
+    /// construction), plus the tail of a block or `if`. Any other shape yields `None`,
     /// which surfaces as `ImplReturnNotInferable`.
     pub(super) fn shallow_result_type(&self, expr: &Expr) -> Option<Type> {
         match expr {

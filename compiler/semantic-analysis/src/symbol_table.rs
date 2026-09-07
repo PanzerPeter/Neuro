@@ -23,7 +23,7 @@ pub(crate) struct SymbolInfo {
     /// The span at which this binding's value was moved out, or `None` while the
     /// binding still owns its value. Drives use-after-move detection.
     pub(crate) moved_at: Option<Span>,
-    /// Borrows taken against this binding's place that outlive a single statement —
+    /// Borrows taken against this binding's place that outlive a single statement:
     /// each one held by a reference binding (`val r = &x`) until it leaves scope.
     shared_persistent: u32,
     exclusive_persistent: u32,
@@ -75,8 +75,8 @@ impl SymbolTable {
     /// dies with it. A reference binding (`val r = &x`) holds a borrow against an
     /// outer place; once `r` is gone the borrow is over, so the outer place's
     /// persistent borrow count is decremented. Borrows targeting a
-    /// place that lived in the same dying scope need no release — the place is
-    /// gone too — so a target absent from the surviving scopes is simply skipped.
+    /// place that lived in the same dying scope need no release: the place is
+    /// gone too, so a target absent from the surviving scopes is simply skipped.
     pub(crate) fn pop_scope(&mut self) {
         if self.scopes.len() <= 1 {
             return;
@@ -123,8 +123,8 @@ impl SymbolTable {
         None
     }
 
-    /// Total borrows currently active against `place` — persistent plus
-    /// transient — as `(shared, exclusive)`. `None` when the name is not a live
+    /// Total borrows currently active against `place` (persistent plus
+    /// transient) as `(shared, exclusive)`. `None` when the name is not a live
     /// binding (e.g. a constant or an undefined name). Drives the
     /// coexistence checks at each borrow site.
     pub(crate) fn borrow_counts(&self, place: &str) -> Option<(u32, u32)> {
@@ -182,7 +182,7 @@ impl SymbolTable {
             .and_then(|info| info.borrows.as_ref().map(|prov| prov.place.clone()))
     }
 
-    /// Release the persistent borrow held by `holder`, if any — used before a
+    /// Release the persistent borrow held by `holder`, if any: used before a
     /// `mut` reference binding is reassigned, so its previous borrowee is freed
     /// before the new borrow is checked. No-op when `holder` holds no borrow.
     pub(crate) fn release_borrow_of(&mut self, holder: &str) {
@@ -227,7 +227,7 @@ impl SymbolTable {
         }
     }
 
-    /// Clear the moved state of `name` — the binding owns a fresh value again
+    /// Clear the moved state of `name`: the binding owns a fresh value again
     /// (e.g. after reassigning a `mut`).
     pub(crate) fn clear_moved(&mut self, name: &str) {
         for scope in self.scopes.iter_mut().rev() {

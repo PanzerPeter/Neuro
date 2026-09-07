@@ -1,7 +1,7 @@
 // The struct-literal guard in guarded headers (`if` / `while` / `for` / `match`).
 //
 // A bare `Ident {` in a header is the header's body block, never a struct literal.
-// Inside a delimiter pair — `(...)` or `[...]` — that ambiguity is gone, so a struct
+// Inside a delimiter pair (`(...)` or `[...]`) that ambiguity is gone, so a struct
 // literal must be accepted there even though the enclosing header is guarded.
 
 use syntax_parsing::{parse, parse_expr, Expr};
@@ -105,7 +105,7 @@ fn guarded_header_still_reads_bare_brace_as_the_body() {
 
 #[test]
 fn guard_is_restored_after_a_nested_delimiter_pair() {
-    // After the argument list closes, the header is guarded again — so the
+    // After the argument list closes, the header is guarded again, so the
     // trailing `{` is the body, not a struct literal on `flag`.
     parse_ok(
         r#"

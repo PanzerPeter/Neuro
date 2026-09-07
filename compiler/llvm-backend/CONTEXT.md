@@ -10,8 +10,8 @@ Emit native object code from the typed Neuro HIR via LLVM IR generation.
 - Output: `Result<Vec<u8>, CodegenError>`
 
 The backend consumes the typed HIR produced by `hir-lowering`: every HIR node carries its
-resolved type (`HirExpr::ty`), so codegen reads types inline rather than re-deriving them —
-**there is no backend type-collection pass**. A single `type_env` (binding name → resolved type),
+resolved type (`HirExpr::ty`), so codegen reads types inline rather than re-deriving them.
+**There is no backend type-collection pass**. A single `type_env` (binding name → resolved type),
 populated as bindings are lowered, exists only so the place statements `obj.field = …` and
 `arr[i] = …` can recover a binding's nominal struct/array type.
 
@@ -22,7 +22,7 @@ diagnostics. They affect nothing else.
 `optimization` selects two independent things. It picks the `TargetMachine`'s level, which
 governs instruction selection and register allocation; and it picks the LLVM IR pass
 pipeline (`default<O1>` / `default<O2>` / `default<O3>`) run over the verified module before
-instruction selection. Both are needed — the `TargetMachine` level runs no IR passes at all,
+instruction selection. Both are needed: the `TargetMachine` level runs no IR passes at all,
 so without the pipeline nothing promotes an `alloca` to an SSA value, inlines a call, or
 hoists loop-invariant work. `-O0` runs no pipeline, which is what keeps its checked
 arithmetic and bounds guards where codegen emitted them.
@@ -35,15 +35,15 @@ transforms.
 - Tables / Events Published / Events Consumed / Public Read Model: none
 
 ## Shared Kernel
-- neuro-hir — the typed HIR lowered from (`HirProgram` / `HirExpr` / `HirType`)
-- ast-types — the `BinaryOp` / `UnaryOp` enums (reused unchanged by the HIR)
-- shared-types — type system primitives, `FormatSpec` for interpolation
-- diagnostics — error type infrastructure
-- source-location — `SourceFile` byte-offset → line/column mapping for panic diagnostics
+- neuro-hir: the typed HIR lowered from (`HirProgram` / `HirExpr` / `HirType`)
+- ast-types: the `BinaryOp` / `UnaryOp` enums (reused unchanged by the HIR)
+- shared-types: type system primitives, `FormatSpec` for interpolation
+- diagnostics: error type infrastructure
+- source-location: `SourceFile` byte-offset → line/column mapping for panic diagnostics
 
 inkwell 0.10.0 (feature `llvm20-1`) is a third-party crate, not Shared Kernel. Requires LLVM 20;
 set `LLVM_SYS_201_PREFIX` (e.g. `/usr/lib/llvm20`) before building. `semantic-analysis` is not a
-production dependency — neurc orders type-check then HIR lowering before codegen.
+production dependency: neurc orders type-check then HIR lowering before codegen.
 `syntax-parsing` and `hir-lowering` appear only in `[dev-dependencies]` (tests and benches lower
 source to HIR before compiling).
 
@@ -55,16 +55,16 @@ source to HIR before compiling).
 can assert on IR text that object emission erases. Inside `build_module` the order is fixed and
 load-bearing:
 
-1. **Signature pre-declaration** over every function, method, and closure before any body —
+1. **Signature pre-declaration** over every function, method, and closure before any body:
    `declare_function` / `declare_method` / `declare_impl` / `declare_closure` add the LLVM
    signature and register it in `functions`; the `codegen_*` counterparts fetch that declaration
    rather than adding one. Monomorphization means the call graph is no longer definition-ordered
    (an instance may be called by, or call, items emitted before it), so a call must resolve
    regardless of order.
-2. **Vtables** (`emit_vtables`) — after all signatures are declared, before any body, so item
+2. **Vtables** (`emit_vtables`): after all signatures are declared, before any body, so item
    order never matters.
 3. **Bodies.**
-4. **Standard-output drain** (`finalize_stdout_buffer`) — inserted after all bodies, because only
+4. **Standard-output drain** (`finalize_stdout_buffer`): inserted after all bodies, because only
    a finished module knows whether it prints at all and because the exit paths it edits are all
    emitted by then. See Standard-Output ABI.
 5. **Soft-float builtins** linked in when the module uses `half`/`bfloat`, after codegen and
@@ -74,7 +74,7 @@ load-bearing:
 `CodegenContext::entry_alloca` positions the builder before the entry block's first instruction,
 allocates, and restores. **Every** local binding, result slot, induction variable, scratch temp,
 drop flag, and closure environment goes through it. Allocating at the current builder position
-meant a slot inside a loop body was re-allocated per iteration, so a long enough loop segfaulted —
+meant a slot inside a loop body was re-allocated per iteration, so a long enough loop segfaulted,
 at every `-O` level, since `mem2reg` only promotes entry-block allocas. The initializing store
 stays where it was; sharing one slot across iterations is sound because each is written before it
 is read, and a fresh frame per call keeps recursion correct. Parameter and `self` allocas in
@@ -87,14 +87,14 @@ is read, and a fresh frame per call keeps recursion correct. Parameter and `self
 
 Literals are emitted to `.rodata`, never heap-allocated; the appended NUL
 (`STRING_NULL_TERMINATOR` in `literals.rs`) exists only for C-string FFI validity. `len` is
-authoritative — interior NULs are legal counted content, so consumers must not treat the data as
+authoritative: interior NULs are legal counted content, so consumers must not treat the data as
 NUL-terminated.
 
 Passed and returned by value. On x86-64 SysV this fits two registers, so no `sret` indirection.
-The semantic `Type::String` is unchanged — the fat-pointer layout is a backend-only detail.
+The semantic `Type::String` is unchanged: the fat-pointer layout is a backend-only detail.
 
 ### `&string`
-An **immutable** `&string` is the `{ ptr, i64 }` fat pointer itself, held by value — it is not a
+An **immutable** `&string` is the `{ ptr, i64 }` fat pointer itself, held by value. It is not a
 pointer to one. `string` is immutable, so the referent's address carries nothing the fat pointer
 does not, and demanding one forces every computed slice (`s.slice(a..b)`, which has no home) into
 a stack slot whose address then outlives the frame it was taken in (BUG-008). By value, a slice is
@@ -102,7 +102,7 @@ returned like any other aggregate, `.len()` is an `extractvalue`, and no slot ex
 
 `&mut string` is the exception: a store through it has to reach the referent, so it stays the
 referent's address (an opaque `ptr`), exactly like every other `&mut T`. `&&string` is likewise a
-pointer — the outer reference borrows a reference, not a string. The backend `Type::Reference`
+pointer: the outer reference borrows a reference, not a string. The backend `Type::Reference`
 therefore carries `mutable`, which is the only thing distinguishing the two lowerings;
 `TypeMapper::map_type` matches one reference level, never `referent()`. `codegen_reference` reads
 the place instead of taking its address when the borrow's own type is `&string`, and
@@ -118,13 +118,13 @@ a `&mut string` is loaded through) and then `codegen_string_eq`. Detection keys 
 `left_ty.referent() == String`, covering owned, borrowed, and mixed operands.
 
 `@derive(PartialEq)` equality is expanded here too, in `codegen/expressions/struct_eq.rs`, and for
-the same reason — before the numeric coercion, which would ask an aggregate value for its integer
+the same reason: before the numeric coercion, which would ask an aggregate value for its integer
 variant. `codegen_derived_struct_eq` walks the struct's fields from `struct_defs`, comparing each
 with `icmp` / `fcmp` / `codegen_string_eq` and recursing into a nested struct, then `and`s the
 results: none of the comparisons can have a side effect, so an `and` chain is cheaper than the
 branching a short-circuit would need. A `&mut S` operand is loaded through first. `!=` negates.
 Recursion is bounded by `MAX_DERIVE_DEPTH`, insurance against a future self-referential layout.
-A hand-written `impl PartialEq` never arrives here — lowering turned it into a method call.
+A hand-written `impl PartialEq` never arrives here: lowering turned it into a method call.
 
 `+` is concatenation, routed to `codegen_string_concat` before the numeric coercion: both operands
 are normalized with `load_string_fatptr`, a `len1 + len2` buffer is `malloc`'d, each operand's
@@ -137,9 +137,9 @@ the `len` contract). The frontend types the result as owned `String` even when a
 The fat pointer describes a `.rodata` literal and a `malloc`'d buffer identically, so ownership
 cannot be read off a value at runtime. It is decided at compile time instead, by
 `produces_owned_string` (`drops.rs`): an expression owns its buffer only if it is an
-`InterpString` or a `+` yielding `string` — the two producers that allocate unconditionally.
-Everything else — a literal, a variable, a `slice`, a value returned by a function that could have
-returned either — answers `false` and is never freed. The asymmetry is deliberate: a missed `true`
+`InterpString` or a `+` yielding `string`: the two producers that allocate unconditionally.
+Everything else (a literal, a variable, a `slice`, a value returned by a function that could have
+returned either) answers `false` and is never freed. The asymmetry is deliberate: a missed `true`
 leaks a buffer, a wrong `true` hands `.rodata` to `free`.
 
 Two consumers act on that answer. `codegen_var_decl` registers a `string` binding whose initializer
@@ -148,20 +148,20 @@ releases a collection's storage, flag-guarded against a move. `codegen_io_builti
 argument it can prove the caller built, since `write` retains none of the bytes it copies out.
 
 **Known limits**: a heap string that escapes into a collection, a struct field, or a function's
-return value is still owned by nothing and leaks — the conservative answer, not a regression. So
+return value is still owned by nothing and leaks (the conservative answer, not a regression). So
 does the prior value of a reassigned binding, matching the same limit the Drop ABI carries.
 
 ## Struct ABI
-User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding —
+User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding:
 LLVM handles alignment). `TypeMapper` holds the layout table (`set_struct_fields`, fed by
 `CodegenContext::set_struct_defs`) beside `enum_words`, and `struct_written_names` (fed by
-`set_struct_written_names`) maps each key to the name the programmer wrote — they differ only for
+`set_struct_written_names`) maps each key to the name the programmer wrote: they differ only for
 a monomorphized generic instance, and only the derived debug rendering reads it. `map_type` builds a named struct's
 aggregate: a struct works as a free function's **parameter and return type** and as a field of
-another struct. That ABI is by value and direct — no `sret` — matching what methods already did
+another struct. That ABI is by value and direct (no `sret`), matching what methods already did
 for `&self`. `get_struct_llvm_type` delegates to `TypeMapper::struct_type`, so one definition of
 the layout serves both paths; recursion is bounded by `MAX_STRUCT_DEPTH`, which is insurance
-rather than a live case (a cycle is impossible today — a field type must be declared before use).
+rather than a live case (a cycle is impossible today: a field type must be declared before use).
 
 Values live on the stack via `alloca`, initialised field-by-field with `insertvalue`; reads are
 `getelementptr`+`load`, writes `getelementptr`+`store`. A functional update
@@ -174,7 +174,7 @@ with `extractvalue`, keeping the GEP-and-load path for a named binding.
 `get_struct_ptr_and_type` addresses a receiver place. It resolves a named binding (auto-loading
 through a `&Struct` / `&mut Struct` binding, whose alloca holds a pointer rather than the
 aggregate) and, recursively, a **field of a place**: the parent's pointer, then a GEP to the
-field's slot. That second arm is what makes `self.inner.next()` work — an adapter's `&mut self`
+field's slot. That second arm is what makes `self.inner.next()` work: an adapter's `&mut self`
 method driving the iterator it wraps writes back into the field's own storage, where reaching
 the field as a value would discard the advance. Anything else (a call result, a literal) has no
 address and is refused: a `&mut self` method needs storage to write through.
@@ -206,7 +206,7 @@ method call, so the backend emits a plain `StructName__op` call.
 
 ## Builtin Method ABI
 Intrinsics on non-struct receivers resolve in `resolve_builtin_method` (`context.rs`), which maps
-a receiver `Type` plus method name to a `BuiltinMethod` tag **only** — the call's result type comes
+a receiver `Type` plus method name to a `BuiltinMethod` tag **only**: the call's result type comes
 from the HIR callee node, because `checked_*` yields a monomorphized `Option<T>` instance whose
 mangled name only the frontend can produce. The method-call arm of `codegen_call_expr` passes both
 the receiver type (from `object.ty`) and that result type into `codegen_builtin_method`
@@ -219,15 +219,15 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
 - `string.slice(a..b)` / `.slice(a..=b)` → `codegen_string_slice`, computing a
   `(ptr+start, end-start)` fat pointer (`end` = `b+1` for `..=`). Runtime bounds
   (`0 <= start <= end <= len`) and UTF-8 codepoint-boundary checks at both endpoints route through
-  `codegen_guard_or_panic` (`panic.rs`) — abort, no unwinding, in every build. The result is the
+  `codegen_guard_or_panic` (`panic.rs`): abort, no unwinding, in every build. The result is the
   computed fat pointer itself, returned by value with no stack slot, so a slice returned across a
   call boundary stays valid. The `Range` argument is consumed here; reaching it through general
   `codegen_expr` is an internal error.
 - `string.char_slice(a..b)` / `.char_slice(a..=b)` → `codegen_char_slice`
   (`expressions/char_slice.rs`), the same borrowed `&string` with its range counting **code
   points** instead of bytes. Each endpoint is resolved to a byte offset by the module-private
-  `neuro.string.char_offset(ptr, len, index)` helper — a byte walk that skips continuation bytes
-  (`0b10xxxxxx`) and answers `-1` for an index the string does not reach — and the resulting byte
+  `neuro.string.char_offset(ptr, len, index)` helper: a byte walk that skips continuation bytes
+  (`0b10xxxxxx`) and answers `-1` for an index the string does not reach. The resulting byte
   pair goes through the same `string_fat_slice` tail `.slice` uses. Only the bounds guard survives
   (`start` found, and `start <= end` on the resolved offsets, which catches a reversed range and an
   unreachable end together); the UTF-8 boundary checks do not exist here, because a code point
@@ -236,11 +236,11 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
 - `string.__char_at(offset)` → `BuiltinMethod::StringCharAt` → `codegen_char_at`
   (`expressions/char_at.rs`), the Unicode scalar whose UTF-8 encoding begins at that byte, as an
   `i32`. The module-private `neuro.string.char_at(ptr, len, offset)` helper takes the lead byte's
-  payload — selected from its own value, since the width follows from it — and folds in every
+  payload (selected from its own value, since the width follows from it) and folds in every
   following byte matching `0b10xxxxxx`, so a scalar's own bytes bound the loop and no width is
   computed up front. An offset at or past `len` answers `0`. This is the only byte-indexed read of
   a string in the backend, and its one caller is the prelude's codepoint iterator: the frontend
-  refuses the method to every other module. There is no `.chars()` tag here — that call is already
+  refuses the method to every other module. There is no `.chars()` tag here: that call is already
   the iterator's struct literal by the time the HIR arrives.
 - `seq.slice(a..b)` / `.slice(a..=b)` on an array, `Vec`, or slice → `BuiltinMethod::SequenceSlice`
   → `codegen_sequence_slice` (`expressions/slices.rs`), the slice ABI below. It resolves **ahead
@@ -250,14 +250,14 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
 - `struct.clone()` → handled in the struct method-call arm rather than `resolve_builtin_method`
   (which is keyed by `Type`): when the receiver is a struct, the field is `clone`, and no
   `StructName__clone` exists, it passes `BuiltinMethod::StructClone`. Semantic analysis already
-  verified the `Clone` derive. Lowers to the receiver's aggregate value — faithful while
+  verified the `Clone` derive. Lowers to the receiver's aggregate value: faithful while
   stack-allocated, must recurse into heap-owning fields later.
 - `tensor.clone()` → `BuiltinMethod::TensorClone` → `codegen_tensor_clone`
   (`expressions/tensors.rs`). A tensor value is a DLPack handle, so the clone allocates a second
   handle and a second buffer and `memcpy`s the elements across: the copy is independent and both
   `data` addresses stay stable. An owned
   receiver lowers to the tensor pointer; a `&Tensor` receiver lowers to the *address of* that
-  pointer. Both are `ptr` in LLVM, so the distinction comes from `recv_ty`, not from the value —
+  pointer. Both are `ptr` in LLVM, so the distinction comes from `recv_ty`, not from the value:
   the one auto-deref site the value-driven rule below cannot decide.
 - `tensor.to(device)` → `BuiltinMethod::TensorTo` → `codegen_tensor_to` (same file). The device
   argument is the prelude `Device` enum; its tag (`extractvalue` field 0) is compared against
@@ -265,10 +265,10 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   to any other device aborts with a diagnostic rather than silently leaving the buffer on the
   host. A host transfer is the move itself and emits no copy: the receiver's value is the result.
   `resolve_builtin_method` matches `.to` on the receiver type rather than its referent, so a
-  `&Tensor` resolves to nothing — a borrow cannot be consumed. Because the result *is* the
+  `&Tensor` resolves to nothing: a borrow cannot be consumed. Because the result *is* the
   receiver's buffer pointer, `codegen_tensor_to` calls `mark_moved_for_drop` on the receiver;
   without it the one buffer would be freed by both the source binding and the transfer's result.
-- Integer intrinsics — `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, `.shr(n)` — resolve
+- Integer intrinsics (`wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, `.shr(n)`) resolve
   on any integer receiver to its own type and lower in `codegen_int_intrinsic`. Both operands are
   coerced to the receiver int via `coerce_if_needed` (an argument literal may arrive widened to
   i32). Wrapping → plain `add`/`sub`/`mul`, no `nsw`/`nuw`, never trapping. `.shr` → `ashr`
@@ -276,13 +276,13 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   `saturating_mul` has no direct intrinsic and becomes `{s,u}mul.with.overflow` + `select`
   (unsigned → MAX; signed → MIN on differing operand signs, else MAX).
 - `.is_nan()` → `codegen_is_nan`: `fcmp uno x, x` on the receiver value, yielding the `i1` a
-  `bool` lowers to. The self-comparison IS the test — NaN is the only value unordered with
-  itself — and it is why the check cannot be spelled in source, where `x != x` uses the ordered
+  `bool` lowers to. The self-comparison IS the test (NaN is the only value unordered with
+  itself), and it is why the check cannot be spelled in source, where `x != x` uses the ordered
   predicate. Resolved for `F32`/`F64` spelled out rather than via this slice's `Type::is_float`,
   which also admits `f16`/`bf16`.
 - `checked_{add,sub,mul}` → `codegen_checked_int_intrinsic`: `llvm.{s,u}{add,sub,mul}.with.overflow`
   via the shared `emit_with_overflow`, then `build_option_value` (`collections/mod.rs`) selects
-  `Some(result)` / `None` on the negated overflow bit. Branchless — both variants are materialized
+  `Some(result)` / `None` on the negated overflow bit. Branchless: both variants are materialized
   and `select`ed. The `Option<T>` instance, its variant tags, and its payload layout all come from
   the call's result type; nothing about `Option` is assumed here.
 
@@ -295,7 +295,7 @@ fallback for a non-numeric resolved type.
 Module-level consts emit as `@NAME = internal constant TYPE VALUE` globals before any function
 definitions, and their LLVM value is also stored in `CodegenContext.const_values` so body
 references resolve without loading from the global. Body-level consts fold in Rust and store the
-`BasicValueEnum` in `const_values` for the function scope — no `alloca`, purely compile-time.
+`BasicValueEnum` in `const_values` for the function scope (no `alloca`, purely compile-time).
 
 Folding uses a pure-Rust `FoldedConst { Int(i64), Float(f64), Bool(bool), Str(String) }` rather
 than inkwell's const-arithmetic API (inconsistent across versions): all arithmetic happens in Rust
@@ -305,7 +305,7 @@ always wraps, regardless of `overflow_checks`.
 
 ## Enum ABI
 `compile` builds an `enum_words` table (each enum's widest-variant field count) and hands it to
-the `TypeMapper`, which maps an enum to the tagged union `{ i32 tag, [W x i64] payload }` — usable
+the `TypeMapper`, which maps an enum to the tagged union `{ i32 tag, [W x i64] payload }`, usable
 as a parameter, return, or field via `map_type`. `codegen_enum_construct`
 (`expressions/enums.rs`) packs the discriminant tag plus each scalar payload field into its own
 64-bit slot (floats bitcast to int width, then zero-extended), a lossless round-trip for `match`.
@@ -315,31 +315,31 @@ the split-out half that builds an enum from already-evaluated values, and the co
 than assuming the prelude's declaration order.
 
 ## Aggregate ABIs
-- **Tuples** — `map_type` → anonymous LLVM struct `{ T1, T2, ... }`. `codegen_tuple_literal`
+- **Tuples**: `map_type` → anonymous LLVM struct `{ T1, T2, ... }`. `codegen_tuple_literal`
   builds it with `insert_value` (with per-element `coerce_if_needed` for default-typed literals);
   `codegen_tuple_index` reads element N with `extract_value`, auto-loading through a `&tuple`
   borrow pointer first. Tuples flow through parameters and returns.
-- **Arrays** — `map_type` → LLVM `[N x T]`. `expressions/arrays.rs` lowers array literals, index
+- **Arrays**: `map_type` → LLVM `[N x T]`. `expressions/arrays.rs` lowers array literals, index
   read/write (with a debug-only bounds guard through `codegen_guard_or_panic`), and
   `for x in arr` / `for x in &arr`. `BuiltinMethod::ArrayLen` is a compile-time `u64`.
   `coerce_if_needed` has an element-wise array arm for typed `[i64; N] = [..]` literals.
-- **Array rest** — `codegen_array_rest` builds a fresh `[T; N - start]` aggregate by loading
+- **Array rest**: `codegen_array_rest` builds a fresh `[T; N - start]` aggregate by loading
   elements `start..N` of the source (via `array_place_ptr`) and `insert_value`-ing them. A
   zero-length remainder (the rest-less arity-assert form) yields an undef `[T; 0]`, discarded in
   statement position.
-- **Slices** — `map_type` lowers `&[T]` *and* `&mut [T]` to `slice_ref_type()`, the
+- **Slices**: `map_type` lowers `&[T]` *and* `&mut [T]` to `slice_ref_type()`, the
   `{ ptr buffer, i64 len }` fat pointer held by value; a bare `[T]` is rejected as unsized. The
   mutable form is by value too (unlike `&mut string`): a write through a slice goes to the buffer
   the pointer names, not to the pair. `expressions/slices.rs` owns every operation.
-  `slice_source` reduces the three receivers to one `(buffer, element type, length)` triple —
+  `slice_source` reduces the three receivers to one `(buffer, element type, length)` triple:
   an array via `array_place_ptr` with its static `N`, a `Vec` via `collection_place_ptr` plus its
-  `FIELD_LEN`/`FIELD_BUFFER`, a slice by `extractvalue` — and `codegen_slice_coerce` (the
+  `FIELD_LEN`/`FIELD_BUFFER`, a slice by `extractvalue`. `codegen_slice_coerce` (the
   `SliceCoerce` node) pairs that triple back into a fat pointer. `codegen_sequence_slice` computes
   `(base + start, end - start)` behind a bounds guard that runs in **every** build, not only debug
   ones: an out-of-range range hands back a *view* that outlives the check, so there is no later
   point at which a release build could still notice. Index reads/writes and `for x in xs` keep the
   ordinary debug-only element guard, against the runtime length instead of a constant.
-- **Newtypes** — transparent at runtime: `Type::from_hir` erases `HirType::Newtype { inner, .. }`
+- **Newtypes**. Transparent at runtime: `Type::from_hir` erases `HirType::Newtype { inner, .. }`
   to `from_hir(inner)`, so codegen never sees a newtype. `NewtypeConstruct` and `NewtypeAccess`
   both codegen their inner expression unchanged. No backend `Type` variant, type mapping, or item
   handling.
@@ -349,15 +349,15 @@ than assuming the prelude's declaration order.
 (the fat pointer itself, above), `Reference(DynObject)` (the two-word `dyn_ref_type()` struct),
 and `Reference(Slice)` (the two-word `slice_ref_type()` struct, mutable or not). A bare
 `DynObject` or `Slice` is rejected as unsized. `Type::Tensor { .. }` maps to an opaque `ptr`: the
-value is a **DLPack handle** — a pointer to the `DLManagedTensorVersioned` that
-`dlpack_managed_tensor_type` lays out — and its `data` field addresses the element buffer, whose
+value is a **DLPack handle** (a pointer to the `DLManagedTensorVersioned` that
+`dlpack_managed_tensor_type` lays out), and its `data` field addresses the element buffer, whose
 own layout `tensor_buffer_type` gives as a flat, row-major `[d0*d1*... x T]` array. The rank-0
-tensor's buffer is `[1 x T]` — the empty product — not a zero-length array. Host memory only:
+tensor's buffer is `[1 x T]` (the empty product), not a zero-length array. Host memory only:
 `.to(device)` guards on the requested device rather than moving anything, and the handle reports
 `kDLCPU` until a device backend flips that field.
 
 The buffer is out of line because the language has a tensor *own* it and promises that buffer a
-stable address across an in-place update — neither is expressible for an SSA value, which has no
+stable address across an in-place update: neither is expressible for an SSA value, which has no
 address.
 It is also what makes a large tensor compilable: an aggregate copy is a whole-buffer `load`/`store`
 pair that only `-O1`'s SROA turns into a `memcpy`, and SelectionDAG crashed legalizing one above
@@ -368,7 +368,7 @@ per-tensor-type `shape` and `strides` constants, and defines the one shared `del
 DLPack Representation section below.
 
 `expressions/tensors.rs` owns the construction nodes. `alloc_tensor` is the single place the
-allocator is chosen — the hook 2D's arena replaces — and every construction node routes through it,
+allocator is chosen (the hook 2D's arena replaces), and every construction node routes through it,
 taking back both the handle it returns and the `data` pointer it writes elements through.
 `zeros()` / `ones()` / `identity()` and a literal whose elements are all constants emit the buffer
 once as a private `.rodata` global and `memcpy` it in, so a fill of any size costs one call rather
@@ -377,7 +377,7 @@ than an instruction per element; a literal mentioning a runtime value is written
 
 ## DLPack Representation
 A tensor value *is* the exchange structure DLPack 1.1 defines, so the pointer a Neuro
-program passes around is the pointer a foreign consumer takes — there is no wrap step at an FFI
+program passes around is the pointer a foreign consumer takes: there is no wrap step at an FFI
 boundary. `type_mapping.rs` holds the layout (`dlpack_managed_tensor_type`), the dtype table
 (`dlpack_dtype`, covering every integer, float, `bf16`, and `bool` element), and the buffer sizing
 (`tensor_buffer_bytes`); `codegen/dlpack.rs` holds the emission.
@@ -387,7 +387,7 @@ Fields are filled at construction: `version` `{1, 1}`, `manager_ctx` null, `dele
 rank, `dtype` from the table with `lanes` 1, `byte_offset` 0, and `shape` / `strides` pointing at
 private constants named `__neuro_dlpack_shape_<mangle>` / `__neuro_dlpack_strides_<mangle>` and
 shared by every value of that tensor type. Strides count **elements, not bytes**. Rank 0 has no
-axis, so both pointers are null — DLPack's own spelling for a scalar. The globals are pointer
+axis, so both pointers are null: DLPack's own spelling for a scalar. The globals are pointer
 fields, so dynamic shapes can later supply a per-value vector without changing the layout.
 
 Two allocations, not one fused block: the structure comes from `malloc`, the elements from
@@ -400,15 +400,15 @@ rounded up to the alignment, but only the unpadded element run is ever copied
 
 Release goes through the handle's own `deleter` field (`build_dlpack_release`), never through a
 direct `free`, so the release a scope exit performs is provably the one a foreign owner performs.
-`__neuro_dlpack_deleter` frees `data` and then the structure, in that order — reading `data` out of
+`__neuro_dlpack_deleter` frees `data` and then the structure, in that order: reading `data` out of
 a block it had already freed would be a use-after-free.
 
-`codegen_reference` returns the borrowed place's storage pointer — mutability is compile-time
+`codegen_reference` returns the borrowed place's storage pointer: mutability is compile-time
 only. `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer.
 **Auto-deref is value-driven**: a borrowed receiver lowers to a `PointerValue`, so
 `string_receiver_struct`, `StructClone`, `codegen_method_call`, and `get_struct_ptr_and_type` load
 through the pointer when they see one; an owned receiver is already a value. There is no context
-state for ref-ness — it is read from `variable_types` (a `&Struct` alloca holds a `ptr`) and from
+state for ref-ness: it is read from `variable_types` (a `&Struct` alloca holds a `ptr`) and from
 the lowered value kind.
 
 Unit-returning calls are valid in statement position: `codegen_call` / `codegen_method_call`
@@ -416,7 +416,7 @@ return an `Option` (`None` = void), and the shared `codegen_call_dispatch` is wr
 void-error in value position.
 
 - **`char`** lowers to LLVM `i32`. Casts use `is_int_like` / `is_unsigned_like` so char↔integer
-  (and char→char) reuse the int-to-int path — char zero-extends, code points being non-negative —
+  (and char→char) reuse the int-to-int path (char zero-extends, code points being non-negative),
   and comparisons hit the signed-int branch, correct since valid code points are < 2²¹.
 - **Float-to-integer** casts lower to `llvm.fptosi.sat` / `llvm.fptoui.sat`, not the plain
   `fptosi` / `fptoui`. The plain instructions are defined only when the truncated value fits the
@@ -438,13 +438,13 @@ is mutually exclusive and the final `else` is reached only when all conditions a
 
 A value-producing `if`/`else` in expression position goes to `codegen_if_expr`: a result `alloca`
 written per arm, loaded at the merge block. A trailing `if` acting as a block's or a body's value
-arrives as a `HirStmt::Expr` holding an if-expression — **hir-lowering owns that promotion**, so
+arrives as a `HirStmt::Expr` holding an if-expression: **hir-lowering owns that promotion**, so
 the backend needs no rule of its own and `codegen_body` handles only `HirStmt::Expr` tails.
 
 `codegen_block_expr` reads a trailing `HirStmt::Expr` as the block's value only when its type is
 not `HirType::Void`: a block ending in a call to a unit function has no value, and asking for one
 failed with "function call returned void when value expected". A `void` tail is emitted through
-`codegen_stmt` like any other non-expression tail — which is also the shape the named-argument
+`codegen_stmt` like any other non-expression tail, which is also the shape the named-argument
 hoisting rewrite produces for a unit call.
 
 An `unsafe` block lowers through `codegen_block_expr` exactly like a bare block, emitting
@@ -454,8 +454,8 @@ identical IR.
 `codegen_match` (`expressions/matches.rs`) evaluates the scrutinee **once** into an alloca, then
 builds a per-arm test-block chain: each arm ORs its `HirMatchTest`s (tag compare / scalar `==` /
 range `lo<=x<=hi`, signed vs unsigned by scrutinee type) and branches to the arm body or the next
-test. An arm body materializes its bindings — the whole scrutinee, or an enum payload slot decoded
-by `decode_enum_payload_field`, the inverse of the payload pack — evaluates the guard (branching
+test. An arm body materializes its bindings (the whole scrutinee, or an enum payload slot decoded
+by `decode_enum_payload_field`, the inverse of the payload pack), evaluates the guard (branching
 to the next arm on failure), then evaluates the body into a shared result slot. Bindings are saved
 and restored in the name maps per arm, and the fall-through block is `unreachable`, because
 exhaustiveness is a frontend guarantee.
@@ -466,7 +466,7 @@ exhaustiveness is a frontend guarantee.
 ## val-else Lowering
 `codegen/val_else.rs`. The scrutinee is stored once into an alloca, `codegen_single_test` picks
 the branch, and the else block runs in its own drop scope with its binding saved and restored. The
-success block's bindings are materialized by `bind_arm` and deliberately **not** restored — they
+success block's bindings are materialized by `bind_arm` and deliberately **not** restored: they
 belong to the enclosing block, which is the whole difference from a match arm. The else block is
 terminated with `unreachable` if it still falls through; the frontend has already rejected that
 case, so this only keeps the emitted function verifier-clean.
@@ -474,7 +474,7 @@ case, so this only keeps the emitted function verifier-clean.
 ## Logical Operator Lowering
 `&&` / `||` short-circuit. `codegen_binary` intercepts them before eager operand evaluation and
 delegates to `codegen_short_circuit`: evaluate the LHS in the current block, conditionally branch
-to a `logic.rhs` block (taken only on the deciding edge — true for `&&`, false for `||`), and merge
+to a `logic.rhs` block (taken only on the deciding edge: true for `&&`, false for `||`), and merge
 the RHS value with the short-circuit constant (`false`/`true`) via a phi in `logic.merge`. Both phi
 predecessors are captured *after* their side is emitted (`get_insert_block`), so an RHS that
 appends blocks (a nested if-expression) works, and an RHS that terminates its block is dropped from
@@ -482,14 +482,23 @@ the phi. Operands are guaranteed `i1` by semantics; the eager `And | Or` arm is 
 guard.
 
 `codegen_binary` also checks that both coerced operands are integer or float values **before** the
-operator match — every arm calls `into_int_value` / `into_float_value`, which *panic* on a struct,
-array, or pointer rather than returning an error — and answers one that is not with
+operator match (every arm calls `into_int_value` / `into_float_value`, which *panic* on a struct,
+array, or pointer rather than returning an error), and answers one that is not with
 `CodegenError::InvalidOperandType`. Semantic analysis and HIR lowering both reject such an operand,
 so this is the backstop rather than the diagnostic.
 
 `BinaryOp::NullCoalesce` reaching `codegen_binary` or `fold_const` is an `InternalError`: `??` is
 desugared to a `match` by hir-lowering, so a binary node still carrying it means the HIR did not
 come from that pass. `??` in a const expression is rejected outright.
+
+`fold_const` computes in `i128` and range-checks every arithmetic result against the node's own
+resolved type, answering `CodegenError::ConstOverflow` when it does not fit. `+`, `-`, `*`, `/`,
+`%` and unary `-` all go through that check, and `MIN / -1` and `MIN % -1` are recognised against
+the operand type's minimum because neither is caught by the range alone. A `const` never reaches
+the run-time tier that would choose between panicking and wrapping, so an initializer that
+overflows has no defined value under both rules at once and is rejected instead of folded.
+Operators with no run-time overflow rule keep their run-time meaning: `&`, `|`, `^`, `~` and `<<`
+truncate to the node's type, and an `as` cast still narrows explicitly.
 
 ## Loop Lowering
 `codegen_loop` mirrors `codegen_while` without a condition block: it branches unconditionally into
@@ -506,15 +515,15 @@ labeled one scans `loop_targets` from innermost out for the matching label, an u
 the top. Label validity is guaranteed by semantic analysis, so an unresolved label is an
 `InternalError`.
 
-The three counted loops — `codegen_for_range` (`statements.rs`), `codegen_for_each`
-(`expressions/arrays.rs`), and `codegen_vec_for_each` (`collections/vectors.rs`) — each take an
+The three counted loops: `codegen_for_range` (`statements.rs`), `codegen_for_each`
+(`expressions/arrays.rs`), and `codegen_vec_for_each` (`collections/vectors.rs`). Each takes an
 `index: Option<&str>`, the `u64` position binding of `for (i, x) in xs.enumerate()`. `loop_index.rs`
 owns its scope bookkeeping: `bind_loop_index` opens a slot and shadows the name across
 `variables` / `variable_types` / `type_env`, `store_loop_index` refreshes it at the top of the
 body, and `unbind_loop_index` restores the outer meaning at the exit block. The array and `Vec`
 loops publish their own induction variable; the range loop steps a separate zero-based counter in
 its step block, because its induction variable carries the range's bounds and element type rather
-than a position. The slot is never the induction variable itself even where the values agree —
+than a position. The slot is never the induction variable itself even where the values agree:
 `mem2reg` erases the copy, and aliasing a slot the loop steps would make a future edit silently
 wrong.
 
@@ -532,8 +541,8 @@ Integer `+` / `-` / `*` and unary `-` honor the overflow rule, keyed off
 Signedness picks the `s`/`u` variant via `TypeMapper::is_unsigned_int`. Bitwise ops
 (`build_and`/`or`/`xor`/`left_shift`, `build_not` for `BitNot`) and floats are unaffected.
 
-Unary `-` on an integer is `0 - x` and overflows exactly where that subtraction does — at a
-signed type's `MIN`, and at every nonzero value of an unsigned type — so `codegen_unary` builds
+Unary `-` on an integer is `0 - x` and overflows exactly where that subtraction does (at a
+signed type's `MIN`, and at every nonzero value of an unsigned type), so `codegen_unary` builds
 a zero and hands the pair to the same `codegen_int_arith` (`pub(super)` for that caller),
 taking the expression's source offset like `codegen_binary`. Emitted separately as
 `build_int_neg` it wrapped silently on the debug tier while `0 - x` panicked, so the two
@@ -551,13 +560,13 @@ Integer `/` and `%` go through `codegen_int_div_rem`, which guards the two opera
 `sdiv` / `udiv` / `srem` / `urem` leave undefined. Left unguarded these are not quietly wrong:
 `-O0` dies of `SIGFPE` with nothing printed, and `-O1` and above fold the surrounding code around
 a poison value.
-- **Zero divisor** — guarded in *every* build, panicking `division by zero` / `remainder by zero`.
+- **Zero divisor**: guarded in *every* build, panicking `division by zero` / `remainder by zero`.
   It is not an overflow and has no two's-complement answer to wrap to, so there is no defined
   release behaviour the check could be dropped in favour of. The guard folds away wherever the
   divisor is a constant or its range is known.
-- **`MIN / -1`** (signed only) — an integer overflow, so it follows the rule above: with
+- **`MIN / -1`** (signed only), an integer overflow, so it follows the rule above: with
   `overflow_checks` it panics `integer overflow`; without, the divisor is replaced by `1` through a
-  `select`, since `MIN / 1` is `MIN` and `MIN % 1` is `0` — the two's-complement wraps — and `-1`
+  `select`, since `MIN / 1` is `MIN` and `MIN % 1` is `0` (the two's-complement wraps), and `-1`
   never reaches the instruction. `MIN` is `1 << (width - 1)`, built from the operand's own width
   because `const_int` truncates rather than sign-extends.
 
@@ -565,7 +574,7 @@ Unsigned operands skip the second guard: no unsigned quotient is unrepresentable
 
 ## Panic Runtime ABI
 Panic-family builtins `panic(msg: string)`, `assert(cond: bool)`, `unreachable()` lower in
-`panic.rs`. Contract: **abort, no unwinding** — no landing pads, so the happy path is zero-cost and
+`panic.rs`. Contract: **abort, no unwinding**, no landing pads, so the happy path is zero-cost and
 `Drop` fires only on normal scope exit. The `Call`→`Identifier` arm intercepts these names via
 `CodegenContext::is_panic_builtin` before `codegen_call`, but only when no user function of the
 same name is registered (user functions shadow, matching the semantic resolver).
@@ -578,10 +587,10 @@ Each builtin writes its diagnostic to stderr (fd 2) via external POSIX `write`
 - `assert` → true falls through to `assert.cont`; false enters `assert.fail` (write
   `"assertion failed at file:line:col\n"`, abort).
 
-That sequence is **not** emitted inline — see Error-Path Outlining. The `file:line:col` suffix
+That sequence is **not** emitted inline. See Error-Path Outlining. The `file:line:col` suffix
 comes from the `Call` span start via the `SourceFile` (empty when no source is supplied).
 `write` + `abort` are POSIX/libc (Linux, macOS; MSVC CRT on Windows). `abort` runs no exit hook, so
-`emit_abort_unreachable` takes `&mut self` and records its call for the standard-output drain — see
+`emit_abort_unreachable` takes `&mut self` and records its call for the standard-output drain. See
 Exit-path draining.
 
 Because `panic` / `unreachable` terminate the block with `unreachable`, following statements are
@@ -593,7 +602,7 @@ terminator.
 ## Error-Path Outlining
 `outlining.rs` emits every panic-family failure path into a module-private cold function and leaves
 one call at the failure site, so the diagnostic machinery never sits inline in the function that
-can fail. It covers `panic` / `assert` / `unreachable` and every `codegen_guard_or_panic` caller —
+can fail. It covers `panic` / `assert` / `unreachable` and every `codegen_guard_or_panic` caller:
 array and `Vec` bounds, string-slice bounds, UTF-8 codepoint boundary.
 
 - Thunks are named `neuro.cold.panic.N`, `Linkage::Private`, with attributes
@@ -608,7 +617,7 @@ array and `Vec` bounds, string-slice bounds, UTF-8 codepoint boundary.
   (`panic.rs`) are `pub(crate)` for it, and `build_thunk_body` saves and restores the builder
   position since thunks are created lazily mid-function.
 - `mark_cold_branch(branch)` attaches `!prof` `branch_weights` (`2000 : 1`) to every guard
-  branch. Every guard in the language has one shape — continuation on true, failure on false — so
+  branch. Every guard in the language has one shape (continuation on true, failure on false), so
   the cold edge is always the false one and the helper takes no side argument.
 
 ## Standard-Output ABI
@@ -628,21 +637,21 @@ Output is **buffered**. `PRINT_BUFFER_BYTES` (4096) bytes of `.bss` (`neuro.prin
 `Linkage::Private`. Four module-private helpers, each emitted on first use, each saving and
 restoring the builder position because they are built lazily mid-function:
 
-- `neuro.print.emit(ptr, i64)` — the only thing a builtin calls with bytes. Copies into the buffer
+- `neuro.print.emit(ptr, i64)`: the only thing a builtin calls with bytes. Copies into the buffer
   when they fit; drains first when they do not; and when they are larger than the buffer could ever
   hold, hands them to `write_all` directly after that drain, so one enormous string stays one
   syscall instead of being chopped into pages. `emit` has consumed the bytes by the time it
   returns on every path, which is what lets `codegen_io_builtin` free an owned argument right
   after the call.
-- `neuro.print.flush()` — drains and zeroes the counter. A no-op when nothing is buffered, so it
+- `neuro.print.flush()`: drains and zeroes the counter. A no-op when nothing is buffered, so it
   is cheap enough to call unconditionally from an exit path.
-- `neuro.print.line_end()` — emitted after `println`'s newline. Resolves `isatty(1)` once into
+- `neuro.print.line_end()`: emitted after `println`'s newline. Resolves `isatty(1)` once into
   `neuro.print.mode` and drains only when fd 1 is a terminal, so interactive output stays
   line-by-line while a pipe or file gets the full buffer. The compiler knows where the line
   boundary is, so the runtime never scans bytes for `\n`. `print` writes no terminator and so
-  calls this not at all — the same rule C's line-buffered stdio follows. `isatty` is declared as
+  calls this not at all: the same rule C's line-buffered stdio follows. `isatty` is declared as
   `_isatty` on Windows, chosen with `cfg!(windows)` since `neurc` compiles for the host.
-- `neuro.print.write_all(ptr, i64)` — the drain primitive, holding the short-write retry loop:
+- `neuro.print.write_all(ptr, i64)`: the drain primitive, holding the short-write retry loop:
   `write` may consume less than it was offered (a pipe with a full buffer does exactly that), and
   a bare call per site would silently truncate the language's primary result channel. The loop
   stops on a non-positive return so a closed or failing descriptor cannot spin.
@@ -660,7 +669,7 @@ and `llvm.global_dtors` are not available to lean on either.
 body is generated and before soft-float linking and `verify`. It returns immediately unless
 `neuro.print.buffer` exists, so a program that never prints reserves no buffer, declares no
 `isatty`, and keeps its exit paths untouched. Otherwise it inserts `call void @neuro.print.flush()`
-before every recorded process-exit instruction and before every `ret` in `@main` — `main` is
+before every recorded process-exit instruction and before every `ret` in `@main`: `main` is
 emitted under its own name with no wrapper, so that is the C entry point itself.
 
 The exit instructions are recorded as they are emitted, into `CodegenContext::process_exit_points`,
@@ -696,15 +705,15 @@ unsigned is the magnitude wanted).
 Float holes still call the C library, but once. `build_snprintf_alloc` renders into a
 `SCRATCH_TEXT_BYTES` stack buffer and uses `snprintf`'s return value as the length, replacing the
 `(NULL, 0)` probe call that used to precede every render. The buffer is sized for the widest
-conversion the format mini-language admits — `%.Nf` on a full-magnitude `f64`, with `N` capped by
-`MAX_FORMAT_PRECISION` — and a render that does not fit falls back to allocating what `snprintf`
+conversion the format mini-language admits (`%.Nf` on a full-magnitude `f64`, with `N` capped by
+`MAX_FORMAT_PRECISION`), and a render that does not fit falls back to allocating what `snprintf`
 asked for and rendering again, so correctness does not rest on that size being right. It takes the
 helper's own `FunctionValue`, because it runs inside a helper body the builder was moved into and
 `current_function` still names the caller.
 
 A `@derive(Debug)` struct hole renders through `render_struct_debug`, which frames the fields from
 `struct_defs` as `Name { field: value, ... }` and renders each one under the same `FormatKind::
-Debug` — which is what quotes a nested `string` or `char` and recurses into a nested struct. The
+Debug`, which is what quotes a nested `string` or `char` and recurses into a nested struct. The
 name comes from `struct_written_names` (`HirStruct::written_name`, set by `set_struct_written_names`
 beside `set_struct_defs`), so a monomorphized instance prints `Wrapper`, not `Wrapper_g_i32`. A
 field-less struct renders as its bare name. The pieces reuse the same `PieceOwner` bookkeeping the
@@ -735,7 +744,7 @@ receiver and forwards; a `&mut self` method is already pointer-passed and forwar
 call. `CodegenContext` carries `trait_methods` (vtable slot order, via `set_trait_methods`) and
 `vtables`.
 
-Static dispatch needs nothing here — `impl Trait` is monomorphized away before the HIR arrives.
+Static dispatch needs nothing here: `impl Trait` is monomorphized away before the HIR arrives.
 
 ## Drop ABI (deterministic destruction)
 `drops.rs` inserts a `{struct}__drop(&mut self)` call at each lexical scope exit for an owned
@@ -762,27 +771,27 @@ store), so a moved value is dropped exactly once.
 fields are not auto-dropped (no recursive glue).
 
 ## Collections ABI
-`Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, and `String` share one by-value header —
-`{ ptr buffer, i64 len, i64 cap, i64 used }` (`TypeMapper::collection_header_type`) — held in the
+`Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, and `String` share one by-value header:
+`{ ptr buffer, i64 len, i64 cap, i64 used }` (`TypeMapper::collection_header_type`), held in the
 owner's alloca, with all elements in a single heap buffer. `len` counts live elements/entries,
 `cap` the allocated slots, and `used` the *occupied* slots (live + tombstoned) that the hash map's
 load factor is measured against; the other kinds leave `used` zero.
 
 Buffer layouts, per kind:
-- **`Vec<T>`** — a plain `[T]` run. Growth doubles `cap` (minimum 8) through one shared byte-sized
+- **`Vec<T>`**: a plain `[T]` run. Growth doubles `cap` (minimum 8) through one shared byte-sized
   `__neuro_vec_reserve(header, elem_size)` helper, so every `Vec<T>` in a module reuses it.
-- **`HashMap<K, V>`** — `{ i8 state, K key, V value }` slots, power-of-two `cap`, so the bucket is
+- **`HashMap<K, V>`**: `{ i8 state, K key, V value }` slots, power-of-two `cap`, so the bucket is
   `hash & (cap - 1)`. Linear probing; `state` is `0` EMPTY / `1` FULL / `2` TOMBSTONE. A lookup
   stops at the first EMPTY and skips tombstones; an insert takes the first non-FULL slot, so a
   tombstoned run is reused. Rehashing at a 3/4 load factor reclaims tombstones, which is what keeps
   a churned table's probe runs bounded.
-- **`BTreeMap<K, V>`** — `{ K key, V value }` slots kept sorted by key: binary search to look up,
+- **`BTreeMap<K, V>`**: `{ K key, V value }` slots kept sorted by key: binary search to look up,
   `memmove` the tail to insert or erase. That gives the ordered iteration the type promises; a
   multi-way tree would change only the insert/erase constant, not this ABI.
-- **`String`** — a byte run; `len` and `cap` are byte counts and `used` stays zero. It carries no
+- **`String`**: a byte run; `len` and `cap` are byte counts and `used` stays zero. It carries no
   type arguments, so one instantiation serves every program. `push_str` reserves through
-  `__neuro_string_reserve(header, extra)` — capacity becomes `max(cap * 2, len + extra, 8)`, so one
-  large append is a single `realloc` rather than a chain of doublings — then `memcpy`s the
+  `__neuro_string_reserve(header, extra)`: capacity becomes `max(cap * 2, len + extra, 8)`, so one
+  large append is a single `realloc` rather than a chain of doublings, then `memcpy`s the
   argument's bytes at `buffer + len`. `to_string` `malloc`s (at least one byte, so an empty result
   is never null) and copies out a `{ ptr, i64 }` `string`; a borrowed view into the buffer would
   dangle after the next `push_str`, which the borrow checker does not yet track.
@@ -804,7 +813,7 @@ compile-time constant the optimizer can fold away. `pop` / `get` build their `Op
 `codegen_enum_value`.
 
 A collection binding is registered in the drop scope with `DropTarget::Collection`, so scope exit
-`free`s field 0 under the same runtime drop flag that user `Drop` types use — a moved-out
+`free`s field 0 under the same runtime drop flag that user `Drop` types use: a moved-out
 collection is not freed twice. An unnamed collection *temporary* (`for k in m.keys()`) is
 registered the same way under a synthetic `__`-containing name that no source binding can collide
 with; without that, the only route to map iteration would leak. This is also what frees a `String`
@@ -815,7 +824,7 @@ collection is not freed**, and neither is the heap `string` that `+`, interpolat
 A tensor binding is registered the same way, with `DropTarget::TensorBuffer`: the binding's storage
 holds the DLPack handle, so scope exit loads it and calls the handle's own `deleter` under the same
 flag, which releases the element buffer and the structure together. Unlike
-`HeapString` the ownership comes from the type alone — every tensor construction allocates, and
+`HeapString` the ownership comes from the type alone: every tensor construction allocates, and
 there is no borrowed value of tensor type to confuse it with. **A tensor held in a struct field is
 not freed**, exactly as a collection field is not; recursing into a struct's fields is one gap, not
 one per element type.
@@ -825,8 +834,8 @@ New libc declarations these need: `free`, `realloc`, `memmove`, `memset`, `align
 on first use in `context.rs`.
 
 ## Soft-Float ABI
-On generic x86-64, LLVM lowers `fpext` / `fptrunc` on `half` / `bfloat` — and f16/bf16
-comparisons, which widen to f32 first — to runtime calls: `__extendhfsf2`, `__truncsfhf2`,
+On generic x86-64, LLVM lowers `fpext` / `fptrunc` on `half` / `bfloat` (and f16/bf16
+comparisons, which widen to f32 first) to runtime calls: `__extendhfsf2`, `__truncsfhf2`,
 `__truncdfhf2`, `__truncsfbf2`, `__truncdfbf2`. Linux and macOS get these from libgcc/compiler-rt
 (linked by the `cc` driver), but the Windows linkers (clang → lld-link → MSVC) link no such
 runtime, so the symbols are undefined and linking fails. `src/softfloat/` provides our own

@@ -1,4 +1,4 @@
-// Showcase — trait declarations and both dispatch forms working together with
+// Showcase: trait declarations and both dispatch forms working together with
 // prior features.
 //
 // Cumulative integration example combining:
@@ -12,7 +12,7 @@
 //   · @derive(Copy) + if-expressions and implicit returns
 //
 // A trait bound can be satisfied two ways, and the keyword chooses. `impl Trait`
-// and a named `<T: Shape>` are both monomorphized — the compiler emits one
+// and a named `<T: Shape>` are both monomorphized: the compiler emits one
 // specialized copy per concrete type, so they cost nothing at runtime. `dyn Trait`
 // instead produces a single runtime type: the reference carries a pointer to the
 // value plus a pointer to that type's method table, and the call jumps through the
@@ -68,7 +68,7 @@ func describe(s: &impl Shape) -> i32 {
 }
 
 // Dynamic dispatch: ONE function body serves every implementor. The concrete type
-// is not known here — `area` is reached through the trait object's method table.
+// is not known here: `area` is reached through the trait object's method table.
 func dyn_area(s: &dyn Shape) -> i32 {
     s.area()
 }

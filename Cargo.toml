@@ -53,7 +53,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.17.0"
+version = "2.17.1"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Neuro Contributors"]
@@ -94,7 +94,7 @@ inkwell = { version = "0.10.0", default-features = false, features = ["llvm20-1"
 # Rust MLIR bindings, used alongside inkwell for the tensor / AD / GPU lowering
 # path. melior 0.25.1 is the newest release that targets MLIR 20 (via mlir-sys
 # 0.5.0); melior 0.26+ moved to MLIR 21/22. mlir-sys carries no llvm-sys
-# dependency — it discovers MLIR through `MLIR_SYS_200_PREFIX` and links its own
+# dependency: it discovers MLIR through `MLIR_SYS_200_PREFIX` and links its own
 # `MLIR` key, so it coexists with inkwell's `llvm-20` link without conflict.
 # MLIR_SYS_200_PREFIX and TABLEGEN_200_PREFIX must point at an LLVM 20 build that
 # includes MLIR (the same prefix as LLVM_SYS_201_PREFIX, so both bindings share

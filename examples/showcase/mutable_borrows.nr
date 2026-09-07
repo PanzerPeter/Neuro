@@ -3,7 +3,7 @@
 // A `&mut T` reference grants write access to a `mut` binding without taking
 // ownership. The value is read and written through the `*` dereference operator.
 // Mutating through the reference is visible at the original binding after the
-// call returns — the borrow points at the caller's storage, it does not copy.
+// call returns: the borrow points at the caller's storage, it does not copy.
 
 // Increment the integer the reference points at, in place.
 func increment(n: &mut i32) {

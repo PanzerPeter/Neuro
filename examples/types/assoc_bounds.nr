@@ -1,4 +1,4 @@
-// Constraining an associated type in a bound — `Trait<Assoc = T>`.
+// Constraining an associated type in a bound: `Trait<Assoc = T>`.
 //
 // A trait that declares `type Item` says a member exists; only an impl says what it
 // is. That is enough to call a method on a concrete value, but not through a type
@@ -44,7 +44,7 @@ impl Source for Stride {
 }
 
 // A different implementor of the same trait, binding `Item` to a different type. It
-// satisfies a bare `T: Source` bound, but NOT `Source<Item = i32>` — passing it to any
+// satisfies a bare `T: Source` bound, but NOT `Source<Item = i32>`: passing it to any
 // of the functions below is a compile error naming both types.
 impl Source for Gauge {
     type Item = f64

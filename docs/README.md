@@ -88,7 +88,7 @@ Key design goals:
   rank, shape, strides, dtype, and device over a 64-byte-aligned out-of-line buffer with a
   stable address, released when its last owner leaves scope, so a tensor of any size
   compiles at any optimization level and a foreign consumer reads the same pointer.
-  Reading one back — indexing, arithmetic, reductions — is later work
+  Reading one back (indexing, arithmetic, reductions) is later work
 
 ### Variables
 
@@ -139,12 +139,12 @@ Key design goals:
   `{ fn_ptr, env_ptr }` value with no heap allocation. Parameter-type inference and passing
   a closure to a *generic* higher-order function come later
 - **Standard output** (2A): `print(text: string)` and `println(text: string)` write to stdout and
-  return `void`. Exactly one argument, no variadic form and no call-site format string —
+  return `void`. Exactly one argument, no variadic form and no call-site format string:
   interpolation renders every hole into one ordinary `string` first, so `println("{x:.2}")` is a
   plain one-argument call. An owned `string` or an immutable `&string` slice both work, and the
   text is read rather than moved. Compiler builtins like the panic family, so a local declaration
   of the name shadows one and `@no_prelude` does not remove them. Buffered, and drained on every
-  path out of the program — including a panic, ahead of its diagnostic — with line buffering when
+  path out of the program (including a panic, ahead of its diagnostic) with line buffering when
   standard output is a terminal, see
   [functions.md](language-reference/functions.md#standard-output-builtins)
 
@@ -164,8 +164,8 @@ Key design goals:
 - Range-for loops: exclusive (`for i in 0..n`) and inclusive (`for i in 0..=n`)
 - `break` and `continue`
 - The `IntoIterator` / `Iterator` protocol (2A): `for x in e` calls `e.into_iter()` once and then
-  `.next()` until it answers `None`, so any type implementing either prelude trait — an adapter
-  wrapping another iterator included — stands in a `for` head. The built-in heads (range, array,
+  `.next()` until it answers `None`, so any type implementing either prelude trait (an adapter
+  wrapping another iterator included) stands in a `for` head. The built-in heads (range, array,
   `Vec<T>`, `&[T]`) keep their counted-loop lowering, see
   [control-flow.md](language-reference/control-flow.md#the-iteration-protocol)
 - `.map(f)` / `.filter(p)` adapter methods on a `for` head (2A): they apply to every head shape,
@@ -174,7 +174,7 @@ Key design goals:
   [control-flow.md](language-reference/control-flow.md#adapter-methods--mapf-and-filterp)
 - Codepoint iteration over text (2A): `.chars()` yields an iterator over Unicode scalar values
   (O(1) per step) that composes with `.enumerate()` and the adapters, and
-  `for (offset, c) in s.char_indices()` binds each scalar's byte offset — the offset
+  `for (offset, c) in s.char_indices()` binds each scalar's byte offset: the offset
   `.slice(range)` takes, see
   [control-flow.md](language-reference/control-flow.md#walking-text--chars-and-char_indices)
 - Attribute system: `@allow(prefer_loop_over_while_true)` suppresses the `while true` lint
@@ -211,15 +211,15 @@ Key design goals:
 
 ### Derived traits (2A)
 
-- `@derive(Copy, Clone, Debug, PartialEq)` — the derivable-and-implemented set. Any other name in
+- `@derive(Copy, Clone, Debug, PartialEq)`: the derivable-and-implemented set. Any other name in
   the list is a compile error, never a silent no-op: `Hashable` is specified but not generated yet,
   and anything else is unknown
-- `@derive(Debug)` gives a struct its `{p:?}` rendering — `Point { x: 1, y: 2 }` — recursing into a
+- `@derive(Debug)` gives a struct its `{p:?}` rendering (`Point { x: 1, y: 2 }`), recursing into a
   nested struct and quoting a `string` or `char` field. A struct has no display form, so `"{p}"`
   is an error even with the derive
 - `@derive(PartialEq)` gives a struct field-wise `==` / `!=`, recursing the same way. It is
   generated inline rather than through a method, so deriving it *and* writing
-  `impl PartialEq for` the same struct is rejected — and a `HashMap` / `BTreeMap` struct key,
+  `impl PartialEq for` the same struct is rejected, and a `HashMap` / `BTreeMap` struct key,
   which calls the trait method, still needs the hand-written `impl`
 - Both derives require every field to be renderable / comparable by the same rules; a field that
   is not names itself in the diagnostic, see [structs.md](language-reference/structs.md#derived-traits-derive)
@@ -371,12 +371,12 @@ Key design goals:
 - Signedness-aware integer codegen
 - `print` / `println` lower to a module-private buffered writer on fd 1: bytes are copied into a
   page-sized `.bss` buffer and drained through one helper carrying the short-write retry loop, so
-  a large buffer is never truncated on a pipe. The drain is inserted at every exit — `main`'s
-  returns and the panic runtime's `abort` — and after every `println` when
+  a large buffer is never truncated on a pipe. The drain is inserted at every exit (`main`'s
+  returns and the panic runtime's `abort`) and after every `println` when
   fd 1 is a terminal; a string too large for the buffer bypasses it in a single write
 - Integer `/` and `%` guard the two operand pairs the LLVM instruction leaves undefined: a zero
   divisor panics in **every** build, since it has no wrapping answer to fall back on, and
-  `MIN / -1` follows the integer-overflow rule — a panic in debug builds, the two's-complement
+  `MIN / -1` follows the integer-overflow rule: a panic in debug builds, the two's-complement
   wrap in release, produced by dividing by `1` rather than by handing `-1` to the instruction
 - Debug-build `+` / `-` / `*` overflow panics with a located diagnostic through the same machinery
   every other guard uses, rather than executing a bare `llvm.trap` the programmer sees only as

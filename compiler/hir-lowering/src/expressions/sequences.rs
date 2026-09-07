@@ -10,7 +10,7 @@ use crate::{Lowerer, LoweringError};
 
 impl Lowerer {
     /// Lower a `start..end` / `start..=end` range. Ranges are not first-class values
-    /// Only valid as a `string.slice` argument — so the node carries
+    /// Only valid as a `string.slice` argument, so the node carries
     /// `void`; the slice lowering reads the bounds directly. Bounds are `u64`-typed.
     pub(super) fn lower_range(
         &mut self,

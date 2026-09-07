@@ -1,7 +1,7 @@
-// Showcase — a two-neuron feed-forward pass.
+// Showcase: a two-neuron feed-forward pass.
 //
 // This is an integration example: it exercises several features *together*
-// rather than in isolation —
+// rather than in isolation:
 //   structs · impl blocks (associated fn + &self methods) · f64 arithmetic
 //   · if/else as a value expression · while loop · `as` cast.
 //

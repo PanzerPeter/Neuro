@@ -51,7 +51,7 @@ impl Parser {
     /// Desugar a destructuring bind `val PATTERN = expr`, where `PATTERN` is a
     /// tuple, array, or struct pattern. The cursor sits on the pattern's opening
     /// token. The right-hand side is bound once to a fresh immutable temporary, then
-    /// each pattern leaf is bound to a projection of that temporary — so the only new
+    /// each pattern leaf is bound to a projection of that temporary, so the only new
     /// AST node any pattern needs is the array-rest remainder ([`Expr::ArrayRest`]).
     pub(super) fn parse_destructure_bind(
         &mut self,
@@ -112,7 +112,7 @@ impl Parser {
     }
 
     /// Parse a parenthesized tuple pattern `(p0, p1, ...)`. Requires at least two
-    /// elements — a single `(p)` is not a tuple. The cursor sits on the `(`.
+    /// elements: a single `(p)` is not a tuple. The cursor sits on the `(`.
     pub(super) fn parse_tuple_pattern(&mut self) -> ParseResult<DestructurePattern> {
         let open = self.consume(TokenKind::LeftParen, "'(' to open destructuring pattern")?;
         let mut subs = Vec::new();

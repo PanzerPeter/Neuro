@@ -8,7 +8,7 @@ use crate::types::HirType;
 /// A typed HIR statement.
 ///
 /// Mirrors [`ast_types::Stmt`] one-to-one. A variable declaration's type is
-/// always resolved here (`ty`) — in the AST it is an optional annotation that
+/// always resolved here (`ty`): in the AST it is an optional annotation that
 /// the type checker may have had to infer.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HirStmt {
@@ -95,7 +95,7 @@ pub enum HirStmt {
     /// `val PATTERN = scrutinee else |binding| { ... }`, fully resolved.
     ///
     /// `test` decides the success path; `bindings` are then materialized into the
-    /// ENCLOSING scope and stay live for every statement after this one — the
+    /// ENCLOSING scope and stay live for every statement after this one: the
     /// difference from a [`HirExprKind::Match`](crate::HirExprKind::Match) arm, whose
     /// bindings die with the arm. `else_binding` is scoped to `else_block` alone. The
     /// frontend has verified that `else_block` diverges, so control leaves the scope

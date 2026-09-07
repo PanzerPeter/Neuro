@@ -115,7 +115,7 @@ fn comparison_chain_equality_rejected() {
 fn single_comparison_accepted() {
     let mut checker = TypeChecker::new();
 
-    // a < b — valid
+    // a < b, valid
     let func = make_function(
         "main",
         vec![],
@@ -142,7 +142,7 @@ fn single_comparison_accepted() {
 fn comparison_with_logical_and_accepted() {
     let mut checker = TypeChecker::new();
 
-    // a < b && b < c — valid
+    // a < b && b < c, valid
     let func = make_function(
         "main",
         vec![],
@@ -225,7 +225,7 @@ fn equality_on_a_struct_with_partial_eq_is_accepted() {
     );
 }
 
-/// Aggregates have no built-in equality either — the same missing rejection crashed the
+/// Aggregates have no built-in equality either, and the same missing rejection crashed the
 /// backend for arrays, tuples, enums and non-string references.
 #[test]
 fn equality_on_an_aggregate_is_rejected() {

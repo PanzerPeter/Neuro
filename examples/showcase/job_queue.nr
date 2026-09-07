@@ -1,4 +1,4 @@
-// Showcase — `val-else` early exit carrying a small job queue, combined with
+// Showcase: `val-else` early exit carrying a small job queue, combined with
 // earlier features.
 //
 // Cumulative integration example combining:
@@ -67,7 +67,7 @@ func classify(weight: i32) -> Verdict {
     }
 }
 
-// `else |reason|` names the `Err` payload — the reason code, returned negated so an
+// `else |reason|` names the `Err` payload: the reason code, returned negated so an
 // invalid job is visible in the total without a second channel.
 func score(id: i32, cost: i32) -> i32 {
     val Result::Ok(valid) = priced(cost) else |reason| { return 0 - reason }
@@ -94,7 +94,7 @@ func main() -> i32 {
     mut total: i32 = 0
 
     for i in 0..5 {
-        // An absent slot falls back to 0, which `priced` then rejects — the two
+        // An absent slot falls back to 0, which `priced` then rejects: the two
         // fallible styles (`??` for "I don't care why", `val-else` for "forward it")
         // side by side.
         val cost = slot_cost(costs, i) ?? 0

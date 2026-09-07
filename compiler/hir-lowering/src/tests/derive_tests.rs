@@ -5,7 +5,7 @@ use super::{binding_init, function_body, lower};
 use neuro_hir::{HirExprKind, HirItem, HirType};
 
 /// A derived comparison has no `eq` to dispatch to, so it stays a binary node the
-/// backend expands over the fields — unlike a hand-written `impl PartialEq`, which
+/// backend expands over the fields, unlike a hand-written `impl PartialEq`, which
 /// lowers to an ordinary method call.
 #[test]
 fn derived_equality_stays_a_binary_node_typed_bool() {

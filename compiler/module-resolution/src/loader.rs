@@ -22,7 +22,7 @@ pub struct ResolvedModule {
 
 pub(crate) struct Module {
     pub(crate) path: String,
-    /// Short form used in diagnostics — the file relative to the root module's directory.
+    /// Short form used in diagnostics: the file relative to the root module's directory.
     pub(crate) display: String,
     pub(crate) file: PathBuf,
     /// Directory a path written *inside* this module resolves its first segment against.
@@ -110,7 +110,7 @@ impl ModuleGraph {
         Ok(graph)
     }
 
-    /// The module-path candidates written in module `id` — every qualified name minus its
+    /// The module-path candidates written in module `id`: every qualified name minus its
     /// final segment, which is the item or type being named rather than a module, plus the
     /// path of every `import`, which is what makes an import pull its module in even when
     /// no qualified name reaches into it.
@@ -251,7 +251,7 @@ impl ModuleGraph {
         Ok(id)
     }
 
-    /// Register one module — a file, or an inline `module` block — along with every block
+    /// Register one module (a file, or an inline `module` block) along with every block
     /// it declares.
     ///
     /// An inline block is a module in every sense that matters here: its items are private
@@ -358,8 +358,8 @@ impl ModuleGraph {
         Ok(id)
     }
 
-    /// The module a path segment names: a child of `current`, or — for the first segment,
-    /// where `current` is `None` — a module beside `from`. Only already-loaded modules are
+    /// The module a path segment names: a child of `current`, or (for the first segment,
+    /// where `current` is `None`) a module beside `from`. Only already-loaded modules are
     /// consulted; discovery has finished by the time this is asked.
     ///
     /// An inline block declared in the module doing the reaching wins over a same-named
@@ -411,7 +411,7 @@ impl ModuleGraph {
     ///
     /// Graph-wide rather than per-module because items share one flat namespace once
     /// resolution finishes, so `import Shape::{Circle}` is legitimate wherever `Shape`
-    /// was declared. The prelude's enums are not here — they are prepended after this
+    /// was declared. The prelude's enums are not here: they are prepended after this
     /// pass, so the caller adds them from the prelude list it already holds.
     pub(crate) fn declares_enum_anywhere(&self, name: &str) -> bool {
         self.modules
@@ -431,7 +431,7 @@ impl ModuleGraph {
 
     /// Is `name` reachable from outside module `id`?
     ///
-    /// A re-export is reachable by construction — making a name reachable through this
+    /// A re-export is reachable by construction: making a name reachable through this
     /// module is the whole of what `export import` does.
     pub(crate) fn exports(&self, id: usize, name: &str) -> bool {
         self.modules[id].exported.contains(name) || self.modules[id].reexports.contains_key(name)
@@ -532,7 +532,7 @@ impl ModuleGraph {
 
     pub(crate) fn into_program(self) -> crate::ResolvedProgram {
         // The prelude's declarations join one flat namespace, so opting out of them is a
-        // decision for the program rather than for a file — and the root is the file that
+        // decision for the program rather than for a file, and the root is the file that
         // makes it.
         let no_prelude = self.modules.first().is_some_and(|root| root.no_prelude);
         let mut items = Vec::new();
@@ -560,7 +560,7 @@ impl ModuleGraph {
 
 /// The `::`-separated segments a qualified site names, item or type name included.
 ///
-/// A site that names no path — a pattern, a non-path expression — yields nothing, and a
+/// A site that names no path (a pattern, a non-path expression) yields nothing, and a
 /// bare name yields the one segment an import table is keyed on.
 pub(crate) fn site_segments(site: &Site<'_>) -> Vec<String> {
     match site {

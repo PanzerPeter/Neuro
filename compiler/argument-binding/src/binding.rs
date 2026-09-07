@@ -21,7 +21,7 @@ pub(crate) enum Bound {
 /// Rewrite `call`'s arguments into `sig`'s declaration order and empty its labels.
 ///
 /// A call written entirely positionally against a signature that requires no name is
-/// already in declaration order, so it is left exactly as it was — arity and types stay
+/// already in declaration order, so it is left exactly as it was: arity and types stay
 /// the type checker's to report. Everything else is bound here, which is the only place
 /// a label is ever matched against a parameter.
 ///
@@ -66,7 +66,7 @@ pub(crate) fn bind(
     }
 
     // A permutation needs one argument per parameter. Reporting the mismatch here rather
-    // than deferring to the type checker keeps the failure on the call that caused it —
+    // than deferring to the type checker keeps the failure on the call that caused it:
     // this pass returns before type checking runs at all.
     if args.len() != sig.params.len() {
         return Err(ArgumentError::ArgumentCountMismatch {

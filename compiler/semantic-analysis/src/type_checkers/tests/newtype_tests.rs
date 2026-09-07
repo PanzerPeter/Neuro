@@ -22,7 +22,7 @@ func main() -> i32 {
 
 #[test]
 fn newtype_is_not_interchangeable_with_inner() {
-    // Assigning a `Meters` where an `i32` is expected is a type error — a newtype is
+    // Assigning a `Meters` where an `i32` is expected is a type error: a newtype is
     // a DISTINCT nominal type, unlike a transparent `type` alias.
     let errors = semantic_errors(
         r#"

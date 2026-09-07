@@ -89,7 +89,7 @@ fn both_slice_spellings_lower_to_a_string_borrow() {
 
 #[test]
 fn char_slice_keeps_its_range_argument() {
-    // The range reaches the backend intact — it is the argument, not a folded pair of
+    // The range reaches the backend intact: it is the argument, not a folded pair of
     // offsets, because only the backend knows how to turn code points into bytes.
     let program =
         lower("func main() -> i32 { val s = \"hello\"\n val c = s.char_slice(1..=3)\n 0 }");

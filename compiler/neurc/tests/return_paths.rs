@@ -1,8 +1,8 @@
 // A non-void function must produce a value on every path.
 //
 // The checker recognised only a trailing bare expression as the implicit return, so a
-// body that ended in anything else — a trailing `if` (which the parser always shapes as
-// `Stmt::If`), a loop, a `val`, nothing at all — was never checked against the declared
+// body that ended in anything else: a trailing `if` (which the parser always shapes as
+// `Stmt::If`), a loop, a `val`, nothing at all, was never checked against the declared
 // return type and never checked for producing a value. The backend then left the exit
 // block without a return, LLVM terminated it with `unreachable` (a legal terminator, so
 // the verifier stayed silent), and the program ran off the end of the function.
@@ -168,7 +168,7 @@ fn regression_tail_if_mixing_return_and_value_carries_the_other_arm() {
     // value was dropped, because a tail `if` was not a value position), then was rejected
     // outright once it became one: the returning arm typed as `void` and forced its
     // sibling to be `void` too. A returning arm never reaches the point where the `if`
-    // has a value, so it constrains nothing — each path now yields its own arm's value.
+    // has a value, so it constrains nothing: each path now yields its own arm's value.
     let test = CompileTest::new();
     let exit = test
         .compile_and_run(

@@ -1,7 +1,7 @@
 // Binding a `void` initializer must be a type error, not an internal codegen error.
 //
 // `void` has no value representation, so the backend's value path can only answer it
-// with an internal error — the wrong place for the program to be caught. Every shape
+// with an internal error: the wrong place for the program to be caught. Every shape
 // below reaches that path through a different expression form, and each one used to
 // pass `neurc check` and abort code generation. The `if` / `match` / block / `loop`
 // spellings are the reason the check tests the binding's TYPE rather than whether its

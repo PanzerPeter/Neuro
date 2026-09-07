@@ -11,7 +11,7 @@ fn llvm_err(e: inkwell::builder::BuilderError) -> CodegenError {
 }
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// `{ptr, len} __neuro_point(i8* s, i64 len)` — append `.0` when `%g` produced
+    /// `{ptr, len} __neuro_point(i8* s, i64 len)`, which appends `.0` when `%g` produced
     /// a bare integer.
     ///
     /// Default float rendering goes through `%.16g`, which drops the fraction of a
@@ -128,13 +128,13 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(func)
     }
 
-    /// `{ptr, len} __neuro_exp(i8* s, i64 len, i1 trim)` — turn C's scientific
+    /// `{ptr, len} __neuro_exp(i8* s, i64 len, i1 trim)`, which turns C's scientific
     /// output into the form the language specifies.
     ///
     /// `%e` writes `3.141590e+00`; the table specifies `3.14159e0`. Two fix-ups get
     /// there: the exponent loses its `+` and its leading zeros (keeping one digit),
-    /// and — when `trim` is set, which it is for a hole that named no precision —
-    /// the mantissa loses the trailing zeros the fixed conversion padded it with.
+    /// and, when `trim` is set (which it is for a hole that named no
+    /// precision), the mantissa loses the trailing zeros the fixed conversion padded it with.
     /// An explicit `{x:.2e}` clears `trim`, because there the zeros were asked for.
     /// Output with no `e` (`inf`, `nan`) is returned untouched.
     pub(crate) fn get_or_define_normalize_exponent(&self) -> CodegenResult<FunctionValue<'ctx>> {

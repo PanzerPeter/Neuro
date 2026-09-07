@@ -47,7 +47,7 @@ pub fn parse(source: &str) -> ParseResult<Vec<Item>> {
     parser.parse_program()
 }
 
-/// Parse a standalone Neuro expression — a convenience for tests and REPLs.
+/// Parse a standalone Neuro expression: a convenience for tests and REPLs.
 ///
 /// # Examples
 ///

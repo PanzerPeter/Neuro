@@ -1,4 +1,4 @@
-// Showcase — sub-phase 1H end to end: a render pipeline configured by name.
+// Showcase: sub-phase 1H end to end: a render pipeline configured by name.
 //
 // Integration example combining every 1H language-cleanup feature with the
 // machinery that gives them something to say:
@@ -11,7 +11,7 @@
 //
 // Every named call below is written with its arguments in an order that differs
 // from the declaration, so the program only produces the right answer if the
-// labels — not the positions — decided the binding.
+// labels (not the positions) decided the binding.
 
 enum Quality {
     Draft,
@@ -56,7 +56,7 @@ impl Frame {
 /* The budget rule is deliberately asymmetric, so a wrongly ordered call is
    visible in the answer.
    /* A Draft frame is charged at full price; a Final frame is discounted by
-      its payload. This inner comment closes without ending the outer one —
+      its payload. This inner comment closes without ending the outer one:
       nesting block comments is itself a 1H feature. */
    Everything up to the final delimiter is still part of this comment. */
 func budget(quality q: Quality, per_pixel rate: i32, frame f: Frame) -> i32 {

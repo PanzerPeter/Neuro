@@ -1,19 +1,19 @@
-// Showcase — the 2A sub-phase end to end: standard I/O and the spec stragglers,
+// Showcase: the 2A sub-phase end to end: standard I/O and the spec stragglers,
 // combined in one program.
 //
 // Cumulative integration example combining the features 2A added:
-//   `@derive(Debug, PartialEq)` — struct rendering and structural equality
+//   `@derive(Debug, PartialEq)`: struct rendering and structural equality
 //   · `println` to stdout · `.is_nan()` on a computed float
 //   · `&[T]` borrowed slices passed to one signature from an array and from a `Vec`
 //   · the `IntoIterator` / `Iterator` protocol with an associated type (`type Item`)
 //   · an associated-type bound (`S: Iterator<Item = i32>`)
 //   · `.enumerate()` and the `.filter(p)` head adapter
 //   · `.chars()` codepoint iteration and `.char_indices()` byte offsets
-//   — alongside earlier features: `@derive(Copy, Clone)` structs with `&self` methods,
+//   plus earlier features: `@derive(Copy, Clone)` structs with `&self` methods,
 //   fixed-size arrays, `Vec<T>`, `match` on `Option`, and the format mini-language.
 //
 // The point of the combination: every one of these is a *separate* addition, and the
-// program only produces the right report if they agree with each other — the slice
+// program only produces the right report if they agree with each other: the slice
 // parameter must accept both an array and a `Vec`, the protocol's `Item` must be the
 // type the bound demanded, the byte offsets must line up with the codepoints standing
 // at them, and a NaN must fail `==` while the derived equality still finds duplicates
@@ -30,7 +30,7 @@ struct Reading {
 impl Reading {
     // A reading is usable when its value is a real number. `0.0 / 0.0` is the one way
     // to reach NaN without a literal for it, and `.is_nan()` is the only test that
-    // answers — NaN compares false against everything, itself included.
+    // answers: NaN compares false against everything, itself included.
     func usable(&self) -> bool {
         !self.value.is_nan()
     }
@@ -146,7 +146,7 @@ func main() -> i32 {
 
     // Codepoints and byte offsets over the same non-ASCII text: `.chars()` counts
     // scalars, `.char_indices()` pairs each with the byte it starts at, and the two
-    // only agree on the count — the final offset is larger because 'é' takes two bytes.
+    // only agree on the count: the final offset is larger because 'é' takes two bytes.
     val label = "café"
     mut scalars = 0
     for c in label.chars() {

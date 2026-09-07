@@ -1,4 +1,4 @@
-// Showcase — a config manifest rendered from typed records and checked against
+// Showcase: a config manifest rendered from typed records and checked against
 // the exact document it should produce.
 //
 // Integration example combining triple-quoted block strings with the features

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Cross-language benchmark harness: Neuro vs C++ vs Python.
 
-Each benchmark is a triple of programs — `programs/<name>.nr`, `<name>.cpp`,
-`<name>.py` — that compute the same result and print it identically. The harness
+Each benchmark is a triple of programs (`programs/<name>.nr`, `<name>.cpp`,
+`<name>.py`) that compute the same result and print it identically. The harness
 builds the compiled ones, checks all three agree on stdout, then times each and
 reports wall time relative to the fastest.
 
@@ -141,7 +141,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if neurc() is None:
-        print("neurc not found — run `cargo build --release` first", file=sys.stderr)
+        print("neurc not found; run `cargo build --release` first", file=sys.stderr)
         raise SystemExit(1)
 
     names = args.names or sorted({p.stem for p in PROGRAMS.glob("*.nr")})

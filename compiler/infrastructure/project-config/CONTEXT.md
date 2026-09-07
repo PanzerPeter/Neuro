@@ -1,17 +1,17 @@
 # project-config
 
 ## Purpose
-Parse and hold project metadata from a `neuro.toml` workspace file — package name, version, authors, build settings, and dependency declarations.
+Parse and hold project metadata from a `neuro.toml` workspace file: package name, version, authors, build settings, and dependency declarations.
 
 ## Entry Point
-- Type: Library (no entry function — pure data)
+- Type: Library (no entry function: pure data)
 - Key types: `ProjectConfig`, `PackageConfig`, `BuildConfig`, `Dependency`
 
 ## Data Ownership
 - Tables / Events Published / Events Consumed / Public Read Model: none
 
 ## Shared Kernel
-None within the workspace — this crate depends only on `serde`/`toml`.
+None within the workspace: this crate depends only on `serde`/`toml`.
 
 ## Notes
 Data structures and TOML deserialization only, no compiler business logic.

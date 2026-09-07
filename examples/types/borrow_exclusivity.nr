@@ -1,8 +1,8 @@
-// Borrow exclusivity — the flow-sensitive aliasing rules.
+// Borrow exclusivity: the flow-sensitive aliasing rules.
 //
 // The borrow checker enforces two coexistence rules at compile time:
 //   * any number of shared `&T` borrows of a place may be live at once;
-//   * a `&mut T` borrow is exclusive — while it is live, no other borrow
+//   * a `&mut T` borrow is exclusive: while it is live, no other borrow
 //     (shared or mutable) of the same place may exist.
 //
 // A borrow held by a binding lives until that binding leaves scope; a borrow

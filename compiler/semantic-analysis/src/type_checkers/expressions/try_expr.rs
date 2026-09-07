@@ -2,7 +2,7 @@
 //
 // Reached from the `check_expr` dispatch in this module's `mod.rs`. Two rules beyond
 // "the operand must be fallible": the enclosing function has to return the same fallible
-// enum for the failure to go anywhere, and — since the language has no From/Into — the
+// enum for the failure to go anywhere, and (since the language has no From/Into) the
 // error type must already match, with no implicit conversion.
 
 use super::operators::RESULT_ENUM;
@@ -13,7 +13,7 @@ use ast_types::Expr;
 use shared_types::Span;
 
 /// The `Result` variant `?` propagates. `Option::None` carries no payload, so it needs
-/// no name here — the failure value is rebuilt from the variant alone.
+/// no name here; the failure value is rebuilt from the variant alone.
 const RESULT_FAILURE_VARIANT: &str = "Err";
 
 impl TypeChecker {
@@ -67,7 +67,7 @@ impl TypeChecker {
 
     /// Verify the operand's `Err` payload is already the function's error type.
     ///
-    /// `?` forwards the error as-is — there is no From/Into trait to convert through, so
+    /// `?` forwards the error as-is: there is no From/Into trait to convert through, so
     /// a mismatch is a plain type error the programmer resolves with `.map_err(...)`.
     fn check_propagated_error(
         &mut self,

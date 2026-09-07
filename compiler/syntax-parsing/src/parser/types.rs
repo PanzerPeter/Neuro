@@ -18,11 +18,11 @@ pub(super) type ShapeArg = (Vec<usize>, Span);
 /// The only form `Self` takes in a type annotation: bare `Self` is not one, because the
 /// implementing type is always nameable where an annotation is written.
 /// The one type name that accepts a `[...]` shape argument. It is a prelude name
-/// rather than a keyword, so the parser only claims it once a shape appears — a module
+/// rather than a keyword, so the parser only claims it once a shape appears: a module
 /// that shadows `Tensor` with its own generic type keeps parsing as before.
 pub(super) const TENSOR_TYPE_NAME: &str = "Tensor";
 
-const SELF_ASSOC_FORM: &str = "`Self::` followed by an associated type name — bare `Self` is not a type annotation, name the type itself";
+const SELF_ASSOC_FORM: &str = "`Self::` followed by an associated type name; bare `Self` is not a type annotation, name the type itself";
 
 impl Parser {
     /// Parse a type annotation
@@ -71,7 +71,7 @@ impl Parser {
             });
         }
         // A parenthesized type list opens either a tuple type `(T1, T2, ...)` or a
-        // closure/function type `(T1, ...) -> R` — disambiguated by a trailing `->`.
+        // closure/function type `(T1, ...) -> R`: disambiguated by a trailing `->`.
         // A tuple needs two or more elements; a function type accepts zero or more.
         if self.check(&TokenKind::LeftParen) {
             let open = self.advance().ok_or(ParseError::UnexpectedEof {
@@ -175,8 +175,8 @@ impl Parser {
         }
 
         // Associated-type path `Self::Item`. The qualifier rides in the name exactly as a
-        // module qualifier does, so no pass between here and the type checker — which is
-        // the first place an implementing type is known — needs a node of its own for it.
+        // module qualifier does, so no pass between here and the type checker (which is
+        // the first place an implementing type is known) needs a node of its own for it.
         if self.check(&TokenKind::SelfUpper) {
             let kw = self.advance().ok_or(ParseError::UnexpectedEof {
                 expected: "'Self'".to_string(),

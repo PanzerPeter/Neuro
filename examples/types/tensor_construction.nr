@@ -6,7 +6,7 @@
 // it stays a plain array. Without an annotation, name the type with a turbofish.
 //
 // A tensor owns its buffer and is not `Copy`, so binding it or passing it MOVES it.
-// Reading elements back out is slicing and indexing, which is not implemented yet —
+// Reading elements back out is slicing and indexing, which is not implemented yet:
 // these programs build tensors and pass them around.
 
 // A tensor parameter names its full shape; a caller with a different shape is a
@@ -32,7 +32,7 @@ func main() -> i32 {
     // `f32` literals, not `f64` ones being narrowed.
     val row: Tensor<f32, [3]> = [1.0, 2.0, 3.0]
 
-    // Nested literals must be rectangular — every row here is 3 wide because the
+    // Nested literals must be rectangular: every row here is 3 wide because the
     // shape says so. A ragged literal is a compile error.
     val grid: Tensor<f32, [2, 3]> = [
         [1.0, 2.0, 3.0],
@@ -55,7 +55,7 @@ func main() -> i32 {
     // compiled program draws the same weights on every run.
     val weights = Tensor::<f32, [8, 4]>::random_normal(mean: 0.0f32, std: 0.02f32)
 
-    // A rank-0 (scalar) tensor has no array-literal form — it is built directly.
+    // A rank-0 (scalar) tensor has no array-literal form: it is built directly.
     val loss: Tensor<f32, []> = Tensor::scalar(0.5)
 
     // Without a `Tensor` annotation this is a plain `[f64; 3]`, indexable as one.

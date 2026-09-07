@@ -1,4 +1,4 @@
-// The `??` operator — unwrap a fallible value or fall back.
+// The `??` operator: unwrap a fallible value or fall back.
 //
 // `??` reads an `Option<T>` or a `Result<T, E>` and produces the inner `T`, using the
 // right-hand expression when the value is absent or the call failed. For a `Result`
@@ -24,7 +24,7 @@ func divide(a: i32, b: i32) -> Result<i32, i32> {
     }
 }
 
-// A fallback may be any expression producing the payload type — including a call.
+// A fallback may be any expression producing the payload type: including a call.
 func default_reading() -> i32 {
     3
 }

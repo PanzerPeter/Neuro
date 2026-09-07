@@ -7,8 +7,8 @@
 # This file is the single source of truth for the exit code the example test
 # harness (compiler/neurc/tests/examples.rs) expects. The harness walks
 # examples/ recursively, compiles and runs every *.nr file, and asserts its
-# exit code matches the value here. A *.nr file with no entry below — or an
-# entry with no file — fails the test, so adding an example is one new line
+# exit code matches the value here. A *.nr file with no entry below, or an
+# entry with no file, fails the test, so adding an example is one new line
 # here and nothing else.
 #
 # Standard output is checked separately and is not listed here: an example that

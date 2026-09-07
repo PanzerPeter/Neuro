@@ -55,7 +55,7 @@ impl TypeChecker {
         for method in &def.methods {
             // Consuming `self` still needs the by-value struct ABI for non-`Copy` types,
             // so reject it there. A `Copy` struct is duplicated by value, which is
-            // ABI-identical to `&self`, so an owned `self` is accepted — this is what lets
+            // ABI-identical to `&self`, so an owned `self` is accepted: this is what lets
             // an operator-trait method `func add(self, ...)` run on the scalar path
             // `&mut self` is supported and recorded below.
             if matches!(method.self_param, Some(SelfParam::Owned)) && !struct_is_copy {
@@ -139,7 +139,7 @@ impl TypeChecker {
     /// associated types in scope, returning the previous scope to restore afterwards.
     ///
     /// The bindings are resolved before they are installed, so a binding cannot name
-    /// another one — an associated type stands for a concrete type, not for a chain.
+    /// another one: an associated type stands for a concrete type, not for a chain.
     pub(super) fn enter_impl_assoc(&mut self, def: &ImplDef) -> HashMap<String, Type> {
         let mut bindings = HashMap::new();
         for (name, ty) in &def.assoc_types {
@@ -153,7 +153,7 @@ impl TypeChecker {
     /// Validate an operator-trait impl and record its operator dispatch.
     ///
     /// Operator traits (`Add`, `Sub`, …, `PartialEq`, `Comparable`) are compiler-known
-    /// lang-items — the user writes only the `impl`, never a `trait` declaration. Each
+    /// lang-items: the user writes only the `impl`, never a `trait` declaration. Each
     /// impl method whose name matches one the trait provides wires its operator to that
     /// method's return type. The scalar path requires the receiver to be `Copy`; an
     /// `Output` associated type, when present, must equal the method's return type; and a
@@ -273,8 +273,8 @@ impl TypeChecker {
 
     /// Reject a struct that both derives a trait and declares an `impl` of it.
     ///
-    /// The two produce different code — the derive compares fields inline, the impl
-    /// routes the operator through a method — and the operator dispatch consults the
+    /// The two produce different code: the derive compares fields inline, the impl
+    /// routes the operator through a method, and the operator dispatch consults the
     /// impl first, so the derive would be silently outranked.
     pub(crate) fn check_derive_impl_conflicts(&mut self, items: &[ast_types::Item]) {
         let mut conflicts: Vec<(String, &'static str, shared_types::Span)> = Vec::new();
@@ -302,8 +302,8 @@ impl TypeChecker {
 
     /// Validate and record an `impl Drop for T` block.
     ///
-    /// A Drop type must contain exactly the destructor `drop(&mut self)` — no
-    /// parameters, no return — and must not also be `Copy` (a type with a
+    /// A Drop type must contain exactly the destructor `drop(&mut self)`: no
+    /// parameters, no return, and must not also be `Copy` (a type with a
     /// destructor is moved, never duplicated). The method itself is
     /// registered by the normal `impl` path under `T__drop`; this only enforces the
     /// lang-item shape and records `T` as a Drop type for scope-exit insertion.
@@ -348,7 +348,7 @@ impl TypeChecker {
     ///
     /// `Hashable` is a compiler-known lang-item like `Drop` and the operator traits: it
     /// exists so a user struct can be a `HashMap` key, and the generated probe sequence
-    /// calls `T__hash` directly. The shape is therefore fixed — one `hash(&self) -> u64`
+    /// calls `T__hash` directly. The shape is therefore fixed: one `hash(&self) -> u64`
     /// method, taking the receiver by reference so hashing never moves the key.
     pub(super) fn register_hashable_impl(&mut self, def: &ImplDef, struct_name: &str) {
         let valid = match def.methods.as_slice() {
@@ -447,7 +447,7 @@ impl TypeChecker {
                 }
             }
 
-            // The implicit-return tail is checked once, below — see the same rule in
+            // The implicit-return tail is checked once, below: see the same rule in
             // `check_function`, where checking it twice moved a by-value argument twice.
             let tail_returns = Self::tail_is_implicit_return(&method.body, &return_type);
             let leading = if tail_returns {

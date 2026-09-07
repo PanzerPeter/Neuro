@@ -1,7 +1,7 @@
-// Showcase — the derived `Debug` and `PartialEq` working alongside earlier features.
+// Showcase: the derived `Debug` and `PartialEq` working alongside earlier features.
 //
 // Cumulative integration example combining:
-//   `@derive(Debug, PartialEq)` — struct rendering and field-wise equality
+//   `@derive(Debug, PartialEq)`: struct rendering and field-wise equality
 //   · `@derive(Copy, Clone)` structs · impl methods (`&self`)
 //   · a fixed-size array + a counted `for i in 0..n` loop with indexing
 //   · enums with `match` · nested struct fields · labeled `break`
@@ -11,7 +11,7 @@
 // The point of the combination: a derived `==` is *structural*, so two samples built
 // independently from the same numbers compare equal, and the comparison recurses into
 // the nested `Origin` without either struct naming a method. The derived `{s:?}` is
-// what makes the duplicate visible in the output rather than merely counted — and it
+// what makes the duplicate visible in the output rather than merely counted, and it
 // renders a `char` field in its debug form, quotes and all.
 
 @derive(Copy, Clone, Debug, PartialEq)
@@ -82,7 +82,7 @@ func main() -> i32 {
             duplicates += 1
         }
 
-        // `{s:?}` is the derived rendering — the whole record, nested struct and all.
+        // `{s:?}` is the derived rendering: the whole record, nested struct and all.
         println("{i:>2}  {kind:<6} {samples[i]:?}")
         total += points + samples[i].weight()
     }

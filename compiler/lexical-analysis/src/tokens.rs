@@ -33,11 +33,11 @@ pub struct FloatSuffixToken {
 /// text/hole chunks of an interpolated one.
 ///
 /// One token variant for both shapes because a logos callback picks the
-/// variant's *payload*, never the variant — the decoder decides plain-vs-
-/// interpolated after it has walked the content.
+/// variant's *payload*, never the variant. The decoder decides
+/// plain-vs-interpolated after it has walked the content.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StringValue {
-    /// No interpolation holes — the whole literal's decoded text.
+    /// No interpolation holes: the whole literal's decoded text.
     Plain(String),
     /// At least one `{expr}` hole; see [`InterpChunk`].
     Interp(Vec<InterpChunk>),
@@ -45,8 +45,8 @@ pub enum StringValue {
 
 /// One segment of an interpolated string literal, as split by the lexer.
 ///
-/// The lexer only locates the `{...}` holes — brace matching that skips char
-/// literals — and hands each hole's raw source text to the parser, which
+/// The lexer only locates the `{...}` holes (brace matching that skips char
+/// literals) and hands each hole's raw source text to the parser, which
 /// re-lexes and parses it as an expression. Keeping expression parsing out of
 /// the lexer is what lets a hole contain calls, struct literals, and nested
 /// blocks. A hole may not contain a `"` string literal: the quote ends the
@@ -148,7 +148,7 @@ pub enum TokenKind {
     // Float(1.5) + Identifier("f32"). Two patterns mirror the fractional and
     // exponent-only forms of the Float regex. `f16`/`bf16` are the half-precision
     // suffixes; `bf16` precedes the others in the alternation only for
-    // readability — logos matches the whole literal greedily regardless.
+    // readability: logos matches the whole literal greedily regardless.
     #[regex(
         r"[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?(bf16|f16|f32|f64)",
         parse_fractional_float_suffix,
@@ -190,7 +190,7 @@ pub enum TokenKind {
     #[regex(r"0[xX][0-9a-fA-F][0-9a-fA-F_]*", parse_hex)]
     #[regex(r"[0-9][0-9_]*", parse_decimal)]
     /// The **magnitude** of an integer literal. A literal is never negative in
-    /// source — `-1` is a negation over `1` — so the widest magnitude the language
+    /// source (`-1` is a negation over `1`), so the widest magnitude the language
     /// can spell is `u64::MAX`, and an `i64` here would reject both that and
     /// `9223372036854775808`, the magnitude `i64::MIN` is written with. Deciding
     /// what a magnitude means is the type checker's job, not the lexer's.
@@ -205,7 +205,7 @@ pub enum TokenKind {
     // body itself. A regex cannot express it: logos has no non-greedy repetition, so a
     // pattern ending in `"""` would run to the LAST `"""` in the file. (0.16 parses a
     // lazy `*?` rather than rejecting it, but still matches greedily, so the lazy spelling
-    // is not a way out of this -- it silently swallows every literal in the file.) Matching only
+    // is not a way out of this: it silently swallows every literal in the file.) Matching only
     // the opening delimiter keeps the DFA trivial and hands the body to a hand-written
     // scanner. Three quotes always beat the two-quote empty-string match under logos'
     // longest-match rule, so `""` and `"""` never collide.
@@ -220,8 +220,8 @@ pub enum TokenKind {
 
     // Character literals: a single Unicode scalar value between single
     // quotes, e.g. `'a'`, `'\n'`, `'\u{1F44D}'`. The regex admits exactly one
-    // content unit — a non-quote/backslash/newline char, a recognized escape, a
-    // `\u{...}` unicode escape, or a `\xNN` byte escape — so `''`, `'ab'`, and an
+    // content unit: a non-quote/backslash/newline char, a recognized escape, a
+    // `\u{...}` unicode escape, or a `\xNN` byte escape. So `''`, `'ab'`, and an
     // unterminated `'a` never match and fall through to a lex error.
     #[regex(
         r"'([^'\\\n]|\\['nrt\\0]|\\u\{[0-9a-fA-F]+\}|\\x[0-9a-fA-F]{2})'",
@@ -230,7 +230,7 @@ pub enum TokenKind {
     Char(char),
 
     // Lifetime name: a leading `'` followed by an identifier, with NO closing
-    // quote — e.g. `'a` in `func longest<'a>(...)`. The callback strips the `'`, so the
+    // quote (e.g. `'a` in `func longest<'a>(...)`). The callback strips the `'`, so the
     // stored name is the bare identifier. A char literal `'a'` is a strictly longer match
     // (it carries the closing quote), so logos' longest-match rule keeps char literals
     // winning; only the quote-less form reaches here.
@@ -318,7 +318,7 @@ pub enum TokenKind {
     // tokenized + parsed now so the R-to-L precedence (Appendix B row 14) is locked in.
     #[token("??")]
     QuestionQuestion,
-    // Error propagation `expr?`. Declared after `??` for readability only — logos
+    // Error propagation `expr?`. Declared after `??` for readability only: logos
     // matches the longest token, so `a ?? b` is never read as two propagations.
     #[token("?")]
     Question,
@@ -482,7 +482,7 @@ const BLOCK_COMMENT_CLOSE: &[u8] = b"*/";
 /// Logos matched only the opening `/*`, so this counts depth over the remainder:
 /// every further `/*` deepens it and every `*/` unwinds it, and the comment ends
 /// when depth returns to zero. Delimiters inside string and char literals are NOT
-/// exempt — a comment is scanned as raw text, matching how `//` already swallows a
+/// exempt: a comment is scanned as raw text, matching how `//` already swallows a
 /// quote to end of line.
 fn lex_nested_block_comment(
     lex: &mut logos::Lexer<TokenKind>,
@@ -521,7 +521,7 @@ fn lex_nested_block_comment(
 ///
 /// This is the stateful half of string lexing: logos matches the literal's
 /// shape, but finding where each `{...}` hole opens and closes requires walking
-/// the content with a brace depth that skips over nested string/char literals —
+/// the content with a brace depth that skips over nested string/char literals,
 /// beyond what a regular expression can express. A literal without any unescaped
 /// `{` decodes exactly like the pre-interpolation lexer did ([`StringValue::Plain`]);
 /// one with holes yields [`StringValue::Interp`] with raw hole sources for
@@ -544,8 +544,8 @@ fn decode_string_literal(lex: &mut logos::Lexer<TokenKind>) -> Result<StringValu
 ///
 /// Logos matched only the opening delimiter, so this walks the remainder for the
 /// closing `"""`, bumps the lexer past it, applies the dedent rule, and hands the
-/// surviving characters to the same chunk decoder ordinary literals use — escapes
-/// and `{...}` holes therefore behave identically in both forms.
+/// surviving characters to the same chunk decoder ordinary literals use, so escapes
+/// and `{...}` holes behave identically in both forms.
 fn decode_triple_quoted_string(lex: &mut logos::Lexer<TokenKind>) -> Result<StringValue, LexError> {
     let source = lex.source();
     let open = lex.span().start;
@@ -591,8 +591,8 @@ fn find_triple_quote_close(body: &str) -> Option<usize> {
 /// string, drop the newline that precedes the closing line, and return the surviving
 /// characters tagged with absolute source offsets.
 ///
-/// Dedenting by dropping characters from the indexed vector — rather than by
-/// rebuilding a `String` — is what keeps every remaining character's true offset, so
+/// Dedenting by dropping characters from the indexed vector (rather than by
+/// rebuilding a `String`) is what keeps every remaining character's true offset, so
 /// interpolation holes inside a block string still report at real source columns.
 fn dedent_block_body(
     body: &str,
@@ -652,7 +652,7 @@ fn dedent_block_body(
     // Every content line pushed its own terminator, so the last one carries the
     // newline that separates it from the closing delimiter's line. That newline is
     // punctuation belonging to the delimiter, not content: dropping it is what makes
-    // a block "no leading or trailing blank". A trailing newline is still writable —
+    // a block "no leading or trailing blank". A trailing newline is still writable:
     // leave a blank line before the closer and its terminator becomes the last one.
     if out.last().is_some_and(|(_, ch)| *ch == '\n') {
         out.pop();
@@ -849,7 +849,7 @@ fn scan_hole_close(indexed: &[(usize, char)], open: usize) -> Option<usize> {
 /// Return the index just past the closing `'` of the char literal starting at
 /// `open`. Backslash-skips honor escapes; a `\u{...}` payload may itself contain
 /// quotes or braces (`'\u{7D}'`), so the whole escape is jumped rather than two
-/// characters. An unterminated literal consumes the remainder — the caller
+/// characters. An unterminated literal consumes the remainder, and the caller
 /// reports the enclosing hole as unterminated, which is the correct diagnosis
 /// regardless.
 fn skip_nested_literal(indexed: &[(usize, char)], open: usize) -> usize {
@@ -953,7 +953,7 @@ fn parse_char(lex: &mut logos::Lexer<TokenKind>) -> Result<char, LexError> {
             Ok(code as char)
         }
         Some('u') => {
-            // `\u{NNNN}` — the regex shape is fixed, so skip the leading `{` and
+            // `\u{NNNN}`: the regex shape is fixed, so skip the leading `{` and
             // read hex digits until `}`.
             let hex: String = chars.take_while(|&c| c != '}').skip(1).collect();
             let code = u32::from_str_radix(&hex, 16).map_err(|_| invalid(content))?;
@@ -966,7 +966,7 @@ fn parse_char(lex: &mut logos::Lexer<TokenKind>) -> Result<char, LexError> {
 // ── Suffixed integer helpers ──────────────────────────────────────────────────
 
 /// Maps the suffix string (e.g. "i64") to `IntSuffix`. Panics for unexpected
-/// inputs — the logos regex guarantees the suffix is one of the eight variants.
+/// inputs: the logos regex guarantees the suffix is one of the eight variants.
 fn parse_int_suffix(suffix: &str) -> IntSuffix {
     match suffix {
         "i8" => IntSuffix::I8,

@@ -1,120 +1,154 @@
-// Integration tests for type inference (numeric literal inference, semantic analysis)
-mod common;
+// Integration tests for type inference (numeric literal inference, semantic analysis).
 //
-// NOTE: These tests focus on type checking behavior. Full code generation
-// with inferred types requires passing type information from semantic analysis
-// to LLVM backend, which is deferred to a future phase.
+// The first group checks what the type checker accepts and rejects, so it runs
+// `neurc check` and never reaches the backend. The second group compiles and runs a
+// program, because its subject is the LLVM slot a declared type produces, which type
+// checking alone cannot observe.
+mod common;
 
-use std::path::PathBuf;
-use std::process::Command;
+use common::CompileTest;
 
-fn get_test_dir() -> PathBuf {
-    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path.pop(); // Go to compiler dir
-    path.pop(); // Go to project root
-    path.push("tests");
-    path.push("type_inference");
-    path
+#[test]
+fn i64_annotation_accepts_a_small_literal() {
+    let test = CompileTest::new();
+    test.check(
+        "i64_variable.nr",
+        r#"func main() -> i32 {
+    val x: i64 = 42
+    return 42
 }
-
-/// Check a test file for type errors (using neurc check command)
-fn check_test(test_name: &str) -> (bool, String) {
-    let test_dir = get_test_dir();
-    let source_file = test_dir.join(format!("{}.nr", test_name));
-
-    // Run type checking
-    let check_result = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "neurc",
-            "--",
-            "check",
-            source_file.to_str().unwrap(),
-        ])
-        .output()
-        .expect("Failed to run compiler");
-
-    let check_success = check_result.status.success();
-    let check_output = String::from_utf8_lossy(&check_result.stderr).to_string();
-
-    (check_success, check_output)
+"#,
+    )
+    .expect("42 should infer as i64 from the annotation");
 }
 
 #[test]
-fn test_i64_inference_in_variable() {
-    // Test: val x: i64 = 42
-    // Literal 42 should infer as i64 and pass type checking
-    let (success, output) = check_test("i64_variable");
-    assert!(success, "Type checking failed: {}", output);
+fn u32_parameter_types_its_argument_literal() {
+    let test = CompileTest::new();
+    test.check(
+        "u32_function_param.nr",
+        r#"func foo(x: u32) -> u32 {
+    x
+}
+
+func main() -> i32 {
+    val result: u32 = foo(100)
+    return 100
+}
+"#,
+    )
+    .expect("100 should infer as u32 from the parameter");
 }
 
 #[test]
-fn test_u32_inference_in_function_param() {
-    // Test: func foo(x: u32) -> u32 { x } ... foo(100)
-    // Literal 100 should infer as u32 and pass type checking
-    let (success, output) = check_test("u32_function_param");
-    assert!(success, "Type checking failed: {}", output);
+fn return_type_types_a_tail_expression_literal() {
+    let test = CompileTest::new();
+    test.check(
+        "i16_return.nr",
+        r#"func foo() -> i16 {
+    256
+}
+
+func main() -> i32 {
+    val result: i16 = foo()
+    return 0
+}
+"#,
+    )
+    .expect("256 should infer as i16 from the return type");
 }
 
 #[test]
-fn test_i16_inference_in_return() {
-    // Test: func foo() -> i16 { 256 }
-    // Literal 256 should infer as i16 and pass type checking
-    let (success, output) = check_test("i16_return");
-    assert!(success, "Type checking failed: {}", output);
+fn f32_annotation_accepts_a_float_literal() {
+    let test = CompileTest::new();
+    test.check(
+        "f32_variable.nr",
+        r#"func main() -> i32 {
+    val x: f32 = 3.14
+    return 0
+}
+"#,
+    )
+    .expect("3.14 should infer as f32, not f64");
 }
 
 #[test]
-fn test_f32_inference_in_variable() {
-    // Test: val x: f32 = 3.14
-    // Literal 3.14 should infer as f32 and pass type checking
-    let (success, output) = check_test("f32_variable");
-    assert!(success, "Type checking failed: {}", output);
+fn an_unannotated_integer_literal_defaults_to_i32() {
+    let test = CompileTest::new();
+    test.check(
+        "default_i32.nr",
+        r#"func main() -> i32 {
+    val x = 42
+    return 42
+}
+"#,
+    )
+    .expect("an unannotated literal should default to i32");
 }
 
 #[test]
-fn test_i8_out_of_range_error() {
-    // Test: val x: i8 = 300
-    // Should produce type error - 300 doesn't fit in i8
-    let (success, output) = check_test("i8_out_of_range");
+fn several_widths_infer_independently_in_one_program() {
+    let test = CompileTest::new();
+    test.check(
+        "mixed_types.nr",
+        r#"func add_i16(a: i16, b: i16) -> i16 {
+    a + b
+}
 
-    assert!(!success, "Should have failed type checking");
+func add_u64(a: u64, b: u64) -> u64 {
+    a + b
+}
+
+func main() -> i32 {
+    val x: i16 = 3
+    val y: i16 = add_i16(x, 4)
+
+    val a: u64 = 100
+    val b: u64 = add_u64(a, 200)
+
+    return 7
+}
+"#,
+    )
+    .expect("i16 and u64 inference should not interfere");
+}
+
+#[test]
+fn a_literal_too_large_for_i8_is_rejected() {
+    let test = CompileTest::new();
+    let error = test
+        .check(
+            "i8_out_of_range.nr",
+            r#"func main() -> i32 {
+    val x: i8 = 300
+    return 0
+}
+"#,
+        )
+        .expect_err("300 does not fit in i8");
     assert!(
-        output.contains("out of range") || output.contains("OutOfRange"),
-        "Error message should mention out of range: {}",
-        output
+        error.contains("out of range"),
+        "the diagnostic should say the literal is out of range: {error}"
     );
 }
 
 #[test]
-fn test_u32_out_of_range_error() {
-    // Test: val x: u32 = 5000000000
-    // Should produce type error - value too large for u32 (max 4294967295)
-    let (success, output) = check_test("u32_negative");
-
-    assert!(!success, "Should have failed type checking");
+fn a_literal_too_large_for_u32_is_rejected() {
+    let test = CompileTest::new();
+    let error = test
+        .check(
+            "u32_out_of_range.nr",
+            r#"func main() -> i32 {
+    val x: u32 = 5000000000
+    return 0
+}
+"#,
+        )
+        .expect_err("5000000000 exceeds u32::MAX");
     assert!(
-        output.contains("out of range") || output.contains("OutOfRange"),
-        "Error message should mention out of range: {}",
-        output
+        error.contains("out of range"),
+        "the diagnostic should say the literal is out of range: {error}"
     );
-}
-
-#[test]
-fn test_default_to_i32() {
-    // Test: val x = 42 (no type annotation)
-    // Should default to i32 and pass type checking
-    let (success, output) = check_test("default_i32");
-    assert!(success, "Type checking failed: {}", output);
-}
-
-#[test]
-fn test_mixed_types_inference() {
-    // Test: Complex program with multiple type inferences
-    // All literals should infer correctly and pass type checking
-    let (success, output) = check_test("mixed_types");
-    assert!(success, "Type checking failed: {}", output);
 }
 
 // ── Codegen regression tests ──────────────────────────────────────────────────

@@ -8,18 +8,18 @@ use crate::precedence::Precedence;
 use super::Parser;
 
 /// A binding pattern on the left of a destructuring `val`/`mut`. Lives only
-/// during parsing — it is expanded to ordinary variable declarations and never
+/// during parsing: it is expanded to ordinary variable declarations and never
 /// reaches the AST.
 pub(super) enum DestructurePattern {
-    /// `_` — matches and discards the value, binding nothing.
+    /// `_`: matches and discards the value, binding nothing.
     Wildcard,
     /// A binding name.
     Bind(Identifier),
     /// A nested tuple pattern `(a, b, ...)`.
     Tuple(Vec<DestructurePattern>),
     /// A struct pattern `Name { field, field, ... }` binding each field by its name.
-    /// The type name is syntax-only — field access in the desugar resolves against
-    /// the scrutinee's own type — so it is not retained.
+    /// The type name is syntax-only: field access in the desugar resolves against
+    /// the scrutinee's own type, so it is not retained.
     Struct { fields: Vec<Identifier> },
     /// An array pattern `[p0, p1, ..rest]` binding elements positionally with an
     /// optional trailing rest.
@@ -286,7 +286,7 @@ impl Parser {
                 }
                 Ok(Stmt::Expr(expr))
             }
-            // `self` keyword as statement — detect `self.field = expr` field assignments
+            // `self` keyword as statement: detect `self.field = expr` field assignments
             TokenKind::SelfLower => {
                 if self.current + 1 < self.tokens.len() {
                     if let Some(next_token) = self.tokens.get(self.current + 1) {
@@ -339,8 +339,8 @@ impl Parser {
 
     /// Parse one source statement and append the resulting AST statement(s) to
     /// `out`. Most statements append exactly one node, but a tuple-destructuring
-    /// bind `val (a, b) = e` desugars to several — a temp binding plus one
-    /// projection per leaf — so it is spliced in here rather than forcing the
+    /// bind `val (a, b) = e` desugars to several (a temp binding plus one
+    /// projection per leaf), so it is spliced in here rather than forcing the
     /// single-`Stmt` shape of [`Parser::parse_stmt`].
     pub(crate) fn parse_stmt_into(&mut self, out: &mut Vec<Stmt>) -> ParseResult<()> {
         self.skip_newlines();
@@ -380,7 +380,7 @@ impl Parser {
     }
 }
 
-/// Extract the span from a statement — shared by span-calculation in block-ending logic.
+/// Extract the span from a statement: shared by span-calculation in block-ending logic.
 pub(crate) fn stmt_span(stmt: &Stmt) -> shared_types::Span {
     match stmt {
         Stmt::VarDecl { span, .. } => *span,

@@ -2,7 +2,7 @@
 //
 // The compiler supplies all three for the builtin key types. A struct key routes them to
 // its own `PartialEq` / `Comparable` / `Hashable` impl methods, which semantic analysis
-// has already required — that is how `BTreeMap<OrderedF32, V>` gets a total order over
+// has already required. That is how `BTreeMap<OrderedF32, V>` gets a total order over
 // values that `f32` itself cannot provide.
 
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};

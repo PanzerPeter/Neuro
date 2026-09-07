@@ -11,7 +11,7 @@ use super::types::TENSOR_TYPE_NAME;
 use super::Parser;
 
 /// A parsed call argument list: the argument expressions, plus the call-site names of
-/// any named arguments — empty when the call named none.
+/// any named arguments, empty when the call named none.
 type CallArguments = (Vec<Expr>, Vec<Option<Identifier>>);
 
 /// Maximum expression nesting depth to prevent stack overflow
@@ -38,8 +38,8 @@ impl Parser {
         let mut left = self.parse_prefix()?;
 
         while !self.is_at_end() {
-            // A new line beginning with `*`, `(`, or `[` starts a statement — a
-            // dereference (`*r = v`), a parenthesized expression, an array literal —
+            // A new line beginning with `*`, `(`, or `[` starts a statement: a
+            // dereference (`*r = v`), a parenthesized expression, or an array literal,
             // not a continuation of this one. The no-semicolon rule only continues an
             // expression across a newline when the *previous* line ends with an
             // operator, a comma, or an opening delimiter, and every one of those
@@ -101,7 +101,7 @@ impl Parser {
             TokenKind::True => Ok(Expr::Literal(Literal::Boolean(true), token.span)),
             TokenKind::False => Ok(Expr::Literal(Literal::Boolean(false), token.span)),
 
-            // Identifiers — path expressions (`Type::member`), struct literals, or plain idents
+            // Identifiers: path expressions (`Type::member`), struct literals, or plain idents
             TokenKind::Identifier(name) => {
                 let ident = Identifier {
                     name,
@@ -122,7 +122,7 @@ impl Parser {
                         return self.parse_labeled_loop_expr(ident, token.span);
                     }
                 }
-                // `Tensor::<f32, [3, 3]>::zeros()` — the tensor constructor spelling.
+                // `Tensor::<f32, [3, 3]>::zeros()`: the tensor constructor spelling.
                 // A turbofish is otherwise the callee's own generic arguments and must
                 // be followed by `(`; here it applies to the *type* that qualifies the
                 // constructor, so it is followed by another `::`. `Tensor` is the only
@@ -347,7 +347,7 @@ impl Parser {
     ///
     /// `is_move` records a leading `move` keyword. `start_span` is the span of the
     /// opening token (`move` or the pipe). `empty_params` is true when the opener was
-    /// `||` — the zero-parameter form, which has already consumed both pipes; otherwise
+    /// `||`: the zero-parameter form, which has already consumed both pipes; otherwise
     /// a closing `|` is parsed after the comma-separated parameter list.
     fn parse_closure(
         &mut self,
@@ -532,7 +532,7 @@ impl Parser {
 
     /// Parse an unsafe block expression. The `unsafe` keyword has already been
     /// consumed; `start_span` is its span. The body is an ordinary statement
-    /// block — `unsafe` is inert in Phase 1.7, so this only records the node.
+    /// block: `unsafe` is inert in Phase 1.7, so this only records the node.
     fn parse_unsafe_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
         self.skip_newlines();
         self.consume(TokenKind::LeftBrace, "'{' after 'unsafe'")?;
@@ -582,7 +582,7 @@ impl Parser {
 
     /// Parse one call argument: `expr`, or `label: expr` for a named argument.
     ///
-    /// An identifier immediately followed by `:` can only be a label here — a bare `:`
+    /// An identifier immediately followed by `:` can only be a label here: a bare `:`
     /// is not an expression operator in any other argument position, and a qualified
     /// path uses `::`, a single token.
     fn parse_call_argument(&mut self) -> ParseResult<(Option<Identifier>, Expr)> {
@@ -859,7 +859,7 @@ impl Parser {
             TokenKind::LeftParen => Precedence::Call,
             TokenKind::LeftBracket => Precedence::Call,
             TokenKind::Question => Precedence::Call,
-            // A turbofish `::<...>` binds like a call — it only ever precedes one.
+            // A turbofish `::<...>` binds like a call: it only ever precedes one.
             TokenKind::ColonColon => Precedence::Call,
             TokenKind::Dot => Precedence::FieldAccess,
             _ => Precedence::Lowest,
@@ -875,14 +875,14 @@ impl Parser {
         )
     }
 
-    /// Parse `Tensor::<T, [d0, ...]>::ctor(args)` — the tensor constructor spelling, whose
+    /// Parse `Tensor::<T, [d0, ...]>::ctor(args)`: the tensor constructor spelling, whose
     /// turbofish qualifies the *type* rather than the callee.
     ///
     /// The result is an ordinary `Call` on a `Path` whose single type argument is the
     /// assembled `Type::Tensor`. Nothing downstream needs a node of its own: the tensor
     /// type is exactly what a turbofish already carries, and the associated-call arm of
-    /// the type checker is already where `Tensor::scalar(v)` — the same constructors
-    /// spelled without a turbofish — has to be resolved anyway.
+    /// the type checker is already where `Tensor::scalar(v)` (the same constructors
+    /// spelled without a turbofish) has to be resolved anyway.
     fn parse_tensor_qualified_call(&mut self, type_name: Identifier) -> ParseResult<Expr> {
         self.advance(); // consume '::'
         let (args, shape, close_span) = self.parse_generic_type_args()?;

@@ -1,4 +1,4 @@
-// `val-else` — unwrap a pattern or leave the scope.
+// `val-else`: unwrap a pattern or leave the scope.
 //
 // `val PATTERN = value else { ... }` binds the pattern's names for the REST of the
 // enclosing block, not just one arm. The `else` branch handles the failure and must
@@ -9,10 +9,10 @@
 // the scrutinee's type:
 //
 //   Result<T, E>   the `Err` payload
-//   Option<T>      nothing — `None` is empty, so only `else |_|` (or plain `else`)
+//   Option<T>      nothing: `None` is empty, so only `else |_|` (or plain `else`)
 //   any other enum the original scrutinee, unmodified, for a nested `match`
 //
-// Every form is exercised twice — once binding, once failing — and both results
+// Every form is exercised twice (once binding, once failing), and both results
 // are printed, so which side of each `val-else` ran is visible in the output.
 
 enum Shape {

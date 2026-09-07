@@ -6,7 +6,7 @@ use neuro_hir::{HirExprKind, HirItem, HirStmt, HirType};
 
 #[test]
 fn trait_default_method_lowers_as_concrete_method() {
-    // A trait impl that omits a default method still lowers with that method present —
+    // A trait impl that omits a default method still lowers with that method present,
     // the parser injects it, so codegen sees an ordinary inherent method.
     let program = lower(
         r#"
@@ -38,7 +38,7 @@ func main() -> i32 {
 #[test]
 fn generic_trait_bound_monomorphizes_to_concrete_dispatch() {
     // `total<T: Shape>` monomorphizes to a concrete instance whose `s.area()` dispatches
-    // to `Square`'s impl method — traits carry no runtime cost.
+    // to `Square`'s impl method: traits carry no runtime cost.
     let program = lower(
         r#"
 trait Shape { func area(&self) -> i32 }
@@ -134,7 +134,7 @@ func main() -> i32 {
 }
 
 /// A trait declaration lowers to a vtable-layout item carrying its methods in
-/// declaration order — the slot order every implementor shares.
+/// declaration order, the slot order every implementor shares.
 #[test]
 fn trait_lowers_to_its_vtable_method_order() {
     let program = lower(

@@ -272,11 +272,11 @@ func sum_first_five() -> i32 {
 }
 ```
 
-### Iterating with a Position — `.enumerate()`
+### Iterating with a Position: `.enumerate()`
 
 A `for` head may bind a pair instead of a single variable when the iterable ends
-in `.enumerate()`. The first binding is the **position** — a `u64` counting from
-zero — and the second is the element:
+in `.enumerate()`. The first binding is the **position** (a `u64` counting from
+zero), and the second is the element:
 
 ```neuro
 val scores: [i32; 3] = [5, 4, 3]
@@ -297,7 +297,7 @@ for (i, score) in scores.enumerate() {
 
 `.enumerate()` applies to a fixed-size array, a `Vec<T>`, a borrow of either, and
 a range. A range must be parenthesised, because `..` binds looser than a method
-call — `0..n.enumerate()` would enumerate `n`:
+call, `0..n.enumerate()` would enumerate `n`:
 
 ```neuro
 for (step, value) in (10..13).enumerate() {
@@ -305,7 +305,7 @@ for (step, value) in (10..13).enumerate() {
 }
 ```
 
-The position is a count of iterations, not a value the sequence holds — which is
+The position is a count of iterations, not a value the sequence holds, which is
 why the two columns above differ.
 
 The pair head and `.enumerate()` imply each other: a pair head over a plain
@@ -339,7 +339,7 @@ trait IntoIterator {
 ```
 
 Any type implementing either one may stand in a `for` head. A type that
-implements `Iterator` **is** its own iterator — no second `IntoIterator` impl is
+implements `Iterator` **is** its own iterator: no second `IntoIterator` impl is
 needed, and the loop uses the value directly:
 
 ```neuro
@@ -362,7 +362,7 @@ for n in c {
 }
 ```
 
-Implement `IntoIterator` when the container and the cursor are different types —
+Implement `IntoIterator` when the container and the cursor are different types,
 which is what lets a container be walked more than once, since each `for` head
 asks it for a fresh cursor.
 
@@ -399,11 +399,11 @@ for n in doubled {
 Nothing between the source and the loop is materialized: each step pulls one
 element through the whole chain.
 
-**What is not covered.** The built-in heads — a range, a fixed-size array, a
-`Vec<T>`, a borrowed slice — do **not** go through the protocol. They compile to
+**What is not covered.** The built-in heads (a range, a fixed-size array, a
+`Vec<T>`, a borrowed slice) do **not** go through the protocol. They compile to
 counted loops directly, which is a lowering choice, not a difference in meaning.
 
-### Adapter methods — `.map(f)` and `.filter(p)`
+### Adapter methods: `.map(f)` and `.filter(p)`
 
 A `for` head may end in a chain of `.map(f)` / `.filter(p)` calls, which need no
 adapter type of their own:
@@ -421,7 +421,7 @@ for value in (0..12).filter(|x: i32| -> bool { x % 4 == 0 }) {
 }
 ```
 
-The chain runs left to right — a filter sees what the map before it produced —
+The chain runs left to right (a filter sees what the map before it produced)
 and composes to any depth. Each element is pulled through the whole chain one at
 a time; nothing in between is materialized:
 
@@ -434,15 +434,15 @@ for value in [1, 2, 3, 4, 5]
 ```
 
 `.map` may change the element type, so the loop binding is whatever the function
-returns. The function is an ordinary expression of function type — usually a
-closure literal — evaluated **once**, before the loop, in the scope around it: it
+returns. The function is an ordinary expression of function type (usually a
+closure literal) evaluated **once**, before the loop, in the scope around it: it
 cannot name the binding it feeds, and a closure binding used by a head is still
 usable afterwards.
 
 Like `.enumerate()`, these apply to every head: a range (parenthesised), a
 fixed-size array, a `Vec<T>`, a borrow of either, and any type that implements
 `IntoIterator` or `Iterator`. `.enumerate()` stays outermost, and its position
-counts what the chain **yielded** — so it stays dense however much a filter drops:
+counts what the chain **yielded**, so it stays dense however much a filter drops:
 
 ```neuro
 for (rank, value) in [10, 3, 20, 4, 30].filter(|x: i32| -> bool { x >= 10 }).enumerate() {
@@ -455,10 +455,10 @@ value; a function that does not take the element type is rejected where the head
 is written.
 
 **Head form, not a value.** `.map` / `.filter` are part of the `for` head, exactly
-as `.enumerate()` is — `val m = xs.map(f)` is not a method call that resolves.
+as `.enumerate()` is: `val m = xs.map(f)` is not a method call that resolves.
 Write the adapter type, as above, when the pipeline has to be stored or returned.
 
-### Walking text — `.chars()` and `.char_indices()`
+### Walking text: `.chars()` and `.char_indices()`
 
 A `string` is UTF-8, so its characters are not its bytes. `.chars()` is an ordinary
 iterator over Unicode scalar values and stands in a `for` head like any other, with
@@ -470,7 +470,7 @@ is the offset `.slice(range)` takes.
 for c in "héllo".chars() { }                       // 5 scalars, 6 bytes
 
 for (offset, c) in "héllo".char_indices() {
-    // offset: 0, 1, 3, 4, 5 — 'é' occupies two bytes
+    // offset: 0, 1, 3, 4, 5 ('é' occupies two bytes)
 }
 ```
 
@@ -668,7 +668,7 @@ func classify(n: i32) -> i32 {
 ```
 
 An arm body is an expression, and may also be a bare `return`, `break`, or
-`continue` — the statement that leaves the enclosing function or loop instead of
+`continue`, the statement that leaves the enclosing function or loop instead of
 producing a value for the arm:
 
 ```neuro

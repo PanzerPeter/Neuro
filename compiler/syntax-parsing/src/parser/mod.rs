@@ -28,7 +28,7 @@ pub(crate) struct Parser {
     pub(super) expr_depth: usize,
     /// When true, an identifier followed by `{` is NOT parsed as a struct literal.
     /// Set to true inside if/while/for conditions to prevent consuming the block's `{`.
-    /// Cleared again inside a delimiter pair — see [`Parser::inside_delimiters`].
+    /// Cleared again inside a delimiter pair: see [`Parser::inside_delimiters`].
     pub(super) no_struct_lit: bool,
     /// Loop labels in scope at the current parse position, innermost last.
     /// `break`/`continue` labels and value-carrying `break v` share bare-identifier
@@ -140,7 +140,7 @@ impl Parser {
         self.with_struct_lit_guard(true, f)
     }
 
-    /// Parse `f` inside a delimiter pair — `( ... )`, `[ ... ]`, or an argument list.
+    /// Parse `f` inside a delimiter pair: `( ... )`, `[ ... ]`, or an argument list.
     /// A `{` there cannot be a header's body block, so a struct literal is unambiguous
     /// and the guard is lifted for the duration.
     pub(super) fn inside_delimiters<T>(

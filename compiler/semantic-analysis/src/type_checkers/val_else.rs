@@ -2,7 +2,7 @@
 //
 // Two rules make this more than a one-armed `match`: the pattern's bindings land in
 // the ENCLOSING scope (so the rest of the block sees them), and the `else` branch must
-// leave that scope — a branch that can fall through would reach code whose bindings
+// leave that scope: a branch that can fall through would reach code whose bindings
 // were never initialized.
 
 use ast_types::{Expr, Pattern, Stmt};
@@ -25,7 +25,7 @@ impl TypeChecker {
     ///
     /// The scrutinee is checked first so the pattern and the `else` binding both
     /// resolve against a concrete type; the `else` branch is then checked in its own
-    /// scope, and only afterwards are the pattern's bindings introduced — the branch
+    /// scope, and only afterwards are the pattern's bindings introduced: the branch
     /// must not see the bindings its failure means were never produced.
     pub(crate) fn check_val_else(
         &mut self,
@@ -76,7 +76,7 @@ impl TypeChecker {
     }
 
     /// The type `else |name|` names, per the documented table: a `Result`'s `Err` payload,
-    /// nothing for an `Option` (whose failure variant carries none — reported), and
+    /// nothing for an `Option` (whose failure variant carries none, reported), and
     /// the untouched scrutinee for every other type.
     fn else_binding_type(&mut self, ident: &Identifier, scrut_ty: &Type) -> Option<Type> {
         if matches!(scrut_ty, Type::Unknown) {
@@ -108,7 +108,7 @@ impl TypeChecker {
 
 /// Whether a statement list is guaranteed to leave the enclosing scope.
 ///
-/// Any diverging statement suffices — everything after it is unreachable, so the list
+/// Any diverging statement suffices: everything after it is unreachable, so the list
 /// as a whole cannot fall through.
 pub(crate) fn stmts_diverge(stmts: &[Stmt]) -> bool {
     stmts.iter().any(stmt_diverges)

@@ -27,7 +27,7 @@ const CHAR_BITS: u32 = 32;
 /// This is the Phase 1.8 scaffold of the MLIR path: it walks the typed HIR and
 /// emits one `func.func` *declaration* (external, empty body) per free function
 /// and per `impl` method, mapping each HIR type to its MLIR counterpart. Function
-/// bodies are intentionally not lowered yet — that is the Phase 3+ tensor / linalg
+/// bodies are intentionally not lowered yet; that is the Phase 3+ tensor / linalg
 /// work; this stage proves the HIR → `melior` → verified MLIR pipeline end-to-end.
 ///
 /// # Errors

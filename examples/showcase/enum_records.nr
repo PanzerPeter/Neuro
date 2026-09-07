@@ -1,4 +1,4 @@
-// Showcase — pattern matching working alongside enums, structs, methods, arrays,
+// Showcase: pattern matching working alongside enums, structs, methods, arrays,
 // and loops.
 //
 // Integration example combining several Phase-1E features:

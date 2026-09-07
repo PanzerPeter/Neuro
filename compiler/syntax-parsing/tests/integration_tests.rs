@@ -328,7 +328,7 @@ fn test_complete_program_with_continue_statement() {
     assert!(result.is_ok(), "Parse error: {:?}", result.err());
 }
 
-// `??` (null/error coalescing) — parser-level R-to-L associativity per Appendix B row 14.
+// `??` (null/error coalescing): parser-level R-to-L associativity per Appendix B row 14.
 // Full semantics (Option/Result unwrap) land in Phase 2; this test pins down the AST shape.
 #[test]
 fn test_null_coalesce_is_right_associative() {
@@ -360,7 +360,7 @@ fn test_null_coalesce_is_right_associative() {
     assert!(matches!(*ir, Expr::Identifier(ref id) if id.name == "c"));
 }
 
-// `?` (error propagation) — a postfix operator binding as tightly as a call.
+// `?` (error propagation): a postfix operator binding as tightly as a call.
 #[test]
 fn test_try_is_postfix_and_binds_tighter_than_arithmetic() {
     use syntax_parsing::{parse_expr, BinaryOp, Expr};
@@ -400,7 +400,7 @@ fn test_try_chains_with_field_access() {
 fn test_null_coalesce_binds_looser_than_logical_or() {
     use syntax_parsing::{parse_expr, BinaryOp, Expr};
 
-    // `a ?? b || c` must parse as `a ?? (b || c)` — `||` (row 13) binds tighter than `??` (row 14).
+    // `a ?? b || c` must parse as `a ?? (b || c)`: `||` (row 13) binds tighter than `??` (row 14).
     let expr = parse_expr("a ?? b || c").expect("parse should succeed");
 
     let Expr::Binary {

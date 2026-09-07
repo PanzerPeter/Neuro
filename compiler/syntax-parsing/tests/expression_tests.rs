@@ -608,7 +608,7 @@ fn test_parse_struct_update_only_base() {
 
 #[test]
 fn test_parse_exclusive_range() {
-    // `a..b` parses to a Range expression — only valid as a slice argument.
+    // `a..b` parses to a Range expression: only valid as a slice argument.
     let expr = parse_expr("0..5").expect("range should parse");
     match expr {
         Expr::Range {

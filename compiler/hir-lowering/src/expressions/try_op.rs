@@ -35,7 +35,7 @@ impl Lowerer {
     /// existing per-arm basic-block chain already handles.
     ///
     /// The failure value is rebuilt against the ENCLOSING FUNCTION's return instance, not
-    /// the operand's — a `Result<u8, E>` propagating out of a `-> Result<i32, E>` function
+    /// the operand's. A `Result<u8, E>` propagating out of a `-> Result<i32, E>` function
     /// must produce the latter. The checker has verified the two share an error type.
     pub(super) fn lower_try(
         &mut self,

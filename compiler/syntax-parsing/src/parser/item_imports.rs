@@ -11,10 +11,10 @@ use super::Parser;
 impl Parser {
     /// Parse one `import` declaration.
     ///
-    /// Five surface forms share a single shape — a path, then an optional selection:
+    /// Five surface forms share a single shape (a path, then an optional selection):
     /// `import math`, `import ./utils::io`, `import math::{sqrt, sin}`,
     /// `import math::matrix as mat`, `import Option::{Some, None}`. What each path
-    /// segment *names* — a module file, an item inside one, an enum — is a question
+    /// segment *names* (a module file, an item inside one, an enum) is a question
     /// about the file system, so the parser records the syntax and module resolution
     /// answers it.
     ///
@@ -25,7 +25,7 @@ impl Parser {
         let start = self.consume(TokenKind::Import, "'import'")?;
         self.skip_newlines();
 
-        // `./utils` — a leading `./` marks the path explicitly relative to this file.
+        // `./utils`: a leading `./` marks the path explicitly relative to this file.
         let relative = self.check(&TokenKind::Dot);
         if relative {
             self.advance(); // consume '.'

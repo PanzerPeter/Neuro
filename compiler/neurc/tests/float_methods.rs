@@ -1,8 +1,8 @@
-// Float primitive methods — `.is_nan()` on `f32` / `f64` (Phase 2A).
+// Float primitive methods: `.is_nan()` on `f32` / `f64` (Phase 2A).
 //
 // End-to-end coverage: `.is_nan()` dispatches through the builtin-method intrinsic path
 // and lowers to an unordered self-comparison (`fcmp uno`). NaN is the only value it
-// answers `true` for, which is what makes it necessary — `x != x` is false for NaN too,
+// answers `true` for, which is what makes it necessary: `x != x` is false for NaN too,
 // so the test is not expressible with the comparison operators.
 mod common;
 use common::CompileTest;

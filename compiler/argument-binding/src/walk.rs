@@ -1,7 +1,7 @@
 // One mutable traversal reaching every call expression in a program.
 //
 // A call this walk misses keeps its labels, and the type checker after it would then
-// match arguments against parameters in the order they were written — the one way a
+// match arguments against parameters in the order they were written: the one way a
 // named argument could bind to the wrong parameter instead of failing loudly. So the
 // walk visits every expression position, not only the ones a call is usually written in.
 

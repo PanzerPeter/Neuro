@@ -21,7 +21,7 @@ pub enum TypeError {
     #[error("undefined function '{name}' at {span:?}")]
     UndefinedFunction { name: String, span: Span },
 
-    #[error("'{name}' at {span:?} is a function, not a value; functions are not first-class here — wrap it in a closure with annotated parameters, e.g. `|x: T| -> R {{ {name}(x) }}`")]
+    #[error("'{name}' at {span:?} is a function, not a value; functions are not first-class here; wrap it in a closure with annotated parameters, e.g. `|x: T| -> R {{ {name}(x) }}`")]
     FunctionUsedAsValue { name: String, span: Span },
 
     #[error("generic type parameter '{name}' at {span:?} shadows a built-in type name")]
@@ -161,13 +161,13 @@ pub enum TypeError {
     #[error("trait '{trait_name}' is already defined at {span:?}")]
     TraitAlreadyDefined { trait_name: String, span: Span },
 
-    #[error("`dyn {trait_name}` at {span:?} is unsized and must appear behind a reference — write `&dyn {trait_name}` or `&mut dyn {trait_name}`")]
+    #[error("`dyn {trait_name}` at {span:?} is unsized and must appear behind a reference: write `&dyn {trait_name}` or `&mut dyn {trait_name}`")]
     DynTraitNotBehindReference { trait_name: String, span: Span },
 
-    #[error("`[{element}]` at {span:?} is unsized and must appear behind a reference — write `&[{element}]` or `&mut [{element}]`")]
+    #[error("`[{element}]` at {span:?} is unsized and must appear behind a reference: write `&[{element}]` or `&mut [{element}]`")]
     SliceNotBehindReference { element: String, span: Span },
 
-    #[error("tensor element type {ty} at {span:?} is not a numeric scalar — a tensor's element must be an integer, a floating-point type, or `bool`")]
+    #[error("tensor element type {ty} at {span:?} is not a numeric scalar; a tensor's element must be an integer, a floating-point type, or `bool`")]
     NonScalarTensorElement { ty: Type, span: Span },
 
     #[error("`Tensor` at {span:?} needs a shape: write `Tensor<{element}, [3, 3]>`, or `Tensor<{element}, []>` for a rank-0 scalar tensor")]
@@ -180,20 +180,20 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("this literal at {span:?} is nested {found} deep, but the tensor has rank {expected} — a nested tensor literal must be rectangular and as deep as the shape is long")]
+    #[error("this literal at {span:?} is nested {found} deep, but the tensor has rank {expected}; a nested tensor literal must be rectangular and as deep as the shape is long")]
     TensorRankMismatch {
         expected: usize,
         found: usize,
         span: Span,
     },
 
-    #[error("a rank-0 tensor at {span:?} has no elements to write — build it with `Tensor::scalar(value)` instead of an array literal")]
+    #[error("a rank-0 tensor at {span:?} has no elements to write; build it with `Tensor::scalar(value)` instead of an array literal")]
     TensorScalarNeedsConstructor { span: Span },
 
-    #[error("the tensor type of `Tensor::{ctor}` at {span:?} cannot be inferred here — annotate the binding with `Tensor<T, [...]>`, or name it with a turbofish: `Tensor::<f32, [3, 3]>::{ctor}(...)`")]
+    #[error("the tensor type of `Tensor::{ctor}` at {span:?} cannot be inferred here; annotate the binding with `Tensor<T, [...]>`, or name it with a turbofish: `Tensor::<f32, [3, 3]>::{ctor}(...)`")]
     TensorTypeNotInferable { ctor: String, span: Span },
 
-    #[error("`Tensor` has no constructor named '{ctor}' at {span:?} — it provides `zeros`, `ones`, `identity`, `random_normal`, `scalar`, and `from`")]
+    #[error("`Tensor` has no constructor named '{ctor}' at {span:?}; it provides `zeros`, `ones`, `identity`, `random_normal`, `scalar`, and `from`")]
     UnknownTensorConstructor { ctor: String, span: Span },
 
     #[error("`Tensor::{ctor}` at {span:?} does not apply to {ty}: {reason}")]
@@ -510,7 +510,7 @@ pub enum TypeError {
     #[error("cannot assign through an immutable reference `&{inner}` at {span:?}: writing through `*` requires a `&mut {inner}`")]
     CannotAssignThroughRef { inner: Type, span: Span },
 
-    #[error("cannot borrow '{name}' as mutable at {span:?}: it is already borrowed; a `&mut` borrow is exclusive — no other borrow of '{name}' may be live at the same time")]
+    #[error("cannot borrow '{name}' as mutable at {span:?}: it is already borrowed; a `&mut` borrow is exclusive, so no other borrow of '{name}' may be live at the same time")]
     CannotMutablyBorrowWhileBorrowed { name: String, span: Span },
 
     #[error("cannot borrow '{name}' as immutable at {span:?}: it is already mutably borrowed; an active `&mut` borrow excludes all other borrows of '{name}'")]
@@ -681,7 +681,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("non-exhaustive match at {span:?}: {reason} — add the missing pattern(s) or a `_` wildcard arm")]
+    #[error("non-exhaustive match at {span:?}: {reason}; add the missing pattern(s) or a `_` wildcard arm")]
     NonExhaustiveMatch { reason: String, span: Span },
 
     #[error("cannot match on a value of type {ty} at {span:?}: `match` supports enums, integers, `char`, and `bool` in this phase")]
@@ -721,7 +721,7 @@ pub enum TypeError {
     #[error("a payload sub-pattern must be a binding or `_` at {span:?}: match a payload value with a guard instead (e.g. `Some(n) if n == 0`)")]
     RefutablePayloadPattern { span: Span },
 
-    #[error("closure parameter '{name}' needs a type annotation at {span:?}: write `|{name}: T| ...` — closure parameter-type inference is not yet supported")]
+    #[error("closure parameter '{name}' needs a type annotation at {span:?}: write `|{name}: T| ...`; closure parameter-type inference is not yet supported")]
     ClosureParamNeedsType { name: String, span: Span },
 
     #[error("closure captures '{name}' of non-Copy type {ty} at {span:?}: only Copy values may be captured in this phase (capture by reference / move of owned values is not yet supported)")]

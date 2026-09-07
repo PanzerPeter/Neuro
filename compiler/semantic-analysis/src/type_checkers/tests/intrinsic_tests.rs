@@ -5,7 +5,7 @@ use super::*;
 fn unknown_builtin_method_reports_method_not_found() {
     let mut checker = TypeChecker::new();
 
-    // "hello".foo() — no such intrinsic on string
+    // "hello".foo(): no such intrinsic on string
     let expr = Expr::Call {
         func: Box::new(Expr::FieldAccess {
             object: Box::new(Expr::Literal(
@@ -99,7 +99,7 @@ fn checked_intrinsics_resolve_to_an_option_instance() {
 
 #[test]
 fn checked_intrinsic_mismatched_option_instance_rejected() {
-    // The receiver is `u8`, so the result is `Option<u8>` — not `Option<i64>`.
+    // The receiver is `u8`, so the result is `Option<u8>`, not `Option<i64>`.
     let errors = semantic_errors(&program_with_option(
         "    val a: u8 = 200
     val r: Option<i64> = a.checked_add(100u8)
@@ -117,7 +117,7 @@ fn checked_intrinsic_mismatched_option_instance_rejected() {
 fn integer_intrinsic_wrong_arity_rejected() {
     let mut checker = TypeChecker::new();
 
-    // 200u8.wrapping_add() — missing the rhs argument.
+    // 200u8.wrapping_add(): missing the rhs argument.
     let expr = Expr::Call {
         func: Box::new(Expr::FieldAccess {
             object: Box::new(Expr::Literal(
@@ -149,7 +149,7 @@ fn integer_intrinsic_wrong_arity_rejected() {
 fn integer_intrinsic_mismatched_arg_type_rejected() {
     let mut checker = TypeChecker::new();
 
-    // 200u8.wrapping_add(5i64) — argument type differs from the receiver's.
+    // 200u8.wrapping_add(5i64): the argument type differs from the receiver's.
     let expr = Expr::Call {
         func: Box::new(Expr::FieldAccess {
             object: Box::new(Expr::Literal(
@@ -184,7 +184,7 @@ fn integer_intrinsic_mismatched_arg_type_rejected() {
 fn integer_intrinsic_on_float_reports_method_not_found() {
     let mut checker = TypeChecker::new();
 
-    // (1.5f64).wrapping_add(2.0) — no integer intrinsics on floats.
+    // (1.5f64).wrapping_add(2.0): no integer intrinsics on floats.
     let expr = Expr::Call {
         func: Box::new(Expr::FieldAccess {
             object: Box::new(Expr::Literal(Literal::Float(1.5, None), Span::new(0, 5))),
@@ -246,7 +246,7 @@ fn is_nan_wrong_arity_rejected() {
 #[test]
 fn is_nan_on_non_float_receiver_reports_method_not_found() {
     // Integers cannot be NaN, and half-precision has no scalar arithmetic contract
-    // that could produce one — both fall through to the ordinary method lookup.
+    // that could produce one; both fall through to the ordinary method lookup.
     for decl in [
         "val x: i32 = 1",
         "val x: f16 = 1.5f16",

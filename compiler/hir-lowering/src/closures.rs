@@ -126,7 +126,7 @@ impl Lowerer {
 
 /// A closure body's free-variable footprint: names bound inside the body and the
 /// identifiers it reads, in first-seen order. A flat `bound` over-approximation is
-/// sound for exclusion — a read of a locally-bound name is never a capture.
+/// sound for exclusion: a read of a locally-bound name is never a capture.
 #[derive(Default)]
 struct FreeVars {
     bound: HashSet<String>,

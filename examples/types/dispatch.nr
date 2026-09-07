@@ -1,12 +1,12 @@
-// Static and dynamic dispatch — the two ways to satisfy a trait bound.
+// Static and dynamic dispatch: the two ways to satisfy a trait bound.
 //
 // `impl Trait` is static dispatch: it is shorthand for an anonymous type parameter,
 // so the compiler emits one specialized copy of the function per concrete type that
 // flows through it. There is no indirection and no runtime cost.
 //
 // `dyn Trait` is dynamic dispatch: `&dyn Speaker` is a single runtime type that can
-// hold ANY implementor. The reference carries two words — a pointer to the value and
-// a pointer to that type's method table — and a call jumps through the table. That
+// hold ANY implementor. The reference carries two words: a pointer to the value and
+// a pointer to that type's method table. A call jumps through the table. That
 // costs one indirection, and buys the ability to write one function that serves
 // values of different concrete types.
 //

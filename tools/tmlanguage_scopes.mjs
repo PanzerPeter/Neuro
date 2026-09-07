@@ -9,8 +9,8 @@
 //
 // `compiler/lexical-analysis/tests/tmlanguage_sync.rs` covers the two failure modes
 // that can be checked without a tokenizer (a missing keyword, an invented one, a
-// declaration rule ordered behind `#keywords`). This tool is for everything else —
-// escapes, interpolation holes, number shapes — and is deliberately not wired into CI,
+// declaration rule ordered behind `#keywords`). This tool is for everything else
+// (escapes, interpolation holes, number shapes) and is deliberately not wired into CI,
 // so the Rust workspace keeps no Node dependency.
 //
 //   mkdir -p /tmp/tmscopes && cd /tmp/tmscopes

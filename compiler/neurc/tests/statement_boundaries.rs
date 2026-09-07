@@ -4,7 +4,7 @@
 // precedence, so the FOLLOWING line decided instead: a line starting with `(` was
 // eaten as a call's argument list, and one starting with `[` as an index. `val a = f()`
 // followed by `(2 + 3)` therefore parsed as `f()(2 + 3)`. Where the previous line's
-// value happened to be callable — a closure binding — the misparse type-checked and
+// value happened to be callable (a closure binding), the misparse type-checked and
 // silently ran a different program.
 
 mod common;

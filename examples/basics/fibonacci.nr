@@ -18,7 +18,7 @@ func fibonacci(n: i32) -> i32 {
 }
 
 func main() -> i32 {
-    // Each term is computed from scratch — the naive recursion, printed term by term.
+    // Each term is computed from scratch: the naive recursion, printed term by term.
     for i in 0..=10 {
         val term: i32 = fibonacci(i)
         println("fibonacci({i}) = {term}")

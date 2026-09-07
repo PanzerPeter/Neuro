@@ -1,4 +1,4 @@
-// Option<T> and Result<T, E> — the standard-library enums for absence and failure.
+// Option<T> and Result<T, E>: the standard-library enums for absence and failure.
 //
 // Both are ordinary generic enums, available in every program without a declaration.
 // A generic enum is monomorphized per set of type arguments, so `Option<i32>` and
@@ -22,7 +22,7 @@ func divide(a: i32, b: i32) -> Result<i32, i32> {
     }
 }
 
-// A user-declared generic enum works the same way — nothing about Option is special.
+// A user-declared generic enum works the same way: nothing about Option is special.
 enum Slot<T> { Filled(T), Vacant }
 
 func slot_or(s: Slot<i32>, fallback: i32) -> i32 {

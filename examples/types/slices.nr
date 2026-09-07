@@ -47,7 +47,7 @@ func main() -> i32 {
     println("sum(fixed.slice(1..3)) = {part}")
     println("sum(&grown)            = {vector}")
 
-    // `.slice(range)` copies nothing — it re-points the view into the same buffer.
+    // `.slice(range)` copies nothing: it re-points the view into the same buffer.
     val tail = fixed.slice(2..4)
     println("tail.len()             = {tail.len()}")
     println("largest(tail)          = {largest(tail)}")

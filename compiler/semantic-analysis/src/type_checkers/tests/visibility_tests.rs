@@ -3,7 +3,7 @@
 //!
 //! The fixtures are built by hand rather than parsed: a single parsed file is one
 //! module, so only a hand-built program can put a struct and its reader in different
-//! ones — which is exactly the case being tested.
+//! ones, which is exactly the case being tested.
 
 use super::*;
 

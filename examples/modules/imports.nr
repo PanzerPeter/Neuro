@@ -1,7 +1,7 @@
 // `import` declarations: the five ways to name what another module holds.
 //
-// An import does two things. It pulls the module into the build — without one, only a
-// qualified path reaches into a module — and it binds names locally, so the rest of the
+// An import does two things. It pulls the module into the build (without one, only a
+// qualified path reaches into a module) and it binds names locally, so the rest of the
 // file can drop the qualifier.
 //
 //   examples/modules/
@@ -21,7 +21,7 @@ import shapes::area as region
 import ./shapes
 
 // Enum variants, spelled out. The implicit prelude already binds `Option`'s variants in
-// every module (see `prelude.nr`), so this line is redundant here — it is the form to
+// every module (see `prelude.nr`), so this line is redundant here: it is the form to
 // write when the variants belong to an enum of your own, and an explicit import of a
 // prelude name takes precedence over the implicit one rather than colliding with it.
 import Option::{Some, None}

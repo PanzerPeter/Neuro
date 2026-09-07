@@ -121,7 +121,7 @@ fn a_filter_predicate_must_answer_bool() {
 }
 
 /// A `void` result would bind the loop variable to nothing, which the backend cannot
-/// represent — the same class as a `void` binding.
+/// represent, the same class as a `void` binding.
 #[test]
 fn a_map_producing_void_is_rejected() {
     let errors = semantic_errors(

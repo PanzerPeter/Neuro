@@ -8,7 +8,7 @@ use crate::types::HirType;
 
 /// A complete type-checked program: the ordered list of top-level items.
 ///
-/// This is the HIR root — the stable hand-off from the frontend (parser + type
+/// This is the HIR root: the stable hand-off from the frontend (parser + type
 /// checker) to every backend.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirProgram {
@@ -57,14 +57,14 @@ pub struct HirCapture {
 
 /// The vtable contract of a declared trait.
 ///
-/// Trait declarations are otherwise erased — an `impl Trait for T` lowers to ordinary
+/// Trait declarations are otherwise erased: an `impl Trait for T` lowers to ordinary
 /// inherent methods. What dynamic dispatch additionally needs is a *canonical method
 /// order*, shared by every implementor, so a vtable slot index is meaningful. That
 /// order is the trait's declaration order, recorded here.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirTrait {
     pub name: String,
-    /// Method names in declaration order — the vtable slot order.
+    /// Method names in declaration order: the vtable slot order.
     pub methods: Vec<String>,
     pub span: Span,
 }
@@ -80,7 +80,7 @@ pub struct HirEnum {
 
 /// A single enum variant with its resolved payload fields. A field's `name` is
 /// `Some` for a struct variant and `None` for a tuple variant; a unit variant has
-/// no fields. Fields are in declaration order — the order codegen packs them.
+/// no fields. Fields are in declaration order: the order codegen packs them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirEnumVariant {
     pub name: String,
@@ -95,7 +95,7 @@ pub struct HirEnumField {
     pub ty: HirType,
 }
 
-/// A free function. The return type is always resolved — `HirType::Void` when
+/// A free function. The return type is always resolved: `HirType::Void` when
 /// the source declared none.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirFunction {
@@ -149,11 +149,11 @@ pub struct HirImpl {
 /// associated function.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HirSelfParam {
-    /// `&self` — immutable borrow.
+    /// `&self`: immutable borrow.
     Ref,
-    /// `&mut self` — mutable borrow.
+    /// `&mut self`: mutable borrow.
     RefMut,
-    /// `self` — consuming receiver.
+    /// `self`: consuming receiver.
     Owned,
 }
 

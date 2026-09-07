@@ -1,4 +1,4 @@
-// Showcase — `?` error propagation threaded through earlier features.
+// Showcase: `?` error propagation threaded through earlier features.
 //
 // Cumulative integration example combining:
 //   the `?` operator on both `Result` and `Option`
@@ -9,7 +9,7 @@
 //
 // The point of the combination: `?` inside a loop body leaves the *whole function*,
 // not just the iteration, and the error it carries out is the one the validator
-// produced — it survives the loop, the call chain, and the `match` that reads it.
+// produced: it survives the loop, the call chain, and the `match` that reads it.
 //
 // Expected exit code: 177
 

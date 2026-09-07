@@ -11,7 +11,7 @@
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
 [![CI](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml)
 
-**Status:** Alpha. Phase 1 (Core Language) is complete — the full general-purpose language surface compiles and runs. Phase 2 (Tensors and MLIR) is now open. Per-phase status lives in one place: the [Quick Roadmap](#quick-roadmap).
+**Status:** Alpha. Phase 1 (Core Language) is complete: the full general-purpose language surface compiles and runs. Phase 2 (Tensors and MLIR) is now open. Per-phase status lives in one place: the [Quick Roadmap](#quick-roadmap).
 
 ---
 
@@ -116,13 +116,13 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | **Pattern matching** | Exhaustive `match` expressions over variant / literal / or / range / wildcard patterns with `if` guards, plus `val Point { x, y } = p` and `val [a, ..rest] = arr` destructuring |
 | **`Option` / `Result`** | `Option<T>` and `Result<T, E>` from the implicit prelude. They are ordinary generic enums, available with no declaration and no import, variants included; `??` unwraps either with a lazy fallback; `?` propagates the failure to the caller; `val-else` unwraps or exits the scope; `checked_add` / `checked_sub` / `checked_mul` report integer overflow as `Option::None` |
 | **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop`, `&T` / `&mut T` with flow-sensitive exclusivity, lifetime elision and annotations |
-| **Strings** | Immutable fat-pointer `string` with escapes, `&string` slices, `==`, `+` concatenation, `.len()` / `.clone()` / `.slice(a..b)` / `.char_slice(a..b)`, codepoint iteration with `.chars()` and `.char_indices()`, interpolation `"{x:.2}"`, triple-quoted `"""` blocks with dedent; growable `String` buffer for building text — `push_str` / `clear` / `to_string` |
+| **Strings** | Immutable fat-pointer `string` with escapes, `&string` slices, `==`, `+` concatenation, `.len()` / `.clone()` / `.slice(a..b)` / `.char_slice(a..b)`, codepoint iteration with `.chars()` and `.char_indices()`, interpolation `"{x:.2}"`, triple-quoted `"""` blocks with dedent; growable `String` buffer for building text: `push_str` / `clear` / `to_string` |
 | **Modules & visibility** | Multi-file programs: every `.nr` file is a module and `mod.nr` directories nest; inline `module { }` blocks group within one file; `import math::{sqrt}`, `import ./utils`, `as` renames, module aliases, variant imports, and `export import` re-export facades; declarations and struct fields are private until `export` opts them in; an implicit prelude puts `Option` / `Result` and `Some` / `None` / `Ok` / `Err` in every module, with `@no_prelude` to opt out |
 | **Toolchain** | Native binaries via inkwell 0.10 / LLVM 20; `neurc check` and `neurc compile`; buffered `print` / `println` to stdout, line-buffered on a terminal and drained on every exit path; `panic` / `assert` / `unreachable` runtime with located diagnostics, covering array bounds, string slices, a zero divisor, and debug-build integer overflow, all outlined off the hot path |
 
 ### Current Memory Model
 
-> **Alpha memory warning.** Stack values are reclaimed on return and string literals live in `.rodata`, so neither leaks. Move semantics, borrows, deterministic `Drop`, and the owning collections have landed, so a `Vec`, `HashMap`, `BTreeMap`, or `String` frees its buffer at scope exit. A heap `string` — the one `+` concatenation and interpolation produce — is freed too when the compiler can prove who owns it: a temporary the statement consumes, or a binding whose initializer allocated it. A loop that formats output therefore holds steady rather than growing.
+> **Alpha memory warning.** Stack values are reclaimed on return and string literals live in `.rodata`, so neither leaks. Move semantics, borrows, deterministic `Drop`, and the owning collections have landed, so a `Vec`, `HashMap`, `BTreeMap`, or `String` frees its buffer at scope exit. A heap `string` (the one `+` concatenation and interpolation produce) is freed too when the compiler can prove who owns it: a temporary the statement consumes, or a binding whose initializer allocated it. A loop that formats output therefore holds steady rather than growing.
 >
 > What still leaks is a heap `string` that escapes what the compiler can follow: one stored into a collection or a struct field, one returned from a function, and the prior value of a reassigned binding. The ownership test answers conservatively by design, since freeing a `.rodata` literal would be far worse than holding a buffer.
 >
@@ -539,7 +539,7 @@ vsce package                     # -> neuro-language-support-<version>.vsix
 code --install-extension neuro-language-support-*.vsix --force
 ```
 
-Reload the VS Code window afterwards (`Developer: Reload Window`) — a grammar change
+Reload the VS Code window afterwards (`Developer: Reload Window`). A grammar change
 does not apply to already-open editors. During grammar work, symlinking the folder into
 `~/.vscode/extensions/` avoids repackaging: a window reload then picks up every edit.
 
@@ -558,7 +558,7 @@ does not apply to already-open editors. During grammar work, symlinking the fold
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture guidelines, coding standards, and the pull request process. Confirmed open defects live in [docs/BUGS.md](docs/BUGS.md) — fixing one is the best way to start.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture guidelines, coding standards, and the pull request process. Confirmed open defects live in [docs/BUGS.md](docs/BUGS.md). Fixing one is the best way to start.
 
 The project is in early alpha, so breaking changes are expected. Contributions should focus on **Phase 2 (Tensors and MLIR)**; the [Quick Roadmap](#quick-roadmap) marks which phase is currently open.
 

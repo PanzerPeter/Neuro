@@ -100,7 +100,7 @@ func main() -> i32 {
 #[test]
 fn distinct_option_instances_are_independent_types() {
     let test = CompileTest::new();
-    // One template, three instances (i32 / i64 / char) — each monomorphized to its own
+    // One template, three instances (i32 / i64 / char): each monomorphized to its own
     // tagged union, so the payload keeps its own width.
     let source = r#"
 func main() -> i32 {

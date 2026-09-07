@@ -1,6 +1,6 @@
 // End-to-end tests for the extreme values of each integer type.
 //
-// A literal is never negative in source — `-1` is a negation over `1` — so the most
+// A literal is never negative in source (`-1` is a negation over `1`), so the most
 // negative value of a signed type is written with a magnitude one past that type's
 // maximum. Range-checking the magnitude alone rejected every such value, and carrying
 // the magnitude as an `i64` in the lexer put `i64::MIN` and the upper half of `u64` out

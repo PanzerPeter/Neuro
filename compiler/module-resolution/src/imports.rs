@@ -127,8 +127,8 @@ impl ImportScope {
 
 /// Reject an `export import` whose bound name is not an item.
 ///
-/// A module and a variant are both reached through something else — a deeper path, or the
-/// enum that owns them — so neither has a name this module could stand in front of.
+/// A module and a variant are both reached through something else (a deeper path, or the
+/// enum that owns them), so neither has a name this module could stand in front of.
 fn reject_reexport(reexport: bool, name: &str, what: &str, from: &str) -> Result<(), ModuleError> {
     if !reexport {
         return Ok(());
@@ -146,7 +146,7 @@ pub(crate) fn resolve_imports(
     prelude: &[PreludeVariant],
 ) -> Result<Vec<ImportScope>, ModuleError> {
     // A re-exported name only becomes reachable once the module re-exporting it has been
-    // resolved, and modules resolve in id order — so a chain of re-exports settles one link
+    // resolved, and modules resolve in id order, so a chain of re-exports settles one link
     // per round. Errors are held back until the tables stop growing: an import that fails
     // this round may be exactly the one the next round makes resolvable.
     while install_reexports(graph, prelude) {}
@@ -156,7 +156,7 @@ pub(crate) fn resolve_imports(
 /// Add the prelude's variant bindings to a module that did not opt out.
 ///
 /// They are the weakest bindings in the language: a name this module declares, or already
-/// imported, keeps its meaning, and neither case is an error — the prelude is a fallback,
+/// imported, keeps its meaning, and neither case is an error: the prelude is a fallback,
 /// so shadowing it is how a module overrides what the prelude offers.
 fn seed_prelude(
     graph: &ModuleGraph,
@@ -205,7 +205,7 @@ fn build_scopes(
 /// Copy one round of re-export tables onto the graph, reporting whether anything was new.
 fn install_reexports(graph: &mut ModuleGraph, prelude: &[PreludeVariant]) -> bool {
     // A re-export names an item, never a prelude variant, so nothing here reads the
-    // seeded bindings — but `resolve_one` consults the prelude to decide whether an
+    // seeded bindings, but `resolve_one` consults the prelude to decide whether an
     // unresolvable head could be an enum, and must reach the same verdict either round.
     let Ok(scopes) = build_scopes(graph, Tolerance::Skip, prelude) else {
         return false;
@@ -242,7 +242,7 @@ fn resolve_one(
     }
 
     // No segment named a module. A single segment can still be an enum whose variants are
-    // being imported — but only if an enum by that name exists: a head that names neither
+    // being imported, but only if an enum by that name exists: a head that names neither
     // a module nor an enum used to be read as an enum regardless, which turned a typo, and
     // any path to an out-of-scope module, into a binding that quietly meant nothing.
     if consumed == 0 && segments.len() == 1 && names_an_enum(graph, prelude, segments[0]) {
@@ -328,7 +328,7 @@ fn bind_from_module(
                 let bound = entry.alias.as_ref().unwrap_or(&entry.name);
                 let name = &entry.name.name;
                 // A listed name is a child module (`import ./utils::{io}`) or an item the
-                // module declares — the file system settles which.
+                // module declares: the file system settles which.
                 match graph.resolve_segment(from, Some(module), name) {
                     Some(child) => {
                         scope.bind_module(&bound.name, child, &owner, import.exported)?
@@ -381,14 +381,14 @@ fn bind_from_item(
             let (origin, flat) = graph.flat_origin(module, item);
             scope.bind_item(bound, &flat, origin, &owner, import.exported)
         }
-        // `import geometry::Shape::{Circle, Square}` — the tail is a type in the module,
+        // `import geometry::Shape::{Circle, Square}`: the tail is a type in the module,
         // so the listed names are its variants.
         ImportSelection::List(names) => {
             if !graph.declares_type(module, item) {
                 return Err(undeclared());
             }
             // The listed names are variants of `item`, and a variant carries the enum's
-            // visibility — so the enum itself is the only thing to gate.
+            // visibility, so the enum itself is the only thing to gate.
             graph.check_visible(from, module, item)?;
             for entry in names {
                 let bound = entry.alias.as_ref().unwrap_or(&entry.name);

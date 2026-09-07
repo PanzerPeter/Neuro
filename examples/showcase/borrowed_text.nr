@@ -1,4 +1,4 @@
-// Showcase — explicit lifetime annotations working together with prior features.
+// Showcase: explicit lifetime annotations working together with prior features.
 //
 // Cumulative integration example combining:
 //   explicit lifetime annotations `<'a>` on reference parameters + return

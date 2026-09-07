@@ -158,7 +158,7 @@ fn resolve_qualified(
                     from: graph.display(from).to_string(),
                 });
             }
-            // The member is a method or a variant, which carry the type's visibility —
+            // The member is a method or a variant, which carry the type's visibility:
             // only the type itself is gated.
             graph.check_visible(from, module, ty)?;
             rewrite_member(
@@ -253,7 +253,7 @@ fn rewrite_bare(site: Site<'_>, item: &str) {
                     name: item.to_string(),
                     span: ident.span,
                 }),
-                // `geometry::Point { x: 1.0 }` parses as a struct-variant construction —
+                // `geometry::Point { x: 1.0 }` parses as a struct-variant construction:
                 // the brace form is indistinguishable from `Shape::Circle { .. }` until the
                 // qualifier is known to name a module.
                 Expr::EnumStructLiteral {

@@ -1,8 +1,8 @@
 // Outlining of error paths into cold functions.
 //
-// A panic-family error path is several instructions of diagnostic machinery — one
+// A panic-family error path is several instructions of diagnostic machinery, one
 // `write(2, …)` per message fragment, an `abort()`, and the `.rodata` globals they
-// reference — that runs at most once in a program's lifetime. Emitted inline it still
+// reference, that runs at most once in a program's lifetime. Emitted inline it still
 // occupies cache lines in the middle of the hot function, between the guard branch and
 // the code that follows it, and it does so at every bounds check, every assertion, and
 // every string-slice boundary check.
@@ -27,7 +27,7 @@ use crate::errors::{CodegenError, CodegenResult};
 /// edge is never chosen as the fall-through.
 const HOT_EDGE_WEIGHT: u64 = 2000;
 
-/// Relative weight of a guard's failure edge — the panic path, which a correct program
+/// Relative weight of a guard's failure edge, the panic path, which a correct program
 /// never takes.
 const COLD_EDGE_WEIGHT: u64 = 1;
 
@@ -75,8 +75,8 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Mark a runtime guard's two edges as hot and cold.
     ///
-    /// Every guard in the language has the same shape — branch to the continuation when
-    /// the condition holds, to the failure path when it does not — so the false edge is
+    /// Every guard in the language has the same shape: branch to the continuation when
+    /// the condition holds, to the failure path when it does not, so the false edge is
     /// always the cold one.
     pub(crate) fn mark_cold_branch(&self, branch: InstructionValue<'ctx>) -> CodegenResult<()> {
         let weights = self.context.metadata_node(&[

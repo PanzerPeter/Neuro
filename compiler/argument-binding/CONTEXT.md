@@ -5,24 +5,24 @@ Bind every call site's arguments to the callee's parameters in declaration order
 
 ## Entry Point
 - Type: Library function
-- Input: `items: &mut [Item]` — the whole program, every module merged and the prelude prepended
-- Output: `Result<(), Vec<ArgumentError>>` — the items are rewritten in place; every call that cannot be bound is reported, not just the first
+- Input: `items: &mut [Item]`: the whole program, every module merged and the prelude prepended
+- Output: `Result<(), Vec<ArgumentError>>`: the items are rewritten in place; every call that cannot be bound is reported, not just the first
 
 ## Data Ownership
 - Tables / Events Published / Events Consumed / Public Read Model: none
 - Reads and rewrites the AST it is handed; touches no files
 
 ## Shared Kernel
-- ast-types — the `Item` / `Stmt` / `Expr` tree this slice walks and rewrites, and the `ParamLabel` a declaration carries
-- shared-types — `Identifier`, `Span` on the labels it matches and the errors it reports
-- thiserror — `ArgumentError` derivation
+- ast-types: the `Item` / `Stmt` / `Expr` tree this slice walks and rewrites, and the `ParamLabel` a declaration carries
+- shared-types: `Identifier`, `Span` on the labels it matches and the errors it reports
+- thiserror: `ArgumentError` derivation
 
 ## Notes
 - **A label is surface syntax, and this slice is where it stops.** `Expr::Call` carries
   `arg_labels` beside `args`; this pass permutes `args` into the callee's declaration order
   and empties `arg_labels`. Type checking, HIR lowering, and both backends therefore see the
   positional call they always saw, which is what makes a named argument cost nothing at
-  runtime — it produces the same IR as writing the arguments in order.
+  runtime: it produces the same IR as writing the arguments in order.
 - **A compiler-known callee has no `Item` to read its labels off, so its signature is
   seeded.** `SignatureTable::build` calls `seed_builtins` before `collect`, which today
   records one entry: `Tensor::random_normal(mean:, std:)`, spelled with its labels
@@ -32,18 +32,18 @@ Bind every call site's arguments to the callee's parameters in declaration order
 - **Permuting the arguments also permutes when they are evaluated, so a call that would
   notice is rewritten instead** (`hoisting.rs`). Every later stage evaluates an argument
   where it finds it, so a bare permutation ran `f(second: b(), first: a())` as `a()` then
-  `b()` — the opposite of what was written, and of what the positional form does.
+  `b()`, the opposite of what was written, and of what the positional form does.
   `reorders_effects` looks at the arguments the permutation moves past each other and
   ignores the ones nothing can observe (a literal, a path, and those under `paren`/`as`); a
   plain variable read counts, since another argument's `&mut` borrow can change it. When two
   observable arguments would swap, `hoist` replaces the call with
-  `{ val __narg0 = <first written>; …; callee(<in declaration order>) }` — temporaries in
+  `{ val __narg0 = <first written>; …; callee(<in declaration order>) }`: temporaries in
   source order, the call after them already bound. Each temporary carries its parameter's
   own type annotation (`ParamBinding::ty`), because a binding is typed by its initializer
   while an argument is typed by its parameter, and `Vec::new()` or an `i64` literal would
   otherwise lose that. The annotation is dropped when it would not mean the same thing at a
-  call site — a type parameter of the callee, `Self`, `impl Trait`, `dyn Trait`, `&[T]`, a
-  function type — the last three because an argument reaches them through a coercion an
+  call site: a type parameter of the callee, `Self`, `impl Trait`, `dyn Trait`, `&[T]`, a
+  function type; the last three because an argument reaches them through a coercion an
   argument position applies and a binding does not. A statically shaped `Tensor<T, [d0, ...]>`
   is *kept*: its extents are literals, so restating it at a call site names the same type. It is dropped for every method signature
   too, since a method signature is agreed across impls by parameter *name* and so cannot
@@ -53,8 +53,8 @@ Bind every call site's arguments to the callee's parameters in declaration order
   receiver is evaluated before its arguments, so hoisting them ahead of a computed receiver
   (`make().m(b: …, a: …)`) would invert that pair to fix the argument pair.
   `callee_allows_hoisting` therefore takes an identifier, a `Type::member` path, and a method
-  on a *place* receiver — a place resolves to an address, so when it is read is not
-  observable — and leaves anything else permuted in place.
+  on a *place* receiver (a place resolves to an address, so when it is read is not
+  observable) and leaves anything else permuted in place.
 - **The walk is told what binding did.** `CallFn` answers `Bound::InPlace` or
   `Bound::Hoisted`; on the latter `walk_expr` descends only into the temporaries'
   initializers, since the trailing call is already bound. Visiting that call again would
@@ -66,7 +66,7 @@ Bind every call site's arguments to the callee's parameters in declaration order
   checker matches argument types against parameter types, or it would compare the wrong
   pairs.
 - **A call that named nothing is left untouched.** The parser emits an empty `arg_labels` for
-  it, and the fast path returns immediately unless the callee has a *required* label — an
+  it, and the fast path returns immediately unless the callee has a *required* label: an
   `external internal:` parameter is an obligation on every call site, so an all-positional
   call to one is still checked. Everything else keeps the exact node it had, so arity and
   type errors stay the type checker's to report and this pass adds no failure mode to
@@ -89,7 +89,7 @@ Bind every call site's arguments to the callee's parameters in declaration order
   so a required label on that function would be enforced against the closure call. Only a
   program that shadows a labelled function by name can notice.
 - **A missed call would be silent, so it is made loud.** If this walk failed to reach a call,
-  its labels would survive and the arguments would stay in written order — the one way a named
+  its labels would survive and the arguments would stay in written order, the one way a named
   argument could bind to the wrong parameter instead of failing. `hir-lowering` refuses a call
   whose `arg_labels` is non-empty, so anything the walk misses fails the build rather than
   compiling to the wrong program.

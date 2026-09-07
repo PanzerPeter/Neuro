@@ -90,7 +90,7 @@ func main() -> i32 {
 fn the_fallback_is_lazy() {
     let test = CompileTest::new();
     // The fallback aborts the process. Reaching exit code 7 therefore proves it was
-    // never evaluated — laziness is observable, not just documented.
+    // never evaluated: laziness is observable, not just documented.
     let source = r#"
 func never_runs() -> i32 {
     panic("the fallback of a present value must not be evaluated")
@@ -114,7 +114,7 @@ func main() -> i32 {
 fn coalesce_composes_with_a_fallible_builtin() {
     let test = CompileTest::new();
     // `checked_mul` and `Vec::get` both return the prelude `Option<T>`, so `??` reads
-    // them without a `match` — the pattern the operator exists for.
+    // them without a `match`: the pattern the operator exists for.
     let source = r#"
 func main() -> i32 {
     val safe: i32 = 1000

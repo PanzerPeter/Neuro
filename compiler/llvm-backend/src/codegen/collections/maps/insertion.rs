@@ -104,7 +104,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_unconditional_branch(probe_bb)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
-        // The first slot that is not FULL takes the entry — an EMPTY one, or a
+        // The first slot that is not FULL takes the entry: an EMPTY one, or a
         // tombstone whose run is thereby reused.
         self.builder.position_at_end(probe_bb);
         let slot = self

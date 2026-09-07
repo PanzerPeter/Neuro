@@ -596,7 +596,7 @@ func main() -> i32 { 0 }
 
 #[test]
 fn a_constraint_carries_through_a_second_bounded_parameter() {
-    // The inner call has no impl to read — its argument is the outer parameter — so the
+    // The inner call has no impl to read, since its argument is the outer parameter, so the
     // outer bound's own constraint is what must answer for it.
     let errors = semantic_errors(
         r#"

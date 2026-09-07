@@ -2,7 +2,7 @@ use super::semantic_errors;
 use crate::errors::TypeError;
 
 /// The protocol traits live in the prelude, which these tests do not load, so each
-/// program declares them itself — a local declaration shadows the prelude's entry, so
+/// program declares them itself. A local declaration shadows the prelude's entry, so
 /// this is the same shape a real program sees.
 const PROTOCOL_TRAITS: &str = r#"
 trait Iterator {
@@ -220,7 +220,7 @@ func main() -> i32 {{
 }
 
 /// Outside a `for` head there is no position to bind, so the call names no method at
-/// all — the diagnostic is the ordinary one for a method a type does not have.
+/// all: the diagnostic is the ordinary one for a method a type does not have.
 #[test]
 fn char_indices_outside_a_for_head_is_not_a_method() {
     let source = format!(
@@ -242,7 +242,7 @@ func main() -> i32 {{
 }
 
 /// The decode step behind `Chars::next` belongs to the prelude. A program is not the
-/// prelude, so it cannot reach it — the language specifies no byte-indexed read.
+/// prelude, so it cannot reach it; the language specifies no byte-indexed read.
 #[test]
 fn the_decode_intrinsic_is_out_of_reach_of_a_program() {
     let errors = semantic_errors(

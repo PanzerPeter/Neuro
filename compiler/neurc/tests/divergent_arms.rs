@@ -95,7 +95,7 @@ func main() -> i32 { f(0 - 1) }
 
 #[test]
 fn a_panicking_arm_still_aborts_when_its_path_is_taken() {
-    // `abort()` raises SIGABRT, so the process carries no ordinary exit code — the
+    // `abort()` raises SIGABRT, so the process carries no ordinary exit code: the
     // helper reports -1. What matters is that it did not return the other arm's value.
     let test = CompileTest::new();
     let exit = test

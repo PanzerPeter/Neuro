@@ -196,7 +196,7 @@ func main() -> i32 {
 }
 
 /// The annotation types each leaf, so an `f32` tensor's `1.0` is an `f32` literal
-/// rather than an `f64` one being narrowed — the same rule `val x: f32 = 0.01` follows.
+/// rather than an `f64` one being narrowed, the same rule `val x: f32 = 0.01` follows.
 /// A half-precision element still needs its suffix, exactly as a half-precision scalar
 /// binding does: the tensor path does not widen literal inference.
 #[test]
@@ -428,7 +428,7 @@ func main() -> i32 {
 
 /// The `Device` enum these ownership tests need. The unit-test harness type-checks bare
 /// source without the prelude, so the program that would get it implicitly has to declare
-/// it — which is also what a `@no_prelude` module does.
+/// it, which is also what a `@no_prelude` module does.
 const DEVICE_DECL: &str = r#"
 enum Device {
     CPU,
@@ -497,7 +497,7 @@ func main() -> i32 {
     );
 }
 
-/// A borrow cannot be consumed, so `.to` is not offered on one — the alternative would be
+/// A borrow cannot be consumed, so `.to` is not offered on one; the alternative would be
 /// moving a tensor out from under whoever owns it.
 #[test]
 fn a_device_transfer_is_rejected_on_a_borrow() {

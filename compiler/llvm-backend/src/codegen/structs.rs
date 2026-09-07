@@ -11,7 +11,7 @@ use super::context::CodegenContext;
 impl<'ctx> CodegenContext<'ctx> {
     /// Populate the struct definition table before code generation begins. The field
     /// *types* are also handed to the [`crate::type_mapping::TypeMapper`], which needs
-    /// them to build a struct's LLVM aggregate wherever one appears — a parameter, a
+    /// them to build a struct's LLVM aggregate wherever one appears: a parameter, a
     /// return type, or a field of another struct.
     pub(crate) fn set_struct_defs(&mut self, defs: HashMap<String, Vec<(String, Type)>>) {
         let field_types = defs
@@ -92,7 +92,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Read a single field from a struct.
     ///
     /// A named binding is addressed and the field loaded through a GEP. Any other
-    /// object — a chained access (`o.inner.v`), a call result, a struct literal —
+    /// object (a chained access (`o.inner.v`), a call result, a struct literal)
     /// has no storage of its own, so it is evaluated to a first-class aggregate and
     /// the field extracted from that value.
     pub(crate) fn codegen_field_access(
@@ -256,7 +256,7 @@ impl<'ctx> CodegenContext<'ctx> {
             // A field of a struct that itself has storage: GEP into the parent rather
             // than materializing a copy. This is what lets an adapter's `&mut self`
             // method drive the iterator it wraps (`self.inner.next()`) and have the
-            // advance stick — reaching the field as a value would discard it.
+            // advance stick; reaching the field as a value would discard it.
             HirExprKind::FieldAccess {
                 object: parent,
                 field,

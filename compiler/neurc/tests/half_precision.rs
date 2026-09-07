@@ -1,7 +1,7 @@
 // End-to-end tests for the `f16` / `bf16` half-precision primitives.
 //
 // The scalar contract is deliberately narrow: binding, copy, `==`/`!=`, and
-// `as`-cast to/from any numeric type — but no arithmetic (compute in `f32`).
+// `as`-cast to/from any numeric type, but no arithmetic (compute in `f32`).
 
 mod common;
 use common::CompileTest;

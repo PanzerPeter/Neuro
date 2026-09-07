@@ -2,7 +2,7 @@
 //
 // The unit tests in `argument-binding` prove the permutation is right; these prove the
 // *program* is right. Every program here is written so that binding the arguments in the
-// order they appear would produce a different exit code from binding them by name — a
+// order they appear would produce a different exit code from binding them by name: a
 // pass that silently ignored a label would still compile, and only the answer would be
 // wrong.
 

@@ -1,8 +1,8 @@
 //! Resolve a root `.nr` file into the single item list its program is built from.
 //!
 //! Each `.nr` file is a module; a directory holding a `mod.nr` is a module with children.
-//! A module is loaded when an `import` names it or a qualified path reaches into it —
-//! `math::sqrt`, `utils::io::read`, `geometry::Point` — so a directory full of unrelated
+//! A module is loaded when an `import` names it or a qualified path reaches into it
+//! (`math::sqrt`, `utils::io::read`, `geometry::Point`), so a directory full of unrelated
 //! programs never drags its neighbours into a build.
 //!
 //! Resolution flattens: every loaded module's items are merged into one namespace, the
@@ -56,7 +56,7 @@ pub struct ResolvedProgram {
 /// One enum variant the implicit prelude binds in every module that did not opt out.
 ///
 /// The prelude's contents belong to the driver, which owns the prelude source; this slice
-/// is told what to bind for the same reason it is handed a parser — it may not reach into
+/// is told what to bind for the same reason it is handed a parser: it may not reach into
 /// another slice to find out.
 #[derive(Debug, Clone)]
 pub struct PreludeVariant {
@@ -104,7 +104,7 @@ pub enum ModuleError {
 
     #[error(
         "`{name}` is declared in both `{first}` and `{second}`; module items share one \
-         namespace, so the two declarations collide — rename one of them"
+         namespace, so the two declarations collide; rename one of them"
     )]
     DuplicateItem {
         name: String,
@@ -142,13 +142,13 @@ pub enum ModuleError {
 
     #[error(
         "`{name}` is declared twice as an inline module in `{from}`; one module name can \
-         stand for one block — rename one of them"
+         stand for one block; rename one of them"
     )]
     DuplicateInlineModule { name: String, from: String },
 
     #[error(
         "`export import` in `{from}` would re-export `{name}`, which names {what} rather \
-         than an item; only an item can be re-exported — drop the `export`"
+         than an item; only an item can be re-exported; drop the `export`"
     )]
     ExportImportNotItem {
         name: String,
@@ -158,7 +158,7 @@ pub enum ModuleError {
 
     #[error(
         "`{path}` in `{from}` names neither a module nor an enum: there is no `{head}.nr`, \
-         no `{head}/mod.nr`, no inline `module {head}` in scope, and no `enum {head}` — so \
+         no `{head}/mod.nr`, no inline `module {head}` in scope, and no `enum {head}`, so \
          the import brings nothing into scope"
     )]
     UnknownImportHead {
@@ -169,7 +169,7 @@ pub enum ModuleError {
 
     #[error(
         "`{path}` in `{from}` cannot reach the inline module `{head}`: a block sees its own \
-         children and its file's sibling files, not the file's other blocks — move `{head}` \
+         children and its file's sibling files, not the file's other blocks; move `{head}` \
          into a `{head}.nr` beside it and import it as `./{head}`"
     )]
     UnreachableInlineModule {
@@ -183,7 +183,7 @@ pub enum ModuleError {
 ///
 /// Parsing is supplied by the caller rather than imported: this slice depends only on the
 /// AST it rewrites, so the parser stays on the driver's side of the boundary. `prelude`
-/// names the enum variants every module may write bare — `Some`, `None`, `Ok`, `Err` —
+/// names the enum variants every module may write bare (`Some`, `None`, `Ok`, `Err`)
 /// and comes from the caller for the same reason.
 ///
 /// # Errors

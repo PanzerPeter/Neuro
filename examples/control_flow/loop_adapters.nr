@@ -3,7 +3,7 @@
 // `.map()`, `.filter()`, and `.enumerate()` are adapters that return new iterators,
 // so they compose in a single `for` head. They are recognised as part of the head
 // rather than resolved as methods, which is what lets them
-// apply to a range and an array — neither of which is a value with methods on it.
+// apply to a range and an array: neither of which is a value with methods on it.
 //
 //     .map(f)     replaces each element with `f(element)`
 //     .filter(p)  drops each element for which `p(element)` is false
@@ -46,7 +46,7 @@ func main() -> i32 {
     }
     println("halves total {mean}")
 
-    // `.enumerate()` stays outermost, and counts what the chain YIELDED — not how
+    // `.enumerate()` stays outermost, and counts what the chain YIELDED, not how
     // many source elements were stepped over to get there.
     for (position, value) in [10, 3, 20, 4, 30].filter(|x: i32| -> bool { x >= 10 }).enumerate() {
         println("kept {position}: {value}")

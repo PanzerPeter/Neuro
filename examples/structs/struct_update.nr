@@ -1,4 +1,4 @@
-// Struct field-init shorthand and functional-update syntax — Phase 2A
+// Struct field-init shorthand and functional-update syntax: Phase 2A
 //
 // Demonstrates `Point { x, y }` shorthand and `Point { x: 10, ..base }` update.
 // Both structs are printed so the inherited field is visibly the base's.

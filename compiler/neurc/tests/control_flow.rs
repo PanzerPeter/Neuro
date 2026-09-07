@@ -320,7 +320,7 @@ func main() -> i32 {
 
 #[test]
 fn regression_else_if_all_branches_return() {
-    // Variant with else-if chain — all arms return explicitly.
+    // Variant with else-if chain: all arms return explicitly.
     let test = CompileTest::new();
     let source = r#"
 func classify(x: i32) -> i32 {

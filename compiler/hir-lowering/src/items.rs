@@ -18,7 +18,7 @@ const PARTIAL_EQ_TRAIT: &str = "PartialEq";
 
 impl Lowerer {
     /// Build the global symbol tables (structs, methods, functions, constants) in a
-    /// pre-pass so bodies see every item regardless of source order — mirroring the
+    /// pre-pass so bodies see every item regardless of source order, mirroring the
     /// checker's registration passes.
     pub(crate) fn register_items(&mut self, items: &[Item]) -> Result<(), LoweringError> {
         // Newtype names first so they resolve as struct fields, enum payloads, or
@@ -517,7 +517,7 @@ impl Lowerer {
     /// restore afterwards.
     ///
     /// A binding is a name standing for a concrete type over one block, which is what
-    /// the type-parameter substitution already is — so `Self::Item` joins it under its
+    /// the type-parameter substitution already is, so `Self::Item` joins it under its
     /// written spelling and every annotation resolves through the one path.
     fn enter_impl_assoc(
         &mut self,
@@ -618,8 +618,8 @@ impl Lowerer {
     /// The resolved return type of a function, resolving return-position `impl Trait`
     /// to the concrete type the body constructs.
     ///
-    /// `impl Trait` in return position is static dispatch — exactly one concrete type
-    /// leaves the function — so it is transparent here, exactly as the checker resolved
+    /// `impl Trait` in return position is static dispatch, since exactly one concrete type
+    /// leaves the function, so it is transparent here, exactly as the checker resolved
     /// it. The concrete type is read structurally from the body's result expression; the
     /// checker has already verified it exists and implements the trait.
     pub(crate) fn declared_return_type(
@@ -973,7 +973,7 @@ impl Lowerer {
     }
 
     /// Lower a function/method body. The trailing expression of a non-`void` body is
-    /// an implicit return, so it is typed against the declared return type — exactly
+    /// an implicit return, so it is typed against the declared return type, exactly
     /// the contextual hint the checker applies; every other statement lowers
     /// with no expected type.
     pub(crate) fn lower_body(
@@ -1007,7 +1007,7 @@ impl Lowerer {
                     }
                     // A statement-position `if` parses to `Stmt::If`, so a trailing
                     // `if/else` acting as the implicit return must be lowered as an
-                    // expression — otherwise its branches lower as statement blocks and
+                    // expression; otherwise its branches lower as statement blocks and
                     // whatever they evaluate to is discarded.
                     ast_types::Stmt::If {
                         condition,

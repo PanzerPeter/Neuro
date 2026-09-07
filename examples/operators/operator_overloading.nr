@@ -2,7 +2,7 @@
 //
 // Operators on a user type are sugar for trait method calls. A `Copy` struct that
 // implements `Add` / `Sub` / `Neg` / `PartialEq` gets `+`, `-`, unary `-`, and
-// `==` / `!=` — each dispatched to its impl method and monomorphized to a plain call
+// `==` / `!=`: each dispatched to its impl method and monomorphized to a plain call
 // (no vtable, zero runtime cost).
 //
 // Each operator's result is printed as a vector, so the dispatch is visible

@@ -1,4 +1,4 @@
-// `if` and bare blocks as *expressions* — each evaluates to a value rather than
+// `if` and bare blocks as *expressions*: each evaluates to a value rather than
 // only steering control flow.
 //
 // Every branch result is printed, so which arm each call took can be read off

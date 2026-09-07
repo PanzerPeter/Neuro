@@ -1,17 +1,17 @@
-// Codegen for `string.char_slice(range)` — a borrowed sub-slice located by code point
+// Codegen for `string.char_slice(range)`, a borrowed sub-slice located by code point
 // rather than by byte.
 //
 // `.slice(a..b)` is the cheap operation: `a` and `b` are already byte offsets, so the
 // whole method is a `gep` and a subtraction, and its only runtime cost is proving the two
 // endpoints do not split a multi-byte code point. That contract is wrong for text whose
-// positions came from counting characters rather than from a previous byte offset — the
-// tokenizer and NLP workloads this method exists for — where "the first three
+// positions came from counting characters rather than from a previous byte offset, the
+// tokenizer and NLP workloads this method exists for, where "the first three
 // characters" of `"héllo"` is four bytes, not three.
 //
 // A code point index therefore has to be resolved into a byte offset, and UTF-8 offers no
 // way to do that but to walk the bytes: the encoding is variable-width, so the nth code
 // point's position depends on the width of all n before it. Hence the linear scan below,
-// and hence the two boundary rules `.slice` enforces do not appear here at all — a scan
+// and hence the two boundary rules `.slice` enforces do not appear here at all: a scan
 // can only ever stop on a lead byte, so a code point index cannot name a position inside
 // a code point in the first place. The only way this method can fail is a range that runs
 // off the end of the string or one whose bounds are reversed.
@@ -178,8 +178,8 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// Counting up to `index` rather than to `index - 1` is what makes the end of the
     /// string a legal answer: for a string of `n` characters the loop leaves the cursor at
-    /// `len` with `n` seen, so `char_offset(s, n)` is `len` — the exclusive upper bound of
-    /// a range covering the whole string — while `n + 1` runs out of bytes and reports
+    /// `len` with `n` seen, so `char_offset(s, n)` is `len`, the exclusive upper bound of
+    /// a range covering the whole string, while `n + 1` runs out of bytes and reports
     /// [`CHAR_OFFSET_NOT_FOUND`].
     fn build_char_offset_body(&self, function: FunctionValue<'ctx>) -> CodegenResult<()> {
         let i64_type = self.context.i64_type();

@@ -1,7 +1,7 @@
 // `Vec<T>`: growable contiguous storage.
 //
 // The buffer is a plain `[T]` run of `cap` elements holding `len` live ones. Growth
-// doubles the capacity through one shared byte-sized `realloc` helper — the element type
+// doubles the capacity through one shared byte-sized `realloc` helper. The element type
 // only enters through its stride, so every `Vec<T>` in a module reuses the same helper.
 
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
@@ -17,7 +17,7 @@ use crate::types::Type;
 const RESERVE_HELPER: &str = "__neuro_vec_reserve";
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// `v.push(x)` — grow if the buffer is full, then store at index `len` and bump it.
+    /// `v.push(x)`, which grows if the buffer is full, then store at index `len` and bump it.
     pub(crate) fn codegen_vec_push(
         &mut self,
         header: PointerValue<'ctx>,
@@ -50,7 +50,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// `v.pop()` — `Some(last)` after shrinking by one, or `None` when empty.
+    /// `v.pop()`, which is `Some(last)` after shrinking by one, or `None` when empty.
     pub(crate) fn codegen_vec_pop(
         &mut self,
         header: PointerValue<'ctx>,
@@ -88,7 +88,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.build_option_value(result_ty, present, value, element_ty)
     }
 
-    /// `v.get(i)` — `Some(element)` when `i < len`, else `None`. The checked
+    /// `v.get(i)`, which is `Some(element)` when `i < len`, else `None`. The checked
     /// counterpart to `v[i]`, which panics instead.
     pub(crate) fn codegen_vec_get(
         &mut self,
@@ -123,7 +123,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.build_option_value(result_ty, present, value, element_ty)
     }
 
-    /// `v[i]` read — bounds-checked in every build, panicking on violation.
+    /// `v[i]` read, bounds-checked in every build, panicking on violation.
     ///
     /// Unlike `[T; N]`, whose length is a compile-time constant the optimizer can fold,
     /// a `Vec`'s length is only known at run time, so the check is never elided.
@@ -143,7 +143,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))
     }
 
-    /// `v[i] = x` — bounds-checked element store into an owned `Vec` binding.
+    /// `v[i] = x`, a bounds-checked element store into an owned `Vec` binding.
     pub(crate) fn codegen_vec_index_assignment(
         &mut self,
         target: &str,
@@ -167,7 +167,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// `for x in v` / `for x in &v` — a counted loop over the live elements, binding
+    /// `for x in v` / `for x in &v`, a counted loop over the live elements, binding
     /// `iterator` to a copy of each in turn. The bound is re-read every iteration, so a
     /// body that pushes or pops observes the current length.
     pub(crate) fn codegen_vec_for_each(
@@ -342,7 +342,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<PointerValue<'ctx>> {
         let buffer = self.load_header_buffer(header)?;
         let elem_llvm = self.collection_value_type(element_ty)?;
-        // SAFETY: unchecked by contract — every caller either bounds-checks `index`
+        // SAFETY: unchecked by contract. Every caller either bounds-checks `index`
         // first (`checked_vec_slot`) or derives it from the vector's own `len`/`cap`,
         // so it addresses a slot inside the allocated buffer.
         unsafe {
@@ -372,7 +372,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.vec_slot_ptr(header, element_ty, widened)
     }
 
-    /// Load element `index`, or a zero value when `present` is false — the buffer may be
+    /// Load element `index`, or a zero value when `present` is false. The buffer may be
     /// null on an empty collection, so the load itself is predicated.
     fn load_vec_element_or_zero(
         &mut self,

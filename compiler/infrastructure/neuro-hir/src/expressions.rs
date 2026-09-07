@@ -9,7 +9,7 @@ use crate::types::HirType;
 
 /// A typed HIR expression.
 ///
-/// Every expression carries its resolved `ty` — the defining difference from
+/// Every expression carries its resolved `ty`: the defining difference from
 /// the surface [`ast_types::Expr`], whose types are still unresolved name
 /// annotations. Backends read `ty` directly instead of re-deriving it.
 #[derive(Debug, Clone, PartialEq)]
@@ -38,7 +38,7 @@ pub struct HirFieldInit {
 ///
 /// The variant set mirrors [`ast_types::Expr`] one-to-one, with two
 /// normalizations the HIR performs over the AST:
-/// - `Paren` is dropped — grouping is already encoded by the tree structure, so
+/// - `Paren` is dropped: grouping is already encoded by the tree structure, so
 ///   a typed IR has no need for an explicit parenthesis node.
 /// - Identifiers are resolved to their `String` name; the binding's source span
 ///   lives on the enclosing [`HirExpr`].
@@ -139,7 +139,7 @@ pub enum HirExprKind {
     /// A tensor built element by element: a coerced nested array literal,
     /// `Tensor::<T, [...]>::from(...)`, or `Tensor::scalar(v)`.
     ///
-    /// `elements` is the buffer in row-major order, already flattened — the nesting
+    /// `elements` is the buffer in row-major order, already flattened: the nesting
     /// carried the shape and the shape is in the expression's [`HirType::Tensor`], so
     /// no backend has to re-derive it. Its length is the product of the extents.
     TensorLiteral {
@@ -176,8 +176,8 @@ pub enum HirExprKind {
     },
     /// Enum construction: builds the `variant`-th value of `enum_name` from
     /// the lowered `payload`, which is in the variant's declared field order (the
-    /// three surface forms — unit `E::V`, tuple `E::V(..)`, and struct `E::V { .. }`
-    /// — all normalize to this single node). `tag` is the variant's discriminant
+    /// three surface forms (unit `E::V`, tuple `E::V(..)`, and struct `E::V { .. }`)
+    /// all normalize to this single node). `tag` is the variant's discriminant
     /// (its declaration index). The expression's `ty` is [`HirType::Enum`].
     EnumConstruct {
         enum_name: String,
@@ -216,7 +216,7 @@ pub enum HirExprKind {
         scrutinee: Box<HirExpr>,
         arms: Vec<HirMatchArm>,
     },
-    /// Construction of an empty standard collection — `Vec::new()`,
+    /// Construction of an empty standard collection: `Vec::new()`,
     /// `HashMap::new()`, `BTreeMap::new()`. The expression's `ty` is the
     /// [`HirType::Collection`] being built; backends emit a zero-capacity header with
     /// no allocation (the first insertion allocates).

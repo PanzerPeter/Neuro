@@ -24,7 +24,7 @@ impl<'ctx> CodegenContext<'ctx> {
         args: &[HirExpr],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         match kind {
-            // `string.len()` reads field 1 of the fat pointer `{ ptr, i64 }` — the
+            // `string.len()` reads field 1 of the fat pointer `{ ptr, i64 }`, the
             // stored byte length. O(1), no scan; the value is already the u64 length.
             // A `&string` receiver is auto-dereferenced first.
             BuiltinMethod::StringLen => {
@@ -35,27 +35,27 @@ impl<'ctx> CodegenContext<'ctx> {
                         CodegenError::LlvmError(format!("failed to extract string length: {}", e))
                     })
             }
-            // `string.clone()` — explicit deep copy of an owned string.
+            // `string.clone()`, an explicit deep copy of an owned string.
             // String literals live in immutable `.rodata` and no heap-backed string type
             // exists yet (Phase 1.7), so duplicating the `{ ptr, len }` fat-pointer value is
             // observationally a deep copy: the pointee bytes are immutable and shared safely.
             // When runtime heap strings land this must duplicate the underlying buffer.
             // A `&string` receiver is auto-dereferenced first.
             BuiltinMethod::StringClone => Ok(self.string_receiver_struct(receiver)?.into()),
-            // `string.slice(a..b)` — a borrowed `&string` view into the receiver's
+            // `string.slice(a..b)`, a borrowed `&string` view into the receiver's
             // UTF-8 bytes, with runtime bounds and codepoint-boundary checks.
             BuiltinMethod::StringSlice => self.codegen_string_slice(receiver, args),
-            // `seq.slice(a..b)` — a borrowed `&[T]` view over an array, `Vec`, or slice.
+            // `seq.slice(a..b)`, a borrowed `&[T]` view over an array, `Vec`, or slice.
             BuiltinMethod::SequenceSlice => self.codegen_sequence_slice(receiver, args),
-            // `slice.len()` — the length word of the fat pointer.
+            // `slice.len()`, the length word of the fat pointer.
             BuiltinMethod::SliceLen => self.codegen_slice_len(receiver),
-            // `string.char_slice(a..b)` — the same borrowed view, located by counting
+            // `string.char_slice(a..b)`, the same borrowed view, located by counting
             // code points instead of bytes.
             BuiltinMethod::StringCharSlice => self.codegen_char_slice(receiver, args),
-            // `string.__char_at(offset)` — the decode step behind the prelude's codepoint
+            // `string.__char_at(offset)`, the decode step behind the prelude's codepoint
             // iterator, and the only byte-indexed read of a string anywhere.
             BuiltinMethod::StringCharAt => self.codegen_char_at(receiver, args),
-            // `array.len()` — the static length `N` of `[T; N]`, read from the
+            // `array.len()`, the static length `N` of `[T; N]`, read from the
             // receiver type recorded by the type pass. A compile-time constant `u64`;
             // the receiver is not evaluated (length is independent of its value).
             BuiltinMethod::ArrayLen => {
@@ -70,7 +70,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 };
                 Ok(self.context.i64_type().const_int(size as u64, false).into())
             }
-            // `struct.clone()` — structs are stack-allocated aggregates with no heap
+            // `struct.clone()`. Structs are stack-allocated aggregates with no heap
             // backing yet, so loading the receiver's value is a faithful deep copy. When a
             // struct gains a heap-owning field this must recurse into that field's clone.
             // A `&Struct` receiver is auto-dereferenced first.
@@ -95,13 +95,13 @@ impl<'ctx> CodegenContext<'ctx> {
                     other => Ok(other),
                 }
             }
-            // `tensor.clone()` — the tensor value IS its buffer, so copying the
+            // `tensor.clone()`. The tensor value IS its buffer, so copying the
             // aggregate copies every element; there is no shared heap block to duplicate
             // separately. A `&Tensor` receiver is loaded through first.
             BuiltinMethod::TensorClone => self.codegen_tensor_clone(recv_ty, receiver),
-            // `tensor.to(device)` — the consuming device transfer.
+            // `tensor.to(device)`, the consuming device transfer.
             BuiltinMethod::TensorTo => self.codegen_tensor_to(receiver, args),
-            // `float.is_nan()` — the receiver is the whole computation; no arguments.
+            // `float.is_nan()`. The receiver is the whole computation; no arguments.
             BuiltinMethod::IsNan => self.codegen_is_nan(receiver),
             BuiltinMethod::CheckedAdd | BuiltinMethod::CheckedSub | BuiltinMethod::CheckedMul => {
                 self.codegen_checked_int_intrinsic(kind, recv_ty, result_ty, receiver, args)
@@ -119,7 +119,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Lower `string.slice(a..b)` / `string.slice(a..=b)` to a borrowed `&string`.
     ///
     /// Computes a `(base + start, end - start)` fat pointer into the receiver's UTF-8
-    /// data — zero copy, since strings are immutable. Both bounds and the two endpoint
+    /// data, zero copy, since strings are immutable. Both bounds and the two endpoint
     /// UTF-8 codepoint boundaries are validated at runtime in every build; a violation
     /// routes through the panic runtime (abort, no unwinding). The result `&string` is the
     /// computed fat pointer itself, so it is returned by value like any other aggregate.
@@ -243,7 +243,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .into_struct_value();
 
         // `&string` is the `{ ptr, i64 }` fat pointer by value, so the computed slice is
-        // the result — no stack slot, and nothing whose address could outlive this frame.
+        // the result: no stack slot, and nothing whose address could outlive this frame.
         Ok(fat_val.into())
     }
 

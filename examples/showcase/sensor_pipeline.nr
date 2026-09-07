@@ -1,4 +1,4 @@
-// Showcase — Option / Result working alongside structs, methods, arrays, generics,
+// Showcase: Option / Result working alongside structs, methods, arrays, generics,
 // and pattern matching.
 //
 // Integration example combining several features at once:

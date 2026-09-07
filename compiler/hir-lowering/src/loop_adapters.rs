@@ -1,7 +1,7 @@
 //! The `.map(f)` / `.filter(p)` desugar for a `for` head.
 //!
 //! An adapter chain is folded into the loop it decorates rather than materialized
-//! as an iterator value, so it works over every head shape — a range, an array, a
+//! as an iterator value, so it works over every head shape: a range, an array, a
 //! `Vec`, a borrowed slice, and a protocol iterator alike:
 //!
 //! ```text
@@ -22,7 +22,7 @@
 //!
 //! An enumerated head counts what the chain YIELDS, not what the source produced, so
 //! `.enumerate()` over a filtered chain gets its own cursor instead of the counted
-//! loop's index — which counts source steps and would leave gaps.
+//! loop's index, which counts source steps and would leave gaps.
 
 use ast_types::{LoopAdapter, LoopAdapterKind, Stmt, UnaryOp};
 use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirType};
@@ -170,7 +170,7 @@ impl Lowerer {
             }
         }
 
-        // The position is read out and advanced here — after the filters, so it counts
+        // The position is read out and advanced here, after the filters, so it counts
         // yielded elements, and before the user's statements, so a `continue` in the
         // body cannot skip the advance and repeat an index.
         if let (Some(index), Some(cursor)) = (index, &plan.cursor) {

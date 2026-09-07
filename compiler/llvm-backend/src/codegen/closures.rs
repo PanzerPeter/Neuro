@@ -102,7 +102,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         // Captures are Copy and parameters are borrowed/Copy, so the body opens a
-        // drop scope with no registered owned bindings — locals register themselves.
+        // drop scope with no registered owned bindings; locals register themselves.
         self.push_drop_scope();
         let ret_ty = Type::from_hir(&closure.return_type);
         self.codegen_body(&closure.body, &ret_ty)

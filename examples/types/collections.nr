@@ -1,7 +1,7 @@
 // Standard collections: Vec<T>, HashMap<K, V>, BTreeMap<K, V>.
 //
-// All three are heap-backed library types. They are not Copy — assignment moves
-// them — and each frees its buffer when its owner leaves scope. The fallible
+// All three are heap-backed library types. They are not Copy (assignment moves
+// them) and each frees its buffer when its owner leaves scope. The fallible
 // readers (`pop`, `get`) return `Option<T>`, so a miss is a value to match on
 // rather than a trap.
 

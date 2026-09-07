@@ -80,7 +80,7 @@ fn parses_without_an_else_binding() {
 
 #[test]
 fn parses_a_wildcard_else_binding() {
-    // `|_|` is a written binding that names nothing — distinct from omitting the
+    // `|_|` is a written binding that names nothing: distinct from omitting the
     // form entirely, which is what lets the Option rule reject `|name|` but accept this.
     let stmt = only_val_else(
         r#"

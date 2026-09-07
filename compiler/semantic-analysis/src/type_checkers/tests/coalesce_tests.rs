@@ -2,7 +2,7 @@
 //! diagnostics for the two ways to get it wrong.
 //!
 //! `Option` / `Result` are prelude source rather than compiler built-ins, so every
-//! program here declares them — which is also what proves `??` is not hard-wired to
+//! program here declares them, which is also what proves `??` is not hard-wired to
 //! one specific declaration.
 
 use super::super::*;
@@ -15,7 +15,7 @@ const FALLIBLE_DECLS: &str = "enum Option<T> { Some(T), None }\n\
 #[test]
 fn coalesce_types_to_the_unwrapped_payload() {
     // Both fallible types unwrap to their success payload, and the result is an
-    // ordinary value of that type — usable in arithmetic against a sibling of the
+    // ordinary value of that type, usable in arithmetic against a sibling of the
     // same width.
     let errors = semantic_errors(&format!(
         "{FALLIBLE_DECLS}
@@ -49,7 +49,7 @@ func main() -> i32 {{
 
 #[test]
 fn coalesce_discards_the_error_payload() {
-    // The `Err` type is unconstrained by `??` — the fallback answers to `T`, never
+    // The `Err` type is unconstrained by `??`: the fallback answers to `T`, never
     // to `E`, so a `Result<i32, string>` coalesces with a plain `i32`.
     let errors = semantic_errors(&format!(
         "{FALLIBLE_DECLS}

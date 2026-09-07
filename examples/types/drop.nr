@@ -1,4 +1,4 @@
-// Drop — deterministic destruction at scope exit.
+// Drop: deterministic destruction at scope exit.
 //
 // A type that implements `Drop` runs its `drop(&mut self)` destructor when its
 // owner leaves scope, on normal exit only (a panic aborts without running
@@ -7,7 +7,7 @@
 //
 // Three guards are created in an inner block and destroyed at its end (in reverse
 // declaration order); one of them is moved into a new binding first, so it is
-// dropped exactly once — not twice. The program returns 3.
+// dropped exactly once, not twice. The program returns 3.
 
 struct Guard {
     sink: &mut i32

@@ -186,7 +186,7 @@ fn builders_reused_in_a_loop_do_not_grow_the_heap() {
     // Each iteration's builder owns a buffer of a few kilobytes. Without the scope-exit
     // free this allocates hundreds of megabytes; with it, the process stays flat. The
     // exit code only proves the arithmetic, so the leak is caught by the runtime of the
-    // allocator rather than asserted directly — what is asserted is that it completes.
+    // allocator rather than asserted directly: what is asserted is that it completes.
     let test = CompileTest::new();
     let source = r#"
 func build(rounds: i32) -> u64 {

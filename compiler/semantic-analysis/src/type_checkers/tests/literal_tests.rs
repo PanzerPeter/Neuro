@@ -145,7 +145,7 @@ fn test_negated_zero_for_unsigned_target_is_accepted() {
 
 #[test]
 fn test_negated_literal_out_of_range_for_signed_target_is_not_the_unsigned_error() {
-    // `val x: i8 = -200` is out of range, but `i8` HAS negative values — it must not
+    // `val x: i8 = -200` is out of range, but `i8` HAS negative values, so it must not
     // pick up the unsigned diagnostic, which is keyed on the target's signedness.
     let mut checker = TypeChecker::new();
 

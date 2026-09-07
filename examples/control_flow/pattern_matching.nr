@@ -1,5 +1,5 @@
 // Pattern matching: `match` as an exhaustive expression over enums and
-// scalar values — variant deconstruction with payload binding, literal / or /
+// scalar values: variant deconstruction with payload binding, literal / or /
 // range patterns, guard clauses, and the `_` wildcard.
 //
 // Every scrutinee prints the arm it selected, so the range and guard arms are
@@ -41,7 +41,7 @@ func main() -> i32 {
     println("Op::Push(7)                -> {push}")
     // A literal `{` in interpolated text is escaped `\{` so it is not read as
     // opening a hole. A closing `}` is unambiguous outside a hole and stands as
-    // itself — `\}` is not an escape sequence.
+    // itself: `\}` is not an escape sequence.
     println("Op::Range \{ lo: 2, hi: 5 \} -> {range}")
     total += nop + push + range               // => 10
 

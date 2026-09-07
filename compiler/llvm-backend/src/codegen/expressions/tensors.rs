@@ -5,12 +5,12 @@
 //
 // The buffer is out of line rather than a first-class LLVM aggregate because the language
 // has a tensor *own* its buffer, and promises that buffer a stable address across an
-// in-place update — neither is expressible for an SSA value, which has no address at all.
+// in-place update. Neither is expressible for an SSA value, which has no address at all.
 // It is also what makes a large tensor compilable: an aggregate copy is a whole-buffer
 // `load`/`store` pair that only `-O1`'s SROA can turn into a `memcpy`, and SelectionDAG
 // crashes legalizing one above ~50k elements at `-O0`.
 //
-// Three of the four construction nodes still fold to an LLVM constant — a fill, an
+// Three of the four construction nodes still fold to an LLVM constant: a fill, an
 // identity matrix, and a literal whose elements are themselves constant all land in
 // `.rodata` and reach the buffer as one `memcpy`. Only `random_normal` needs a runtime
 // loop, and it now writes straight into the heap buffer.
@@ -73,7 +73,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// handle *is* the tensor value, and the buffer is where elements are written.
     ///
     /// Every construction node routes through here, so there is exactly one place the
-    /// allocator is chosen — the hook 2D's arena replaces.
+    /// allocator is chosen, the hook 2D's arena replaces.
     fn alloc_tensor(
         &mut self,
         tensor_ty: &Type,
@@ -88,7 +88,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// The constant is emitted once as a private `.rodata` global and `memcpy`'d into the
     /// tensor's own buffer, so a `zeros()` of any size costs one call rather than an
-    /// instruction per element — and the tensor still owns writable storage afterwards.
+    /// instruction per element, and the tensor still owns writable storage afterwards.
     fn emit_const_tensor_buffer(
         &mut self,
         tensor_ty: &Type,
@@ -129,8 +129,8 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// Lower a tensor literal — a coerced nested array literal, `Tensor::from(...)`, or
-    /// `Tensor::scalar(v)` — into a fresh buffer. `elements` is already in row-major
+    /// Lower a tensor literal (a coerced nested array literal, `Tensor::from(...)`, or
+    /// `Tensor::scalar(v)`) into a fresh buffer. `elements` is already in row-major
     /// order, so the element index is the buffer index.
     ///
     /// A literal whose elements are all constants becomes one `.rodata` blob and one
@@ -315,8 +315,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_float_add(mean, scaled, "tensor.rand.value")
             .map_err(llvm_err)?;
-        // `i` is below `count` on this edge — the loop head's `ULT` test is what branches
-        // here — so the slot address stays inside the buffer.
+        // `i` is below `count` on this edge, because the loop head's `ULT` test is what
+        // branches here, so the slot address stays inside the buffer.
         let slot = self.tensor_slot(buffer_ty, data, i)?;
         self.builder.build_store(slot, value).map_err(llvm_err)?;
         let next = self
@@ -335,7 +335,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Lower `tensor.clone()`: a second buffer holding the same elements.
     ///
     /// The clone allocates and `memcpy`s, so the result owns storage of its own and the
-    /// receiver keeps its address — the deep copy the language specifies, rather than a
+    /// receiver keeps its address: the deep copy the language specifies, rather than a
     /// second name for one buffer.
     ///
     /// An owned receiver lowers to the tensor pointer itself; a `&Tensor<T, S>` receiver
@@ -377,7 +377,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Every buffer this backend can build is host memory, so a transfer to the host is
     /// the move itself and costs nothing. A transfer anywhere else has no lowering at all,
     /// and the device is an ordinary run-time value, so the mismatch is caught where the
-    /// value is known — a guard on the discriminant that aborts with a diagnostic rather
+    /// value is known: a guard on the discriminant that aborts with a diagnostic rather
     /// than letting the program run somewhere it did not ask for.
     ///
     /// The result is the receiver's own buffer pointer, so the transfer hands ownership on:
@@ -462,7 +462,7 @@ impl<'ctx> CodegenContext<'ctx> {
         global
     }
 
-    /// `double __neuro_rng_uniform_f64()` — one xorshift64 step rendered as a uniform
+    /// `double __neuro_rng_uniform_f64()`, one xorshift64 step rendered as a uniform
     /// draw in `(0, 1]`. The interval excludes zero because the normal transform takes
     /// its logarithm.
     fn get_or_define_rng_uniform(&self) -> CodegenResult<FunctionValue<'ctx>> {
@@ -549,7 +549,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(llvm_err)
     }
 
-    /// `double __neuro_rng_normal_f64()` — one standard-normal draw by the Box–Muller
+    /// `double __neuro_rng_normal_f64()`, one standard-normal draw by the Box-Muller
     /// transform. Both uniforms are consumed per call rather than caching the second
     /// output, so a draw depends on nothing but the generator state.
     fn get_or_define_rng_normal(&self) -> CodegenResult<FunctionValue<'ctx>> {

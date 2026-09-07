@@ -97,7 +97,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         rust_version: [stable, nightly]
-        # nightly is opt-in for experimental coverage — failures are
+        # nightly is opt-in for experimental coverage: failures are
         # informational only and must not block merges
     # Allow nightly legs to fail without failing the whole workflow
     continue-on-error: ${{ matrix.rust_version == 'nightly' }}

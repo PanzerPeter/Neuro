@@ -309,7 +309,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// The ordered map's growth is the same doubling `realloc` a `Vec` uses, since its
-    /// slots are a dense array too — only the stride differs, and that is a parameter.
+    /// slots are a dense array too; only the stride differs, and that is a parameter.
     pub(super) fn build_ordered_reserve_helper(&mut self) -> CodegenResult<FunctionValue<'ctx>> {
         self.build_reserve_helper()
     }

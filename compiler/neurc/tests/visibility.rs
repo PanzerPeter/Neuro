@@ -2,7 +2,7 @@
 //
 // Item visibility is settled during module resolution, which knows both the referencing
 // file and the owning one. Field visibility needs the receiver's type, so it is settled by
-// the type checker against the module each item carries — these tests exercise both paths
+// the type checker against the module each item carries: these tests exercise both paths
 // through the real compiler.
 
 mod common;

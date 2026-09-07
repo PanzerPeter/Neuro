@@ -11,10 +11,10 @@ pub(crate) struct LoopExit {
     pub(crate) has_break: bool,
 }
 
-/// If `expr` is a direct borrow of a named place — `&x` / `&mut x`, or a
-/// `x.slice(range)` view into `x` — return that place's name and whether the borrow is
+/// If `expr` is a direct borrow of a named place (`&x` / `&mut x`, or a
+/// `x.slice(range)` view into `x`), return that place's name and whether the borrow is
 /// exclusive. A borrow wrapped in any other expression (a block, an `if`, a call result)
-/// is not tracked as persistent — only a direct initializer creates a held borrow,
+/// is not tracked as persistent: only a direct initializer creates a held borrow,
 /// which keeps the analysis free of false positives at the cost of missing some
 /// borrows that escape through compound expressions.
 fn borrow_target_of(expr: &Expr) -> Option<(String, bool)> {
@@ -54,7 +54,7 @@ fn slice_receiver_of(expr: &Expr) -> Option<String> {
     TypeChecker::slice_borrow_root(expr)
 }
 
-/// The trailing value expression of a block — the last statement when it is a
+/// The trailing value expression of a block: the last statement when it is a
 /// bare expression. Used to follow a returned reference into the tail of an
 /// `if`/`else` arm or a bare block.
 fn tail_expr(stmts: &[Stmt]) -> Option<&Expr> {
@@ -78,7 +78,7 @@ fn root_place_name(expr: &Expr) -> Option<String> {
 }
 
 impl TypeChecker {
-    /// Whether `name` is a binding local to the current function — present in the
+    /// Whether `name` is a binding local to the current function: present in the
     /// symbol table but not in the set of places that outlive the call.
     /// Function locals and by-value parameters are local; reference parameters and
     /// `self` outlive. A name absent from the table (a constant, an out-of-scope
@@ -189,7 +189,7 @@ impl TypeChecker {
     /// Check a loop body under a fresh [`LoopContext`], returning how the loop is
     /// left. Loop bodies run any number of times, so a move inside is not a
     /// straight-line move; the move state is snapshotted and restored on exit.
-    /// `is_value_loop` is true only for `loop` — the sole construct that can yield
+    /// `is_value_loop` is true only for `loop`: the sole construct that can yield
     /// a value.
     pub(crate) fn check_loop_body(
         &mut self,
@@ -283,8 +283,8 @@ impl TypeChecker {
     /// Check a statement, then drop any transient borrows it took.
     ///
     /// A borrow passed to a call, used in a condition, or returned lives only for
-    /// the statement that created it. Clearing transient borrows here
-    /// — after the statement and its nested sub-statements are fully checked —
+    /// the statement that created it. Clearing transient borrows here (after the
+    /// statement and its nested sub-statements are fully checked)
     /// frees the place for a later borrow without leaking the borrow forward.
     /// Persistent borrows held by reference bindings are untouched; they are
     /// released when their binding leaves scope.
@@ -401,7 +401,7 @@ impl TypeChecker {
                 let expected_ty = self.symbols.lookup(&target.name).map(|s| s.ty.clone());
 
                 // If the target was a reference binding, its previous borrow ends
-                // here — release it before the new value is checked so that
+                // here: release it before the new value is checked so that
                 // re-borrowing the same place (`r = &mut x`) is not a false
                 // conflict against the borrow being overwritten.
                 self.symbols.release_borrow_of(&target.name);
@@ -411,7 +411,7 @@ impl TypeChecker {
                     .unwrap_or(Type::Unknown);
 
                 // The RHS is moved into the target, and the target now owns a
-                // fresh value — clearing any prior moved-out state on it.
+                // fresh value, clearing any prior moved-out state on it.
                 self.record_move(value);
                 self.symbols.clear_moved(&target.name);
 

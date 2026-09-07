@@ -28,7 +28,7 @@ pub(crate) enum BuiltinMethod {
     StringSlice,
     /// `string.char_slice(a..b)` → a borrowed `&string` sub-slice whose range counts
     /// codepoints rather than bytes; panics on an out-of-bounds range. No boundary check
-    /// is needed — a codepoint index cannot name a position inside a code point.
+    /// is needed: a codepoint index cannot name a position inside a code point.
     StringCharSlice,
     /// `string.__char_at(offset)` → the Unicode scalar whose UTF-8 encoding begins at
     /// that byte. Private to the prelude, which writes its codepoint iterator against it.
@@ -75,13 +75,13 @@ pub(crate) enum BuiltinMethod {
 /// `semantic-analysis`; the duplication keeps the backend independent of the
 /// type-checker slice.
 ///
-/// Only the method tag is resolved here — the call's result type comes from the HIR
+/// Only the method tag is resolved here; the call's result type comes from the HIR
 /// node, because `checked_*` yields a monomorphized `Option<T>` instance whose mangled
 /// name only the frontend can produce.
 pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<BuiltinMethod> {
     // Auto-deref an immutable borrow `&string` so `r.len()` / `r.clone()` resolve through
     // the reference. The integer intrinsics below intentionally require a value
-    // receiver — reading a scalar through a reference needs the deref operator (later phase).
+    // receiver: reading a scalar through a reference needs the deref operator (later phase).
     // The receiver type (possibly `&string`) is carried by the HIR receiver node, letting
     // codegen decide whether to load through the reference.
     match (recv.referent(), method) {
@@ -161,7 +161,7 @@ pub(crate) struct LoopTargets<'ctx> {
 ///
 /// `flag_ptr` is an `i1` slot initialized to `true` at the binding site and set
 /// `false` when the value is moved out, so the scope-exit drop is elided for a
-/// moved value — the runtime drop-flag mechanism that keeps conditional
+/// moved value, the runtime drop-flag mechanism that keeps conditional
 /// moves sound.
 pub(crate) struct DropEntry<'ctx> {
     /// Source binding name, used to clear the flag when the value is moved.
@@ -187,7 +187,7 @@ pub(crate) enum DropTarget {
     /// a `.rodata` literal is never handed to `free`.
     HeapString,
     /// A tensor binding: release the buffer its owning pointer addresses. Unlike
-    /// `HeapString`, a tensor's type alone proves the ownership — every construction
+    /// `HeapString`, a tensor's type alone proves the ownership: every construction
     /// allocates, and there is no borrowed spelling of an owned tensor.
     TensorBuffer,
 }
@@ -219,7 +219,7 @@ pub(crate) struct CodegenContext<'ctx> {
     /// (name → type), populated as each binding is lowered. The HIR carries every
     /// expression's type inline, so this only serves the place-statement codegen
     /// (`object.field = …` and `target[i] = …`) that must recover the *binding's*
-    /// nominal type — a struct or array name LLVM types do not preserve.
+    /// nominal type, a struct or array name LLVM types do not preserve.
     pub(crate) type_env: HashMap<String, Type>,
 
     /// Active loop targets for break/continue statements.
@@ -336,7 +336,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Every local binding and every result/scratch slot must go through this. An
     /// `alloca` emitted at the current builder position is executed once per pass
     /// through that position, so a slot allocated inside a loop body grows the stack by
-    /// one slot per iteration until the process runs out of it — a segfault on a
+    /// one slot per iteration until the process runs out of it, a segfault on a
     /// perfectly ordinary counted loop. LLVM's `mem2reg` cannot rescue it either: the
     /// pass only promotes allocas that are already in the entry block, so the leak
     /// survives every optimization level.
@@ -464,7 +464,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Get the external `memcmp` declaration, inserting it on first use.
-    /// memcmp(s1: ptr, s2: ptr, n: i64) -> i32 — libc, always available on Linux/macOS.
+    /// memcmp(s1: ptr, s2: ptr, n: i64) -> i32, from libc, always available on Linux/macOS.
     pub(crate) fn get_or_declare_memcmp(&self) -> FunctionValue<'ctx> {
         if let Some(f) = self.module.get_function("memcmp") {
             return f;
@@ -615,7 +615,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .add_function("abort", fn_type, Some(inkwell::module::Linkage::External));
         // `cold` alongside `noreturn`: a block whose terminator is `unreachable` is only
         // treated as unlikely-executed by LLVM's placement heuristics when the call
-        // preceding it is itself marked cold — `noreturn` on its own does not imply it.
+        // preceding it is itself marked cold; `noreturn` on its own does not imply it.
         for attribute in ["noreturn", "cold"] {
             func.add_attribute(
                 inkwell::attributes::AttributeLoc::Function,

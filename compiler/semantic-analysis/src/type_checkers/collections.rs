@@ -4,7 +4,7 @@
 //! They are specified as library types, but the language exposes no allocator and no
 //! raw pointers, so nothing in `.nr` source could implement them: the compiler knows
 //! them all by name and lowers their operations directly. Everything user-visible is
-//! still ordinary type checking — a collection type is a nominal type with type
+//! still ordinary type checking: a collection type is a nominal type with type
 //! arguments, its operations are builtin methods, and it obeys move-by-default.
 //!
 //! `String` joins the family because it is the same machine: one growable heap buffer
@@ -229,7 +229,7 @@ impl TypeChecker {
                         matches!(arg_ty, Type::Unknown) || arg_ty.is_integer()
                     }
                     // Appended text is read, never stored, so an immutable borrow is as
-                    // good as an owned `string` — the same latitude `+` gives its operands.
+                    // good as an owned `string`, the same latitude `+` gives its operands.
                     Some(ParamSlot::Text) => {
                         matches!(&arg_ty, Type::String | Type::Unknown)
                             || matches!(
@@ -294,9 +294,9 @@ impl TypeChecker {
 enum ParamSlot {
     /// A `u64`-shaped position index (`Vec::get`).
     Index,
-    /// The collection's key type — argument 0 of a map.
+    /// The collection's key type: argument 0 of a map.
     Key,
-    /// The collection's element/value type — the last type argument.
+    /// The collection's element/value type: the last type argument.
     Value,
     /// Borrowed UTF-8 text: a `string` or an immutable `&string` (`String::push_str`).
     Text,

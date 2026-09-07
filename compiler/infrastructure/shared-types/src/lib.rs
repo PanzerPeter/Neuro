@@ -107,8 +107,8 @@ pub enum IntSuffix {
 /// Type suffix on a float literal (e.g., the `f32` in `1.5f32`).
 ///
 /// `F16`/`BF16` are the half-precision suffixes (`1.5f16`, `0.02bf16`). The
-/// suffix is the only way to write a half-precision literal — they have no
-/// contextual default — because half-precision scalars carry a deliberately narrow
+/// suffix is the only way to write a half-precision literal: they have no
+/// contextual default, because half-precision scalars carry a deliberately narrow
 /// contract (storage, copy, equality, and `as`-cast only; no arithmetic).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FloatSuffix {
@@ -120,7 +120,7 @@ pub enum FloatSuffix {
 
 /// Alignment inside a padded interpolation field: `:<10`, `:>10`, `:^10`.
 ///
-/// The language's specifier table has no fill character — padding fills with
+/// The language's specifier table has no fill character: padding fills with
 /// spaces (or zeros under the `0` flag), so alignment is the whole story.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatAlign {
@@ -134,25 +134,25 @@ pub enum FormatAlign {
 /// applicability to a value's type is checked later, against the resolved type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatKind {
-    /// No kind letter — Display-style default per type.
+    /// No kind letter: Display-style default per type.
     Default,
-    /// `?` — debug rendering. Scalars only this phase; aggregate support awaits
+    /// `?`: debug rendering. Scalars only this phase; aggregate support awaits
     /// `@derive(Debug)`.
     Debug,
-    /// `.N` — fixed-point, N decimal places (floats).
+    /// `.N`: fixed-point, N decimal places (floats).
     Fixed,
-    /// `e` / `.Ne` — scientific notation with the exponent normalized to
+    /// `e` / `.Ne`: scientific notation with the exponent normalized to
     /// `3.14e0` form (floats).
     Scientific,
-    /// `d` — decimal (integers).
+    /// `d`: decimal (integers).
     Decimal,
-    /// `x` — lowercase hexadecimal (integers).
+    /// `x`: lowercase hexadecimal (integers).
     LowerHex,
-    /// `X` — uppercase hexadecimal (integers).
+    /// `X`: uppercase hexadecimal (integers).
     UpperHex,
-    /// `b` — binary (integers).
+    /// `b`: binary (integers).
     Binary,
-    /// `o` — octal (integers).
+    /// `o`: octal (integers).
     Octal,
 }
 
@@ -164,10 +164,10 @@ pub enum FormatKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatSpec {
     pub align: Option<FormatAlign>,
-    /// `0` flag — zero-pad to `width`. Rejected together with [`FormatAlign::Left`]
+    /// `0` flag: zero-pad to `width`. Rejected together with [`FormatAlign::Left`]
     /// (one forces digits left, the other right).
     pub zero_pad: bool,
-    /// `+` flag — always render the sign for numeric values.
+    /// `+` flag: always render the sign for numeric values.
     pub plus_sign: bool,
     /// Field width; shorter renders are padded to it.
     pub width: Option<u32>,
@@ -224,7 +224,7 @@ pub enum Literal {
     String(String),
     /// Boolean literal (`true` or `false`)
     Boolean(bool),
-    /// Character literal — a single Unicode scalar value (e.g. `'a'`, `'\n'`)
+    /// Character literal: a single Unicode scalar value (e.g. `'a'`, `'\n'`)
     Char(char),
 }
 

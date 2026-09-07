@@ -16,7 +16,7 @@ fn ident(name: &str) -> Identifier {
     }
 }
 
-/// `name: i32` — an ordinary parameter, nameable but not required to be named.
+/// `name: i32`: an ordinary parameter, nameable but not required to be named.
 fn implicit(name: &str) -> Parameter {
     Parameter {
         label: ParamLabel::Implicit,
@@ -26,7 +26,7 @@ fn implicit(name: &str) -> Parameter {
     }
 }
 
-/// `external internal: i32` — the caller must write `external:`.
+/// `external internal: i32`: the caller must write `external:`.
 fn external(label: &str, name: &str) -> Parameter {
     Parameter {
         label: ParamLabel::External(ident(label)),
@@ -36,7 +36,7 @@ fn external(label: &str, name: &str) -> Parameter {
     }
 }
 
-/// `_ name: i32` — the caller must pass positionally.
+/// `_ name: i32`: the caller must pass positionally.
 fn suppressed(name: &str) -> Parameter {
     Parameter {
         label: ParamLabel::Suppressed,
@@ -434,7 +434,7 @@ fn program_with_args(params: Vec<Parameter>, args: Vec<(Option<Identifier>, Expr
     ]
 }
 
-/// `effect()` — a call, so an argument that carries one.
+/// `effect()`: a call, so an argument that carries one.
 fn effect() -> Expr {
     Expr::Call {
         func: Box::new(Expr::Identifier(ident("effect"))),
@@ -458,7 +458,7 @@ fn hoisted_block(items: &[Item]) -> Vec<Stmt> {
 
 #[test]
 fn a_reordered_call_with_effects_evaluates_its_arguments_in_source_order() {
-    // `target(b: effect(), a: effect())` must run the argument written first, first —
+    // `target(b: effect(), a: effect())` must run the argument written first, first:
     // permuting the two into declaration order would run them the other way round.
     let mut items = program_with_args(
         vec![implicit("a"), implicit("b")],
@@ -507,8 +507,8 @@ fn a_reordered_call_with_effects_evaluates_its_arguments_in_source_order() {
 
 #[test]
 fn a_reordered_call_of_plain_values_is_permuted_in_place() {
-    // Nothing can observe when a literal is evaluated, so the call keeps the shape — and
-    // the identical IR — it has always had.
+    // Nothing can observe when a literal is evaluated, so the call keeps the shape
+    // (and the identical IR) it has always had.
     let mut items = program_with_args(
         vec![implicit("a"), implicit("b")],
         vec![named("b", 2), named("a", 1)],

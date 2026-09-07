@@ -8,7 +8,7 @@ license-file.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Infrastructure (shared kernel) only — no feature-slice dependencies (VSA).
+# Infrastructure (shared kernel) only: no feature-slice dependencies (VSA).
 shared-types = { path = "../infrastructure/shared-types" }
 ast-types = { path = "../infrastructure/ast-types" }
 neuro-hir = { path = "../infrastructure/neuro-hir" }

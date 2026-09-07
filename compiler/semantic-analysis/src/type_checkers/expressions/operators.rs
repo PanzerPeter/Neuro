@@ -14,7 +14,7 @@ use shared_types::Span;
 /// from the prelude rather than the compiler; `??` recognizes it by name.
 pub(super) const RESULT_ENUM: &str = "Result";
 
-/// The variant of `Option` that carries a value — the one `??` unwraps.
+/// The variant of `Option` that carries a value, the one `??` unwraps.
 const OPTION_SUCCESS_VARIANT: &str = "Some";
 
 /// The variant of `Result` that carries a value. `Err`'s payload is discarded by `??`.
@@ -312,7 +312,7 @@ impl TypeChecker {
     /// Check `lhs ?? fallback`: the left side must be an `Option<T>` or `Result<T, E>`,
     /// the fallback must produce that `T`, and the expression's type is `T`.
     ///
-    /// The `Result` error payload is deliberately unconstrained — `??` means "I do not
+    /// The `Result` error payload is deliberately unconstrained: `??` means "I do not
     /// care why it failed", so `E` never reaches the fallback.
     fn check_null_coalesce(&mut self, left: &Expr, right: &Expr, span: &Span) -> Option<Type> {
         let left_ty = self.check_expr(left, None).unwrap_or(Type::Unknown);
@@ -360,7 +360,7 @@ impl TypeChecker {
     /// Resolve a type to the fallible enum it is, if any: the concrete instance, the
     /// prelude base it was monomorphized from, and the payload its success variant carries.
     ///
-    /// Shared by `??` and `?` — the two operators that read a fallible value — so both
+    /// Shared by `??` and `?`, the two operators that read a fallible value, so both
     /// recognize exactly the same set of left-hand types.
     pub(super) fn fallible_kind(&self, ty: &Type) -> Option<FallibleKind> {
         let Type::Enum(instance) = ty.referent() else {
@@ -398,7 +398,7 @@ impl TypeChecker {
         //
         // The same check is what rejects `val x: u8 = -1`: a literal that does not fit
         // its type is a compile error, and -1 does not fit an unsigned type however it
-        // is spelled. Without it the two spellings of one quantity disagree —
+        // is spelled. Without it the two spellings of one quantity disagree,
         // the literal silently became the type's maximum while the computed `0u8 - 1u8`
         // panicked on the debug tier.
         if let (
@@ -423,7 +423,7 @@ impl TypeChecker {
                 // An unsigned target rejects every negative value, so "out of range"
                 // under-explains: the author wrote a negative number for a type that has
                 // none. Name that, and name the spelling that does produce the wrap.
-                // Keyed on the TARGET's signedness, not the value's sign — `-200` for
+                // Keyed on the TARGET's signedness, not the value's sign: `-200` for
                 // `i8` is out of range too, and is not this diagnostic.
                 if !Self::is_signed_integer(&target) {
                     self.record_error(TypeError::NegativeLiteralForUnsignedType {

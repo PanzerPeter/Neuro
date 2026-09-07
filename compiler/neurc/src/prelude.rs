@@ -1,7 +1,7 @@
 //! The implicit standard library every program is compiled with.
 //!
 //! The driver parses [`PRELUDE_SOURCE`] and prepends its items to the program's own.
-//! Downstream passes see ordinary declarations — nothing about `Option` or `Result` is
+//! Downstream passes see ordinary declarations: nothing about `Option` or `Result` is
 //! special-cased in the type checker, the lowering, or the backend.
 //!
 //! The prelude also binds its enums' variants in every module, so `Some` and `Ok` read as
@@ -68,7 +68,7 @@ impl Prelude {
     /// A prelude item whose name the program already declares is dropped: a local
     /// declaration shadows the prelude, which is the module system's rule and the only way
     /// to keep a program that defines its own `Result` compilable. Dropping one
-    /// declaration takes with it every prelude declaration written against it — the
+    /// declaration takes with it every prelude declaration written against it: the
     /// prelude's own bodies are compiled against the prelude's own types, and a
     /// replacement is a different type with a different surface.
     pub fn prepend(self, items: Vec<Item>) -> Vec<Item> {
@@ -102,7 +102,7 @@ fn dropped_declarations(declared: &[&str]) -> Vec<String> {
 }
 
 /// Whether a prelude item is displaced: the declaration itself, or an `impl` block
-/// extending a displaced type — those methods belong to the prelude's type, not to
+/// extending a displaced type: those methods belong to the prelude's type, not to
 /// whatever the program put in its place.
 fn is_dropped(item: &Item, dropped: &[String]) -> bool {
     if let Item::Impl(def) = item {
@@ -138,7 +138,7 @@ fn item_name(item: &Item) -> Option<&str> {
         Item::Const(def) => Some(&def.name.name),
         Item::Newtype(def) => Some(&def.name.name),
         // An `impl` block extends a type declared elsewhere, and module resolution has
-        // already consumed every import, inline block, and `@no_prelude` marker — none
+        // already consumed every import, inline block, and `@no_prelude` marker: none
         // declares a name that could shadow.
         Item::Impl(_) | Item::Import(_) | Item::Module(_) | Item::NoPrelude(_) => None,
     }

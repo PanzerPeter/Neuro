@@ -20,7 +20,7 @@ expression already carries the type the checker resolved for it.
 - Implemented: generic functions, structs, and impls, monomorphized
 - Implemented: traits, operator traits, and `impl` / `dyn` dispatch
 - Implemented: enums, generic enums, `Option<T>` / `Result<T, E>`, and the standard collections
-- Implemented: statically shaped tensors `Tensor<T, [d0, ...]>` — annotations, literal
+- Implemented: statically shaped tensors `Tensor<T, [d0, ...]>`: annotations, literal
   coercion, the construction helpers, and the ownership surface (`.clone()`, `.to(device)`)
 
 ## Primitive Types
@@ -98,7 +98,15 @@ func main() -> i32 {
 }
 ```
 
-The debug-build trap turns a silent miscalculation into an immediate failure during development, while release builds match the zero-overhead wrapping behavior of the underlying hardware. The check is applied to `+`, `-`, `*`, and unary `-` only; division and modulo are unaffected. Compile-time constant folding always uses wrapping arithmetic regardless of optimization level.
+The debug-build trap turns a silent miscalculation into an immediate failure during development, while release builds match the zero-overhead wrapping behavior of the underlying hardware. The check covers `+`, `-`, `*`, unary `-`, and the one overflowing division, `MIN / -1` (and the matching `MIN % -1`).
+
+A `const` initializer is folded by the compiler, so it never reaches either tier. Rather than pick one and make the choice observable in a value, an initializer whose arithmetic overflows its declared type is a compile error:
+
+```neuro
+const C: u8 = 200u8 + 100u8   // error: constant expression overflows u8
+```
+
+Write the value you mean, or widen the type. The bitwise operators `&`, `|`, `^`, `~` and `<<` have no overflow rule to begin with and fold exactly as they evaluate at run time, and an explicit `as` cast still narrows: `300 as u8` is `44` in a `const` just as it is in a function body.
 
 Unary negation is `0 - x`, so it overflows wherever that subtraction does: at a signed type's `MIN`, and at every nonzero value of an unsigned type.
 
@@ -192,7 +200,7 @@ Valid suffixes: `f16`, `bf16`, `f32`, `f64`. The suffix attaches directly to the
 |--------|---------|----------|
 | `.is_nan()` | `bool` | `true` when the receiver is NaN, `false` for every other value including `Inf` and `-Inf`. Nullary; defined on `f32` and `f64` only. |
 
-Floats follow IEEE 754 in full, so **every** comparison against NaN is false — `NaN == NaN`
+Floats follow IEEE 754 in full, so **every** comparison against NaN is false: `NaN == NaN`
 and `NaN != NaN` alike. That makes NaN undetectable with the comparison operators, and
 `.is_nan()` is the way to test for it:
 
@@ -202,13 +210,13 @@ val nan: f64 = zero / zero    // 0.0 / 0.0 is NaN
 val inf: f64 = 1.0 / zero     // division by zero is Inf, an ordinary ordered value
 
 val a: bool = nan.is_nan()    // true
-val b: bool = inf.is_nan()    // false — infinity is not NaN
+val b: bool = inf.is_nan()    // false: infinity is not NaN
 val c: bool = nan == nan      // false: the equality operator cannot see it
 ```
 
 The result is an ordinary `bool`, so it composes with `!`, `&&`, and `||`. Like the integer
 intrinsics, `.is_nan()` needs a value receiver: read through a `&f64` with `*r` first.
-`f16` / `bf16` do not provide it — their scalar contract is storage and casts only, with no
+`f16` / `bf16` do not provide it: their scalar contract is storage and casts only, with no
 arithmetic that could produce a NaN (see below).
 
 ### Half-Precision Types (`f16` / `bf16`)
@@ -327,7 +335,7 @@ program; they are **not** heap-allocated, so a program that only reads literals 
 **Concatenation** (`a + b`) is the first runtime heap-backed string: it `malloc`s a fresh buffer
 and copies both operands' bytes in, yielding a new owned `string`. Both literal and heap-backed
 forms share the same `{ ptr, i64 }` ABI, so consumers cannot tell them apart. An anonymous heap
-`string` — the result of `+`, of interpolation, or of `String::to_string` — is owned by no
+`string` (the result of `+`, of interpolation, or of `String::to_string`) is owned by no
 binding the drop machinery tracks, so it still leaks; see the alpha memory warning in the README.
 A [`String`](#growable-strings-string) builder is different: it *is* a tracked binding, so its
 buffer is freed at scope exit.
@@ -382,22 +390,22 @@ violation:
 
 **`.char_slice(range) -> &string`**, the codepoint-indexed companion to `.slice`. It returns
 the same borrowed, zero-copy `&string`, but its range counts **Unicode code points** rather
-than bytes, walking the UTF-8 data to locate each endpoint — O(n) on the receiver's length,
+than bytes, walking the UTF-8 data to locate each endpoint: O(n) on the receiver's length,
 where `.slice` is O(1). Use it whenever the indices came from counting characters (tokenizer
 and NLP work); use `.slice` when the offsets are already byte offsets or the text is known to
 be ASCII.
 
 ```neuro
 val s = "héllo"                       // 5 characters, 6 bytes: 'é' takes two
-val by_char = s.char_slice(0..3)      // "hél" — three characters, four bytes
-val by_byte = s.slice(0..3)           // "hé"  — three bytes
+val by_char = s.char_slice(0..3)      // "hél": three characters, four bytes
+val by_byte = s.slice(0..3)           // "hé": three bytes
 val tail = s.char_slice(3..=4)        // "lo", inclusive upper bound
 val empty = s.char_slice(5..5)        // "", the character count is a legal bound
 ```
 
 Only the **bounds** rule applies: the range must satisfy `0 <= start <= end <= character
 count`, and a reversed or out-of-range range panics with `string char slice out of bounds`.
-There is no code-point-alignment rule to break — a code point index cannot name a position
+There is no code-point-alignment rule to break: a code point index cannot name a position
 inside a code point, which is the reason to reach for this method in the first place.
 
 A range expression `a..b` / `a..=b` is valid **only** as a `.slice` or `.char_slice`
@@ -432,14 +440,14 @@ names the code point its step yields, never the one after it.
 ```neuro
 mut cut: u64 = 0
 for (offset, c) in "aé漢".char_indices() {
-    if c == '漢' { cut = offset }     // 3 — 'a' is one byte, 'é' two
+    if c == '漢' { cut = offset }     // 3: 'a' is one byte, 'é' two
 }
 ```
 
 `.char_indices()` is a **`for`-head form**, like `.enumerate()`, rather than a method: it binds
 a pair, and a pair cannot travel through `Iterator::next`, whose `Option` payload is limited to
 scalars in this phase. So it appears only in a `for` head, it binds a pair there (never a single
-variable), and it takes no `.enumerate()` and no adapters — it already carries a position of its
+variable), and it takes no `.enumerate()` and no adapters: it already carries a position of its
 own. Where a chain is wanted, walk `.chars()` instead.
 
 ## Growable Strings (`String`)
@@ -478,7 +486,7 @@ unused builder costs no heap traffic. It takes no type arguments, so unlike `Vec
 no annotation to be inferred.
 
 **`.push_str(text)`**, appends the bytes of a `string` or an immutable `&string`. The argument is
-**read, not moved** — the same latitude a `+` operand or a map lookup key gets — so the caller's
+**read, not moved** (the same latitude a `+` operand or a map lookup key gets), so the caller's
 binding stays usable afterwards. It mutates, so it needs a `mut` binding or a `&mut String`.
 
 **`.len() -> u64`**, the byte length, read from the header in O(1). Bytes, not characters, for the
@@ -488,8 +496,8 @@ same reason `string.len()` is.
 not reallocate. This is what makes one builder reusable across iterations. It mutates.
 
 **`.to_string() -> string`**, copies the accumulated bytes into a fresh owned immutable `string`.
-This is the bridge back to `string`: everything that consumes text — `+`, `==`, `.len()`, a
-`Vec<string>` element, a map key — takes the result. A borrowed view into the buffer would be
+This is the bridge back to `string`: everything that consumes text (`+`, `==`, `.len()`, a
+`Vec<string>` element, a map key) takes the result. A borrowed view into the buffer would be
 zero-copy, but a later `push_str` may reallocate and leave it dangling, and the borrow checker
 does not yet track a builder's outstanding views, so the copy is the sound answer. It is one
 allocation at the end of a build, not one per append.
@@ -512,7 +520,7 @@ val moved = buf          // buf is MOVED
 - No `.push(char)`, `String::with_capacity(n)`, `String::from(s)`, or `.is_empty()`.
 - No borrowed `.as_str()`; use `.to_string()`.
 - A `String` cannot be a collection element or a map key.
-- `String` is not an interpolation hole or a `+` operand — call `.to_string()` first.
+- `String` is not an interpolation hole or a `+` operand: call `.to_string()` first.
 
 ## Struct Types
 
@@ -605,16 +613,16 @@ Rules:
   shadows the builtin.
 - `@derive(Debug)` gives the struct its `{value:?}` rendering: the struct's name followed by
   each field in declaration order, e.g. `Point { x: 1, y: 2 }`. A field-less struct renders as
-  its bare name. Every field must itself be renderable — a scalar, `string`, `char`, `bool`, or
-  another struct that derives `Debug` — otherwise the derive is a `DeriveFieldUnsupported` error.
+  its bare name. Every field must itself be renderable (a scalar, `string`, `char`, `bool`, or
+  another struct that derives `Debug`). Otherwise the derive is a `DeriveFieldUnsupported` error.
   A struct has no *display* form, so `"{p}"` stays an error even with the derive; write `"{p:?}"`.
 - `@derive(PartialEq)` gives the struct `==` and `!=`, compared field by field. The same field
   rule applies: a nested struct must derive `PartialEq` too. The comparison is generated inline
   and never calls a method, which is why a struct that both derives `PartialEq` and declares
-  `impl PartialEq for` it is a `DeriveConflictsWithImpl` error — keep one.
+  `impl PartialEq for` it is a `DeriveConflictsWithImpl` error: keep one.
 - The derivable-and-implemented set is exactly `Copy`, `Clone`, `Debug`, `PartialEq`. Any other
   name in a `@derive` list is a compile error, never a silent no-op: `Hashable` is specified but
-  not generated yet (`UnimplementedDerive` — write the `impl` by hand), and anything else is
+  not generated yet (`UnimplementedDerive`: write the `impl` by hand), and anything else is
   `UnknownDerive`. A repeated name is `DuplicateDerive`.
 - A derived `PartialEq` does **not** satisfy the `impl PartialEq` a struct key of a `HashMap` or
   `BTreeMap` requires: a collection key calls the trait method, and a derive provides none.
@@ -1165,7 +1173,7 @@ Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
 
 - Implemented: static tensor types `Tensor<f32, [3, 3]>`, literal coercion, the
   construction helpers, and tensor ownership (see [Tensor Types](#tensor-types))
-- Planned: reading a tensor back — indexing, slicing, arithmetic, and reductions
+- Planned: reading a tensor back (indexing, slicing, arithmetic, and reductions)
 - Planned: broadcasting rules
 - Planned: shape generics, named dimensions, and dynamic shapes
 
@@ -1423,7 +1431,7 @@ for x in &a {  }                     // iterate over a borrow
 
 ## Borrowed Slices (`&[T]` / `&mut [T]`)
 
-`&[T]` is a non-owning `(ptr, len)` view over a contiguous run of `T` — the array-and-`Vec`
+`&[T]` is a non-owning `(ptr, len)` view over a contiguous run of `T`, the array-and-`Vec`
 analogue of `&string`. A function that only reads or writes elements takes one, and stops
 caring whether they came from a `[T; N]`, a `Vec<T>`, or the interior of either.
 
@@ -1453,13 +1461,13 @@ val c = sum(&grown)                  // Vec, same signature
 - **`[T]` alone is unsized** and never appears outside a reference; annotating a parameter
   `[T]` is a compile error. The owned forms are `[T; N]` and `Vec<T>`.
 - **Unsizing**: `&[T; N]`, `&Vec<T>`, and `&[T]` all satisfy a `&[T]` parameter, and the
-  `&mut` forms a `&mut [T]` one. Mutability must match exactly — there is no `&T` → `&mut T`
+  `&mut` forms a `&mut [T]` one. Mutability must match exactly: there is no `&T` → `&mut T`
   strengthening, and no `&mut T` → `&T` weakening.
 - **`.slice(range)`** on an array, a `Vec<T>`, or another slice yields a `&[T]` view over the
   named sub-range, copying nothing. It accepts `a..b` and `a..=b`. An out-of-range or reversed
   range panics in **every** build, debug and release alike: the call hands back a view that
   outlives the check, so there is no later point at which the mistake could still be caught.
-- **`.len()`** is O(1), read from the length word of the view — the borrowed run's length, not
+- **`.len()`** is O(1), read from the length word of the view: the borrowed run's length, not
   the container's.
 - **Indexing** is bounds-checked exactly as on the owning container: debug builds panic on an
   out-of-range index, release builds omit the check. `xs[i] = v` requires a `&mut [T]`; the
@@ -1556,7 +1564,7 @@ func twice(t: Tensor<f32, [2, 2]>) {
 ```
 
 `.clone()` is the explicit way to get a second owner. It takes no arguments, yields a
-tensor of the same type, and leaves the receiver usable — including when it is called
+tensor of the same type, and leaves the receiver usable, including when it is called
 through a borrow, where the result is an owned tensor rather than the borrow.
 
 ```neuro
@@ -1597,7 +1605,7 @@ func main() -> i32 {
 
 To keep the source, clone first: `t.clone().to(Device::CPU)`.
 
-A borrow cannot be consumed, so `.to` is not offered on `&Tensor<T, S>` — calling it there
+A borrow cannot be consumed, so `.to` is not offered on `&Tensor<T, S>`: calling it there
 reports that the borrowed type has no such method.
 
 The host is the only device this compiler can lower to today; the GPU backend is later
@@ -1613,7 +1621,7 @@ writing one under any other name is a parse error.
 
 A nested array literal becomes a tensor wherever an explicit `Tensor<...>` annotation is
 in scope. The annotation supplies the element type and every extent, and it types the
-literal's leaves — `1.0` under a `Tensor<f32, ...>` annotation is an `f32` literal, not
+literal's leaves: `1.0` under a `Tensor<f32, ...>` annotation is an `f32` literal, not
 an `f64` one being narrowed, exactly as `val x: f32 = 0.01` types its literal.
 
 ```neuro
@@ -1630,7 +1638,7 @@ val arr = [1.0, 2.0, 3.0]          // no annotation: a plain [f64; 3], not a ten
 A nested literal must be **rectangular**: every sub-array at a given depth has the length
 the corresponding extent declares, and the nesting is as deep as the shape is long. A
 ragged literal, a wrong extent, and a literal shallower than the shape are all compile
-errors. A value that already has a type is not converted for the annotation's benefit — a
+errors. A value that already has a type is not converted for the annotation's benefit: a
 non-literal element must already be the element type.
 
 Where no annotation reaches, name the type with a turbofish and use a constructor:
@@ -1646,28 +1654,28 @@ val loss: Tensor<f32, []> = Tensor::scalar(0.5)
 
 `identity()` applies only to a square rank-2 shape, `random_normal` draws only into `f32`
 or `f64`, `scalar` builds only the rank-0 tensor, and `from` takes the same nested literal
-the annotated form coerces. A rank-0 tensor has no array-literal form at all — it is
+the annotated form coerces. A rank-0 tensor has no array-literal form at all: it is
 written with `Tensor::scalar(value)`. The generator behind `random_normal` is seeded from a
 fixed constant, so a compiled program draws the same values on every run.
 
 A tensor **owns** its buffer, and that buffer lives out of line. The value itself is a
-[DLPack](https://dmlc.github.io/dlpack/latest/) handle — a pointer to a
+[DLPack](https://dmlc.github.io/dlpack/latest/) handle: a pointer to a
 `DLManagedTensorVersioned` whose `data` field addresses a flat, row-major run of the
 elements, allocated when the tensor is constructed and released when its binding leaves
 scope. The handle carries the tensor's rank, shape, strides, element dtype, and device, so
 the pointer a Neuro program passes around is the pointer a foreign consumer such as NumPy or
 PyTorch reads: nothing is wrapped or converted at the boundary. Release runs through the
-handle's own `deleter`, which is the single release path — a tensor leaving scope and a
+handle's own `deleter`, which is the single release path: a tensor leaving scope and a
 foreign owner of the handle call the same function.
 
 The buffer keeps one address for its whole life and is aligned to 64 bytes, which is what
 DLPack requires; a tensor of any size compiles at every optimization level. `.clone()`
 allocates a second handle and a second buffer and copies into it, so the copy is independent
-of the original. The buffer is host memory — the handle reports the `kDLCPU` device, and
+of the original. The buffer is host memory: the handle reports the `kDLCPU` device, and
 device placement is later work.
 
 A tensor moves like any other non-`Copy` value, and the move hands the buffer on rather than
-copying it — binding it, passing it to a function, returning it, storing it in a struct
+copying it: binding it, passing it to a function, returning it, storing it in a struct
 field, and `.to(device)` all transfer ownership, and only the last owner releases it. A
 tensor held in a struct field is not released when the struct goes out of scope; that gap is
 shared with the standard collections.
@@ -1675,7 +1683,7 @@ shared with the standard collections.
 ### What tensors cannot do yet
 
 A tensor can be built, bound, moved, cloned, passed, returned, transferred with
-`.to(device)`, and stored in a struct — but not yet read back. Indexing and slicing
+`.to(device)`, and stored in a struct, but not yet read back. Indexing and slicing
 (`t[i, j]`, `t[1..3, ..]`), tensor arithmetic (`a + b`, `a @ b`), in-place compound
 assignment, `.t()`, `.reshape(...)`, and the reductions (`.sum()`, `.mean()`, `.max()`,
 `.min()`) are all later work. Symbolic
@@ -1790,7 +1798,7 @@ equally; the map only needs that much.
   limitation and resolves with the heap-string work.
 - `Vec<T>` does not go through the `IntoIterator` / `Iterator` protocol
   ([control flow](control-flow.md#the-iteration-protocol)): `for x in v` lowers to
-  a counted loop, exactly as `for x in arr` does — and so does
+  a counted loop, exactly as `for x in arr` does, and so does
   `for (i, x) in v.enumerate()`, which binds the counter that loop already keeps.
   The protocol is what a *user-defined* type implements to stand in a `for` head;
   the built-in sequences take the direct path instead.

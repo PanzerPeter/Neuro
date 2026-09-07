@@ -1,6 +1,6 @@
 // Neuro Programming Language - String slices `&string` (Phase 1.7)
 //
-// `&string` is a borrowed, non-owning view into UTF-8 data — a string slice.
+// `&string` is a borrowed, non-owning view into UTF-8 data: a string slice.
 // There is no separate slice type: `&string` is both "borrow of an owned
 // string" and "string slice." A slice is read-only, so the fundamental
 // operation it supports is equality: two slices, or a slice and an owned
@@ -11,7 +11,7 @@ func slices_equal(a: &string, b: &string) -> bool {
     a == b
 }
 
-// Compare a slice against an owned string — both sides normalize to the same
+// Compare a slice against an owned string: both sides normalize to the same
 // `(ptr, len)` fat pointer before the byte compare.
 func slice_matches(s: &string) -> bool {
     s == "Neuro"

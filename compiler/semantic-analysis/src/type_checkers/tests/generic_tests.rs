@@ -31,7 +31,7 @@ fn generic_body_operation_without_bound_is_rejected() {
 fn returning_concrete_value_as_type_parameter_is_rejected() {
     // Returning a concrete `string` where the type parameter `T` is expected is a
     // mismatch. (A parameter used only in return position is now permitted at the
-    // declaration — turbofish may supply it — and is instead reported at the call
+    // declaration (turbofish may supply it) and is instead reported at the call
     // site when it cannot be inferred; see the const-generics test suite.)
     let errors = semantic_errors("func p<T>(s: string) -> T { s }");
     assert!(
@@ -201,7 +201,7 @@ func main() -> i32 { return 0 }
 
 #[test]
 fn undeclared_lifetime_is_rejected() {
-    // `'b` is used but never declared in the parameter list — a well-formedness error.
+    // `'b` is used but never declared in the parameter list: a well-formedness error.
     let errors = semantic_errors(
         r#"
 func f<'a>(a: &'b string) -> i32 { 0 }

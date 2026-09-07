@@ -180,7 +180,7 @@ impl TypeChecker {
             //
             // A `loop` that no `break` targets has no exit edge at all: it either
             // runs forever or leaves via `return`. It therefore produces no value
-            // and must satisfy whatever type its context demands — the same
+            // and must satisfy whatever type its context demands, the same
             // divergent contract the panic-family builtins carry.
             Expr::Loop { label, body, .. } => self.check_loop_expr(label, body, expected),
 

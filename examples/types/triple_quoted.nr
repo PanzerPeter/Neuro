@@ -34,7 +34,7 @@ func main() -> i32 {
     """
     passed = passed + check(basic, "first\nsecond")
 
-    // Indentation deeper than the closing delimiter survives — only the common
+    // Indentation deeper than the closing delimiter survives: only the common
     // prefix goes away, so nested structure inside the block is preserved.
     val nested = """
     root

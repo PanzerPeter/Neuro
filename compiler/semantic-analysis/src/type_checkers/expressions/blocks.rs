@@ -38,7 +38,7 @@ impl TypeChecker {
 
         // Arm-type hint, mirroring `check_match`: the caller's expected type if any,
         // else the first arm's type once known. Without it a later arm carrying no type
-        // of its own — a bare `None`, an untyped integer literal — has nothing to
+        // of its own (a bare `None`, an untyped integer literal) has nothing to
         // resolve against, even when the `val` it initializes is annotated.
         let mut hint: Option<Type> = expected.cloned();
 
@@ -78,7 +78,7 @@ impl TypeChecker {
         }
 
         // All arms must agree on type. The result is the first arm that carries one:
-        // a divergent arm — a `panic`, an `unreachable`, a `return` — is `Unknown`, the
+        // a divergent arm (a `panic`, an `unreachable`, a `return`) is `Unknown`, the
         // compatible-with-everything type, so it says nothing about what the `if`
         // evaluates to. Taking it as the result left the whole expression untyped and
         // its binding undefined, purely because of the order the arms were written in.
@@ -102,8 +102,8 @@ impl TypeChecker {
 
     /// The type an `if` arm contributes to unification.
     ///
-    /// An arm that leaves the enclosing scope — `return`, `break`, `continue`, or a
-    /// diverging call — never reaches the point where the `if` has a value, so it
+    /// An arm that leaves the enclosing scope (`return`, `break`, `continue`, or a
+    /// diverging call) never reaches the point where the `if` has a value, so it
     /// describes nothing about that value and must not constrain its siblings. Its
     /// statements are still checked; only the type it reports is dropped, to `Unknown`,
     /// the compatible-with-everything type the panic family already carries.
@@ -132,7 +132,7 @@ impl TypeChecker {
     ///
     /// A `loop` that no `break` targets has no exit edge at all: it either
     /// runs forever or leaves via `return`. It therefore produces no value
-    /// and must satisfy whatever type its context demands — the same
+    /// and must satisfy whatever type its context demands: the same
     /// divergent contract the panic-family builtins carry.
     pub(super) fn check_loop_expr(
         &mut self,
@@ -165,7 +165,7 @@ impl TypeChecker {
     ///
     /// An `if` written in statement position parses to `Stmt::If`, never
     /// `Stmt::Expr(Expr::If)`, so a trailing `if/else` has to be recognized here to
-    /// carry the block's value — the same rule the function-body tail applies.
+    /// carry the block's value, the same rule the function-body tail applies.
     pub(super) fn check_block_expr_type(
         &mut self,
         stmts: &[ast_types::Stmt],

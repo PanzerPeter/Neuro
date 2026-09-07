@@ -1,6 +1,6 @@
-# Vertical Slice Architecture — Solo-Agent AI Base Guidelines v4.4
+# Vertical Slice Architecture: Solo-Agent AI Base Guidelines v4.4
 
-> **Priority: Highest.** Every rule is a compiler error. Blocker-severity violations MUST be refused — state the rule ID and propose a compliant alternative.
+> **Priority: Highest.** Every rule is a compiler error. Blocker-severity violations MUST be refused: state the rule ID and propose a compliant alternative.
 > **Context:** 1 human + 1 AI agent | 20–50K LOC | No backward compatibility.
 > Supersedes: v4.3 | Created: 2026-05-16
 
@@ -25,12 +25,12 @@
 
 **`CTX-001` [BLOCKER]** No migration paths, compatibility shims, versioned endpoints, deprecated code paths, or adapter layers. If a better design exists, refactor completely.
 
-**`CTX-002` [ULTRA] — Continuous Execution Protocol**
+**`CTX-002` [ULTRA]: Continuous Execution Protocol**
 To minimize token overhead and latency, refactoring tasks MUST be executed as a continuous, autonomous stream. The AI is authorized to complete the entire scope without pausing for developer confirmation unless a Hard Gate or terminal error is encountered.
 
 1. **Initial Assessment (The Single Gate):** Output a high-level execution plan and a list of files to be modified. Immediately follow this with: *"Starting continuous execution. I will pause only at Hard Gates, terminal errors, or if $N$ files are modified without success."*
 2. **Autonomous Chaining:** Execute all changes sequentially. Each response starts with a progress indicator (e.g., `[Step 3/8]`) and ends with an internal logic check before proceeding to the next file.
-3. **Hard Gates — mandatory pause regardless of `CTX-002`:**
+3. **Hard Gates (mandatory pause regardless of `CTX-002`):**
    - A new or modified **persistence schema** is required. Output the proposed schema and wait for explicit written confirmation. Silence, absence of objection, or topic continuation is NOT approval.
    - A **`RT-001` trigger** fires (Handler exceeds 300 lines or 5 injected dependencies). Halt, present the split plan, wait for confirmation.
    - The proposed change **contradicts an established pattern** already present in the codebase.
@@ -72,22 +72,22 @@ Leaving old and new patterns coexisting after any single step is **FORBIDDEN**.
 
 ## 4. AI Interaction Protocol
 
-**Step 1 — Complexity Check**
+**Step 1: Complexity Check**
 If fewer than 5 distinct business operations AND clearly a prototype or utility script, warn that VSA adds structural overhead. Proceed only on developer confirmation or if the project is already established as VSA.
 
-**Step 2 — Boundary Proposal**
+**Step 2: Boundary Proposal**
 Before writing implementation code, output:
 - (a) Slice name and its single business responsibility.
 - (b) Full file/folder tree.
 - (c) Input DTO, Output DTO, and Handler signature.
-- (d) Persistence schema if applicable — triggers a **Hard Gate** (→ CTX-002.3).
+- (d) Persistence schema if applicable: triggers a **Hard Gate** (→ CTX-002.3).
 
 Infer from context first. Ask ONE clarifying question only if a boundary is genuinely ambiguous after inference.
 
-**Step 3 — Completeness Check**
+**Step 3: Completeness Check**
 After generating a Slice, verify all mandatory components exist: Entry Point, Input Model, Validator, Handler, CONTEXT.md. Generate any missing component before ending the response.
 
-**Step 4 — Consistency Scan**
+**Step 4: Consistency Scan**
 After any change, report:
 - Other Slices affected by the interface or schema change.
 - Stale CONTEXT.md files referencing the modified surface.
@@ -100,12 +100,12 @@ Do not silently leave inconsistencies.
 ## 5. Core Principles
 
 ### Cohesion over DRY
-Always duplicate business logic across Slices. Do NOT create a shared module based on predicted future divergence — LLMs cannot reliably predict domain evolution. Business logic moves to the Shared Kernel as a Domain Utility ONLY on explicit developer command: `/abstract [LogicName]`. Without that command, **duplication is the default and correct action.**
+Always duplicate business logic across Slices. Do NOT create a shared module based on predicted future divergence. LLMs cannot reliably predict domain evolution. Business logic moves to the Shared Kernel as a Domain Utility ONLY on explicit developer command: `/abstract [LogicName]`. Without that command, **duplication is the default and correct action.**
 
 **`PURE-FN-EXCEPTION`:** Pure functions with zero side effects representing a universal domain concept (e.g., Money arithmetic, VAT calculation, slug generation) are Shared Kernel eligible from initial creation WITHOUT requiring `/abstract`, provided: (a) zero side effects, (b) no branch logic tied to any specific Slice's business rules, (c) genuinely universal across any Slice.
 
 ### Abstract Command Integrity
-If the AI detects identical business logic duplicated across three or more Slices and no `/abstract` command has been issued, it MUST proactively flag `RT-005` and surface the duplication — it MUST NOT silently proceed or self-promote the logic to the Shared Kernel. The `/abstract` command is the only valid promotion gate.
+If the AI detects identical business logic duplicated across three or more Slices and no `/abstract` command has been issued, it MUST proactively flag `RT-005` and surface the duplication. It MUST NOT silently proceed or self-promote the logic to the Shared Kernel. The `/abstract` command is the only valid promotion gate.
 
 ### Slice Independence
 Deleting a Slice folder plus its DI registration and event subscriptions must leave the project in a compilable, fully functional state. If deletion requires modifying code inside another Slice, the boundaries are wrong.
@@ -166,7 +166,7 @@ Do not generate abstractions, interfaces, or extension points for capabilities t
 | `Projection` | Public Read Model for cross-slice reads. |
 | `DomainService` | Complex domain logic with zero infrastructure dependencies. |
 
-**`FN-002`** Test files: `[FeatureName].[Role].Test.[ext]` — co-located in `/tests` within the Feature Folder.
+**`FN-002`** Test files: `[FeatureName].[Role].Test.[ext]`, co-located in `/tests` within the Feature Folder.
 Example: `PlaceOrder.Handler.Test.ts`
 
 **`FN-003`** Shared Kernel files: `[ConceptName].[Role].[ext]`
@@ -184,9 +184,9 @@ Examples: `Money.ValueObject.ts` | `Logger.Adapter.ts` | `DatabaseConnection.Con
 | `CM-001` | HIGH | Comments explain WHY, never WHAT. ❌ `// Loop through orders and sum the totals` ✅ `// Summed here rather than in the DB query because tax calculation requires hydrated domain objects.` |
 | `CM-002` | **BLOCKER** | Dead code MUST be deleted, never commented out. Use version control for history. |
 | `CM-003` | HIGH | TODO comments MUST include reason and context. ❌ `// TODO: fix this` ✅ `// TODO: Replace with event-driven approach once the Notification slice is implemented.` |
-| `CM-004` | MEDIUM | Replace magic numbers and non-obvious strings with named constants. If the constant name is not self-explanatory, add a WHY comment at the declaration — not at the usage site. ❌ `const timeout = 30000; // 30 second timeout` ✅ `const SESSION_EXPIRY_MS = 30_000; // Matches the upstream auth provider's token TTL.` |
+| `CM-004` | MEDIUM | Replace magic numbers and non-obvious strings with named constants. If the constant name is not self-explanatory, add a WHY comment at the declaration, not at the usage site. ❌ `const timeout = 30000; // 30 second timeout` ✅ `const SESSION_EXPIRY_MS = 30_000; // Matches the upstream auth provider's token TTL.` |
 | `CM-005` | MEDIUM | Auto-generated doc comments that restate the function or parameter name are FORBIDDEN. Exception: public API surface methods with non-obvious behavior or constraints. |
-| `CM-006` | LOW | Section divider comments (`// ===== INIT =====`) are FORBIDDEN. A file requiring dividers to be navigable violates single responsibility — split it. |
+| `CM-006` | LOW | Section divider comments (`// ===== INIT =====`) are FORBIDDEN. A file requiring dividers to be navigable violates single responsibility: split it. |
 | `CM-007` | HIGH | Non-obvious business rules embedded in code MUST have a WHY comment explaining the business constraint. Example: `// Orders under €10 ineligible per carrier contract FUL-2024-03.` |
 
 ---
@@ -227,7 +227,7 @@ Observability infrastructure lives exclusively in the Shared Kernel as zero-busi
 | `OB-001` | HIGH | All Slices MUST emit structured log entries at Handler entry and exit. Minimum fields: `slice`, `operation`, `duration_ms`, `result` (`ok` or `error`). |
 | `OB-002` | HIGH | All error responses MUST conform to a single project-wide error envelope defined in the Shared Kernel. Slices MUST NOT define their own error shapes. |
 | `OB-003` | MEDIUM | Correlation/trace IDs MUST be propagated from the Entry Point through the Handler to any Integration Event emitted. The propagation mechanism is defined once in the Shared Kernel. |
-| `OB-004` | LOW | Infrastructure exceptions (DB, network, external service) MUST be caught at the adapter boundary, logged with full context, and re-surfaced as a typed infrastructure error — never as a raw exception at the Slice boundary. |
+| `OB-004` | LOW | Infrastructure exceptions (DB, network, external service) MUST be caught at the adapter boundary, logged with full context, and re-surfaced as a typed infrastructure error, never as a raw exception at the Slice boundary. |
 
 ---
 
@@ -283,7 +283,7 @@ Update CONTEXT.md in the **SAME response** as any change to: Input/Output DTO | 
 - Public Read Model: `[ProjectionName]` ← omit if none
 
 ## Shared Kernel
-- [UtilityName] — [why]   ← omit section if none
+- [UtilityName]: [why]   ← omit section if none
 
 ## Notes
 [Non-obvious design decisions or constraints only. Omit for straightforward slices.]
@@ -293,7 +293,7 @@ Update CONTEXT.md in the **SAME response** as any change to: Input/Output DTO | 
 
 ## 14. Context Scaling
 
-Slices within the same project may mature at different rates. Apply the scale tier to **each Slice individually** based on its own complexity, not the total project Slice count alone. When the project crosses a tier boundary, existing Slices are upgraded incrementally — not all at once — and the AI flags which Slices are below the new tier's requirements during the next Consistency Scan (→ Step 4).
+Slices within the same project may mature at different rates. Apply the scale tier to **each Slice individually** based on its own complexity, not the total project Slice count alone. When the project crosses a tier boundary, existing Slices are upgraded incrementally (not all at once) and the AI flags which Slices are below the new tier's requirements during the next Consistency Scan (→ Step 4).
 
 ### Small (1–14 Slices)
 - DB entities may be used directly in Handlers. No Repository required.
@@ -326,7 +326,7 @@ Condition: Business logic used in two or more Slices.
 Action: Duplicate by default. Move to Shared Kernel ONLY on explicit `/abstract [LogicName]` command. Exception: `PURE-FN-EXCEPTION` (see Section 5).
 
 **Shared Infrastructure Logic**
-Condition: Purely technical logic — logging, email transport, DB connection, HTTP client.
+Condition: Purely technical logic (logging, email transport, DB connection, HTTP client).
 Action: Move to Shared Kernel. Implementation must be a generic adapter with zero awareness of any specific Slice.
 
 **Cross-Slice Read**
@@ -347,7 +347,7 @@ Action: Identify which existing Slice's single responsibility would change. That
 | ID | Severity | Rule |
 |----|----------|------|
 | `TS-001` | HIGH | Generate tests ONLY when the developer appends `--test` to the prompt. Without `--test`, generate no test files. |
-| `TS-002` | HIGH | When `--test` is present, generate one Integration Test covering the full Slice from entry point through Handler to the real or in-memory database. Must assert on actual system state after execution (record persisted, event published) — not only the return value. File: `[FeatureName].Integration.Test.[ext]`, co-located in `/tests` within the Feature Folder. |
+| `TS-002` | HIGH | When `--test` is present, generate one Integration Test covering the full Slice from entry point through Handler to the real or in-memory database. Must assert on actual system state after execution (record persisted, event published), not only the return value. File: `[FeatureName].Integration.Test.[ext]`, co-located in `/tests` within the Feature Folder. |
 | `TS-003` | MEDIUM | Exception: if the Slice Handler contains complex branching or non-trivial domain calculations, also generate a targeted Unit Test for that logic in isolation. Mock only infrastructure boundaries (repository, event bus, external services). Do NOT mock domain services or value objects. File: `[FeatureName].Handler.Test.[ext]` |
 
 ---

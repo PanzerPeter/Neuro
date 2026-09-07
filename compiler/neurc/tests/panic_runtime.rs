@@ -1,7 +1,7 @@
 // End-to-end tests for the panic runtime.
 //
 // `panic(msg)` / `assert(cond)` / `unreachable()` print a diagnostic with source location
-// to stderr and abort the process via `abort()` (SIGABRT) — no stack unwinding. These tests
+// to stderr and abort the process via `abort()` (SIGABRT): no stack unwinding. These tests
 // compile each program and assert both the runtime termination behavior and the emitted
 // diagnostic text.
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ use std::process::{Command, Output};
 ///
 /// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
 /// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()` — that assumes the legacy
+/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
 /// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
 fn neurc_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))

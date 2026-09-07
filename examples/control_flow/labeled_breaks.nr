@@ -6,7 +6,7 @@
 //
 // The labeled `break outer` below leaves both loops the moment `i + j` first
 // reaches 3. Every visited pair is printed, so the output stops at (0, 3) after
-// four iterations rather than running the full 5x5 grid — which is exactly what
+// four iterations rather than running the full 5x5 grid, which is exactly what
 // distinguishes `break outer` from a plain `break`.
 
 func main() -> i32 {

@@ -19,7 +19,7 @@ shared-types = { path = "../infrastructure/shared-types" }
 # The MLIR path is opt-in: enabling `mlir` pulls in melior (and an MLIR 20
 # toolchain at build time) plus the neuro-hir contract it lowers from. Default
 # builds compile a trivial placeholder so the workspace builds and tests on stock
-# LLVM 20 without MLIR — see CONTEXT.md.
+# LLVM 20 without MLIR. See CONTEXT.md.
 default = []
 mlir = ["dep:melior", "dep:thiserror", "dep:neuro-hir"]
 

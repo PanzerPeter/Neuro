@@ -2,7 +2,7 @@
 //! scrutinee type, and the divergence rule on the `else` branch.
 //!
 //! `Option` / `Result` are prelude source rather than compiler built-ins, so every
-//! program here declares them — which also proves the rules key off the scrutinee's
+//! program here declares them, which also proves the rules key off the scrutinee's
 //! type rather than one specific declaration.
 
 use super::super::*;
@@ -30,7 +30,7 @@ func main() -> i32 {{
 
 #[test]
 fn a_result_else_binding_names_the_error_payload() {
-    // `E` here is `bool`, so using `err` as an `i32` must be a mismatch — proof the
+    // `E` here is `bool`, so using `err` as an `i32` must be a mismatch, proof the
     // binding took the `Err` payload type and not the whole `Result`.
     let errors = semantic_errors(&format!(
         "{FALLIBLE_DECLS}
@@ -88,7 +88,7 @@ func main() -> i32 {{
 
 #[test]
 fn a_plain_enum_else_binding_names_the_whole_scrutinee() {
-    // Neither Option nor Result, so `|s|` is the untouched `Shape` — matchable again.
+    // Neither Option nor Result, so `|s|` is the untouched `Shape`, matchable again.
     let errors = semantic_errors(
         "enum Shape { Circle { radius: i32 }, Square(i32), Empty }
 

@@ -38,8 +38,8 @@ impl<'ctx> CodegenContext<'ctx> {
         // Resolve whether this binding owns a `Drop` value before the initializer is
         // consumed, so its destructor can be scheduled for scope exit.
         //
-        // A `string` owns nothing by type — the same fat pointer describes a `.rodata`
-        // literal and a heap buffer — so ownership comes from the initializer instead:
+        // A `string` owns nothing by type. The same fat pointer describes a `.rodata`
+        // literal and a heap buffer, so ownership comes from the initializer instead:
         // a binding initialized by a producer that always allocates owns that buffer and
         // frees it at scope exit, exactly as a collection binding frees its own.
         let drop_target = self.drop_target(ty).or_else(|| {
@@ -191,7 +191,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// Generate code for `*pointer = value` — a store through a mutable reference.
+    /// Generate code for `*pointer = value`, a store through a mutable reference.
     /// `pointer` evaluates to the referent's address; the value is stored there.
     pub(crate) fn codegen_deref_assignment(
         &mut self,
@@ -899,7 +899,7 @@ impl<'ctx> CodegenContext<'ctx> {
         global.set_linkage(inkwell::module::Linkage::Internal);
 
         // Cache the value directly so identifier resolution returns the constant without
-        // emitting a load — consts are values, not memory locations.
+        // emitting a load: consts are values, not memory locations.
         self.const_values.insert(def.name.clone(), val);
         Ok(())
     }

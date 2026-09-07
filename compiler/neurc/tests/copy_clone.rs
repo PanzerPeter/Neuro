@@ -13,7 +13,7 @@ use tempfile::TempDir;
 ///
 /// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
 /// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()` — that assumes the legacy
+/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
 /// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
 fn neurc_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
@@ -132,7 +132,7 @@ func main() -> i32 {
 #[test]
 fn copy_struct_rebound_multiple_times_runs() {
     // A Copy struct can be duplicated into several bindings, each independently
-    // usable — exercising the no-move path end-to-end without struct-typed
+    // usable: exercising the no-move path end-to-end without struct-typed
     // function parameters (a separate Phase 2 codegen item).
     let test = CompileTest::new();
     let source = r#"

@@ -149,10 +149,14 @@ uses the dynamic CRT by default; the `libcmt` (`/MT`) build will fail to link.
 which is why the workspace pins inkwell to the `target-x86` feature rather than
 `target-all`. Neuro only ever initializes the native target, so nothing is lost.
 
-> **Note:** `.cargo/config.toml` adds `C:/vcpkg/installed/x64-windows-static/lib`
-> to the MSVC link search path for LLVM's transitive dependencies (libxml2). If
-> your LLVM package needs those and linking fails with unresolved `xml*` symbols,
-> install them with `vcpkg install libxml2:x64-windows-static`.
+> **Note:** `.cargo/config.toml` adds the vcpkg library directories to the MSVC
+> link search path for LLVM's transitive dependencies (libxml2). Most LLVM 20
+> packages do not need them. If yours does and linking fails with
+> `cannot open input file 'libxml2s.lib'`, install the library with
+> `vcpkg install libxml2:x64-windows-static-md`. Use the `-md` triplet: it builds
+> against the dynamic CRT, which is what Rust's `x86_64-pc-windows-msvc` target
+> uses. A path that does not exist is ignored, so the setting is harmless
+> otherwise.
 
 ---
 

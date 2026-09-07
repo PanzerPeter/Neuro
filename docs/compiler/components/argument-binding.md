@@ -6,8 +6,8 @@
 
 ## Overview
 
-Argument binding resolves **named arguments** — `connect("localhost", port: 8080)`
-— against the callee's parameter list. It permutes each call's arguments into the callee's
+Argument binding resolves **named arguments** (`connect("localhost", port: 8080)`)
+against the callee's parameter list. It permutes each call's arguments into the callee's
 declaration order and drops the labels, so semantic analysis, HIR lowering, and both
 backends only ever see an ordinary positional call. That is what makes a named argument
 free: it produces the same IR as writing the arguments in order.
@@ -17,7 +17,7 @@ The pass also enforces the obligations a *declaration* creates. A parameter writ
 never be. Both are checked here, on every call, including calls that name nothing.
 
 `neurc` runs it after module resolution has merged every file and the prelude has been
-prepended — a call names a callee that may be declared anywhere in that list — and before
+prepended (a call names a callee that may be declared anywhere in that list) and before
 type checking, which would otherwise pair arguments with the wrong parameters.
 
 ## Architecture
@@ -65,7 +65,7 @@ in the program is reported, not just the first.
 ## Guarding the erasure
 
 If the traversal ever failed to reach a call, its labels would survive and the arguments
-would stay in the order they were written — a wrong program rather than a failed build.
+would stay in the order they were written: a wrong program rather than a failed build.
 HIR lowering therefore refuses any call whose label list is non-empty, which turns a missed
 node into a build failure.
 
@@ -76,6 +76,6 @@ node into a build failure.
 
 ## See Also
 
-- [Functions — Named Arguments](../../language-reference/functions.md#named-arguments)
+- [Functions: Named Arguments](../../language-reference/functions.md#named-arguments)
 - [Module Resolution](module-resolution.md)
 - [Semantic Analysis](semantic-analysis.md)

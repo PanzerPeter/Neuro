@@ -82,8 +82,8 @@ func main() -> i32 {
 }
 
 // A tail `loop` is the function's implicit return. It used to reach codegen as a
-// discard-value statement, so its exit block got `unreachable` — no instruction at
-// -O0 — and the `break` target collapsed into a jump to itself.
+// discard-value statement, so its exit block got `unreachable` (no instruction at
+// -O0), and the `break` target collapsed into a jump to itself.
 #[test]
 fn test_tail_loop_is_the_implicit_return() {
     let test = CompileTest::new();
@@ -110,7 +110,7 @@ func main() -> i32 {
 }
 
 // A `loop` no `break` targets never reaches its exit block, so it satisfies any
-// declared return type — the same divergent contract `panic` carries.
+// declared return type: the same divergent contract `panic` carries.
 #[test]
 fn test_tail_loop_without_break_leaves_via_return() {
     let test = CompileTest::new();

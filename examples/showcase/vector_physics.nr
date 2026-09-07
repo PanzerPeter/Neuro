@@ -1,4 +1,4 @@
-// Vector physics step — operator traits working together with prior features.
+// Vector physics step: operator traits working together with prior features.
 //
 // Combines: operator traits (`+` / `-` / unary `-` / `==`) on a `Copy` struct,
 // an `impl` block with an `&self` method, compound assignment (`+=` desugaring
@@ -42,7 +42,7 @@ impl PartialEq for Vec2 {
 }
 
 impl Vec2 {
-    // Manhattan distance from the origin — an `&self` query method.
+    // Manhattan distance from the origin: an `&self` query method.
     func manhattan(&self) -> i32 {
         val ax = if self.x < 0 { -self.x } else { self.x }
         val ay = if self.y < 0 { -self.y } else { self.y }

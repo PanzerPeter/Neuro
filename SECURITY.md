@@ -17,11 +17,11 @@ Only the latest release on the `main` branch receives security fixes. No backpor
 
 Neuro's security concerns fall into three categories:
 
-**Compiler integrity** — malformed or adversarial `.nr` source files that cause the compiler to crash, panic, read out-of-bounds memory, or exhibit undefined behavior during parsing or analysis.
+**Compiler integrity**: malformed or adversarial `.nr` source files that cause the compiler to crash, panic, read out-of-bounds memory, or exhibit undefined behavior during parsing or analysis.
 
-**Generated code safety** — bugs in the LLVM backend that produce incorrect or unsafe native code (e.g., uninitialized memory reads, incorrect pointer arithmetic in generated IR).
+**Generated code safety**: bugs in the LLVM backend that produce incorrect or unsafe native code (e.g., uninitialized memory reads, incorrect pointer arithmetic in generated IR).
 
-**Dependency vulnerabilities** — CVEs in third-party crates (`inkwell`, `logos`, `miette`, etc.) that affect the compiler at build or runtime.
+**Dependency vulnerabilities**: CVEs in third-party crates (`inkwell`, `logos`, `miette`, etc.) that affect the compiler at build or runtime.
 
 Out of scope for security reports: compiler error messages, lint false positives, missing language features, or performance issues that do not have a security impact.
 

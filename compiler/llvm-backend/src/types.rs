@@ -37,7 +37,7 @@ pub(crate) enum Type {
     ///
     /// `mutable` is carried because it changes the lowering, not just the checking:
     /// `&mut T` must be the referent's address so a store reaches it, while a `&string`
-    /// is lowered to the `{ ptr, i64 }` fat pointer *by value* — the referent is
+    /// is lowered to the `{ ptr, i64 }` fat pointer *by value*: the referent is
     /// immutable, so its address buys nothing and outlives nothing.
     ///
     /// The other exception is a reference to a [`Type::DynObject`], which is a
@@ -247,7 +247,7 @@ impl Type {
     /// Whether this type lowers to an LLVM floating-point value. Unlike the
     /// semantic predicate, this **includes** `f16`/`bf16`: at the LLVM level they
     /// are floats (`half`/`bfloat`), so equality and `as`-cast lowering route
-    /// through the float instructions. Arithmetic never reaches here — semantic
+    /// through the float instructions. Arithmetic never reaches here, because semantic
     /// analysis rejects it for half-precision.
     pub(crate) fn is_float(&self) -> bool {
         matches!(self, Type::F16 | Type::BF16 | Type::F32 | Type::F64)

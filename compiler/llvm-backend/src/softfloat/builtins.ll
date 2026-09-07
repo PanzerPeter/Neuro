@@ -11,7 +11,7 @@
 ; Implementations are integer-only (no fpext/fptrunc on half, which would
 ; recursively re-invoke these libcalls). Exhaustively verified against clang's
 ; native _Float16/__bf16: f32<->f16 and f32->bf16 over all 2^32 inputs,
-; f16->f32 over all 2^16, and the f64 paths over 200M random inputs — zero
+; f16->f32 over all 2^16, and the f64 paths over 200M random inputs, with zero
 ; mismatches.
 ;
 ; Generated from compiler/llvm-backend/src/softfloat/reference.c via clang

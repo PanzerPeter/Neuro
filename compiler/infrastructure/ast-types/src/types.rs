@@ -48,7 +48,7 @@ pub enum Type {
     /// type `inner`. `span` covers the leading `&` through the referent type.
     /// `mutable` distinguishes `&mut T` (write access) from `&T` (read-only).
     /// `lifetime` is the optional explicit annotation, the `'a` in `&'a T`;
-    /// `None` when elided. It is validated for well-formedness then erased — a
+    /// `None` when elided. It is validated for well-formedness then erased: a
     /// reference type's identity does not depend on it.
     Reference {
         inner: Box<Type>,
@@ -68,14 +68,14 @@ pub enum Type {
     /// Unsized slice type `[T]`: a contiguous run of `T` of a length not known
     /// at compile time. `span` covers the leading `[` through the closing `]`.
     ///
-    /// It is never a type on its own — only `&[T]` / `&mut [T]` are inhabited — so
+    /// It is never a type on its own; only `&[T]` / `&mut [T]` are inhabited, so
     /// semantic analysis rejects it outside a reference. The owned forms are
     /// `[T; N]` and `Vec<T>`.
     Slice { element: Box<Type>, span: Span },
 
     /// Anonymous tuple type `(T1, T2, ...)`: a fixed-size, heterogeneous,
     /// positionally-indexed aggregate. `span` covers the leading `(` through the
-    /// closing `)`. Always has at least two element types — a single
+    /// closing `)`. Always has at least two element types: a single
     /// parenthesized type is grouping, and the empty tuple (unit) is a separate
     /// concern not yet produced here.
     Tuple { elements: Vec<Type>, span: Span },
