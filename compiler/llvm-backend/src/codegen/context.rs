@@ -10,6 +10,7 @@ use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 use source_location::SourceFile;
 use std::collections::HashMap;
 
+use crate::codegen::expressions::matches::SavedBinding;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::type_mapping::TypeMapper;
 use crate::types::{CollectionKind, Type};
@@ -281,6 +282,15 @@ pub(crate) struct CodegenContext<'ctx> {
     /// exit they are dropped in reverse (LIFO). Empty unless `drop_types` is non-empty.
     pub(crate) drop_scopes: Vec<Vec<DropEntry<'ctx>>>,
 
+    /// Stack of lexical name scopes, innermost last and pushed in lockstep with
+    /// `drop_scopes`. Each frame lists what the bindings declared in that scope
+    /// displaced, so leaving the scope can restore the names it shadowed.
+    ///
+    /// The three name maps above are flat per function; this is what makes them
+    /// behave lexically. Without it a block-local binding stays resolvable after its
+    /// block, pointing at a slot whose owner the drop scope has already released.
+    pub(crate) name_scopes: Vec<Vec<SavedBinding<'ctx>>>,
+
     /// Declared traits → their method names in declaration order. The index of a
     /// name in this list is its vtable slot, shared by every implementor of the trait.
     /// Empty for programs that declare no traits.
@@ -333,6 +343,7 @@ impl<'ctx> CodegenContext<'ctx> {
             vtables: HashMap::new(),
             drop_types: std::collections::HashSet::new(),
             drop_scopes: Vec::new(),
+            name_scopes: Vec::new(),
             enum_variants: HashMap::new(),
             cold_thunks: HashMap::new(),
             process_exit_points: Vec::new(),

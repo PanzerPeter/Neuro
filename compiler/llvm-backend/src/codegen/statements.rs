@@ -65,11 +65,14 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.build_store(alloca, final_val).map_err(|e| {
                 CodegenError::LlvmError(format!("failed to store initial value: {}", e))
             })?;
-            self.variables.insert(name.to_string(), alloca);
-            self.variable_types.insert(name.to_string(), alloca_ty);
-            // Record the binding's nominal type for later place statements (field /
-            // index assignment) that must recover a struct or array name.
-            self.type_env.insert(name.to_string(), target_sem);
+            // `bind_name` records the binding's nominal type for later place statements
+            // (field / index assignment) that must recover a struct or array name, and
+            // hands back whatever the name meant before. That goes into the enclosing
+            // scope's frame so leaving the block puts the outer binding back.
+            let shadowed = self.bind_name(name, alloca, alloca_ty, target_sem);
+            if let Some(scope) = self.name_scopes.last_mut() {
+                scope.push(shadowed);
+            }
 
             // Binding a place into a new owner moves it (`val b = a`): clear the source's
             // drop flag so it is not also dropped. Then register the new binding.

@@ -18,16 +18,26 @@ use crate::types::Type;
 use super::context::{CodegenContext, DropEntry, DropTarget};
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// Open a new lexical drop scope. Paired with [`pop_drop_scope`].
+    /// Open a new lexical scope. Paired with [`pop_drop_scope`].
+    ///
+    /// The name scope rides along with the drop scope because they delimit the same
+    /// thing: every push here is a `{ }` a binding can be declared in, and a binding
+    /// whose owner is released on the way out must stop being resolvable on the way
+    /// out too.
     pub(crate) fn push_drop_scope(&mut self) {
         self.drop_scopes.push(Vec::new());
+        self.name_scopes.push(Vec::new());
     }
 
-    /// Close the innermost drop scope without emitting drops. Drops for a scope are
-    /// emitted explicitly (see [`emit_top_scope_drops`] / [`emit_drops_through`])
-    /// before the scope is popped, so this only discards the bookkeeping.
+    /// Close the innermost scope, restoring the names its bindings shadowed. Drops for
+    /// a scope are emitted explicitly (see [`emit_top_scope_drops`] /
+    /// [`emit_drops_through`]) before the scope is popped, so the destructors have
+    /// already run against the bindings being unbound here.
     pub(crate) fn pop_drop_scope(&mut self) {
         let _ = self.drop_scopes.pop();
+        if let Some(shadowed) = self.name_scopes.pop() {
+            self.restore_bindings(shadowed);
+        }
     }
 
     /// Resolve how a binding of `binding_ty` is destroyed at scope exit, or `None`

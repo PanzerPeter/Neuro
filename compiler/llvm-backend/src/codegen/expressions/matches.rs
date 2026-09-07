@@ -287,14 +287,30 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_store(alloca, value)
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
-            saved.push(SavedBinding {
-                name: b.name.clone(),
-                ptr: self.variables.insert(b.name.clone(), alloca),
-                ty: self.variable_types.insert(b.name.clone(), llvm_ty),
-                sem: self.type_env.insert(b.name.clone(), sem),
-            });
+            saved.push(self.bind_name(&b.name, alloca, llvm_ty, sem));
         }
         Ok(saved)
+    }
+
+    /// Register `name` in the three name maps, returning whatever the name meant
+    /// before so an enclosing scope can put it back.
+    ///
+    /// Every binding form goes through here, which is what keeps the three maps in
+    /// step: a name registered in one and missed in another resolves to a slot of the
+    /// wrong type later.
+    pub(crate) fn bind_name(
+        &mut self,
+        name: &str,
+        alloca: PointerValue<'ctx>,
+        llvm_ty: BasicTypeEnum<'ctx>,
+        sem: Type,
+    ) -> SavedBinding<'ctx> {
+        SavedBinding {
+            name: name.to_string(),
+            ptr: self.variables.insert(name.to_string(), alloca),
+            ty: self.variable_types.insert(name.to_string(), llvm_ty),
+            sem: self.type_env.insert(name.to_string(), sem),
+        }
     }
 
     /// Restore the name maps to their pre-arm state.

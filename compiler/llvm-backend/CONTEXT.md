@@ -80,6 +80,24 @@ stays where it was; sharing one slot across iterations is sound because each is 
 is read, and a fresh frame per call keeps recursion correct. Parameter and `self` allocas in
 `functions.rs` are already in the entry block by construction.
 
+## Name Scoping
+`variables`, `variable_types`, and `type_env` are flat maps per function, so lexical scoping
+is imposed on top of them by `name_scopes`, a stack of frames pushed and popped by
+`push_drop_scope` / `pop_drop_scope`. Every binding form registers its name through
+`bind_name`, which returns whatever the name meant before; a declaration records that in the
+innermost frame, and leaving the scope replays the frame through `restore_bindings`.
+
+The two stacks ride together because they delimit the same `{ }`: a binding whose owner the
+drop scope releases on the way out has to stop being resolvable on the way out too. While the
+maps were unscoped, a block-local binding stayed resolvable after its block and every later
+mention of that name reached the inner slot, reading a stale value or writing through a freed
+buffer. Neither the type checker (which scopes correctly, and rejects the name after the
+block) nor the LLVM verifier could see it: at equal types the IR is well formed.
+
+Match-arm and `val`-else pattern bindings use the same `bind_name` / `restore_bindings` pair
+directly rather than through a frame, because their scope is an arm rather than a block, and
+`val`-else deliberately leaves its ok-branch bindings registered for the enclosing block.
+
 ## String ABI
 `string` = anonymous LLVM struct `{ ptr, i64 }`:
 - field 0 (`ptr`): pointer to null-terminated UTF-8 bytes in `.rodata`

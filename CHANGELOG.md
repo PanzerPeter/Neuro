@@ -10,6 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.18.3] - 2026-09-07
+
+### Fixed
+
+- `codegen`: **a binding declared inside a block no longer outlives that block.** A `val` or
+  `mut` in a nested scope overwrote the enclosing binding of the same name and nothing put the
+  outer one back on the way out, so every mention of the name after the block resolved to the
+  inner binding's slot. An ordinary shadowing program returned the wrong value, and for a type
+  that owns heap storage it was worse than wrong: the block had already released the inner
+  binding, so pushing to a shadowed `Vec` after its block wrote through a freed buffer.
+
+  Nothing upstream could catch it. The type checker scopes these correctly and rejects the name
+  after the block; the leak was only in the backend's name maps, which are flat per function.
+  Where both bindings had the same type the emitted IR was well formed, so the LLVM verifier
+  passed it too. It was reachable from every block form: a bare block, a block expression, an
+  `if` or `else` branch, a `for` or `while` body, and a `match` arm.
+
+  The backend now keeps a stack of name scopes alongside the drop scopes it already kept, and
+  the two are pushed and popped together, because they delimit the same `{ }`: a binding whose
+  owner is released on the way out of a scope has to stop being resolvable on the way out too.
+  Match-arm and `val`-else bindings were already saved and restored this way and are unchanged.
+
+
 ## [2.18.2] - 2026-09-07
 
 ### Added

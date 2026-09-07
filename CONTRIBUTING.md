@@ -302,8 +302,7 @@ A bug fix is the highest-value first contribution, and the queue lives in one fi
 [docs/BUGS.md](docs/BUGS.md) is the register of open, confirmed defects. Every entry is a
 self-contained task carrying a minimal reproduction, the known root cause, a workaround,
 and a fix sketch, and they are often sized for a first-time compiler contributor. The
-register is empty whenever every confirmed defect has been fixed, so check the
-[Phase 2](#phase-2-tensor-foundation--mlir) items below if it is.
+register is empty whenever every confirmed defect has been fixed.
 
 How to take one on:
 
@@ -316,40 +315,7 @@ How to take one on:
 Found a new bug? Open an issue with a minimal reproducible example instead of a PR.
 Confirmed defects get filed into `docs/BUGS.md` from there.
 
-### Phase 2: Tensor Foundation & MLIR
-
-The roadmap is dependency-ordered, so pick the **topmost open item**: its prerequisites
-are already done. Coordinate on an issue before starting a large one.
-
-**Every Phase 1 sub-phase (1A–1H) is complete**, including the last flagged 1C item
-(growable `String`), which shipped in v1.80.0 after the type was specified in the language
-spec. **Phase 2: Tensor Foundation & MLIR** holds the next open items, and its first
-sub-phase was not tensor work: `2A: Standard I/O & Spec Stragglers` cleared constructs the
-specification names that no Phase 1 item ever tracked, and **2A is now complete**. `print` /
-`println` shipped in v2.1.0, `.is_nan()` in v2.2.0, buffered standard output in v2.3.0, the
-codepoint-indexed `.char_slice(range)` in v2.4.0, `.enumerate()` on arrays and ranges in
-v2.5.0, and the `&[T]` / `&mut [T]` borrowed slice type in v2.6.0, associated types in trait
-declarations in v2.7.0, the `Trait<Assoc = T>` bound form in v2.8.0, and the
-`IntoIterator` / `Iterator` protocol in v2.9.0, the `.map()` / `.filter()` head
-adapters in v2.10.0, the codepoint iterators `.chars()` / `.char_indices()` in v2.11.0, and
-`@derive` argument validation with the `Debug` / `PartialEq` derives in v2.12.0.
-`2B: Tensor Core` holds the next open item. Its first line, the static tensor type
-syntax `Tensor<T, [...]>`, shipped in v2.13.0 as a *type-level* landing, and v2.14.0 gave
-tensors a runtime representation: a nested array literal coerces under a `Tensor<...>`
-annotation, and `Tensor::<T, [...]>::zeros()` / `ones()` / `identity()` /
-`random_normal(mean:, std:)` / `scalar()` / `from()` build one where no annotation reaches.
-v2.15.0 then shipped the ownership surface: `.clone()` for a second owner, `&Tensor<T, S>`
-for zero-cost sharing, and the consuming `.to(device)` transfer over the prelude's `Device`
-enum. v2.16.0 moved the buffer itself out of line, which closed `BUG-018` and lifted the size
-limit at every optimization level, and v2.17.0 made the value a DLPack handle: a tensor is a
-pointer to a `DLManagedTensorVersioned` carrying its rank, shape, strides, dtype, and device,
-over a 64-byte-aligned buffer released through the handle's own `deleter`. v2.18.0 added the
-in-place compound assignment family: `w -= g` and its siblings update the target's own buffer
-element-wise, so a weight update allocates nothing and every pointer into it stays valid. A
-tensor can now be built, bound, moved, cloned, passed, returned, updated in place, and stored
-in a struct, but not read back: slicing and indexing, shape generics, named dimensions,
-dynamic shapes, and the reductions are all still open.
-Start at the top of 2B in the roadmap.
+### Keep the editor grammar in step with the lexer
 
 Nothing links `TokenKind` to the editor grammar, so any lexer change must also update
 `neuro-language-support/syntaxes/neuro.tmLanguage.json` by hand in the same commit.
@@ -357,7 +323,7 @@ Nothing links `TokenKind` to the editor grammar, so any lexer change must also u
 invented one, and a declaration rule ordered behind the keyword rule; run
 `tools/tmlanguage_scopes.mjs <file.nr>` to see the scopes the grammar really produces.
 
-Every item ships with integration tests, a `CHANGELOG.md` entry, and its slice's
+Every change ships with integration tests, a `CHANGELOG.md` entry, and its slice's
 `CONTEXT.md` updated in the same commit: see [Acceptance Criteria](#acceptance-criteria).
 
 ### Non-Code Contributions

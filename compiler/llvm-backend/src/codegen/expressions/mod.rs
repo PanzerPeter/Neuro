@@ -13,7 +13,7 @@ mod format_helpers;
 mod format_layout;
 mod interp;
 mod literals;
-mod matches;
+pub(crate) mod matches;
 mod methods;
 mod slices;
 mod struct_eq;
