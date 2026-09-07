@@ -417,6 +417,7 @@ fn emit_object_code(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codegen::context::{ALIGNED_ALLOC_FN, ALIGNED_FREE_FN};
     use type_mapping::TypeMapper;
 
     /// Parse and lower `source` to typed HIR for the backend smoke tests. Mirrors the
@@ -501,8 +502,9 @@ mod tests {
         assert!(body.contains("store ptr null, ptr %dlpack.field"));
     }
 
-    /// The element buffer comes from `aligned_alloc` at DLPack's 64-byte alignment, and
-    /// only the elements themselves are copied into it: the padding is the allocator's.
+    /// The element buffer comes from the over-aligned allocator at DLPack's 64-byte
+    /// alignment, and only the elements themselves are copied into it: the padding is the
+    /// allocator's.
     #[test]
     fn a_tensor_buffer_meets_the_dlpack_alignment() {
         let source = r#"
@@ -513,11 +515,36 @@ mod tests {
         "#;
         let ir = module_ir(source, OptimizationLevelSetting::O0);
         let body = function_body(&ir, "main");
-        assert!(body.contains("call ptr @aligned_alloc(i64 64, i64 64)"));
+        // 24 bytes of elements round up to one whole alignment unit, so both arguments
+        // are 64 here whichever way round the platform takes them.
+        assert!(body.contains(&format!("call ptr @{ALIGNED_ALLOC_FN}(i64 64, i64 64)")));
         assert!(
             body.contains("i64 24)"),
             "six f32 elements are 24 bytes to copy"
         );
+    }
+
+    /// The two spellings of the over-aligned allocator take the same pair of `size_t`s the
+    /// other way round, so a buffer larger than one alignment unit pins the order: passing
+    /// them the wrong way round asks for 64 bytes at 256-byte alignment and overruns.
+    #[test]
+    fn the_over_aligned_allocator_is_called_in_its_platforms_argument_order() {
+        let source = r#"
+            func main() -> i32 {
+                val m = Tensor::<f32, [64]>::zeros()
+                return 0
+            }
+        "#;
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        let expected = if cfg!(target_os = "windows") {
+            // `_aligned_malloc(size, alignment)`
+            "call ptr @_aligned_malloc(i64 256, i64 64)"
+        } else {
+            // `aligned_alloc(alignment, size)`
+            "call ptr @aligned_alloc(i64 64, i64 256)"
+        };
+        assert!(body.contains(expected), "expected {expected} in:\n{body}");
     }
 
     /// Release runs through the handle's own `deleter` field, so a tensor leaving scope
@@ -535,14 +562,18 @@ mod tests {
         assert!(body.contains("%dlpack.deleter = load ptr"));
         assert!(body.contains("call void %dlpack.deleter(ptr %tensor.drop.handle)"));
 
-        // The buffer is freed before the structure that names it.
+        // Each block goes back to the allocator that produced it: the buffer to the
+        // release paired with the over-aligned allocation, the structure to plain `free`.
+        // On Windows `free` cannot release an over-aligned block, so crossing them
+        // corrupts the heap rather than leaking.
         let deleter = function_body(&ir, "__neuro_dlpack_deleter");
         let data_free = deleter
-            .find("call void @free(ptr %dlpack.data)")
+            .find(&format!("call void @{ALIGNED_FREE_FN}(ptr %dlpack.data)"))
             .expect("the deleter frees the element buffer");
         let self_free = deleter
             .rfind("call void @free(ptr %0)")
             .expect("the deleter frees the structure");
+        // The buffer is freed before the structure that names it.
         assert!(data_free < self_free);
     }
 

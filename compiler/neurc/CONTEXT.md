@@ -111,8 +111,15 @@ The backend is handed the *root* file's source for panic-location rendering. Mer
 share one span space, the same approximation the prepended prelude has always had, so a panic
 diagnostic from a non-root module reports a position in the root file's coordinates.
 
-The two-step linker strategy (clang on Unix; lld-link / cl.exe on Windows) is required because
-LLVM object files need a platform linker driver to attach the C runtime startup code: neurc
-cannot ship its own linker. The Unix link passes `-lm` explicitly: `Tensor::random_normal`
-emits `log` and `cos`, and the C math library is a separate archive on the older glibc still in
-wide use. It is a no-op where the platform has folded libm into libc.
+The two-step linker strategy (clang on Unix; clang, then lld-link, then cl.exe on Windows) is
+required because LLVM object files need a platform linker driver to attach the C runtime startup
+code: neurc cannot ship its own linker. The Unix link passes `-lm` explicitly:
+`Tensor::random_normal` emits `log` and `cos`, and the C math library is a separate archive on
+the older glibc still in wide use. It is a no-op where the platform has folded libm into libc.
+
+`link_windows` keeps **every** driver's diagnosis and reports them together when the last one
+fails, rather than logging each at `debug` and raising only the last. The two failures look
+nothing alike and the distinction is the whole diagnosis: a driver that is absent means no
+toolchain is installed, while a driver that ran and could not resolve a symbol means the object
+file is at fault. Reporting only the last driver turned an unresolved symbol into "ensure Visual
+Studio is installed", because the drivers that had already named the real reason were silent.

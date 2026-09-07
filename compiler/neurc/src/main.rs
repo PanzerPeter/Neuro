@@ -328,8 +328,44 @@ fn link_object_to_executable(object_path: &Path, output_path: &Path) -> Result<(
     }
 }
 
+/// Record why one linker did not produce the executable, for the error the last one raises.
+///
+/// Every attempt's diagnosis is kept rather than logged and dropped. A driver that is simply
+/// absent is a different failure from one that ran and could not resolve a symbol, and only
+/// the last driver's message used to survive: an unresolved symbol in the object file was
+/// reported as a missing Visual Studio, since the earlier drivers had already rejected it
+/// for the real reason.
+#[cfg(target_os = "windows")]
+fn record_attempt(
+    attempts: &mut Vec<String>,
+    driver: &str,
+    result: std::io::Result<std::process::Output>,
+) {
+    match result {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::debug!("{driver} linking failed");
+            log::debug!("  stdout: {stdout}");
+            log::debug!("  stderr: {stderr}");
+            attempts.push(format!(
+                "{driver}: exited with {}\n{}{}",
+                output.status,
+                stdout.trim_end(),
+                stderr.trim_end()
+            ));
+        }
+        Err(e) => {
+            log::debug!("{driver} not available: {e}");
+            attempts.push(format!("{driver}: not available ({e})"));
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn link_windows(object_path: &Path, output_path: &Path) -> Result<()> {
+    let mut attempts: Vec<String> = Vec::new();
+
     log::debug!("Attempting to link with clang");
     let clang_result = Command::new("clang")
         .arg(object_path)
@@ -343,14 +379,7 @@ fn link_windows(object_path: &Path, output_path: &Path) -> Result<()> {
             log::info!("Successfully linked with clang: {}", output_path.display());
             return Ok(());
         }
-        Ok(output) => {
-            log::debug!("Clang linking failed");
-            log::debug!("  stdout: {}", String::from_utf8_lossy(&output.stdout));
-            log::debug!("  stderr: {}", String::from_utf8_lossy(&output.stderr));
-        }
-        Err(e) => {
-            log::debug!("Clang not available: {}", e);
-        }
+        other => record_attempt(&mut attempts, "clang", other),
     }
 
     log::debug!("Attempting to link with lld-link");
@@ -369,47 +398,40 @@ fn link_windows(object_path: &Path, output_path: &Path) -> Result<()> {
             );
             return Ok(());
         }
-        Ok(output) => {
-            log::debug!("lld-link linking failed");
-            log::debug!("  stdout: {}", String::from_utf8_lossy(&output.stdout));
-            log::debug!("  stderr: {}", String::from_utf8_lossy(&output.stderr));
-        }
-        Err(e) => {
-            log::debug!("lld-link not available: {}", e);
-        }
+        other => record_attempt(&mut attempts, "lld-link", other),
     }
 
     // Fall back to MSVC: cl.exe acts as a linker driver and locates the real
     // link.exe (not Git's `link` utility).
     log::debug!("Attempting to link with MSVC link.exe via vcvarsall.bat");
 
-    let output = Command::new("cl")
+    let msvc_result = Command::new("cl")
         .arg("/nologo")
         .arg(object_path)
         .arg(format!("/Fe{}", output_path.display())) // /Fe takes no colon or space
         .arg("/link") // subsequent args go to the linker
         .arg("/SUBSYSTEM:CONSOLE")
         .arg("/ENTRY:main")
-        .output()
-        .context("Failed to execute MSVC cl.exe - ensure Visual Studio is installed and vcvarsall.bat has been run")?;
+        .output();
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(anyhow::anyhow!(
-            "MSVC linking failed:\nstdout: {}\nstderr: {}\n\nNote: Ensure you have Visual Studio installed and are running from a Developer Command Prompt, or run vcvarsall.bat",
-            stdout,
-            stderr
-        ))
-        .context(format!(
-            "Failed to link object file {} to executable {}",
-            object_path.display(),
-            output_path.display()
-        ));
+    match msvc_result {
+        Ok(output) if output.status.success() => {
+            log::info!("Successfully linked with MSVC: {}", output_path.display());
+            return Ok(());
+        }
+        other => record_attempt(&mut attempts, "cl.exe (MSVC)", other),
     }
 
-    log::info!("Successfully linked with MSVC: {}", output_path.display());
-    Ok(())
+    Err(anyhow::anyhow!(
+        "No linker produced an executable. Each driver was tried in turn:\n\n{}\n\nNote: if every driver is reported as not available, install LLVM or Visual Studio; \
+         a driver that ran and failed reports the real reason above.",
+        attempts.join("\n\n")
+    ))
+    .context(format!(
+        "Failed to link object file {} to executable {}",
+        object_path.display(),
+        output_path.display()
+    ))
 }
 
 #[cfg(not(target_os = "windows"))]

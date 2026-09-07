@@ -10,6 +10,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.17.2] - 2026-09-07
+
+### Fixed
+
+- **A tensor program now links on Windows** (BUG-023). Every tensor buffer was allocated with C11
+  `aligned_alloc`, which Microsoft's UCRT does not implement: their `free` cannot release
+  an over-aligned block. The symbol resolved nowhere, so any program constructing a tensor
+  failed to link on Windows while every other program linked normally. The over-aligned
+  allocator is now chosen per platform, `_aligned_malloc` on Windows (taking the same pair
+  of arguments the other way round), and the buffer is released through the allocator that
+  produced it, `_aligned_free`, while the handle keeps going back to `free`. Sending an
+  over-aligned block to plain `free` corrupts the heap on Windows rather than leaking, so
+  the pairing is now asserted on the emitted IR.
+
+- **A failed Windows link reports the driver that actually failed** (BUG-024). clang, lld-link and
+  cl.exe are tried in turn; each failure was logged at `debug` level and only the last was
+  raised. An unresolved symbol was therefore reported as "ensure Visual Studio is
+  installed", the cl.exe fallback's message, hiding the two drivers that had already named
+  the real cause. All three diagnoses are now carried in the error.
+
+
 ## [2.17.1] - 2026-09-06
 
 ### Fixed

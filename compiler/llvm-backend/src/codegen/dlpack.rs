@@ -10,7 +10,7 @@
 use inkwell::module::Linkage;
 use inkwell::values::{FunctionValue, IntValue, PointerValue};
 
-use crate::codegen::context::CodegenContext;
+use crate::codegen::context::{CodegenContext, ALIGNED_ALLOC_FN};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
@@ -83,24 +83,29 @@ impl<'ctx> CodegenContext<'ctx> {
 
         // `aligned_alloc` wants a size that is a multiple of the alignment; a tensor
         // buffer is rounded up rather than passed through, since a small tensor's
-        // element run is routinely shorter than one alignment unit.
+        // element run is routinely shorter than one alignment unit. `_aligned_malloc`
+        // has no such requirement, and the rounding is harmless there.
         let bytes = self.tensor_buffer_bytes(tensor_ty)?;
         let padded = bytes.div_ceil(DLPACK_DATA_ALIGN) * DLPACK_DATA_ALIGN;
         let aligned_alloc = self.get_or_declare_aligned_alloc();
+        let alignment = i64_type.const_int(DLPACK_DATA_ALIGN, false);
+        let size = i64_type.const_int(padded, false);
+        // `aligned_alloc(alignment, size)` against `_aligned_malloc(size, alignment)`:
+        // the two spellings take the same pair the other way round.
+        let args = if cfg!(target_os = "windows") {
+            [size.into(), alignment.into()]
+        } else {
+            [alignment.into(), size.into()]
+        };
         let data = self
             .builder
-            .build_call(
-                aligned_alloc,
-                &[
-                    i64_type.const_int(DLPACK_DATA_ALIGN, false).into(),
-                    i64_type.const_int(padded, false).into(),
-                ],
-                "tensor.data",
-            )
+            .build_call(aligned_alloc, &args, "tensor.data")
             .map_err(llvm_err)?
             .try_as_basic_value()
             .basic()
-            .ok_or_else(|| CodegenError::InternalError("aligned_alloc returned void".to_string()))?
+            .ok_or_else(|| {
+                CodegenError::InternalError(format!("{ALIGNED_ALLOC_FN} returned void"))
+            })?
             .into_pointer_value();
 
         self.init_dlpack_handle(handle, data, element, shape)?;
@@ -331,9 +336,13 @@ impl<'ctx> CodegenContext<'ctx> {
             })?
             .into_pointer_value();
         let data = self.load_dlpack_data(handle)?;
+        // The buffer goes back to the release paired with the over-aligned allocation and
+        // the structure to plain `free`: the two blocks come from different allocators on
+        // Windows, where crossing them corrupts the heap.
+        let aligned_free_fn = self.get_or_declare_aligned_free();
         let free_fn = self.get_or_declare_free();
         self.builder
-            .build_call(free_fn, &[data.into()], "")
+            .build_call(aligned_free_fn, &[data.into()], "")
             .map_err(llvm_err)?;
         self.builder
             .build_call(free_fn, &[handle.into()], "")

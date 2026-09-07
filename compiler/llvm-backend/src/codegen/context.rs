@@ -14,6 +14,30 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::type_mapping::TypeMapper;
 use crate::types::{CollectionKind, Type};
 
+/// The libc entry point for an over-aligned allocation, and the release that matches it.
+///
+/// C11 spells this `aligned_alloc(alignment, size)`, released by ordinary `free`. Microsoft's
+/// UCRT does not implement it: their `free` cannot release an over-aligned block, so MSVC
+/// offers `_aligned_malloc(size, alignment)`, with the arguments the other way round, paired
+/// with `_aligned_free`. Codegen targets the host (`TargetMachine::get_default_triple`), so
+/// the host `cfg` is the target's.
+///
+/// The argument order is not encoded here. Call sites build the argument list, and
+/// `codegen/dlpack.rs` is the only one.
+pub(crate) const ALIGNED_ALLOC_FN: &str = if cfg!(target_os = "windows") {
+    "_aligned_malloc"
+} else {
+    "aligned_alloc"
+};
+
+/// The release paired with [`ALIGNED_ALLOC_FN`]. Passing an over-aligned block to the wrong
+/// one corrupts the heap on Windows rather than leaking.
+pub(crate) const ALIGNED_FREE_FN: &str = if cfg!(target_os = "windows") {
+    "_aligned_free"
+} else {
+    "free"
+};
+
 /// A compiler-known intrinsic method on a builtin (non-struct) receiver type.
 /// Recorded by the type-collection pass so `codegen_expr` can lower the call
 /// without a struct mangled-name lookup.
@@ -506,20 +530,36 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Get the external libc `malloc` declaration, inserting it on first use.
     /// `malloc(size: i64) -> ptr`. Backs the heap buffer for runtime string
     /// concatenation; `size_t` is 64-bit on every supported target.
-    /// Get the external libc `aligned_alloc` declaration, inserting it on first use.
-    /// `aligned_alloc(alignment: i64, size: i64) -> ptr`. A tensor's element buffer comes
-    /// from here rather than from `malloc` because DLPack requires its `data` pointer to
-    /// be 64-byte aligned, which `malloc` guarantees only up to `max_align_t`.
-    /// The block it returns is released by ordinary `free`.
+    /// Get the external over-aligned allocation declaration, inserting it on first use.
+    /// A tensor's element buffer comes from here rather than from `malloc` because DLPack
+    /// requires its `data` pointer to be 64-byte aligned, which `malloc` guarantees only
+    /// up to `max_align_t`. Both spellings take two `size_t`s and return the block; the
+    /// call site orders the arguments, see [`ALIGNED_ALLOC_FN`].
     pub(crate) fn get_or_declare_aligned_alloc(&self) -> FunctionValue<'ctx> {
-        if let Some(f) = self.module.get_function("aligned_alloc") {
+        if let Some(f) = self.module.get_function(ALIGNED_ALLOC_FN) {
             return f;
         }
         let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
         let i64_type = self.context.i64_type();
         let fn_type = ptr_type.fn_type(&[i64_type.into(), i64_type.into()], false);
         self.module.add_function(
-            "aligned_alloc",
+            ALIGNED_ALLOC_FN,
+            fn_type,
+            Some(inkwell::module::Linkage::External),
+        )
+    }
+
+    /// Get the release matching [`get_or_declare_aligned_alloc`], inserting it on first
+    /// use. `free` cannot release an over-aligned block on Windows, so the pairing is
+    /// per-platform and a buffer must go back to its own allocator's release.
+    pub(crate) fn get_or_declare_aligned_free(&self) -> FunctionValue<'ctx> {
+        if let Some(f) = self.module.get_function(ALIGNED_FREE_FN) {
+            return f;
+        }
+        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
+        self.module.add_function(
+            ALIGNED_FREE_FN,
             fn_type,
             Some(inkwell::module::Linkage::External),
         )

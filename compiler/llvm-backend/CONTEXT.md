@@ -390,18 +390,28 @@ shared by every value of that tensor type. Strides count **elements, not bytes**
 axis, so both pointers are null: DLPack's own spelling for a scalar. The globals are pointer
 fields, so dynamic shapes can later supply a per-value vector without changing the layout.
 
-Two allocations, not one fused block: the structure comes from `malloc`, the elements from
-`aligned_alloc(64, ...)` because DLPack requires a 64-byte-aligned `data` and `malloc` guarantees
-only `max_align_t`. Fusing them would need the structure's size rounded up to 64 as an IR constant
-expression, and LLVM 20 has been withdrawing constant-expression arithmetic; the element buffer's
-size is computable in Rust (`tensor_buffer_bytes`), the structure's is not. The allocation size is
-rounded up to the alignment, but only the unpadded element run is ever copied
+Two allocations, not one fused block: the structure comes from `malloc`, the elements from the
+over-aligned allocator at 64 bytes, because DLPack requires a 64-byte-aligned `data` and `malloc`
+guarantees only `max_align_t`. Fusing them would need the structure's size rounded up to 64 as an
+IR constant expression, and LLVM 20 has been withdrawing constant-expression arithmetic; the
+element buffer's size is computable in Rust (`tensor_buffer_bytes`), the structure's is not. The
+allocation size is rounded up to the alignment, but only the unpadded element run is ever copied
 (`dlpack_copy_length`).
 
+**The over-aligned allocator is spelled per-platform** (`ALIGNED_ALLOC_FN` / `ALIGNED_FREE_FN` in
+`codegen/context.rs`, the single place both names are chosen). C11's `aligned_alloc(alignment,
+size)`, released by ordinary `free`, is not in Microsoft's UCRT: their `free` cannot release an
+over-aligned block, so MSVC offers `_aligned_malloc(size, alignment)`, taking the same pair the
+other way round, paired with `_aligned_free`. `codegen/dlpack.rs` is the only call site and orders
+the arguments; the deleter frees the buffer through `ALIGNED_FREE_FN` and the structure through
+plain `free`, since on Windows the two blocks come from different allocators and crossing them
+corrupts the heap rather than leaking. Codegen targets the host
+(`TargetMachine::get_default_triple`), so the host `cfg` is the target's.
+
 Release goes through the handle's own `deleter` field (`build_dlpack_release`), never through a
-direct `free`, so the release a scope exit performs is provably the one a foreign owner performs.
-`__neuro_dlpack_deleter` frees `data` and then the structure, in that order: reading `data` out of
-a block it had already freed would be a use-after-free.
+direct free, so the release a scope exit performs is provably the one a foreign owner performs.
+`__neuro_dlpack_deleter` releases `data` and then the structure, in that order: reading `data` out
+of a block it had already freed would be a use-after-free.
 
 `codegen_reference` returns the borrowed place's storage pointer: mutability is compile-time
 only. `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer.
