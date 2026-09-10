@@ -19,7 +19,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | Directory        | What it covers                                                         |
 | ---------------- | ---------------------------------------------------------------------- |
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` to stdout |
-| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` byte sub-slices and `.char_slice(range)` codepoint sub-slices, the codepoint iterators `.chars()` / `.char_indices()`, borrowed slices `&[T]` / `&mut [T]` over arrays and `Vec`s, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), associated-type bounds (`T: Source<Item = i32>`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer |
+| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` byte sub-slices and `.char_slice(range)` codepoint sub-slices, the codepoint iterators `.chars()` / `.char_indices()`, borrowed slices `&[T]` / `&mut [T]` over arrays and `Vec`s, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), associated-type bounds (`T: Source<Item = i32>`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer, tensor construction, tensor indexing and slicing, and tensor shape generics (`func f<M, K>(t: &Tensor<i32, [M, K]>)`) |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result`, `?` error propagation |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `for (i, x) in xs.enumerate()`, the `.map(f)` / `.filter(p)` head adapters, the `IntoIterator` / `Iterator` protocol and hand-written adapters, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`), the `@derive(Debug, PartialEq)` traits |
@@ -53,8 +53,9 @@ isolation:
   operators (`+=`, `-=`, `*=`, `/=`, `%=`) on tensors working together with
   literal coercion and the construction helpers, an enum matched to pick a
   schedule, a struct holding two tensor fields, borrowed tensor operands read
-  once per iteration of a `for` loop, string interpolation, and slicing and
-  indexing. Every update writes into the buffer the target's DLPack handle already
+  once per iteration of a `for` loop, string interpolation, slicing and
+  indexing, and shape generics: `descend<N>` and `first_row<M, K>` are each written once
+  and instantiated at every width the program uses. Every update writes into the buffer the target's DLPack handle already
   addresses, so the handle and its `data` pointer are unchanged across the whole
   run; the counters are then read back element by element through a borrow, and a
   row and a sub-block are sliced out of the weight matrix and compared against the
@@ -331,7 +332,12 @@ No Rust edits are needed: discovery is automatic.
   element-wise, allocating nothing. Slicing and indexing are supported
   (`types/tensor_indexing.nr`): an index gives one argument per axis, an axis given a
   position is dropped and one given a range or `..` survives, so `t[i, j]` reads an
-  element while `t[0, ..]` and `t[1..3, 2..5]` copy out a smaller tensor. By-value
+  element while `t[0, ..]` and `t[1..3, 2..5]` copy out a smaller tensor. Shape generics are
+  supported (`types/tensor_shape_generics.nr`): an extent may be a shape parameter inferred
+  from the argument's own shape (`func f<M, K>(t: &Tensor<i32, [M, K]>) -> Tensor<i32, [K]>`),
+  monomorphized per distinct set of extents and constrained by a `where` predicate; a shape
+  parameter written twice must agree. A tensor *literal* still needs literal extents, and a
+  shape-generic struct or `impl` is later work. By-value
   arithmetic and the reductions are later work. A tensor value is a
   DLPack handle over an out-of-line buffer, so one of any size compiles at any optimization
   level and the same pointer is what a foreign consumer would read;

@@ -13,7 +13,7 @@
 use super::expressions::const_predicates::eval_literal_int;
 use super::TypeChecker;
 use crate::errors::TypeError;
-use crate::types::Type;
+use crate::types::{ArrayLen, Type};
 use ast_types::{Expr, TensorIndexArg};
 use shared_types::Span;
 
@@ -22,8 +22,10 @@ enum ResolvedAxis {
     /// A position, dropped from the result. Carried as the expression it was written
     /// as, since it may be a run-time value.
     Position,
-    /// A half-open sub-range `[start, end)` of the axis, folded to constants.
-    Range { start: usize, end: usize },
+    /// A surviving axis and the extent it survives at. A sub-range's extent is the
+    /// constant length of the range; a whole axis keeps the source's extent, which is
+    /// symbolic when the source's is.
+    Kept(ArrayLen),
 }
 
 impl TypeChecker {
@@ -35,7 +37,7 @@ impl TypeChecker {
     pub(crate) fn check_tensor_index(
         &mut self,
         element: &Type,
-        shape: &[usize],
+        shape: &[ArrayLen],
         indices: &[TensorIndexArg],
         span: Span,
     ) -> Type {
@@ -48,15 +50,16 @@ impl TypeChecker {
             // The written axes are still checked: an index that named the wrong number
             // of axes may also hold an error of its own worth reporting.
             for (axis, index) in indices.iter().enumerate() {
-                self.resolve_axis(index, axis, shape.get(axis).copied().unwrap_or(0));
+                let extent = shape.get(axis).cloned().unwrap_or(ArrayLen::Fixed(0));
+                self.resolve_axis(index, axis, &extent);
             }
             return Type::Unknown;
         }
 
         let mut kept = Vec::new();
         for (axis, (index, extent)) in indices.iter().zip(shape.iter()).enumerate() {
-            match self.resolve_axis(index, axis, *extent) {
-                Some(ResolvedAxis::Range { start, end }) => kept.push(end - start),
+            match self.resolve_axis(index, axis, extent) {
+                Some(ResolvedAxis::Kept(extent)) => kept.push(extent),
                 Some(ResolvedAxis::Position) => {}
                 None => return Type::Unknown,
             }
@@ -79,13 +82,10 @@ impl TypeChecker {
         &mut self,
         index: &TensorIndexArg,
         axis: usize,
-        extent: usize,
+        extent: &ArrayLen,
     ) -> Option<ResolvedAxis> {
         match index {
-            TensorIndexArg::FullAxis(_) => Some(ResolvedAxis::Range {
-                start: 0,
-                end: extent,
-            }),
+            TensorIndexArg::FullAxis(_) => Some(ResolvedAxis::Kept(extent.clone())),
             TensorIndexArg::Position(expr) => self.resolve_position(expr, axis, extent),
             TensorIndexArg::Range {
                 start,
@@ -97,13 +97,14 @@ impl TypeChecker {
     }
 
     /// A position along one axis: any integer expression. A constant one is bounds-
-    /// checked here; a run-time one is checked by the backend's debug-tier guard, the
-    /// same tier an array index sits on.
+    /// checked here against a known extent; a run-time one, or one along a shape
+    /// parameter's axis, is checked by the backend's debug-tier guard, the same tier an
+    /// array index sits on.
     fn resolve_position(
         &mut self,
         expr: &Expr,
         axis: usize,
-        extent: usize,
+        extent: &ArrayLen,
     ) -> Option<ResolvedAxis> {
         let ty = self.check_expr(expr, None).unwrap_or(Type::Unknown);
         if !matches!(ty, Type::Unknown) && !ty.is_integer() {
@@ -113,12 +114,12 @@ impl TypeChecker {
             });
             return None;
         }
-        if let Some(value) = eval_literal_int(expr) {
-            if value < 0 || value >= extent as i128 {
+        if let (Some(value), ArrayLen::Fixed(extent)) = (eval_literal_int(expr), extent) {
+            if value < 0 || value >= *extent as i128 {
                 self.record_error(TypeError::TensorIndexOutOfBounds {
                     index: value,
                     axis,
-                    extent,
+                    extent: *extent,
                     span: expr.span(),
                 });
                 return None;
@@ -135,7 +136,7 @@ impl TypeChecker {
         end: &Expr,
         inclusive: bool,
         axis: usize,
-        extent: usize,
+        extent: &ArrayLen,
         span: Span,
     ) -> Option<ResolvedAxis> {
         self.check_expr(start, None);
@@ -147,20 +148,22 @@ impl TypeChecker {
         };
         // An inclusive range names its last position, so it stops one further on.
         let last = if inclusive { end_value + 1 } else { end_value };
-        if start_value < 0 || last < start_value || last > extent as i128 {
+        // A shape parameter's axis has no extent to stop at until the instantiation, so
+        // only the range's own well-formedness is checked there.
+        let past_extent = matches!(extent, ArrayLen::Fixed(e) if last > *e as i128);
+        if start_value < 0 || last < start_value || past_extent {
             self.record_error(TypeError::TensorSliceOutOfRange {
                 start: start_value,
                 end: last,
                 axis,
-                extent,
+                extent: extent.to_string(),
                 span,
             });
             return None;
         }
-        Some(ResolvedAxis::Range {
-            start: start_value as usize,
-            end: last as usize,
-        })
+        Some(ResolvedAxis::Kept(ArrayLen::Fixed(
+            (last - start_value) as usize,
+        )))
     }
 
     /// Check the multi-axis index expression itself: the receiver must be a tensor, or

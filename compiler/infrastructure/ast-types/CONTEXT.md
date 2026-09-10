@@ -14,7 +14,7 @@ Provide the canonical Abstract Syntax Tree node definitions shared by every stag
     `ImportSelection`, `Parameter`, `ParamLabel`, `GenericParam`, `GenericParamKind`,
     `TraitBound`, `Attribute`
   - `statements`: `Stmt`, `LoopAdapter`, `LoopAdapterKind`
-  - `types`: `Type`, `ArraySize`, `GenericArg`
+  - `types`: `Type`, `ArraySize`, `TensorDim`, `GenericArg`
 
 ## Data Ownership
 - Tables / Events Published / Events Consumed / Public Read Model: none
@@ -97,8 +97,11 @@ walkers.
   parser selects on. Like `Type::DynTrait` it is valid only as a reference referent; semantic
   analysis rejects a bare one.
 - `Type::Tensor { element_type, shape, span }` is the statically shaped `Tensor<T, [d0, ...]>`.
-  `shape` is a `Vec<usize>` of literal extents (an empty one is the rank-0 scalar tensor), so
-  symbolic and dynamic extents have no representation here yet, by design. It is the one type
+  `shape` is a `Vec<TensorDim>`, each extent either a `Literal` or the `Param` naming a shape
+  parameter (an empty shape is the rank-0 scalar tensor); a dynamic `?` axis has no
+  representation here yet, by design. `TensorDim` is the tensor counterpart of `ArraySize`, and
+  for the same reason: a symbolic extent is resolved by monomorphization and never reaches a
+  backend. It is the one type
   node the parser builds from a *name* plus a bracketed shape rather than from a keyword or a
   bracket, and `span` covers the name through the closing `>`.
 - `Stmt::ForRange` / `Stmt::ForEach` carry `index: Option<Identifier>`: the position binding of
@@ -159,7 +162,8 @@ walkers.
   Unknown names are accepted so the surface stays forward-compatible; semantics are interpreted
   by later passes (`@derive(Copy, Clone)`, `@allow(...)`, and eventually `@grad` / `@gpu`).
 - **Const generics.** `GenericParamKind` (`Type` / `Const`) on `GenericParam`, `ArraySize`
-  (`Literal` / `Const`) on `Type::Array`, `GenericArg` (`Type` / `Const`) in `Type::Generic.args`,
+  (`Literal` / `Const`) on `Type::Array`, `TensorDim` (`Literal` / `Param`) on
+  `Type::Tensor.shape`, `GenericArg` (`Type` / `Const`) in `Type::Generic.args`,
   `Expr::Call.type_args` for turbofish, and `where_predicates` on
   `FunctionDef` / `StructDef` / `ImplDef`.
 

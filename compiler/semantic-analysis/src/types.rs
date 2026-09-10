@@ -2,12 +2,13 @@
 
 use std::fmt;
 
-/// The length of a fixed-size array `[T; N]`.
+/// One compile-time extent: the length of a fixed-size array `[T; N]`, or one axis
+/// of a tensor shape `Tensor<T, [M, K]>`.
 ///
-/// Concrete arrays carry a [`ArrayLen::Fixed`] length. Inside a generic definition an
-/// array may instead be sized by a `const` parameter ([`ArrayLen::Param`], `[T; CAP]`);
-/// monomorphization substitutes each `Param` with the instantiation's concrete value,
-/// so a `Param` never survives into the HIR.
+/// Concrete types carry a [`ArrayLen::Fixed`] extent. Inside a generic definition an
+/// extent may instead be a `const` parameter ([`ArrayLen::Param`], `[T; CAP]` or the `K`
+/// in `Tensor<f32, [M, K]>`); monomorphization substitutes each `Param` with the
+/// instantiation's concrete value, so a `Param` never survives into the HIR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArrayLen {
     /// A concrete compile-time length.
@@ -112,10 +113,12 @@ pub enum Type {
     /// Statically shaped tensor `Tensor<T, [d0, d1, ...]>`. Every extent is part of
     /// the type, so `Tensor<f32, [2, 2]>` and `Tensor<f32, [3, 3]>` are distinct and an
     /// empty `shape` is the rank-0 scalar tensor. A tensor owns its buffer, so it is
-    /// never `Copy`: assignment and argument passing move it.
+    /// never `Copy`: assignment and argument passing move it. An extent is symbolic
+    /// ([`ArrayLen::Param`]) inside a shape-generic definition and concrete everywhere
+    /// else.
     Tensor {
         element: Box<Type>,
-        shape: Vec<usize>,
+        shape: Vec<ArrayLen>,
     },
     /// A heap-backed standard collection: `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`,
     /// or the growable text buffer `String`. These are library types rather than

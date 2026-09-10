@@ -889,7 +889,7 @@ impl Parser {
     /// spelled without a turbofish) has to be resolved anyway.
     fn parse_tensor_qualified_call(&mut self, type_name: Identifier) -> ParseResult<Expr> {
         self.advance(); // consume '::'
-        let (args, shape, close_span) = self.parse_generic_type_args()?;
+        let (args, shape, close_span) = self.parse_generic_type_args(true)?;
         let type_span = type_name.span.merge(close_span);
         let Some((dims, shape_span)) = shape else {
             return Err(ParseError::TensorTypeArity { span: type_span });

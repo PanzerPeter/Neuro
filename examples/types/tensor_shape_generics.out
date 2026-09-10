@@ -1,0 +1,7 @@
+rank_two_size(&wide) = 6
+rank_two_size(&tall) = 8
+top_row(&wide)[2]    = 30
+last(&row)           = 30
+last(&pair)          = 8
+decayed(row)[2]      = 27
+width(&pair)         = 2

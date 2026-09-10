@@ -226,12 +226,27 @@ pub enum TypeError {
         start: i128,
         end: i128,
         axis: usize,
-        extent: usize,
+        /// The axis's extent as written: a number, or a shape parameter's name.
+        extent: String,
         span: Span,
     },
 
     #[error("{found} at {span:?} is not a tensor, so it takes one index and no range: index an array or a `Vec` with `xs[i]`, and take a sub-range of one with `xs.slice(a..b)`")]
     TensorIndexOnNonTensor { found: Type, span: Span },
+
+    #[error("tensor dimension '{name}' at {span:?} is not a known extent; use a non-negative integer, or declare it as a shape parameter of the enclosing function, e.g. `func f<{name}>(t: Tensor<f32, [{name}]>)`")]
+    UnknownTensorDimension { name: String, span: Span },
+
+    #[error("shape parameter '{name}' at {span:?} is already {expected} here, but this argument makes it {found}; one shape parameter names one extent, so every position that writes it must agree")]
+    TensorShapeParamConflict {
+        name: String,
+        expected: u64,
+        found: u64,
+        span: Span,
+    },
+
+    #[error("this literal at {span:?} is written against a shape whose extent '{name}' is a shape parameter, so its length cannot be checked here; build the tensor with a constructor instead, e.g. `Tensor::<f32, [{name}]>::zeros()`")]
+    TensorLiteralSymbolicExtent { name: String, span: Span },
 
     #[error("`Tensor::{ctor}` at {span:?} does not apply to {ty}: {reason}")]
     TensorConstructorNotApplicable {

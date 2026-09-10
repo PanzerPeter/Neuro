@@ -837,3 +837,133 @@ func main() -> i32 {
         "an array is not sliced by an index; got {errors:?}"
     );
 }
+
+#[test]
+fn a_shape_parameter_is_inferred_from_the_argument() {
+    let errors = semantic_errors(
+        r#"
+func first<M, K>(t: &Tensor<i32, [M, K]>) -> i32 {
+    return t[0, 0]
+}
+
+func main() -> i32 {
+    val wide: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val tall: Tensor<i32, [3, 2]> = [[1, 2], [3, 4], [5, 6]]
+    return first(&wide) + first(&tall)
+}
+"#,
+    );
+    assert!(errors.is_empty(), "shape generics; got {errors:?}");
+}
+
+#[test]
+fn a_repeated_shape_parameter_must_agree() {
+    let errors = semantic_errors(
+        r#"
+func pair<M, N, K>(a: &Tensor<i32, [M, K]>, b: &Tensor<i32, [K, N]>) -> i32 {
+    return a[0, 0] + b[0, 0]
+}
+
+func main() -> i32 {
+    val x: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val y: Tensor<i32, [5, 6]> = Tensor::<i32, [5, 6]>::zeros()
+    return pair(&x, &y)
+}
+"#,
+    );
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::TensorShapeParamConflict { name, expected, found, .. }
+                if name == "K" && *expected == 3 && *found == 5
+        )),
+        "expected a conflict naming K; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_shape_parameters_extent_reaches_the_return_type() {
+    let errors = semantic_errors(
+        r#"
+func row<M, K>(t: &Tensor<i32, [M, K]>) -> Tensor<i32, [K]> {
+    return t[0, ..]
+}
+
+func main() -> i32 {
+    val grid: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val first: Tensor<i32, [3]> = row(&grid)
+    return first[2]
+}
+"#,
+    );
+    assert!(errors.is_empty(), "sliced shape parameter; got {errors:?}");
+}
+
+#[test]
+fn a_value_predicate_over_a_shape_parameter_is_enforced() {
+    let errors = semantic_errors(
+        r#"
+func wide<N>(t: &Tensor<i32, [N]>) -> i32 where N > 2 {
+    return t[0]
+}
+
+func main() -> i32 {
+    val pair: Tensor<i32, [2]> = [1, 2]
+    return wide(&pair)
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ConstPredicateViolated { .. })),
+        "expected the predicate to be violated; got {errors:?}"
+    );
+}
+
+#[test]
+fn an_undeclared_tensor_dimension_is_named() {
+    let errors = semantic_errors(
+        r#"
+func read(t: &Tensor<i32, [Q]>) -> i32 {
+    return t[0]
+}
+
+func main() -> i32 {
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::UnknownTensorDimension { name, .. } if name == "Q"
+        )),
+        "expected the dimension to be named; got {errors:?}"
+    );
+}
+
+/// A literal is written once and every instantiation reuses it, so there is no length
+/// the extent could be checked against.
+#[test]
+fn a_literal_against_a_symbolic_extent_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func build<N>() -> Tensor<i32, [N]> {
+    val t: Tensor<i32, [N]> = [1, 2, 3]
+    return t
+}
+
+func main() -> i32 {
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::TensorLiteralSymbolicExtent { name, .. } if name == "N"
+        )),
+        "expected the symbolic extent to be reported; got {errors:?}"
+    );
+}

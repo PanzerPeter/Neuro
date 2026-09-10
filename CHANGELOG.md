@@ -10,6 +10,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.20.0] - 2026-09-10
+
+### Added
+
+- `semantic`: **tensor shape generics and constraints** (§4.5). A tensor extent may now be a
+  generic parameter rather than a literal, so one function serves every shape it is written
+  for: `func corner<M, K>(t: &Tensor<i32, [M, K]>) -> i32` is instantiated at `M = 2, K = 3`
+  by a `[2, 3]` argument and again at `M = 4, K = 2` by a `[4, 2]` one. A bare name in a
+  shape position is sugar for a `const NAME: u32` parameter, so a shape parameter is an
+  ordinary const generic: it is readable as a value in the body (`t[N - 1]`), it may be
+  spelled out as `const K: u32` where that reads better, and it is monomorphized per distinct
+  set of extents with nothing left to check at run time.
+
+  An extent flows into the return type, so a function may hand back a shape derived from its
+  argument's: `func top_row<M, K>(t: &Tensor<i32, [M, K]>) -> Tensor<i32, [K]>` returns the
+  `[K]` row `t[0, ..]` reads. A parameter written more than once must be the same extent in
+  every position: a contradiction is reported as `shape parameter 'K' is already 3 here, but
+  this argument makes it 5`, naming the parameter and both extents rather than printing an
+  expected type that was itself inferred. A `where` predicate over a shape parameter
+  (`where N > 0`) is checked at the call that supplies the offending extent.
+
+  Two positions have no number to check against inside a template and say so. A tensor
+  *literal* against a symbolic extent is rejected (one literal serves every instantiation);
+  build one with a constructor instead. Indexing a symbolic axis keeps its rank check and
+  leaves the bounds check to the debug tier a run-time index already sits on, while a range
+  slice still folds to constants, which is what makes the `[K]` row above a static type. A
+  name no signature declares is an error naming the dimension, not a silently inferred
+  extent. Shape parameters are a function's to declare: a shape-generic `struct`, `enum`, or
+  `impl` is later work, and a tensor's element type still may not be generic.
+
 ## [2.19.1] - 2026-09-10
 
 ### Fixed

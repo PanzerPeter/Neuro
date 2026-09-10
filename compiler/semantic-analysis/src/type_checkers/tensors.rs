@@ -8,7 +8,7 @@
 
 use super::TypeChecker;
 use crate::errors::TypeError;
-use crate::types::Type;
+use crate::types::{ArrayLen, Type};
 use ast_types::{BinaryOp, Expr, GenericArg};
 use shared_types::{Identifier, Span};
 
@@ -61,7 +61,7 @@ impl TypeChecker {
         &mut self,
         elements: &[Expr],
         element_ty: &Type,
-        shape: &[usize],
+        shape: &[ArrayLen],
         span: Span,
     ) -> Type {
         let tensor = Type::Tensor {
@@ -70,13 +70,23 @@ impl TypeChecker {
         };
         // A rank-0 tensor holds exactly one value and has no axis to write elements
         // along, so there is no array literal that could denote one.
-        let Some((&extent, rest)) = shape.split_first() else {
+        let Some((extent, rest)) = shape.split_first() else {
             self.record_error(TypeError::TensorScalarNeedsConstructor { span });
             return tensor;
         };
-        if elements.len() != extent {
+        // A shape parameter's extent is only known at the instantiation, and a literal
+        // is written once for every one of them, so there is no length this could be
+        // checked against. The constructors take the extent from the type instead.
+        let ArrayLen::Fixed(extent) = extent else {
+            self.record_error(TypeError::TensorLiteralSymbolicExtent {
+                name: extent.to_string(),
+                span,
+            });
+            return tensor;
+        };
+        if elements.len() != *extent {
             self.record_error(TypeError::TensorExtentMismatch {
-                expected: extent,
+                expected: *extent,
                 found: elements.len(),
                 span,
             });
@@ -93,7 +103,7 @@ impl TypeChecker {
         &mut self,
         element: &Expr,
         element_ty: &Type,
-        remaining_shape: &[usize],
+        remaining_shape: &[ArrayLen],
         rank: usize,
     ) {
         if remaining_shape.is_empty() {

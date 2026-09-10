@@ -247,6 +247,16 @@ pub(crate) fn unify_generic(param: &Type, arg: &Type, subst: &mut HashMap<String
                 size: asz,
             },
         ) => unify_array_len(ps, asz, subst) && unify_generic(pe, ae, subst),
+        (
+            Type::Tensor {
+                element: pe,
+                shape: pshape,
+            },
+            Type::Tensor {
+                element: ae,
+                shape: ashape,
+            },
+        ) => unify_tensor_shape(pshape, ashape, subst) && unify_generic(pe, ae, subst),
         (Type::Tuple(pe), Type::Tuple(ae)) => {
             pe.len() == ae.len() && pe.iter().zip(ae).all(|(p, a)| unify_generic(p, a, subst))
         }
@@ -267,6 +277,13 @@ pub(crate) fn substitute_generic(ty: &Type, subst: &HashMap<String, Type>) -> Ty
         Type::Array { element, size } => Type::Array {
             element: Box::new(substitute_generic(element, subst)),
             size: substitute_array_len(size, subst),
+        },
+        Type::Tensor { element, shape } => Type::Tensor {
+            element: Box::new(substitute_generic(element, subst)),
+            shape: shape
+                .iter()
+                .map(|extent| substitute_array_len(extent, subst))
+                .collect(),
         },
         Type::Tuple(elements) => Type::Tuple(
             elements
@@ -332,6 +349,13 @@ pub(super) fn remap_type(
             element: Box::new(remap_type(element, subst, base, mangled)),
             size: substitute_array_len(size, subst),
         },
+        Type::Tensor { element, shape } => Type::Tensor {
+            element: Box::new(remap_type(element, subst, base, mangled)),
+            shape: shape
+                .iter()
+                .map(|extent| substitute_array_len(extent, subst))
+                .collect(),
+        },
         Type::Tuple(elements) => Type::Tuple(
             elements
                 .iter()
@@ -363,6 +387,73 @@ pub(super) fn unify_array_len(
         },
         (ArrayLen::Param(a), ArrayLen::Param(b)) => a == b,
         _ => false,
+    }
+}
+
+/// Unify a template tensor shape against an argument's, axis by axis.
+///
+/// Every axis is unified even once one has failed, so a shape parameter the rest of the
+/// shape does bind is not reported as uninferable on top of the extent mismatch that is
+/// the real error.
+fn unify_tensor_shape(
+    param: &[ArrayLen],
+    arg: &[ArrayLen],
+    subst: &mut HashMap<String, Type>,
+) -> bool {
+    if param.len() != arg.len() {
+        return false;
+    }
+    let mut agreed = true;
+    for (extent, found) in param.iter().zip(arg) {
+        agreed &= unify_array_len(extent, found, subst);
+    }
+    agreed
+}
+
+/// The first shape parameter this argument contradicts: its name, the extent already
+/// inferred for it, and the extent this argument writes.
+///
+/// A repeated shape parameter (the `K` in `matmul<M, N, K>`) is the one mismatch a plain
+/// expected/found pair explains badly, because the expected type it prints was itself
+/// inferred from an earlier argument, so the parameter and both extents are named instead.
+pub(crate) fn conflicting_shape_param(
+    param: &Type,
+    arg: &Type,
+    subst: &HashMap<String, Type>,
+) -> Option<(String, u64, u64)> {
+    match (param, arg) {
+        (
+            Type::Reference { inner: pi, .. },
+            Type::Reference {
+                inner: ai,
+                mutable: _,
+            },
+        ) => conflicting_shape_param(pi, ai, subst),
+        (
+            Type::Tensor { shape: pshape, .. },
+            Type::Tensor {
+                shape: ashape,
+                element: _,
+            },
+        ) => pshape.iter().zip(ashape).find_map(|(p, a)| {
+            match (p, a, subst.get(extent_param_name(p)?)) {
+                (ArrayLen::Param(name), ArrayLen::Fixed(found), Some(Type::ConstValue(bound)))
+                    if *bound != *found as u64 =>
+                {
+                    Some((name.clone(), *bound, *found as u64))
+                }
+                _ => None,
+            }
+        }),
+        _ => None,
+    }
+}
+
+/// The parameter name an extent is written with, or `None` for a concrete one.
+fn extent_param_name(extent: &ArrayLen) -> Option<&str> {
+    match extent {
+        ArrayLen::Param(name) => Some(name),
+        ArrayLen::Fixed(_) => None,
     }
 }
 

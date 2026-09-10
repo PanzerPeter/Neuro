@@ -101,14 +101,26 @@ the tuple-index parse, so it needs no expression grammar of its own.
   application whose argument is a shape rather than a type, and it shares its opening bracket
   with `Box<[T; N]>` / `Box<[T]>`. `shape_argument_ahead` decides on the token after `[`: an
   integer or an immediate `]` can never open a type, so a shape needs no backtracking.
-  `parse_generic_type_args` therefore returns `(args, Option<ShapeArg>, close_span)`, and
-  `build_tensor_type` turns a shape plus one type argument into `Type::Tensor`. `Tensor` is a
+  `parse_generic_type_args` therefore takes a `named_dims` flag and returns
+  `(args, Option<ShapeArg>, close_span)`, and `build_tensor_type` turns a shape plus one type
+  argument into `Type::Tensor`. `Tensor` is a
   prelude name, not a keyword, so the parser only claims it once a shape appears: a module
   declaring its own generic `Tensor<T>` keeps parsing as `Type::Generic`. A shape under any
   other name is `ParseError::ShapeArgumentOnNonTensor`; a shape with no element type, or with a
-  second type argument, is `ParseError::TensorTypeArity`. Extents are non-negative integer
-  literals only; a symbolic or `?` extent is a parse error until shape generics and dynamic
-  shapes land.
+  second type argument, is `ParseError::TensorTypeArity`. An extent is a non-negative integer
+  literal (`TensorDim::Literal`) or a shape parameter's name (`TensorDim::Param`); a `?`
+  dynamic axis is still a parse error until dynamic shapes land. An identifier-led `[...]` is ambiguous
+  with the slice type `[T]`, so it is read as a shape only under the name `Tensor`, which is
+  what `named_dims` carries: everywhere else `Foo<[T]>` parses as it always did.
+- **Shape parameters are const parameters.** A bare name used as a tensor extent is sugar for
+  a `const NAME: u32` parameter, so `rekind_shape_params` (`parser/item_functions.rs`) rewrites
+  every bound-less `GenericParamKind::Type` a signature uses as an extent into
+  `GenericParamKind::Const(u32)` once the parameter list and return type are parsed. This is
+  the same shape of rewrite `desugar_impl_trait_params` does next to it, and for the same
+  reason: one representation reaches every later pass, so the checker, monomorphization, and
+  `where`-predicate evaluation all see an ordinary const parameter. A parameter carrying trait
+  bounds is left alone (a bound names a type), and its extent is then reported by the checker
+  as an unknown dimension.
 - **Tensor constructor turbofish.** `Tensor::<f32, [3, 3]>::zeros()` is the one turbofish that
   qualifies a *type* rather than a callee, so `parse_tensor_qualified_call` handles it in the
   identifier-primary arm instead of the general infix `::` arm (which still requires a `(`

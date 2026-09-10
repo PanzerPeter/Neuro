@@ -21,8 +21,8 @@ expression already carries the type the checker resolved for it.
 - Implemented: traits, operator traits, and `impl` / `dyn` dispatch
 - Implemented: enums, generic enums, `Option<T>` / `Result<T, E>`, and the standard collections
 - Implemented: statically shaped tensors `Tensor<T, [d0, ...]>`: annotations, literal
-  coercion, the construction helpers, the ownership surface (`.clone()`, `.to(device)`), and
-  in-place compound assignment (`w -= g`)
+  coercion, the construction helpers, the ownership surface (`.clone()`, `.to(device)`),
+  in-place compound assignment (`w -= g`), and shape generics `Tensor<f32, [M, K]>`
 
 ## Primitive Types
 
@@ -1177,9 +1177,11 @@ Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
   (see [Tensor Types](#tensor-types))
 - Implemented: slicing and indexing `t[i, j]` / `t[1..3, ..]`
   (see [Slicing and indexing](#slicing-and-indexing))
+- Implemented: shape generics and constraints, `func f<M, K>(t: &Tensor<f32, [M, K]>)`
+  (see [Shape generics](#shape-generics))
 - Planned: by-value tensor arithmetic (`a + b`, `a @ b`) and the reductions
 - Planned: broadcasting rules
-- Planned: shape generics, named dimensions, and dynamic shapes
+- Planned: named dimensions and dynamic shapes
 
 ## Type Safety Guarantees
 
@@ -1540,9 +1542,10 @@ func loss(l: Tensor<f32, []>) { }        // rank-0 scalar tensor
 func image(px: Tensor<u8, [3, 224, 224]>) { }
 ```
 
-The shape is written as a bracketed list of non-negative integer literals. An empty list
-`[]` is the rank-0 scalar tensor. The element must be a fixed-width scalar: any integer
-type, `f16` / `bf16` / `f32` / `f64`, or `bool`.
+The shape is written as a bracketed list of non-negative integer literals, or of shape
+parameters inside a generic definition (see [Shape generics](#shape-generics)). An empty
+list `[]` is the rank-0 scalar tensor. The element must be a fixed-width scalar: any
+integer type, `f16` / `bf16` / `f32` / `f64`, or `bool`.
 
 Rank and every extent are part of the type, so `Tensor<f32, [2, 2]>` and
 `Tensor<f32, [3, 3]>` are different types and a mismatch is a compile error naming both:
@@ -1748,6 +1751,67 @@ how a borrowed weight is inspected.
 Range indexing is a tensor form. An array or a `Vec` takes one integer index and offers
 `.slice(a..b)` for a sub-range; writing `xs[0..2]` on one reports that.
 
+### Shape generics
+
+A tensor extent may be a **generic parameter** rather than a literal, so one function
+serves every shape it is written for. A bare name in a shape position is sugar for a
+`const NAME: u32` parameter: it is a compile-time *value*, inferred from the shape of the
+argument the caller passes, and each distinct set of extents is monomorphized into its own
+specialization.
+
+```neuro
+func corner<M, K>(t: &Tensor<i32, [M, K]>) -> i32 {
+    return t[0, 0]
+}
+
+val wide: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+val tall: Tensor<i32, [4, 2]> = Tensor::<i32, [4, 2]>::ones()
+val a = corner(&wide)                     // instantiated at M = 2, K = 3
+val b = corner(&tall)                     // and again at M = 4, K = 2
+```
+
+A parameter written more than once must be the same extent everywhere, which is what makes
+a shape mismatch a compile error rather than a wrong answer at run time:
+
+```neuro
+func pair<M, N, K>(a: &Tensor<i32, [M, K]>, b: &Tensor<i32, [K, N]>) -> i32 {
+    return a[0, 0] + b[0, 0]
+}
+
+val x: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+val y: Tensor<i32, [5, 6]> = Tensor::<i32, [5, 6]>::zeros()
+val z = pair(&x, &y)   // error: shape parameter 'K' is already 3 here,
+                       //        but this argument makes it 5
+```
+
+A shape parameter is an ordinary const parameter, so everything const parameters already do
+applies: it can be read as a value in the body, it can be constrained by a `where` predicate
+checked at the call that supplies the offending extent, and it may be spelled out in full as
+`const K: u32` where that reads better.
+
+```neuro
+func last<N>(t: &Tensor<i32, [N]>) -> i32
+where N > 0
+{
+    return t[N - 1]
+}
+```
+
+An extent also flows into the **return** type, so a function may hand back a shape it
+derived from its argument's:
+
+```neuro
+func top_row<M, K>(t: &Tensor<i32, [M, K]>) -> Tensor<i32, [K]> {
+    return t[0, ..]
+}
+```
+
+Two things a shape parameter does not do. A tensor **literal** cannot be written against a
+symbolic extent (one literal would have to serve every instantiation, so there is no length
+to check it against): build the tensor with a constructor instead. And a name that no
+enclosing signature declares is an error naming the dimension, not a silently accepted
+extent.
+
 ### What tensors cannot do yet
 
 A tensor can be built, bound, moved, cloned, passed, returned, transferred with
@@ -1756,8 +1820,10 @@ later work is writing through an index (`t[i, j] = v`), by-value tensor arithmet
 (`a + b`, `a @ b`), `.t()`, `.reshape(...)`, the reductions (`.sum()`, `.mean()`,
 `.max()`, `.min()`), and the step and reverse index forms (`t[(0..n).step(2)]`,
 `t[(0..n).rev()]`), which wait on `.step(n)` / `.rev()` existing on ranges at all.
-Symbolic extents (`Tensor<f32, [M, K]>`), named dimensions, and dynamic axes
-(`Tensor<f32, [?, 768]>`) are not accepted; a non-literal extent is a parse error.
+Named dimensions (`Tensor<f32, [batch: 32, embed: 768]>`) and dynamic axes
+(`Tensor<f32, [?, 768]>`) are not accepted either; a `?` extent is a parse error. Symbolic
+extents *are* accepted, on functions: a shape-generic struct, enum, or `impl` block is
+later work, so a shape parameter is a function's to declare.
 
 ## Standard Collections
 

@@ -318,10 +318,10 @@ impl TypeChecker {
                     ret: Box::new(ret_ty),
                 })
             }
-            // Statically shaped tensor `Tensor<T, [d0, ...]>`. The extents are literals
-            // the parser already validated, so the only thing left to check is the
-            // element: a tensor buffer is a flat run of scalars, and a non-scalar
-            // element has no such layout.
+            // Statically shaped tensor `Tensor<T, [d0, ...]>`. A literal extent the
+            // parser validated needs nothing further; a named one must be an in-scope
+            // shape parameter. The element is checked either way: a tensor buffer is a
+            // flat run of scalars, and a non-scalar element has no such layout.
             ast_types::Type::Tensor {
                 element_type,
                 shape,
@@ -335,10 +335,33 @@ impl TypeChecker {
                     });
                     return None;
                 }
+                let mut extents = Vec::with_capacity(shape.len());
+                for dim in shape {
+                    extents.push(self.resolve_tensor_dim(dim)?);
+                }
                 Some(Type::Tensor {
                     element: Box::new(element),
-                    shape: shape.clone(),
+                    shape: extents,
                 })
+            }
+        }
+    }
+
+    /// Resolve one tensor extent. A literal is taken as written; a name is accepted
+    /// only when it is an in-scope shape parameter, which the parser has already
+    /// re-kinded to a `const NAME: u32` parameter.
+    fn resolve_tensor_dim(&mut self, dim: &ast_types::TensorDim) -> Option<ArrayLen> {
+        match dim {
+            ast_types::TensorDim::Literal(extent) => Some(ArrayLen::Fixed(*extent)),
+            ast_types::TensorDim::Param(ident) => {
+                if self.const_scope.contains_key(&ident.name) {
+                    return Some(ArrayLen::Param(ident.name.clone()));
+                }
+                self.record_error(TypeError::UnknownTensorDimension {
+                    name: ident.name.clone(),
+                    span: ident.span,
+                });
+                None
             }
         }
     }

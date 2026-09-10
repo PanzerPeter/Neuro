@@ -194,8 +194,9 @@ only, and a `for` head over an instance would find no protocol on the type it ac
 Const generics ride the same machinery: a `const_subst` (name → value) and `const_types`
 (name → int type) are active while an instance body lowers, parallel to `type_subst`. `MonoArg`
 (Type | Const) is the positional instance-argument kind and `split_mono_args` builds the two maps;
-`unify_ast_hir` binds a const param from an array-length position, `resolve_array_size` resolves
-`[T; N]` to a concrete length, a const-param reference lowers to a typed integer literal, and
+`unify_ast_hir` binds a const param from an array-length position and from each axis of a
+tensor-argument's shape, `resolve_array_size` resolves
+`[T; N]` to a concrete length, `resolve_tensor_dim` resolves a `Tensor<T, [M, K]>` extent to one, a const-param reference lowers to a typed integer literal, and
 mangles include const values (`_cN`). Turbofish `type_args` seed the substitution before
 inference. Backends are unaffected: every instance reaching the HIR has concrete `usize` array
 lengths.
@@ -254,8 +255,11 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   header; `sliceable_element` names the three receivers that permit it (`[T; N]`, `Vec<T>`,
   `[T]`). Indexing, `for x in xs`, and `IndexAssignment` each read a slice's element type
   alongside the array's, and `slice.len()` is `u64`.
-- **Tensors**: `resolve_type` maps `ast_types::Type::Tensor` straight to
-  `HirType::Tensor { element, shape }`, and `mangle_type` spells it `tensor_<elem>_<d0>x<d1>`.
+- **Tensors**: `resolve_type` maps `ast_types::Type::Tensor` to
+  `HirType::Tensor { element, shape }`, resolving each extent through `resolve_tensor_dim` so a
+  shape parameter takes the value the active instance bound it to; `mangle_type` spells the
+  result `tensor_<elem>_<d0>x<d1>`. A symbolic extent with no binding is an
+  `UnresolvedType` naming the dimension, which the checker's own diagnostic reaches first.
   Construction lives in `tensors.rs`. An array literal lowered against a
   `HirType::Tensor` expectation becomes `HirExprKind::TensorLiteral` whose `elements` are
   **flattened row-major**: the nesting carried the shape and the shape is on the node's type,

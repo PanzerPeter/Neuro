@@ -6,8 +6,10 @@
 //   tensor field · an enum matched to pick a schedule · a `for` loop · borrowed
 //   tensor parameters · string interpolation with the format mini-language ·
 //   2B's in-place compound assignment, which is the reason the weight buffer
-//   keeps one address across every step below · and 2B's slicing and indexing,
-//   which is what finally reads the updated elements back out.
+//   keeps one address across every step below · 2B's slicing and indexing,
+//   which is what finally reads the updated elements back out · and 2B's shape
+//   generics, which let the step below be written ONCE for every width a layer
+//   in this program has.
 //
 // `w -= g` updates the buffer `w`'s DLPack handle already addresses. Nothing is
 // allocated, no handle is replaced, and a pointer held by an optimizer or by a
@@ -41,6 +43,27 @@ func step_for(schedule: Schedule) -> Tensor<i32, [4]> {
         Schedule::Constant => Tensor::<i32, [4]>::ones(),
         Schedule::Frozen => Tensor::<i32, [4]>::zeros()
     }
+}
+
+// One descent step, written once for every width in the program. `N` is a
+// compile-time value inferred from the operands' own shape, so `descend` below is
+// specialized per width with nothing left to check at run time — and passing two
+// tensors of DIFFERENT widths to it is a compile error, not a silent misalignment.
+// `where N > 0` rules out the rank-1 tensor with no elements to step.
+func descend<N>(w: Tensor<i32, [N]>, step: &Tensor<i32, [N]>) -> Tensor<i32, [N]>
+where N > 0
+{
+    // The update is in place: `w`'s buffer is written, not replaced, exactly as it
+    // is in the concrete loop below.
+    mut out = w
+    out -= step
+    return out
+}
+
+// The extent reaches the RETURN type too: dropping the leading axis of an `[M, K]`
+// matrix leaves a `[K]` row at whatever width K was inferred to be.
+func first_row<M, K>(m: &Tensor<i32, [M, K]>) -> Tensor<i32, [K]> {
+    return m[0, ..]
 }
 
 // Every element read back and compared, one axis position at a time. Indexing a
@@ -82,6 +105,29 @@ func main() -> i32 {
     // program here rather than letting it return a success code.
     assert(matched == 4)
     println("counters [4]    updated in place, {matched} of 4 elements matched")
+
+    // One template, two widths. The `[4]` counters and a `[2]` pair below both go
+    // through `descend`, which the compiler specializes per extent; the borrowed
+    // step keeps its own operand alive across the call.
+    val four: Tensor<i32, [4]> = [1, 1, 1, 1]
+    val four_step: Tensor<i32, [4]> = [1, 1, 1, 1]
+    val cleared = descend(four, &four_step)
+    val pair: Tensor<i32, [2]> = [9, 9]
+    val pair_step: Tensor<i32, [2]> = [4, 5]
+    val trimmed = descend(pair, &pair_step)
+    assert(cleared[3] == 0)
+    assert(trimmed[1] == 4)
+    println("descend<N>      one template, [4] -> {cleared[3]} and [2] -> {trimmed[1]}")
+
+    // A shape parameter inferred from a rank-2 tensor and handed back in the result's
+    // type: the grid is [2, 3], so its first row is a [3].
+    val grid: Tensor<i32, [2, 3]> = [
+        [3, 6, 9],
+        [1, 1, 1]
+    ]
+    val row: Tensor<i32, [3]> = first_row(&grid)
+    assert(row[2] == 9)
+    println("first_row<M, K> [2, 3] -> a [3] row ending {row[2]}")
 
     // The same update at a realistic width: 2080 f32 parameters, stepped eight
     // times without a single allocation after the first.

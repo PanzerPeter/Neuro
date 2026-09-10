@@ -193,10 +193,16 @@ impl Lowerer {
                 element_type,
                 shape,
                 ..
-            } => Ok(HirType::Tensor {
-                element: Box::new(self.resolve_type(element_type)?),
-                shape: shape.clone(),
-            }),
+            } => {
+                let mut extents = Vec::with_capacity(shape.len());
+                for dim in shape {
+                    extents.push(crate::resolve_tensor_dim(dim, &self.const_subst)?);
+                }
+                Ok(HirType::Tensor {
+                    element: Box::new(self.resolve_type(element_type)?),
+                    shape: extents,
+                })
+            }
         }
     }
 }

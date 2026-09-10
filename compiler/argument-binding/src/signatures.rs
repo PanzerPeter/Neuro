@@ -258,8 +258,19 @@ fn is_annotatable(ty: &Type, generics: &[GenericParam]) -> bool {
                 })
         }
         // A statically shaped tensor is fully nameable at a call site: its extents are
-        // literals, so restating the annotation there means the same type.
-        Type::Tensor { element_type, .. } => is_annotatable(element_type, generics),
+        // literals, so restating the annotation there means the same type. A shape
+        // parameter's extent is not: it names one of the callee's own parameters, so it
+        // is dropped for the same reason a `T` is.
+        Type::Tensor {
+            element_type,
+            shape,
+            ..
+        } => {
+            is_annotatable(element_type, generics)
+                && shape
+                    .iter()
+                    .all(|dim| matches!(dim, ast_types::TensorDim::Literal(_)))
+        }
         Type::ImplTrait { .. } | Type::DynTrait { .. } | Type::Function { .. } => false,
     }
 }

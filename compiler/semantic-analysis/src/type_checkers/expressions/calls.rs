@@ -341,11 +341,24 @@ impl TypeChecker {
             if !matches!(arg_ty, Type::Unknown)
                 && !declarations::unify_generic(param, &arg_ty, &mut subst)
             {
-                self.record_error(TypeError::Mismatch {
-                    expected: declarations::substitute_generic(param, &subst),
-                    found: arg_ty,
-                    span: arg.span(),
-                });
+                // A shape parameter this argument contradicts is reported by name: the
+                // expected type below was itself inferred from an earlier argument, so
+                // printing it alone leaves the reader to work out which extent moved.
+                match declarations::conflicting_shape_param(param, &arg_ty, &subst) {
+                    Some((name, expected, found)) => {
+                        self.record_error(TypeError::TensorShapeParamConflict {
+                            name,
+                            expected,
+                            found,
+                            span: arg.span(),
+                        })
+                    }
+                    None => self.record_error(TypeError::Mismatch {
+                        expected: declarations::substitute_generic(param, &subst),
+                        found: arg_ty,
+                        span: arg.span(),
+                    }),
+                }
             }
             // A by-value argument moves a non-Copy binding into the callee.
             self.record_move(arg);

@@ -446,6 +446,29 @@ fn unify_ast_hir(
             }
             unify_ast_hir(pe, ae, gnames, cnames, subst, const_subst)
         }
+        // A tensor parameter's shape binds every shape parameter it names to the
+        // argument's extent at that axis, which is what makes `matmul<M, N, K>` infer
+        // its three extents from two arguments.
+        (
+            ast_types::Type::Tensor {
+                element_type: pe,
+                shape: pshape,
+                ..
+            },
+            HirType::Tensor {
+                element: ae,
+                shape: ashape,
+            },
+        ) if pshape.len() == ashape.len() => {
+            for (dim, extent) in pshape.iter().zip(ashape) {
+                if let ast_types::TensorDim::Param(id) = dim {
+                    if cnames.contains(&id.name) {
+                        const_subst.entry(id.name.clone()).or_insert(*extent as u64);
+                    }
+                }
+            }
+            unify_ast_hir(pe, ae, gnames, cnames, subst, const_subst)
+        }
         (ast_types::Type::Tuple { elements: pe, .. }, HirType::Tuple(ae))
             if pe.len() == ae.len() =>
         {
@@ -454,6 +477,24 @@ fn unify_ast_hir(
             }
         }
         _ => {}
+    }
+}
+
+/// Resolve a tensor extent to a concrete value. A literal is taken as-is; a shape
+/// parameter is looked up in `const_subst` (populated while a monomorphized instance
+/// body is lowered), so no symbolic extent reaches the HIR.
+fn resolve_tensor_dim(
+    dim: &ast_types::TensorDim,
+    const_subst: &HashMap<String, u64>,
+) -> Result<usize, LoweringError> {
+    match dim {
+        ast_types::TensorDim::Literal(extent) => Ok(*extent),
+        ast_types::TensorDim::Param(id) => const_subst
+            .get(&id.name)
+            .map(|v| *v as usize)
+            .ok_or_else(|| LoweringError::UnresolvedType {
+                name: format!("tensor dimension '{}'", id.name),
+            }),
     }
 }
 

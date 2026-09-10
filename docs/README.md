@@ -92,7 +92,11 @@ Key design goals:
   place, allocating nothing and leaving the handle and its `data` pointer unchanged.
   An index gives one argument per axis: `t[i, j]` reads an element, and `t[0, ..]` /
   `t[1..3, 2..5]` / `t[0..=2, ..]` copy out a smaller tensor, dropping every axis given a
-  position. By-value arithmetic and the reductions are later work
+  position. An extent may be a shape parameter rather than a literal
+  (`func f<M, K>(t: &Tensor<f32, [M, K]>) -> Tensor<f32, [K]>`): it is a compile-time
+  `const u32` value inferred from the argument's shape, specialized per distinct set of
+  extents, constrained by a `where` predicate, and required to agree everywhere one name is
+  written. By-value arithmetic and the reductions are later work
 
 ### Variables
 

@@ -417,13 +417,27 @@ base name matches the scrutinee's instance and binds payloads at the instance's 
 `Option` / `Result` are **not** special-cased anywhere here: `neurc` injects their declarations.
 
 **Const generics, `where`, turbofish.** `const_scope` holds const params (name → int type) and
-`enter/exit_generic_scope` sets both scopes. `Type::Array.size` is an `ArrayLen`
+`enter/exit_generic_scope` sets both scopes. `Type::Array.size` and every extent of
+`Type::Tensor.shape` are an `ArrayLen`
 (`Fixed` / `Param`) and a `Type::ConstValue` marker carries a const argument through
 monomorphization. `check_generic_call` seeds turbofish arguments, infers const params from
-array-argument lengths (`unify_array_len`), enforces that every param is bound, and checks `where`
+array-argument lengths and tensor-argument extents (`unify_array_len`, `unify_tensor_shape`),
+enforces that every param is bound, and checks `where`
 predicates (`eval_const_predicate`); generic-struct instantiation does the same from field values.
 Errors: `UnknownArrayLength`, `ConstPredicateViolated`, `TurbofishCountMismatch`,
 `TurbofishKindMismatch`, `ConstParamNotInteger`.
+
+**Shape generics.** A tensor extent written as a name is a const parameter the parser has
+already re-kinded, so nothing here treats it specially except where a symbolic extent has no
+number to check against. `resolve_type` maps a `TensorDim::Param` to `ArrayLen::Param` when
+`const_scope` knows the name and reports `UnknownTensorDimension` otherwise.
+`unify_tensor_shape` binds every axis even after one has failed, so a parameter the rest of the
+shape does bind is not also reported as uninferable, and `conflicting_shape_param` turns the
+failure into `TensorShapeParamConflict`, which names the parameter and both extents rather than
+printing an expected type that was itself inferred. A tensor literal against a symbolic extent
+is `TensorLiteralSymbolicExtent`: one literal serves every instantiation, so there is no length
+to check it against. Indexing a symbolic axis keeps its rank check and drops only the
+compile-time bounds check, which is the debug-tier guard's job at that point.
 
 ### Traits
 `traits` (name → `TraitInfo` of resolved method signatures), `trait_impls` (the `(trait, type)`
@@ -584,7 +598,8 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
 - **Tensors.** `Type::Tensor { element, shape }` is the statically shaped `Tensor<T, [d0, ...]>`.
   Rank and every extent are part of the type, so two tensors are compatible only when their
   elements match and their shapes are equal extent for extent; an empty `shape` is the rank-0
-  scalar tensor. `resolve_type` restricts the element to a fixed-width scalar (integers,
+  scalar tensor. An extent is an `ArrayLen`: `Fixed` everywhere concrete, `Param` inside a
+  shape-generic definition, where monomorphization makes it concrete (see **Shape generics**). `resolve_type` restricts the element to a fixed-width scalar (integers,
   `f16`/`bf16`/`f32`/`f64`, `bool`) and reports `NonScalarTensorElement` otherwise. A tensor owns
   its buffer, so `is_type_copy` is false and `is_type_move_tracked` is true: it moves on
   assignment and on being passed. `Tensor` is a prelude name a module may shadow, so the

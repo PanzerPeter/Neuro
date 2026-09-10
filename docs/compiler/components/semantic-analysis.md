@@ -397,8 +397,11 @@ What the checker still owes:
 - [x] **Tensor ownership**: `.clone()` (nullary, auto-derefs a borrow, moves nothing) and
       `.to(device)` (one `Device` argument, consumes the receiver, value receivers only)
       resolve as intrinsics on a tensor receiver
-- [ ] **Shape checking beyond identity**: broadcasting and shape generics; today two tensors
-      match only when their elements and every extent are equal
+- [x] **Shape generics**: a tensor extent may be a `const N: u32` parameter, inferred from
+      the argument's own shape and monomorphized per distinct set of extents; a parameter
+      written twice must agree, and a `where` predicate over one is checked at the call
+- [ ] **Shape checking beyond identity**: broadcasting; today two tensors match only when
+      their elements and every extent are equal
 - [ ] **Broadcasting**: NumPy-style broadcasting rules
 
 ## Troubleshooting

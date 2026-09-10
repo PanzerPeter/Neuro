@@ -69,6 +69,7 @@ types/string_chars.nr               31
 types/strings.nr                    0
 types/tensor_construction.nr        6
 types/tensor_indexing.nr            44
+types/tensor_shape_generics.nr      41
 types/tuples.nr                     62
 types/type_aliases.nr               17
 types/underscore_separators.nr      0

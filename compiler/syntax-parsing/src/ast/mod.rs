@@ -5,6 +5,6 @@ pub use ast_types::{
     EnumVariant, Expr, FieldDef, FieldInit, FieldPattern, FunctionDef, GenericArg, GenericParam,
     GenericParamKind, ImplDef, ImportDef, ImportName, ImportSelection, InterpPart, Item,
     LoopAdapter, LoopAdapterKind, MatchArm, MethodDef, ModuleDef, NewtypeDef, ParamLabel,
-    Parameter, Pattern, SelfParam, Stmt, StructDef, TensorIndexArg, TraitBound, TraitDef,
-    TraitMethod, Type, UnaryOp, VariantPayload,
+    Parameter, Pattern, SelfParam, Stmt, StructDef, TensorDim, TensorIndexArg, TraitBound,
+    TraitDef, TraitMethod, Type, UnaryOp, VariantPayload,
 };

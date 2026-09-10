@@ -18,4 +18,4 @@ pub use items::{
     TraitMethod, VariantPayload, PRELUDE_MODULE,
 };
 pub use statements::{LoopAdapter, LoopAdapterKind, Stmt};
-pub use types::{ArraySize, GenericArg, Type};
+pub use types::{ArraySize, GenericArg, TensorDim, Type};

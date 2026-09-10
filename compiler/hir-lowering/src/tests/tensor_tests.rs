@@ -344,3 +344,42 @@ func main() -> i32 {
     );
     assert_eq!(element.ty, HirType::I32);
 }
+
+/// Each call instantiates the template at its own extents, so the HIR holds one
+/// concrete function per shape and no symbolic extent survives.
+#[test]
+fn a_shape_generic_monomorphizes_once_per_shape() {
+    let program = lower(
+        r#"
+func first<M, K>(t: &Tensor<i32, [M, K]>) -> i32 {
+    return t[0, 0]
+}
+
+func main() -> i32 {
+    val wide: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val tall: Tensor<i32, [3, 2]> = [[1, 2], [3, 4], [5, 6]]
+    return first(&wide) + first(&tall)
+}
+"#,
+    );
+    let mut shapes = Vec::new();
+    for item in &program.items {
+        if let HirItem::Function(f) = item {
+            if !f.name.starts_with("first_g") {
+                continue;
+            }
+            let HirType::Reference { inner, .. } = &f.params[0].ty else {
+                panic!(
+                    "expected a borrowed tensor parameter, got {:?}",
+                    f.params[0]
+                );
+            };
+            let HirType::Tensor { shape, .. } = inner.as_ref() else {
+                panic!("expected a tensor referent, got {inner:?}");
+            };
+            shapes.push(shape.clone());
+        }
+    }
+    shapes.sort();
+    assert_eq!(shapes, vec![vec![2, 3], vec![3, 2]]);
+}
