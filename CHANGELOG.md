@@ -10,6 +10,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.19.0] - 2026-09-10
+
+### Added
+
+- `codegen`: **tensor slicing and indexing** (§4.4). A tensor index gives one argument per axis,
+  and each argument is a position, a range, or the whole axis `..`. An axis given a position is
+  dropped from the result and an axis given a range or `..` survives at its new extent, so
+  `m[1, 2]` reads an element, `m[0, ..]` and `m[.., 1]` are a row and a column, and
+  `m[1..3, 2..5]` / `m[0..=2, 0..=2]` are sub-matrices. This is the first way to read a value
+  back out of a tensor: until now a tensor could be built, moved, cloned, and updated in place,
+  but only asserted on through its shape.
+
+  A position may be any integer expression, including one only known at run time, so a loop can
+  walk a tensor. A range bound must fold to a compile-time constant, because the extent it
+  produces is part of the result's type — `t[0..k]` over a `mut k` reports exactly that. A
+  constant position outside its axis, a reversed range, and a range past the extent are compile
+  errors; a run-time position is bounds-checked on the debug tier, where an array index's check
+  already lives.
+
+  A slice is a fresh owned tensor holding a copy, not a view. A tensor owns its buffer and
+  releases it through its own DLPack deleter, so two tensors sharing one buffer would be a
+  double free; copying also keeps §4.14's contiguous row-major `strides` and zero `byte_offset`
+  true of every value. Indexing reads its receiver rather than consuming it, and reads through a
+  borrow, so `t[i, j]` on a `&Tensor<T, S>` parameter is how a borrowed weight is inspected.
+
+  The parser tells the two index forms apart with no types at all: a bracket holding one plain
+  expression stays the array / `Vec` / `HashMap` index it always was, and a list, a range, or a
+  bare `..` becomes the tensor form, because no other indexable type accepts any of the three.
+  `xs[0..2]` over an array now reports that and names `.slice(a..b)`.
+
+  Not covered, and tracked elsewhere: writing through an index (`t[i, j] = v`, which §4.4 does
+  not specify), and the step and reverse index forms `t[(0..n).step(2)]` / `t[(0..n).rev()]`,
+  which wait on `.step(n)` and `.rev()` existing on ranges at all — their own roadmap item.
+
+
 ## [2.18.3] - 2026-09-07
 
 ### Fixed

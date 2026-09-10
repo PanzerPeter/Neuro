@@ -6,7 +6,7 @@
 use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::Type;
-use ast_types::Expr;
+use ast_types::{Expr, TensorIndexArg};
 use shared_types::Span;
 
 impl TypeChecker {
@@ -152,6 +152,12 @@ impl TypeChecker {
         span: &Span,
     ) -> Option<Type> {
         let obj_ty = self.check_expr(object, None).unwrap_or(Type::Unknown);
+        // A rank-1 tensor is indexed with one argument, which parses as the ordinary
+        // index form; the axis rules are the tensor's either way.
+        if let Type::Tensor { element, shape } = obj_ty.referent().clone() {
+            let axes = [TensorIndexArg::Position(index.clone())];
+            return Some(self.check_tensor_index(&element, &shape, &axes, *span));
+        }
         let idx_ty = self.check_expr(index, None).unwrap_or(Type::Unknown);
 
         if !matches!(idx_ty, Type::Unknown) && !idx_ty.is_integer() {

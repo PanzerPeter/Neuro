@@ -684,3 +684,156 @@ func main() -> i32 {
         "the operand moved the target it updates; got {errors:?}"
     );
 }
+
+/// An axis given a position is dropped and an axis given a range survives, so
+/// naming every axis with a position is what reads one element.
+#[test]
+fn indexing_every_axis_reads_an_element_and_a_range_keeps_its_axis() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val m: Tensor<i32, [3, 4]> = [
+        [0, 1, 2, 3],
+        [4, 5, 6, 7],
+        [8, 9, 10, 11]
+    ]
+    val element: i32 = m[1, 2]
+    val row: Tensor<i32, [4]> = m[0, ..]
+    val column: Tensor<i32, [3]> = m[.., 1]
+    val block: Tensor<i32, [2, 2]> = m[1..3, 2..4]
+    val inclusive: Tensor<i32, [2, 3]> = m[0..=1, 0..=2]
+    return element
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "every index form should check: {errors:?}"
+    );
+}
+
+#[test]
+fn an_index_must_name_every_axis() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val m: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val bad = m[0]
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorIndexRankMismatch { .. })),
+        "a rank-2 tensor takes two arguments; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_constant_position_outside_its_axis_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val m: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val bad = m[2, 0]
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorIndexOutOfBounds { .. })),
+        "axis 0 has extent 2; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_slice_past_the_extent_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val m: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val bad = m[0..1, 1..9]
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorSliceOutOfRange { .. })),
+        "axis 1 has extent 3; got {errors:?}"
+    );
+}
+
+/// A slice's extents are part of the result's type, so a bound that is only known at
+/// run time has no type to produce — unlike a position, which may be any integer.
+#[test]
+fn a_runtime_slice_bound_is_rejected_while_a_runtime_position_is_not() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val m: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    mut k = 1
+    val fine = m[k, k]
+    val bad = m[0..1, 0..k]
+    return fine
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorSliceBoundNotConstant { .. })),
+        "a run-time slice bound has no static extent; got {errors:?}"
+    );
+    assert_eq!(
+        errors.len(),
+        1,
+        "the run-time position is legal; got {errors:?}"
+    );
+}
+
+/// Indexing reads through a borrow without consuming the tensor, which is what lets a
+/// borrowed weight be inspected inside a loop.
+#[test]
+fn a_borrowed_tensor_is_indexed_and_not_moved() {
+    let errors = semantic_errors(
+        r#"
+func first(t: &Tensor<i32, [2, 2]>) -> i32 {
+    return t[0, 0]
+}
+
+func main() -> i32 {
+    val m: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    val a = first(&m)
+    val b = first(&m)
+    return a + b
+}
+"#,
+    );
+    assert!(errors.is_empty(), "indexing reads a tensor: {errors:?}");
+}
+
+/// A range index is a tensor form: an array takes one integer and offers `.slice`.
+#[test]
+fn a_range_index_over_an_array_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val xs = [1, 2, 3]
+    val bad = xs[0..2]
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorIndexOnNonTensor { .. })),
+        "an array is not sliced by an index; got {errors:?}"
+    );
+}

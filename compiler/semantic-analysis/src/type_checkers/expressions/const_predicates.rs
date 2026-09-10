@@ -45,6 +45,13 @@ pub(crate) fn eval_const_predicate(expr: &Expr, subst: &HashMap<String, Type>) -
     }
 }
 
+/// Evaluate a const-integer expression that names no const parameter: the literal
+/// arithmetic a tensor slice bound may be written as, where the folded value
+/// becomes part of the result's type rather than a run-time index.
+pub(crate) fn eval_literal_int(expr: &Expr) -> Option<i128> {
+    eval_const_int(expr, &HashMap::new())
+}
+
 /// Evaluate a const-integer expression: an integer literal, a const parameter
 /// looked up in `subst`, or an arithmetic combination of these. `None` when it is not a
 /// fully resolved const integer.

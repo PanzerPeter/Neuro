@@ -1,7 +1,7 @@
 // Expression parsing tests
 
 use shared_types::{FloatSuffix, FormatAlign, FormatKind, Literal};
-use syntax_parsing::{parse_expr, BinaryOp, Expr, InterpPart, UnaryOp};
+use syntax_parsing::{parse_expr, BinaryOp, Expr, InterpPart, TensorIndexArg, UnaryOp};
 
 #[test]
 fn test_parse_integer_literal() {
@@ -694,4 +694,61 @@ fn test_parse_literal_without_holes_stays_a_plain_string() {
         Expr::Literal(Literal::String(text), _) => assert_eq!(text, "no holes {here}"),
         other => panic!("Expected a plain string literal, got {:?}", other),
     }
+}
+
+/// The index forms: a comma-separated list, a range, and the bare `..` full axis
+/// all reach the tensor node, while one plain argument stays the ordinary index every
+/// other indexable type takes.
+#[test]
+fn one_plain_index_stays_the_ordinary_index_form() {
+    let expr = parse_expr("xs[i]").expect("an array index should parse");
+    assert!(
+        matches!(expr, Expr::Index { .. }),
+        "one plain argument is the sequence index, got {expr:?}"
+    );
+}
+
+#[test]
+fn a_multi_axis_index_parses_as_a_tensor_index() {
+    let expr = parse_expr("m[1, 2]").expect("a tensor index should parse");
+    let Expr::TensorIndex { indices, .. } = expr else {
+        panic!("expected a tensor index, got {expr:?}");
+    };
+    assert_eq!(indices.len(), 2);
+    assert!(indices
+        .iter()
+        .all(|index| matches!(index, TensorIndexArg::Position(_))));
+}
+
+#[test]
+fn a_bare_dot_dot_in_an_index_is_the_full_axis_slice() {
+    let expr = parse_expr("image[.., 10..42, 0..=3]").expect("a mixed index should parse");
+    let Expr::TensorIndex { indices, .. } = expr else {
+        panic!("expected a tensor index, got {expr:?}");
+    };
+    assert!(matches!(indices[0], TensorIndexArg::FullAxis(_)));
+    assert!(matches!(
+        indices[1],
+        TensorIndexArg::Range {
+            inclusive: false,
+            ..
+        }
+    ));
+    assert!(matches!(
+        indices[2],
+        TensorIndexArg::Range {
+            inclusive: true,
+            ..
+        }
+    ));
+}
+
+/// A single range still names an axis, so it is a tensor index even without a comma.
+#[test]
+fn a_lone_range_index_is_a_tensor_index() {
+    let expr = parse_expr("v[1..3]").expect("a rank-1 slice should parse");
+    let Expr::TensorIndex { indices, .. } = expr else {
+        panic!("expected a tensor index, got {expr:?}");
+    };
+    assert!(matches!(indices[0], TensorIndexArg::Range { .. }));
 }

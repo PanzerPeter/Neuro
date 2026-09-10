@@ -1,2 +1,4 @@
-counters [4]    updated in place, every element matched
+counters [4]    updated in place, 4 of 4 elements matched
+weights[0, ..]  is a [32] row, stable across the steps: true
+weights[0..2, 0..=1] is a [2, 2] block, corner matches: true
 layer  [64, 32] + bias [32] =   2080 params, one buffer each

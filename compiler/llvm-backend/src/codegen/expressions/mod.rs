@@ -17,6 +17,7 @@ pub(crate) mod matches;
 mod methods;
 mod slices;
 mod struct_eq;
+mod tensor_index;
 mod tensors;
 mod tuples;
 mod unary;
@@ -176,6 +177,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 let tensor_ty = Type::from_hir(&expr.ty);
                 self.codegen_tensor_random_normal(mean, std, &tensor_ty)
             }
+            // Tensor indexing and slicing `t[i, j]` / `t[1..3, ..]`.
+            HirExprKind::TensorIndex { object, axes } => {
+                let result_ty = Type::from_hir(&expr.ty);
+                self.codegen_tensor_index(object, axes, &result_ty, expr.span.start)
+            }
+
             HirExprKind::Index { object, index } => {
                 let obj_ty = Type::from_hir(&object.ty);
                 if matches!(obj_ty.referent(), Type::Collection { .. }) {

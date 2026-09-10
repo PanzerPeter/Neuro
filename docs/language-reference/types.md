@@ -1175,7 +1175,9 @@ Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
 - Implemented: static tensor types `Tensor<f32, [3, 3]>`, literal coercion, the
   construction helpers, tensor ownership, and in-place compound assignment
   (see [Tensor Types](#tensor-types))
-- Planned: reading a tensor back (indexing, slicing, by-value arithmetic, and reductions)
+- Implemented: slicing and indexing `t[i, j]` / `t[1..3, ..]`
+  (see [Slicing and indexing](#slicing-and-indexing))
+- Planned: by-value tensor arithmetic (`a + b`, `a @ b`) and the reductions
 - Planned: broadcasting rules
 - Planned: shape generics, named dimensions, and dynamic shapes
 
@@ -1705,15 +1707,57 @@ must have arithmetic (any integer, `f32`, or `f64`), and element arithmetic carr
 same guards the scalar operator does. See
 [Compound Assignment Operators](operators.md#compound-assignment-operators).
 
+### Slicing and indexing
+
+A tensor index gives **one argument per axis**, and each argument is a position, a range,
+or the whole axis `..`. An axis given a position is **dropped** from the result; an axis
+given a range or `..` **survives** at the extent that range names. So naming every axis
+with a position reads one element, and anything else builds a smaller tensor.
+
+```neuro
+val m: Tensor<i32, [3, 4]> = [
+    [0, 1, 2, 3],
+    [10, 11, 12, 13],
+    [20, 21, 22, 23]
+]
+
+val element = m[1, 2]                     // i32: every axis dropped
+val row: Tensor<i32, [4]> = m[0, ..]      // the whole first row
+val column: Tensor<i32, [3]> = m[.., 1]   // the whole second column
+val block: Tensor<i32, [2, 2]> = m[1..3, 2..4]
+val inclusive: Tensor<i32, [3, 3]> = m[0..=2, 0..=2]
+```
+
+A **position** may be any integer expression, including one only known at run time, which
+is what lets a loop walk a tensor. A **range bound** must fold to a compile-time constant:
+the extent it produces is part of the result's type, and a type cannot wait for a value.
+`t[0..k]` with a `mut k` is therefore a compile error naming that rule.
+
+A constant position outside its axis, a reversed range, and a range reaching past the
+extent are all compile errors. A run-time position is bounds-checked on the debug tier,
+the same tier an array index sits on: it panics in a debug build and the check is omitted
+under `-O 1` and above.
+
+A slice is a **fresh owned tensor holding a copy**, not a view into the source. A tensor
+owns its buffer and releases it through its own DLPack deleter, so two tensors never share
+one buffer; the slice may be sliced again, cloned, passed by value, and returned, and it
+is freed at the end of its own scope. Indexing **reads** its receiver rather than
+consuming it, and it reads through a borrow, so `t[i, j]` on a `&Tensor<T, S>` parameter is
+how a borrowed weight is inspected.
+
+Range indexing is a tensor form. An array or a `Vec` takes one integer index and offers
+`.slice(a..b)` for a sub-range; writing `xs[0..2]` on one reports that.
+
 ### What tensors cannot do yet
 
 A tensor can be built, bound, moved, cloned, passed, returned, transferred with
-`.to(device)`, updated in place, and stored in a struct, but not yet read back. Indexing
-and slicing (`t[i, j]`, `t[1..3, ..]`), by-value tensor arithmetic (`a + b`, `a @ b`),
-`.t()`, `.reshape(...)`, and the reductions (`.sum()`, `.mean()`, `.max()`,
-`.min()`) are all later work. Symbolic
-extents (`Tensor<f32, [M, K]>`), named dimensions, and dynamic axes (`Tensor<f32, [?, 768]>`)
-are not accepted; a non-literal extent is a parse error.
+`.to(device)`, updated in place, stored in a struct, indexed, and sliced. What is still
+later work is writing through an index (`t[i, j] = v`), by-value tensor arithmetic
+(`a + b`, `a @ b`), `.t()`, `.reshape(...)`, the reductions (`.sum()`, `.mean()`,
+`.max()`, `.min()`), and the step and reverse index forms (`t[(0..n).step(2)]`,
+`t[(0..n).rev()]`), which wait on `.step(n)` / `.rev()` existing on ranges at all.
+Symbolic extents (`Tensor<f32, [M, K]>`), named dimensions, and dynamic axes
+(`Tensor<f32, [?, 768]>`) are not accepted; a non-literal extent is a parse error.
 
 ## Standard Collections
 

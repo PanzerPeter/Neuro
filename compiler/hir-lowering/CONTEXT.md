@@ -274,6 +274,12 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   carrying the target's tensor type, and every other target has its `x = x OP rhs` desugar
   re-formed as an `Expr::Binary` and lowered through `lower_expr`, which is what keeps a user
   operator-trait impl reachable through `+=`. By-value operators on tensors do not exist yet.
+  Slicing and indexing live in `tensor_index.rs`: `lower_tensor_index` folds each range bound to
+  the constant the checker already proved it to be (`HirTensorAxis::Range { start, end }`, with
+  a `..` full axis becoming the whole extent and an inclusive range stopping one further on),
+  lowers a position as an ordinary expression, and computes the result type by dropping every
+  axis given a position. Both index spellings reach it: `Expr::TensorIndex`, and the
+  one-argument `Expr::Index` whose object lowered to a tensor.
 - **Enumerated loops**: `ForRange` / `ForEach` carry the position binding through as
   `index: Option<String>` and define it in the loop scope as `LOOP_INDEX_TYPE` (`u64`), ahead of
   the element binding so the two collide rather than shadow. The free-variable walker binds it

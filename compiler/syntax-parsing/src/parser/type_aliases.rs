@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
-use crate::ast::{Expr, InterpPart, Item, Stmt, Type};
+use crate::ast::{Expr, InterpPart, Item, Stmt, TensorIndexArg, Type};
 use crate::errors::{ParseError, ParseResult};
 
 use super::Parser;
@@ -424,6 +424,14 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
             rewrite_expr(object, resolved);
             rewrite_expr(index, resolved);
         }
+        Expr::TensorIndex {
+            object, indices, ..
+        } => {
+            rewrite_expr(object, resolved);
+            for index in indices.iter_mut() {
+                rewrite_index_arg(index, resolved);
+            }
+        }
         Expr::TupleLiteral { elements, .. } => {
             for el in elements.iter_mut() {
                 rewrite_expr(el, resolved);
@@ -458,6 +466,19 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
             rewrite_expr(body, resolved);
         }
         Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } => {}
+    }
+}
+
+/// Rewrite the aliased types inside one tensor index argument. A full-axis `..` names
+/// no expression, so only the other two forms carry anything to rewrite.
+fn rewrite_index_arg(index: &mut TensorIndexArg, resolved: &HashMap<String, Type>) {
+    match index {
+        TensorIndexArg::Position(expr) => rewrite_expr(expr, resolved),
+        TensorIndexArg::Range { start, end, .. } => {
+            rewrite_expr(start, resolved);
+            rewrite_expr(end, resolved);
+        }
+        TensorIndexArg::FullAxis(_) => {}
     }
 }
 

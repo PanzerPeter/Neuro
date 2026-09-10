@@ -203,6 +203,36 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("this index at {span:?} names {found} axis/axes, but the tensor has rank {expected}; a tensor index gives one argument per axis")]
+    TensorIndexRankMismatch {
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    #[error("index {index} at {span:?} is outside axis {axis}, whose extent is {extent}")]
+    TensorIndexOutOfBounds {
+        index: i128,
+        axis: usize,
+        extent: usize,
+        span: Span,
+    },
+
+    #[error("the bounds of a tensor slice at {span:?} must be compile-time constants, because the sliced shape is part of the result's type; write literal bounds, or index one position with a runtime value")]
+    TensorSliceBoundNotConstant { span: Span },
+
+    #[error("the slice `{start}..{end}` at {span:?} does not name a sub-range of axis {axis}, whose extent is {extent}; a slice runs forward and stops at the extent")]
+    TensorSliceOutOfRange {
+        start: i128,
+        end: i128,
+        axis: usize,
+        extent: usize,
+        span: Span,
+    },
+
+    #[error("{found} at {span:?} is not a tensor, so it takes one index and no range: index an array or a `Vec` with `xs[i]`, and take a sub-range of one with `xs.slice(a..b)`")]
+    TensorIndexOnNonTensor { found: Type, span: Span },
+
     #[error("`Tensor::{ctor}` at {span:?} does not apply to {ty}: {reason}")]
     TensorConstructorNotApplicable {
         ctor: String,
@@ -585,7 +615,7 @@ pub enum TypeError {
     #[error("`impl Hashable for {type_name}` at {span:?} must provide exactly `func hash(&self) -> u64`")]
     InvalidHashableImpl { type_name: String, span: Span },
 
-    #[error("array index must be an integer, found {found} at {span:?}")]
+    #[error("an index must be an integer, found {found} at {span:?}")]
     IndexNotInteger { found: Type, span: Span },
 
     #[error(

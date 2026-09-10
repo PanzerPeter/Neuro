@@ -9,7 +9,7 @@ pub mod types;
 
 pub use expressions::{
     BinaryOp, ClosureParam, EnumPatternPayload, Expr, FieldInit, FieldPattern, InterpPart,
-    MatchArm, Pattern, UnaryOp,
+    MatchArm, Pattern, TensorIndexArg, UnaryOp,
 };
 pub use items::{
     Attribute, ConstDef, EnumDef, EnumVariant, FieldDef, FunctionDef, GenericParam,

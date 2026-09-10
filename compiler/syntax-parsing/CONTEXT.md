@@ -119,6 +119,15 @@ the tuple-index parse, so it needs no expression grammar of its own.
   with no shape in it is `ParseError::TensorTypeArity`. The shape-free spelling
   `Tensor::scalar(v)` stays a plain `Path` call, resolved against the annotation by semantic
   analysis, which is what keeps a program's own `Tensor` type working.
+- **Index bracket: one form or two.** `object[...]` holds either the single index an array,
+  `Vec`, or `HashMap` takes, or the per-axis tensor index a tensor takes. `parse_index_arguments`
+  (`parser/expr_index.rs`) parses the comma-separated contents and decides on shape alone, with
+  no types: one plain expression stays `Expr::Index`, and a list, a range, or a bare `..`
+  becomes `Expr::TensorIndex`. That works because no other indexable type accepts any of the
+  three, so an array written `xs[0..2]` is a type error naming `.slice(a..b)` rather than a
+  parse ambiguity. A bare `..` opening an argument is unambiguous by position: no range,
+  spread, or rest binding can start one. A range inside one layer of parentheses is peeled, so
+  `t[(0..3)]` names the same axis range as `t[0..3]`.
 - **Prefix vs. infix `&` and `*`.** Purely parser position: prefix `&` is a borrow
   (`Expr::Reference`, operand at `Precedence::Unary`), infix `&` is `BinaryOp::BitAnd`; prefix
   `*` is `Expr::Deref`, infix `*` is multiply. A leading `*` in statement position is a deref

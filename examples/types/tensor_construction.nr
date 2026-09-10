@@ -6,8 +6,8 @@
 // it stays a plain array. Without an annotation, name the type with a turbofish.
 //
 // A tensor owns its buffer and is not `Copy`, so binding it or passing it MOVES it.
-// Reading elements back out is slicing and indexing, which is not implemented yet:
-// these programs build tensors and pass them around.
+// These programs build tensors and pass them around; reading elements back out is
+// slicing and indexing, which `types/tensor_indexing.nr` covers.
 
 // A tensor parameter names its full shape; a caller with a different shape is a
 // compile error, not a runtime one.

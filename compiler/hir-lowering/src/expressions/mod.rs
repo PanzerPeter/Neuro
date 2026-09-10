@@ -13,7 +13,7 @@ mod sequences;
 mod structs;
 mod try_op;
 
-use ast_types::{Expr, UnaryOp};
+use ast_types::{Expr, TensorIndexArg, UnaryOp};
 use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirType};
 use shared_types::Literal;
 
@@ -428,12 +428,27 @@ impl Lowerer {
                 }
             }
 
+            Expr::TensorIndex {
+                object,
+                indices,
+                span,
+            } => {
+                let object = self.lower_expr(object, None)?;
+                self.lower_tensor_index(object, indices, *span)
+            }
+
             Expr::Index {
                 object,
                 index,
                 span,
             } => {
                 let object = self.lower_expr(object, None)?;
+                // A rank-1 tensor takes the ordinary one-argument index form, and its
+                // single argument is a position along its one axis.
+                if matches!(object.ty.referent(), HirType::Tensor { .. }) {
+                    let axes = [TensorIndexArg::Position((**index).clone())];
+                    return self.lower_tensor_index(object, &axes, *span);
+                }
                 let index = self.lower_expr(index, None)?;
                 let element = match Self::collection_element(&object.ty) {
                     Some(element) => element,

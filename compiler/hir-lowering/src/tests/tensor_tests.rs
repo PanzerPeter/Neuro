@@ -1,5 +1,5 @@
 use super::{binding_init, function_body, lower};
-use neuro_hir::{HirExpr, HirExprKind, HirItem, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirItem, HirTensorAxis, HirType};
 use shared_types::Literal;
 
 /// The declared parameter types of the first function named `name`.
@@ -243,4 +243,104 @@ func main() -> i32 {
         panic!("`.to` should lower to a call, got {:?}", here.kind);
     };
     assert_eq!(args[0].ty, HirType::Enum("Device".to_string()));
+}
+
+/// A full-axis `..` reaches the HIR as the range covering the whole extent: the
+/// backend has no reason to tell the two spellings apart.
+#[test]
+fn a_full_axis_lowers_to_the_range_over_the_whole_extent() {
+    let program = lower(
+        r#"
+func main() -> i32 {
+    val m: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val row = m[1, ..]
+    return 0
+}
+"#,
+    );
+    let row = binding_init(function_body(&program, "main"), "row");
+    let HirExprKind::TensorIndex { axes, .. } = &row.kind else {
+        panic!(
+            "a tensor index should lower to TensorIndex, got {:?}",
+            row.kind
+        );
+    };
+    assert!(matches!(axes[0], HirTensorAxis::Position(_)));
+    assert_eq!(axes[1], HirTensorAxis::Range { start: 0, end: 3 });
+    assert_eq!(
+        row.ty,
+        HirType::Tensor {
+            element: Box::new(HirType::I32),
+            shape: vec![3],
+        }
+    );
+}
+
+/// An inclusive range names its last position, so it stops one further on than the
+/// exclusive spelling of the same bounds.
+#[test]
+fn an_inclusive_slice_lowers_to_the_half_open_range_one_further_on() {
+    let program = lower(
+        r#"
+func main() -> i32 {
+    val m: Tensor<i32, [4, 4]> = Tensor::<i32, [4, 4]>::zeros()
+    val block = m[0..=2, 1..3]
+    return 0
+}
+"#,
+    );
+    let block = binding_init(function_body(&program, "main"), "block");
+    let HirExprKind::TensorIndex { axes, .. } = &block.kind else {
+        panic!(
+            "a tensor index should lower to TensorIndex, got {:?}",
+            block.kind
+        );
+    };
+    assert_eq!(axes[0], HirTensorAxis::Range { start: 0, end: 3 });
+    assert_eq!(axes[1], HirTensorAxis::Range { start: 1, end: 3 });
+    assert_eq!(
+        block.ty,
+        HirType::Tensor {
+            element: Box::new(HirType::I32),
+            shape: vec![3, 2],
+        }
+    );
+}
+
+/// Reading one element carries the element's type, not a rank-0 tensor's: `matrix[1, 2]`
+/// is a value, and the backend loads it rather than allocating.
+#[test]
+fn indexing_every_axis_lowers_to_the_element_type() {
+    let program = lower(
+        r#"
+func main() -> i32 {
+    val m: Tensor<f32, [2, 2]> = [[1.0, 2.0], [3.0, 4.0]]
+    val e = m[1, 0]
+    return 0
+}
+"#,
+    );
+    let element = binding_init(function_body(&program, "main"), "e");
+    assert_eq!(element.ty, HirType::F32);
+}
+
+/// A rank-1 tensor takes the one-argument index form, which parses as the ordinary
+/// index every sequence uses; the axis rules are still the tensor's.
+#[test]
+fn a_rank_one_tensor_uses_the_plain_index_form() {
+    let program = lower(
+        r#"
+func main() -> i32 {
+    val v: Tensor<i32, [3]> = [1, 2, 3]
+    val e = v[2]
+    return e
+}
+"#,
+    );
+    let element = binding_init(function_body(&program, "main"), "e");
+    assert!(
+        matches!(element.kind, HirExprKind::TensorIndex { .. }),
+        "a tensor index is a tensor node whichever bracket form wrote it"
+    );
+    assert_eq!(element.ty, HirType::I32);
 }

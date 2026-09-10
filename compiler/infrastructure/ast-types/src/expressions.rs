@@ -175,6 +175,18 @@ pub enum Expr {
         index: Box<Expr>,
         span: Span,
     },
+    /// Tensor indexing `object[a0, a1, ...]`: one argument per axis, each naming a
+    /// position, a sub-range, or the whole axis.
+    ///
+    /// Distinct from [`Expr::Index`], which carries the single integer index an
+    /// array, `Vec`, or `HashMap` takes. The parser emits this node whenever the
+    /// bracket holds more than one argument or any argument is a range or `..`,
+    /// which no other indexable type accepts.
+    TensorIndex {
+        object: Box<Expr>,
+        indices: Vec<TensorIndexArg>,
+        span: Span,
+    },
     /// Tuple literal `(e0, e1, ...)`. Always has at least two elements; a
     /// single parenthesized expression is [`Expr::Paren`] grouping instead.
     TupleLiteral {
@@ -415,6 +427,7 @@ impl Expr {
             Expr::Range { span, .. } => *span,
             Expr::ArrayLiteral { span, .. } => *span,
             Expr::Index { span, .. } => *span,
+            Expr::TensorIndex { span, .. } => *span,
             Expr::TupleLiteral { span, .. } => *span,
             Expr::TupleIndex { span, .. } => *span,
             Expr::ArrayRest { span, .. } => *span,
@@ -422,6 +435,38 @@ impl Expr {
             Expr::Closure { span, .. } => *span,
             Expr::Try { span, .. } => *span,
             Expr::InterpString { span, .. } => *span,
+        }
+    }
+}
+
+/// One axis of a tensor index `t[a0, a1, ...]`.
+///
+/// The three forms are positional syntax rather than three types of value: a range
+/// and a bare `..` are not expressions anywhere a tensor index is not, so they are
+/// spelled out here instead of riding inside an [`Expr`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum TensorIndexArg {
+    /// A single position along the axis, `t[i]`. The axis is dropped from the
+    /// result, so an index naming every axis reads one element.
+    Position(Expr),
+    /// A sub-range of the axis, `t[a..b]` or `t[a..=b]`. The axis survives at the
+    /// range's own extent.
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+        inclusive: bool,
+        span: Span,
+    },
+    /// The whole axis, `t[..]`. The axis survives at its declared extent.
+    FullAxis(Span),
+}
+
+impl TensorIndexArg {
+    pub fn span(&self) -> Span {
+        match self {
+            TensorIndexArg::Position(expr) => expr.span(),
+            TensorIndexArg::Range { span, .. } => *span,
+            TensorIndexArg::FullAxis(span) => *span,
         }
     }
 }

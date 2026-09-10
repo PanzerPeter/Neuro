@@ -5,8 +5,9 @@
 //   tensor literal coercion + the construction helpers · a struct holding a
 //   tensor field · an enum matched to pick a schedule · a `for` loop · borrowed
 //   tensor parameters · string interpolation with the format mini-language ·
-//   and 2B's in-place compound assignment, which is the reason the weight
-//   buffer keeps one address across every step below.
+//   2B's in-place compound assignment, which is the reason the weight buffer
+//   keeps one address across every step below · and 2B's slicing and indexing,
+//   which is what finally reads the updated elements back out.
 //
 // `w -= g` updates the buffer `w`'s DLPack handle already addresses. Nothing is
 // allocated, no handle is replaced, and a pointer held by an optimizer or by a
@@ -42,16 +43,17 @@ func step_for(schedule: Schedule) -> Tensor<i32, [4]> {
     }
 }
 
-// Adding a value to `i32`'s maximum overflows exactly when that value is
-// positive, and adding it to the minimum exactly when it is negative, so a
-// program that survives both has proved every element of `diff` is zero. It is
-// the only assertion a tensor can carry today: reading an element back needs
-// indexing, which is a later 2B item.
-func assert_all_zero(diff: &Tensor<i32, [4]>) {
-    mut high: Tensor<i32, [4]> = [2147483647, 2147483647, 2147483647, 2147483647]
-    high += diff
-    mut low: Tensor<i32, [4]> = [-2147483648, -2147483648, -2147483648, -2147483648]
-    low += diff
+// Every element read back and compared, one axis position at a time. Indexing a
+// borrowed tensor reads it without consuming it, so the caller still owns the
+// counters afterwards and the same tensor can be checked twice.
+func count_zeros(diff: &Tensor<i32, [4]>) -> i32 {
+    mut zeros = 0
+    for i in 0..4 {
+        if diff[i] == 0 {
+            zeros = zeros + 1
+        }
+    }
+    return zeros
 }
 
 func main() -> i32 {
@@ -72,12 +74,14 @@ func main() -> i32 {
     val ten: Tensor<i32, [4]> = [10, 10, 10, 10]
     counters %= &ten                            // 6, 6, 6, 6
 
-    // Subtracting the expectation leaves zeros, and the bracket proves it: a
-    // single wrong element aborts the program instead of returning below.
+    // Subtracting the expectation leaves zeros, and every element says so.
     val expected: Tensor<i32, [4]> = [6, 6, 6, 6]
     counters -= &expected
-    assert_all_zero(&counters)
-    println("counters [4]    updated in place, every element matched")
+    val matched = count_zeros(&counters)
+    // The exit code below is an assertion, not a report: one wrong element stops the
+    // program here rather than letting it return a success code.
+    assert(matched == 4)
+    println("counters [4]    updated in place, {matched} of 4 elements matched")
 
     // The same update at a realistic width: 2080 f32 parameters, stepped eight
     // times without a single allocation after the first.
@@ -89,6 +93,21 @@ func main() -> i32 {
         weights -= &decay
         bias -= &bias_decay
     }
+
+    // A row of the weight matrix, read out by slicing: an axis given a position is
+    // dropped, so `weights[0, ..]` is a rank-1 tensor of the first neuron's 32
+    // inputs, and the eight decay steps above left every one of them alone.
+    val first_neuron: Tensor<f32, [32]> = weights[0, ..]
+    val unchanged = first_neuron[7] == weights[0, 7]
+    assert(unchanged)
+    println("weights[0, ..]  is a [32] row, stable across the steps: {unchanged}")
+
+    // A sub-block of the same matrix, both axes sliced. The slice is a copy of its
+    // own, so it outlives the moves below.
+    val block: Tensor<f32, [2, 2]> = weights[0..2, 0..=1]
+    val diagonal_matches = block[1, 1] == weights[1, 1]
+    assert(diagonal_matches)
+    println("weights[0..2, 0..=1] is a [2, 2] block, corner matches: {diagonal_matches}")
 
     // The trained buffers move into the layer; they are not copied.
     val layer = Layer { weights: weights, bias: bias, parameters: 2080 }

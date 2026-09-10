@@ -10,7 +10,7 @@ pub use ast::{
     ArraySize, Attribute, BinaryOp, EnumDef, EnumPatternPayload, EnumVariant, Expr, FieldDef,
     FieldInit, FieldPattern, FunctionDef, GenericArg, GenericParamKind, ImplDef, ImportDef,
     ImportName, ImportSelection, InterpPart, Item, MatchArm, MethodDef, ModuleDef, ParamLabel,
-    Parameter, Pattern, SelfParam, Stmt, StructDef, Type, UnaryOp, VariantPayload,
+    Parameter, Pattern, SelfParam, Stmt, StructDef, TensorIndexArg, Type, UnaryOp, VariantPayload,
 };
 pub use errors::{ParseError, ParseResult};
 

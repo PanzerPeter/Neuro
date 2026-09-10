@@ -4,6 +4,7 @@ use lexical_analysis::{Token, TokenKind};
 
 use crate::errors::{ParseError, ParseResult};
 
+mod expr_index;
 mod expressions;
 mod interpolation;
 mod item_enums;

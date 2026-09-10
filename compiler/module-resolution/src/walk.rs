@@ -6,7 +6,7 @@
 
 use ast_types::{
     ClosureParam, EnumPatternPayload, Expr, GenericArg, GenericParamKind, InterpPart, Item,
-    MatchArm, MethodDef, Pattern, Stmt, Type, VariantPayload,
+    MatchArm, MethodDef, Pattern, Stmt, TensorIndexArg, Type, VariantPayload,
 };
 use shared_types::Identifier;
 
@@ -394,6 +394,22 @@ fn walk_expr(expr: &mut Expr, f: SiteFn) -> Result<(), ModuleError> {
         Expr::Index { object, index, .. } => {
             walk_expr(object, f)?;
             walk_expr(index, f)
+        }
+        Expr::TensorIndex {
+            object, indices, ..
+        } => {
+            walk_expr(object, f)?;
+            for index in indices {
+                match index {
+                    TensorIndexArg::Position(expr) => walk_expr(expr, f)?,
+                    TensorIndexArg::Range { start, end, .. } => {
+                        walk_expr(start, f)?;
+                        walk_expr(end, f)?;
+                    }
+                    TensorIndexArg::FullAxis(_) => {}
+                }
+            }
+            Ok(())
         }
         Expr::TupleIndex { object, .. } => walk_expr(object, f),
         Expr::ArrayRest { array, .. } => walk_expr(array, f),

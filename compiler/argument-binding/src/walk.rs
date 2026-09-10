@@ -5,7 +5,7 @@
 // named argument could bind to the wrong parameter instead of failing loudly. So the
 // walk visits every expression position, not only the ones a call is usually written in.
 
-use ast_types::{Expr, Item, MatchArm, Stmt};
+use ast_types::{Expr, Item, MatchArm, Stmt, TensorIndexArg};
 
 use crate::binding::Bound;
 use crate::errors::ArgumentError;
@@ -240,6 +240,21 @@ fn walk_expr(expr: &mut Expr, f: CallFn, errors: &mut Vec<ArgumentError>) {
         Expr::Index { object, index, .. } => {
             walk_expr(object, f, errors);
             walk_expr(index, f, errors);
+        }
+        Expr::TensorIndex {
+            object, indices, ..
+        } => {
+            walk_expr(object, f, errors);
+            for index in indices {
+                match index {
+                    TensorIndexArg::Position(expr) => walk_expr(expr, f, errors),
+                    TensorIndexArg::Range { start, end, .. } => {
+                        walk_expr(start, f, errors);
+                        walk_expr(end, f, errors);
+                    }
+                    TensorIndexArg::FullAxis(_) => {}
+                }
+            }
         }
         Expr::Match {
             scrutinee, arms, ..

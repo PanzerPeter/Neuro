@@ -90,7 +90,9 @@ Key design goals:
   compiles at any optimization level and a foreign consumer reads the same pointer. The
   compound operators `+=` / `-=` / `*=` / `/=` / `%=` update a `mut` tensor's buffer in
   place, allocating nothing and leaving the handle and its `data` pointer unchanged.
-  Reading one back (indexing, by-value arithmetic, reductions) is later work
+  An index gives one argument per axis: `t[i, j]` reads an element, and `t[0, ..]` /
+  `t[1..3, 2..5]` / `t[0..=2, ..]` copy out a smaller tensor, dropping every axis given a
+  position. By-value arithmetic and the reductions are later work
 
 ### Variables
 

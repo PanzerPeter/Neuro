@@ -7,7 +7,9 @@
 
 use std::collections::HashSet;
 
-use ast_types::{ClosureParam, EnumPatternPayload, Expr, InterpPart, Pattern, Stmt};
+use ast_types::{
+    ClosureParam, EnumPatternPayload, Expr, InterpPart, Pattern, Stmt, TensorIndexArg,
+};
 use shared_types::Span;
 
 use super::TypeChecker;
@@ -407,6 +409,21 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
         Expr::Index { object, index, .. } => {
             collect_expr(object, fv);
             collect_expr(index, fv);
+        }
+        Expr::TensorIndex {
+            object, indices, ..
+        } => {
+            collect_expr(object, fv);
+            for index in indices {
+                match index {
+                    TensorIndexArg::Position(expr) => collect_expr(expr, fv),
+                    TensorIndexArg::Range { start, end, .. } => {
+                        collect_expr(start, fv);
+                        collect_expr(end, fv);
+                    }
+                    TensorIndexArg::FullAxis(_) => {}
+                }
+            }
         }
         Expr::TupleIndex { object, .. } => collect_expr(object, fv),
         Expr::ArrayRest { array, .. } => collect_expr(array, fv),

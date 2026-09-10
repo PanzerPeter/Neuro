@@ -85,6 +85,13 @@ walkers.
 - `Expr::Range { start, end, inclusive, span }` is **not** a first-class value: it is valid only
   as a `.slice` / `.char_slice` argument, and semantic analysis rejects it elsewhere. `for`-range
   loops keep their bounds on `Stmt::ForRange` and never produce it.
+- `Expr::TensorIndex { object, indices, span }` is the tensor index `t[i, j]` / `t[1..3, ..]`,
+  one `TensorIndexArg` per axis: `Position(Expr)`, `Range { start, end, inclusive }`,
+  or `FullAxis`. It is a node of its own rather than a widened `Expr::Index` because no other
+  indexable type accepts more than one argument or a range, so the parser can tell the two
+  apart with no types: a bracket holding one plain expression stays `Expr::Index` and
+  everything else becomes this. `TensorIndexArg::Range` spells its bounds out instead of
+  holding an `Expr::Range`, since neither a range nor a bare `..` is a value here.
 - `Type::Slice { element, span }` is `[T]`, the unsized run behind `&[T]` / `&mut [T]`. It shares
   its opening bracket with `Type::Array`, and the `;` (or its absence before `]`) is what the
   parser selects on. Like `Type::DynTrait` it is valid only as a reference referent; semantic

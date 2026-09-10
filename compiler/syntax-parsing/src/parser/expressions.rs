@@ -5,6 +5,7 @@ use crate::ast::{BinaryOp, ClosureParam, Expr, GenericArg, Stmt, UnaryOp};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 
+use super::expr_index::IndexArguments;
 use super::interpolation::parse_interp_string;
 use super::statements::stmt_span;
 use super::types::TENSOR_TYPE_NAME;
@@ -705,22 +706,25 @@ impl Parser {
                 })
             }
 
-            // Array indexing `object[index]`. Binds at call precedence so
-            // `arr[i]` is a tight postfix on the preceding primary.
+            // Indexing `object[...]`. Binds at call precedence so `arr[i]` is a
+            // tight postfix on the preceding primary. One plain argument is the
+            // array / `Vec` / `HashMap` index; anything else is a tensor index.
             TokenKind::LeftBracket => {
                 self.advance(); // consume '['
-                let index = self.inside_delimiters(|p| {
-                    p.skip_newlines();
-                    let index = p.parse_expr(Precedence::Lowest)?;
-                    p.skip_newlines();
-                    Ok(index)
-                })?;
+                let arguments = self.inside_delimiters(|p| p.parse_index_arguments())?;
                 let close = self.consume(TokenKind::RightBracket, "']' to close index")?;
                 let span = left.span().merge(close.span);
-                Ok(Expr::Index {
-                    object: Box::new(left),
-                    index: Box::new(index),
-                    span,
+                Ok(match arguments {
+                    IndexArguments::Single(index) => Expr::Index {
+                        object: Box::new(left),
+                        index: Box::new(index),
+                        span,
+                    },
+                    IndexArguments::Axes(indices) => Expr::TensorIndex {
+                        object: Box::new(left),
+                        indices,
+                        span,
+                    },
                 })
             }
 

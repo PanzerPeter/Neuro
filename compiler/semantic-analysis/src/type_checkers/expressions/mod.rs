@@ -5,7 +5,7 @@
 mod blocks;
 mod builtins;
 mod calls;
-mod const_predicates;
+pub(crate) mod const_predicates;
 mod enum_exprs;
 mod interpolation;
 mod operators;
@@ -226,6 +226,15 @@ impl TypeChecker {
                 index,
                 span,
             } => self.check_index_expr(object, index, span),
+
+            // Tensor indexing `object[a0, a1, ...]`: one argument per axis,
+            // each a position, a sub-range, or the whole axis. Positions drop their
+            // axis, so an index naming every axis reads one element.
+            Expr::TensorIndex {
+                object,
+                indices,
+                span,
+            } => self.check_tensor_index_expr(object, indices, *span),
 
             // Array rest pattern remainder `..rest`: the compiler-internal node
             // a `val [a, b, ..rest] = arr` desugar produces. The source must be an

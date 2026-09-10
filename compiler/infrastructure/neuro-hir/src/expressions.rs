@@ -164,6 +164,19 @@ pub enum HirExprKind {
         object: Box<HirExpr>,
         index: Box<HirExpr>,
     },
+    /// Tensor indexing and slicing `t[a0, a1, ...]`, one axis per entry of `axes` and
+    /// always as many entries as the receiver's rank.
+    ///
+    /// The expression's `ty` says which of the two things this is: an element type
+    /// means every axis was given a position and one element is read; an
+    /// [`HirType::Tensor`] means at least one axis survived and a fresh tensor of the
+    /// surviving extents is built. A slice is a COPY, not a view: a tensor owns its
+    /// buffer and releases it through its own DLPack deleter, so two values
+    /// cannot share one.
+    TensorIndex {
+        object: Box<HirExpr>,
+        axes: Vec<HirTensorAxis>,
+    },
     /// Tuple literal `(e0, e1, ...)`. The element types live on the elements;
     /// this expression's `ty` is the [`HirType::Tuple`] of them.
     TupleLiteral {
@@ -291,4 +304,18 @@ pub enum HirBindingSource {
     Scrutinee,
     /// Enum payload slot `slot`, decoded back to the binding's type.
     EnumPayload { slot: usize },
+}
+
+/// One axis of a tensor index, resolved against the receiver's shape.
+///
+/// A `..` full axis is not a form of its own here: the checker has already turned it
+/// into the range covering the whole extent, and the backend has no reason to tell the
+/// two apart.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HirTensorAxis {
+    /// A position along the axis; the axis is dropped from the result. The expression
+    /// is any integer value, so it may only be known at run time.
+    Position(HirExpr),
+    /// The half-open sub-range `[start, end)` of the axis that survives.
+    Range { start: usize, end: usize },
 }

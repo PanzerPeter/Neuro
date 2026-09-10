@@ -53,12 +53,13 @@ isolation:
   operators (`+=`, `-=`, `*=`, `/=`, `%=`) on tensors working together with
   literal coercion and the construction helpers, an enum matched to pick a
   schedule, a struct holding two tensor fields, borrowed tensor operands read
-  once per iteration of a `for` loop, and string interpolation. Every update
-  writes into the buffer the target's DLPack handle already addresses, so the
-  handle and its `data` pointer are unchanged across the whole run; the element
-  values are checked at the end by bracketing their difference from the expected
-  tensor against `i32`'s two extremes, which aborts on any wrong element.
-  Exit `32`.
+  once per iteration of a `for` loop, string interpolation, and slicing and
+  indexing. Every update writes into the buffer the target's DLPack handle already
+  addresses, so the handle and its `data` pointer are unchanged across the whole
+  run; the counters are then read back element by element through a borrow, and a
+  row and a sub-block are sliced out of the weight matrix and compared against the
+  matrix they came from. Each comparison is an `assert`, so a wrong element aborts
+  instead of returning. Exit `32`.
 - [`showcase/perceptron.nr`](showcase/perceptron.nr): a two-neuron feed-forward
   pass. Structs + `impl` (method calling method) + `f64` math + ReLU branch +
   `while` loop + `as` cast. Exit `8`.
@@ -327,9 +328,11 @@ No Rust edits are needed: discovery is automatic.
   `scalar()` / `from()` build one where no annotation reaches. Tensors move rather than
   copy. In-place compound assignment is supported too (`showcase/optimizer_step.nr`):
   `w -= g` and the rest of the `*Assign` family update the target's own buffer
-  element-wise, allocating nothing. Reading a tensor back (indexing, by-value
-  arithmetic, reductions) is later work, so an example still checks its results
-  indirectly rather than printing elements. A tensor value is a
+  element-wise, allocating nothing. Slicing and indexing are supported
+  (`types/tensor_indexing.nr`): an index gives one argument per axis, an axis given a
+  position is dropped and one given a range or `..` survives, so `t[i, j]` reads an
+  element while `t[0, ..]` and `t[1..3, 2..5]` copy out a smaller tensor. By-value
+  arithmetic and the reductions are later work. A tensor value is a
   DLPack handle over an out-of-line buffer, so one of any size compiles at any optimization
   level and the same pointer is what a foreign consumer would read;
   `showcase/model_shapes.nr` returns a 100352-parameter weight matrix by value.

@@ -611,6 +611,24 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   `TensorConstructorNotApplicable`: `identity` is square and rank 2, `random_normal` draws only
   into `f32`/`f64`, `scalar` is rank 0, and `from` takes the same nested literal the annotated
   form coerces.
+- **Tensor slicing and indexing, in `type_checkers/tensor_index.rs`.** `check_tensor_index`
+  takes one argument per axis and answers one of two types: an axis given a `Position` is
+  DROPPED and one given a `Range` (a `..` full axis is the range over the whole extent)
+  SURVIVES at its new extent, so an index naming every axis reads the element type and any
+  other builds `Tensor<T, [survivors]>`. An argument count other than the rank is
+  `TensorIndexRankMismatch`. A position is any integer expression — `IndexNotInteger`
+  otherwise — and only a *constant* one is bounds-checked here (`TensorIndexOutOfBounds`); a
+  run-time position is left to the backend's debug-tier guard, the tier an array index sits
+  on. Both bounds of a range must fold through `eval_literal_int`
+  (`expressions/const_predicates.rs`) or it is `TensorSliceBoundNotConstant`: the extent is
+  part of the result's TYPE, so it cannot wait for a value. A reversed or over-long range is
+  `TensorSliceOutOfRange`. Two spellings reach this: `Expr::TensorIndex` through
+  `check_tensor_index_expr`, and the one-argument `Expr::Index` whose object is a tensor,
+  routed from `check_index_expr` (`expressions/places.rs`) ahead of the sequence rules so a
+  rank-1 tensor takes the ordinary bracket. Indexing READS its receiver — nothing is moved,
+  and `referent()` sees through a borrow — because a slice is a fresh owned copy rather than
+  a view, which is what keeps one buffer to one owner. A range index on a non-tensor is
+  `TensorIndexOnNonTensor`, whose text names `.slice(a..b)`.
 - **Tuples.** Each element is checked against the expected tuple's element type when annotated;
   `t.N` is `NotATuple` on a non-tuple and `TupleIndexOutOfBounds` past the arity. Struct, tuple,
   and array *destructuring* is parser-desugared and reaches this slice as ordinary field-access

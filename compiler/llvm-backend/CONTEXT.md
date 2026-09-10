@@ -404,6 +404,19 @@ buffer is not freed twice) while a borrowed one is only read. Element arithmetic
 guards: an overflowing element panics on the debug tier and a zero divisor panics in every
 build, exactly as the scalar operator does.
 
+`expressions/tensor_index.rs` owns `HirExprKind::TensorIndex`. Every stride is a compile-time
+constant (every extent is part of the type), so the index is arithmetic on the flat row-major
+run behind `data`: each `Position` axis contributes `position * stride[k]` and each `Range` axis
+contributes `start * stride[k]`. Reading an element is that offset, one `getelementptr`, and one
+`load`. A slice ALLOCATES a fresh handle through `alloc_dlpack_tensor` and copies into it — a
+tensor owns its buffer and releases it through its own deleter, so a view sharing one would be a
+double free, and a copy is also what keeps the DLPack contract's contiguous `strides` and
+zero `byte_offset` true of every value. The copy loop walks the RESULT, whose linear index is its own buffer index,
+and recovers each source coordinate as `(i / result_stride) % extent`; both divisors are
+constants. A run-time position is guarded by `guard_tensor_position`, which is `overflow_checks`-
+gated: the debug tier an array index sits on. A slice's bounds were settled at compile time, so
+nothing about them is checked here.
+
 ## DLPack Representation
 A tensor value *is* the exchange structure DLPack 1.1 defines, so the pointer a Neuro
 program passes around is the pointer a foreign consumer takes: there is no wrap step at an FFI

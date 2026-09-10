@@ -34,6 +34,11 @@ it the *typed* contract:
    (elements already flattened row-major), `TensorFill`, `TensorIdentity`, `TensorRandomNormal`.
    A fill and an identity stay separate nodes rather than expanding to elements,
    so a large tensor is one node and one loop instead of one node per element.
+   `HirExprKind::TensorIndex { object, axes }` reads one back: `HirTensorAxis::Position(expr)`
+   drops its axis and `HirTensorAxis::Range { start, end }` keeps it, and the expression's own
+   `ty` is what says which happened — an element type when every axis was a position, a
+   `HirType::Tensor` of the survivors otherwise. A `..` full axis has no variant of its own: the
+   checker resolved it to the range over the whole extent.
    `HirStmt::TensorCompoundAssign { target, op, value, ty, span }` is the in-place update
    beside them: `ty` is the target's tensor type and `value` is either that same type or a
    reference to it, an owned operand being consumed by the update and a borrowed one only
