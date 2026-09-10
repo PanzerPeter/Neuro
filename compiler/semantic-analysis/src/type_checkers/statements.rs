@@ -660,8 +660,20 @@ impl TypeChecker {
                             // so; the head is consumed into the loop's iterator, so it
                             // moves like any other by-value placement.
                             Some(item) => {
-                                self.record_move(iterable);
-                                Some(item)
+                                // The protocol is declared on the OWNED type, and the
+                                // referent peel above is what makes a borrow of it look
+                                // resolvable. Lowering has no path for that head, so
+                                // reject it here where the span is still available.
+                                if matches!(iterable_ty, Type::Reference { .. }) {
+                                    self.record_error(TypeError::BorrowedIterableHead {
+                                        found: iterable_ty.clone(),
+                                        span: iterable.span(),
+                                    });
+                                    None
+                                } else {
+                                    self.record_move(iterable);
+                                    Some(item)
+                                }
                             }
                             None => {
                                 self.record_error(TypeError::NotIterable {

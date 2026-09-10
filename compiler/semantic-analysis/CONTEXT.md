@@ -279,6 +279,11 @@ nor a slice falls through to `iteration_item`, which answers what one step binds
   `record_move`d like any other by-value placement.
 - A head implementing neither trait is `TypeError::NotIterable`, which replaced the
   `NotIndexable` this arm used to reuse: iterating and indexing are no longer the same question.
+- A BORROW of a protocol type is `TypeError::BorrowedIterableHead`. The referent peel that
+  auto-derefs `&T` receivers makes `&c` / `&mut c` look resolvable against the impl on the owned
+  type, and lowering has no path for that head; the arm rejects it here so the diagnostic keeps
+  its span instead of surfacing as a lowering error. Arrays, `Vec`s and slices are unaffected:
+  they are matched off the referent before this arm is reached.
 
 `char_indices_receiver` (same module) recognises the `text.char_indices()` head form ahead of
 the ordinary `check_expr` on the iterable, and `check_char_indices_head` types it as the same

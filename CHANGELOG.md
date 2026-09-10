@@ -10,6 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.19.1] - 2026-09-10
+
+### Fixed
+
+- `semantic`: **a `for` head over a borrow of a type implementing the iterator protocol is now
+  diagnosed by the type checker.** `for v in &c` and `for v in &mut c`, where `c`'s type
+  implements `IntoIterator` or `Iterator`, passed type checking and failed later in HIR
+  lowering with `malformed expression reached lowering: for-each over non-iterable type`, an
+  internal-invariant message carrying no source span. The head resolution peels a reference
+  before asking whether the type is iterable (the same peel that auto-derefs a `&T` method
+  receiver), so a borrow looked resolvable against an impl that is declared on the owned type,
+  and nothing rejected it until lowering, which has no path for that head.
+
+  The protocol is still only reachable through the owned value; what changed is where saying
+  so happens. The checker reports `cannot iterate over a value of type &mut Counter ...: the
+  `IntoIterator` / `Iterator` protocol is implemented on the owned type, and a borrow of it is
+  not a `for` head; iterate the value itself`, with the head's span. Arrays, `Vec`s and
+  borrowed slices are matched before this arm is reached and are unaffected: `for x in &xs`
+  over an array keeps working exactly as before.
+
 ## [2.19.0] - 2026-09-10
 
 ### Added

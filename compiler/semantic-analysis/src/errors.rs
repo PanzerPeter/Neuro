@@ -571,6 +571,9 @@ pub enum TypeError {
     #[error("cannot iterate over a value of type {found} at {span:?}: a `for` head must be a range, an array, a `Vec<T>`, a `&[T]`, or a type implementing `IntoIterator` or `Iterator`")]
     NotIterable { found: Type, span: Span },
 
+    #[error("cannot iterate over a value of type {found} at {span:?}: the `IntoIterator` / `Iterator` protocol is implemented on the owned type, and a borrow of it is not a `for` head; iterate the value itself")]
+    BorrowedIterableHead { found: Type, span: Span },
+
     #[error("`.{adapter}()` at {span:?} needs a function of one parameter, but was given {found}")]
     LoopAdapterNotCallable {
         adapter: String,

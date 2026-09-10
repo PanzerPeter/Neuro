@@ -299,6 +299,49 @@ func main() -> i32 {{
     );
 }
 
+/// A borrow of a protocol type is not a `for` head: the checker rejects it with a span
+/// rather than letting it reach HIR lowering, which has no path for that head.
+#[test]
+fn regression_borrowed_protocol_head_is_rejected_by_the_checker() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Counter { n: i32 }
+
+impl Iterator for Counter {
+    type Item = i32
+
+    func next(&mut self) -> Option<i32> {
+        if self.n >= 3 {
+            return None
+        }
+        self.n = self.n + 1
+        return Some(self.n)
+    }
+}
+
+func main() -> i32 {
+    mut c = Counter { n: 0 }
+    mut total = 0
+    for v in &mut c {
+        total = total + v
+    }
+    return total
+}
+"#;
+    let path = test.write_source("iter_borrowed_head.nr", source);
+    let error = test
+        .compile(&path)
+        .expect_err("a borrowed protocol head must be rejected");
+    assert!(
+        error.contains("cannot iterate over a value of type &mut Counter"),
+        "the diagnostic must name the borrowed head type; got {error}"
+    );
+    assert!(
+        !error.contains("malformed expression reached lowering"),
+        "the head must be diagnosed in the checker, not in lowering; got {error}"
+    );
+}
+
 /// A `for` head over a type implementing neither trait names the protocol it is missing.
 #[test]
 fn a_non_iterable_head_is_rejected() {
