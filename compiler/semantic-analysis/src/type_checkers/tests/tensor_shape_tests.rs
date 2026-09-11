@@ -33,7 +33,7 @@ func main() -> i32 {
     );
 }
 
-/// `-1` takes the extent the others leave over, which is the form §4.3 writes.
+/// `-1` takes the extent the others leave over, which is the documented form.
 #[test]
 fn reshape_infers_the_single_negative_extent() {
     let errors = semantic_errors(
@@ -105,7 +105,7 @@ func main() -> i32 {
     );
 }
 
-/// The §4.6 rule this item exists to make reachable: a dimension name is resolved
+/// The rule this item exists to make reachable: a dimension name is resolved
 /// against the receiver's own shape, and an unknown one lists the names that shape does
 /// declare.
 #[test]
@@ -135,7 +135,7 @@ func main() -> i32 {
 }
 
 /// A local binding of the same name neither shadows the axis nor is shadowed by it:
-/// names live in a namespace attached to the tensor type (§4.6).
+/// names live in a namespace attached to the tensor type.
 #[test]
 fn a_dimension_name_is_not_looked_up_in_the_value_scope() {
     let errors = semantic_errors(

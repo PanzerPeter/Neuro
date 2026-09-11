@@ -4,7 +4,7 @@
 // Reached from the builtin-method arm of `check_call_expr`. What these four have in
 // common is that their arguments are read at compile time and never as values: a
 // `.reshape` extent is folded here, and a `.permute` axis may be written as a dimension
-// NAME, which §4.6 resolves against the receiver's own shape rather than the surrounding
+// NAME, which is resolved against the receiver's own shape rather than the surrounding
 // value scope. So the arguments are inspected as syntax and never handed to `check_expr`,
 // which would look an axis name up as a variable and not find one.
 
@@ -270,7 +270,7 @@ impl TypeChecker {
     /// One axis-list entry: a bare identifier is a dimension name, an integer literal a
     /// positional index.
     ///
-    /// An identifier here is ALWAYS a dimension name (§4.6): the names live in a
+    /// An identifier here is ALWAYS a dimension name: the names live in a
     /// namespace attached to the tensor type, so a local binding of the same name
     /// neither shadows the axis nor is shadowed by it.
     fn resolve_shape_axis(
@@ -386,7 +386,7 @@ fn const_integer(expr: &Expr) -> Option<i128> {
     }
 }
 
-/// The dimension names a shape declares, for the diagnostic §4.6 specifies: naming a
+/// The dimension names a shape declares, for the diagnostic that names them: naming a
 /// dimension the type does not declare lists the ones it does.
 fn declared_names(shape: &[TensorAxis]) -> String {
     let names: Vec<&str> = shape

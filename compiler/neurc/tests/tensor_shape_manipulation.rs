@@ -71,7 +71,7 @@ func main() -> i32 {
     assert_eq!(run_program("tensor_reshape_infer.nr", source), 62);
 }
 
-/// The §4.6 spelling: dimension names in place of positional indices.
+/// The named spelling: dimension names in place of positional indices.
 #[test]
 fn a_permute_reorders_axes_by_dimension_name() {
     let source = r#"
