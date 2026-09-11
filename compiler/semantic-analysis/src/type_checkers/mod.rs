@@ -380,6 +380,33 @@ impl TypeChecker {
         self.errors.push(error);
     }
 
+    /// Record a type mismatch, telling the tensor-transposition story where that is what
+    /// happened.
+    ///
+    /// Two shapes that differ only in which axis carries which name print almost
+    /// identically and may hold identical extents, so the disagreeing axis is named
+    /// instead of leaving the reader to diff two types.
+    pub(crate) fn record_type_mismatch(
+        &mut self,
+        expected: &Type,
+        found: Type,
+        span: shared_types::Span,
+    ) {
+        match declarations::mismatched_axis_name(expected, &found) {
+            Some((axis, expected, found)) => self.record_error(TypeError::TensorAxisNameMismatch {
+                axis,
+                expected,
+                found,
+                span,
+            }),
+            None => self.record_error(TypeError::Mismatch {
+                expected: expected.clone(),
+                found,
+                span,
+            }),
+        }
+    }
+
     /// Get all collected errors
     pub(crate) fn into_errors(self) -> Vec<TypeError> {
         self.errors

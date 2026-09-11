@@ -8,7 +8,7 @@
 
 use super::TypeChecker;
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, Type};
+use crate::types::{ArrayLen, TensorAxis, Type};
 use ast_types::{BinaryOp, Expr, GenericArg};
 use shared_types::{Identifier, Span};
 
@@ -61,7 +61,7 @@ impl TypeChecker {
         &mut self,
         elements: &[Expr],
         element_ty: &Type,
-        shape: &[ArrayLen],
+        shape: &[TensorAxis],
         span: Span,
     ) -> Type {
         let tensor = Type::Tensor {
@@ -70,16 +70,16 @@ impl TypeChecker {
         };
         // A rank-0 tensor holds exactly one value and has no axis to write elements
         // along, so there is no array literal that could denote one.
-        let Some((extent, rest)) = shape.split_first() else {
+        let Some((axis, rest)) = shape.split_first() else {
             self.record_error(TypeError::TensorScalarNeedsConstructor { span });
             return tensor;
         };
         // A shape parameter's extent is only known at the instantiation, and a literal
         // is written once for every one of them, so there is no length this could be
         // checked against. The constructors take the extent from the type instead.
-        let ArrayLen::Fixed(extent) = extent else {
+        let ArrayLen::Fixed(extent) = &axis.extent else {
             self.record_error(TypeError::TensorLiteralSymbolicExtent {
-                name: extent.to_string(),
+                name: axis.extent.to_string(),
                 span,
             });
             return tensor;
@@ -103,7 +103,7 @@ impl TypeChecker {
         &mut self,
         element: &Expr,
         element_ty: &Type,
-        remaining_shape: &[ArrayLen],
+        remaining_shape: &[TensorAxis],
         rank: usize,
     ) {
         if remaining_shape.is_empty() {
@@ -179,7 +179,9 @@ impl TypeChecker {
             }
             CTOR_IDENTITY => {
                 self.check_tensor_ctor_arity(args, 0, span);
-                let square = matches!(shape.as_slice(), [rows, cols] if rows == cols);
+                // The EXTENTS decide squareness; a `[row: 4, col: 4]` identity is
+                // square even though its two axes carry different names.
+                let square = matches!(shape.as_slice(), [rows, cols] if rows.extent == cols.extent);
                 if !square {
                     self.reject_tensor_ctor(
                         ctor,

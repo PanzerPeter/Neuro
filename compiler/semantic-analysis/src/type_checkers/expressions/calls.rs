@@ -94,11 +94,7 @@ impl TypeChecker {
         for (arg, expected_ty) in args.iter().zip(param_types.iter()) {
             if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
                 if !self.assignable(&arg_ty, expected_ty) {
-                    self.record_error(TypeError::Mismatch {
-                        expected: expected_ty.clone(),
-                        found: arg_ty,
-                        span: arg.span(),
-                    });
+                    self.record_type_mismatch(expected_ty, arg_ty, arg.span());
                 }
             }
             // By-value argument passing moves a non-Copy binding into the callee.
@@ -200,11 +196,7 @@ impl TypeChecker {
         for (arg, expected_ty) in args.iter().zip(visible_params.iter()) {
             if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
                 if !self.assignable(&arg_ty, expected_ty) {
-                    self.record_error(TypeError::Mismatch {
-                        expected: expected_ty.clone(),
-                        found: arg_ty,
-                        span: arg.span(),
-                    });
+                    self.record_type_mismatch(expected_ty, arg_ty, arg.span());
                 }
             }
             self.record_move(arg);
@@ -353,11 +345,10 @@ impl TypeChecker {
                             span: arg.span(),
                         })
                     }
-                    None => self.record_error(TypeError::Mismatch {
-                        expected: declarations::substitute_generic(param, &subst),
-                        found: arg_ty,
-                        span: arg.span(),
-                    }),
+                    None => {
+                        let expected = declarations::substitute_generic(param, &subst);
+                        self.record_type_mismatch(&expected, arg_ty, arg.span())
+                    }
                 }
             }
             // A by-value argument moves a non-Copy binding into the callee.
@@ -627,11 +618,7 @@ impl TypeChecker {
                 for (arg, expected_ty) in args.iter().zip(visible_params.iter()) {
                     if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
                         if !self.assignable(&arg_ty, expected_ty) {
-                            self.record_error(TypeError::Mismatch {
-                                expected: expected_ty.clone(),
-                                found: arg_ty,
-                                span: arg.span(),
-                            });
+                            self.record_type_mismatch(expected_ty, arg_ty, arg.span());
                         }
                     }
                     self.record_move(arg);
@@ -712,11 +699,7 @@ impl TypeChecker {
                 for (arg, expected_ty) in args.iter().zip(param_types.iter()) {
                     if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
                         if !self.assignable(&arg_ty, expected_ty) {
-                            self.record_error(TypeError::Mismatch {
-                                expected: expected_ty.clone(),
-                                found: arg_ty,
-                                span: arg.span(),
-                            });
+                            self.record_type_mismatch(expected_ty, arg_ty, arg.span());
                         }
                     }
                     self.record_move(arg);

@@ -96,7 +96,10 @@ Key design goals:
   (`func f<M, K>(t: &Tensor<f32, [M, K]>) -> Tensor<f32, [K]>`): it is a compile-time
   `const u32` value inferred from the argument's shape, specialized per distinct set of
   extents, constrained by a `where` predicate, and required to agree everywhere one name is
-  written. By-value arithmetic and the reductions are later work
+  written. An axis may also be named (`Tensor<f32, [batch: 32, embed: 768]>`): names are
+  checked wherever both shapes supply one, so a named shape stays interchangeable with the
+  unnamed one while a transposed `[width: W, height: H]` is a compile error.
+  By-value arithmetic and the reductions are later work
 
 ### Variables
 

@@ -13,7 +13,7 @@
 use super::expressions::const_predicates::eval_literal_int;
 use super::TypeChecker;
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, Type};
+use crate::types::{ArrayLen, TensorAxis, Type};
 use ast_types::{Expr, TensorIndexArg};
 use shared_types::Span;
 
@@ -37,7 +37,7 @@ impl TypeChecker {
     pub(crate) fn check_tensor_index(
         &mut self,
         element: &Type,
-        shape: &[ArrayLen],
+        shape: &[TensorAxis],
         indices: &[TensorIndexArg],
         span: Span,
     ) -> Type {
@@ -50,16 +50,21 @@ impl TypeChecker {
             // The written axes are still checked: an index that named the wrong number
             // of axes may also hold an error of its own worth reporting.
             for (axis, index) in indices.iter().enumerate() {
-                let extent = shape.get(axis).cloned().unwrap_or(ArrayLen::Fixed(0));
+                let extent = shape
+                    .get(axis)
+                    .map(|source| source.extent.clone())
+                    .unwrap_or(ArrayLen::Fixed(0));
                 self.resolve_axis(index, axis, &extent);
             }
             return Type::Unknown;
         }
 
         let mut kept = Vec::new();
-        for (axis, (index, extent)) in indices.iter().zip(shape.iter()).enumerate() {
-            match self.resolve_axis(index, axis, extent) {
-                Some(ResolvedAxis::Kept(extent)) => kept.push(extent),
+        for (axis, (index, source)) in indices.iter().zip(shape.iter()).enumerate() {
+            match self.resolve_axis(index, axis, &source.extent) {
+                // A surviving axis keeps its dimension name at its new extent: rows
+                // 10..42 of `height` are still `height`.
+                Some(ResolvedAxis::Kept(extent)) => kept.push(source.with_extent(extent)),
                 Some(ResolvedAxis::Position) => {}
                 None => return Type::Unknown,
             }

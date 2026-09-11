@@ -101,17 +101,24 @@ the tuple-index parse, so it needs no expression grammar of its own.
   application whose argument is a shape rather than a type, and it shares its opening bracket
   with `Box<[T; N]>` / `Box<[T]>`. `shape_argument_ahead` decides on the token after `[`: an
   integer or an immediate `]` can never open a type, so a shape needs no backtracking.
-  `parse_generic_type_args` therefore takes a `named_dims` flag and returns
+  `parse_generic_type_args` therefore takes a `symbolic_extents` flag and returns
   `(args, Option<ShapeArg>, close_span)`, and `build_tensor_type` turns a shape plus one type
   argument into `Type::Tensor`. `Tensor` is a
   prelude name, not a keyword, so the parser only claims it once a shape appears: a module
   declaring its own generic `Tensor<T>` keeps parsing as `Type::Generic`. A shape under any
   other name is `ParseError::ShapeArgumentOnNonTensor`; a shape with no element type, or with a
-  second type argument, is `ParseError::TensorTypeArity`. An extent is a non-negative integer
-  literal (`TensorDim::Literal`) or a shape parameter's name (`TensorDim::Param`); a `?`
-  dynamic axis is still a parse error until dynamic shapes land. An identifier-led `[...]` is ambiguous
+  second type argument, is `ParseError::TensorTypeArity`. A shape is a list of
+  `TensorDim { name, extent }`: the extent is a non-negative integer literal
+  (`TensorExtent::Literal`) or a shape parameter's name (`TensorExtent::Param`), and the
+  optional name is the `batch:` of a named dimension. A `?` dynamic axis is still a parse
+  error until dynamic shapes land. An identifier-led `[...]` is ambiguous
   with the slice type `[T]`, so it is read as a shape only under the name `Tensor`, which is
-  what `named_dims` carries: everywhere else `Foo<[T]>` parses as it always did.
+  what `symbolic_extents` carries: everywhere else `Foo<[T]>` parses as it always did.
+- **A dimension name is decided by the colon after it.** `[N]` names the extent and `[batch: N]`
+  names the axis, so `parse_dimension_name` looks one token past the identifier and claims the
+  name only when a `:` follows. Nothing else distinguishes the two spellings, and the
+  distinction matters downstream: `rekind_shape_params` collects extents only, so an axis name
+  never becomes a generic parameter.
 - **Shape parameters are const parameters.** A bare name used as a tensor extent is sugar for
   a `const NAME: u32` parameter, so `rekind_shape_params` (`parser/item_functions.rs`) rewrites
   every bound-less `GenericParamKind::Type` a signature uses as an extent into

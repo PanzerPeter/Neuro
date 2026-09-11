@@ -269,7 +269,7 @@ fn is_annotatable(ty: &Type, generics: &[GenericParam]) -> bool {
             is_annotatable(element_type, generics)
                 && shape
                     .iter()
-                    .all(|dim| matches!(dim, ast_types::TensorDim::Literal(_)))
+                    .all(|dim| matches!(dim.extent, ast_types::TensorExtent::Literal(_)))
         }
         Type::ImplTrait { .. } | Type::DynTrait { .. } | Type::Function { .. } => false,
     }

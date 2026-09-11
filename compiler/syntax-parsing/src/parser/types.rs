@@ -1,7 +1,7 @@
 use lexical_analysis::TokenKind;
 use shared_types::{Identifier, Span};
 
-use crate::ast::{ArraySize, GenericArg, TensorDim, Type};
+use crate::ast::{ArraySize, GenericArg, TensorDim, TensorExtent, Type};
 use crate::errors::{ParseError, ParseResult};
 
 use super::Parser;
@@ -221,8 +221,9 @@ impl Parser {
                 // following `<`, this is a plain named type. Arguments may be types or
                 // const (integer) values, as in `Ring<i32, 4>`.
                 if self.check(&TokenKind::Less) {
-                    let named_dims = ident.name == TENSOR_TYPE_NAME;
-                    let (args, shape, close_span) = self.parse_generic_type_args(named_dims)?;
+                    let symbolic_extents = ident.name == TENSOR_TYPE_NAME;
+                    let (args, shape, close_span) =
+                        self.parse_generic_type_args(symbolic_extents)?;
                     let span = span.merge(close_span);
                     if let Some((dims, shape_span)) = shape {
                         return Self::build_tensor_type(ident, args, dims, shape_span, span);
@@ -316,19 +317,20 @@ impl Parser {
     /// span the whole application: ending at the last argument leaves the `>` out
     /// of every diagnostic that points at the type.
     ///
-    /// `named_dims` says whether an identifier-led `[...]` argument is a shape. Only
+    /// `symbolic_extents` says whether an identifier-led `[...]` argument is a shape. Only
     /// `Tensor` accepts one: everywhere else `[T]` is the slice type it has always been,
-    /// so the flag is what keeps `Vec<[T]>` parsing as it did.
+    /// so the flag is what keeps `Vec<[T]>` parsing as it did. It is about the EXTENT
+    /// being a name, not about dimension names, which any shape may carry.
     pub(super) fn parse_generic_type_args(
         &mut self,
-        named_dims: bool,
+        symbolic_extents: bool,
     ) -> ParseResult<(Vec<GenericArg>, Option<ShapeArg>, Span)> {
         self.consume(TokenKind::Less, "'<'")?;
         self.skip_newlines();
         let mut args = Vec::new();
         let mut shape: Option<ShapeArg> = None;
         loop {
-            if self.shape_argument_ahead(named_dims) {
+            if self.shape_argument_ahead(symbolic_extents) {
                 let parsed = self.parse_shape_argument()?;
                 let parsed_span = parsed.1;
                 // A second shape argument cannot be a tensor's, and `build_tensor_type`
@@ -371,9 +373,9 @@ impl Parser {
     /// the token after `[` decides without backtracking.
     ///
     /// An identifier-led shape (`[M, K]`) is ambiguous with the slice type `[T]`, so it
-    /// is claimed only under `Tensor`, where a slice cannot appear: `named_dims` carries
+    /// is claimed only under `Tensor`, where a slice cannot appear: `symbolic_extents` carries
     /// that from the caller, which already knows the name.
-    fn shape_argument_ahead(&self, named_dims: bool) -> bool {
+    fn shape_argument_ahead(&self, symbolic_extents: bool) -> bool {
         if !self.check(&TokenKind::LeftBracket) {
             return false;
         }
@@ -387,46 +389,81 @@ impl Parser {
         matches!(
             self.tokens.get(i).map(|t| &t.kind),
             Some(TokenKind::Integer(_)) | Some(TokenKind::RightBracket)
-        ) || (named_dims
+        ) || (symbolic_extents
             && matches!(
                 self.tokens.get(i).map(|t| &t.kind),
                 Some(TokenKind::Identifier(_))
             ))
     }
 
-    /// Parse a `[d0, d1, ...]` tensor shape. An extent is a non-negative integer
-    /// literal or a shape parameter's name; an empty list is the rank-0 scalar shape.
+    /// Parse the `batch:` that may open an axis, or `None` when the axis is unnamed.
+    ///
+    /// The colon is what distinguishes a name from a shape parameter used as the extent,
+    /// so the decision needs the token after the identifier and cannot be made from the
+    /// identifier alone.
+    fn parse_dimension_name(&mut self) -> ParseResult<Option<Identifier>> {
+        let Some(TokenKind::Identifier(name)) = self.peek_kind() else {
+            return Ok(None);
+        };
+        if !matches!(
+            self.tokens.get(self.current + 1).map(|t| &t.kind),
+            Some(TokenKind::Colon)
+        ) {
+            return Ok(None);
+        }
+        let name = name.clone();
+        let span = self
+            .advance()
+            .map(|t| t.span)
+            .ok_or(ParseError::UnexpectedEof {
+                expected: "a tensor dimension name".to_string(),
+            })?;
+        self.advance(); // consume ':'
+        self.skip_newlines();
+        Ok(Some(Identifier { name, span }))
+    }
+
+    /// Parse one axis extent: a non-negative integer literal or a shape parameter's name.
+    fn parse_tensor_extent(&mut self) -> ParseResult<TensorExtent> {
+        let token = self.advance().ok_or(ParseError::UnexpectedEof {
+            expected: "a tensor dimension".to_string(),
+        })?;
+        match token.kind {
+            TokenKind::Integer(extent) => {
+                let Ok(extent) = usize::try_from(extent) else {
+                    return Err(ParseError::UnexpectedToken {
+                        found: TokenKind::Integer(extent),
+                        expected: "a non-negative integer tensor dimension".to_string(),
+                        span: token.span,
+                    });
+                };
+                Ok(TensorExtent::Literal(extent))
+            }
+            TokenKind::Identifier(name) => Ok(TensorExtent::Param(Identifier {
+                name,
+                span: token.span,
+            })),
+            found => Err(ParseError::UnexpectedToken {
+                found,
+                expected: "a tensor dimension: a non-negative integer or a shape parameter"
+                    .to_string(),
+                span: token.span,
+            }),
+        }
+    }
+
+    /// Parse a `[d0, d1, ...]` tensor shape. An axis is an extent — a non-negative
+    /// integer literal or a shape parameter's name — optionally preceded by a dimension
+    /// name and a colon (`[batch: 32]`); an empty list is the rank-0 scalar shape.
     fn parse_shape_argument(&mut self) -> ParseResult<ShapeArg> {
         let open = self.consume(TokenKind::LeftBracket, "'[' to open a tensor shape")?;
         self.skip_newlines();
         let mut dims = Vec::new();
         while !self.check(&TokenKind::RightBracket) {
-            let token = self.advance().ok_or(ParseError::UnexpectedEof {
-                expected: "a tensor dimension".to_string(),
-            })?;
-            let dim = match token.kind {
-                TokenKind::Integer(extent) => {
-                    let Ok(extent) = usize::try_from(extent) else {
-                        return Err(ParseError::UnexpectedToken {
-                            found: TokenKind::Integer(extent),
-                            expected: "a non-negative integer tensor dimension".to_string(),
-                            span: token.span,
-                        });
-                    };
-                    TensorDim::Literal(extent)
-                }
-                TokenKind::Identifier(name) => TensorDim::Param(Identifier {
-                    name,
-                    span: token.span,
-                }),
-                found => {
-                    return Err(ParseError::UnexpectedToken {
-                        found,
-                        expected: "a tensor dimension: a non-negative integer or a shape parameter"
-                            .to_string(),
-                        span: token.span,
-                    })
-                }
+            let name = self.parse_dimension_name()?;
+            let dim = TensorDim {
+                name,
+                extent: self.parse_tensor_extent()?,
             };
             dims.push(dim);
             self.skip_newlines();
@@ -473,9 +510,17 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{GenericArg, Item, Stmt, TensorDim, Type};
+    use crate::ast::{GenericArg, Item, Stmt, TensorDim, TensorExtent, Type};
     use crate::errors::ParseError;
     use crate::parse;
+
+    /// An unnamed axis of a literal extent, the shape a test without dimension names writes.
+    fn dim(extent: usize) -> TensorDim {
+        TensorDim {
+            name: None,
+            extent: TensorExtent::Literal(extent),
+        }
+    }
 
     /// The declared type of the first `val` in the first function body.
     fn first_var_type(items: &[Item]) -> Option<Type> {
@@ -570,7 +615,7 @@ mod tests {
             panic!("expected a tensor type, got {ty:?}");
         };
         assert!(matches!(element_type.as_ref(), Type::Named(id) if id.name == "f32"));
-        assert_eq!(shape, vec![TensorDim::Literal(2), TensorDim::Literal(3)]);
+        assert_eq!(shape, vec![dim(2), dim(3)]);
         assert_eq!(&src[span.start..span.end], "Tensor<f32, [2, 3]>");
     }
 
@@ -595,14 +640,7 @@ mod tests {
         let Type::Tensor { shape, .. } = &func.params[0].ty else {
             panic!("expected a tensor parameter type");
         };
-        assert_eq!(
-            shape,
-            &vec![
-                TensorDim::Literal(3),
-                TensorDim::Literal(224),
-                TensorDim::Literal(224)
-            ]
-        );
+        assert_eq!(shape, &vec![dim(3), dim(224), dim(224)]);
     }
 
     /// A shape argument is what marks a tensor, so `[T; N]` and `[T]` type arguments
@@ -665,8 +703,56 @@ mod tests {
             panic!("expected a tensor parameter type");
         };
         assert_eq!(shape.len(), 2);
-        assert_eq!(shape[0], TensorDim::Literal(2));
-        assert!(matches!(&shape[1], TensorDim::Param(id) if id.name == "N"));
+        assert_eq!(shape[0], dim(2));
+        assert!(matches!(&shape[1].extent, TensorExtent::Param(id) if id.name == "N"));
+        assert!(shape[1].name.is_none());
+    }
+
+    #[test]
+    fn a_dimension_name_parses_alongside_its_extent() {
+        let src = "func f(x: Tensor<f32, [batch: 32, embed: 768]>) { }";
+        let items = parse(src).expect("parses");
+        let Some(Item::Function(func)) = items.first() else {
+            panic!("expected a function item");
+        };
+        let Type::Tensor { shape, .. } = &func.params[0].ty else {
+            panic!("expected a tensor parameter type");
+        };
+        assert_eq!(shape.len(), 2);
+        assert_eq!(
+            shape[0].name.as_ref().map(|n| n.name.as_str()),
+            Some("batch")
+        );
+        assert_eq!(shape[0].extent, TensorExtent::Literal(32));
+        assert_eq!(
+            shape[1].name.as_ref().map(|n| n.name.as_str()),
+            Some("embed")
+        );
+        assert_eq!(shape[1].extent, TensorExtent::Literal(768));
+    }
+
+    /// The colon is the whole distinction: `[N]` names the extent, `[batch: N]` names
+    /// the axis and leaves `N` as the extent.
+    #[test]
+    fn a_named_axis_may_still_take_a_shape_parameter_as_its_extent() {
+        let items = parse("func f<N>(x: Tensor<f32, [batch: N]>) { }").expect("parses");
+        let Some(Item::Function(func)) = items.first() else {
+            panic!("expected a function item");
+        };
+        let Type::Tensor { shape, .. } = &func.params[0].ty else {
+            panic!("expected a tensor parameter type");
+        };
+        assert_eq!(
+            shape[0].name.as_ref().map(|n| n.name.as_str()),
+            Some("batch")
+        );
+        assert!(matches!(&shape[0].extent, TensorExtent::Param(id) if id.name == "N"));
+        // The extent re-kinds the generic; the axis name is not a parameter at all.
+        assert_eq!(func.generics.len(), 1);
+        assert!(matches!(
+            func.generics[0].kind,
+            crate::ast::GenericParamKind::Const(_)
+        ));
     }
 
     /// A bare name used as an extent is a `const N: u32` parameter, so the signature
@@ -762,7 +848,7 @@ mod tests {
             panic!("expected one tensor type argument, got {type_args:?}");
         };
         assert!(matches!(**element_type, Type::Named(ref i) if i.name == "f32"));
-        assert_eq!(*shape, vec![TensorDim::Literal(3), TensorDim::Literal(3)]);
+        assert_eq!(*shape, vec![dim(3), dim(3)]);
         let crate::ast::Expr::Path {
             type_name, member, ..
         } = *func

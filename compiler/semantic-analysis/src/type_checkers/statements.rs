@@ -324,11 +324,7 @@ impl TypeChecker {
                     (Some(decl), Some(init)) => {
                         // Both declared and initialized: types must match
                         if !self.assignable(&init, &decl) {
-                            self.record_error(TypeError::Mismatch {
-                                expected: decl.clone(),
-                                found: init,
-                                span: *span,
-                            });
+                            self.record_type_mismatch(&decl, init, *span);
                             // Use declared type to avoid cascading errors
                         }
                         decl

@@ -196,7 +196,8 @@ Const generics ride the same machinery: a `const_subst` (name → value) and `co
 (Type | Const) is the positional instance-argument kind and `split_mono_args` builds the two maps;
 `unify_ast_hir` binds a const param from an array-length position and from each axis of a
 tensor-argument's shape, `resolve_array_size` resolves
-`[T; N]` to a concrete length, `resolve_tensor_dim` resolves a `Tensor<T, [M, K]>` extent to one, a const-param reference lowers to a typed integer literal, and
+`[T; N]` to a concrete length, `resolve_tensor_dim` resolves a `Tensor<T, [M, K]>` axis's extent to one (a dimension
+name is checked by semantic analysis and dropped here), a const-param reference lowers to a typed integer literal, and
 mangles include const values (`_cN`). Turbofish `type_args` seed the substitution before
 inference. Backends are unaffected: every instance reaching the HIR has concrete `usize` array
 lengths.

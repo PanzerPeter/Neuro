@@ -417,8 +417,8 @@ base name matches the scrutinee's instance and binds payloads at the instance's 
 `Option` / `Result` are **not** special-cased anywhere here: `neurc` injects their declarations.
 
 **Const generics, `where`, turbofish.** `const_scope` holds const params (name → int type) and
-`enter/exit_generic_scope` sets both scopes. `Type::Array.size` and every extent of
-`Type::Tensor.shape` are an `ArrayLen`
+`enter/exit_generic_scope` sets both scopes. `Type::Array.size` and the `extent` of every
+`TensorAxis` in `Type::Tensor.shape` are an `ArrayLen`
 (`Fixed` / `Param`) and a `Type::ConstValue` marker carries a const argument through
 monomorphization. `check_generic_call` seeds turbofish arguments, infers const params from
 array-argument lengths and tensor-argument extents (`unify_array_len`, `unify_tensor_shape`),
@@ -429,7 +429,7 @@ Errors: `UnknownArrayLength`, `ConstPredicateViolated`, `TurbofishCountMismatch`
 
 **Shape generics.** A tensor extent written as a name is a const parameter the parser has
 already re-kinded, so nothing here treats it specially except where a symbolic extent has no
-number to check against. `resolve_type` maps a `TensorDim::Param` to `ArrayLen::Param` when
+number to check against. `resolve_type` maps a `TensorExtent::Param` to `ArrayLen::Param` when
 `const_scope` knows the name and reports `UnknownTensorDimension` otherwise.
 `unify_tensor_shape` binds every axis even after one has failed, so a parameter the rest of the
 shape does bind is not also reported as uninferable, and `conflicting_shape_param` turns the
@@ -596,10 +596,26 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   the source and `borrow_target_of` promotes it to a persistent borrow when it initializes a
   binding, which is what makes returning a view of a local a `ReturnsReferenceToLocal`.
 - **Tensors.** `Type::Tensor { element, shape }` is the statically shaped `Tensor<T, [d0, ...]>`.
-  Rank and every extent are part of the type, so two tensors are compatible only when their
-  elements match and their shapes are equal extent for extent; an empty `shape` is the rank-0
+  `shape` is a `Vec<TensorAxis>`, one `{ name, extent }` per dimension. Rank and every extent are
+  part of the type, so two tensors are compatible only when their elements match and their shapes
+  agree axis for axis (`shapes_agree` / `TensorAxis::agrees_with`); an empty `shape` is the rank-0
   scalar tensor. An extent is an `ArrayLen`: `Fixed` everywhere concrete, `Param` inside a
-  shape-generic definition, where monomorphization makes it concrete (see **Shape generics**). `resolve_type` restricts the element to a fixed-width scalar (integers,
+  shape-generic definition, where monomorphization makes it concrete (see **Shape generics**).
+- **Named dimensions.** `TensorAxis.name` is the optional `batch:` of a named shape. It is
+  part of the type but not of type identity: two axes agree when their extents agree and their
+  names agree *where both carry one*, so a named shape and an unnamed one with the same extents
+  are interchangeable while `[height: H, width: W]` and `[width: W, height: H]` are not. That
+  rule lives in one place, `TensorAxis::agrees_with`, and both `is_compatible_with` and
+  `unify_tensor_shape` route through it — derived `PartialEq` on the axis is structural and
+  therefore stricter, so a shape comparison never uses `==`. A repeated name in one shape is
+  `DuplicateTensorAxisName` (raised in `resolve_type`, where the name's span is still to hand),
+  and a disagreement is `TensorAxisNameMismatch`, which names the axis and both names because two
+  transposed shapes print near-identically. `record_type_mismatch` (`type_checkers/mod.rs`) is the
+  one entry point that chooses between that error and a plain `Mismatch`, so every argument,
+  binding, and generic-call path tells the same story. An axis that survives an index keeps its
+  name at its new extent (`TensorAxis::with_extent`), which is what lets a row of
+  `[height: 2, width: 3]` annotate as `[width: 3]`. Names are erased after checking: HIR lowering
+  reads `TensorDim.extent` alone. `resolve_type` restricts the element to a fixed-width scalar (integers,
   `f16`/`bf16`/`f32`/`f64`, `bool`) and reports `NonScalarTensorElement` otherwise. A tensor owns
   its buffer, so `is_type_copy` is false and `is_type_move_tracked` is true: it moves on
   assignment and on being passed. `Tensor` is a prelude name a module may shadow, so the

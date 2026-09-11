@@ -245,6 +245,17 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("tensor dimension name '{name}' at {span:?} is used twice in one shape; each axis of a tensor needs its own name")]
+    DuplicateTensorAxisName { name: String, span: Span },
+
+    #[error("tensor axis {axis} is named '{expected}' here but '{found}' at {span:?}; the two shapes name the same axis differently, which is the transposition named dimensions exist to catch")]
+    TensorAxisNameMismatch {
+        axis: usize,
+        expected: String,
+        found: String,
+        span: Span,
+    },
+
     #[error("this literal at {span:?} is written against a shape whose extent '{name}' is a shape parameter, so its length cannot be checked here; build the tensor with a constructor instead, e.g. `Tensor::<f32, [{name}]>::zeros()`")]
     TensorLiteralSymbolicExtent { name: String, span: Span },
 

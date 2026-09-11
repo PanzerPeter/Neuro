@@ -967,3 +967,188 @@ func main() -> i32 {
         "expected the symbolic extent to be reported; got {errors:?}"
     );
 }
+
+#[test]
+fn a_named_shape_type_checks_and_matches_an_unnamed_one() {
+    let errors = semantic_errors(
+        r#"
+func rows(image: Tensor<f32, [channels: 3, height: 4, width: 4]>) -> i32 {
+    return 3
+}
+
+func main() -> i32 {
+    val plain: Tensor<f32, [3, 4, 4]> = Tensor::<f32, [3, 4, 4]>::zeros()
+    val named: Tensor<f32, [channels: 3, height: 4, width: 4]> = plain
+    return rows(named)
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "a named shape is interchangeable with the unnamed one; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_transposed_argument_is_rejected_by_its_axis_names() {
+    let errors = semantic_errors(
+        r#"
+func normalize(x: Tensor<f32, [height: 4, width: 4]>) { }
+
+func main() -> i32 {
+    val t: Tensor<f32, [width: 4, height: 4]> = Tensor::<f32, [4, 4]>::zeros()
+    normalize(t)
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::TensorAxisNameMismatch { axis, expected, found, .. }
+                if *axis == 0 && expected == "height" && found == "width"
+        )),
+        "a transposed tensor whose extents agree; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_transposed_argument_is_rejected_along_shape_parameters() {
+    let errors = semantic_errors(
+        r#"
+func project<H, W>(x: Tensor<f32, [height: H, width: W]>) { }
+
+func main() -> i32 {
+    val t: Tensor<f32, [width: 4, height: 4]> = Tensor::<f32, [4, 4]>::zeros()
+    project(t)
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorAxisNameMismatch { .. })),
+        "symbolic extents bind but the names still disagree; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_transposed_annotation_is_rejected_at_the_binding() {
+    let errors = semantic_errors(
+        r#"
+func make() -> Tensor<f32, [height: 4, width: 4]> {
+    return Tensor::<f32, [4, 4]>::zeros()
+}
+
+func main() -> i32 {
+    val t: Tensor<f32, [width: 4, height: 4]> = make()
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorAxisNameMismatch { .. })),
+        "the annotation transposes the initializer's axes; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_repeated_dimension_name_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func square(x: Tensor<f32, [side: 4, side: 4]>) { }
+
+func main() -> i32 {
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::DuplicateTensorAxisName { name, .. } if name == "side"
+        )),
+        "two axes cannot share one name; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_dimension_name_does_not_declare_a_shape_parameter() {
+    let errors = semantic_errors(
+        r#"
+func widths<W>(x: Tensor<f32, [batch: 2, width: W]>) -> i32 {
+    return 2
+}
+
+func main() -> i32 {
+    val t: Tensor<f32, [batch: 2, width: 3]> = Tensor::<f32, [2, 3]>::zeros()
+    return widths(t)
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "`W` is the shape parameter, `width` is only the axis name; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_sliced_axis_keeps_its_dimension_name() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val image: Tensor<f32, [height: 2, width: 3]> = [
+        [1.0, 2.0, 3.0],
+        [4.0, 5.0, 6.0]
+    ]
+    val row: Tensor<f32, [width: 3]> = image[0, ..]
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "the surviving axis keeps the name it had; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_sliced_axis_does_not_answer_to_another_name() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val image: Tensor<f32, [height: 2, width: 3]> = [
+        [1.0, 2.0, 3.0],
+        [4.0, 5.0, 6.0]
+    ]
+    val row: Tensor<f32, [height: 3]> = image[0, ..]
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorAxisNameMismatch { .. })),
+        "the axis that survived is `width`; got {errors:?}"
+    );
+}
+
+#[test]
+fn an_identity_matrix_may_name_its_two_axes_differently() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val eye: Tensor<f32, [row: 4, col: 4]> = Tensor::<f32, [row: 4, col: 4]>::identity()
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "squareness is a property of the extents; got {errors:?}"
+    );
+}

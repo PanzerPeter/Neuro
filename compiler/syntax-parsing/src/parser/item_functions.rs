@@ -7,7 +7,7 @@ use shared_types::{Identifier, Span};
 
 use crate::ast::{
     Attribute, Expr, FunctionDef, GenericParam, GenericParamKind, MethodDef, ParamLabel, Parameter,
-    SelfParam, TensorDim, TraitBound, Type,
+    SelfParam, TensorExtent, TraitBound, Type,
 };
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
@@ -582,7 +582,9 @@ fn collect_shape_params(ty: &Type, out: &mut Vec<String>) {
             ..
         } => {
             for dim in shape {
-                if let TensorDim::Param(name) = dim {
+                // The dimension NAME is not a parameter: it lives in the tensor type's
+                // own namespace, so only the extent can re-kind a generic.
+                if let TensorExtent::Param(name) = &dim.extent {
                     out.push(name.name.clone());
                 }
             }

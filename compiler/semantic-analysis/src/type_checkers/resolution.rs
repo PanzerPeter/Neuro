@@ -3,7 +3,7 @@ use ast_types::{ArraySize, GenericArg};
 use super::tensors::TENSOR_TYPE_NAME;
 use super::TypeChecker;
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, CollectionKind, Type};
+use crate::types::{ArrayLen, CollectionKind, TensorAxis, Type};
 
 /// The qualifier an associated-type path carries in its name, as the parser spells it.
 pub(crate) const SELF_ASSOC_PREFIX: &str = "Self::";
@@ -335,25 +335,44 @@ impl TypeChecker {
                     });
                     return None;
                 }
-                let mut extents = Vec::with_capacity(shape.len());
+                let mut axes: Vec<TensorAxis> = Vec::with_capacity(shape.len());
                 for dim in shape {
-                    extents.push(self.resolve_tensor_dim(dim)?);
+                    let extent = self.resolve_tensor_dim(dim)?;
+                    // Dimension names are the tensor type's own namespace, and
+                    // `permute`-style operations resolve an identifier against it, so a
+                    // repeated name would denote two axes at once.
+                    if let Some(name) = &dim.name {
+                        if axes
+                            .iter()
+                            .any(|axis| axis.name.as_deref() == Some(name.name.as_str()))
+                        {
+                            self.record_error(TypeError::DuplicateTensorAxisName {
+                                name: name.name.clone(),
+                                span: name.span,
+                            });
+                            return None;
+                        }
+                    }
+                    axes.push(TensorAxis {
+                        name: dim.name.as_ref().map(|n| n.name.clone()),
+                        extent,
+                    });
                 }
                 Some(Type::Tensor {
                     element: Box::new(element),
-                    shape: extents,
+                    shape: axes,
                 })
             }
         }
     }
 
-    /// Resolve one tensor extent. A literal is taken as written; a name is accepted
+    /// Resolve one axis's extent. A literal is taken as written; a name is accepted
     /// only when it is an in-scope shape parameter, which the parser has already
     /// re-kinded to a `const NAME: u32` parameter.
     fn resolve_tensor_dim(&mut self, dim: &ast_types::TensorDim) -> Option<ArrayLen> {
-        match dim {
-            ast_types::TensorDim::Literal(extent) => Some(ArrayLen::Fixed(*extent)),
-            ast_types::TensorDim::Param(ident) => {
+        match &dim.extent {
+            ast_types::TensorExtent::Literal(extent) => Some(ArrayLen::Fixed(*extent)),
+            ast_types::TensorExtent::Param(ident) => {
                 if self.const_scope.contains_key(&ident.name) {
                     return Some(ArrayLen::Param(ident.name.clone()));
                 }

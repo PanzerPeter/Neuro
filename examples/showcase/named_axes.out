@@ -1,0 +1,6 @@
+embedding [vocab: 4, embed: 4]    width = 4
+projection [embed: 4, hidden: 2]  width = 2
+embedding row 0 sum               =    4
+counts after bump                 =   11  22
+batch total over every token      =   24
+declared widths                   =    6

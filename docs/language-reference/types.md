@@ -1179,9 +1179,11 @@ Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
   (see [Slicing and indexing](#slicing-and-indexing))
 - Implemented: shape generics and constraints, `func f<M, K>(t: &Tensor<f32, [M, K]>)`
   (see [Shape generics](#shape-generics))
+- Implemented: named dimensions `Tensor<f32, [batch: 32, embed: 768]>`
+  (see [Named dimensions](#named-dimensions))
 - Planned: by-value tensor arithmetic (`a + b`, `a @ b`) and the reductions
 - Planned: broadcasting rules
-- Planned: named dimensions and dynamic shapes
+- Planned: dynamic shapes
 
 ## Type Safety Guarantees
 
@@ -1812,16 +1814,67 @@ to check it against): build the tensor with a constructor instead. And a name th
 enclosing signature declares is an error naming the dimension, not a silently accepted
 extent.
 
+### Named dimensions
+
+An axis may carry a name before its extent. The name is part of the type, so a signature
+says which axis is which, and the compiler checks the claim:
+
+```neuro
+func batch_norm(
+    x: &Tensor<f32, [batch: 32, channels: 3, height: 224, width: 224]>
+) -> i32 {
+    return 32
+}
+```
+
+A name does not create a new type. Two tensor types agree when their element types agree,
+their ranks agree, and each pair of extents agrees; a name is compared only at a position
+where **both** sides write one. So `Tensor<f32, [3, 224, 224]>` and
+`Tensor<f32, [channels: 3, height: 224, width: 224]>` are interchangeable, and a function
+written before the names existed still takes a named tensor:
+
+```neuro
+val plane: Tensor<i32, [height: 2, width: 3]> = [[1, 2, 3], [4, 5, 6]]
+val same:  Tensor<i32, [2, 3]> = plane          // fine: one side names nothing
+```
+
+What is rejected is the transposition the feature exists to catch — the same extents, the
+wrong way round:
+
+```neuro
+func normalize(x: Tensor<f32, [height: 4, width: 4]>) { }
+
+val t: Tensor<f32, [width: 4, height: 4]> = Tensor::<f32, [4, 4]>::zeros()
+normalize(t)   // error: tensor axis 0 is named 'height' here but 'width'
+```
+
+The extents are identical, so nothing else would have caught it.
+
+Names live in the tensor type's own namespace rather than the surrounding scope: a local
+variable called `height` neither shadows an axis nor collides with one. Each axis of one
+shape needs its own name (`[side: 4, side: 4]` is an error), and the name is not a generic
+parameter — in `[batch: N]`, `batch` names the axis and `N` is the shape parameter the call
+infers. An axis keeps its name through an index, at whatever extent survives:
+
+```neuro
+val row: Tensor<i32, [width: 3]> = plane[1, ..]   // `height` was dropped, `width` kept
+```
+
+Names are checked and then erased: a named tensor compiles to exactly the code the unnamed
+one does. The name-driven operations that read a name back, `.permute([height, width])` and
+`.flatten(dims: [...])`, are later work: they need tensor shape manipulation, which does not
+exist yet in any form.
+
 ### What tensors cannot do yet
 
 A tensor can be built, bound, moved, cloned, passed, returned, transferred with
 `.to(device)`, updated in place, stored in a struct, indexed, and sliced. What is still
 later work is writing through an index (`t[i, j] = v`), by-value tensor arithmetic
-(`a + b`, `a @ b`), `.t()`, `.reshape(...)`, the reductions (`.sum()`, `.mean()`,
-`.max()`, `.min()`), and the step and reverse index forms (`t[(0..n).step(2)]`,
-`t[(0..n).rev()]`), which wait on `.step(n)` / `.rev()` existing on ranges at all.
-Named dimensions (`Tensor<f32, [batch: 32, embed: 768]>`) and dynamic axes
-(`Tensor<f32, [?, 768]>`) are not accepted either; a `?` extent is a parse error. Symbolic
+(`a + b`, `a @ b`), `.t()`, `.reshape(...)`, `.permute(...)`, `.flatten(...)`, the reductions
+(`.sum()`, `.mean()`, `.max()`, `.min()`), and the step and reverse index forms
+(`t[(0..n).step(2)]`, `t[(0..n).rev()]`), which wait on `.step(n)` / `.rev()` existing on
+ranges at all. Dynamic axes (`Tensor<f32, [?, 768]>`) are not accepted either; a `?` extent
+is a parse error. Symbolic
 extents *are* accepted, on functions: a shape-generic struct, enum, or `impl` block is
 later work, so a shape parameter is a function's to declare.
 

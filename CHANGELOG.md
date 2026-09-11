@@ -10,6 +10,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.21.0] - 2026-09-11
+
+### Added
+
+- `semantic`: **named tensor dimensions** (§4.6). An axis may carry a name before its extent,
+  so a shape documents itself: `Tensor<f32, [batch: 32, seq_len: 128, embed: 768]>` says which
+  axis is which, and the compiler holds the signature to it.
+
+  A name is part of the type but not of type identity. Two tensor types agree when their
+  element types agree, their ranks agree, and each pair of extents agrees; a name is compared
+  only where **both** sides write one. `Tensor<f32, [3, 224, 224]>` and
+  `Tensor<f32, [channels: 3, height: 224, width: 224]>` are therefore interchangeable, and
+  every function written against a bare shape still takes a named tensor. What is rejected is
+  the transposition the feature exists to catch: passing a `[width: 4, height: 4]` where a
+  `[height: 4, width: 4]` is expected reports `tensor axis 0 is named 'height' here but
+  'width'`, naming the axis and both names — the extents are identical, so nothing else would
+  have caught it. The same check runs against a shape parameter's axis, so
+  `func project<H, W>(x: Tensor<f32, [height: H, width: W]>)` rejects a transposed argument
+  even though `H` and `W` both bind.
+
+  Names live in the tensor type's own namespace, not the surrounding scope: a local called
+  `height` neither shadows an axis nor collides with one. Each axis of a shape needs its own
+  name (`[side: 4, side: 4]` is rejected), and a name is not a generic parameter — in
+  `[batch: N]`, `batch` names the axis and `N` is the shape parameter the call infers. An axis
+  keeps its name through an index at whatever extent survives, so a row of
+  `[height: 2, width: 3]` annotates as `[width: 3]`. Names are checked and then erased: a
+  named tensor compiles to exactly the code the unnamed one does.
+
+  The name-driven operations §4.6 also describes, `.permute([height, width])` and
+  `.flatten(dims: [...])`, are not part of this: they need tensor shape manipulation, which
+  has its own roadmap item.
+
 ## [2.20.0] - 2026-09-10
 
 ### Added

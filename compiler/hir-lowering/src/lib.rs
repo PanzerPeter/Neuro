@@ -461,7 +461,7 @@ fn unify_ast_hir(
             },
         ) if pshape.len() == ashape.len() => {
             for (dim, extent) in pshape.iter().zip(ashape) {
-                if let ast_types::TensorDim::Param(id) = dim {
+                if let ast_types::TensorExtent::Param(id) = &dim.extent {
                     if cnames.contains(&id.name) {
                         const_subst.entry(id.name.clone()).or_insert(*extent as u64);
                     }
@@ -487,9 +487,9 @@ fn resolve_tensor_dim(
     dim: &ast_types::TensorDim,
     const_subst: &HashMap<String, u64>,
 ) -> Result<usize, LoweringError> {
-    match dim {
-        ast_types::TensorDim::Literal(extent) => Ok(*extent),
-        ast_types::TensorDim::Param(id) => const_subst
+    match &dim.extent {
+        ast_types::TensorExtent::Literal(extent) => Ok(*extent),
+        ast_types::TensorExtent::Param(id) => const_subst
             .get(&id.name)
             .map(|v| *v as usize)
             .ok_or_else(|| LoweringError::UnresolvedType {

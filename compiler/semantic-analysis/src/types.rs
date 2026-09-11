@@ -26,6 +26,59 @@ impl fmt::Display for ArrayLen {
     }
 }
 
+/// One axis of a tensor shape: its extent, plus the optional dimension name written
+/// before it (`Tensor<f32, [batch: 32, embed: 768]>`).
+///
+/// A name is part of the type but does not make a named shape a different type from an
+/// unnamed one: [`TensorAxis::agrees_with`] compares names only where both sides carry
+/// one. Derived equality is structural and therefore stricter than that, so shape
+/// comparisons go through `agrees_with` rather than `==`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TensorAxis {
+    pub name: Option<std::string::String>,
+    pub extent: ArrayLen,
+}
+
+impl TensorAxis {
+    /// The same axis at a different extent, keeping the name: a sub-range of `height`
+    /// is still `height`.
+    pub(crate) fn with_extent(&self, extent: ArrayLen) -> Self {
+        TensorAxis {
+            name: self.name.clone(),
+            extent,
+        }
+    }
+
+    /// Whether two axes at the same position denote the same axis: their extents match,
+    /// and their names match where both supply one. A named axis and an unnamed one are
+    /// interchangeable, so an annotation may name axes a constructor's type does not.
+    pub(crate) fn agrees_with(&self, other: &TensorAxis) -> bool {
+        self.extent == other.extent && self.names_agree_with(other)
+    }
+
+    /// Whether the two names may sit at the same position, ignoring the extents.
+    pub(crate) fn names_agree_with(&self, other: &TensorAxis) -> bool {
+        match (&self.name, &other.name) {
+            (Some(a), Some(b)) => a == b,
+            _ => true,
+        }
+    }
+}
+
+impl fmt::Display for TensorAxis {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.name {
+            Some(name) => write!(f, "{}: {}", name, self.extent),
+            None => write!(f, "{}", self.extent),
+        }
+    }
+}
+
+/// Whether two shapes denote the same shape: equal rank, and every axis agreeing.
+pub(crate) fn shapes_agree(a: &[TensorAxis], b: &[TensorAxis]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.agrees_with(y))
+}
+
 /// Type representation for semantic analysis
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -118,7 +171,7 @@ pub enum Type {
     /// else.
     Tensor {
         element: Box<Type>,
-        shape: Vec<ArrayLen>,
+        shape: Vec<TensorAxis>,
     },
     /// A heap-backed standard collection: `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`,
     /// or the growable text buffer `String`. These are library types rather than
@@ -287,8 +340,9 @@ impl Type {
                         .all(|(x, y)| x.is_compatible_with(y))
             }
 
-            // Tensors match when their element types match and their shapes are
-            // identical extent for extent: rank and every extent are part of the type.
+            // Tensors match when their element types match and their shapes agree axis
+            // for axis: rank and every extent are part of the type, and a dimension name
+            // is checked wherever both sides supply one.
             (
                 Type::Tensor {
                     element: a,
@@ -298,7 +352,7 @@ impl Type {
                     element: b,
                     shape: bshape,
                 },
-            ) => ashape == bshape && a.is_compatible_with(b),
+            ) => shapes_agree(ashape, bshape) && a.is_compatible_with(b),
 
             // Tuples match when they have the same arity and each element matches.
             (Type::Tuple(a), Type::Tuple(b)) => {
@@ -473,11 +527,11 @@ impl fmt::Display for Type {
             Type::Slice(element) => write!(f, "[{}]", element),
             Type::Tensor { element, shape } => {
                 write!(f, "Tensor<{}, [", element)?;
-                for (i, extent) in shape.iter().enumerate() {
+                for (i, axis) in shape.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", extent)?;
+                    write!(f, "{}", axis)?;
                 }
                 write!(f, "]>")
             }

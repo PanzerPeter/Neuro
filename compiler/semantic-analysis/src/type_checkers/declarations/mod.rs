@@ -13,7 +13,7 @@ pub(crate) mod traits;
 
 use super::{BoundInfo, TypeChecker};
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, Type};
+use crate::types::{ArrayLen, TensorAxis, Type};
 use ast_types::Item;
 use shared_types::Identifier;
 use std::collections::HashMap;
@@ -282,7 +282,7 @@ pub(crate) fn substitute_generic(ty: &Type, subst: &HashMap<String, Type>) -> Ty
             element: Box::new(substitute_generic(element, subst)),
             shape: shape
                 .iter()
-                .map(|extent| substitute_array_len(extent, subst))
+                .map(|axis| axis.with_extent(substitute_array_len(&axis.extent, subst)))
                 .collect(),
         },
         Type::Tuple(elements) => Type::Tuple(
@@ -353,7 +353,7 @@ pub(super) fn remap_type(
             element: Box::new(remap_type(element, subst, base, mangled)),
             shape: shape
                 .iter()
-                .map(|extent| substitute_array_len(extent, subst))
+                .map(|axis| axis.with_extent(substitute_array_len(&axis.extent, subst)))
                 .collect(),
         },
         Type::Tuple(elements) => Type::Tuple(
@@ -395,19 +395,50 @@ pub(super) fn unify_array_len(
 /// Every axis is unified even once one has failed, so a shape parameter the rest of the
 /// shape does bind is not reported as uninferable on top of the extent mismatch that is
 /// the real error.
+///
+/// A dimension name must also agree where both sides carry one: that is what
+/// rejects a transposed argument whose extents happen to match the template's.
 fn unify_tensor_shape(
-    param: &[ArrayLen],
-    arg: &[ArrayLen],
+    param: &[TensorAxis],
+    arg: &[TensorAxis],
     subst: &mut HashMap<String, Type>,
 ) -> bool {
     if param.len() != arg.len() {
         return false;
     }
     let mut agreed = true;
-    for (extent, found) in param.iter().zip(arg) {
-        agreed &= unify_array_len(extent, found, subst);
+    for (axis, found) in param.iter().zip(arg) {
+        agreed &=
+            unify_array_len(&axis.extent, &found.extent, subst) && axis.names_agree_with(found);
     }
     agreed
+}
+
+/// The first axis whose dimension name the argument contradicts: its position, the name
+/// the parameter writes, and the name the argument writes.
+///
+/// A transposition is the mismatch a printed expected/found pair explains worst, because
+/// the two types differ only in the order of two names and may carry identical extents,
+/// so the axis is named instead.
+pub(crate) fn mismatched_axis_name(param: &Type, arg: &Type) -> Option<(usize, String, String)> {
+    match (param, arg) {
+        (Type::Reference { inner: pi, .. }, Type::Reference { inner: ai, .. }) => {
+            mismatched_axis_name(pi, ai)
+        }
+        (
+            Type::Tensor { shape: pshape, .. },
+            Type::Tensor {
+                shape: ashape,
+                element: _,
+            },
+        ) => pshape
+            .iter()
+            .zip(ashape)
+            .enumerate()
+            .find(|(_, (p, a))| !p.names_agree_with(a))
+            .and_then(|(axis, (p, a))| Some((axis, p.name.clone()?, a.name.clone()?))),
+        _ => None,
+    }
 }
 
 /// The first shape parameter this argument contradicts: its name, the extent already
@@ -436,7 +467,11 @@ pub(crate) fn conflicting_shape_param(
                 element: _,
             },
         ) => pshape.iter().zip(ashape).find_map(|(p, a)| {
-            match (p, a, subst.get(extent_param_name(p)?)) {
+            match (
+                &p.extent,
+                &a.extent,
+                subst.get(extent_param_name(&p.extent)?),
+            ) {
                 (ArrayLen::Param(name), ArrayLen::Fixed(found), Some(Type::ConstValue(bound)))
                     if *bound != *found as u64 =>
                 {

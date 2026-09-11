@@ -45,7 +45,8 @@ Bind every call site's arguments to the callee's parameters in declaration order
   call site: a type parameter of the callee, `Self`, `impl Trait`, `dyn Trait`, `&[T]`, a
   function type; the last three because an argument reaches them through a coercion an
   argument position applies and a binding does not. A `Tensor<T, [d0, ...]>` whose extents are all
-  literals is *kept*: restating it at a call site names the same type. One with a shape
+  literals is *kept*: restating it at a call site names the same type, dimension names included,
+  since a name is checked only against another name. One with a shape
   parameter's extent is dropped for the same reason a `T` is: the name is the callee's own. It is dropped for every method signature
   too, since a method signature is agreed across impls by parameter *name* and so cannot
   promise a type. Only these calls give up the identical-IR property; a call

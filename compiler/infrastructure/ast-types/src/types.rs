@@ -45,11 +45,24 @@ pub enum ArraySize {
 /// sugar for a `const NAME: u32` parameter, so the symbolic form is resolved to a concrete
 /// extent by monomorphization and never escapes the frontend.
 #[derive(Debug, Clone, PartialEq)]
-pub enum TensorDim {
+pub enum TensorExtent {
     /// A concrete compile-time extent, e.g. the `3` in `Tensor<f32, [3, 3]>`.
     Literal(usize),
     /// A shape parameter used as an extent, e.g. the `K` in `Tensor<f32, [M, K]>`.
     Param(Identifier),
+}
+
+/// One axis of a tensor shape: an extent, plus the optional dimension name written
+/// before it (`[batch: 32, embed: 768]`).
+///
+/// The name documents the axis and is checked against another shape's name at the same
+/// position, which is what catches a transposed argument whose extents happen to agree.
+/// It is a frontend-only annotation: monomorphization and HIR lowering read the extent
+/// alone, so a name never reaches a backend.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TensorDim {
+    pub name: Option<Identifier>,
+    pub extent: TensorExtent,
 }
 
 /// Type AST nodes
@@ -137,7 +150,7 @@ pub enum Type {
     /// Every extent is known at compile time and is part of the type, so
     /// `Tensor<f32, [2, 2]>` and `Tensor<f32, [3, 3]>` are distinct types. An empty
     /// `shape` is the rank-0 scalar tensor `Tensor<T, []>`. `span` covers the type name
-    /// through the closing `>`. An extent may be a [`TensorDim::Param`] inside a generic
+    /// through the closing `>`. An extent may be a [`TensorExtent::Param`] inside a generic
     /// definition, in which case monomorphization makes it concrete.
     Tensor {
         element_type: Box<Type>,

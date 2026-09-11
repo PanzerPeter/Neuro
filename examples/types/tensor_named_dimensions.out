@@ -1,0 +1,5 @@
+first_element(&plane)  = 1
+row[0]                 = 5
+row_width(&row)        = 4
+eye[2, 2]              = 1
+total_pixels(&image)   = 24
