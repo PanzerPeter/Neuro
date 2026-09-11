@@ -10,6 +10,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.22.0] - 2026-09-11
+
+### Added
+
+- `semantic`: **tensor shape manipulation** — `.t()`, `.reshape(...)`, `.permute(...)` and
+  `.flatten(...)`. Each builds a tensor of a new shape from the receiver's elements, and each
+  computes that shape at compile time, so what comes back is as statically shaped as what went
+  in. `.t()` is the matrix transpose; `.reshape([2, -1])` re-extents the same elements, with
+  `-1` in at most one position taking whatever extent the others leave over; `.permute([...])`
+  reorders the axes; `.flatten()` merges them all and `.flatten(dims: [...])` merges an
+  adjacent run.
+
+  `.permute` and `.flatten` take **dimension names** as well as positions, which is what the
+  names in a shape were always for: `image.permute([height, width, channels])` resolves those
+  three identifiers against the receiver's own shape, never against the surrounding scope, so a
+  local called `height` neither shadows the axis nor is shadowed by it, and naming a dimension
+  the shape does not declare is an error listing the ones it does. `.t()` and `.permute` carry
+  each axis's name into the result, so a transposed `[height: H, width: W]` is still rejected
+  where the original was expected.
+
+  All four **consume** the receiver: a tensor owns its buffer, so the buffer moves into the
+  result rather than being duplicated, and `t.clone().t()` is the way to keep the original.
+  A reshape that does not change the element order allocates nothing at all — the receiver's
+  DLPack handle is re-described in place, three stores and no copy — while a transpose or a
+  permute builds the result's buffer and releases the receiver's through its own deleter.
+
+  Compile-time errors cover the rest: a `.reshape` that would change the element count names
+  both counts, a second `-1` is rejected, a `.permute` that repeats or omits an axis is
+  rejected, `.flatten` requires its axes to be adjacent, and `.t()` on any rank but 2 points
+  at `.permute`.
+
+
 ## [2.21.1] - 2026-09-11
 
 ### Fixed

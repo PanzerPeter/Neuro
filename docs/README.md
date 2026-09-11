@@ -98,7 +98,11 @@ Key design goals:
   extents, constrained by a `where` predicate, and required to agree everywhere one name is
   written. An axis may also be named (`Tensor<f32, [batch: 32, embed: 768]>`): names are
   checked wherever both shapes supply one, so a named shape stays interchangeable with the
-  unnamed one while a transposed `[width: W, height: H]` is a compile error.
+  unnamed one while a transposed `[width: W, height: H]` is a compile error. A shape is
+  rearranged with `.t()`, `.reshape([...])` (with a `-1` extent the compiler infers),
+  `.permute([...])`, and `.flatten()` / `.flatten(dims: [...])`, whose result shape is
+  computed at compile time and which take dimension names as well as positions; each
+  consumes the receiver, handing its buffer on rather than duplicating it.
   By-value arithmetic and the reductions are later work
 
 ### Variables

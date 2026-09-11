@@ -9,6 +9,7 @@ mod loop_adapter_tests;
 mod match_tests;
 mod newtype_tests;
 mod slice_tests;
+mod tensor_shape_tests;
 mod tensor_tests;
 mod trait_tests;
 mod try_tests;

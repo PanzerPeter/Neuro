@@ -5,6 +5,7 @@
 
 use super::{TypeChecker, CLONE_METHOD};
 use crate::errors::TypeError;
+use crate::type_checkers::tensor_shape::is_shape_method;
 use crate::type_checkers::tensors::DEVICE_TYPE_NAME;
 use crate::types::{CollectionKind, Type};
 use ast_types::Expr;
@@ -203,6 +204,18 @@ impl TypeChecker {
             // moved rather than borrowed. Matched on `recv` rather than the referent
             // because a borrow cannot be consumed: `(&t).to(...)` falls through to
             // `MethodNotFound` instead of quietly moving out of someone else's tensor.
+            // The four shape-manipulation methods. They CONSUME the receiver, so like
+            // `.to` they are matched on `recv` and a borrow falls through: the one
+            // buffer moves into the differently shaped result rather than being copied.
+            // Their arguments are read as syntax, never as values, because a `.permute`
+            // axis may be a dimension name that no value scope declares.
+            (Type::Tensor { element, shape }, m) if is_shape_method(m) => {
+                if matches!(recv, Type::Reference { .. }) {
+                    return None;
+                }
+                let (element, shape) = (element.clone(), shape.clone());
+                Some(self.check_tensor_shape_method(&element, &shape, object, m, args, call_span))
+            }
             (Type::Tensor { .. }, TENSOR_TO_METHOD) if !matches!(recv, Type::Reference { .. }) => {
                 self.check_call_args(args, &[Type::Enum(DEVICE_TYPE_NAME.to_string())], call_span);
                 self.record_move(object);

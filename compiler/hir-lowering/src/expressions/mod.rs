@@ -375,7 +375,7 @@ impl Lowerer {
             // A `Tensor<T, [...]>` expectation turns the literal into a tensor
             // literal; anything else leaves it a plain array.
             Expr::ArrayLiteral { elements, span } => match expected {
-                Some(HirType::Tensor { element, shape }) => {
+                Some(HirType::Tensor { element, shape, .. }) => {
                     let element = (**element).clone();
                     let shape = shape.clone();
                     self.lower_tensor_literal(elements, &element, &shape, *span)

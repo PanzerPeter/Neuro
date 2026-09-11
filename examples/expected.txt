@@ -71,6 +71,7 @@ types/tensor_construction.nr        6
 types/tensor_indexing.nr            44
 types/tensor_shape_generics.nr      41
 types/tensor_named_dimensions.nr    33
+types/tensor_shape_manipulation.nr  44
 types/tuples.nr                     62
 types/type_aliases.nr               17
 types/underscore_separators.nr      0
@@ -134,7 +135,7 @@ showcase/job_queue.nr       139
 showcase/log_builder.nr     64
 showcase/model_shapes.nr    216
 showcase/mutable_borrows.nr 47
-showcase/named_axes.nr      56
+showcase/named_axes.nr      70
 showcase/num_algorithms.nr  33
 showcase/optimizer_step.nr  32
 showcase/perceptron.nr      8

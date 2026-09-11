@@ -257,9 +257,10 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   `[T]`). Indexing, `for x in xs`, and `IndexAssignment` each read a slice's element type
   alongside the array's, and `slice.len()` is `u64`.
 - **Tensors**: `resolve_type` maps `ast_types::Type::Tensor` to
-  `HirType::Tensor { element, shape }`, resolving each extent through `resolve_tensor_dim` so a
-  shape parameter takes the value the active instance bound it to; `mangle_type` spells the
-  result `tensor_<elem>_<d0>x<d1>`. A symbolic extent with no binding is an
+  `HirType::Tensor { element, shape, names }`, resolving each extent through `resolve_tensor_dim`
+  so a shape parameter takes the value the active instance bound it to, and carrying each axis's
+  dimension name into `AxisNames`; `mangle_type` spells the result `tensor_<elem>_<d0>x<d1>`,
+  names taking no part (they are checked in the frontend and reach no backend). A symbolic extent with no binding is an
   `UnresolvedType` naming the dimension, which the checker's own diagnostic reaches first.
   Construction lives in `tensors.rs`. An array literal lowered against a
   `HirType::Tensor` expectation becomes `HirExprKind::TensorLiteral` whose `elements` are
@@ -279,11 +280,21 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   carrying the target's tensor type, and every other target has its `x = x OP rhs` desugar
   re-formed as an `Expr::Binary` and lowered through `lower_expr`, which is what keeps a user
   operator-trait impl reachable through `+=`. By-value operators on tensors do not exist yet.
+  Shape manipulation lives in `tensor_shape.rs`: `.t()`, `.reshape(...)`, `.permute(...)` and
+  `.flatten(...)` are intercepted in `lower_method_call` **before the arguments are lowered**,
+  because a `.permute` entry may be a dimension name and would otherwise be looked up as a
+  variable. `lower_tensor_shape_cast` re-derives the result shape and emits
+  `HirExprKind::TensorShapeCast`, whose `permutation` is `Some` only for `.t()` / `.permute`
+  (the two that change the element order) and `None` for `.reshape` / `.flatten`. A name is
+  resolved against the receiver's `AxisNames`, which is the one reason the HIR carries them;
+  the result keeps the names its axes brought with them, and a merged or re-extented axis is
+  unnamed. The checker validated all of this, so a shape that does not work out here is a
+  `LoweringError::Malformed`.
   Slicing and indexing live in `tensor_index.rs`: `lower_tensor_index` folds each range bound to
   the constant the checker already proved it to be (`HirTensorAxis::Range { start, end }`, with
   a `..` full axis becoming the whole extent and an inclusive range stopping one further on),
   lowers a position as an ordinary expression, and computes the result type by dropping every
-  axis given a position. Both index spellings reach it: `Expr::TensorIndex`, and the
+  axis given a position along with its name, keeping the name of every axis that survives. Both index spellings reach it: `Expr::TensorIndex`, and the
   one-argument `Expr::Index` whose object lowered to a tensor.
 - **Enumerated loops**: `ForRange` / `ForEach` carry the position binding through as
   `index: Option<String>` and define it in the loop scope as `LOOP_INDEX_TYPE` (`u64`), ahead of

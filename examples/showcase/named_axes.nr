@@ -2,11 +2,13 @@
 //
 // This is an integration example: it exercises several features *together*
 // rather than in isolation:
-//   named tensor dimensions · structs holding tensor fields · a trait with an
-//   `impl` per layer kind · shape-generic functions whose extents are inferred
-//   from the argument · tensor slicing, which keeps the surviving axis's name ·
-//   in-place `+=` on a tensor · a fixed-size array walked by `for`-in · string
-//   interpolation with the format mini-language.
+//   named tensor dimensions · shape manipulation (`.t()` / `.permute(...)` /
+//   `.flatten(...)`), which names those dimensions rather than counting axes ·
+//   structs holding tensor fields · a trait with an `impl` per layer kind ·
+//   shape-generic functions whose extents are inferred from the argument ·
+//   tensor slicing, which keeps the surviving axis's name · in-place `+=` on a
+//   tensor · a fixed-size array walked by `for`-in · string interpolation with
+//   the format mini-language.
 //
 // The point of the names is the signature: `[batch: 2, seq: 3, embed: 4]` says
 // which axis is which, and a caller that hands over a `[seq: .., batch: ..]`
@@ -78,12 +80,32 @@ func batch_total(batch: &Tensor<i32, [batch: 2, seq: 3, embed: 4]>) -> i32 {
     return total
 }
 
+// Shape manipulation written in the axis names rather than in positions: the
+// reader sees which axes are being merged, and an axis this shape does not
+// declare is a compile error listing the ones it does. The receiver is consumed,
+// so the batch is cloned where the caller still needs it.
+func tokens_per_batch(batch: Tensor<i32, [batch: 2, seq: 3, embed: 4]>) -> i32 {
+    val tokens = batch.flatten(dims: [seq, embed])
+    mut total = 0
+    for t in 0..12 {
+        total = total + tokens[0, t]
+    }
+    return total
+}
+
 func main() -> i32 {
     val embedding = Embedding {
         table: Tensor::<i32, [vocab: 4, embed: 4]>::ones()
     }
+    // Distinct values, so the transpose below can be seen to move elements rather
+    // than relabel axes.
     val projection = Projection {
-        weights: Tensor::<i32, [embed: 4, hidden: 2]>::ones()
+        weights: [
+            [1, 2],
+            [3, 4],
+            [5, 6],
+            [7, 8]
+        ]
     }
 
     // A tensor built without names is the same type as one that has them, so the
@@ -107,6 +129,17 @@ func main() -> i32 {
     counts += bump
     println("counts after bump                 = {counts[0]:>4}{counts[1]:>4}")
 
+    // `.t()` moves the elements, not the labels: the transposed projection is a
+    // `[hidden: 2, embed: 4]`, and reading it proves the buffer was rearranged.
+    val transposed: Tensor<i32, [hidden: 2, embed: 4]> = projection.weights.clone().t()
+    val hidden_row: Tensor<i32, [embed: 4]> = transposed[1, ..]
+    println("transposed projection row 1 sum   = {row_sum(&hidden_row):>4}")
+
+    // Merging `seq` and `embed` leaves `[batch: 2, 12]`, so one batch row is every
+    // token it holds laid end to end.
+    val per_batch = tokens_per_batch(batch.clone())
+    println("tokens in batch row 0             = {per_batch:>4}")
+
     val widths = [4, 2]
     mut declared = 0
     for width in widths {
@@ -117,5 +150,5 @@ func main() -> i32 {
     println("batch total over every token      = {total:>4}")
     println("declared widths                   = {declared:>4}")
 
-    return total + declared + counts[1] + row_sum(&first_row)
+    return total + declared + counts[1] + row_sum(&first_row) + per_batch + hidden_row[0]
 }

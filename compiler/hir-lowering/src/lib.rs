@@ -37,6 +37,7 @@ mod loop_adapters;
 mod operator_traits;
 mod statements;
 mod tensor_index;
+mod tensor_shape;
 mod tensors;
 mod types;
 mod val_else;
@@ -458,6 +459,7 @@ fn unify_ast_hir(
             HirType::Tensor {
                 element: ae,
                 shape: ashape,
+                ..
             },
         ) if pshape.len() == ashape.len() => {
             for (dim, extent) in pshape.iter().zip(ashape) {
@@ -579,7 +581,7 @@ fn mangle_type(ty: &HirType) -> String {
         }
         HirType::Array { element, size } => format!("arr{}_{}", size, mangle_type(element)),
         HirType::Slice(element) => format!("slice_{}", mangle_type(element)),
-        HirType::Tensor { element, shape } => {
+        HirType::Tensor { element, shape, .. } => {
             let extents: Vec<String> = shape.iter().map(|d| d.to_string()).collect();
             format!("tensor_{}_{}", mangle_type(element), extents.join("x"))
         }

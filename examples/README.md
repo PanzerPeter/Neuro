@@ -67,10 +67,12 @@ isolation:
   stage, shape-generic functions whose extent is inferred from the argument,
   slicing that keeps the surviving axis's name, in-place `+=` on a tensor, a
   fixed-size array walked by `for`-in, and string interpolation with the format
-  mini-language. The names make axis order part of each signature, so a
-  transposed batch is a compile error rather than a wrong answer; a shape that
-  names nothing still passes to one that does, which is what keeps every
-  pre-existing tensor function usable. Exit `56`.
+  mini-language. Shape manipulation joins them: `.t()` transposes the projection
+  and `.flatten(dims: [seq, embed])` merges two axes *by name*, so the code says
+  which axes it is rearranging instead of counting positions. The names make axis
+  order part of each signature, so a transposed batch is a compile error rather
+  than a wrong answer; a shape that names nothing still passes to one that does,
+  which is what keeps every pre-existing tensor function usable. Exit `70`.
 - [`showcase/perceptron.nr`](showcase/perceptron.nr): a two-neuron feed-forward
   pass. Structs + `impl` (method calling method) + `f64` math + ReLU branch +
   `while` loop + `as` cast. Exit `8`.
@@ -351,8 +353,12 @@ No Rust edits are needed: discovery is automatic.
   (`types/tensor_named_dimensions.nr`, combined with the rest in `showcase/named_axes.nr`):
   an axis may be written `[batch: 32, embed: 768]`, names are compared only where both
   shapes supply one, a surviving axis keeps its name through an index, and a transposed
-  argument is a compile error naming the axis. `.permute(...)` / `.flatten(...)` are later
-  work. By-value
+  argument is a compile error naming the axis. Shape manipulation is supported
+  (`types/tensor_shape_manipulation.nr`): `.t()`, `.reshape([...])` with a `-1` extent the
+  compiler infers, `.permute([...])`, and `.flatten()` / `.flatten(dims: [...])`, all
+  computing the result's shape at compile time and all consuming the receiver so one buffer
+  is handed on rather than duplicated. `.permute` and `.flatten` take dimension NAMES as
+  well as positions, resolved against the receiver's own shape. By-value
   arithmetic and the reductions are later work. A tensor value is a
   DLPack handle over an out-of-line buffer, so one of any size compiles at any optimization
   level and the same pointer is what a foreign consumer would read;

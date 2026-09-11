@@ -139,6 +139,22 @@ impl SignatureTable {
             ("Tensor".to_string(), "random_normal".to_string()),
             Signature { params },
         );
+        // `tensor.flatten(dims: [...])` is compiler-known too, and is the one builtin
+        // *method* spelled with a label. It goes through `record_method` rather than a
+        // direct insert so a program declaring its own `flatten` with different
+        // parameter names is reported as the ambiguity it is, instead of silently
+        // binding against this entry.
+        self.record_method(
+            "flatten",
+            Signature {
+                params: vec![ParamBinding {
+                    name: Some("dims".to_string()),
+                    internal: "dims".to_string(),
+                    required: false,
+                    ty: None,
+                }],
+            },
+        );
     }
 
     fn collect(&mut self, items: &[Item]) {

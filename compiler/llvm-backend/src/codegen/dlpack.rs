@@ -219,6 +219,46 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// Re-describe an existing handle as a tensor of `tensor_ty`, leaving its `data`
+    /// pointer and its deleter alone.
+    ///
+    /// This is the whole of an order-preserving reshape: the buffer already holds the
+    /// result's elements in the result's order, so only the rank, extents, and strides a
+    /// DLPack consumer reads have to change. Nothing is allocated and nothing is copied,
+    /// which is why `.reshape` on a large tensor costs three stores.
+    pub(crate) fn build_dlpack_redescribe(
+        &self,
+        handle: PointerValue<'ctx>,
+        tensor_ty: &Type,
+    ) -> CodegenResult<()> {
+        let Type::Tensor { element, shape } = tensor_ty else {
+            return Err(CodegenError::InternalError(
+                "a DLPack handle is only re-described as a tensor type".to_string(),
+            ));
+        };
+        let handle_ty = self.dlpack_managed_tensor_type();
+        let i32_type = self.context.i32_type();
+        self.store_handle_field(
+            handle_ty,
+            handle,
+            &[FIELD_DL_TENSOR, FIELD_NDIM],
+            i32_type.const_int(shape.len() as u64, false).into(),
+        )?;
+        let (shape_global, strides_global) = self.dlpack_shape_globals(element, shape)?;
+        self.store_handle_field(
+            handle_ty,
+            handle,
+            &[FIELD_DL_TENSOR, FIELD_SHAPE],
+            shape_global.into(),
+        )?;
+        self.store_handle_field(
+            handle_ty,
+            handle,
+            &[FIELD_DL_TENSOR, FIELD_STRIDES],
+            strides_global.into(),
+        )
+    }
+
     /// Store `value` into the handle field reached by walking `path` from the structure
     /// root: one index for a top-level field, two to reach into the nested `DLTensor`.
     fn store_handle_field(

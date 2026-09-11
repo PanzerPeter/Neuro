@@ -177,6 +177,22 @@ pub enum HirExprKind {
         object: Box<HirExpr>,
         axes: Vec<HirTensorAxis>,
     },
+    /// A tensor of a different shape built from `receiver`'s elements: `.t()`,
+    /// `.reshape(...)`, `.permute(...)`, and `.flatten(...)`. The result shape is the
+    /// expression's own [`HirType::Tensor`]; the receiver's is on `receiver.ty`.
+    ///
+    /// The call CONSUMES the receiver, so the one buffer moves into the result rather
+    /// than being duplicated: a transpose of a weight matrix must not silently leave a
+    /// second copy of it alive.
+    ///
+    /// `permutation` is `Some` only when the element order changes, and then
+    /// `permutation[d]` is the receiver axis that result axis `d` came from. `None` is
+    /// the order-preserving case (`.reshape`, `.flatten`), which is pure metadata: the
+    /// same buffer, re-described.
+    TensorShapeCast {
+        receiver: Box<HirExpr>,
+        permutation: Option<Vec<usize>>,
+    },
     /// Tuple literal `(e0, e1, ...)`. The element types live on the elements;
     /// this expression's `ty` is the [`HirType::Tuple`] of them.
     TupleLiteral {

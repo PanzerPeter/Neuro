@@ -22,7 +22,8 @@ expression already carries the type the checker resolved for it.
 - Implemented: enums, generic enums, `Option<T>` / `Result<T, E>`, and the standard collections
 - Implemented: statically shaped tensors `Tensor<T, [d0, ...]>`: annotations, literal
   coercion, the construction helpers, the ownership surface (`.clone()`, `.to(device)`),
-  in-place compound assignment (`w -= g`), and shape generics `Tensor<f32, [M, K]>`
+  in-place compound assignment (`w -= g`), shape manipulation
+  (`.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`), and shape generics `Tensor<f32, [M, K]>`
 
 ## Primitive Types
 
@@ -1180,6 +1181,8 @@ Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
 - Implemented: shape generics and constraints, `func f<M, K>(t: &Tensor<f32, [M, K]>)`
   (see [Shape generics](#shape-generics))
 - Implemented: named dimensions `Tensor<f32, [batch: 32, embed: 768]>`
+- Implemented: shape manipulation `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`
+  (see [Rearranging a shape](#rearranging-a-shape))
   (see [Named dimensions](#named-dimensions))
 - Planned: by-value tensor arithmetic (`a + b`, `a @ b`) and the reductions
 - Planned: broadcasting rules
@@ -1861,16 +1864,76 @@ val row: Tensor<i32, [width: 3]> = plane[1, ..]   // `height` was dropped, `widt
 ```
 
 Names are checked and then erased: a named tensor compiles to exactly the code the unnamed
-one does. The name-driven operations that read a name back, `.permute([height, width])` and
-`.flatten(dims: [...])`, are later work: they need tensor shape manipulation, which does not
-exist yet in any form.
+one does. They are read back by the two name-driven operations `.permute([height, width])`
+and `.flatten(dims: [...])`, described under
+[Rearranging a shape](#rearranging-a-shape).
+
+### Rearranging a shape
+
+Four methods build a tensor of a different shape from the receiver's elements. Each one's
+result shape is computed at compile time, so what comes back is as statically shaped as
+what went in.
+
+```neuro
+val m: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+
+val t: Tensor<i32, [3, 2]> = m.t()                 // matrix transpose
+val flat: Tensor<i32, [6]> = t.reshape([-1])       // same order, new extents
+```
+
+| Method | Result |
+|---|---|
+| `.t()` | the rank-2 transpose; any other rank is an error suggesting `.permute` |
+| `.reshape([d0, ...])` | the same elements at new extents; `-1` in at most one position takes whatever extent the others leave over |
+| `.permute([...])` | the axes reordered; every axis named exactly once |
+| `.flatten()` | every axis merged into one |
+| `.flatten(dims: [...])` | an adjacent run of axes merged into one, the rest untouched |
+
+All four **consume** the receiver. A tensor owns its buffer, so handing that buffer on is
+what a move means here; a transpose that quietly left a second copy of a weight matrix
+alive is exactly what move-by-default exists to prevent. Use `.clone()` where the original
+has to stay readable, and note that a borrow cannot be consumed, so none of the four is
+offered on `&Tensor<T, S>`.
+
+```neuro
+val m: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+val t = m.clone().t()
+val first = m[0, 0]                       // fine: the clone was consumed, not `m`
+```
+
+`.permute` and `.flatten` take **dimension names** as well as positions, which is what the
+names in a shape are for. A name resolves against the receiver's own shape, never against
+the surrounding scope, so a local called `height` neither shadows the axis nor is shadowed
+by it; naming a dimension the shape does not declare is an error listing the ones it does.
+
+```neuro
+val image: Tensor<i32, [channels: 3, height: 2, width: 4]> = Tensor::<i32, [3, 2, 4]>::ones()
+val hwc = image.permute([height, width, channels])    // [height: 2, width: 4, channels: 3]
+
+val batch: Tensor<i32, [batch: 2, seq_len: 3, embed: 4]> = Tensor::<i32, [2, 3, 4]>::ones()
+val tokens = batch.flatten(dims: [seq_len, embed])    // [batch: 2, 12]
+```
+
+`.t()` and `.permute` carry each axis's name along with it, so a transposed
+`[height: H, width: W]` is a `[width: W, height: H]` and is still rejected where the
+original was expected. A reshaped extent is not the axis its old name documented, so
+`.reshape` and a merged `.flatten` axis are unnamed.
+
+The errors are compile-time: a `.reshape` that would change the element count names both
+counts, a `-1` that no whole extent satisfies is rejected, a `.permute` that names an axis
+twice or leaves one out is rejected, and `.flatten` requires its axes to be adjacent,
+because flattening re-describes the element order rather than moving elements. A receiver
+whose extent is a shape parameter has no element count to check against, so `.reshape` and
+`.flatten` are not available inside a shape-generic function; `.t()` and `.permute` are,
+since they only reorder axes.
 
 ### What tensors cannot do yet
 
 A tensor can be built, bound, moved, cloned, passed, returned, transferred with
-`.to(device)`, updated in place, stored in a struct, indexed, and sliced. What is still
+`.to(device)`, updated in place, stored in a struct, indexed, sliced, and reshaped with
+`.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`. What is still
 later work is writing through an index (`t[i, j] = v`), by-value tensor arithmetic
-(`a + b`, `a @ b`), `.t()`, `.reshape(...)`, `.permute(...)`, `.flatten(...)`, the reductions
+(`a + b`, `a @ b`), the reductions
 (`.sum()`, `.mean()`, `.max()`, `.min()`), and the step and reverse index forms
 (`t[(0..n).step(2)]`, `t[(0..n).rev()]`), which wait on `.step(n)` / `.rev()` existing on
 ranges at all. Dynamic axes (`Tensor<f32, [?, 768]>`) are not accepted either; a `?` extent

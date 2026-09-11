@@ -10,7 +10,7 @@
 //! position, a tensor of the surviving extents otherwise.
 
 use ast_types::{BinaryOp, Expr, TensorIndexArg};
-use neuro_hir::{HirExpr, HirExprKind, HirTensorAxis, HirType};
+use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirTensorAxis, HirType};
 use shared_types::{Literal, Span};
 
 use crate::{Lowerer, LoweringError};
@@ -23,8 +23,12 @@ impl Lowerer {
         indices: &[TensorIndexArg],
         span: Span,
     ) -> Result<HirExpr, LoweringError> {
-        let (element, shape) = match object.ty.referent() {
-            HirType::Tensor { element, shape } => ((**element).clone(), shape.clone()),
+        let (element, shape, names) = match object.ty.referent() {
+            HirType::Tensor {
+                element,
+                shape,
+                names,
+            } => ((**element).clone(), shape.clone(), names.clone()),
             other => {
                 return Err(LoweringError::Malformed {
                     detail: format!("tensor index over non-tensor type '{other}'"),
@@ -43,10 +47,14 @@ impl Lowerer {
 
         let mut axes = Vec::with_capacity(indices.len());
         let mut kept = Vec::new();
-        for (index, extent) in indices.iter().zip(shape.iter()) {
+        // A surviving axis is still the axis its name documented, so a sub-range of
+        // `height` keeps that name; an axis given a position disappears with it.
+        let mut kept_names = Vec::new();
+        for (position, (index, extent)) in indices.iter().zip(shape.iter()).enumerate() {
             let axis = self.lower_tensor_axis(index, *extent)?;
             if let HirTensorAxis::Range { start, end } = &axis {
                 kept.push(end - start);
+                kept_names.push(names.0.get(position).cloned().flatten());
             }
             axes.push(axis);
         }
@@ -57,6 +65,7 @@ impl Lowerer {
             HirType::Tensor {
                 element: Box::new(element),
                 shape: kept,
+                names: AxisNames(kept_names),
             }
         };
         Ok(HirExpr::new(

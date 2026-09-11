@@ -259,6 +259,79 @@ pub enum TypeError {
     #[error("this literal at {span:?} is written against a shape whose extent '{name}' is a shape parameter, so its length cannot be checked here; build the tensor with a constructor instead, e.g. `Tensor::<f32, [{name}]>::zeros()`")]
     TensorLiteralSymbolicExtent { name: String, span: Span },
 
+    #[error("`.t()` at {span:?} transposes a matrix, but this tensor has rank {rank}; use `.permute([...])` to reorder the axes of a rank-{rank} tensor")]
+    TensorTransposeRank { rank: usize, span: Span },
+
+    #[error("`.{method}` at {span:?} needs its axes written as an array literal, e.g. `.{method}([{example}])`")]
+    TensorShapeArgNotLiteral {
+        method: String,
+        example: String,
+        span: Span,
+    },
+
+    #[error("this extent at {span:?} is not a constant; `.reshape` takes an array of integer literals, with `-1` in at most one position to infer that extent")]
+    TensorReshapeExtentNotConstant { span: Span },
+
+    #[error("`.reshape` at {span:?} writes `-1` more than once; only one extent can be inferred, because the rest have to determine it")]
+    TensorReshapeRepeatedInference { span: Span },
+
+    #[error("`.reshape` at {span:?} would hold {found} elements but the receiver holds {expected}; a reshape rearranges a tensor's extents and cannot change how many elements it has")]
+    TensorReshapeElementCount {
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    #[error("`-1` at {span:?} cannot be inferred: the other extents multiply to {known}, which does not divide the receiver's {total} elements")]
+    TensorReshapeIndivisible {
+        known: usize,
+        total: usize,
+        span: Span,
+    },
+
+    #[error(
+        "this tensor has no dimension named '{name}' at {span:?}; its shape declares {declared}"
+    )]
+    UnknownTensorAxisName {
+        name: String,
+        declared: String,
+        span: Span,
+    },
+
+    #[error("axis {axis} at {span:?} is out of range for a rank-{rank} tensor; axes are numbered 0 to {}", rank.saturating_sub(1))]
+    TensorAxisOutOfRange {
+        axis: usize,
+        rank: usize,
+        span: Span,
+    },
+
+    #[error("`.{method}` at {span:?} names axis {axis} twice; each axis may be named once")]
+    TensorAxisRepeated {
+        method: String,
+        axis: usize,
+        span: Span,
+    },
+
+    #[error("`.permute` at {span:?} was given {found} axes for a rank-{rank} tensor; a permutation names every axis exactly once")]
+    TensorPermuteRank {
+        found: usize,
+        rank: usize,
+        span: Span,
+    },
+
+    #[error("`.flatten` at {span:?} was given axes that are not adjacent; flattening merges a contiguous run of axes into one, so name them in shape order")]
+    TensorFlattenNotAdjacent { span: Span },
+
+    #[error("`.flatten` at {span:?} was given an empty axis list; name the axes to merge, or call `.flatten()` to merge them all")]
+    TensorFlattenNoAxes { span: Span },
+
+    #[error("`.{method}` at {span:?} needs every extent of the receiver to be known here, but '{name}' is a shape parameter; a shape-generic tensor cannot be reshaped until it is instantiated")]
+    TensorShapeCastSymbolicExtent {
+        method: String,
+        name: String,
+        span: Span,
+    },
+
     #[error("`Tensor::{ctor}` at {span:?} does not apply to {ty}: {reason}")]
     TensorConstructorNotApplicable {
         ctor: String,

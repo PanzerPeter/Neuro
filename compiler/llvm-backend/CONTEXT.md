@@ -404,6 +404,20 @@ buffer is not freed twice) while a borrowed one is only read. Element arithmetic
 guards: an overflowing element panics on the debug tier and a zero divisor panics in every
 build, exactly as the scalar operator does.
 
+`codegen_tensor_shape_cast` (same file) lowers `HirExprKind::TensorShapeCast`: `.t()`,
+`.reshape(...)`, `.permute(...)` and `.flatten(...)`. It is not a `BuiltinMethod` — the method
+name alone would not say how the axes move, so lowering resolved that into the node's
+`permutation` and the backend never sees the four spellings. Both halves consume the receiver
+(`mark_moved_for_drop`), leaving exactly one buffer alive. With no permutation the receiver's own
+handle is returned after `build_dlpack_redescribe` rewrites its `ndim`, `shape`, and `strides`
+to the result type's globals: the elements are already in the result's order, so a reshape of any
+size costs three stores, allocates nothing, and does not move `data`. With one, a fresh handle and
+buffer are allocated and `emit_permuted_copy` fills them, then the receiver's handle is released
+through `build_dlpack_release` (the deleter, not a private free). That copy is ONE flat loop over
+the result's linear index rather than a nest of `rank` loops: both stride vectors are compile-time
+constants, so a result index decomposes into coordinates with constant `udiv`/`urem` and
+recomposes into a source offset with constant `mul`, and the IR is the same size at every rank.
+
 `expressions/tensor_index.rs` owns `HirExprKind::TensorIndex`. Every stride is a compile-time
 constant (every extent is part of the type), so the index is arithmetic on the flat row-major
 run behind `data`: each `Position` axis contributes `position * stride[k]` and each `Range` axis

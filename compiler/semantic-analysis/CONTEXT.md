@@ -623,8 +623,10 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   one entry point that chooses between that error and a plain `Mismatch`, so every argument,
   binding, and generic-call path tells the same story. An axis that survives an index keeps its
   name at its new extent (`TensorAxis::with_extent`), which is what lets a row of
-  `[height: 2, width: 3]` annotate as `[width: 3]`. Names are erased after checking: HIR lowering
-  reads `TensorDim.extent` alone. `resolve_type` restricts the element to a fixed-width scalar (integers,
+  `[height: 2, width: 3]` annotate as `[width: 3]`. A name is also *read back* by
+  `.permute` / `.flatten`, the only places one is resolved as an identifier rather than
+  compared (see **Tensor shape manipulation**); HIR lowering carries the names for that one
+  consumer and every backend still reads `TensorDim.extent` alone. `resolve_type` restricts the element to a fixed-width scalar (integers,
   `f16`/`bf16`/`f32`/`f64`, `bool`) and reports `NonScalarTensorElement` otherwise. A tensor owns
   its buffer, so `is_type_copy` is false and `is_type_move_tracked` is true: it moves on
   assignment and on being passed. `Tensor` is a prelude name a module may shadow, so the
@@ -656,6 +658,25 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   `TensorConstructorNotApplicable`: `identity` is square and rank 2, `random_normal` draws only
   into `f32`/`f64`, `scalar` is rank 0, and `from` takes the same nested literal the annotated
   form coerces.
+- **Tensor shape manipulation, in `type_checkers/tensor_shape.rs`.** `.t()`,
+  `.reshape([...])`, `.permute([...])`, and `.flatten()` / `.flatten(dims: [...])` reach
+  `check_tensor_shape_method` from the builtin arm, matched on `recv` (not the referent) like
+  `.to(device)`: each CONSUMES its receiver via `record_move`, so a borrow falls through to
+  `MethodNotFound`. **Their arguments are never handed to `check_expr`**, because a `.permute`
+  entry may be a dimension NAME, which the specification resolves against the receiver's own shape and
+  which no value scope declares; `const_integer` folds a position or extent out of the syntax
+  instead. `.t()` is rank-2 only (`TensorTransposeRank`); `.reshape` takes at most one `-1`
+  (`TensorReshapeRepeatedInference`) and may not change the element count
+  (`TensorReshapeElementCount`, `TensorReshapeIndivisible`); `.permute` names every axis
+  exactly once (`TensorPermuteRank`, `TensorAxisRepeated`); `.flatten` merges an ADJACENT run
+  (`TensorFlattenNotAdjacent`) and merges everything when given no argument. An unknown
+  dimension name is `UnknownTensorAxisName`, which lists the names the shape does declare.
+  `.t()` and `.permute` carry each axis's name along; `.reshape` and a merged `.flatten` axis
+  are unnamed, a new extent not being the axis the old name documented. A `Param` extent has
+  no element count, so `.reshape` / `.flatten` report `TensorShapeCastSymbolicExtent` inside a
+  shape-generic definition while the two reordering methods still work. The label in
+  `.flatten(dims: ...)` is bound by the `argument-binding` slice, whose seeded builtin
+  signature is the one method entry it carries.
 - **Tensor slicing and indexing, in `type_checkers/tensor_index.rs`.** `check_tensor_index`
   takes one argument per axis and answers one of two types: an axis given a `Position` is
   DROPPED and one given a `Range` (a `..` full axis is the range over the whole extent)

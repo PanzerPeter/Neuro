@@ -1,5 +1,5 @@
 use super::{binding_init, function_body, lower};
-use neuro_hir::{HirExpr, HirExprKind, HirItem, HirTensorAxis, HirType};
+use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirItem, HirTensorAxis, HirType};
 use shared_types::Literal;
 
 /// The declared parameter types of the first function named `name`.
@@ -30,6 +30,7 @@ func main() -> i32 { return 0 }
         HirType::Tensor {
             element: Box::new(HirType::F32),
             shape: vec![3, 224, 224],
+            names: AxisNames::default(),
         }
     );
 }
@@ -49,6 +50,7 @@ func main() -> i32 { return 0 }
         HirType::Tensor {
             element: Box::new(HirType::F32),
             shape: Vec::new(),
+            names: AxisNames::default(),
         }
     );
 }
@@ -183,6 +185,7 @@ func main() -> i32 {
         HirType::Tensor {
             element: Box::new(HirType::U8),
             shape: vec![2, 3],
+            names: AxisNames::default(),
         }
     );
 }
@@ -213,6 +216,7 @@ func main() -> i32 {
     let tensor = HirType::Tensor {
         element: Box::new(HirType::F32),
         shape: vec![2, 2],
+        names: AxisNames::default(),
     };
     let copied = binding_init(function_body(&program, "copy_of"), "copied");
     assert_eq!(copied.ty, tensor);
@@ -272,6 +276,7 @@ func main() -> i32 {
         HirType::Tensor {
             element: Box::new(HirType::I32),
             shape: vec![3],
+            names: AxisNames::default(),
         }
     );
 }
@@ -303,6 +308,7 @@ func main() -> i32 {
         HirType::Tensor {
             element: Box::new(HirType::I32),
             shape: vec![3, 2],
+            names: AxisNames::default(),
         }
     );
 }

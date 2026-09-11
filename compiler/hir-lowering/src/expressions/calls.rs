@@ -422,6 +422,14 @@ impl Lowerer {
             return self.lower_chars_iterator(object, span);
         }
 
+        // The shape-manipulation intrinsics consume a tensor by value, so a borrowed
+        // receiver falls through to the ordinary method surface exactly as the checker
+        // makes it. Their arguments are never lowered as values: `.permute([height])`
+        // names an axis, not a variable.
+        if crate::tensor_shape::is_shape_method(method) && matches!(recv, HirType::Tensor { .. }) {
+            return self.lower_tensor_shape_cast(object, method, args, span);
+        }
+
         let (lowered_args, result_ty) = if let HirType::Struct(struct_name) = recv.referent() {
             let struct_name = struct_name.clone();
             if let Some(mangled) = self

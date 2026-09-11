@@ -146,7 +146,7 @@ impl Type {
                 size: *size,
             },
             HirType::Slice(element) => Type::Slice(Box::new(Type::from_hir(element))),
-            HirType::Tensor { element, shape } => Type::Tensor {
+            HirType::Tensor { element, shape, .. } => Type::Tensor {
                 element: Box::new(Type::from_hir(element)),
                 shape: shape.clone(),
             },

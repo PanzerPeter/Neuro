@@ -29,8 +29,14 @@ it the *typed* contract:
    a fully resolved `HirType`. `HirType` has **no `Unknown` variant**. Reaching the HIR implies
    the program type-checked. Its variant set mirrors what the semantic analyzer produces today;
    no generic variants until the language gains them (No Speculative Generality).
-   `HirType::Tensor { element, shape }` carries the statically shaped `Tensor<T, [d0, ...]>`,
-   and the four construction kinds beside it are the only ways to produce one: `TensorLiteral`
+   `HirType::Tensor { element, shape, names }` carries the statically shaped
+   `Tensor<T, [d0, ...]>`. `names` is the dimension name at each axis, wrapped in `AxisNames`,
+   whose `PartialEq` is deliberately trivial: the language makes a named shape and an unnamed
+   one the same type and compares a name only where both sides supply one, so derived equality
+   would be stricter than the language's. It exists for one consumer, the shape-manipulation
+   calls that resolve `image.permute([height, width, channels])` against the receiver's own
+   shape; no backend reads it.
+   The four construction kinds beside it are the only ways to produce one: `TensorLiteral`
    (elements already flattened row-major), `TensorFill`, `TensorIdentity`, `TensorRandomNormal`.
    A fill and an identity stay separate nodes rather than expanding to elements,
    so a large tensor is one node and one loop instead of one node per element.
@@ -39,6 +45,12 @@ it the *typed* contract:
    `ty` is what says which happened — an element type when every axis was a position, a
    `HirType::Tensor` of the survivors otherwise. A `..` full axis has no variant of its own: the
    checker resolved it to the range over the whole extent.
+   `HirExprKind::TensorShapeCast { receiver, permutation }` is `.t()` / `.reshape(...)` /
+   `.permute(...)` / `.flatten(...)`: the result shape is the expression's own type, the
+   receiver's is on `receiver.ty`, and the call consumes the receiver so one buffer moves into
+   the result. `permutation` is `Some(order)` only when the element order changes, and then
+   `order[d]` is the receiver axis result axis `d` came from; `None` is the order-preserving
+   case, which is pure metadata over the same buffer.
    `HirStmt::TensorCompoundAssign { target, op, value, ty, span }` is the in-place update
    beside them: `ty` is the target's tensor type and `value` is either that same type or a
    reference to it, an owned operand being consumed by the update and a borrowed one only

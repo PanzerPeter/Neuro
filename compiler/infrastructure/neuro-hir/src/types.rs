@@ -2,6 +2,34 @@
 
 use std::fmt;
 
+/// The dimension names of a tensor shape, one entry per axis.
+///
+/// Two tensor types are the same type whether or not they name their axes: the language
+/// checks a name only where both sides supply one, and the frontend has already applied
+/// that rule by the time any HIR consumer compares two types. Derived equality would be
+/// stricter than the language's, so this wrapper is deliberately equal to every other
+/// wrapper and the names ride along without changing type identity.
+#[derive(Debug, Clone, Default, Eq)]
+pub struct AxisNames(pub Vec<Option<String>>);
+
+impl AxisNames {
+    /// The axis `name` sits at, or `None` when the shape declares no such name.
+    pub fn position_of(&self, name: &str) -> Option<usize> {
+        self.0.iter().position(|n| n.as_deref() == Some(name))
+    }
+
+    /// Every name the shape declares, in axis order, for a diagnostic that lists them.
+    pub fn declared(&self) -> Vec<String> {
+        self.0.iter().flatten().cloned().collect()
+    }
+}
+
+impl PartialEq for AxisNames {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
 /// A fully resolved Neuro type as it appears in the HIR.
 ///
 /// Unlike the surface [`ast_types::Type`], a `HirType` is the *result* of type
@@ -83,6 +111,11 @@ pub enum HirType {
     Tensor {
         element: Box<HirType>,
         shape: Vec<usize>,
+        /// The dimension name written at each axis, `None` where the shape gave none.
+        /// Carried so a shape-manipulation call can resolve the identifier in
+        /// `image.permute([height, width, channels])` against the receiver's own shape;
+        /// no backend reads it. See [`AxisNames`] for why it is outside type equality.
+        names: AxisNames,
     },
     /// A heap-backed standard collection: `Vec<T>` (one argument),
     /// `HashMap<K, V>` / `BTreeMap<K, V>` (two), or `String` (none). Backends lower
@@ -188,13 +221,20 @@ impl fmt::Display for HirType {
             }
             HirType::Array { element, size } => write!(f, "[{}; {}]", element, size),
             HirType::Slice(element) => write!(f, "[{}]", element),
-            HirType::Tensor { element, shape } => {
+            HirType::Tensor {
+                element,
+                shape,
+                names,
+            } => {
                 write!(f, "Tensor<{}, [", element)?;
                 for (i, extent) in shape.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", extent)?;
+                    match names.0.get(i).and_then(Option::as_ref) {
+                        Some(name) => write!(f, "{}: {}", name, extent)?,
+                        None => write!(f, "{}", extent)?,
+                    }
                 }
                 write!(f, "]>")
             }

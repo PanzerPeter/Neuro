@@ -1,6 +1,6 @@
 //! Type-annotation resolution: `ast_types::Type` → `neuro_hir::HirType`.
 
-use neuro_hir::HirType;
+use neuro_hir::{AxisNames, HirType};
 use shared_types::{FloatSuffix, IntSuffix};
 
 use crate::{Lowerer, LoweringError};
@@ -201,6 +201,12 @@ impl Lowerer {
                 Ok(HirType::Tensor {
                     element: Box::new(self.resolve_type(element_type)?),
                     shape: extents,
+                    names: AxisNames(
+                        shape
+                            .iter()
+                            .map(|dim| dim.name.as_ref().map(|n| n.name.clone()))
+                            .collect(),
+                    ),
                 })
             }
         }

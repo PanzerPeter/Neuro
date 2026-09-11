@@ -6,7 +6,7 @@
 //! here is flattening the literal into row-major buffer order and picking the node.
 
 use ast_types::{Expr, GenericArg};
-use neuro_hir::{HirExpr, HirExprKind, HirType};
+use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirType};
 use shared_types::Literal;
 
 use crate::{Lowerer, LoweringError};
@@ -52,6 +52,7 @@ impl Lowerer {
             HirType::Tensor {
                 element: Box::new(element.clone()),
                 shape: shape.to_vec(),
+                names: AxisNames::default(),
             },
             span,
         ))
@@ -112,7 +113,7 @@ impl Lowerer {
                 }
             },
         };
-        let HirType::Tensor { element, shape } = &ty else {
+        let HirType::Tensor { element, shape, .. } = &ty else {
             return Err(LoweringError::Malformed {
                 detail: format!("`Tensor::{ctor}` did not resolve to a tensor type"),
             });

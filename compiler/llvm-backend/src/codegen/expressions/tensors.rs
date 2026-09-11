@@ -378,6 +378,196 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(handle.into())
     }
 
+    /// Lower `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`.
+    ///
+    /// Both halves consume the receiver, so exactly one buffer is alive afterwards.
+    /// An order-preserving cast (`permutation` is `None`) hands the receiver's own handle
+    /// back with its rank, extents, and strides rewritten: the elements are already where
+    /// the result wants them, so there is nothing to copy and the DLPack `data` pointer
+    /// does not move. A permuting cast has to build the result's buffer, because the
+    /// element order genuinely differs, and then releases the receiver's handle — the
+    /// deleter, not a private free, so a `pool`-allocated tensor stays correct.
+    pub(crate) fn codegen_tensor_shape_cast(
+        &mut self,
+        receiver: &HirExpr,
+        permutation: Option<&[usize]>,
+        result_ty: &Type,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let BasicValueEnum::PointerValue(source) = self.codegen_expr(receiver)? else {
+            return Err(CodegenError::InternalError(
+                "a tensor receiver does not lower to a pointer".to_string(),
+            ));
+        };
+        self.mark_moved_for_drop(receiver);
+
+        let Some(permutation) = permutation else {
+            self.build_dlpack_redescribe(source, result_ty)?;
+            return Ok(source.into());
+        };
+
+        let source_ty = Type::from_hir(receiver.ty.referent());
+        let Type::Tensor {
+            shape: src_shape, ..
+        } = &source_ty
+        else {
+            return Err(CodegenError::InternalError(
+                "a shape cast's receiver does not carry a tensor type".to_string(),
+            ));
+        };
+        let (_, count) = self.tensor_layout(result_ty)?;
+        let Type::Tensor {
+            shape: dst_shape, ..
+        } = result_ty
+        else {
+            return Err(CodegenError::InternalError(
+                "a shape cast does not produce a tensor type".to_string(),
+            ));
+        };
+        if permutation.len() != dst_shape.len() || permutation.len() != src_shape.len() {
+            return Err(CodegenError::InternalError(
+                "a shape cast's permutation does not match its ranks".to_string(),
+            ));
+        }
+
+        let buffer_ty = self.tensor_buffer_type(result_ty)?;
+        let source_data = self.load_dlpack_data(source)?;
+        let (handle, data) = self.alloc_tensor(result_ty, "tensor.permute")?;
+        self.emit_permuted_copy(
+            buffer_ty,
+            source_data,
+            data,
+            count,
+            src_shape,
+            dst_shape,
+            permutation,
+        )?;
+        self.build_dlpack_release(source)?;
+        Ok(handle.into())
+    }
+
+    /// Copy `count` elements from `source` into `destination`, reading each result slot
+    /// from the receiver slot the permutation points it at.
+    ///
+    /// One flat loop over the result's linear index rather than a nest of `rank` loops:
+    /// the extents and both stride vectors are compile-time constants, so a result index
+    /// decomposes into coordinates with constant divisions and recomposes into a source
+    /// offset with constant multiplies. The IR is then the same size whatever the rank is.
+    #[allow(clippy::too_many_arguments)]
+    fn emit_permuted_copy(
+        &mut self,
+        buffer_ty: BasicTypeEnum<'ctx>,
+        source: PointerValue<'ctx>,
+        destination: PointerValue<'ctx>,
+        count: usize,
+        src_shape: &[usize],
+        dst_shape: &[usize],
+        permutation: &[usize],
+    ) -> CodegenResult<()> {
+        let src_strides = row_major_strides(src_shape);
+        let dst_strides = row_major_strides(dst_shape);
+        let i64_type = self.context.i64_type();
+        let BasicTypeEnum::ArrayType(buffer_array) = buffer_ty else {
+            return Err(CodegenError::InternalError(
+                "a tensor buffer is not an array type".to_string(),
+            ));
+        };
+        let element_ty = buffer_array.get_element_type();
+
+        let function = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("a shape cast outside a function".to_string())
+        })?;
+        let index = self.entry_alloca(i64_type, "tensor.permute.i")?;
+        self.builder
+            .build_store(index, i64_type.const_zero())
+            .map_err(llvm_err)?;
+        let head = self
+            .context
+            .append_basic_block(function, "tensor.permute.head");
+        let body = self
+            .context
+            .append_basic_block(function, "tensor.permute.body");
+        let done = self
+            .context
+            .append_basic_block(function, "tensor.permute.done");
+
+        self.builder
+            .build_unconditional_branch(head)
+            .map_err(llvm_err)?;
+        self.builder.position_at_end(head);
+        let i = self
+            .builder
+            .build_load(i64_type, index, "tensor.permute.idx")
+            .map_err(llvm_err)?
+            .into_int_value();
+        let more = self
+            .builder
+            .build_int_compare(
+                IntPredicate::ULT,
+                i,
+                i64_type.const_int(count as u64, false),
+                "tensor.permute.more",
+            )
+            .map_err(llvm_err)?;
+        self.builder
+            .build_conditional_branch(more, body, done)
+            .map_err(llvm_err)?;
+
+        self.builder.position_at_end(body);
+        let mut offset = i64_type.const_zero();
+        for axis in 0..dst_shape.len() {
+            let coord = self
+                .builder
+                .build_int_unsigned_div(
+                    i,
+                    i64_type.const_int(dst_strides[axis], false),
+                    "tensor.permute.div",
+                )
+                .map_err(llvm_err)?;
+            let coord = self
+                .builder
+                .build_int_unsigned_rem(
+                    coord,
+                    i64_type.const_int(dst_shape[axis] as u64, false),
+                    "tensor.permute.coord",
+                )
+                .map_err(llvm_err)?;
+            let scaled = self
+                .builder
+                .build_int_mul(
+                    coord,
+                    i64_type.const_int(src_strides[permutation[axis]], false),
+                    "tensor.permute.scaled",
+                )
+                .map_err(llvm_err)?;
+            offset = self
+                .builder
+                .build_int_add(offset, scaled, "tensor.permute.offset")
+                .map_err(llvm_err)?;
+        }
+
+        // Both indices are below `count` on this edge: `i` by the loop head's test, and
+        // `offset` because a permutation is a bijection over the same element run.
+        let from = self.tensor_slot(buffer_ty, source, offset)?;
+        let value = self
+            .builder
+            .build_load(element_ty, from, "tensor.permute.value")
+            .map_err(llvm_err)?;
+        let into = self.tensor_slot(buffer_ty, destination, i)?;
+        self.builder.build_store(into, value).map_err(llvm_err)?;
+
+        let next = self
+            .builder
+            .build_int_add(i, i64_type.const_int(1, false), "tensor.permute.next")
+            .map_err(llvm_err)?;
+        self.builder.build_store(index, next).map_err(llvm_err)?;
+        self.builder
+            .build_unconditional_branch(head)
+            .map_err(llvm_err)?;
+
+        self.builder.position_at_end(done);
+        Ok(())
+    }
+
     /// Lower `tensor.to(device)`: the consuming device transfer.
     ///
     /// Every buffer this backend can build is host memory, so a transfer to the host is
@@ -810,4 +1000,14 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or_else(|| CodegenError::InternalError(format!("`{name}` returned void")))?
             .into_float_value())
     }
+}
+
+/// Row-major element strides for `shape`: the distance between neighbouring elements
+/// along each axis, counted in elements the way DLPack counts them.
+fn row_major_strides(shape: &[usize]) -> Vec<u64> {
+    let mut strides = vec![1u64; shape.len()];
+    for axis in (0..shape.len().saturating_sub(1)).rev() {
+        strides[axis] = strides[axis + 1] * shape[axis + 1] as u64;
+    }
+    strides
 }

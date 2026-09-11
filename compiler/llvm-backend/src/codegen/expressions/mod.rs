@@ -182,6 +182,14 @@ impl<'ctx> CodegenContext<'ctx> {
                 let result_ty = Type::from_hir(&expr.ty);
                 self.codegen_tensor_index(object, axes, &result_ty, expr.span.start)
             }
+            // `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`.
+            HirExprKind::TensorShapeCast {
+                receiver,
+                permutation,
+            } => {
+                let result_ty = Type::from_hir(&expr.ty);
+                self.codegen_tensor_shape_cast(receiver, permutation.as_deref(), &result_ty)
+            }
 
             HirExprKind::Index { object, index } => {
                 let obj_ty = Type::from_hir(&object.ty);
