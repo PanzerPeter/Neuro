@@ -561,6 +561,9 @@ pub enum TypeError {
         moved_at: Span,
     },
 
+    #[error("'{name}' at {span:?} is moved out inside a loop body, but it is bound outside the loop: the next iteration would move it again. Move a `.clone()` instead, borrow it with `&`, or give the binding a fresh value before the iteration ends")]
+    MovedInLoopBody { name: String, span: Span },
+
     #[error("cannot borrow this expression at {span:?}: `&` requires a place (a variable); bind it to a `val` first")]
     CannotBorrowValue { span: Span },
 

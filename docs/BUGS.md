@@ -5,6 +5,138 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-028 — an annotation's type does not reach a `break` value
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (expected-type propagation)
+- **Severity**: minor — the compiler rejects a program the equivalent `if`, `match`, and
+  block forms all accept; it never miscompiles
+
+An expected type flows into an `if` arm, a `match` arm, a bare block's tail, and a
+function's `return`, so a tensor literal written in any of those coerces against the
+annotation. It does not flow into the value of a `break`, so the same literal in a value
+loop is typed as a plain array and then fails to match.
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    mut i = 0
+    val t: Tensor<i32, [2]> = loop {
+        i = i + 1
+        if i == 1 { break [10, 20] }
+    }
+    return t[0] + t[1]
+}
+```
+
+Expected: compiles and returns 30, the way every other form of the same program does.
+Observed:
+
+```
+type mismatch: expected Tensor<i32, [2]>, found [i32; 2]
+```
+
+These three are accepted, which is what makes the `break` case a defect rather than a
+missing feature: `val t: Tensor<i32, [2]> = if c { [1, 2] } else { [3, 4] }`, the same with
+`match`, and the same with a bare block. An explicit constructor in the `break`
+(`break Tensor::<i32, [2]>::ones()`) is also accepted, so only the literal coercion is
+affected.
+
+**Root cause**: `check_loop_expr` takes the expected type but passes it no further than its
+own fallback for a loop with no `break`; `check_loop_body` never receives it, so `LoopContext`
+carries no expected type and the `Stmt::Break` arm checks its value with no annotation to
+coerce against.
+
+**Workaround**: write the constructor instead of the literal, or bind the literal to an
+annotated `val` inside the loop and `break` that.
+
+**Fix sketch**: thread the expected type through `check_loop_body` into `LoopContext`, and
+have the `Stmt::Break` arm pass it to `check_expr` as the expected type of the break value.
+The agreement check between several `break`s in one loop stays as it is. A regression test
+wants the repro above plus a loop whose `break`s disagree, so the added expectation does not
+mask a genuine mismatch.
+
+## BUG-027 — a const generic parameter cannot be passed to another generic call
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (generic inference, `unify_array_len` / `seed_turbofish`)
+- **Severity**: major — a generic function cannot delegate to another over its own const
+  parameter, by inference or explicitly; the compiler rejects, it does not miscompile
+
+A generic function that takes a const parameter (including a tensor shape parameter, which
+the language reference makes sugar for one) cannot pass that parameter to another generic
+function. Type parameters forward correctly; only const parameters fail.
+
+**Minimal repro**
+
+```neuro
+func sum_n<N>(t: &Tensor<i32, [N]>) -> i32 {
+    mut total = 0
+    for i in 0..(N as i32) { total = total + t[i] }
+    return total
+}
+
+func delegate<N>(t: &Tensor<i32, [N]>) -> i32 {
+    return sum_n(t)
+}
+
+func main() -> i32 {
+    val v: Tensor<i32, [3]> = [1, 2, 3]
+    return delegate(&v)
+}
+```
+
+Expected: compiles and returns 6. The callee's `N` is named by the argument's own type, so
+it is inferable. Observed:
+
+```
+generic parameter 'N' cannot be inferred from the call arguments;
+supply it explicitly with a turbofish, e.g. `f::<...>(...)`
+```
+
+The turbofish the message recommends does not work either. `sum_n::<N>(t)` reports
+
+```
+turbofish argument for parameter 'N' has the wrong kind: a const argument was expected
+```
+
+so the parameter can be supplied neither way. Calling the same function from a *concrete*
+caller works, and the identical program over a type parameter (`func outer<T>(x: T) -> T {
+inner(x) }`) works, which is what isolates this to const parameters. Arrays hit it too: a
+`func delegate<const N: u32>(a: &[i32; N])` calling a `func sum_arr<const N: u32>` fails the
+same way.
+
+**Root cause**: two halves, both confirmed in the code.
+
+Inference: `unify_array_len` (`type_checkers/declarations/mod.rs`) matches a symbolic callee
+extent against a symbolic argument extent with `(ArrayLen::Param(a), ArrayLen::Param(b)) =>
+a == b`. It reports agreement but inserts nothing into the substitution, so the later
+"every parameter must be bound" loop in `calls.rs` finds no binding and reports the
+parameter as uninferable. When the two spell the parameter differently the same arm returns
+`false` and an extent mismatch is reported on top.
+
+Turbofish: `seed_turbofish` accepts a const argument only as `GenericArg::Const`, which is
+what the parser produces for a literal. An identifier naming an in-scope const parameter
+parses as `GenericArg::Type`, so it lands in the kind-mismatch arm.
+
+**Workaround**: none within a generic function. Inline the callee's body, or make the caller
+concrete.
+
+**Fix sketch**: this is bigger than the two arms it appears to be, which is why it is filed
+rather than patched. A substitution has to be able to hold a *symbolic* const — "the
+caller's parameter `N`" — not only a `Type::ConstValue`; `unify_array_len` then binds the
+callee's parameter to it, `substitute_array_len` maps it back to an `ArrayLen::Param` in the
+caller's frame, and the Copy check in `calls.rs` needs a carve-out for it the way
+`ConstValue` already has one. `seed_turbofish` separately has to resolve an identifier
+argument against the enclosing function's const parameters before deciding its kind. The
+part to settle first is monomorphization: an instantiation of the outer function has to
+resolve the inner call's symbolic binding to the concrete extent it was instantiated at, and
+whether the existing instantiation walk carries enough context to do that is the question
+that decides the shape of the rest. Regression tests want both spellings of the parameter
+name, the turbofish form, the array form, and two distinct instantiations of the outer
+function so a wrong extent could not pass unnoticed.
+
 ## BUG-026 — a later binding may not reuse a name in the same block
 
 - **Status**: open, confirmed

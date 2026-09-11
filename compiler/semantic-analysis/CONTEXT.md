@@ -312,7 +312,16 @@ borrows rather than moving: the canonical opt-out.
 
 The analysis is deliberately conservative: `if`/`while`/`for` bodies and if-expression arms
 snapshot and restore move state, so a conditional move never leaks onto a non-executing path. It
-may miss some moves (a second-iteration loop move, say) but never rejects a valid program.
+may miss some moves, but it never rejects a valid program.
+
+A loop body is the exception to the plain restore. `report_loop_body_moves` runs after the body
+and before the restore, and reports `MovedInLoopBody` for every binding that was intact at the
+snapshot and is still moved-out when the body ends: the next iteration would move it again, which
+is a double free rather than a diagnostic. A body that re-establishes the binding (a `mut`
+reassignment clears `moved_at`) and a binding declared inside the body (it leaves with the body's
+scope) are both untouched, and a body that always leaves the loop via `break` or `return`
+(`stmts_exit_loop`) is exempt, because its move runs once. The restore after it is unchanged: the
+loop may run zero times, so the binding still owns its value on the path past the loop.
 
 **`@derive(...)`.** `copy_structs` / `clone_structs` / `debug_structs` / `partial_eq_structs` are
 populated from `StructDef.attributes` in `record_derive_intent`, which also validates the argument

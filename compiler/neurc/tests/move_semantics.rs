@@ -129,3 +129,166 @@ func main() -> i32 {
         .expect("scalar copy program should compile and run");
     assert_eq!(exit_code, 0);
 }
+
+// A move out of a binding declared outside a loop repeats on the next iteration.
+// Before these landed, the checker restored the body's move state wholesale, so the
+// program compiled and freed the same buffer once per iteration.
+
+#[test]
+fn regression_move_in_while_body_is_rejected_not_double_freed() {
+    let source = r#"
+func eat(t: Tensor<i32, [3]>) -> i32 { return t[0] }
+
+func main() -> i32 {
+    val b: Tensor<i32, [3]> = [1, 2, 3]
+    mut s = 0
+    mut i = 0
+    while i < 2 {
+        s = s + eat(b)
+        i = i + 1
+    }
+    return s
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(
+        !success,
+        "a move repeated by a `while` body should be rejected"
+    );
+    assert!(
+        stderr.contains("is moved out inside a loop body"),
+        "expected the loop-move diagnostic, got: {stderr}"
+    );
+}
+
+#[test]
+fn regression_move_in_for_body_is_rejected() {
+    let source = r#"
+func eat(t: Tensor<i32, [3]>) -> i32 { return t[0] }
+
+func main() -> i32 {
+    val b: Tensor<i32, [3]> = [1, 2, 3]
+    mut s = 0
+    for i in 0..2 {
+        s = s + eat(b)
+    }
+    return s
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(
+        !success,
+        "a move repeated by a `for` body should be rejected"
+    );
+    assert!(
+        stderr.contains("is moved out inside a loop body"),
+        "expected the loop-move diagnostic, got: {stderr}"
+    );
+}
+
+#[test]
+fn regression_move_of_drop_value_in_loop_body_is_rejected() {
+    // The `Drop` case is the silent one: no allocator is involved, so the old
+    // behaviour ran the destructor once per iteration without aborting.
+    let source = r#"
+struct Res { id: i32 }
+
+impl Drop for Res {
+    func drop(&mut self) {
+        println("drop {self.id}")
+    }
+}
+
+func eat(r: Res) -> i32 { return r.id }
+
+func main() -> i32 {
+    val r = Res { id: 7 }
+    mut s = 0
+    mut i = 0
+    while i < 2 {
+        s = s + eat(r)
+        i = i + 1
+    }
+    return s
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(
+        !success,
+        "a repeated move of a Drop value should be rejected"
+    );
+    assert!(
+        stderr.contains("is moved out inside a loop body"),
+        "expected the loop-move diagnostic, got: {stderr}"
+    );
+}
+
+#[test]
+fn move_in_loop_body_is_allowed_when_the_binding_is_given_a_fresh_value() {
+    let test = CompileTest::new();
+    let source = r#"
+func eat(t: Tensor<i32, [3]>) -> i32 { return t[0] }
+
+func main() -> i32 {
+    mut b: Tensor<i32, [3]> = [1, 2, 3]
+    mut s = 0
+    mut i = 0
+    while i < 3 {
+        s = s + eat(b)
+        b = [1, 2, 3]
+        i = i + 1
+    }
+    return s - 3
+}
+"#;
+    let exit_code = test
+        .compile_and_run("move_loop_reassigned.nr", source)
+        .expect("a body that re-establishes the binding should compile and run");
+    assert_eq!(exit_code, 0);
+}
+
+#[test]
+fn move_in_loop_body_is_allowed_when_the_body_always_breaks() {
+    let test = CompileTest::new();
+    let source = r#"
+func eat(t: Tensor<i32, [3]>) -> i32 { return t[0] }
+
+func main() -> i32 {
+    val b: Tensor<i32, [3]> = [7, 2, 3]
+    mut s = 0
+    mut i = 0
+    while i < 3 {
+        s = s + eat(b)
+        break
+    }
+    return s - 7
+}
+"#;
+    let exit_code = test
+        .compile_and_run("move_loop_break.nr", source)
+        .expect("a body that always leaves the loop moves once and should compile");
+    assert_eq!(exit_code, 0);
+}
+
+#[test]
+fn move_of_a_binding_declared_inside_the_loop_body_is_allowed() {
+    let test = CompileTest::new();
+    let source = r#"
+func eat(t: Tensor<i32, [3]>) -> i32 { return t[0] }
+
+func main() -> i32 {
+    mut s = 0
+    mut i = 0
+    while i < 3 {
+        val local: Tensor<i32, [3]> = [2, 0, 0]
+        s = s + eat(local)
+        i = i + 1
+    }
+    return s - 6
+}
+"#;
+    let exit_code = test
+        .compile_and_run("move_loop_local.nr", source)
+        .expect("a binding fresh each iteration should compile and run");
+    assert_eq!(exit_code, 0);
+}

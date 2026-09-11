@@ -167,7 +167,7 @@ pub enum Type {
     /// the type, so `Tensor<f32, [2, 2]>` and `Tensor<f32, [3, 3]>` are distinct and an
     /// empty `shape` is the rank-0 scalar tensor. A tensor owns its buffer, so it is
     /// never `Copy`: assignment and argument passing move it. An extent is symbolic
-    /// ([`ArrayLen::Param`]) inside a shape-generic definition and concrete everywhere
+    /// (`ArrayLen::Param`) inside a shape-generic definition and concrete everywhere
     /// else.
     Tensor {
         element: Box<Type>,

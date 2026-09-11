@@ -10,8 +10,19 @@
 //! expressions in a consuming position, and conditional regions snapshot/restore
 //! their move state (see `SymbolTable::snapshot_moves`). It may therefore miss
 //! some moves, but it never rejects a valid program.
+//!
+//! A loop body is the one region where restoring the state is not the whole
+//! story. The restore is right for what follows the loop — it may run zero times,
+//! so the binding may still own its value there — but a move that is still
+//! outstanding when the body *ends* is one the next iteration performs again on a
+//! binding that owns nothing. `report_loop_body_moves` reports those before the
+//! restore, which is what keeps the second iteration from freeing the same buffer
+//! twice.
 
-use ast_types::Expr;
+use ast_types::{Expr, Stmt};
+use shared_types::Span;
+
+use crate::errors::TypeError;
 
 use super::TypeChecker;
 
@@ -39,6 +50,56 @@ impl TypeChecker {
         if binding_ty.is_some_and(|ty| self.is_type_move_tracked(&ty)) {
             self.symbols.mark_moved(&ident.name, ident.span);
         }
+    }
+
+    /// Report every binding the just-checked loop body moved out of and did not
+    /// replace, given the move state captured before the body ran.
+    ///
+    /// A loop body's moves are restored afterwards because the loop may run zero
+    /// times, but a move that is still outstanding when the body ends is a move the
+    /// *next* iteration performs again on a binding that no longer owns anything —
+    /// a double free at run time rather than a diagnostic. Call this with the scope
+    /// stack the snapshot was taken on: bindings declared inside the body have gone
+    /// with its scope, which is what leaves only the outer ones.
+    pub(crate) fn report_loop_body_moves(&mut self, snapshot: &[Option<Span>], body: &[Stmt]) {
+        // A body that always leaves the loop runs its move once, so there is no
+        // second iteration to catch.
+        if stmts_exit_loop(body) {
+            return;
+        }
+
+        for (name, span) in self.symbols.moves_since(snapshot) {
+            self.record_error(TypeError::MovedInLoopBody { name, span });
+        }
+    }
+}
+
+/// Whether a statement list always leaves the enclosing loop before falling off its
+/// end, via `break` or `return`.
+///
+/// `continue` is deliberately not an exit: it starts the next iteration, which is
+/// exactly the repetition this predicate exists to detect. Nested loops are not
+/// descended into either — a `break` inside one targets that loop, not this one.
+fn stmts_exit_loop(stmts: &[Stmt]) -> bool {
+    stmts.iter().any(stmt_exits_loop)
+}
+
+fn stmt_exits_loop(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Break { .. } | Stmt::Return { .. } => true,
+        Stmt::If {
+            then_block,
+            else_if_blocks,
+            else_block: Some(else_block),
+            ..
+        } => {
+            stmts_exit_loop(then_block)
+                && else_if_blocks
+                    .iter()
+                    .all(|(_, block)| stmts_exit_loop(block))
+                && stmts_exit_loop(else_block)
+        }
+        _ => false,
     }
 }
 

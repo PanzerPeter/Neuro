@@ -210,6 +210,7 @@ impl TypeChecker {
         }
         self.symbols.pop_scope();
         let ctx = self.loop_stack.pop();
+        self.report_loop_body_moves(&move_snapshot, body);
         self.symbols.restore_moves(&move_snapshot);
         match ctx {
             Some(ctx) => LoopExit {
@@ -621,6 +622,7 @@ impl TypeChecker {
 
                 self.symbols.pop_scope();
                 self.loop_stack.pop();
+                self.report_loop_body_moves(&move_snapshot, body);
                 self.symbols.restore_moves(&move_snapshot);
 
                 Some(())
@@ -714,6 +716,7 @@ impl TypeChecker {
 
                 self.symbols.pop_scope();
                 self.loop_stack.pop();
+                self.report_loop_body_moves(&move_snapshot, body);
                 self.symbols.restore_moves(&move_snapshot);
 
                 Some(())

@@ -10,6 +10,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.21.1] - 2026-09-11
+
+### Fixed
+
+- `semantic`: **a move inside a loop body is no longer accepted silently** when the binding
+  it consumes is declared outside the loop. The checker snapshotted the move state before a
+  `while` / `for` / `loop` body and restored it afterwards, which is right for the path past
+  the loop (it may run zero times) but erased the move within it. The second iteration then
+  moved a binding that no longer owned anything, and the value was released once per
+  iteration: a tensor or a `String` aborted the process with a double free, and a value with
+  a `Drop` impl ran its destructor once per iteration without any diagnostic at all. The
+  same program written straight-line was rejected, which is what made the loop form a hole
+  rather than a choice.
+
+  A body that still has a move outstanding when it ends now reports the binding by name.
+  Three shapes stay accepted, because none of them repeats the move: a body that gives the
+  binding a fresh value before the iteration ends, a binding declared inside the body, and a
+  body that always leaves the loop through `break` or `return`. Borrowing (`&x`) and
+  `.clone()` inside a loop were never affected.
+
+
 ## [2.21.0] - 2026-09-11
 
 ### Added

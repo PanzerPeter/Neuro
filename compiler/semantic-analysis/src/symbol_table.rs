@@ -255,6 +255,29 @@ impl SymbolTable {
         snapshot
     }
 
+    /// Every binding that was intact at [`snapshot_moves`] and is moved-out now,
+    /// with the span of the move. Walks the scope stack in the same flat order as
+    /// the snapshot, so it must be called with the same scope stack.
+    ///
+    /// A loop body uses this to tell a move it performed on a binding declared
+    /// outside the loop — which the next iteration would perform again — from one
+    /// the body re-established before the iteration ended.
+    ///
+    /// [`snapshot_moves`]: SymbolTable::snapshot_moves
+    pub(crate) fn moves_since(&self, snapshot: &[Option<Span>]) -> Vec<(String, Span)> {
+        let mut introduced = Vec::new();
+        let mut idx = 0;
+        for scope in &self.scopes {
+            for (name, info) in scope {
+                if let (Some(None), Some(span)) = (snapshot.get(idx), info.moved_at) {
+                    introduced.push((name.clone(), span));
+                }
+                idx += 1;
+            }
+        }
+        introduced
+    }
+
     /// Restore moved-state captured by [`snapshot_moves`]. Entries beyond the
     /// snapshot length (bindings introduced after the snapshot) are left as-is.
     ///
