@@ -5,6 +5,56 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-031 — `.step(n)` on a range is specified but has no implementation and no checkbox
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (range method dispatch); reaches `syntax-parsing`,
+  `hir-lowering` and `llvm-backend` once implemented
+- **Severity**: major. A documented construct of a closed sub-phase does not compile.
+
+The specification gives `.step(n)` as a method on any range, in three places: as a
+`for`-head adapter, in the list of adapters ranges implement alongside `.enumerate()` /
+`.map()` / `.filter()`, and as a tensor index (`tensor[(0..n).step(2)]`). The syntax
+summary lists both the range form and the tensor step-slice form. No range method named `step` exists in the
+compiler, so all of those spellings are rejected.
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    mut t = 0
+    for i in (0..6).step(2) { t = t + i }
+    t
+}
+```
+
+Expected: `6` (0 + 2 + 4). Observed: a compile error reporting that a range expression is
+only valid as the argument to `.slice()` or `.char_slice()`, followed by a cascaded
+`undefined variable 'i'`. The tensor-index form
+(`val s: Tensor<i32, [3]> = a[(0..6).step(2)]`) fails the same way.
+
+**Root cause**: there is no `step` method on a range at all. A range expression is accepted
+only in a `for` head and as the argument to `.slice()` / `.char_slice()`; any method call on
+one falls through to the diagnostic above. The diagnostic is accurate about what the checker
+supports and silent about the fact that the language defines the method.
+
+**Why this is filed rather than scheduled**: the tensor-index half *is* deferred in the
+internal notes archive, to the open roadmap item that adds `.rev()` to ranges. But that
+item's text names only `.rev()`, and the `for`-head form belongs to a sub-phase that closed
+long before it. The roadmap's own spec-coverage rule says a deferral written in the prose
+of a closed item is not tracking, and that every construct a spec section names needs
+either an implementation or a checkbox of its own. `.step(n)` has neither.
+
+**Workaround**: write the stride into the loop body or the index arithmetic
+(`for i in 0..3 { val j = i * 2 ... }`).
+
+**Fix sketch**: feature-sized, not a surgical fix, and it wants a checkbox before it is
+worked. Which line it goes on is a scheduling decision. The natural home is the existing
+open `.rev()` item, whose text would widen to name `.step(n)` as well: the two compose
+(`.rev().step(n)`), and both want the same strided-range representation (a stride field on
+the range value, honoured by the `for`-head lowering and by the tensor slice path that
+already handles a plain range).
+
 ## BUG-030 — an element moved out of a `Vec` leaves the `Vec` owning it too
 
 - **Status**: open, confirmed

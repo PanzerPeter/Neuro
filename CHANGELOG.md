@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.22.2] - 2026-09-11
+
+### Documentation
+
+- `docs`: recorded **BUG-031** in `docs/BUGS.md`, `.step(n)` on a range is specified as a
+  `for`-head adapter, as a range adapter alongside `.enumerate()` / `.map()` / `.filter()`,
+  and as a tensor index, but no such method exists in the compiler, so every one of those
+  spellings is rejected. Found by a combination sweep over the tensor sub-phase; no code
+  changed, because implementing it is feature-sized and wants a checkbox first.
+
+
 ## [2.22.1] - 2026-09-11
 
 ### Fixed
