@@ -303,12 +303,23 @@ there is no `Stmt::Loop`.
 ### Ownership, borrows, and lifetimes
 **Move by default** (`type_checkers/moves.rs`). A non-`Copy` value is moved out of its source
 binding when placed into a new owner: a `val`/`mut` initializer, an assignment RHS, a `return`, a
-struct-field assignment value, or a by-value call argument. `record_move` marks the source moved,
-but only when the consumed expression is a bare place identifier of a move-tracked type
-(`is_type_move_tracked` is true for `Type::String`, every collection, and any `Type::Struct` not
-deriving `Copy`). Reading a moved binding is `UseOfMovedValue`, carrying the original move span;
-`SymbolInfo.moved_at` holds the per-binding state and reassigning a `mut` clears it. `.clone()`
-borrows rather than moving: the canonical opt-out.
+struct-literal or struct-field assignment value, or a by-value call argument. `record_move` marks
+the source moved when the consumed expression is a place of a move-tracked type
+(`is_type_move_tracked` is true for `Type::String`, every collection, every tensor, and any
+`Type::Struct` not deriving `Copy`). Reading a moved binding is `UseOfMovedValue`, carrying the
+original move span; `SymbolInfo.moved_at` holds the per-binding state and reassigning a `mut`
+clears it. `.clone()` borrows rather than moving: the canonical opt-out.
+
+A place is more than a bare identifier. `place_origin` resolves a field path (`l.w`,
+`o.inner.w`) to the type it denotes and to whether reaching it crossed a reference; an index
+place is not resolved, which is BUG-030. A field move is marked against the place's **ROOT
+binding** rather than the field, because a struct with a field moved out is partially moved and
+unusable as a whole — so `l.w.t()` followed by any use of `l` reports `l`. A place reached
+through a borrow owns nothing to give away and is `CannotMoveOutOfBorrow` instead of a move;
+that covers a dereferenced borrow (`val x = *r`) and every `self.field`, since `self` is bound
+as the struct type for field access but `SelfParam::Owned` is rejected, so every receiver the
+language admits is a borrow. `..base` moves its base when it supplies any non-`Copy` field
+(`record_update_base_move`), and moves nothing when every unlisted field is `Copy`.
 
 The analysis is deliberately conservative: `if`/`while`/`for` bodies and if-expression arms
 snapshot and restore move state, so a conditional move never leaks onto a non-executing path. It

@@ -292,3 +292,237 @@ func main() -> i32 {
         .expect("a binding fresh each iteration should compile and run");
     assert_eq!(exit_code, 0);
 }
+
+// Regression: a move out of a struct FIELD was recorded nowhere, so the field
+// could be consumed twice or read after being consumed. Both released the same
+// buffer twice at run time, with no diagnostic.
+
+#[test]
+fn consuming_a_tensor_field_then_reading_it_is_rejected() {
+    let source = r#"
+struct Layer { w: Tensor<i32, [2, 2]> }
+
+func main() -> i32 {
+    val l = Layer { w: [[1, 2], [3, 4]] }
+    val t = l.w.t()
+    return t[0, 1] + l.w[0, 0]
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(
+        !success,
+        "reading a field after a shape method consumed it should be rejected"
+    );
+    assert!(
+        stderr.contains("use of moved value 'l'"),
+        "expected the whole binding to be reported moved, got: {stderr}"
+    );
+}
+
+#[test]
+fn consuming_a_tensor_field_twice_is_rejected() {
+    let source = r#"
+struct Layer { w: Tensor<i32, [2, 2]> }
+
+func main() -> i32 {
+    val l = Layer { w: [[1, 2], [3, 4]] }
+    val a = l.w.t()
+    val b = l.w.t()
+    return a[0, 1] + b[0, 1]
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(!success, "a field cannot be consumed twice");
+    assert!(
+        stderr.contains("use of moved value 'l'"),
+        "expected a move diagnostic, got: {stderr}"
+    );
+}
+
+#[test]
+fn passing_a_field_by_value_then_reading_it_is_rejected() {
+    let source = r#"
+struct Layer { w: Tensor<i32, [2, 2]> }
+
+func take(t: Tensor<i32, [2, 2]>) -> i32 { return t[0, 0] }
+
+func main() -> i32 {
+    val l = Layer { w: [[1, 2], [3, 4]] }
+    val a = take(l.w)
+    return a + l.w[0, 0]
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(
+        !success,
+        "a field passed by value is moved out of its struct"
+    );
+    assert!(
+        stderr.contains("use of moved value 'l'"),
+        "expected a move diagnostic, got: {stderr}"
+    );
+}
+
+#[test]
+fn consuming_a_field_through_a_borrowed_receiver_is_rejected() {
+    let source = r#"
+struct Layer { w: Tensor<i32, [2, 2]> }
+
+impl Layer {
+    func flip(&self) -> i32 {
+        val t = self.w.t()
+        return t[0, 1]
+    }
+}
+
+func main() -> i32 {
+    val l = Layer { w: [[1, 2], [3, 4]] }
+    return l.flip() + l.flip()
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(
+        !success,
+        "a &self method cannot consume a field its caller still owns"
+    );
+    assert!(
+        stderr.contains("cannot move out of 'self'"),
+        "expected a borrow diagnostic, got: {stderr}"
+    );
+}
+
+#[test]
+fn moving_out_of_a_dereferenced_borrow_is_rejected() {
+    let source = r#"
+func main() -> i32 {
+    val s: string = "a" + "b"
+    val r: &string = &s
+    val x: string = *r
+    return (x.len() as i32) + (s.len() as i32)
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(!success, "a borrow owns nothing to move out of");
+    assert!(
+        stderr.contains("cannot move out of 'r'"),
+        "expected a borrow diagnostic, got: {stderr}"
+    );
+}
+
+#[test]
+fn a_struct_literal_field_value_is_moved() {
+    let source = r#"
+struct Layer { w: Tensor<i32, [2, 2]> }
+
+func main() -> i32 {
+    val a: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    val l = Layer { w: a }
+    return l.w[0, 0] + a[0, 0]
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(
+        !success,
+        "a value placed into a struct field is moved into it"
+    );
+    assert!(
+        stderr.contains("use of moved value 'a'"),
+        "expected a move diagnostic, got: {stderr}"
+    );
+}
+
+#[test]
+fn one_tensor_cannot_fill_two_fields_of_one_struct() {
+    let source = r#"
+struct Pair { a: Tensor<i32, [2, 2]>, b: Tensor<i32, [2, 2]> }
+
+func main() -> i32 {
+    val t: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    val p = Pair { a: t, b: t }
+    return p.a[0, 0] + p.b[0, 0]
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(!success, "one buffer cannot have two owners");
+    assert!(
+        stderr.contains("use of moved value 't'"),
+        "expected a move diagnostic, got: {stderr}"
+    );
+}
+
+#[test]
+fn struct_update_with_an_owned_field_moves_the_base() {
+    let source = r#"
+struct Layer { w: Tensor<i32, [2, 2]>, n: i32 }
+
+func main() -> i32 {
+    val a = Layer { w: [[1, 2], [3, 4]], n: 1 }
+    val b = Layer { n: 2, ..a }
+    return b.w[0, 0] + a.w[0, 0]
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(
+        !success,
+        "`..base` supplies an owned field, so the base is partially moved"
+    );
+    assert!(
+        stderr.contains("use of moved value 'a'"),
+        "expected a move diagnostic, got: {stderr}"
+    );
+}
+
+#[test]
+fn a_copy_field_does_not_move_its_struct() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Counter { n: i32, m: i32 }
+
+func main() -> i32 {
+    val c = Counter { n: 3, m: 4 }
+    val a = c.n
+    val b = c.m
+    return a + b - 7
+}
+"#;
+    let exit_code = test
+        .compile_and_run("copy_field.nr", source)
+        .expect("reading a Copy field moves nothing");
+    assert_eq!(exit_code, 0);
+}
+
+#[test]
+fn struct_update_with_only_copy_fields_leaves_the_base_usable() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Point { x: i32, y: i32 }
+
+func main() -> i32 {
+    val p = Point { x: 1, y: 2 }
+    val q = Point { x: 10, ..p }
+    return q.y + p.x - 3
+}
+"#;
+    let exit_code = test
+        .compile_and_run("copy_update.nr", source)
+        .expect("an all-Copy `..base` moves nothing");
+    assert_eq!(exit_code, 0);
+}
+
+#[test]
+fn cloning_a_field_leaves_the_struct_usable() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Layer { w: Tensor<i32, [2, 2]> }
+
+func main() -> i32 {
+    val l = Layer { w: [[1, 2], [3, 4]] }
+    val t = l.w.clone().t()
+    return t[0, 1] + l.w[0, 0] - 4
+}
+"#;
+    let exit_code = test
+        .compile_and_run("clone_field.nr", source)
+        .expect("a cloned field is the documented way to keep the original");
+    assert_eq!(exit_code, 0);
+}

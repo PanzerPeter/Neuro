@@ -5,6 +5,50 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-030 — an element moved out of a `Vec` leaves the `Vec` owning it too
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (move analysis of index places)
+- **Severity**: major — two owners of one heap buffer; not yet observable as a crash only
+  because an anonymous heap string is never freed today
+
+Move analysis records a move out of a binding and, since the struct-field fix, out of a
+field place. An **index** place is still not a place it recognises, so binding an element
+of a `Vec<string>` moves nothing: the element and the `Vec` both own the same buffer, and
+a `Vec` frees its elements on `Drop`.
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    mut v: Vec<string> = Vec::new()
+    v.push("a" + "b")
+    val x = v[0]
+    return (x.len() as i32) + (v[0].len() as i32)
+}
+```
+
+Expected: a diagnostic, the way the same program written against a plain binding or a
+struct field gets one. Observed: it compiles, and `x` and `v` own one buffer between them.
+It exits 4 rather than crashing because an owned string built by `+` is never freed — the
+untracked leak Phase 1 left behind — so the double free has nothing to fire on yet. A
+collection of a type with a real destructor would abort.
+
+**Root cause**: `record_move` resolves a place through `place_origin`, which handles an
+identifier, a field access, and a dereference. It returns `None` for `Expr::Index`, so no
+move is recorded and no error is raised.
+
+**Workaround**: read the element through a method or a loop over the collection rather
+than binding it, or `.clone()` it.
+
+**Fix sketch**: not purely mechanical, which is why it is filed rather than fixed. The
+conservative rule that works for a field — mark the ROOT binding moved — would make a
+`Vec` of a non-`Copy` element readable exactly once, since `&v[0]` is not a borrowable
+place either. What a partial move of a collection means is a language decision the spec
+does not make: fixed arrays and tuples sidestep it by rejecting non-`Copy` elements
+outright, and a `Vec` does not. Decide the rule first (reject the move outright, as Rust
+does; require `.clone()`; or add a borrowing index form), then implement it.
+
 ## BUG-028 — an annotation's type does not reach a `break` value
 
 - **Status**: open, confirmed

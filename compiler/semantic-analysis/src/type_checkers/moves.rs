@@ -6,10 +6,17 @@
 //! source binding is invalid, and reading it is a `UseOfMovedValue` error
 //! (emitted from the `Expr::Identifier` arm in `expressions.rs`).
 //!
-//! The analysis is intentionally conservative: it flags only direct place
-//! expressions in a consuming position, and conditional regions snapshot/restore
-//! their move state (see `SymbolTable::snapshot_moves`). It may therefore miss
-//! some moves, but it never rejects a valid program.
+//! The analysis is intentionally conservative: it flags only place expressions
+//! in a consuming position, and conditional regions snapshot/restore their move
+//! state (see `SymbolTable::snapshot_moves`). It may therefore miss some moves,
+//! but it never rejects a valid program.
+//!
+//! A move out of a *sub-place* — `l.w`, `(o).inner.w` — is recorded against the
+//! place's ROOT binding rather than the one field, because the language leaves a
+//! struct whose field has been moved out partially moved and unusable as a whole.
+//! Reaching the place through a borrow is not a move at all but an error: a
+//! `&self` method that consumes `self.w` would release a buffer its caller still
+//! owns, once per call.
 //!
 //! A loop body is the one region where restoring the state is not the whole
 //! story. The restore is right for what follows the loop — it may run zero times,
@@ -23,32 +30,94 @@ use ast_types::{Expr, Stmt};
 use shared_types::Span;
 
 use crate::errors::TypeError;
+use crate::types::Type;
 
 use super::TypeChecker;
+
+/// The method receiver. It is bound as the struct type rather than `&Struct`, so
+/// that a field read and a `&mut self` field write stay ordinary field access —
+/// but every receiver the language admits is a borrow, `SelfParam::Owned` being
+/// rejected until the by-value struct ABI exists. A field of it therefore cannot
+/// be moved out, and `self` is a keyword, so no other binding can wear the name.
+const SELF_RECEIVER: &str = "self";
 
 impl TypeChecker {
     /// Record the move that occurs when `expr` appears in a consuming position.
     ///
-    /// Moves apply only to a bare place expression (an identifier, possibly
-    /// wrapped in parentheses) whose binding has a move-tracked type. A literal,
-    /// a `.clone()` call, or any compound expression produces a fresh value and
-    /// moves nothing here; nested consuming positions (e.g. an argument inside a
-    /// call) are handled where that call's arguments are checked.
+    /// Moves apply to a place expression — an identifier or a field path rooted
+    /// in one, either possibly wrapped in parentheses — whose value has a
+    /// move-tracked type. A literal, a `.clone()` call, or any compound
+    /// expression produces a fresh value and moves nothing here; nested
+    /// consuming positions (e.g. an argument inside a call) are handled where
+    /// that call's arguments are checked.
     pub(crate) fn record_move(&mut self, expr: &Expr) {
         let mut place = expr;
         while let Expr::Paren(inner, _) = place {
             place = inner;
         }
 
-        let Expr::Identifier(ident) = place else {
+        // A constant is a value, not an owner, so it cannot be moved from.
+        if let Expr::Identifier(ident) = place {
+            let binding_ty = self.symbols.lookup(&ident.name).map(|info| info.ty.clone());
+
+            if binding_ty.is_some_and(|ty| self.is_type_move_tracked(&ty)) {
+                self.symbols.mark_moved(&ident.name, ident.span);
+            }
+            return;
+        }
+
+        let Some((place_ty, behind_borrow)) = self.place_origin(place) else {
+            return;
+        };
+        if !self.is_type_move_tracked(&place_ty) {
+            return;
+        }
+        let Some(root) = Self::place_root_name(place) else {
             return;
         };
 
-        // A constant is a value, not an owner, so it cannot be moved from.
-        let binding_ty = self.symbols.lookup(&ident.name).map(|info| info.ty.clone());
+        if behind_borrow {
+            self.record_error(TypeError::CannotMoveOutOfBorrow {
+                name: root,
+                span: place.span(),
+            });
+            return;
+        }
 
-        if binding_ty.is_some_and(|ty| self.is_type_move_tracked(&ty)) {
-            self.symbols.mark_moved(&ident.name, ident.span);
+        self.symbols.mark_moved(&root, place.span());
+    }
+
+    /// The type a place expression denotes, paired with whether reaching it
+    /// crossed a reference.
+    ///
+    /// `None` means the expression is not a place rooted in a binding — a call
+    /// result or a literal — which owns nothing a caller could move out of.
+    fn place_origin(&self, place: &Expr) -> Option<(Type, bool)> {
+        match place {
+            Expr::Paren(inner, _) => self.place_origin(inner),
+            Expr::Identifier(ident) => self
+                .symbols
+                .lookup(&ident.name)
+                .map(|info| (info.ty.clone(), ident.name == SELF_RECEIVER)),
+            Expr::Deref { operand, .. } => match self.place_origin(operand)?.0 {
+                Type::Reference { inner, .. } => Some((*inner, true)),
+                _ => None,
+            },
+            Expr::FieldAccess { object, field, .. } => {
+                let (object_ty, behind_borrow) = self.place_origin(object)?;
+                let behind_borrow = behind_borrow || matches!(object_ty, Type::Reference { .. });
+                let Type::Struct(name) = object_ty.referent() else {
+                    return None;
+                };
+                let field_ty = self
+                    .struct_defs
+                    .get(name)?
+                    .iter()
+                    .find(|(n, _)| n == &field.name)
+                    .map(|(_, ty)| ty.clone())?;
+                Some((field_ty, behind_borrow))
+            }
+            _ => None,
         }
     }
 
@@ -634,6 +703,62 @@ mod tests {
         assert!(
             errs.iter().any(|e| e.contains("not yet supported")),
             "consuming self must still be rejected; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn moving_a_field_marks_the_whole_binding() {
+        // A struct with a field moved out is partially moved and unusable as a
+        // whole, so the root binding is what the diagnostic names.
+        let errs = errors(
+            r#"
+            struct Holder { name: string }
+            func consume(s: string) -> i32 { 0 }
+            func main() -> i32 {
+                val h = Holder { name: "hi" }
+                val r: i32 = consume(h.name)
+                val n: u64 = h.name.len()
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("use of moved value 'h'")),
+            "a moved-out field must move its struct; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn moving_a_copy_field_moves_nothing() {
+        let errs = errors(
+            r#"
+            struct Point { x: i32, y: i32 }
+            func consume(v: i32) -> i32 { v }
+            func main() -> i32 {
+                val p = Point { x: 1, y: 2 }
+                val r: i32 = consume(p.x)
+                return p.y
+            }
+            "#,
+        );
+        assert!(errs.is_empty(), "a Copy field moves nothing; got {errs:?}");
+    }
+
+    #[test]
+    fn moving_a_field_out_of_a_borrowed_receiver_is_rejected() {
+        let errs = errors(
+            r#"
+            struct Holder { name: string }
+            func consume(s: string) -> i32 { 0 }
+            impl Holder {
+                func give(&self) -> i32 { consume(self.name) }
+            }
+            func main() -> i32 { 0 }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("cannot move out of 'self'")),
+            "a &self receiver owns nothing to give away; got {errs:?}"
         );
     }
 

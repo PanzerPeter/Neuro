@@ -156,6 +156,7 @@ impl TypeChecker {
                     });
                 }
             }
+            self.record_update_base_move(&template_fields, &seen, base_expr);
         }
 
         inst
@@ -217,6 +218,7 @@ impl TypeChecker {
                         });
                     }
                 }
+                self.record_move(value);
             } else {
                 self.record_error(TypeError::UnknownField {
                     struct_name: name.name.clone(),
@@ -243,6 +245,7 @@ impl TypeChecker {
                     });
                 }
             }
+            self.record_update_base_move(&def, &seen, base_expr);
         } else {
             for (field_name, _) in &def {
                 if !seen.contains_key(field_name) {
@@ -256,6 +259,28 @@ impl TypeChecker {
         }
 
         Some(Type::Struct(name.name.clone()))
+    }
+
+    /// Record the move `Point { x: 1.0, ..p }` performs on `p`.
+    ///
+    /// `..base` supplies every field the literal does not list, so it moves each
+    /// of them out of `base`. A single move-tracked one leaves `base` partially
+    /// moved and unusable as a whole; when every unlisted field is `Copy` nothing
+    /// moves and `base` stays valid.
+    fn record_update_base_move(
+        &mut self,
+        fields: &[(String, Type)],
+        listed: &HashMap<String, Span>,
+        base: &Expr,
+    ) {
+        let supplies_owned = fields
+            .iter()
+            .filter(|(name, _)| !listed.contains_key(name))
+            .any(|(_, ty)| self.is_type_move_tracked(ty));
+
+        if supplies_owned {
+            self.record_move(base);
+        }
     }
 
     pub(super) fn check_field_access_expr(

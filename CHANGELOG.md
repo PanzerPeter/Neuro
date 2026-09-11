@@ -10,6 +10,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.22.1] - 2026-09-11
+
+### Fixed
+
+- `semantic`: **a value moved out of a struct field is now tracked**. Move analysis
+  recognised only a whole binding as a place, so consuming a field — `layer.weights.t()`,
+  `take(layer.weights)`, `val w = layer.weights` — recorded nothing. The field could then be
+  read again, or consumed a second time, and both released the same buffer: a tensor field
+  consumed twice aborted the process with a double free, and a field read after being passed
+  by value returned whatever the freed buffer held. The straight-line form on a plain binding
+  was rejected all along, which is what made the field form a hole rather than a choice.
+
+  A field place is now reported against its **root binding**, because a struct with a field
+  moved out is partially moved and unusable as a whole (§3.3): `layer.weights.t()` followed by
+  any use of `layer` names `layer`, not the field. A `Copy` field still moves nothing, and
+  `layer.weights.clone().t()` is the documented way to keep the original.
+
+- `semantic`: **a field reached through a borrow can no longer be moved out.** A `&self`
+  method that consumed `self.weights` released a buffer its caller still owned, once per
+  call, so calling it twice double-freed. Moving out of a dereferenced borrow (`val x = *r`)
+  had the same shape. Both now report that the place is reached through a borrow, which owns
+  nothing to give away.
+
+- `semantic`: **a struct literal's field values are moved into it.** The non-generic literal
+  path recorded no move, so one tensor could fill two fields of the same struct and both
+  owned it; the generic path had always recorded it. `..base` now moves its base too when it
+  supplies any non-`Copy` field, as §3.3 states.
+
+
 ## [2.22.0] - 2026-09-11
 
 ### Added
