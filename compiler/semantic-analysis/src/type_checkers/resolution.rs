@@ -368,10 +368,11 @@ impl TypeChecker {
 
     /// Resolve one axis's extent. A literal is taken as written; a name is accepted
     /// only when it is an in-scope shape parameter, which the parser has already
-    /// re-kinded to a `const NAME: u32` parameter.
+    /// re-kinded to a `const NAME: u32` parameter; `?` is a dynamic extent.
     fn resolve_tensor_dim(&mut self, dim: &ast_types::TensorDim) -> Option<ArrayLen> {
         match &dim.extent {
             ast_types::TensorExtent::Literal(extent) => Some(ArrayLen::Fixed(*extent)),
+            ast_types::TensorExtent::Dynamic(_) => Some(ArrayLen::Dynamic),
             ast_types::TensorExtent::Param(ident) => {
                 if self.const_scope.contains_key(&ident.name) {
                     return Some(ArrayLen::Param(ident.name.clone()));

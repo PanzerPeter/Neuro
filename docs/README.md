@@ -77,7 +77,7 @@ Key design goals:
 - Integer and float literal type suffixes: `42i64`, `255u8`, `1.5f32`, `2.0f64`, `1.5f16`, `0.02bf16`
 - Contextual numeric literal inference with range validation
 - Struct types: definition, instantiation, field access, field mutation
-- Statically shaped tensors: `Tensor<T, [d0, ...]>`, rank-0 through rank-N, over any
+- Tensors: `Tensor<T, [d0, ...]>`, rank-0 through rank-N, over any
   fixed-width scalar element; a shape or element mismatch is a compile error. Values are
   built from a nested array literal under a `Tensor<...>` annotation, or with
   `Tensor::<T, [...]>::zeros()` / `ones()` / `identity()` / `random_normal(mean:, std:)` /
@@ -102,7 +102,10 @@ Key design goals:
   rearranged with `.t()`, `.reshape([...])` (with a `-1` extent the compiler infers),
   `.permute([...])`, and `.flatten()` / `.flatten(dims: [...])`, whose result shape is
   computed at compile time and which take dimension names as well as positions; each
-  consumes the receiver, handing its buffer on rather than duplicating it.
+  consumes the receiver, handing its buffer on rather than duplicating it. An axis written
+  `?` (`Tensor<f32, [?, 784]>`) has no compile-time extent, so one signature accepts every
+  extent at that position while the axes beside it stay checked; a statically shaped tensor
+  widens into a `?` and not back, and anything needing the extent is a compile error.
   By-value arithmetic and the reductions are later work
 
 ### Variables

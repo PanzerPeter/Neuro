@@ -1,0 +1,5 @@
+embed_width(&pair)     = 4
+embed_width(&seven)    = 4
+batch_embed(&rows)     = 3
+pair[0, 3]             = 4
+a [2, 4] widened to [?, 4]

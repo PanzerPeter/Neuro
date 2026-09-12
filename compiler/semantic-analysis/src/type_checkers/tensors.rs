@@ -51,6 +51,30 @@ impl TypeChecker {
             && !self.enum_defs.contains_key(TENSOR_TYPE_NAME)
     }
 
+    /// Report `operation` when any axis of `shape` is dynamic, and answer whether it did.
+    ///
+    /// Every extent-consuming operation funnels through here: a `?` axis has no
+    /// compile-time value, so a buffer size, a stride, or an element count computed from
+    /// it would be a guess. Widening a static tensor into a `?`-shaped type is what the
+    /// axis is for, and stays legal.
+    pub(crate) fn reject_dynamic_extent(
+        &mut self,
+        shape: &[TensorAxis],
+        operation: &str,
+        ty: &Type,
+        span: Span,
+    ) -> bool {
+        if !shape.iter().any(|axis| axis.extent == ArrayLen::Dynamic) {
+            return false;
+        }
+        self.record_error(TypeError::TensorDynamicExtent {
+            operation: operation.to_string(),
+            ty: ty.clone(),
+            span,
+        });
+        true
+    }
+
     /// Type-check a nested array literal against a `Tensor<T, [d0, ...]>` annotation.
     ///
     /// The annotation supplies both the element type and every extent, so each leaf
@@ -68,6 +92,9 @@ impl TypeChecker {
             element: Box::new(element_ty.clone()),
             shape: shape.to_vec(),
         };
+        if self.reject_dynamic_extent(shape, "a tensor literal", &tensor, span) {
+            return tensor;
+        }
         // A rank-0 tensor holds exactly one value and has no axis to write elements
         // along, so there is no array literal that could denote one.
         let Some((axis, rest)) = shape.split_first() else {
@@ -172,6 +199,10 @@ impl TypeChecker {
             return Type::Unknown;
         };
         let element = (**element).clone();
+        let shape = shape.clone();
+        if self.reject_dynamic_extent(&shape, &format!("`Tensor::{}`", ctor.name), &tensor, span) {
+            return tensor;
+        }
 
         match ctor.name.as_str() {
             CTOR_ZEROS | CTOR_ONES => {
@@ -219,7 +250,6 @@ impl TypeChecker {
             }
             CTOR_FROM => {
                 if self.check_tensor_ctor_arity(args, 1, span) {
-                    let shape = shape.clone();
                     match &args[0] {
                         Expr::ArrayLiteral {
                             elements,
@@ -326,9 +356,16 @@ impl TypeChecker {
             });
             return None;
         };
-        let Type::Tensor { element, .. } = &tensor_ty else {
+        let Type::Tensor { element, shape } = &tensor_ty else {
             return None;
         };
+
+        // The update walks the buffer element by element, so it needs the element count.
+        let (element_ty, shape) = ((**element).clone(), shape.clone());
+        if self.reject_dynamic_extent(&shape, &format!("`{op}=`"), &tensor_ty, span) {
+            return None;
+        }
+        let element = &element_ty;
 
         // The element carries the arithmetic, so the operator is defined exactly where
         // it is defined on the scalar: `bool` has none, and the half-precision scalar
@@ -336,7 +373,7 @@ impl TypeChecker {
         if !element.is_numeric() || element.is_half_float() {
             self.record_error(TypeError::TensorElementNotArithmetic {
                 op: op.to_string(),
-                element: (**element).clone(),
+                element: element.clone(),
                 span,
             });
             return None;

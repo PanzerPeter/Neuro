@@ -44,6 +44,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "a tensor index node does not carry a tensor receiver".to_string(),
             ));
         };
+        let shape = crate::types::static_extents(&shape)?;
         let data = self.tensor_index_data(object, &source_ty)?;
         let strides = row_major_strides(&shape);
         let base = self.tensor_index_base(axes, &shape, &strides, offset)?;
@@ -60,7 +61,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_load(elem_llvm, slot, "tensor.elem")
                 .map_err(CodegenError::from);
         };
-        self.copy_tensor_slice(result_ty, result_shape, axes, &strides, data, base)
+        let result_shape = crate::types::static_extents(result_shape)?;
+        self.copy_tensor_slice(result_ty, &result_shape, axes, &strides, data, base)
     }
 
     /// The element buffer of the indexed tensor. A borrowed receiver lowers to the

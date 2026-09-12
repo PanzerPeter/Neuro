@@ -51,7 +51,7 @@ impl Lowerer {
             HirExprKind::TensorLiteral { elements: flat },
             HirType::Tensor {
                 element: Box::new(element.clone()),
-                shape: shape.to_vec(),
+                shape: neuro_hir::static_shape(shape),
                 names: AxisNames::default(),
             },
             span,
@@ -119,7 +119,7 @@ impl Lowerer {
             });
         };
         let element = (**element).clone();
-        let shape = shape.clone();
+        let shape = crate::static_extents(shape)?;
 
         let kind = match ctor {
             CTOR_ZEROS => HirExprKind::TensorFill {

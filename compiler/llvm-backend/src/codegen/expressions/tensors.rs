@@ -69,7 +69,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 "tensor node does not carry a tensor type".to_string(),
             ));
         };
-        Ok(((**element).clone(), shape.iter().product()))
+        let extents = crate::types::static_extents(shape)?;
+        Ok(((**element).clone(), extents.iter().product()))
     }
 
     /// Allocate a tensor's DLPack handle and its element buffer, returning both: the
@@ -204,7 +205,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "identity node does not carry a tensor type".to_string(),
             ));
         };
-        let [rows, cols] = shape[..] else {
+        let [rows, cols] = crate::types::static_extents(shape)?[..] else {
             return Err(CodegenError::InternalError(
                 "identity is a rank-2 construction".to_string(),
             ));
@@ -393,6 +394,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "a shape cast's receiver does not carry a tensor type".to_string(),
             ));
         };
+        let src_shape = crate::types::static_extents(src_shape)?;
         let (_, count) = self.tensor_layout(result_ty)?;
         let Type::Tensor {
             shape: dst_shape, ..
@@ -402,6 +404,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "a shape cast does not produce a tensor type".to_string(),
             ));
         };
+        let dst_shape = crate::types::static_extents(dst_shape)?;
         if permutation.len() != dst_shape.len() || permutation.len() != src_shape.len() {
             return Err(CodegenError::InternalError(
                 "a shape cast's permutation does not match its ranks".to_string(),
@@ -416,8 +419,8 @@ impl<'ctx> CodegenContext<'ctx> {
             source_data,
             data,
             count,
-            src_shape,
-            dst_shape,
+            &src_shape,
+            &dst_shape,
             permutation,
         )?;
         self.build_dlpack_release(source)?;

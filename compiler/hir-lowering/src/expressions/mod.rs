@@ -377,7 +377,7 @@ impl Lowerer {
             Expr::ArrayLiteral { elements, span } => match expected {
                 Some(HirType::Tensor { element, shape, .. }) => {
                     let element = (**element).clone();
-                    let shape = shape.clone();
+                    let shape = crate::static_extents(shape)?;
                     self.lower_tensor_literal(elements, &element, &shape, *span)
                 }
                 _ => self.lower_array_literal(elements, expected, *span),

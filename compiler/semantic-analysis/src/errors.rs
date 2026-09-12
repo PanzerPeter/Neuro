@@ -325,6 +325,13 @@ pub enum TypeError {
     #[error("`.flatten` at {span:?} was given an empty axis list; name the axes to merge, or call `.flatten()` to merge them all")]
     TensorFlattenNoAxes { span: Span },
 
+    #[error("{operation} at {span:?} needs every extent of `{ty}` at compile time, but an axis is `?`; a dynamic extent is not known until run time, so build or read the tensor at a static shape and pass it where a `?` is expected")]
+    TensorDynamicExtent {
+        operation: String,
+        ty: Type,
+        span: Span,
+    },
+
     #[error("`.{method}` at {span:?} needs every extent of the receiver to be known here, but '{name}' is a shape parameter; a shape-generic tensor cannot be reshaped until it is instantiated")]
     TensorShapeCastSymbolicExtent {
         method: String,

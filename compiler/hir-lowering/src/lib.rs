@@ -463,10 +463,14 @@ fn unify_ast_hir(
             },
         ) if pshape.len() == ashape.len() => {
             for (dim, extent) in pshape.iter().zip(ashape) {
-                if let ast_types::TensorExtent::Param(id) = &dim.extent {
-                    if cnames.contains(&id.name) {
-                        const_subst.entry(id.name.clone()).or_insert(*extent as u64);
-                    }
+                // A `?` argument axis carries no value, so it binds no shape parameter;
+                // the checker has already refused the call that would need one.
+                let (ast_types::TensorExtent::Param(id), Some(extent)) = (&dim.extent, extent)
+                else {
+                    continue;
+                };
+                if cnames.contains(&id.name) {
+                    const_subst.entry(id.name.clone()).or_insert(*extent as u64);
                 }
             }
             unify_ast_hir(pe, ae, gnames, cnames, subst, const_subst)
@@ -488,16 +492,34 @@ fn unify_ast_hir(
 fn resolve_tensor_dim(
     dim: &ast_types::TensorDim,
     const_subst: &HashMap<String, u64>,
-) -> Result<usize, LoweringError> {
+) -> Result<Option<usize>, LoweringError> {
     match &dim.extent {
-        ast_types::TensorExtent::Literal(extent) => Ok(*extent),
+        ast_types::TensorExtent::Literal(extent) => Ok(Some(*extent)),
+        ast_types::TensorExtent::Dynamic(_) => Ok(None),
         ast_types::TensorExtent::Param(id) => const_subst
             .get(&id.name)
-            .map(|v| *v as usize)
+            .map(|v| Some(*v as usize))
             .ok_or_else(|| LoweringError::UnresolvedType {
                 name: format!("tensor dimension '{}'", id.name),
             }),
     }
+}
+
+/// The extents of a shape every one of whose axes is static.
+///
+/// Semantic analysis rejects a `?` axis at every operation that consumes an
+/// extent, so one arriving here is a compiler bug rather than a program error — reported
+/// as a value, since a lowering pass has no business panicking.
+fn static_extents(shape: &[Option<usize>]) -> Result<Vec<usize>, LoweringError> {
+    shape
+        .iter()
+        .map(|extent| {
+            extent.ok_or_else(|| LoweringError::Malformed {
+                detail: "a dynamic `?` extent reached an operation that needs its value"
+                    .to_string(),
+            })
+        })
+        .collect()
 }
 
 /// Resolve a fixed-size array length annotation to a concrete value. A
@@ -582,7 +604,7 @@ fn mangle_type(ty: &HirType) -> String {
         HirType::Array { element, size } => format!("arr{}_{}", size, mangle_type(element)),
         HirType::Slice(element) => format!("slice_{}", mangle_type(element)),
         HirType::Tensor { element, shape, .. } => {
-            let extents: Vec<String> = shape.iter().map(|d| d.to_string()).collect();
+            let extents: Vec<String> = shape.iter().map(neuro_hir::extent_display).collect();
             format!("tensor_{}_{}", mangle_type(element), extents.join("x"))
         }
         HirType::Tuple(elements) => {

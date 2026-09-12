@@ -161,7 +161,7 @@ impl<'ctx> TypeMapper<'ctx> {
             )));
         };
         let elem_llvm = self.map_type(element)?;
-        let count: usize = shape.iter().product();
+        let count: usize = crate::types::static_extents(shape)?.iter().product();
         Ok(elem_llvm.array_type(count as u32).into())
     }
 
@@ -262,7 +262,10 @@ impl<'ctx> TypeMapper<'ctx> {
                 ty.mangle()
             )));
         };
-        let count: u64 = shape.iter().map(|d| *d as u64).product();
+        let count: u64 = crate::types::static_extents(shape)?
+            .iter()
+            .map(|d| *d as u64)
+            .product();
         Ok(count * self.tensor_element_bytes(element)?)
     }
 
@@ -462,24 +465,20 @@ mod tests {
     fn a_tensor_buffer_is_sized_from_its_shape() {
         let context = LLVMContext::create();
         let mapper = TypeMapper::new(&context);
-        let tensor = |element: Type, shape: Vec<usize>| Type::Tensor {
+        let tensor = |element: Type, shape: &[usize]| Type::Tensor {
             element: Box::new(element),
-            shape,
+            shape: neuro_hir::static_shape(shape),
         };
         assert_eq!(
-            mapper
-                .tensor_buffer_bytes(&tensor(Type::F32, vec![2, 3]))
-                .ok(),
+            mapper.tensor_buffer_bytes(&tensor(Type::F32, &[2, 3])).ok(),
             Some(24)
         );
         assert_eq!(
-            mapper.tensor_buffer_bytes(&tensor(Type::F64, vec![])).ok(),
+            mapper.tensor_buffer_bytes(&tensor(Type::F64, &[])).ok(),
             Some(8)
         );
         assert_eq!(
-            mapper
-                .tensor_buffer_bytes(&tensor(Type::Bool, vec![7]))
-                .ok(),
+            mapper.tensor_buffer_bytes(&tensor(Type::Bool, &[7])).ok(),
             Some(7)
         );
         assert!(mapper.tensor_buffer_bytes(&Type::I32).is_err());

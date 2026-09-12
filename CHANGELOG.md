@@ -10,6 +10,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.23.0] - 2026-09-12
+
+### Added
+
+- `parser`, `semantic`, `codegen`: dynamic tensor shapes. An axis of a tensor shape may be
+  written `?` (`Tensor<f32, [?, 784]>`), deferring that one extent to run time while every
+  other axis stays checked at compile time, so one signature accepts every extent at that
+  position. A dimension name may sit on a dynamic axis (`[batch: ?, embed: 768]`) and the
+  name rule is unchanged.
+- `semantic`: widening is one-directional. A statically shaped tensor is accepted wherever
+  a `?` axis is expected; a `?` is refused where a literal is expected, because narrowing
+  would let the consumer index at strides the run-time buffer may not have and there is no
+  run-time shape check yet. For the same reason a `?` binds no shape parameter, so a
+  shape-generic call over a dynamic argument reports the parameter as uninferable.
+- `semantic`: one diagnostic for every operation that needs an extent a `?` does not have —
+  the construction helpers, tensor literals, `.clone()`, `.to(device)`, indexing and
+  slicing, `.t()` / `.reshape` / `.permute` / `.flatten`, and in-place compound assignment.
+  It names the operation, the type, and the way out.
+- `docs`: `examples/types/tensor_dynamic_shapes.nr`, a dynamic-shape section in the type
+  reference, and a `?` parameter reading two shapes in `examples/showcase/model_shapes.nr`.
+
+### Changed
+
+- `infra`: `HirType::Tensor.shape` is a `Vec<Option<usize>>`, `None` being a dynamic axis,
+  mirroring how MLIR's own tensor type spells one. A tensor value is a DLPack handle, so
+  moving, storing and releasing a dynamically shaped tensor needs no extent; the sites that
+  do need one (buffer layout and size, the DLPack shape/stride globals, an index's strides,
+  symbol mangling) read it through a guard that reports rather than guesses.
+
 ## [2.22.4] - 2026-09-12
 
 ### Removed

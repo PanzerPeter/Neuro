@@ -2,6 +2,19 @@
 
 use std::fmt;
 
+/// A shape whose every axis is static, from the extents alone.
+pub fn static_shape(extents: &[usize]) -> Vec<Option<usize>> {
+    extents.iter().copied().map(Some).collect()
+}
+
+/// How one tensor extent is spelled: its value, or `?` when it is dynamic.
+pub fn extent_display(extent: &Option<usize>) -> String {
+    match extent {
+        Some(value) => value.to_string(),
+        None => "?".to_string(),
+    }
+}
+
 /// The dimension names of a tensor shape, one entry per axis.
 ///
 /// Two tensor types are the same type whether or not they name their axes: the language
@@ -103,14 +116,13 @@ pub enum HirType {
         params: Vec<HirType>,
         ret: Box<HirType>,
     },
-    /// Statically shaped tensor `Tensor<T, [d0, ...]>`. Every extent is known at
-    /// compile time and is part of the type; an empty `shape` is the rank-0 scalar
-    /// tensor. The HIR carries the type so the contract is complete, but no backend
-    /// has a runtime representation for it yet: a tensor buffer's layout arrives with
-    /// tensor construction.
+    /// Tensor `Tensor<T, [d0, ...]>`. An extent is part of the type; an empty `shape`
+    /// is the rank-0 scalar tensor. `None` at an axis is the `?` of a dynamic shape: that
+    /// extent is not known until run time, so a backend may move, store and release such a
+    /// tensor but cannot compute a buffer size or a stride from it.
     Tensor {
         element: Box<HirType>,
-        shape: Vec<usize>,
+        shape: Vec<Option<usize>>,
         /// The dimension name written at each axis, `None` where the shape gave none.
         /// Carried so a shape-manipulation call can resolve the identifier in
         /// `image.permute([height, width, channels])` against the receiver's own shape;
@@ -231,6 +243,7 @@ impl fmt::Display for HirType {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
+                    let extent = extent_display(extent);
                     match names.0.get(i).and_then(Option::as_ref) {
                         Some(name) => write!(f, "{}: {}", name, extent)?,
                         None => write!(f, "{}", extent)?,

@@ -755,7 +755,7 @@ mod tests {
     fn tensor_ownership_methods_resolve() {
         let tensor = Type::Tensor {
             element: Box::new(Type::F32),
-            shape: vec![2, 2],
+            shape: neuro_hir::static_shape(&[2, 2]),
         };
         let borrowed = Type::Reference {
             inner: Box::new(tensor.clone()),

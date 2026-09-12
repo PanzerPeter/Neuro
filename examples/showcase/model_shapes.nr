@@ -6,8 +6,9 @@
 //   tensor fields · an enum matched to pick an initializer · a trait with an
 //   `impl` per layer kind · a fixed-size array walked by `for`-in · string
 //   interpolation with the format mini-language · tensor ownership: moves,
-//   `.clone()`, and the `.to(device)` transfer · a weight matrix at real scale,
-//   built in one function and returned by value.
+//   `.clone()`, and the `.to(device)` transfer · a dynamic `?` axis reading two
+//   shapes through one signature · a weight matrix at real scale, built in one
+//   function and returned by value.
 //
 // Every weight below is a real buffer the binary carries or fills at startup;
 // a tensor is not `Copy`, so building a layer MOVES its weights into it, and a
@@ -120,6 +121,14 @@ impl Hidden {
     }
 }
 
+// A `?` axis (dynamic shapes) is the one way out of naming the full shape: this takes a
+// table of any height as long as every row is 4 wide, so one function serves the `[3, 4]`
+// embedding table and a `[5, 4]` one alike. The axes beside the `?` are checked exactly
+// as before, and the `[784, 128]` hidden weights would be rejected on their width.
+func row_width(table: &Tensor<f32, [?, 4]>) -> i32 {
+    return 4
+}
+
 // A tensor parameter names its full shape, so a caller with any other shape is a
 // compile error rather than a runtime one. Taking the table by value MOVES it.
 func embedding_rows(table: Tensor<f32, [3, 4]>) -> i32 {
@@ -177,6 +186,13 @@ func main() -> i32 {
 
     // `on_host` is still ours: the borrow above read it without taking it.
     total = total + embedding_width(&on_host)
+
+    // Two shapes that share only their second axis, read by one signature. Neither
+    // borrow moves anything, and neither call needed the height written down.
+    val wide = Tensor::<f32, [5, 4]>::zeros()
+    val row_widths = row_width(&on_host) + row_width(&wide)
+    println("row_width over [3,4] and [5,4]  = {row_widths:>6} wide")
+    total = total + row_widths
 
     println("total parameters                = {total:>6}")
     return total % 256

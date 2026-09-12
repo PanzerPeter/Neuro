@@ -26,8 +26,13 @@ it the *typed* contract:
    a fully resolved `HirType`. `HirType` has **no `Unknown` variant**. Reaching the HIR implies
    the program type-checked. Its variant set mirrors what the semantic analyzer produces today;
    no generic variants until the language gains them (No Speculative Generality).
-   `HirType::Tensor { element, shape, names }` carries the statically shaped
-   `Tensor<T, [d0, ...]>`. `names` is the dimension name at each axis, wrapped in `AxisNames`,
+   `HirType::Tensor { element, shape, names }` carries `Tensor<T, [d0, ...]>`. An axis's
+   extent is `Option<usize>`, and `None` is the `?` of a dynamic shape: a backend may
+   move, store and release such a tensor, since a value is a DLPack handle, but every
+   operation that would compute a buffer size or a stride from the extent is refused by the
+   frontend before lowering. `static_shape` builds an all-static shape from extents and
+   `extent_display` spells one axis (`?` for the dynamic one).
+   `names` is the dimension name at each axis, wrapped in `AxisNames`,
    whose `PartialEq` is deliberately trivial: the language makes a named shape and an unnamed
    one the same type and compares a name only where both sides supply one, so derived equality
    would be stricter than the language's. It exists for one consumer, the shape-manipulation

@@ -189,7 +189,13 @@ impl TypeChecker {
             // diagnostic already points at. Auto-derefs `&Tensor<T, S>`: copying through
             // a borrow is how a shared weight is duplicated without moving it out of
             // whatever owns it.
-            (Type::Tensor { .. }, CLONE_METHOD) => {
+            (Type::Tensor { shape, .. }, CLONE_METHOD) => {
+                // A deep copy allocates a second buffer, whose size is the product of
+                // the extents.
+                let (shape, referent) = (shape.clone(), recv.referent().clone());
+                if self.reject_dynamic_extent(&shape, "`.clone()`", &referent, call_span) {
+                    return Some(referent);
+                }
                 if !args.is_empty() {
                     self.record_error(TypeError::ArgumentCountMismatch {
                         expected: 0,
@@ -214,9 +220,21 @@ impl TypeChecker {
                     return None;
                 }
                 let (element, shape) = (element.clone(), shape.clone());
+                let referent = recv.referent().clone();
+                if self.reject_dynamic_extent(&shape, &format!("`.{m}`"), &referent, call_span) {
+                    return Some(Type::Unknown);
+                }
                 Some(self.check_tensor_shape_method(&element, &shape, object, m, args, call_span))
             }
-            (Type::Tensor { .. }, TENSOR_TO_METHOD) if !matches!(recv, Type::Reference { .. }) => {
+            (Type::Tensor { shape, .. }, TENSOR_TO_METHOD)
+                if !matches!(recv, Type::Reference { .. }) =>
+            {
+                // A transfer allocates the destination buffer, so it needs the size the
+                // same way `.clone()` does.
+                let shape = shape.clone();
+                if self.reject_dynamic_extent(&shape, "`.to`", recv, call_span) {
+                    return Some(recv.clone());
+                }
                 self.check_call_args(args, &[Type::Enum(DEVICE_TYPE_NAME.to_string())], call_span);
                 self.record_move(object);
                 Some(recv.clone())

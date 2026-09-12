@@ -20,10 +20,11 @@ expression already carries the type the checker resolved for it.
 - Implemented: generic functions, structs, and impls, monomorphized
 - Implemented: traits, operator traits, and `impl` / `dyn` dispatch
 - Implemented: enums, generic enums, `Option<T>` / `Result<T, E>`, and the standard collections
-- Implemented: statically shaped tensors `Tensor<T, [d0, ...]>`: annotations, literal
+- Implemented: tensors `Tensor<T, [d0, ...]>`: annotations, literal
   coercion, the construction helpers, the ownership surface (`.clone()`, `.to(device)`),
   in-place compound assignment (`w -= g`), shape manipulation
-  (`.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`), and shape generics `Tensor<f32, [M, K]>`
+  (`.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`), shape generics
+  `Tensor<f32, [M, K]>`, and dynamic axes `Tensor<f32, [?, 784]>`
 
 ## Primitive Types
 
@@ -1184,9 +1185,10 @@ Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
 - Implemented: shape manipulation `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`
   (see [Rearranging a shape](#rearranging-a-shape))
   (see [Named dimensions](#named-dimensions))
+- Implemented: dynamic shapes `Tensor<f32, [?, 784]>`
+  (see [Dynamic shapes](#dynamic-shapes))
 - Planned: by-value tensor arithmetic (`a + b`, `a @ b`) and the reductions
 - Planned: broadcasting rules
-- Planned: dynamic shapes
 
 ## Type Safety Guarantees
 
@@ -1529,8 +1531,9 @@ exactly. See [Variables → Destructuring](variables.md#destructuring).
 
 ## Tensor Types
 
-`Tensor<T, [d0, d1, ...]>` is a statically shaped tensor: the element type and every
-extent are known at compile time and are part of the type.
+`Tensor<T, [d0, d1, ...]>` is a tensor: the element type and every extent are part of the
+type, and an extent is ordinarily known at compile time. An axis may instead be written
+`?`, which defers that one extent to run time (see [Dynamic shapes](#dynamic-shapes)).
 
 ```neuro
 type Weights = Tensor<f32, [784, 128]>
@@ -1547,9 +1550,9 @@ func loss(l: Tensor<f32, []>) { }        // rank-0 scalar tensor
 func image(px: Tensor<u8, [3, 224, 224]>) { }
 ```
 
-The shape is written as a bracketed list of non-negative integer literals, or of shape
-parameters inside a generic definition (see [Shape generics](#shape-generics)). An empty
-list `[]` is the rank-0 scalar tensor. The element must be a fixed-width scalar: any
+The shape is written as a bracketed list of non-negative integer literals, of shape
+parameters inside a generic definition (see [Shape generics](#shape-generics)), or of `?`
+for a dynamic axis. An empty list `[]` is the rank-0 scalar tensor. The element must be a fixed-width scalar: any
 integer type, `f16` / `bf16` / `f32` / `f64`, or `bool`.
 
 Rank and every extent are part of the type, so `Tensor<f32, [2, 2]>` and
@@ -1927,6 +1930,54 @@ whose extent is a shape parameter has no element count to check against, so `.re
 `.flatten` are not available inside a shape-generic function; `.t()` and `.permute` are,
 since they only reorder axes.
 
+### Dynamic shapes
+
+An axis written `?` has no compile-time extent. It opts that one axis out of
+compile-time shape checking and leaves every other axis checked exactly as before, so one
+signature serves every extent at that position:
+
+```neuro
+func embed_width(batch: &Tensor<f32, [?, 4]>) -> i32 {
+    return 4
+}
+
+val pair: Tensor<f32, [2, 4]>  = [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]
+val seven = Tensor::<f32, [7, 4]>::zeros()
+
+embed_width(&pair)                        // ok
+embed_width(&seven)                       // ok, same function
+```
+
+A dimension name may sit on a dynamic axis like any other (`[batch: ?, embed: 768]`), and
+the name rule is unchanged: compared wherever both shapes supply one, so a transposed
+argument is still rejected even when the extents say nothing.
+
+**The `?` is an expectation, not a value.** A statically shaped tensor is accepted where a
+`?` axis is expected; the reverse is not, because a dynamic tensor's run-time shape could
+be anything and a static annotation would let the next reader index it at strides its
+buffer may not have:
+
+```neuro
+func widen(t: Tensor<f32, [2, 4]>) -> Tensor<f32, [?, 4]> {
+    return t                              // ok: widening
+}
+
+val back: Tensor<f32, [2, 4]> = widen(Tensor::<f32, [2, 4]>::zeros())
+//                              error: expected Tensor<f32, [2, 4]>,
+//                                     found Tensor<f32, [?, 4]>
+```
+
+For the same reason a `?` binds no shape parameter: a call to
+`func rows<N>(t: &Tensor<f32, [N, 4]>)` with a dynamic argument leaves `N` uninferable.
+
+A `?`-shaped tensor binds, moves, crosses a call boundary, is returned, and is released at
+scope exit like any other, because a tensor value is a DLPack handle and none of that
+needs an extent. What does need one is a compile error naming the axis: the construction
+helpers and tensor literals (no size to allocate), `.clone()` and `.to(device)` (no size to
+copy), indexing and slicing (no strides), the four shape casts (no element count), and
+in-place compound assignment. Build such a tensor at a static shape and pass it where the
+`?` is expected.
+
 ### What tensors cannot do yet
 
 A tensor can be built, bound, moved, cloned, passed, returned, transferred with
@@ -1936,9 +1987,10 @@ later work is writing through an index (`t[i, j] = v`), by-value tensor arithmet
 (`a + b`, `a @ b`), the reductions
 (`.sum()`, `.mean()`, `.max()`, `.min()`), and the step and reverse index forms
 (`t[(0..n).step(2)]`, `t[(0..n).rev()]`), which wait on `.step(n)` / `.rev()` existing on
-ranges at all. Dynamic axes (`Tensor<f32, [?, 768]>`) are not accepted either; a `?` extent
-is a parse error. Symbolic
-extents *are* accepted, on functions: a shape-generic struct, enum, or `impl` block is
+ranges at all. A dynamic `?` axis is accepted, but only as a widening: nothing that needs
+an extent works on one, and there is no run-time shape check that would let a `?` be
+narrowed back to a literal. Symbolic
+extents are accepted on functions: a shape-generic struct, enum, or `impl` block is
 later work, so a shape parameter is a function's to declare.
 
 ## Standard Collections

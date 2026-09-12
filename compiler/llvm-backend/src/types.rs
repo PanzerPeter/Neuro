@@ -1,5 +1,26 @@
 // Backend-local type model for code generation decisions
 
+use crate::errors::{CodegenError, CodegenResult};
+
+/// The extents of a tensor shape every one of whose axes is static.
+///
+/// Semantic analysis refuses a dynamic `?` axis at every operation that consumes
+/// an extent, so one arriving at a buffer size, a stride or an element count is a
+/// compiler bug; it is reported rather than guessed at, since the alternative is a
+/// wrongly sized allocation.
+pub(crate) fn static_extents(shape: &[Option<usize>]) -> CodegenResult<Vec<usize>> {
+    shape
+        .iter()
+        .map(|extent| {
+            extent.ok_or_else(|| {
+                CodegenError::UnsupportedType(
+                    "a dynamic `?` tensor extent has no compile-time value".to_string(),
+                )
+            })
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Type {
     I8,
@@ -63,12 +84,13 @@ pub(crate) enum Type {
     /// Anonymous tuple `(T1, T2, ...)`. Lowered to an anonymous LLVM struct
     /// `{ T1, T2, ... }`; element access is `extractvalue` by constant index.
     Tuple(Vec<Type>),
-    /// Statically shaped tensor `Tensor<T, [d0, ...]>`. It reaches the backend so the
-    /// type model stays complete, but it has no LLVM lowering yet: the buffer layout
-    /// arrives with tensor construction, so mapping one is an error today.
+    /// Tensor `Tensor<T, [d0, ...]>`. A value is a pointer to its DLPack handle, so
+    /// moving, storing and releasing one needs no extent; `None` at an axis is a dynamic
+    /// `?`, and every operation that does need the extent — the buffer layout, its byte
+    /// size, an index's strides — reports it instead of guessing.
     Tensor {
         element: Box<Type>,
-        shape: Vec<usize>,
+        shape: Vec<Option<usize>>,
     },
     /// A heap-backed standard collection. Every kind lowers to the same
     /// `{ buffer, length, capacity, used }` header; `kind` selects the buffer layout
@@ -189,7 +211,7 @@ impl Type {
             Type::Array { element, size } => format!("arr{}x{}", size, element.mangle()),
             Type::Slice(element) => format!("slice{}", element.mangle()),
             Type::Tensor { element, shape } => {
-                let extents: Vec<String> = shape.iter().map(|d| d.to_string()).collect();
+                let extents: Vec<String> = shape.iter().map(neuro_hir::extent_display).collect();
                 format!("tensor{}x{}", extents.join("x"), element.mangle())
             }
             Type::Tuple(elements) => {

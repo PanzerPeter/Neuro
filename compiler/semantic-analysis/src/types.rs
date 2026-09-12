@@ -9,12 +9,31 @@ use std::fmt;
 /// extent may instead be a `const` parameter ([`ArrayLen::Param`], `[T; CAP]` or the `K`
 /// in `Tensor<f32, [M, K]>`); monomorphization substitutes each `Param` with the
 /// instantiation's concrete value, so a `Param` never survives into the HIR.
+/// [`ArrayLen::Dynamic`] is the third case and only a tensor axis reaches it: `?` has no
+/// compile-time value at all, so unlike a `Param` it survives into the backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArrayLen {
     /// A concrete compile-time length.
     Fixed(usize),
     /// A `const` generic parameter used as the length, identified by name.
     Param(std::string::String),
+    /// A tensor axis written `?`: its extent is not known until run time.
+    Dynamic,
+}
+
+impl ArrayLen {
+    /// Whether an extent found at an axis satisfies the one expected there.
+    ///
+    /// Widening only: an expected `?` accepts any extent, which is the compile-time check
+    /// a dynamic axis opts out of. The reverse is NOT accepted — a `?` found where a
+    /// literal is expected would let the consumer index at strides the run-time shape may
+    /// not have, and the run-time check that would catch it does not exist yet.
+    pub(crate) fn satisfies(&self, expected: &ArrayLen) -> bool {
+        match (self, expected) {
+            (_, ArrayLen::Dynamic) => true,
+            (found, expected) => found == expected,
+        }
+    }
 }
 
 impl fmt::Display for ArrayLen {
@@ -22,6 +41,7 @@ impl fmt::Display for ArrayLen {
         match self {
             ArrayLen::Fixed(n) => write!(f, "{}", n),
             ArrayLen::Param(name) => write!(f, "{}", name),
+            ArrayLen::Dynamic => write!(f, "?"),
         }
     }
 }
@@ -49,11 +69,13 @@ impl TensorAxis {
         }
     }
 
-    /// Whether two axes at the same position denote the same axis: their extents match,
+    /// Whether two axes at the same position denote the same axis: their extents agree,
     /// and their names match where both supply one. A named axis and an unnamed one are
-    /// interchangeable, so an annotation may name axes a constructor's type does not.
+    /// interchangeable, so an annotation may name axes a constructor's type does not, and
+    /// an expected `?` extent accepts any extent. `self` is the found axis and
+    /// `other` the expected one: the `?` rule reads in that direction only.
     pub(crate) fn agrees_with(&self, other: &TensorAxis) -> bool {
-        self.extent == other.extent && self.names_agree_with(other)
+        self.extent.satisfies(&other.extent) && self.names_agree_with(other)
     }
 
     /// Whether the two names may sit at the same position, ignoring the extents.
@@ -74,7 +96,7 @@ impl fmt::Display for TensorAxis {
     }
 }
 
-/// Whether two shapes denote the same shape: equal rank, and every axis agreeing.
+/// Whether a found shape satisfies an expected one: equal rank, and every axis agreeing.
 pub(crate) fn shapes_agree(a: &[TensorAxis], b: &[TensorAxis]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.agrees_with(y))
 }

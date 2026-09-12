@@ -488,7 +488,7 @@ pub(crate) fn conflicting_shape_param(
 fn extent_param_name(extent: &ArrayLen) -> Option<&str> {
     match extent {
         ArrayLen::Param(name) => Some(name),
-        ArrayLen::Fixed(_) => None,
+        ArrayLen::Fixed(_) | ArrayLen::Dynamic => None,
     }
 }
 
@@ -501,6 +501,6 @@ pub(super) fn substitute_array_len(size: &ArrayLen, subst: &HashMap<String, Type
             Some(Type::ConstValue(v)) => ArrayLen::Fixed(*v as usize),
             _ => size.clone(),
         },
-        ArrayLen::Fixed(_) => size.clone(),
+        ArrayLen::Fixed(_) | ArrayLen::Dynamic => size.clone(),
     }
 }

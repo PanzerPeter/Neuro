@@ -65,6 +65,7 @@ impl Lowerer {
             )));
         };
 
+        let shape = crate::static_extents(&shape)?;
         let cast = match method {
             TRANSPOSE_METHOD => transpose(&shape, &names)?,
             RESHAPE_METHOD => reshape(&shape, args)?,
@@ -80,7 +81,7 @@ impl Lowerer {
             },
             HirType::Tensor {
                 element,
-                shape: cast.shape,
+                shape: neuro_hir::static_shape(&cast.shape),
                 names: cast.names,
             },
             span,

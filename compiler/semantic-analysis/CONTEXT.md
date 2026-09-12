@@ -435,7 +435,8 @@ base name matches the scrutinee's instance and binds payloads at the instance's 
 **Const generics, `where`, turbofish.** `const_scope` holds const params (name → int type) and
 `enter/exit_generic_scope` sets both scopes. `Type::Array.size` and the `extent` of every
 `TensorAxis` in `Type::Tensor.shape` are an `ArrayLen`
-(`Fixed` / `Param`) and a `Type::ConstValue` marker carries a const argument through
+(`Fixed` / `Param` / `Dynamic`, the last reachable only from a tensor's `?`) and a
+`Type::ConstValue` marker carries a const argument through
 monomorphization. `check_generic_call` seeds turbofish arguments, infers const params from
 array-argument lengths and tensor-argument extents (`unify_array_len`, `unify_tensor_shape`),
 enforces that every param is bound, and checks `where`
@@ -454,6 +455,17 @@ printing an expected type that was itself inferred. A tensor literal against a s
 is `TensorLiteralSymbolicExtent`: one literal serves every instantiation, so there is no length
 to check it against. Indexing a symbolic axis keeps its rank check and drops only the
 compile-time bounds check, which is the debug-tier guard's job at that point.
+
+**Dynamic shapes.** `resolve_type` maps a `TensorExtent::Dynamic` to `ArrayLen::Dynamic`, and
+`ArrayLen::satisfies` is the whole rule: an EXPECTED `?` accepts any extent, and the
+reverse is refused, since a `?` found where a literal is expected would let the consumer index at
+strides the run-time shape may not have. A `?` binds no shape parameter (`unify_array_len` has no
+case for it), so a shape-generic call over a dynamic argument is an uninferable parameter rather
+than a wrong extent. `reject_dynamic_extent` (in `tensors.rs`) is the single gate every
+extent-consuming operation passes through — construction, literal coercion, indexing, the four
+shape casts, `.clone()`, `.to(device)`, and compound assignment — reporting
+`TensorDynamicExtent` with the operation and the type. What remains legal on a `?`-shaped tensor
+is what needs no extent: binding, passing, returning, moving and dropping.
 
 ### Traits
 `traits` (name → `TraitInfo` of resolved method signatures), `trait_impls` (the `(trait, type)`

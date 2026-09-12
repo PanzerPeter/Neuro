@@ -29,7 +29,7 @@ func main() -> i32 { return 0 }
         types[0],
         HirType::Tensor {
             element: Box::new(HirType::F32),
-            shape: vec![3, 224, 224],
+            shape: neuro_hir::static_shape(&[3, 224, 224]),
             names: AxisNames::default(),
         }
     );
@@ -184,7 +184,7 @@ func main() -> i32 {
         init.ty,
         HirType::Tensor {
             element: Box::new(HirType::U8),
-            shape: vec![2, 3],
+            shape: neuro_hir::static_shape(&[2, 3]),
             names: AxisNames::default(),
         }
     );
@@ -215,7 +215,7 @@ func main() -> i32 {
     );
     let tensor = HirType::Tensor {
         element: Box::new(HirType::F32),
-        shape: vec![2, 2],
+        shape: neuro_hir::static_shape(&[2, 2]),
         names: AxisNames::default(),
     };
     let copied = binding_init(function_body(&program, "copy_of"), "copied");
@@ -275,7 +275,7 @@ func main() -> i32 {
         row.ty,
         HirType::Tensor {
             element: Box::new(HirType::I32),
-            shape: vec![3],
+            shape: neuro_hir::static_shape(&[3]),
             names: AxisNames::default(),
         }
     );
@@ -307,7 +307,7 @@ func main() -> i32 {
         block.ty,
         HirType::Tensor {
             element: Box::new(HirType::I32),
-            shape: vec![3, 2],
+            shape: neuro_hir::static_shape(&[3, 2]),
             names: AxisNames::default(),
         }
     );
@@ -387,5 +387,11 @@ func main() -> i32 {
         }
     }
     shapes.sort();
-    assert_eq!(shapes, vec![vec![2, 3], vec![3, 2]]);
+    assert_eq!(
+        shapes,
+        vec![
+            neuro_hir::static_shape(&[2, 3]),
+            neuro_hir::static_shape(&[3, 2])
+        ]
+    );
 }

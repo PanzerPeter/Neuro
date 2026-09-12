@@ -50,7 +50,8 @@ impl Lowerer {
         // A surviving axis is still the axis its name documented, so a sub-range of
         // `height` keeps that name; an axis given a position disappears with it.
         let mut kept_names = Vec::new();
-        for (position, (index, extent)) in indices.iter().zip(shape.iter()).enumerate() {
+        let extents = crate::static_extents(&shape)?;
+        for (position, (index, extent)) in indices.iter().zip(extents.iter()).enumerate() {
             let axis = self.lower_tensor_axis(index, *extent)?;
             if let HirTensorAxis::Range { start, end } = &axis {
                 kept.push(end - start);
@@ -64,7 +65,7 @@ impl Lowerer {
         } else {
             HirType::Tensor {
                 element: Box::new(element),
-                shape: kept,
+                shape: neuro_hir::static_shape(&kept),
                 names: AxisNames(kept_names),
             }
         };

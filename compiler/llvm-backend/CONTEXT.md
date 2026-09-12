@@ -371,7 +371,11 @@ and `Reference(Slice)` (the two-word `slice_ref_type()` struct, mutable or not).
 value is a **DLPack handle** (a pointer to the `DLManagedTensorVersioned` that
 `dlpack_managed_tensor_type` lays out), and its `data` field addresses the element buffer, whose
 own layout `tensor_buffer_type` gives as a flat, row-major `[d0*d1*... x T]` array. The rank-0
-tensor's buffer is `[1 x T]` (the empty product), not a zero-length array. Host memory only:
+tensor's buffer is `[1 x T]` (the empty product), not a zero-length array. Because the value is
+just the handle, a tensor with a dynamic `?` axis maps, moves and releases like any other;
+`types::static_extents` guards the sites that do need a number — the buffer layout, its byte
+size, an index's strides — and reports `UnsupportedType` rather than sizing an allocation from a
+guess. Host memory only:
 `.to(device)` guards on the requested device rather than moving anything, and the handle reports
 `kDLCPU` until a device backend flips that field.
 

@@ -255,10 +255,15 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   alongside the array's, and `slice.len()` is `u64`.
 - **Tensors**: `resolve_type` maps `ast_types::Type::Tensor` to
   `HirType::Tensor { element, shape, names }`, resolving each extent through `resolve_tensor_dim`
-  so a shape parameter takes the value the active instance bound it to, and carrying each axis's
+  so a shape parameter takes the value the active instance bound it to and a `?` axis becomes
+  `None`, and carrying each axis's
   dimension name into `AxisNames`; `mangle_type` spells the result `tensor_<elem>_<d0>x<d1>`,
+  a dynamic axis as `?`,
   names taking no part (they are checked in the frontend and reach no backend). A symbolic extent with no binding is an
   `UnresolvedType` naming the dimension, which the checker's own diagnostic reaches first.
+  `static_extents` is how every site that needs the extents reads them: the checker has already
+  refused a `?` at each, so one arriving here is a compiler bug and returns `Malformed` rather
+  than panicking.
   Construction lives in `tensors.rs`. An array literal lowered against a
   `HirType::Tensor` expectation becomes `HirExprKind::TensorLiteral` whose `elements` are
   **flattened row-major**: the nesting carried the shape and the shape is on the node's type,

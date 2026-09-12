@@ -19,7 +19,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | Directory        | What it covers                                                         |
 | ---------------- | ---------------------------------------------------------------------- |
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` to stdout |
-| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` byte sub-slices and `.char_slice(range)` codepoint sub-slices, the codepoint iterators `.chars()` / `.char_indices()`, borrowed slices `&[T]` / `&mut [T]` over arrays and `Vec`s, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), associated-type bounds (`T: Source<Item = i32>`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer, tensor construction, tensor indexing and slicing, and tensor shape generics (`func f<M, K>(t: &Tensor<i32, [M, K]>)`) |
+| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` byte sub-slices and `.char_slice(range)` codepoint sub-slices, the codepoint iterators `.chars()` / `.char_indices()`, borrowed slices `&[T]` / `&mut [T]` over arrays and `Vec`s, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), associated-type bounds (`T: Source<Item = i32>`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer, tensor construction, tensor indexing and slicing, tensor shape generics (`func f<M, K>(t: &Tensor<i32, [M, K]>)`), and dynamic tensor shapes (`Tensor<f32, [?, 784]>`) |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result`, `?` error propagation |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `for (i, x) in xs.enumerate()`, the `.map(f)` / `.filter(p)` head adapters, the `IntoIterator` / `Iterator` protocol and hand-written adapters, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`), the `@derive(Debug, PartialEq)` traits |
@@ -47,7 +47,7 @@ isolation:
   arm's buffer *moves* into the struct that keeps it, `.clone()` is what buys a second
   owner, `&Tensor` reads one without consuming it, and `.to(Device::CPU)` is the
   consuming device transfer: each one moving, copying, or handing on a DLPack handle.
-  Exit `216`.
+  A `?` dynamic axis reads two different heights through one signature. Exit `224`.
 - [`showcase/optimizer_step.nr`](showcase/optimizer_step.nr): a weight update
   written in place, the shape a training step has. The `*Assign` compound
   operators (`+=`, `-=`, `*=`, `/=`, `%=`) on tensors working together with
@@ -358,7 +358,13 @@ No Rust edits are needed: discovery is automatic.
   compiler infers, `.permute([...])`, and `.flatten()` / `.flatten(dims: [...])`, all
   computing the result's shape at compile time and all consuming the receiver so one buffer
   is handed on rather than duplicated. `.permute` and `.flatten` take dimension NAMES as
-  well as positions, resolved against the receiver's own shape. By-value
+  well as positions, resolved against the receiver's own shape. Dynamic shapes are
+  supported (`types/tensor_dynamic_shapes.nr`): an axis written `?` has no compile-time
+  extent, so one signature accepts every extent at that position while the axes beside it
+  stay checked. Widening goes one way — a statically shaped tensor is accepted where a `?`
+  is expected, not the reverse — and a `?`-shaped tensor binds, moves, is returned and is
+  released like any other, while anything needing the extent (a constructor, a literal,
+  `.clone()`, an index, a shape cast) is a compile error naming the axis. By-value
   arithmetic and the reductions are later work. A tensor value is a
   DLPack handle over an out-of-line buffer, so one of any size compiles at any optimization
   level and the same pointer is what a foreign consumer would read;

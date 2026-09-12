@@ -1152,3 +1152,141 @@ func main() -> i32 {
         "squareness is a property of the extents; got {errors:?}"
     );
 }
+
+#[test]
+fn a_dynamic_axis_accepts_any_extent_at_that_position() {
+    let errors = semantic_errors(
+        r#"
+func rows(batch: &Tensor<f32, [?, 4]>) -> i32 {
+    return 4
+}
+
+func main() -> i32 {
+    val small: Tensor<f32, [2, 4]> = [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]
+    val big = Tensor::<f32, [7, 4]>::zeros()
+    return rows(&small) + rows(&big)
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "two extents at one `?` axis; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_static_axis_beside_a_dynamic_one_is_still_checked() {
+    let errors = semantic_errors(
+        r#"
+func rows(batch: &Tensor<f32, [?, 4]>) -> i32 {
+    return 4
+}
+
+func main() -> i32 {
+    val wrong = Tensor::<f32, [2, 8]>::zeros()
+    return rows(&wrong)
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })),
+        "the second axis is 4, not 8; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_dynamic_shape_does_not_satisfy_a_static_annotation() {
+    let errors = semantic_errors(
+        r#"
+func widen(t: Tensor<f32, [2, 4]>) -> Tensor<f32, [?, 4]> {
+    return t
+}
+
+func main() -> i32 {
+    val narrowed: Tensor<f32, [2, 4]> = widen(Tensor::<f32, [2, 4]>::zeros())
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })),
+        "widening is sound, narrowing is not; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_dynamic_extent_cannot_be_constructed_or_written_as_a_literal() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val zeroed = Tensor::<f32, [?, 4]>::zeros()
+    val written: Tensor<f32, [?, 2]> = [[1.0, 2.0]]
+    return 0
+}
+"#,
+    );
+    let reported = errors
+        .iter()
+        .filter(|e| matches!(e, TypeError::TensorDynamicExtent { .. }))
+        .count();
+    assert_eq!(
+        reported, 2,
+        "neither a constructor nor a literal has a size; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_dynamic_extent_is_refused_by_every_operation_that_needs_its_value() {
+    let errors = semantic_errors(
+        r#"
+func flexible(x: Tensor<f32, [?, 4]>) -> i32 {
+    val copied = x.clone()
+    val element = x[0, 1]
+    val transposed = x.t()
+    return 0
+}
+
+func main() -> i32 {
+    return 0
+}
+"#,
+    );
+    let reported = errors
+        .iter()
+        .filter(|e| matches!(e, TypeError::TensorDynamicExtent { .. }))
+        .count();
+    assert_eq!(
+        reported, 3,
+        "a copy, an index and a shape cast each need an extent; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_dynamic_axis_binds_no_shape_parameter() {
+    let errors = semantic_errors(
+        r#"
+func widen(t: Tensor<f32, [2, 4]>) -> Tensor<f32, [?, 4]> {
+    return t
+}
+
+func rows<N>(t: &Tensor<f32, [N, 4]>) -> i32 {
+    return 4
+}
+
+func main() -> i32 {
+    val dynamic = widen(Tensor::<f32, [2, 4]>::zeros())
+    return rows(&dynamic)
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })),
+        "`N` has no value to take from a `?` axis; got {errors:?}"
+    );
+}

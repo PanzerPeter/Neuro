@@ -97,7 +97,7 @@ the tuple-index parse, so it needs no expression grammar of its own.
 - **Shape argument vs. array/slice type argument.** `Tensor<f32, [2, 3]>` is the one type
   application whose argument is a shape rather than a type, and it shares its opening bracket
   with `Box<[T; N]>` / `Box<[T]>`. `shape_argument_ahead` decides on the token after `[`: an
-  integer or an immediate `]` can never open a type, so a shape needs no backtracking.
+  integer, a `?`, or an immediate `]` can never open a type, so a shape needs no backtracking.
   `parse_generic_type_args` therefore takes a `symbolic_extents` flag and returns
   `(args, Option<ShapeArg>, close_span)`, and `build_tensor_type` turns a shape plus one type
   argument into `Type::Tensor`. `Tensor` is a
@@ -106,9 +106,10 @@ the tuple-index parse, so it needs no expression grammar of its own.
   other name is `ParseError::ShapeArgumentOnNonTensor`; a shape with no element type, or with a
   second type argument, is `ParseError::TensorTypeArity`. A shape is a list of
   `TensorDim { name, extent }`: the extent is a non-negative integer literal
-  (`TensorExtent::Literal`) or a shape parameter's name (`TensorExtent::Param`), and the
-  optional name is the `batch:` of a named dimension. A `?` dynamic axis is still a parse
-  error until dynamic shapes land. An identifier-led `[...]` is ambiguous
+  (`TensorExtent::Literal`), a shape parameter's name (`TensorExtent::Param`), or `?`
+  (`TensorExtent::Dynamic`), and the
+  optional name is the `batch:` of a named dimension, which a `?` axis may carry like any
+  other. An identifier-led `[...]` is ambiguous
   with the slice type `[T]`, so it is read as a shape only under the name `Tensor`, which is
   what `symbolic_extents` carries: everywhere else `Foo<[T]>` parses as it always did.
 - **A dimension name is decided by the colon after it.** `[N]` names the extent and `[batch: N]`

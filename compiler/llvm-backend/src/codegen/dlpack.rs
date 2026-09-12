@@ -103,7 +103,7 @@ impl<'ctx> CodegenContext<'ctx> {
             })?
             .into_pointer_value();
 
-        self.init_dlpack_handle(handle, data, element, shape)?;
+        self.init_dlpack_handle(handle, data, element, &crate::types::static_extents(shape)?)?;
         Ok(handle)
     }
 
@@ -239,7 +239,8 @@ impl<'ctx> CodegenContext<'ctx> {
             &[FIELD_DL_TENSOR, FIELD_NDIM],
             i32_type.const_int(shape.len() as u64, false).into(),
         )?;
-        let (shape_global, strides_global) = self.dlpack_shape_globals(element, shape)?;
+        let (shape_global, strides_global) =
+            self.dlpack_shape_globals(element, &crate::types::static_extents(shape)?)?;
         self.store_handle_field(
             handle_ty,
             handle,

@@ -43,13 +43,17 @@ pub enum ArraySize {
 /// Ordinarily a compile-time integer literal. Inside a generic definition it may
 /// instead name a shape parameter (`[M, K]`): a bare identifier in a shape position is
 /// sugar for a `const NAME: u32` parameter, so the symbolic form is resolved to a concrete
-/// extent by monomorphization and never escapes the frontend.
+/// extent by monomorphization and never escapes the frontend. A `?` axis is neither: its
+/// extent is not known until run time and survives every later stage.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TensorExtent {
     /// A concrete compile-time extent, e.g. the `3` in `Tensor<f32, [3, 3]>`.
     Literal(usize),
     /// A shape parameter used as an extent, e.g. the `K` in `Tensor<f32, [M, K]>`.
     Param(Identifier),
+    /// A dynamic extent, the `?` in `Tensor<f32, [?, 784]>`: unknown until run time,
+    /// so the axis opts out of compile-time shape checking while its siblings keep it.
+    Dynamic(Span),
 }
 
 /// One axis of a tensor shape: an extent, plus the optional dimension name written

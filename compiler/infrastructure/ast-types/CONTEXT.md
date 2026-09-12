@@ -93,14 +93,15 @@ walkers.
   its opening bracket with `Type::Array`, and the `;` (or its absence before `]`) is what the
   parser selects on. Like `Type::DynTrait` it is valid only as a reference referent; semantic
   analysis rejects a bare one.
-- `Type::Tensor { element_type, shape, span }` is the statically shaped `Tensor<T, [d0, ...]>`.
+- `Type::Tensor { element_type, shape, span }` is `Tensor<T, [d0, ...]>`.
   `shape` is a `Vec<TensorDim>`, one axis per dimension: `TensorDim { name, extent }`, where the
-  extent is either a `TensorExtent::Literal` or the `TensorExtent::Param` naming a shape
-  parameter (an empty shape is the rank-0 scalar tensor) and `name` is the optional
-  dimension name (`[batch: 32]`); a dynamic `?` axis has no
-  representation here yet, by design. `TensorExtent` is the tensor counterpart of `ArraySize`, and
-  for the same reason: a symbolic extent is resolved by monomorphization and never reaches a
-  backend. A dimension name is frontend-only for a stronger reason — it is checked between two
+  extent is a `TensorExtent::Literal`, the `TensorExtent::Param` naming a shape
+  parameter, or `TensorExtent::Dynamic` for a `?` axis (an empty shape is the rank-0 scalar
+  tensor) and `name` is the optional dimension name (`[batch: 32]`).
+  `TensorExtent` is the tensor counterpart of `ArraySize`, and
+  for a reason that holds for two of its three cases: a symbolic extent is resolved by
+  monomorphization and never reaches a backend. `Dynamic` is the exception — it has no value to
+  resolve, so it survives every stage. A dimension name is frontend-only for a stronger reason — it is checked between two
   shapes and then dropped, so no later pass has to carry it. It is the one type
   node the parser builds from a *name* plus a bracketed shape rather than from a keyword or a
   bracket, and `span` covers the name through the closing `>`.
@@ -162,7 +163,7 @@ walkers.
   Unknown names are accepted so the surface stays forward-compatible; semantics are interpreted
   by later passes (`@derive(Copy, Clone)`, `@allow(...)`, and eventually `@grad` / `@gpu`).
 - **Const generics.** `GenericParamKind` (`Type` / `Const`) on `GenericParam`, `ArraySize`
-  (`Literal` / `Const`) on `Type::Array`, `TensorExtent` (`Literal` / `Param`) inside each
+  (`Literal` / `Const`) on `Type::Array`, `TensorExtent` (`Literal` / `Param` / `Dynamic`) inside each
   `TensorDim` of `Type::Tensor.shape`, `GenericArg` (`Type` / `Const`) in `Type::Generic.args`,
   `Expr::Call.type_args` for turbofish, and `where_predicates` on
   `FunctionDef` / `StructDef` / `ImplDef`.

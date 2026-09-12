@@ -369,8 +369,8 @@ impl Parser {
     }
 
     /// Whether the argument at the cursor is a `[d0, d1, ...]` shape rather than an
-    /// array or slice type. An integer (or an immediate `]`) can never open a type, so
-    /// the token after `[` decides without backtracking.
+    /// array or slice type. An integer, a `?`, or an immediate `]` can never open a
+    /// type, so the token after `[` decides without backtracking.
     ///
     /// An identifier-led shape (`[M, K]`) is ambiguous with the slice type `[T]`, so it
     /// is claimed only under `Tensor`, where a slice cannot appear: `symbolic_extents` carries
@@ -388,7 +388,7 @@ impl Parser {
         }
         matches!(
             self.tokens.get(i).map(|t| &t.kind),
-            Some(TokenKind::Integer(_)) | Some(TokenKind::RightBracket)
+            Some(TokenKind::Integer(_)) | Some(TokenKind::RightBracket) | Some(TokenKind::Question)
         ) || (symbolic_extents
             && matches!(
                 self.tokens.get(i).map(|t| &t.kind),
@@ -423,7 +423,8 @@ impl Parser {
         Ok(Some(Identifier { name, span }))
     }
 
-    /// Parse one axis extent: a non-negative integer literal or a shape parameter's name.
+    /// Parse one axis extent: a non-negative integer literal, a shape parameter's name,
+    /// or `?` for an axis whose extent is not known until run time.
     fn parse_tensor_extent(&mut self) -> ParseResult<TensorExtent> {
         let token = self.advance().ok_or(ParseError::UnexpectedEof {
             expected: "a tensor dimension".to_string(),
@@ -443,9 +444,10 @@ impl Parser {
                 name,
                 span: token.span,
             })),
+            TokenKind::Question => Ok(TensorExtent::Dynamic(token.span)),
             found => Err(ParseError::UnexpectedToken {
                 found,
-                expected: "a tensor dimension: a non-negative integer or a shape parameter"
+                expected: "a tensor dimension: a non-negative integer, a shape parameter, or `?`"
                     .to_string(),
                 span: token.span,
             }),
@@ -453,8 +455,9 @@ impl Parser {
     }
 
     /// Parse a `[d0, d1, ...]` tensor shape. An axis is an extent — a non-negative
-    /// integer literal or a shape parameter's name — optionally preceded by a dimension
-    /// name and a colon (`[batch: 32]`); an empty list is the rank-0 scalar shape.
+    /// integer literal, a shape parameter's name, or `?` — optionally preceded by a
+    /// dimension name and a colon (`[batch: 32]`); an empty list is the rank-0 scalar
+    /// shape.
     fn parse_shape_argument(&mut self) -> ParseResult<ShapeArg> {
         let open = self.consume(TokenKind::LeftBracket, "'[' to open a tensor shape")?;
         self.skip_newlines();
@@ -731,6 +734,41 @@ mod tests {
         assert_eq!(shape[1].extent, TensorExtent::Literal(768));
     }
 
+    #[test]
+    fn a_question_mark_parses_as_a_dynamic_extent() {
+        let items = parse("func f(x: Tensor<f32, [?, 784]>) { }").expect("parses");
+        let Some(Item::Function(func)) = items.first() else {
+            panic!("expected a function item");
+        };
+        let Type::Tensor { shape, .. } = &func.params[0].ty else {
+            panic!("expected a tensor parameter type");
+        };
+        assert_eq!(shape.len(), 2);
+        assert!(matches!(shape[0].extent, TensorExtent::Dynamic(_)));
+        assert!(shape[0].name.is_none());
+        assert_eq!(shape[1].extent, TensorExtent::Literal(784));
+    }
+
+    /// A `?` axis documents itself like any other: the name and the extent are
+    /// independent, so `[batch: ?]` is both named and dynamic.
+    #[test]
+    fn a_named_axis_may_be_dynamic() {
+        let items = parse("func f(x: Tensor<f32, [batch: ?, embed: 768]>) { }").expect("parses");
+        let Some(Item::Function(func)) = items.first() else {
+            panic!("expected a function item");
+        };
+        let Type::Tensor { shape, .. } = &func.params[0].ty else {
+            panic!("expected a tensor parameter type");
+        };
+        assert_eq!(
+            shape[0].name.as_ref().map(|n| n.name.as_str()),
+            Some("batch")
+        );
+        assert!(matches!(shape[0].extent, TensorExtent::Dynamic(_)));
+        // A `?` is not a name, so it re-kinds nothing into a shape parameter.
+        assert!(func.generics.is_empty());
+    }
+
     /// The colon is the whole distinction: `[N]` names the extent, `[batch: N]` names
     /// the axis and leaves `N` as the extent.
     #[test]
@@ -786,14 +824,27 @@ mod tests {
         assert!(matches!(param.kind, crate::ast::GenericParamKind::Type));
     }
 
-    /// Dynamic axes are a later roadmap item, so `?` must still fail loudly rather than
-    /// parse as something else.
+    /// A `?` is claimed as a shape wherever it appears in the list, so a static axis
+    /// before it does not decide how the rest is read.
     #[test]
-    fn a_dynamic_tensor_axis_is_rejected() {
-        let err = parse("func f(x: Tensor<f32, [2, ?]>) { }").expect_err("rejected");
+    fn a_dynamic_axis_parses_after_a_static_one() {
+        let items = parse("func f(x: Tensor<f32, [2, ?]>) { }").expect("parses");
+        let Some(Item::Function(func)) = items.first() else {
+            panic!("expected a function item");
+        };
+        let Type::Tensor { shape, .. } = &func.params[0].ty else {
+            panic!("expected a tensor parameter type");
+        };
+        assert_eq!(shape[0].extent, TensorExtent::Literal(2));
+        assert!(matches!(shape[1].extent, TensorExtent::Dynamic(_)));
+    }
+
+    /// A shape is not a type, so `?` still fails loudly where a type belongs.
+    #[test]
+    fn a_question_mark_is_not_a_type() {
+        let err = parse("func f(x: ?) { }").expect_err("rejected");
         assert!(
-            matches!(&err, ParseError::UnexpectedToken { expected, .. }
-                if expected.contains("tensor dimension")),
+            matches!(&err, ParseError::UnexpectedToken { .. }),
             "unexpected error: {err:?}"
         );
     }

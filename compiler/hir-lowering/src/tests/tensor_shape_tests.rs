@@ -7,6 +7,15 @@ use super::{binding_init, function_body, lower};
 
 use neuro_hir::{HirExprKind, HirType};
 
+/// The extents of a lowered shape. Every case here is statically shaped, so an axis
+/// without a value would be the bug under test rather than an expected outcome.
+fn extents(shape: &[Option<usize>]) -> Vec<usize> {
+    shape
+        .iter()
+        .map(|extent| extent.expect("a static extent"))
+        .collect()
+}
+
 /// The shape a shape-manipulation call lowers to, and where each result axis came from.
 fn cast_of(src: &str, binding: &str) -> (Vec<usize>, Option<Vec<usize>>) {
     let program = lower(src);
@@ -21,7 +30,7 @@ fn cast_of(src: &str, binding: &str) -> (Vec<usize>, Option<Vec<usize>>) {
     let HirType::Tensor { shape, .. } = &init.ty else {
         panic!("a shape cast should produce a tensor type, got {}", init.ty);
     };
-    (shape.clone(), permutation.clone())
+    (extents(shape), permutation.clone())
 }
 
 #[test]
@@ -126,5 +135,5 @@ func main() -> i32 {
     let HirType::Tensor { shape, .. } = &binding_init(body, "f").ty else {
         panic!("a flatten should produce a tensor type");
     };
-    assert_eq!(shape, &vec![3, 8]);
+    assert_eq!(extents(shape), vec![3, 8]);
 }
