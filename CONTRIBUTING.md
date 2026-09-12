@@ -154,15 +154,12 @@ compiler/
 │   ├── ast-types/           # AST node definitions (owned here, not in syntax-parsing)
 │   ├── neuro-hir/           # Typed HIR, the backend-agnostic frontend/backend contract (1D)
 │   ├── shared-types/        # Span, Identifier, Literal
-│   ├── diagnostics/         # Error type infrastructure
-│   ├── source-location/     # Source mapping
-│   └── project-config/      # neuro.toml config parsing
+│   └── source-location/     # Source mapping
 │
 ├── lexical-analysis/        # Tokenizer slice
 ├── syntax-parsing/          # Parser slice (depends on lexical-analysis by design)
 ├── semantic-analysis/       # Type checker slice
 ├── hir-lowering/            # AST → typed HIR lowering slice (1D)
-├── control-flow/            # CFG data structures; no caller yet
 ├── llvm-backend/            # LLVM 20 / inkwell 0.10 codegen slice
 ├── mlir-backend/            # MLIR / melior slice (1D+, off-by-default `mlir` feature)
 │
@@ -175,7 +172,7 @@ compiler/
 - Organize by features, not layers
 - Keep slices independent. Duplication is preferred over coupling.
 - Use `pub(crate)` as default visibility; `pub` only for the slice entry point
-- Accept infrastructure dependencies (`shared-types`, `diagnostics`, `ast-types`)
+- Accept infrastructure dependencies (`shared-types`, `ast-types`, `neuro-hir`)
 - Keep each slice's `CONTEXT.md` up to date when entry points or dependencies change
 
 **Do not:**

@@ -23,10 +23,6 @@ const DEFAULT_FLOAT_CONVERSION: &str = ".16g";
 /// digits, hence 15. `__neuro_exp` trims the zeros this pads with.
 const DEFAULT_SCIENTIFIC_DECIMALS: u32 = 15;
 
-fn llvm_err(e: inkwell::builder::BuilderError) -> CodegenError {
-    CodegenError::LlvmError(e.to_string())
-}
-
 /// Who owns the buffer behind a rendered piece.
 ///
 /// A rendering either hands back bytes the program already had (a `.rodata` literal,
@@ -66,10 +62,7 @@ impl<'ctx> CodegenContext<'ctx> {
         for part in parts {
             match part {
                 HirInterpPart::Text(text) => {
-                    let global = self
-                        .builder
-                        .build_global_string_ptr(text, "interp.text")
-                        .map_err(llvm_err)?;
+                    let global = self.builder.build_global_string_ptr(text, "interp.text")?;
                     let len = self.context.i64_type().const_int(text.len() as u64, false);
                     pieces.push(Piece {
                         ptr: global.as_pointer_value(),
@@ -113,8 +106,7 @@ impl<'ctx> CodegenContext<'ctx> {
         for piece in pieces {
             total = self
                 .builder
-                .build_int_add(total, piece.len, "interp.total")
-                .map_err(llvm_err)?;
+                .build_int_add(total, piece.len, "interp.total")?;
         }
 
         let buf = self.build_malloc(total, "interp.buf")?;
@@ -124,8 +116,7 @@ impl<'ctx> CodegenContext<'ctx> {
             self.build_memcpy_call(dst, piece.ptr, piece.len)?;
             offset = self
                 .builder
-                .build_int_add(offset, piece.len, "interp.offset")
-                .map_err(llvm_err)?;
+                .build_int_add(offset, piece.len, "interp.offset")?;
         }
 
         self.build_string_value(buf, total)
@@ -137,9 +128,7 @@ impl<'ctx> CodegenContext<'ctx> {
             PieceOwner::Borrowed => Ok(()),
             PieceOwner::Owned => {
                 let free_fn = self.get_or_declare_free();
-                self.builder
-                    .build_call(free_fn, &[piece.ptr.into()], "")
-                    .map_err(llvm_err)?;
+                self.builder.build_call(free_fn, &[piece.ptr.into()], "")?;
                 Ok(())
             }
             PieceOwner::OwnedUnlessSameAs(source) => self.free_if_distinct(piece.ptr, source),
@@ -160,24 +149,21 @@ impl<'ctx> CodegenContext<'ctx> {
         let parent_fn = self.current_function.ok_or_else(|| {
             CodegenError::InternalError("interpolation emitted outside function".to_string())
         })?;
-        let same = self
-            .builder
-            .build_int_compare(inkwell::IntPredicate::EQ, candidate, other, "interp.same")
-            .map_err(llvm_err)?;
+        let same = self.builder.build_int_compare(
+            inkwell::IntPredicate::EQ,
+            candidate,
+            other,
+            "interp.same",
+        )?;
         let free_bb = self.context.append_basic_block(parent_fn, "interp.free");
         let cont_bb = self.context.append_basic_block(parent_fn, "interp.kept");
         self.builder
-            .build_conditional_branch(same, cont_bb, free_bb)
-            .map_err(llvm_err)?;
+            .build_conditional_branch(same, cont_bb, free_bb)?;
 
         self.builder.position_at_end(free_bb);
         let free_fn = self.get_or_declare_free();
-        self.builder
-            .build_call(free_fn, &[candidate.into()], "")
-            .map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(cont_bb)
-            .map_err(llvm_err)?;
+        self.builder.build_call(free_fn, &[candidate.into()], "")?;
+        self.builder.build_unconditional_branch(cont_bb)?;
 
         self.builder.position_at_end(cont_bb);
         Ok(())
@@ -214,13 +200,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let structure = value.into_struct_value();
         let ptr = self
             .builder
-            .build_extract_value(structure, 0, "interp.piece.ptr")
-            .map_err(llvm_err)?
+            .build_extract_value(structure, 0, "interp.piece.ptr")?
             .into_pointer_value();
         let len = self
             .builder
-            .build_extract_value(structure, 1, "interp.piece.len")
-            .map_err(llvm_err)?
+            .build_extract_value(structure, 1, "interp.piece.len")?
             .into_int_value();
         Ok((ptr, len))
     }
@@ -239,9 +223,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let value = match (ty, value) {
             (Type::Reference { .. }, BasicValueEnum::PointerValue(ptr)) => {
                 let referent = self.type_mapper.map_type(&target)?;
-                self.builder
-                    .build_load(referent, ptr, "interp.deref")
-                    .map_err(llvm_err)?
+                self.builder.build_load(referent, ptr, "interp.deref")?
             }
             _ => value,
         };
@@ -297,10 +279,11 @@ impl<'ctx> CodegenContext<'ctx> {
                 pieces.push(self.text_piece(", ")?);
             }
             pieces.push(self.text_piece(&format!("{}: ", field_name))?);
-            let field_value = self
-                .builder
-                .build_extract_value(aggregate, index as u32, &format!("dbg.{}", field_name))
-                .map_err(llvm_err)?;
+            let field_value = self.builder.build_extract_value(
+                aggregate,
+                index as u32,
+                &format!("dbg.{}", field_name),
+            )?;
             let (rendered, owner) =
                 self.render_hole(field_value, field_ty, &field_spec, PieceOwner::Borrowed)?;
             let (ptr, len) = self.split_string_value(rendered)?;
@@ -332,8 +315,7 @@ impl<'ctx> CodegenContext<'ctx> {
     fn text_piece(&self, text: &str) -> CodegenResult<Piece<'ctx>> {
         let global = self
             .builder
-            .build_global_string_ptr(text, "interp.dbg.text")
-            .map_err(llvm_err)?;
+            .build_global_string_ptr(text, "interp.dbg.text")?;
         Ok(Piece {
             ptr: global.as_pointer_value(),
             len: self.context.i64_type().const_int(text.len() as u64, false),
@@ -366,9 +348,7 @@ impl<'ctx> CodegenContext<'ctx> {
             // `__neuro_quote` always allocates, so a buffer we brought in is now dead.
             if matches!(incoming, PieceOwner::Owned) {
                 let free_fn = self.get_or_declare_free();
-                self.builder
-                    .build_call(free_fn, &[source.into()], "")
-                    .map_err(llvm_err)?;
+                self.builder.build_call(free_fn, &[source.into()], "")?;
             }
             return Ok((quoted, PieceOwner::Owned));
         }
@@ -384,12 +364,10 @@ impl<'ctx> CodegenContext<'ctx> {
         let i64_type = self.context.i64_type();
         let truthy = self
             .builder
-            .build_global_string_ptr("true", "interp.true")
-            .map_err(llvm_err)?;
+            .build_global_string_ptr("true", "interp.true")?;
         let falsy = self
             .builder
-            .build_global_string_ptr("false", "interp.false")
-            .map_err(llvm_err)?;
+            .build_global_string_ptr("false", "interp.false")?;
         let flag = value.into_int_value();
         let ptr = self
             .builder
@@ -398,8 +376,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 truthy.as_pointer_value(),
                 falsy.as_pointer_value(),
                 "interp.bool.ptr",
-            )
-            .map_err(llvm_err)?
+            )?
             .into_pointer_value();
         let len = self
             .builder
@@ -408,8 +385,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 i64_type.const_int(4, false),
                 i64_type.const_int(5, false),
                 "interp.bool.len",
-            )
-            .map_err(llvm_err)?
+            )?
             .into_int_value();
         Ok((self.build_string_value(ptr, len)?, PieceOwner::Borrowed))
     }
@@ -424,8 +400,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let utf8 = self.get_or_define_utf8()?;
         let encoded = self
             .builder
-            .build_call(utf8, &[value.into()], "interp.char")
-            .map_err(llvm_err)?
+            .build_call(utf8, &[value.into()], "interp.char")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("utf8 helper returned void".to_string()))?;
@@ -436,8 +411,7 @@ impl<'ctx> CodegenContext<'ctx> {
             // `__neuro_quote` always allocates, so the encoding it read is now dead.
             let free_fn = self.get_or_declare_free();
             self.builder
-                .build_call(free_fn, &[encoded_ptr.into()], "")
-                .map_err(llvm_err)?;
+                .build_call(free_fn, &[encoded_ptr.into()], "")?;
             return Ok((quoted, PieceOwner::Owned));
         }
         Ok((encoded, PieceOwner::Owned))
@@ -457,15 +431,13 @@ impl<'ctx> CodegenContext<'ctx> {
         // extension: `-1i32` in hex is `ffffffff`, not sixteen `f`s.
         let widened_unsigned = self
             .builder
-            .build_int_z_extend(raw, i64_type, "interp.int.bits")
-            .map_err(llvm_err)?;
+            .build_int_z_extend(raw, i64_type, "interp.int.bits")?;
 
         if spec.kind == FormatKind::Binary {
             let helper = self.get_or_define_fmt_binary()?;
             let text = self
                 .builder
-                .build_call(helper, &[widened_unsigned.into()], "interp.bin")
-                .map_err(llvm_err)?
+                .build_call(helper, &[widened_unsigned.into()], "interp.bin")?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -488,27 +460,21 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 let signed = self
                     .builder
-                    .build_int_s_extend(raw, i64_type, "interp.int")
-                    .map_err(llvm_err)?;
-                let negative = self
-                    .builder
-                    .build_int_compare(
-                        inkwell::IntPredicate::SLT,
-                        signed,
-                        i64_type.const_zero(),
-                        "interp.int.neg",
-                    )
-                    .map_err(llvm_err)?;
+                    .build_int_s_extend(raw, i64_type, "interp.int")?;
+                let negative = self.builder.build_int_compare(
+                    inkwell::IntPredicate::SLT,
+                    signed,
+                    i64_type.const_zero(),
+                    "interp.int.neg",
+                )?;
                 // Plain wrapping negation: `0 - i64::MIN` is `i64::MIN`'s own bit
                 // pattern, which read as unsigned is the magnitude wanted.
-                let negated = self
-                    .builder
-                    .build_int_sub(i64_type.const_zero(), signed, "interp.int.abs")
-                    .map_err(llvm_err)?;
+                let negated =
+                    self.builder
+                        .build_int_sub(i64_type.const_zero(), signed, "interp.int.abs")?;
                 let magnitude = self
                     .builder
-                    .build_select(negative, negated, signed, "interp.int.mag")
-                    .map_err(llvm_err)?
+                    .build_select(negative, negated, signed, "interp.int.mag")?
                     .into_int_value();
                 let positive = if spec.plus_sign {
                     i8_type.const_int(u64::from(b'+'), false)
@@ -522,8 +488,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         i8_type.const_int(u64::from(b'-'), false),
                         positive,
                         "interp.int.sign",
-                    )
-                    .map_err(llvm_err)?
+                    )?
                     .into_int_value();
                 (magnitude, sign, 10, false)
             }
@@ -532,8 +497,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let helper = self.get_or_define_fmt_int(radix, upper)?;
         let text = self
             .builder
-            .build_call(helper, &[magnitude.into(), sign.into()], "interp.int.text")
-            .map_err(llvm_err)?
+            .build_call(helper, &[magnitude.into(), sign.into()], "interp.int.text")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("int format returned void".to_string()))?;
@@ -554,8 +518,7 @@ impl<'ctx> CodegenContext<'ctx> {
             raw
         } else {
             self.builder
-                .build_float_ext(raw, f64_type, "interp.float")
-                .map_err(llvm_err)?
+                .build_float_ext(raw, f64_type, "interp.float")?
         };
 
         let (conversion, precision) = match spec.kind {
@@ -574,8 +537,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 helper,
                 &[operand.into(), format.into()],
                 "interp.float.text",
-            )
-            .map_err(llvm_err)?
+            )?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("float format returned void".to_string()))?;
@@ -594,8 +556,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     self.get_or_define_normalize_exponent()?,
                     &[ptr.into(), len.into(), trim.into()],
                     "interp.float.sci",
-                )
-                .map_err(llvm_err)?
+                )?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -615,8 +576,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.get_or_define_ensure_point()?,
                 &[ptr.into(), len.into()],
                 "interp.float.point",
-            )
-            .map_err(llvm_err)?
+            )?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("float fix-up returned void".to_string()))?;
@@ -645,7 +605,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder
             .build_global_string_ptr(&format, "interp.fmt")
-            .map_err(llvm_err)
+            .map_err(CodegenError::from)
             .map(|global| global.as_pointer_value())
     }
 
@@ -662,8 +622,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 helper,
                 &[ptr.into(), len.into(), quote.into()],
                 "interp.quoted",
-            )
-            .map_err(llvm_err)?
+            )?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("quote helper returned void".to_string()))
@@ -709,8 +668,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         .into(),
                 ],
                 "interp.padded",
-            )
-            .map_err(llvm_err)?
+            )?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("pad helper returned void".to_string()))?;

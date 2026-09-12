@@ -9,7 +9,6 @@ publish.workspace = true
 
 [dependencies]
 # Infrastructure
-diagnostics = { path = "../infrastructure/diagnostics" }
 neuro-hir = { path = "../infrastructure/neuro-hir" }
 ast-types = { path = "../infrastructure/ast-types" }
 
@@ -28,7 +27,6 @@ log = { workspace = true }
 anyhow = { workspace = true }
 
 # Compilation and Linking
-cc = "1.0"
 tempfile = "3.8"
 
 [[bin]]

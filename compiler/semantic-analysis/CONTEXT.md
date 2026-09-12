@@ -12,7 +12,6 @@ Validate the type correctness and scope rules of a parsed Neuro program before c
 ## Shared Kernel
 - ast-types: read-only traversal of `Item` / `Expr` / `Stmt` nodes
 - shared-types: `Span` embedded in every `TypeError`, `FormatSpec` for interpolation holes
-- diagnostics: error type infrastructure
 
 `syntax-parsing` is `[dev-dependencies]` only (integration tests), never production.
 

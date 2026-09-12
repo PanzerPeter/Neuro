@@ -84,7 +84,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "argument-binding"
-version = "2.22.3"
+version = "2.22.4"
 dependencies = [
  "ast-types",
  "shared-types",
@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "ast-types"
-version = "2.22.3"
+version = "2.22.4"
 dependencies = [
  "shared-types",
 ]
@@ -301,13 +301,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "control-flow"
-version = "2.22.3"
-dependencies = [
- "thiserror",
-]
-
-[[package]]
 name = "convert_case"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -420,14 +413,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "abd57806937c9cc163efc8ea3910e00a62e2aeb0b8119f1793a978088f8f6b04"
 
 [[package]]
-name = "diagnostics"
-version = "2.22.3"
-dependencies = [
- "shared-types",
- "thiserror",
-]
-
-[[package]]
 name = "either"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -461,12 +446,6 @@ dependencies = [
  "jiff",
  "log",
 ]
-
-[[package]]
-name = "equivalent"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "errno"
@@ -549,12 +528,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hashbrown"
-version = "0.17.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
-
-[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -562,23 +535,13 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hir-lowering"
-version = "2.22.3"
+version = "2.22.4"
 dependencies = [
  "ast-types",
  "neuro-hir",
  "shared-types",
  "syntax-parsing",
  "thiserror",
-]
-
-[[package]]
-name = "indexmap"
-version = "2.14.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
-dependencies = [
- "equivalent",
- "hashbrown",
 ]
 
 [[package]]
@@ -681,9 +644,8 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lexical-analysis"
-version = "2.22.3"
+version = "2.22.4"
 dependencies = [
- "diagnostics",
  "logos",
  "serde_json",
  "shared-types",
@@ -715,11 +677,10 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "llvm-backend"
-version = "2.22.3"
+version = "2.22.4"
 dependencies = [
  "ast-types",
  "criterion",
- "diagnostics",
  "hir-lowering",
  "inkwell",
  "neuro-hir",
@@ -821,7 +782,7 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "mlir-backend"
-version = "2.22.3"
+version = "2.22.4"
 dependencies = [
  "melior",
  "neuro-hir",
@@ -840,7 +801,7 @@ dependencies = [
 
 [[package]]
 name = "module-resolution"
-version = "2.22.3"
+version = "2.22.4"
 dependencies = [
  "ast-types",
  "shared-types",
@@ -850,14 +811,12 @@ dependencies = [
 
 [[package]]
 name = "neurc"
-version = "2.22.3"
+version = "2.22.4"
 dependencies = [
  "anyhow",
  "argument-binding",
  "ast-types",
- "cc",
  "clap",
- "diagnostics",
  "env_logger",
  "hir-lowering",
  "llvm-backend",
@@ -871,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "neuro-hir"
-version = "2.22.3"
+version = "2.22.4"
 dependencies = [
  "ast-types",
  "shared-types",
@@ -999,15 +958,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "project-config"
-version = "2.22.3"
-dependencies = [
- "serde",
- "thiserror",
- "toml",
-]
-
-[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1113,10 +1063,9 @@ dependencies = [
 
 [[package]]
 name = "semantic-analysis"
-version = "2.22.3"
+version = "2.22.4"
 dependencies = [
  "ast-types",
- "diagnostics",
  "shared-types",
  "syntax-parsing",
  "thiserror",
@@ -1172,17 +1121,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_spanned"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26"
-dependencies = [
- "serde_core",
-]
-
-[[package]]
 name = "shared-types"
-version = "2.22.3"
+version = "2.22.4"
 
 [[package]]
 name = "shlex"
@@ -1214,7 +1154,7 @@ dependencies = [
 
 [[package]]
 name = "source-location"
-version = "2.22.3"
+version = "2.22.4"
 dependencies = [
  "shared-types",
 ]
@@ -1249,10 +1189,9 @@ dependencies = [
 
 [[package]]
 name = "syntax-parsing"
-version = "2.22.3"
+version = "2.22.4"
 dependencies = [
  "ast-types",
- "diagnostics",
  "lexical-analysis",
  "shared-types",
  "thiserror",
@@ -1327,45 +1266,6 @@ name = "tinyvec_macros"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
-
-[[package]]
-name = "toml"
-version = "1.1.5+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12c0ba9680044b4ce98d391a62094047eada0d64860b80166c39f4a6b5640785"
-dependencies = [
- "indexmap",
- "serde_core",
- "serde_spanned",
- "toml_datetime",
- "toml_parser",
- "toml_writer",
- "winnow",
-]
-
-[[package]]
-name = "toml_datetime"
-version = "1.1.1+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3165f65f62e28e0115a00b2ebdd37eb6f3b641855f9d636d3cd4103767159ad7"
-dependencies = [
- "serde_core",
-]
-
-[[package]]
-name = "toml_parser"
-version = "1.1.3+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d38ac1cf9b95face32296c0a3ede1fdc270627c9d9c02a7274dd6d960dc4d56"
-dependencies = [
- "winnow",
-]
-
-[[package]]
-name = "toml_writer"
-version = "1.1.2+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
 name = "typed-arena"
@@ -1522,12 +1422,6 @@ checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
 ]
-
-[[package]]
-name = "winnow"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 
 [[package]]
 name = "zerocopy"

@@ -137,7 +137,7 @@ the moment the second case appears, not before.
 |-----------|----------|----------------|
 | `lib.rs` | yes | Public surface: the entry function, its error type, `pub use` of nothing else. No logic. → AC-008 |
 | Entry function | yes | One per Slice. Named for the transformation (`tokenize`, `parse`, `check_program`, `lower_program`). |
-| Error type | yes | Carries a `Span`. Built on the `diagnostics` crate. → Section 10 |
+| Error type | yes | One `thiserror` enum, owned by the Slice, whose variants carry a `Span`. → Section 10 |
 | Internal modules | yes | `pub(crate)` by default. One module per sub-concern, not per file-size limit. |
 | `tests/` | yes | Integration tests driving the entry function. → Section 13 |
 | `CONTEXT.md` | yes | → Section 12 |
@@ -166,7 +166,7 @@ governed by SB-001 rather than by convenience.
 |----|----------|------|
 | `CM-001` | HIGH | Comments explain WHY, never WHAT. Bad: `// loop over the items`. Good: `// Checked before mangling because a user name carrying its own separator would collide with a generated method symbol.` |
 | `CM-002` | **BLOCKER** | Dead code is deleted, never commented out. Version control is the history. Exception: the commented workspace members in the root `Cargo.toml` are a roadmap marker, not dead code. |
-| `CM-003` | HIGH | A TODO states the reason and the unblocking condition. Bad: `// TODO: fix`. Good: `// TODO: fold into the CFG pass once control-flow has a caller.` |
+| `CM-003` | HIGH | A TODO states the reason and the unblocking condition. Bad: `// TODO: fix`. Good: `// TODO: lower the body here once 2C lands the Linalg path.` |
 | `CM-004` | MEDIUM | Magic numbers and non-obvious strings become named constants. The WHY comment goes at the declaration, not the use site. |
 | `CM-005` | MEDIUM | Doc comments that restate the item name are forbidden. Exception: a public entry point with non-obvious constraints or ordering requirements. |
 | `CM-006` | LOW | Section divider comments are forbidden. A file needing dividers to navigate wants splitting. |
@@ -197,7 +197,7 @@ diagnostics.
 
 | ID | Severity | Rule |
 |----|----------|------|
-| `DG-001` | **BLOCKER** | Every user-facing error is built on the `diagnostics` crate. A Slice must not define its own error envelope or print to stderr directly. |
+| `DG-001` | **BLOCKER** | A Slice's errors are one `thiserror` enum on its own entry point, returned to the driver. A Slice must not print a user-facing diagnostic to stderr itself: rendering belongs to `neurc`, which is the only crate that knows whether it is running `check` or `compile`. |
 | `DG-002` | HIGH | Every diagnostic carries a `Span` locating it in source. A diagnostic without a span is a compiler bug, not a user error. |
 | `DG-003` | HIGH | Infrastructure failures (file IO, linker invocation, LLVM initialisation) are caught at the adapter boundary and surfaced as a typed error, never as a panic at a Slice boundary. |
 | `DG-004` | MEDIUM | A diagnostic states what was found and what was expected. "Invalid syntax" is not a diagnostic. |

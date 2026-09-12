@@ -96,10 +96,6 @@ const ENTRY_FN: &str = "main";
 /// carried through the module.
 const ISATTY_FN: &str = if cfg!(windows) { "_isatty" } else { "isatty" };
 
-fn llvm_err(e: inkwell::builder::BuilderError) -> CodegenError {
-    CodegenError::LlvmError(e.to_string())
-}
-
 impl<'ctx> CodegenContext<'ctx> {
     /// True when `name` is a compiler-known standard-output builtin.
     /// Mirrors the resolver in `semantic-analysis`; the duplication keeps the backend
@@ -128,9 +124,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let emit = self.get_or_build_emit()?;
         let text_args: [BasicMetadataValueEnum; 2] = [ptr.into(), len.into()];
-        self.builder
-            .build_call(emit, &text_args, "")
-            .map_err(llvm_err)?;
+        self.builder.build_call(emit, &text_args, "")?;
 
         if name == "println" {
             let newline = self.get_or_create_newline()?;
@@ -138,25 +132,19 @@ impl<'ctx> CodegenContext<'ctx> {
                 newline.into(),
                 self.context.i64_type().const_int(1, false).into(),
             ];
-            self.builder
-                .build_call(emit, &newline_args, "")
-                .map_err(llvm_err)?;
+            self.builder.build_call(emit, &newline_args, "")?;
 
             // The line terminator is where a line boundary is, and the compiler knows it
             // here, so a terminal is served without the runtime ever scanning bytes for
             // a newline. `print` writes no terminator and so ends no line, matching what
             // C's line-buffered stdio does with a `printf` that has no `\n`.
             let line_end = self.get_or_build_line_end()?;
-            self.builder
-                .build_call(line_end, &[], "")
-                .map_err(llvm_err)?;
+            self.builder.build_call(line_end, &[], "")?;
         }
 
         if owns_argument {
             let free_fn = self.get_or_declare_free();
-            self.builder
-                .build_call(free_fn, &[ptr.into()], "")
-                .map_err(llvm_err)?;
+            self.builder.build_call(free_fn, &[ptr.into()], "")?;
         }
 
         Ok(())
@@ -185,13 +173,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let fat = value.into_struct_value();
         let ptr = self
             .builder
-            .build_extract_value(fat, 0, "print.ptr")
-            .map_err(llvm_err)?
+            .build_extract_value(fat, 0, "print.ptr")?
             .into_pointer_value();
         let len = self
             .builder
-            .build_extract_value(fat, 1, "print.len")
-            .map_err(llvm_err)?
+            .build_extract_value(fat, 1, "print.len")?
             .into_int_value();
         Ok((ptr, len))
     }
@@ -201,10 +187,7 @@ impl<'ctx> CodegenContext<'ctx> {
         if let Some(existing) = self.module.get_global(NEWLINE_GLOBAL) {
             return Ok(existing.as_pointer_value());
         }
-        let global = self
-            .builder
-            .build_global_string_ptr("\n", NEWLINE_GLOBAL)
-            .map_err(llvm_err)?;
+        let global = self.builder.build_global_string_ptr("\n", NEWLINE_GLOBAL)?;
         Ok(global.as_pointer_value())
     }
 
@@ -313,63 +296,42 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(entry);
         let used = self
             .builder
-            .build_load(i64_type, used_slot, "emit.used")
-            .map_err(llvm_err)?
+            .build_load(i64_type, used_slot, "emit.used")?
             .into_int_value();
-        let free = self
-            .builder
-            .build_int_sub(capacity, used, "emit.free")
-            .map_err(llvm_err)?;
+        let free = self.builder.build_int_sub(capacity, used, "emit.free")?;
         let fits = self
             .builder
-            .build_int_compare(IntPredicate::ULE, len, free, "emit.fits")
-            .map_err(llvm_err)?;
-        self.builder
-            .build_conditional_branch(fits, copy, spill)
-            .map_err(llvm_err)?;
+            .build_int_compare(IntPredicate::ULE, len, free, "emit.fits")?;
+        self.builder.build_conditional_branch(fits, copy, spill)?;
 
         self.builder.position_at_end(spill);
-        self.builder.build_call(flush, &[], "").map_err(llvm_err)?;
-        let oversize = self
-            .builder
-            .build_int_compare(IntPredicate::UGT, len, capacity, "emit.oversize")
-            .map_err(llvm_err)?;
+        self.builder.build_call(flush, &[], "")?;
+        let oversize =
+            self.builder
+                .build_int_compare(IntPredicate::UGT, len, capacity, "emit.oversize")?;
         self.builder
-            .build_conditional_branch(oversize, bypass, copy)
-            .map_err(llvm_err)?;
+            .build_conditional_branch(oversize, bypass, copy)?;
 
         self.builder.position_at_end(bypass);
         let bypass_args: [BasicMetadataValueEnum; 2] = [text.into(), len.into()];
-        self.builder
-            .build_call(write_all, &bypass_args, "")
-            .map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(done)
-            .map_err(llvm_err)?;
+        self.builder.build_call(write_all, &bypass_args, "")?;
+        self.builder.build_unconditional_branch(done)?;
 
         // Reached from both the fits-already block and the just-drained one, so the
         // offset is re-read rather than carried in: the drain reset it to zero.
         self.builder.position_at_end(copy);
         let offset = self
             .builder
-            .build_load(i64_type, used_slot, "emit.offset")
-            .map_err(llvm_err)?
+            .build_load(i64_type, used_slot, "emit.offset")?
             .into_int_value();
         let cursor = self.byte_offset(buffer, offset, "emit.cursor")?;
         self.build_memcpy_call(cursor, text, len)?;
-        let filled = self
-            .builder
-            .build_int_add(offset, len, "emit.filled")
-            .map_err(llvm_err)?;
-        self.builder
-            .build_store(used_slot, filled)
-            .map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(done)
-            .map_err(llvm_err)?;
+        let filled = self.builder.build_int_add(offset, len, "emit.filled")?;
+        self.builder.build_store(used_slot, filled)?;
+        self.builder.build_unconditional_branch(done)?;
 
         self.builder.position_at_end(done);
-        self.builder.build_return(None).map_err(llvm_err)?;
+        self.builder.build_return(None)?;
         Ok(())
     }
 
@@ -419,36 +381,25 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(entry);
         let used = self
             .builder
-            .build_load(i64_type, used_slot, "flush.used")
-            .map_err(llvm_err)?
+            .build_load(i64_type, used_slot, "flush.used")?
             .into_int_value();
-        let pending = self
-            .builder
-            .build_int_compare(
-                IntPredicate::UGT,
-                used,
-                i64_type.const_zero(),
-                "flush.pending",
-            )
-            .map_err(llvm_err)?;
+        let pending = self.builder.build_int_compare(
+            IntPredicate::UGT,
+            used,
+            i64_type.const_zero(),
+            "flush.pending",
+        )?;
         self.builder
-            .build_conditional_branch(pending, drain, done)
-            .map_err(llvm_err)?;
+            .build_conditional_branch(pending, drain, done)?;
 
         self.builder.position_at_end(drain);
         let drain_args: [BasicMetadataValueEnum; 2] = [buffer.into(), used.into()];
-        self.builder
-            .build_call(write_all, &drain_args, "")
-            .map_err(llvm_err)?;
-        self.builder
-            .build_store(used_slot, i64_type.const_zero())
-            .map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(done)
-            .map_err(llvm_err)?;
+        self.builder.build_call(write_all, &drain_args, "")?;
+        self.builder.build_store(used_slot, i64_type.const_zero())?;
+        self.builder.build_unconditional_branch(done)?;
 
         self.builder.position_at_end(done);
-        self.builder.build_return(None).map_err(llvm_err)?;
+        self.builder.build_return(None)?;
         Ok(())
     }
 
@@ -502,84 +453,61 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(entry);
         let mode = self
             .builder
-            .build_load(i8_type, mode_slot, "line.mode")
-            .map_err(llvm_err)?
+            .build_load(i8_type, mode_slot, "line.mode")?
             .into_int_value();
-        let unresolved = self
-            .builder
-            .build_int_compare(
-                IntPredicate::EQ,
-                mode,
-                i8_type.const_int(MODE_UNRESOLVED, false),
-                "line.unresolved",
-            )
-            .map_err(llvm_err)?;
+        let unresolved = self.builder.build_int_compare(
+            IntPredicate::EQ,
+            mode,
+            i8_type.const_int(MODE_UNRESOLVED, false),
+            "line.unresolved",
+        )?;
         self.builder
-            .build_conditional_branch(unresolved, probe, decide)
-            .map_err(llvm_err)?;
+            .build_conditional_branch(unresolved, probe, decide)?;
 
         self.builder.position_at_end(probe);
         let fd = i32_type.const_int(STDOUT_FD, false);
         let answer = self
             .builder
-            .build_call(isatty, &[fd.into()], "line.isatty")
-            .map_err(llvm_err)?
+            .build_call(isatty, &[fd.into()], "line.isatty")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("isatty() produced no result".into()))?
             .into_int_value();
-        let terminal = self
-            .builder
-            .build_int_compare(
-                IntPredicate::NE,
-                answer,
-                i32_type.const_zero(),
-                "line.terminal",
-            )
-            .map_err(llvm_err)?;
-        let resolved = self
-            .builder
-            .build_select(
-                terminal,
-                i8_type.const_int(MODE_LINE, false),
-                i8_type.const_int(MODE_BLOCK, false),
-                "line.resolved",
-            )
-            .map_err(llvm_err)?;
-        self.builder
-            .build_store(mode_slot, resolved)
-            .map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(decide)
-            .map_err(llvm_err)?;
+        let terminal = self.builder.build_int_compare(
+            IntPredicate::NE,
+            answer,
+            i32_type.const_zero(),
+            "line.terminal",
+        )?;
+        let resolved = self.builder.build_select(
+            terminal,
+            i8_type.const_int(MODE_LINE, false),
+            i8_type.const_int(MODE_BLOCK, false),
+            "line.resolved",
+        )?;
+        self.builder.build_store(mode_slot, resolved)?;
+        self.builder.build_unconditional_branch(decide)?;
 
         self.builder.position_at_end(decide);
         let settled = self
             .builder
-            .build_load(i8_type, mode_slot, "line.settled")
-            .map_err(llvm_err)?
+            .build_load(i8_type, mode_slot, "line.settled")?
             .into_int_value();
-        let by_line = self
-            .builder
-            .build_int_compare(
-                IntPredicate::EQ,
-                settled,
-                i8_type.const_int(MODE_LINE, false),
-                "line.by_line",
-            )
-            .map_err(llvm_err)?;
+        let by_line = self.builder.build_int_compare(
+            IntPredicate::EQ,
+            settled,
+            i8_type.const_int(MODE_LINE, false),
+            "line.by_line",
+        )?;
         self.builder
-            .build_conditional_branch(by_line, drain, done)
-            .map_err(llvm_err)?;
+            .build_conditional_branch(by_line, drain, done)?;
 
         self.builder.position_at_end(drain);
-        self.builder.build_call(flush, &[], "").map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(done)
-            .map_err(llvm_err)?;
+        self.builder.build_call(flush, &[], "")?;
+        self.builder.build_unconditional_branch(done)?;
 
         self.builder.position_at_end(done);
-        self.builder.build_return(None).map_err(llvm_err)?;
+        self.builder.build_return(None)?;
         Ok(())
     }
 
@@ -601,7 +529,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let exits = std::mem::take(&mut self.process_exit_points);
         for instruction in &exits {
             self.builder.position_before(instruction);
-            self.builder.build_call(flush, &[], "").map_err(llvm_err)?;
+            self.builder.build_call(flush, &[], "")?;
         }
 
         if let Some(entry_fn) = self.module.get_function(ENTRY_FN) {
@@ -613,7 +541,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     continue;
                 }
                 self.builder.position_before(&terminator);
-                self.builder.build_call(flush, &[], "").map_err(llvm_err)?;
+                self.builder.build_call(flush, &[], "")?;
             }
         }
 
@@ -675,88 +603,64 @@ impl<'ctx> CodegenContext<'ctx> {
         let done = self.context.append_basic_block(function, "write.done");
 
         self.builder.position_at_end(entry);
-        let offset_slot = self
-            .builder
-            .build_alloca(i64_type, "write.offset")
-            .map_err(llvm_err)?;
+        let offset_slot = self.builder.build_alloca(i64_type, "write.offset")?;
         self.builder
-            .build_store(offset_slot, i64_type.const_zero())
-            .map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(head)
-            .map_err(llvm_err)?;
+            .build_store(offset_slot, i64_type.const_zero())?;
+        self.builder.build_unconditional_branch(head)?;
 
         self.builder.position_at_end(head);
         let offset = self
             .builder
-            .build_load(i64_type, offset_slot, "write.off")
-            .map_err(llvm_err)?
+            .build_load(i64_type, offset_slot, "write.off")?
             .into_int_value();
-        let remaining = self
-            .builder
-            .build_int_sub(len, offset, "write.remaining")
-            .map_err(llvm_err)?;
-        let more = self
-            .builder
-            .build_int_compare(
-                IntPredicate::SGT,
-                remaining,
-                i64_type.const_zero(),
-                "write.more",
-            )
-            .map_err(llvm_err)?;
-        self.builder
-            .build_conditional_branch(more, body, done)
-            .map_err(llvm_err)?;
+        let remaining = self.builder.build_int_sub(len, offset, "write.remaining")?;
+        let more = self.builder.build_int_compare(
+            IntPredicate::SGT,
+            remaining,
+            i64_type.const_zero(),
+            "write.more",
+        )?;
+        self.builder.build_conditional_branch(more, body, done)?;
 
         self.builder.position_at_end(body);
         // SAFETY: `offset` is the count of bytes already written and the loop is entered
         // only while it is below `len`, so the cursor stays inside the caller's buffer.
         let cursor = unsafe {
-            self.builder
-                .build_in_bounds_gep(self.context.i8_type(), buf, &[offset], "write.cursor")
-                .map_err(llvm_err)?
+            self.builder.build_in_bounds_gep(
+                self.context.i8_type(),
+                buf,
+                &[offset],
+                "write.cursor",
+            )?
         };
         let write_fn = self.get_or_declare_write();
         let fd = self.context.i32_type().const_int(STDOUT_FD, false);
         let call_args: [BasicMetadataValueEnum; 3] = [fd.into(), cursor.into(), remaining.into()];
         let written = self
             .builder
-            .build_call(write_fn, &call_args, "write.n")
-            .map_err(llvm_err)?
+            .build_call(write_fn, &call_args, "write.n")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("write() produced no result".into()))?
             .into_int_value();
         // A negative return is the error report and a zero one means the descriptor took
         // nothing; retrying either would spin forever, so both end the loop.
-        let progressed = self
-            .builder
-            .build_int_compare(
-                IntPredicate::SGT,
-                written,
-                i64_type.const_zero(),
-                "write.progressed",
-            )
-            .map_err(llvm_err)?;
+        let progressed = self.builder.build_int_compare(
+            IntPredicate::SGT,
+            written,
+            i64_type.const_zero(),
+            "write.progressed",
+        )?;
         self.builder
-            .build_conditional_branch(progressed, advance, done)
-            .map_err(llvm_err)?;
+            .build_conditional_branch(progressed, advance, done)?;
 
         self.builder.position_at_end(advance);
-        let next = self
-            .builder
-            .build_int_add(offset, written, "write.next")
-            .map_err(llvm_err)?;
-        self.builder
-            .build_store(offset_slot, next)
-            .map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(head)
-            .map_err(llvm_err)?;
+        let next = self.builder.build_int_add(offset, written, "write.next")?;
+        self.builder.build_store(offset_slot, next)?;
+        self.builder.build_unconditional_branch(head)?;
 
         self.builder.position_at_end(done);
-        self.builder.build_return(None).map_err(llvm_err)?;
+        self.builder.build_return(None)?;
         Ok(())
     }
 }

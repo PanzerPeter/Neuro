@@ -16,6 +16,7 @@ use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
 use neuro_hir::{HirExpr, HirTensorAxis};
 
+use super::row_major_strides;
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
@@ -23,19 +24,6 @@ use crate::types::Type;
 /// What an out-of-range position reports. A slice's bounds are constants the type
 /// checker has already rejected, so only a position can fail here.
 const INDEX_OUT_OF_BOUNDS: &str = "tensor index out of bounds";
-
-fn llvm_err(e: inkwell::builder::BuilderError) -> CodegenError {
-    CodegenError::LlvmError(e.to_string())
-}
-
-/// The row-major stride of each axis, in elements: the product of the extents below it.
-fn row_major_strides(shape: &[usize]) -> Vec<usize> {
-    let mut strides = vec![1usize; shape.len()];
-    for axis in (0..shape.len().saturating_sub(1)).rev() {
-        strides[axis] = strides[axis + 1] * shape[axis + 1];
-    }
-    strides
-}
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Lower `object[a0, a1, ...]`: a load when every axis is a position, a fresh
@@ -70,7 +58,7 @@ impl<'ctx> CodegenContext<'ctx> {
             return self
                 .builder
                 .build_load(elem_llvm, slot, "tensor.elem")
-                .map_err(llvm_err);
+                .map_err(CodegenError::from);
         };
         self.copy_tensor_slice(result_ty, result_shape, axes, &strides, data, base)
     }
@@ -94,8 +82,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     self.context.ptr_type(inkwell::AddressSpace::default()),
                     ptr,
                     "tensor.index.recv",
-                )
-                .map_err(llvm_err)?
+                )?
                 .into_pointer_value()
         } else {
             ptr
@@ -125,14 +112,12 @@ impl<'ctx> CodegenContext<'ctx> {
                     let position = self.widen_index_to_i64(position, &Type::from_hir(&expr.ty))?;
                     self.guard_tensor_position(position, shape[axis], offset)?;
                     self.builder
-                        .build_int_mul(position, stride, "tensor.index.axis")
-                        .map_err(llvm_err)?
+                        .build_int_mul(position, stride, "tensor.index.axis")?
                 }
             };
             base = self
                 .builder
-                .build_int_add(base, contribution, "tensor.index.base")
-                .map_err(llvm_err)?;
+                .build_int_add(base, contribution, "tensor.index.base")?;
         }
         Ok(base)
     }
@@ -150,10 +135,12 @@ impl<'ctx> CodegenContext<'ctx> {
             return Ok(());
         }
         let extent = self.context.i64_type().const_int(extent as u64, false);
-        let ok = self
-            .builder
-            .build_int_compare(IntPredicate::ULT, position, extent, "tensor.index.ok")
-            .map_err(llvm_err)?;
+        let ok = self.builder.build_int_compare(
+            IntPredicate::ULT,
+            position,
+            extent,
+            "tensor.index.ok",
+        )?;
         self.codegen_guard_or_panic(ok, INDEX_OUT_OF_BOUNDS, offset)
     }
 
@@ -193,9 +180,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let i64_type = self.context.i64_type();
         let cursor = self.entry_alloca(i64_type, "tensor.slice.i")?;
-        self.builder
-            .build_store(cursor, i64_type.const_zero())
-            .map_err(llvm_err)?;
+        self.builder.build_store(cursor, i64_type.const_zero())?;
         let function = self.current_function.ok_or_else(|| {
             CodegenError::InternalError("a tensor slice outside a function".to_string())
         })?;
@@ -209,61 +194,45 @@ impl<'ctx> CodegenContext<'ctx> {
             .context
             .append_basic_block(function, "tensor.slice.done");
 
-        self.builder
-            .build_unconditional_branch(head)
-            .map_err(llvm_err)?;
+        self.builder.build_unconditional_branch(head)?;
         self.builder.position_at_end(head);
         let i = self
             .builder
-            .build_load(i64_type, cursor, "tensor.slice.idx")
-            .map_err(llvm_err)?
+            .build_load(i64_type, cursor, "tensor.slice.idx")?
             .into_int_value();
-        let more = self
-            .builder
-            .build_int_compare(
-                IntPredicate::ULT,
-                i,
-                i64_type.const_int(count as u64, false),
-                "tensor.slice.more",
-            )
-            .map_err(llvm_err)?;
-        self.builder
-            .build_conditional_branch(more, body, done)
-            .map_err(llvm_err)?;
+        let more = self.builder.build_int_compare(
+            IntPredicate::ULT,
+            i,
+            i64_type.const_int(count as u64, false),
+            "tensor.slice.more",
+        )?;
+        self.builder.build_conditional_branch(more, body, done)?;
 
         self.builder.position_at_end(body);
         let mut source_index = base;
         for (position, (extent, source_stride)) in result_shape.iter().zip(kept.iter()).enumerate()
         {
             let coordinate = self.slice_coordinate(i, result_strides[position], *extent)?;
-            let stepped = self
-                .builder
-                .build_int_mul(
-                    coordinate,
-                    i64_type.const_int(*source_stride as u64, false),
-                    "tensor.slice.step",
-                )
-                .map_err(llvm_err)?;
+            let stepped = self.builder.build_int_mul(
+                coordinate,
+                i64_type.const_int(*source_stride as u64, false),
+                "tensor.slice.step",
+            )?;
             source_index = self
                 .builder
-                .build_int_add(source_index, stepped, "tensor.slice.src")
-                .map_err(llvm_err)?;
+                .build_int_add(source_index, stepped, "tensor.slice.src")?;
         }
         let read = self.tensor_element_ptr(elem_llvm, source, source_index)?;
         let value = self
             .builder
-            .build_load(elem_llvm, read, "tensor.slice.value")
-            .map_err(llvm_err)?;
+            .build_load(elem_llvm, read, "tensor.slice.value")?;
         let write = self.tensor_element_ptr(elem_llvm, target, i)?;
-        self.builder.build_store(write, value).map_err(llvm_err)?;
-        let next = self
-            .builder
-            .build_int_add(i, i64_type.const_int(1, false), "tensor.slice.next")
-            .map_err(llvm_err)?;
-        self.builder.build_store(cursor, next).map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(head)
-            .map_err(llvm_err)?;
+        self.builder.build_store(write, value)?;
+        let next =
+            self.builder
+                .build_int_add(i, i64_type.const_int(1, false), "tensor.slice.next")?;
+        self.builder.build_store(cursor, next)?;
+        self.builder.build_unconditional_branch(head)?;
 
         self.builder.position_at_end(done);
         Ok(handle.into())
@@ -281,21 +250,18 @@ impl<'ctx> CodegenContext<'ctx> {
         extent: usize,
     ) -> CodegenResult<IntValue<'ctx>> {
         let i64_type = self.context.i64_type();
-        let divided = self
-            .builder
-            .build_int_unsigned_div(
-                i,
-                i64_type.const_int(result_stride as u64, false),
-                "tensor.slice.div",
-            )
-            .map_err(llvm_err)?;
+        let divided = self.builder.build_int_unsigned_div(
+            i,
+            i64_type.const_int(result_stride as u64, false),
+            "tensor.slice.div",
+        )?;
         self.builder
             .build_int_unsigned_rem(
                 divided,
                 i64_type.const_int(extent as u64, false),
                 "tensor.slice.coord",
             )
-            .map_err(llvm_err)
+            .map_err(CodegenError::from)
     }
 
     /// The address of one element of a tensor buffer, `index` elements in.
@@ -311,7 +277,7 @@ impl<'ctx> CodegenContext<'ctx> {
         unsafe {
             self.builder
                 .build_in_bounds_gep(elem_llvm, buffer, &[index], "tensor.index.ptr")
-                .map_err(llvm_err)
+                .map_err(CodegenError::from)
         }
     }
 }

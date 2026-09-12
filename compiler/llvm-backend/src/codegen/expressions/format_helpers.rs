@@ -192,16 +192,14 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<IntValue<'ctx>> {
         let i64_type = self.context.i64_type();
         let i8_type = self.context.i8_type();
-        let llvm_err = |e: inkwell::builder::BuilderError| CodegenError::LlvmError(e.to_string());
         let safe_index = self
             .builder
-            .build_select(valid, index, i64_type.const_zero(), "guard.index")
-            .map_err(llvm_err)?
+            .build_select(valid, index, i64_type.const_zero(), "guard.index")?
             .into_int_value();
         let loaded = self.load_byte(buf, safe_index, name)?;
         self.builder
             .build_select(valid, loaded, i8_type.const_zero(), "guard.byte")
-            .map_err(llvm_err)
+            .map_err(CodegenError::from)
             .map(|value| value.into_int_value())
     }
 
@@ -233,7 +231,6 @@ impl<'ctx> CodegenContext<'ctx> {
         if let Some(f) = self.module.get_function(&name) {
             return Ok(f);
         }
-        let llvm_err = |e: inkwell::builder::BuilderError| CodegenError::LlvmError(e.to_string());
         let i64_type = self.context.i64_type();
         let i8_type = self.context.i8_type();
         let scratch_ty = i8_type.array_type(MAX_INT_TEXT_BYTES as u32);
@@ -250,30 +247,17 @@ impl<'ctx> CodegenContext<'ctx> {
                     "0123456789abcdef"
                 },
                 "fmt.digits",
-            )
-            .map_err(llvm_err)?
+            )?
             .as_pointer_value();
 
         // Digits come out least significant first, so they are written backwards into a
         // fixed scratch buffer and the finished text is the buffer's tail.
-        let scratch = self
-            .builder
-            .build_alloca(scratch_ty, "fmt.scratch")
-            .map_err(llvm_err)?;
-        let cursor = self
-            .builder
-            .build_alloca(i64_type, "fmt.cursor")
-            .map_err(llvm_err)?;
-        let rest = self
-            .builder
-            .build_alloca(i64_type, "fmt.rest")
-            .map_err(llvm_err)?;
+        let scratch = self.builder.build_alloca(scratch_ty, "fmt.scratch")?;
+        let cursor = self.builder.build_alloca(i64_type, "fmt.cursor")?;
+        let rest = self.builder.build_alloca(i64_type, "fmt.rest")?;
         self.builder
-            .build_store(cursor, i64_type.const_int(MAX_INT_TEXT_BYTES, false))
-            .map_err(llvm_err)?;
-        self.builder
-            .build_store(rest, magnitude)
-            .map_err(llvm_err)?;
+            .build_store(cursor, i64_type.const_int(MAX_INT_TEXT_BYTES, false))?;
+        self.builder.build_store(rest, magnitude)?;
 
         let digit_bb = self.context.append_basic_block(func, "fmt.digit");
         let sign_bb = self.context.append_basic_block(func, "fmt.sign");
@@ -281,98 +265,80 @@ impl<'ctx> CodegenContext<'ctx> {
         let done_bb = self.context.append_basic_block(func, "fmt.done");
 
         // A do-while, not a while: zero renders as the single digit `0`.
-        self.builder
-            .build_unconditional_branch(digit_bb)
-            .map_err(llvm_err)?;
+        self.builder.build_unconditional_branch(digit_bb)?;
 
         self.builder.position_at_end(digit_bb);
         let value = self
             .builder
-            .build_load(i64_type, rest, "fmt.rest.load")
-            .map_err(llvm_err)?
+            .build_load(i64_type, rest, "fmt.rest.load")?
             .into_int_value();
         let radix_c = i64_type.const_int(radix, false);
         let digit = self
             .builder
-            .build_int_unsigned_rem(value, radix_c, "fmt.digit.value")
-            .map_err(llvm_err)?;
+            .build_int_unsigned_rem(value, radix_c, "fmt.digit.value")?;
         let quotient = self
             .builder
-            .build_int_unsigned_div(value, radix_c, "fmt.rest.next")
-            .map_err(llvm_err)?;
+            .build_int_unsigned_div(value, radix_c, "fmt.rest.next")?;
         // SAFETY: `digit` is below `radix`, and every radix reaching here is at most 16,
         // so the index stays inside the sixteen-byte digit table.
         let digit_ptr = unsafe {
             self.builder
-                .build_in_bounds_gep(i8_type, table, &[digit], "fmt.digit.ptr")
-                .map_err(llvm_err)?
+                .build_in_bounds_gep(i8_type, table, &[digit], "fmt.digit.ptr")?
         };
         let character = self
             .builder
-            .build_load(i8_type, digit_ptr, "fmt.digit.char")
-            .map_err(llvm_err)?
+            .build_load(i8_type, digit_ptr, "fmt.digit.char")?
             .into_int_value();
         self.write_scratch_byte(scratch_ty, scratch, cursor, character)?;
-        self.builder.build_store(rest, quotient).map_err(llvm_err)?;
-        let more = self
-            .builder
-            .build_int_compare(
-                IntPredicate::NE,
-                quotient,
-                i64_type.const_zero(),
-                "fmt.more",
-            )
-            .map_err(llvm_err)?;
+        self.builder.build_store(rest, quotient)?;
+        let more = self.builder.build_int_compare(
+            IntPredicate::NE,
+            quotient,
+            i64_type.const_zero(),
+            "fmt.more",
+        )?;
         self.builder
-            .build_conditional_branch(more, digit_bb, sign_bb)
-            .map_err(llvm_err)?;
+            .build_conditional_branch(more, digit_bb, sign_bb)?;
 
         self.builder.position_at_end(sign_bb);
-        let signed = self
-            .builder
-            .build_int_compare(IntPredicate::NE, sign, i8_type.const_zero(), "fmt.has.sign")
-            .map_err(llvm_err)?;
+        let signed = self.builder.build_int_compare(
+            IntPredicate::NE,
+            sign,
+            i8_type.const_zero(),
+            "fmt.has.sign",
+        )?;
         self.builder
-            .build_conditional_branch(signed, prefix_bb, done_bb)
-            .map_err(llvm_err)?;
+            .build_conditional_branch(signed, prefix_bb, done_bb)?;
 
         self.builder.position_at_end(prefix_bb);
         self.write_scratch_byte(scratch_ty, scratch, cursor, sign)?;
-        self.builder
-            .build_unconditional_branch(done_bb)
-            .map_err(llvm_err)?;
+        self.builder.build_unconditional_branch(done_bb)?;
 
         self.builder.position_at_end(done_bb);
         let start = self
             .builder
-            .build_load(i64_type, cursor, "fmt.start")
-            .map_err(llvm_err)?
+            .build_load(i64_type, cursor, "fmt.start")?
             .into_int_value();
-        let len = self
-            .builder
-            .build_int_sub(
-                i64_type.const_int(MAX_INT_TEXT_BYTES, false),
-                start,
-                "fmt.len",
-            )
-            .map_err(llvm_err)?;
+        let len = self.builder.build_int_sub(
+            i64_type.const_int(MAX_INT_TEXT_BYTES, false),
+            start,
+            "fmt.len",
+        )?;
         let buf = self.build_malloc(len, "fmt.buf")?;
         // SAFETY: `start` is the index of the first byte written, so it is within the
         // scratch buffer and `len` bytes follow it up to the buffer's end.
         let text = unsafe {
-            self.builder
-                .build_in_bounds_gep(
-                    scratch_ty,
-                    scratch,
-                    &[i64_type.const_zero(), start],
-                    "fmt.text",
-                )
-                .map_err(llvm_err)?
+            self.builder.build_in_bounds_gep(
+                scratch_ty,
+                scratch,
+                &[i64_type.const_zero(), start],
+                "fmt.text",
+            )?
         };
         self.build_memcpy_call(buf, text, len)?;
         let result = self.build_string_value(buf, len)?;
 
-        self.builder.build_return(Some(&result)).map_err(llvm_err)?;
+        self.builder.build_return(Some(&result))?;
         self.end_helper(saved);
         Ok(func)
     }
@@ -385,31 +351,26 @@ impl<'ctx> CodegenContext<'ctx> {
         cursor: PointerValue<'ctx>,
         byte: IntValue<'ctx>,
     ) -> CodegenResult<()> {
-        let llvm_err = |e: inkwell::builder::BuilderError| CodegenError::LlvmError(e.to_string());
         let i64_type = self.context.i64_type();
         let index = self
             .builder
-            .build_load(i64_type, cursor, "fmt.cursor.load")
-            .map_err(llvm_err)?
+            .build_load(i64_type, cursor, "fmt.cursor.load")?
             .into_int_value();
-        let next = self
-            .builder
-            .build_int_sub(index, i64_type.const_int(1, false), "fmt.cursor.next")
-            .map_err(llvm_err)?;
+        let next =
+            self.builder
+                .build_int_sub(index, i64_type.const_int(1, false), "fmt.cursor.next")?;
         // SAFETY: the buffer is sized to the widest rendering any radix can produce, so
         // the cursor cannot walk off its front before the digit loop ends.
         let slot = unsafe {
-            self.builder
-                .build_in_bounds_gep(
-                    scratch_ty,
-                    scratch,
-                    &[i64_type.const_zero(), next],
-                    "fmt.slot",
-                )
-                .map_err(llvm_err)?
+            self.builder.build_in_bounds_gep(
+                scratch_ty,
+                scratch,
+                &[i64_type.const_zero(), next],
+                "fmt.slot",
+            )?
         };
-        self.builder.build_store(slot, byte).map_err(llvm_err)?;
-        self.builder.build_store(cursor, next).map_err(llvm_err)?;
+        self.builder.build_store(slot, byte)?;
+        self.builder.build_store(cursor, next)?;
         Ok(())
     }
 
@@ -461,13 +422,9 @@ impl<'ctx> CodegenContext<'ctx> {
         let snprintf = self.get_or_declare_snprintf();
         let i64_type = self.context.i64_type();
         let i8_type = self.context.i8_type();
-        let llvm_err = |e: inkwell::builder::BuilderError| CodegenError::LlvmError(e.to_string());
 
         let scratch_ty = i8_type.array_type(SCRATCH_TEXT_BYTES as u32);
-        let scratch = self
-            .builder
-            .build_alloca(scratch_ty, "fmt.scratch")
-            .map_err(llvm_err)?;
+        let scratch = self.builder.build_alloca(scratch_ty, "fmt.scratch")?;
         let capacity = i64_type.const_int(SCRATCH_TEXT_BYTES, false);
         let written = self
             .builder
@@ -475,8 +432,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 snprintf,
                 &[scratch.into(), capacity.into(), fmt.into(), value.into()],
                 "fmt.render",
-            )
-            .map_err(llvm_err)?
+            )?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("snprintf returned void".to_string()))?
@@ -484,67 +440,52 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let widened = self
             .builder
-            .build_int_s_extend(written, i64_type, "fmt.len.wide")
-            .map_err(llvm_err)?;
+            .build_int_s_extend(written, i64_type, "fmt.len.wide")?;
         // A negative return means the C library refused the conversion; clamp so the
         // allocation below can never be handed a wrapped-around size.
-        let negative = self
-            .builder
-            .build_int_compare(
-                IntPredicate::SLT,
-                widened,
-                i64_type.const_zero(),
-                "fmt.len.neg",
-            )
-            .map_err(llvm_err)?;
+        let negative = self.builder.build_int_compare(
+            IntPredicate::SLT,
+            widened,
+            i64_type.const_zero(),
+            "fmt.len.neg",
+        )?;
         let len = self
             .builder
-            .build_select(negative, i64_type.const_zero(), widened, "fmt.len")
-            .map_err(llvm_err)?
+            .build_select(negative, i64_type.const_zero(), widened, "fmt.len")?
             .into_int_value();
 
         let fits = self
             .builder
-            .build_int_compare(IntPredicate::ULT, len, capacity, "fmt.fits")
-            .map_err(llvm_err)?;
+            .build_int_compare(IntPredicate::ULT, len, capacity, "fmt.fits")?;
         let copy_bb = self.context.append_basic_block(helper, "fmt.copy");
         let again_bb = self.context.append_basic_block(helper, "fmt.again");
         let done_bb = self.context.append_basic_block(helper, "fmt.joined");
         let branch = self
             .builder
-            .build_conditional_branch(fits, copy_bb, again_bb)
-            .map_err(llvm_err)?;
+            .build_conditional_branch(fits, copy_bb, again_bb)?;
         self.mark_cold_branch(branch)?;
 
         self.builder.position_at_end(copy_bb);
         let copied = self.build_malloc(len, "fmt.buf")?;
         self.build_memcpy_call(copied, scratch, len)?;
-        self.builder
-            .build_unconditional_branch(done_bb)
-            .map_err(llvm_err)?;
+        self.builder.build_unconditional_branch(done_bb)?;
 
         self.builder.position_at_end(again_bb);
-        let needed = self
-            .builder
-            .build_int_add(len, i64_type.const_int(1, false), "fmt.cap.big")
-            .map_err(llvm_err)?;
+        let needed =
+            self.builder
+                .build_int_add(len, i64_type.const_int(1, false), "fmt.cap.big")?;
         let rendered = self.build_malloc(needed, "fmt.buf.big")?;
-        self.builder
-            .build_call(
-                snprintf,
-                &[rendered.into(), needed.into(), fmt.into(), value.into()],
-                "",
-            )
-            .map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(done_bb)
-            .map_err(llvm_err)?;
+        self.builder.build_call(
+            snprintf,
+            &[rendered.into(), needed.into(), fmt.into(), value.into()],
+            "",
+        )?;
+        self.builder.build_unconditional_branch(done_bb)?;
 
         self.builder.position_at_end(done_bb);
         let buf = self
             .builder
-            .build_phi(self.context.ptr_type(AddressSpace::default()), "fmt.text")
-            .map_err(llvm_err)?;
+            .build_phi(self.context.ptr_type(AddressSpace::default()), "fmt.text")?;
         buf.add_incoming(&[(&copied, copy_bb), (&rendered, again_bb)]);
 
         self.build_string_value(buf.as_basic_value().into_pointer_value(), len)
@@ -560,28 +501,20 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         let i64_type = self.context.i64_type();
         let i8_type = self.context.i8_type();
-        let llvm_err = |e: inkwell::builder::BuilderError| CodegenError::LlvmError(e.to_string());
         let (func, saved) = self.begin_helper(NAME, &[i64_type.into()]);
 
         let value = self.param(func, 0)?.into_int_value();
-        let digits = self
-            .builder
-            .build_alloca(i64_type, "bin.digits")
-            .map_err(llvm_err)?;
-        let cursor = self
-            .builder
-            .build_alloca(i64_type, "bin.cursor")
-            .map_err(llvm_err)?;
+        let digits = self.builder.build_alloca(i64_type, "bin.digits")?;
+        let cursor = self.builder.build_alloca(i64_type, "bin.cursor")?;
         self.builder
-            .build_store(digits, i64_type.const_int(1, false))
-            .map_err(llvm_err)?;
-        let shifted = self
-            .builder
-            .build_right_shift(value, i64_type.const_int(1, false), false, "bin.rest")
-            .map_err(llvm_err)?;
-        self.builder
-            .build_store(cursor, shifted)
-            .map_err(llvm_err)?;
+            .build_store(digits, i64_type.const_int(1, false))?;
+        let shifted = self.builder.build_right_shift(
+            value,
+            i64_type.const_int(1, false),
+            false,
+            "bin.rest",
+        )?;
+        self.builder.build_store(cursor, shifted)?;
 
         let count_head = self.context.append_basic_block(func, "count.head");
         let count_body = self.context.append_basic_block(func, "count.body");
@@ -590,116 +523,90 @@ impl<'ctx> CodegenContext<'ctx> {
         let write_body = self.context.append_basic_block(func, "write.body");
         let done = self.context.append_basic_block(func, "done");
 
-        self.builder
-            .build_unconditional_branch(count_head)
-            .map_err(llvm_err)?;
+        self.builder.build_unconditional_branch(count_head)?;
 
         self.builder.position_at_end(count_head);
         let rest = self
             .builder
-            .build_load(i64_type, cursor, "bin.rest.load")
-            .map_err(llvm_err)?
+            .build_load(i64_type, cursor, "bin.rest.load")?
             .into_int_value();
-        let more = self
-            .builder
-            .build_int_compare(IntPredicate::NE, rest, i64_type.const_zero(), "bin.more")
-            .map_err(llvm_err)?;
+        let more = self.builder.build_int_compare(
+            IntPredicate::NE,
+            rest,
+            i64_type.const_zero(),
+            "bin.more",
+        )?;
         self.builder
-            .build_conditional_branch(more, count_body, write_setup)
-            .map_err(llvm_err)?;
+            .build_conditional_branch(more, count_body, write_setup)?;
 
         self.builder.position_at_end(count_body);
         let count = self
             .builder
-            .build_load(i64_type, digits, "bin.count")
-            .map_err(llvm_err)?
+            .build_load(i64_type, digits, "bin.count")?
             .into_int_value();
-        let bumped = self
-            .builder
-            .build_int_add(count, i64_type.const_int(1, false), "bin.count.next")
-            .map_err(llvm_err)?;
-        self.builder.build_store(digits, bumped).map_err(llvm_err)?;
-        let narrowed = self
-            .builder
-            .build_right_shift(rest, i64_type.const_int(1, false), false, "bin.rest.next")
-            .map_err(llvm_err)?;
-        self.builder
-            .build_store(cursor, narrowed)
-            .map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(count_head)
-            .map_err(llvm_err)?;
+        let bumped =
+            self.builder
+                .build_int_add(count, i64_type.const_int(1, false), "bin.count.next")?;
+        self.builder.build_store(digits, bumped)?;
+        let narrowed = self.builder.build_right_shift(
+            rest,
+            i64_type.const_int(1, false),
+            false,
+            "bin.rest.next",
+        )?;
+        self.builder.build_store(cursor, narrowed)?;
+        self.builder.build_unconditional_branch(count_head)?;
 
         self.builder.position_at_end(write_setup);
         let total = self
             .builder
-            .build_load(i64_type, digits, "bin.total")
-            .map_err(llvm_err)?
+            .build_load(i64_type, digits, "bin.total")?
             .into_int_value();
         let buf = self.build_malloc(total, "bin.buf")?;
-        let index = self
-            .builder
-            .build_alloca(i64_type, "bin.index")
-            .map_err(llvm_err)?;
-        self.builder
-            .build_store(index, i64_type.const_zero())
-            .map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(write_head)
-            .map_err(llvm_err)?;
+        let index = self.builder.build_alloca(i64_type, "bin.index")?;
+        self.builder.build_store(index, i64_type.const_zero())?;
+        self.builder.build_unconditional_branch(write_head)?;
 
         self.builder.position_at_end(write_head);
         let i = self
             .builder
-            .build_load(i64_type, index, "bin.i")
-            .map_err(llvm_err)?
+            .build_load(i64_type, index, "bin.i")?
             .into_int_value();
-        let in_range = self
-            .builder
-            .build_int_compare(IntPredicate::ULT, i, total, "bin.in.range")
-            .map_err(llvm_err)?;
+        let in_range =
+            self.builder
+                .build_int_compare(IntPredicate::ULT, i, total, "bin.in.range")?;
         self.builder
-            .build_conditional_branch(in_range, write_body, done)
-            .map_err(llvm_err)?;
+            .build_conditional_branch(in_range, write_body, done)?;
 
         self.builder.position_at_end(write_body);
-        let from_end = self
-            .builder
-            .build_int_sub(total, i64_type.const_int(1, false), "bin.last")
-            .map_err(llvm_err)?;
-        let shift = self
-            .builder
-            .build_int_sub(from_end, i, "bin.shift")
-            .map_err(llvm_err)?;
+        let from_end =
+            self.builder
+                .build_int_sub(total, i64_type.const_int(1, false), "bin.last")?;
+        let shift = self.builder.build_int_sub(from_end, i, "bin.shift")?;
         let bit = self
             .builder
-            .build_right_shift(value, shift, false, "bin.bit.wide")
-            .map_err(llvm_err)?;
+            .build_right_shift(value, shift, false, "bin.bit.wide")?;
         let masked = self
             .builder
-            .build_and(bit, i64_type.const_int(1, false), "bin.bit")
-            .map_err(llvm_err)?;
-        let digit = self
-            .builder
-            .build_int_add(masked, i64_type.const_int(ASCII_ZERO, false), "bin.ascii")
-            .map_err(llvm_err)?;
+            .build_and(bit, i64_type.const_int(1, false), "bin.bit")?;
+        let digit = self.builder.build_int_add(
+            masked,
+            i64_type.const_int(ASCII_ZERO, false),
+            "bin.ascii",
+        )?;
         let byte = self
             .builder
-            .build_int_truncate(digit, i8_type, "bin.byte")
-            .map_err(llvm_err)?;
+            .build_int_truncate(digit, i8_type, "bin.byte")?;
         self.store_byte(buf, i, byte)?;
         let next = self
             .builder
-            .build_int_add(i, i64_type.const_int(1, false), "bin.i.next")
-            .map_err(llvm_err)?;
-        self.builder.build_store(index, next).map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(write_head)
-            .map_err(llvm_err)?;
+            .build_int_add(i, i64_type.const_int(1, false), "bin.i.next")?;
+        self.builder.build_store(index, next)?;
+        self.builder.build_unconditional_branch(write_head)?;
 
         self.builder.position_at_end(done);
         let result = self.build_string_value(buf, total)?;
-        self.builder.build_return(Some(&result)).map_err(llvm_err)?;
+        self.builder.build_return(Some(&result))?;
 
         self.end_helper(saved);
         Ok(func)

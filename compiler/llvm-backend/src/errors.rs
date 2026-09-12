@@ -41,5 +41,15 @@ pub enum CodegenError {
     ConstOverflow { op: &'static str, ty: &'static str },
 }
 
+/// Every `inkwell` builder call answers `Result<_, BuilderError>`, and a builder
+/// failure is always an internal invariant break rather than a fault in the program
+/// being compiled. Converting here lets those calls use `?` directly; the rendered
+/// message is unchanged from the per-module `map_err` helpers this replaces.
+impl From<inkwell::builder::BuilderError> for CodegenError {
+    fn from(error: inkwell::builder::BuilderError) -> Self {
+        CodegenError::LlvmError(error.to_string())
+    }
+}
+
 /// Result type for code generation operations
 pub type CodegenResult<T> = Result<T, CodegenError>;

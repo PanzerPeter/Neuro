@@ -15,10 +15,6 @@ use crate::types::Type;
 /// future self-referential layout into a diagnostic instead of a stack overflow.
 const MAX_DERIVE_DEPTH: u32 = 64;
 
-fn llvm_err(e: inkwell::builder::BuilderError) -> CodegenError {
-    CodegenError::LlvmError(e.to_string())
-}
-
 impl<'ctx> CodegenContext<'ctx> {
     /// Compare two values of a `@derive(PartialEq)` struct, field by field.
     ///
@@ -57,19 +53,18 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let mut result = self.context.bool_type().const_int(1, false);
         for (index, (field_name, field_ty)) in fields.iter().enumerate() {
-            let a = self
-                .builder
-                .build_extract_value(lhs, index as u32, &format!("eq.l.{}", field_name))
-                .map_err(llvm_err)?;
-            let b = self
-                .builder
-                .build_extract_value(rhs, index as u32, &format!("eq.r.{}", field_name))
-                .map_err(llvm_err)?;
+            let a = self.builder.build_extract_value(
+                lhs,
+                index as u32,
+                &format!("eq.l.{}", field_name),
+            )?;
+            let b = self.builder.build_extract_value(
+                rhs,
+                index as u32,
+                &format!("eq.r.{}", field_name),
+            )?;
             let field_eq = self.codegen_field_eq(field_ty, a, b, depth)?;
-            result = self
-                .builder
-                .build_and(result, field_eq, "eq.and")
-                .map_err(llvm_err)?;
+            result = self.builder.build_and(result, field_eq, "eq.and")?;
         }
         Ok(result)
     }
@@ -86,8 +81,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let struct_ty = self.type_mapper.struct_type(name)?;
                 Ok(self
                     .builder
-                    .build_load(struct_ty, *ptr, "eq.deref")
-                    .map_err(llvm_err)?
+                    .build_load(struct_ty, *ptr, "eq.deref")?
                     .into_struct_value())
             }
             other => Ok(other.into_struct_value()),
@@ -119,7 +113,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     rhs.into_float_value(),
                     "eq.f",
                 )
-                .map_err(llvm_err),
+                .map_err(CodegenError::from),
             other if other.is_integer() || matches!(other, Type::Bool | Type::Char) => self
                 .builder
                 .build_int_compare(
@@ -128,7 +122,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     rhs.into_int_value(),
                     "eq.i",
                 )
-                .map_err(llvm_err),
+                .map_err(CodegenError::from),
             other => Err(CodegenError::UnsupportedType(format!(
                 "type {:?} reached derived equality; semantic analysis rejects it",
                 other
@@ -147,7 +141,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let string_ty = self.type_mapper.map_type(&Type::String)?;
                 self.builder
                     .build_load(string_ty, ptr, "eq.str")
-                    .map_err(llvm_err)
+                    .map_err(CodegenError::from)
             }
             other => Ok(other),
         }

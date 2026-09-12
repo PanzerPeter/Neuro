@@ -10,6 +10,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.22.4] - 2026-09-12
+
+### Removed
+
+- `infra`: deleted the `diagnostics` infrastructure crate. Five crates declared it as a
+  dependency and not one ever imported it: every slice reports through its own
+  `thiserror` enum, and `neurc` renders them. Its `Severity` / `DiagnosticCode` /
+  `DiagnosticCollector` surface, with four error codes (`E0001`–`E0003`, `E0000`) nothing
+  emitted, described an error architecture the compiler never adopted. `VSA.md` `DG-001`
+  mandated it as a BLOCKER rule, so the rule now states what the code actually does:
+  one `thiserror` enum per slice, rendering owned by the driver.
+- `infra`: deleted the `project-config` crate. It parsed a `neuro.toml` no code reads and
+  was not a dependency of any crate, not even the driver. The manifest shape it guessed at
+  belongs with the package manager it was written for, which is Phase 9. It was the only
+  consumer of the `serde` and `toml` entries in `[workspace.dependencies]`, so both are
+  gone; `toml` and its eight transitive crates leave the lockfile with it. `serde_json`
+  stays for the lexer's grammar-sync test, and pulls `serde` in on its own.
+- `infra`: deleted the `control-flow` slice. `build_cfg()` returned an empty graph, had no
+  caller, and no roadmap item depends on a CFG. Return-path analysis already works without
+  one, in `semantic-analysis`.
+- `build`: dropped the `cc` dependency from `neurc`. The linker path shells out to `cc` as
+  a process; the `cc` crate is a build-script library and was never referenced.
+
+### Changed
+
+- `codegen`: `CodegenError` now implements `From<inkwell::builder::BuilderError>`, so the
+  builder calls throughout codegen use `?` directly. This replaces ten copies of a private
+  `llvm_err` helper, six local closures re-declaring the same conversion, and 484
+  `.map_err(llvm_err)` call sites. Rendered messages are unchanged: the conversion produces
+  the same `CodegenError::LlvmError` the helpers did.
+- `codegen`: `row_major_strides` was written twice in `codegen/expressions`, identical
+  apart from returning `Vec<usize>` in one copy and `Vec<u64>` in the other. One copy now
+  lives in `expressions/mod.rs`, the module that already declares itself the home of
+  shared expression helpers, and the two `u64` uses cast at the point of use.
+- `infra`: `FormatSpec` derives `Default` instead of spelling out an impl whose every
+  field was already the field type's default.
+- `ci`: the nightly test legs on macOS and Windows are excluded from the matrix. Nightly
+  is an early warning that a future `rustc` breaks the build, that break is not
+  OS-specific, and all three legs were `continue-on-error`, so none could block a merge.
+  One nightly leg on Linux keeps the signal; stable still runs on all three systems.
+- `build`: pruned `.gitignore` from 438 lines to 383. Removed the WebAssembly, Java/Gradle
+  and Docker sections, template paths naming crates this workspace does not have
+  (`parser/src/grammar.rs`, `lexer/src/generated/`, `gen/`, `site/`), and fourteen patterns
+  listed twice. What git ignores is byte-for-byte unchanged, verified against
+  `git status --untracked-files=all` before and after.
+
 ## [2.22.3] - 2026-09-12
 
 ### Documentation

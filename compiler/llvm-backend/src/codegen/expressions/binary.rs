@@ -407,14 +407,15 @@ impl<'ctx> CodegenContext<'ctx> {
         offset: usize,
         name: &str,
     ) -> CodegenResult<IntValue<'ctx>> {
-        let llvm_err = |e: inkwell::builder::BuilderError| CodegenError::LlvmError(e.to_string());
         let int_ty = lhs.get_type();
         let is_remainder = matches!(op, BinaryOp::Modulo);
 
-        let nonzero = self
-            .builder
-            .build_int_compare(IntPredicate::NE, rhs, int_ty.const_zero(), "div.nonzero")
-            .map_err(llvm_err)?;
+        let nonzero = self.builder.build_int_compare(
+            IntPredicate::NE,
+            rhs,
+            int_ty.const_zero(),
+            "div.nonzero",
+        )?;
         let message = if is_remainder {
             REMAINDER_BY_ZERO_PANIC
         } else {
@@ -428,11 +429,11 @@ impl<'ctx> CodegenContext<'ctx> {
             return if is_remainder {
                 self.builder
                     .build_int_unsigned_rem(lhs, rhs, name)
-                    .map_err(llvm_err)
+                    .map_err(CodegenError::from)
             } else {
                 self.builder
                     .build_int_unsigned_div(lhs, rhs, name)
-                    .map_err(llvm_err)
+                    .map_err(CodegenError::from)
             };
         }
 
@@ -440,46 +441,37 @@ impl<'ctx> CodegenContext<'ctx> {
         // place in each width, and `const_int` truncates rather than sign-extends, so the
         // shift has to be by this operand's own width less one.
         let min = int_ty.const_int(1u64 << (int_ty.get_bit_width() - 1), false);
-        let lhs_is_min = self
-            .builder
-            .build_int_compare(IntPredicate::EQ, lhs, min, "div.lhs.min")
-            .map_err(llvm_err)?;
-        let rhs_is_minus_one = self
-            .builder
-            .build_int_compare(
-                IntPredicate::EQ,
-                rhs,
-                int_ty.const_all_ones(),
-                "div.rhs.neg1",
-            )
-            .map_err(llvm_err)?;
+        let lhs_is_min =
+            self.builder
+                .build_int_compare(IntPredicate::EQ, lhs, min, "div.lhs.min")?;
+        let rhs_is_minus_one = self.builder.build_int_compare(
+            IntPredicate::EQ,
+            rhs,
+            int_ty.const_all_ones(),
+            "div.rhs.neg1",
+        )?;
         let overflows = self
             .builder
-            .build_and(lhs_is_min, rhs_is_minus_one, "div.overflow")
-            .map_err(llvm_err)?;
+            .build_and(lhs_is_min, rhs_is_minus_one, "div.overflow")?;
 
         let divisor = if self.overflow_checks {
-            let ok = self
-                .builder
-                .build_not(overflows, "div.ok")
-                .map_err(llvm_err)?;
+            let ok = self.builder.build_not(overflows, "div.ok")?;
             self.codegen_guard_or_panic(ok, OVERFLOW_PANIC, offset)?;
             rhs
         } else {
             self.builder
-                .build_select(overflows, int_ty.const_int(1, false), rhs, "div.rhs.safe")
-                .map_err(llvm_err)?
+                .build_select(overflows, int_ty.const_int(1, false), rhs, "div.rhs.safe")?
                 .into_int_value()
         };
 
         if is_remainder {
             self.builder
                 .build_int_signed_rem(lhs, divisor, name)
-                .map_err(llvm_err)
+                .map_err(CodegenError::from)
         } else {
             self.builder
                 .build_int_signed_div(lhs, divisor, name)
-                .map_err(llvm_err)
+                .map_err(CodegenError::from)
         }
     }
 

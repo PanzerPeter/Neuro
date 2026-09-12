@@ -9,7 +9,6 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 - Output: an executable binary on success; diagnostics and non-fatal lint warnings to stderr
 
 ## Shared Kernel
-- diagnostics: pipeline error formatting
 - ast-types: the parsed item list handed between the resolution, binding, and checking steps
 - neuro-hir: the lowered program handed to the backend
 

@@ -9,6 +9,11 @@ Emit native object code from the typed Neuro HIR via LLVM IR generation.
   source_path: &str`
 - Output: `Result<Vec<u8>, CodegenError>`
 
+`CodegenError` implements `From<inkwell::builder::BuilderError>`, so the several hundred
+builder calls inside codegen use `?` directly. A builder failure is always an internal
+invariant break, never a fault in the program being compiled, and it surfaces as
+`CodegenError::LlvmError`.
+
 The backend consumes the typed HIR produced by `hir-lowering`: every HIR node carries its
 resolved type (`HirExpr::ty`), so codegen reads types inline rather than re-deriving them.
 **There is no backend type-collection pass**. A single `type_env` (binding name → resolved type),
@@ -35,7 +40,6 @@ transforms.
 - neuro-hir: the typed HIR lowered from (`HirProgram` / `HirExpr` / `HirType`)
 - ast-types: the `BinaryOp` / `UnaryOp` enums (reused unchanged by the HIR)
 - shared-types: type system primitives, `FormatSpec` for interpolation
-- diagnostics: error type infrastructure
 - source-location: `SourceFile` byte-offset → line/column mapping for panic diagnostics
 
 inkwell 0.10.0 (feature `llvm20-1`) is a third-party crate, not Shared Kernel. Requires LLVM 20;

@@ -54,7 +54,6 @@ fn test_no_cross_slice_dependencies() {
         "compiler/argument-binding",
         "compiler/semantic-analysis",
         "compiler/hir-lowering",
-        "compiler/control-flow",
         "compiler/llvm-backend",
         "compiler/mlir-backend",
     ];
@@ -107,8 +106,6 @@ fn test_infrastructure_no_slice_dependencies() {
         "compiler/infrastructure/shared-types",
         "compiler/infrastructure/ast-types",
         "compiler/infrastructure/source-location",
-        "compiler/infrastructure/diagnostics",
-        "compiler/infrastructure/project-config",
         "compiler/infrastructure/neuro-hir",
     ];
 
@@ -119,7 +116,6 @@ fn test_infrastructure_no_slice_dependencies() {
         "argument-binding",
         "semantic-analysis",
         "hir-lowering",
-        "control-flow",
         "llvm-backend",
         "mlir-backend",
     ];
@@ -155,16 +151,13 @@ fn test_all_slices_have_context_md() {
         "compiler/argument-binding",
         "compiler/semantic-analysis",
         "compiler/hir-lowering",
-        "compiler/control-flow",
         "compiler/llvm-backend",
         "compiler/mlir-backend",
         "compiler/neurc",
         // Infrastructure crates also require CONTEXT.md (VSA AC-012)
         "compiler/infrastructure/shared-types",
         "compiler/infrastructure/ast-types",
-        "compiler/infrastructure/diagnostics",
         "compiler/infrastructure/source-location",
-        "compiler/infrastructure/project-config",
         "compiler/infrastructure/neuro-hir",
     ];
 

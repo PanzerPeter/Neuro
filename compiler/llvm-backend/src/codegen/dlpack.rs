@@ -51,10 +51,6 @@ const FIELD_SHAPE: u32 = 4;
 const FIELD_STRIDES: u32 = 5;
 const FIELD_BYTE_OFFSET: u32 = 6;
 
-fn llvm_err(e: inkwell::builder::BuilderError) -> CodegenError {
-    CodegenError::LlvmError(e.to_string())
-}
-
 impl<'ctx> CodegenContext<'ctx> {
     /// Allocate a tensor's DLPack handle and its element buffer, fill every field of the
     /// structure, and return the handle, the pointer that *is* the tensor value.
@@ -99,8 +95,7 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let data = self
             .builder
-            .build_call(aligned_alloc, &args, "tensor.data")
-            .map_err(llvm_err)?
+            .build_call(aligned_alloc, &args, "tensor.data")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| {
@@ -291,7 +286,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     })?;
             }
         }
-        self.builder.build_store(ptr, value).map_err(llvm_err)?;
+        self.builder.build_store(ptr, value)?;
         Ok(())
     }
 
@@ -382,12 +377,9 @@ impl<'ctx> CodegenContext<'ctx> {
         let aligned_free_fn = self.get_or_declare_aligned_free();
         let free_fn = self.get_or_declare_free();
         self.builder
-            .build_call(aligned_free_fn, &[data.into()], "")
-            .map_err(llvm_err)?;
-        self.builder
-            .build_call(free_fn, &[handle.into()], "")
-            .map_err(llvm_err)?;
-        self.builder.build_return(None).map_err(llvm_err)?;
+            .build_call(aligned_free_fn, &[data.into()], "")?;
+        self.builder.build_call(free_fn, &[handle.into()], "")?;
+        self.builder.build_return(None)?;
         if let Some(block) = saved_block {
             self.builder.position_at_end(block);
         }
@@ -421,7 +413,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
         self.builder
             .build_load(ptr_type, data_ptr, "dlpack.data")
-            .map_err(llvm_err)
+            .map_err(CodegenError::from)
             .map(|value| value.into_pointer_value())
     }
 
@@ -440,13 +432,11 @@ impl<'ctx> CodegenContext<'ctx> {
             })?;
         let deleter = self
             .builder
-            .build_load(ptr_type, deleter_addr, "dlpack.deleter")
-            .map_err(llvm_err)?
+            .build_load(ptr_type, deleter_addr, "dlpack.deleter")?
             .into_pointer_value();
         let fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
         self.builder
-            .build_indirect_call(fn_type, deleter, &[handle.into()], "")
-            .map_err(llvm_err)?;
+            .build_indirect_call(fn_type, deleter, &[handle.into()], "")?;
         Ok(())
     }
 

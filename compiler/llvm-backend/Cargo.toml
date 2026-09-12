@@ -11,7 +11,6 @@ publish.workspace = true
 shared-types = { path = "../infrastructure/shared-types" }
 ast-types = { path = "../infrastructure/ast-types" }
 neuro-hir = { path = "../infrastructure/neuro-hir" }
-diagnostics = { path = "../infrastructure/diagnostics" }
 source-location = { path = "../infrastructure/source-location" }
 inkwell = { workspace = true }
 thiserror = { workspace = true }

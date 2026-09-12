@@ -28,6 +28,7 @@ use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::IntPredicate;
 use neuro_hir::HirExpr;
 
+use super::row_major_strides;
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
@@ -59,10 +60,6 @@ const DEVICE_HOST_VARIANT: &str = "CPU";
 const DEVICE_UNAVAILABLE: &str =
     "tensor transfer to a non-host device requires the GPU backend, which this compiler \
      does not have yet";
-
-fn llvm_err(e: inkwell::builder::BuilderError) -> CodegenError {
-    CodegenError::LlvmError(e.to_string())
-}
 
 impl<'ctx> CodegenContext<'ctx> {
     /// The element type and buffer length of a tensor type.
@@ -131,7 +128,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     &[self.context.i64_type().const_zero(), index],
                     "tensor.slot",
                 )
-                .map_err(llvm_err)
+                .map_err(CodegenError::from)
         }
     }
 
@@ -177,7 +174,7 @@ impl<'ctx> CodegenContext<'ctx> {
         for (index, value) in values.into_iter().enumerate() {
             let slot =
                 self.tensor_slot(buffer_ty, data, i64_type.const_int(index as u64, false))?;
-            self.builder.build_store(slot, value).map_err(llvm_err)?;
+            self.builder.build_store(slot, value)?;
         }
         Ok(handle.into())
     }
@@ -258,9 +255,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let (handle, data) = self.alloc_tensor(tensor_ty, "tensor.rand")?;
         let i64_type = self.context.i64_type();
         let index = self.entry_alloca(i64_type, "tensor.rand.i")?;
-        self.builder
-            .build_store(index, i64_type.const_zero())
-            .map_err(llvm_err)?;
+        self.builder.build_store(index, i64_type.const_zero())?;
 
         let function = self.current_function.ok_or_else(|| {
             CodegenError::InternalError("tensor construction outside a function".to_string())
@@ -275,33 +270,24 @@ impl<'ctx> CodegenContext<'ctx> {
             .context
             .append_basic_block(function, "tensor.rand.done");
 
-        self.builder
-            .build_unconditional_branch(head)
-            .map_err(llvm_err)?;
+        self.builder.build_unconditional_branch(head)?;
         self.builder.position_at_end(head);
         let i = self
             .builder
-            .build_load(i64_type, index, "tensor.rand.idx")
-            .map_err(llvm_err)?
+            .build_load(i64_type, index, "tensor.rand.idx")?
             .into_int_value();
-        let more = self
-            .builder
-            .build_int_compare(
-                IntPredicate::ULT,
-                i,
-                i64_type.const_int(count as u64, false),
-                "tensor.rand.more",
-            )
-            .map_err(llvm_err)?;
-        self.builder
-            .build_conditional_branch(more, body, done)
-            .map_err(llvm_err)?;
+        let more = self.builder.build_int_compare(
+            IntPredicate::ULT,
+            i,
+            i64_type.const_int(count as u64, false),
+            "tensor.rand.more",
+        )?;
+        self.builder.build_conditional_branch(more, body, done)?;
 
         self.builder.position_at_end(body);
         let draw = self
             .builder
-            .build_call(normal_fn, &[], "tensor.rand.draw")
-            .map_err(llvm_err)?
+            .build_call(normal_fn, &[], "tensor.rand.draw")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("rng helper returned void".to_string()))?
@@ -311,28 +297,22 @@ impl<'ctx> CodegenContext<'ctx> {
         // once rather than twice.
         let draw = self
             .builder
-            .build_float_cast(draw, elem_float, "tensor.rand.elem")
-            .map_err(llvm_err)?;
+            .build_float_cast(draw, elem_float, "tensor.rand.elem")?;
         let scaled = self
             .builder
-            .build_float_mul(std, draw, "tensor.rand.scaled")
-            .map_err(llvm_err)?;
+            .build_float_mul(std, draw, "tensor.rand.scaled")?;
         let value = self
             .builder
-            .build_float_add(mean, scaled, "tensor.rand.value")
-            .map_err(llvm_err)?;
+            .build_float_add(mean, scaled, "tensor.rand.value")?;
         // `i` is below `count` on this edge, because the loop head's `ULT` test is what
         // branches here, so the slot address stays inside the buffer.
         let slot = self.tensor_slot(buffer_ty, data, i)?;
-        self.builder.build_store(slot, value).map_err(llvm_err)?;
-        let next = self
-            .builder
-            .build_int_add(i, i64_type.const_int(1, false), "tensor.rand.next")
-            .map_err(llvm_err)?;
-        self.builder.build_store(index, next).map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(head)
-            .map_err(llvm_err)?;
+        self.builder.build_store(slot, value)?;
+        let next =
+            self.builder
+                .build_int_add(i, i64_type.const_int(1, false), "tensor.rand.next")?;
+        self.builder.build_store(index, next)?;
+        self.builder.build_unconditional_branch(head)?;
 
         self.builder.position_at_end(done);
         Ok(handle.into())
@@ -365,8 +345,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     self.context.ptr_type(inkwell::AddressSpace::default()),
                     ptr,
                     "tensor.clone.src",
-                )
-                .map_err(llvm_err)?
+                )?
                 .into_pointer_value()
         } else {
             ptr
@@ -477,9 +456,7 @@ impl<'ctx> CodegenContext<'ctx> {
             CodegenError::InternalError("a shape cast outside a function".to_string())
         })?;
         let index = self.entry_alloca(i64_type, "tensor.permute.i")?;
-        self.builder
-            .build_store(index, i64_type.const_zero())
-            .map_err(llvm_err)?;
+        self.builder.build_store(index, i64_type.const_zero())?;
         let head = self
             .context
             .append_basic_block(function, "tensor.permute.head");
@@ -490,59 +467,41 @@ impl<'ctx> CodegenContext<'ctx> {
             .context
             .append_basic_block(function, "tensor.permute.done");
 
-        self.builder
-            .build_unconditional_branch(head)
-            .map_err(llvm_err)?;
+        self.builder.build_unconditional_branch(head)?;
         self.builder.position_at_end(head);
         let i = self
             .builder
-            .build_load(i64_type, index, "tensor.permute.idx")
-            .map_err(llvm_err)?
+            .build_load(i64_type, index, "tensor.permute.idx")?
             .into_int_value();
-        let more = self
-            .builder
-            .build_int_compare(
-                IntPredicate::ULT,
-                i,
-                i64_type.const_int(count as u64, false),
-                "tensor.permute.more",
-            )
-            .map_err(llvm_err)?;
-        self.builder
-            .build_conditional_branch(more, body, done)
-            .map_err(llvm_err)?;
+        let more = self.builder.build_int_compare(
+            IntPredicate::ULT,
+            i,
+            i64_type.const_int(count as u64, false),
+            "tensor.permute.more",
+        )?;
+        self.builder.build_conditional_branch(more, body, done)?;
 
         self.builder.position_at_end(body);
         let mut offset = i64_type.const_zero();
         for axis in 0..dst_shape.len() {
-            let coord = self
-                .builder
-                .build_int_unsigned_div(
-                    i,
-                    i64_type.const_int(dst_strides[axis], false),
-                    "tensor.permute.div",
-                )
-                .map_err(llvm_err)?;
-            let coord = self
-                .builder
-                .build_int_unsigned_rem(
-                    coord,
-                    i64_type.const_int(dst_shape[axis] as u64, false),
-                    "tensor.permute.coord",
-                )
-                .map_err(llvm_err)?;
-            let scaled = self
-                .builder
-                .build_int_mul(
-                    coord,
-                    i64_type.const_int(src_strides[permutation[axis]], false),
-                    "tensor.permute.scaled",
-                )
-                .map_err(llvm_err)?;
+            let coord = self.builder.build_int_unsigned_div(
+                i,
+                i64_type.const_int(dst_strides[axis] as u64, false),
+                "tensor.permute.div",
+            )?;
+            let coord = self.builder.build_int_unsigned_rem(
+                coord,
+                i64_type.const_int(dst_shape[axis] as u64, false),
+                "tensor.permute.coord",
+            )?;
+            let scaled = self.builder.build_int_mul(
+                coord,
+                i64_type.const_int(src_strides[permutation[axis]] as u64, false),
+                "tensor.permute.scaled",
+            )?;
             offset = self
                 .builder
-                .build_int_add(offset, scaled, "tensor.permute.offset")
-                .map_err(llvm_err)?;
+                .build_int_add(offset, scaled, "tensor.permute.offset")?;
         }
 
         // Both indices are below `count` on this edge: `i` by the loop head's test, and
@@ -550,19 +509,15 @@ impl<'ctx> CodegenContext<'ctx> {
         let from = self.tensor_slot(buffer_ty, source, offset)?;
         let value = self
             .builder
-            .build_load(element_ty, from, "tensor.permute.value")
-            .map_err(llvm_err)?;
+            .build_load(element_ty, from, "tensor.permute.value")?;
         let into = self.tensor_slot(buffer_ty, destination, i)?;
-        self.builder.build_store(into, value).map_err(llvm_err)?;
+        self.builder.build_store(into, value)?;
 
-        let next = self
-            .builder
-            .build_int_add(i, i64_type.const_int(1, false), "tensor.permute.next")
-            .map_err(llvm_err)?;
-        self.builder.build_store(index, next).map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(head)
-            .map_err(llvm_err)?;
+        let next =
+            self.builder
+                .build_int_add(i, i64_type.const_int(1, false), "tensor.permute.next")?;
+        self.builder.build_store(index, next)?;
+        self.builder.build_unconditional_branch(head)?;
 
         self.builder.position_at_end(done);
         Ok(())
@@ -595,19 +550,15 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let tag = self
             .builder
-            .build_extract_value(device_val, 0, "device.tag")
-            .map_err(llvm_err)?
+            .build_extract_value(device_val, 0, "device.tag")?
             .into_int_value();
         let host = self.enum_variant_tag(DEVICE_ENUM, DEVICE_HOST_VARIANT)?;
-        let is_host = self
-            .builder
-            .build_int_compare(
-                IntPredicate::EQ,
-                tag,
-                self.context.i32_type().const_int(host as u64, false),
-                "device.is_host",
-            )
-            .map_err(llvm_err)?;
+        let is_host = self.builder.build_int_compare(
+            IntPredicate::EQ,
+            tag,
+            self.context.i32_type().const_int(host as u64, false),
+            "device.is_host",
+        )?;
         self.codegen_guard_or_panic(is_host, DEVICE_UNAVAILABLE, device.span.start)?;
         Ok(tensor)
     }
@@ -650,8 +601,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     self.context.ptr_type(inkwell::AddressSpace::default()),
                     rhs_ptr,
                     "tensor.op.rhs",
-                )
-                .map_err(llvm_err)?
+                )?
                 .into_pointer_value()
         } else {
             rhs_ptr
@@ -667,8 +617,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.context.ptr_type(inkwell::AddressSpace::default()),
                 target_ptr,
                 "tensor.op.lhs",
-            )
-            .map_err(llvm_err)?
+            )?
             .into_pointer_value();
 
         let lhs_data = self.load_dlpack_data(lhs_handle)?;
@@ -678,9 +627,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let i64_type = self.context.i64_type();
         let index = self.entry_alloca(i64_type, "tensor.op.i")?;
-        self.builder
-            .build_store(index, i64_type.const_zero())
-            .map_err(llvm_err)?;
+        self.builder.build_store(index, i64_type.const_zero())?;
         let function = self.current_function.ok_or_else(|| {
             CodegenError::InternalError("tensor update outside a function".to_string())
         })?;
@@ -688,27 +635,19 @@ impl<'ctx> CodegenContext<'ctx> {
         let body = self.context.append_basic_block(function, "tensor.op.body");
         let done = self.context.append_basic_block(function, "tensor.op.done");
 
-        self.builder
-            .build_unconditional_branch(head)
-            .map_err(llvm_err)?;
+        self.builder.build_unconditional_branch(head)?;
         self.builder.position_at_end(head);
         let i = self
             .builder
-            .build_load(i64_type, index, "tensor.op.idx")
-            .map_err(llvm_err)?
+            .build_load(i64_type, index, "tensor.op.idx")?
             .into_int_value();
-        let more = self
-            .builder
-            .build_int_compare(
-                IntPredicate::ULT,
-                i,
-                i64_type.const_int(count as u64, false),
-                "tensor.op.more",
-            )
-            .map_err(llvm_err)?;
-        self.builder
-            .build_conditional_branch(more, body, done)
-            .map_err(llvm_err)?;
+        let more = self.builder.build_int_compare(
+            IntPredicate::ULT,
+            i,
+            i64_type.const_int(count as u64, false),
+            "tensor.op.more",
+        )?;
+        self.builder.build_conditional_branch(more, body, done)?;
 
         self.builder.position_at_end(body);
         // `i` is below `count` on this edge, because the head's `ULT` test is what
@@ -717,26 +656,19 @@ impl<'ctx> CodegenContext<'ctx> {
         let rhs_slot = self.tensor_slot(buffer_ty, rhs_data, i)?;
         let lhs_elem = self
             .builder
-            .build_load(elem_llvm, lhs_slot, "tensor.op.a")
-            .map_err(llvm_err)?;
+            .build_load(elem_llvm, lhs_slot, "tensor.op.a")?;
         let rhs_elem = self
             .builder
-            .build_load(elem_llvm, rhs_slot, "tensor.op.b")
-            .map_err(llvm_err)?;
+            .build_load(elem_llvm, rhs_slot, "tensor.op.b")?;
         let updated = self.tensor_element_arith(op, lhs_elem, rhs_elem, &element_ty, offset)?;
-        self.builder
-            .build_store(lhs_slot, updated)
-            .map_err(llvm_err)?;
+        self.builder.build_store(lhs_slot, updated)?;
         let next = self
             .builder
-            .build_int_add(i, i64_type.const_int(1, false), "tensor.op.next")
-            .map_err(llvm_err)?;
-        self.builder.build_store(index, next).map_err(llvm_err)?;
+            .build_int_add(i, i64_type.const_int(1, false), "tensor.op.next")?;
+        self.builder.build_store(index, next)?;
         // The element arithmetic may have split the body around an overflow or
         // divide-by-zero guard, so the back edge leaves whichever block is current now.
-        self.builder
-            .build_unconditional_branch(head)
-            .map_err(llvm_err)?;
+        self.builder.build_unconditional_branch(head)?;
 
         self.builder.position_at_end(done);
         // An owned operand is consumed by the update, so its buffer is released here:
@@ -772,7 +704,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     ))
                 }
             };
-            return Ok(value.map_err(llvm_err)?.into());
+            return Ok(value?.into());
         }
         let (BasicValueEnum::IntValue(a), BasicValueEnum::IntValue(b)) = (lhs, rhs) else {
             return Err(CodegenError::InternalError(
@@ -863,43 +795,32 @@ impl<'ctx> CodegenContext<'ctx> {
         let state = self.get_or_create_rng_state();
         let mut s = self
             .builder
-            .build_load(i64_type, state.as_pointer_value(), "rng.s")
-            .map_err(llvm_err)?
+            .build_load(i64_type, state.as_pointer_value(), "rng.s")?
             .into_int_value();
         s = self.xorshift_step(s, XORSHIFT_A, true)?;
         s = self.xorshift_step(s, XORSHIFT_B, false)?;
         s = self.xorshift_step(s, XORSHIFT_C, true)?;
-        self.builder
-            .build_store(state.as_pointer_value(), s)
-            .map_err(llvm_err)?;
+        self.builder.build_store(state.as_pointer_value(), s)?;
 
-        let mantissa = self
-            .builder
-            .build_right_shift(
-                s,
-                i64_type.const_int(64 - MANTISSA_BITS, false),
-                false,
-                "rng.mantissa",
-            )
-            .map_err(llvm_err)?;
+        let mantissa = self.builder.build_right_shift(
+            s,
+            i64_type.const_int(64 - MANTISSA_BITS, false),
+            false,
+            "rng.mantissa",
+        )?;
         let as_float = self
             .builder
-            .build_unsigned_int_to_float(mantissa, f64_type, "rng.float")
-            .map_err(llvm_err)?;
+            .build_unsigned_int_to_float(mantissa, f64_type, "rng.float")?;
         // `+1` before scaling lifts the draw off zero without shrinking the interval to
         // something a caller could distinguish: the result is `(0, 1]`.
-        let shifted = self
-            .builder
-            .build_float_add(as_float, f64_type.const_float(1.0), "rng.shifted")
-            .map_err(llvm_err)?;
+        let shifted =
+            self.builder
+                .build_float_add(as_float, f64_type.const_float(1.0), "rng.shifted")?;
         let scale = f64_type.const_float(1.0 / (1u64 << MANTISSA_BITS) as f64);
         let uniform = self
             .builder
-            .build_float_mul(shifted, scale, "rng.uniform")
-            .map_err(llvm_err)?;
-        self.builder
-            .build_return(Some(&uniform))
-            .map_err(llvm_err)?;
+            .build_float_mul(shifted, scale, "rng.uniform")?;
+        self.builder.build_return(Some(&uniform))?;
 
         if let Some(block) = saved {
             self.builder.position_at_end(block);
@@ -916,17 +837,14 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<IntValue<'ctx>> {
         let shift = self.context.i64_type().const_int(amount, false);
         let shifted = if left {
-            self.builder
-                .build_left_shift(state, shift, "rng.shl")
-                .map_err(llvm_err)?
+            self.builder.build_left_shift(state, shift, "rng.shl")?
         } else {
             self.builder
-                .build_right_shift(state, shift, false, "rng.lshr")
-                .map_err(llvm_err)?
+                .build_right_shift(state, shift, false, "rng.lshr")?
         };
         self.builder
             .build_xor(state, shifted, "rng.xor")
-            .map_err(llvm_err)
+            .map_err(CodegenError::from)
     }
 
     /// `double __neuro_rng_normal_f64()`, one standard-normal draw by the Box-Muller
@@ -956,19 +874,14 @@ impl<'ctx> CodegenContext<'ctx> {
         let ln = self.call_f64(log, &[u1.into()], "rng.ln")?;
         let scaled = self
             .builder
-            .build_float_mul(f64_type.const_float(-2.0), ln, "rng.neg2ln")
-            .map_err(llvm_err)?;
+            .build_float_mul(f64_type.const_float(-2.0), ln, "rng.neg2ln")?;
         let radius = self.call_f64(sqrt, &[scaled.into()], "rng.radius")?;
         let angle = self
             .builder
-            .build_float_mul(f64_type.const_float(TWO_PI), u2, "rng.angle")
-            .map_err(llvm_err)?;
+            .build_float_mul(f64_type.const_float(TWO_PI), u2, "rng.angle")?;
         let cosine = self.call_f64(cos, &[angle.into()], "rng.cos")?;
-        let normal = self
-            .builder
-            .build_float_mul(radius, cosine, "rng.normal")
-            .map_err(llvm_err)?;
-        self.builder.build_return(Some(&normal)).map_err(llvm_err)?;
+        let normal = self.builder.build_float_mul(radius, cosine, "rng.normal")?;
+        self.builder.build_return(Some(&normal))?;
 
         if let Some(block) = saved {
             self.builder.position_at_end(block);
@@ -993,21 +906,10 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<inkwell::values::FloatValue<'ctx>> {
         Ok(self
             .builder
-            .build_call(callee, args, name)
-            .map_err(llvm_err)?
+            .build_call(callee, args, name)?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError(format!("`{name}` returned void")))?
             .into_float_value())
     }
-}
-
-/// Row-major element strides for `shape`: the distance between neighbouring elements
-/// along each axis, counted in elements the way DLPack counts them.
-fn row_major_strides(shape: &[usize]) -> Vec<u64> {
-    let mut strides = vec![1u64; shape.len()];
-    for axis in (0..shape.len().saturating_sub(1)).rev() {
-        strides[axis] = strides[axis + 1] * shape[axis + 1] as u64;
-    }
-    strides
 }

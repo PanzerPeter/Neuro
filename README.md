@@ -434,15 +434,12 @@ Neuro follows Vertical Slice Architecture (VSA): the code is organized by langua
 compiler/
 ├── infrastructure/          # Shared, zero-business-logic crates
 │   ├── ast-types/           #   AST node definitions
-│   ├── diagnostics/         #   Error / warning types + rendering
-│   ├── project-config/      #   Project / manifest configuration
 │   ├── shared-types/        #   Primitives shared across slices
 │   ├── source-location/     #   Spans, positions, source files
 │   └── neuro-hir/           #   Typed High-Level IR (frontend ↔ backend contract)
 ├── lexical-analysis/        # Tokenizer (logos, Unicode XID)
 ├── syntax-parsing/          # Pratt + statement parser → AST
 ├── semantic-analysis/       # Type checker, scope analysis
-├── control-flow/            # CFG data structures; no caller yet
 ├── hir-lowering/            # Type-checked AST → typed HIR
 ├── llvm-backend/            # HIR → object code (inkwell 0.10 / LLVM 20)
 ├── mlir-backend/            # HIR → MLIR scaffold (off-by-default `mlir` feature)

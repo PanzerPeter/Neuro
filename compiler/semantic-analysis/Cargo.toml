@@ -10,7 +10,6 @@ publish.workspace = true
 [dependencies]
 shared-types = { path = "../infrastructure/shared-types" }
 ast-types = { path = "../infrastructure/ast-types" }
-diagnostics = { path = "../infrastructure/diagnostics" }
 thiserror = { workspace = true }
 
 [dev-dependencies]

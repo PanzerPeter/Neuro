@@ -10,7 +10,6 @@ Transform raw Neuro source text into a validated token stream as the first stage
 
 ## Shared Kernel
 - shared-types: `Span` for the byte range on every token, plus `IntSuffix` / `FloatSuffix`
-- diagnostics: error type infrastructure used by `LexError`
 
 ## Notes
 A logos-generated lexer over UTF-8 source, using XID_Start / XID_Continue rules so Unicode

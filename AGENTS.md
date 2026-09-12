@@ -23,16 +23,13 @@ Workspace layout (`compiler/`):
 | --- | --- |
 | `infrastructure/shared-types` | `Span`, `Identifier`, `Literal`: no business logic |
 | `infrastructure/source-location` | Source mapping |
-| `infrastructure/diagnostics` | Error type infrastructure |
 | `infrastructure/ast-types` | AST node definitions (owned here, not in the parser) |
 | `infrastructure/neuro-hir` | Typed HIR: the frontend/backend contract |
-| `infrastructure/project-config` | `neuro.toml` parsing |
 | `lexical-analysis` | Tokenizer (logos + unicode-ident) |
 | `syntax-parsing` | Pratt expression parser + statement parser |
 | `module-resolution` | Multi-file program loading |
 | `argument-binding` | Named/positional argument binding |
 | `semantic-analysis` | Type checking, scope resolution |
-| `control-flow` | CFG data structures only; no caller yet |
 | `hir-lowering` | AST → typed HIR |
 | `llvm-backend` | Codegen via inkwell 0.10.0 (LLVM 20) |
 | `mlir-backend` | MLIR/melior codegen, behind the off-by-default `mlir` feature |

@@ -9,7 +9,6 @@ publish.workspace = true
 
 [dependencies]
 shared-types = { path = "../infrastructure/shared-types" }
-diagnostics = { path = "../infrastructure/diagnostics" }
 logos = { workspace = true }
 unicode-ident = { workspace = true }
 thiserror = { workspace = true }

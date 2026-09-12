@@ -30,6 +30,17 @@ use crate::codegen::context::{resolve_builtin_method, BuiltinMethod, CodegenCont
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
+/// Row-major element strides for `shape`: the distance between neighbouring elements
+/// along each axis, in elements (the product of every extent below it), which is also
+/// how DLPack counts them.
+pub(super) fn row_major_strides(shape: &[usize]) -> Vec<usize> {
+    let mut strides = vec![1usize; shape.len()];
+    for axis in (0..shape.len().saturating_sub(1)).rev() {
+        strides[axis] = strides[axis + 1] * shape[axis + 1];
+    }
+    strides
+}
+
 impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for an expression. The HIR carries the resolved type on every
     /// node (`expr.ty`), so the backend reads it directly instead of consulting a

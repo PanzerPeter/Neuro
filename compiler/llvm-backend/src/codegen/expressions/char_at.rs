@@ -39,10 +39,6 @@ const UTF8_TWO_BYTE_PAYLOAD: u64 = 0x1F;
 const UTF8_THREE_BYTE_PAYLOAD: u64 = 0x0F;
 const UTF8_FOUR_BYTE_PAYLOAD: u64 = 0x07;
 
-fn llvm_err(e: inkwell::builder::BuilderError) -> CodegenError {
-    CodegenError::LlvmError(e.to_string())
-}
-
 impl<'ctx> CodegenContext<'ctx> {
     /// Lower `string.__char_at(offset)` to the code point starting at that byte.
     pub(super) fn codegen_char_at(
@@ -57,21 +53,18 @@ impl<'ctx> CodegenContext<'ctx> {
         let fat = self.string_receiver_struct(receiver)?;
         let base_ptr = self
             .builder
-            .build_extract_value(fat, 0, "cat.base.ptr")
-            .map_err(llvm_err)?
+            .build_extract_value(fat, 0, "cat.base.ptr")?
             .into_pointer_value();
         let len = self
             .builder
-            .build_extract_value(fat, 1, "cat.len")
-            .map_err(llvm_err)?
+            .build_extract_value(fat, 1, "cat.len")?
             .into_int_value();
         let offset = self.codegen_expr(offset_expr)?.into_int_value();
 
         let char_at = self.get_or_build_char_at()?;
         let call_args: [BasicMetadataValueEnum; 3] = [base_ptr.into(), len.into(), offset.into()];
         self.builder
-            .build_call(char_at, &call_args, "cat.scalar")
-            .map_err(llvm_err)?
+            .build_call(char_at, &call_args, "cat.scalar")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("char_at produced no result".into()))
@@ -132,194 +125,129 @@ impl<'ctx> CodegenContext<'ctx> {
         let done = self.context.append_basic_block(function, "cat.done");
 
         self.builder.position_at_end(entry);
-        let scalar_slot = self
-            .builder
-            .build_alloca(i32_type, "cat.scalar")
-            .map_err(llvm_err)?;
-        let cursor_slot = self
-            .builder
-            .build_alloca(i64_type, "cat.cursor")
-            .map_err(llvm_err)?;
+        let scalar_slot = self.builder.build_alloca(i32_type, "cat.scalar")?;
+        let cursor_slot = self.builder.build_alloca(i64_type, "cat.cursor")?;
         self.builder
-            .build_store(scalar_slot, i32_type.const_zero())
-            .map_err(llvm_err)?;
+            .build_store(scalar_slot, i32_type.const_zero())?;
         // An offset at or past the end has no code point standing on it. `Chars::next`
         // stops before that, so this answers the empty scalar rather than panicking.
-        let in_bounds = self
-            .builder
-            .build_int_compare(IntPredicate::ULT, offset, len, "cat.in.bounds")
-            .map_err(llvm_err)?;
+        let in_bounds =
+            self.builder
+                .build_int_compare(IntPredicate::ULT, offset, len, "cat.in.bounds")?;
         self.builder
-            .build_conditional_branch(in_bounds, lead, done)
-            .map_err(llvm_err)?;
+            .build_conditional_branch(in_bounds, lead, done)?;
 
         self.builder.position_at_end(lead);
         let lead_byte = self.load_byte_as_i32(base, offset, "cat.lead.byte")?;
-        let ascii = self
-            .builder
-            .build_int_compare(
-                IntPredicate::ULT,
-                lead_byte,
-                i32_type.const_int(UTF8_ASCII_LIMIT, false),
-                "cat.ascii",
-            )
-            .map_err(llvm_err)?;
-        let two_byte = self
-            .builder
-            .build_int_compare(
-                IntPredicate::ULT,
-                lead_byte,
-                i32_type.const_int(UTF8_THREE_BYTE_LEAD, false),
-                "cat.two.byte",
-            )
-            .map_err(llvm_err)?;
-        let three_byte = self
-            .builder
-            .build_int_compare(
-                IntPredicate::ULT,
-                lead_byte,
-                i32_type.const_int(UTF8_FOUR_BYTE_LEAD, false),
-                "cat.three.byte",
-            )
-            .map_err(llvm_err)?;
-        let payload_two = self
-            .builder
-            .build_and(
-                lead_byte,
-                i32_type.const_int(UTF8_TWO_BYTE_PAYLOAD, false),
-                "cat.payload2",
-            )
-            .map_err(llvm_err)?;
-        let payload_three = self
-            .builder
-            .build_and(
-                lead_byte,
-                i32_type.const_int(UTF8_THREE_BYTE_PAYLOAD, false),
-                "cat.payload3",
-            )
-            .map_err(llvm_err)?;
-        let payload_four = self
-            .builder
-            .build_and(
-                lead_byte,
-                i32_type.const_int(UTF8_FOUR_BYTE_PAYLOAD, false),
-                "cat.payload4",
-            )
-            .map_err(llvm_err)?;
+        let ascii = self.builder.build_int_compare(
+            IntPredicate::ULT,
+            lead_byte,
+            i32_type.const_int(UTF8_ASCII_LIMIT, false),
+            "cat.ascii",
+        )?;
+        let two_byte = self.builder.build_int_compare(
+            IntPredicate::ULT,
+            lead_byte,
+            i32_type.const_int(UTF8_THREE_BYTE_LEAD, false),
+            "cat.two.byte",
+        )?;
+        let three_byte = self.builder.build_int_compare(
+            IntPredicate::ULT,
+            lead_byte,
+            i32_type.const_int(UTF8_FOUR_BYTE_LEAD, false),
+            "cat.three.byte",
+        )?;
+        let payload_two = self.builder.build_and(
+            lead_byte,
+            i32_type.const_int(UTF8_TWO_BYTE_PAYLOAD, false),
+            "cat.payload2",
+        )?;
+        let payload_three = self.builder.build_and(
+            lead_byte,
+            i32_type.const_int(UTF8_THREE_BYTE_PAYLOAD, false),
+            "cat.payload3",
+        )?;
+        let payload_four = self.builder.build_and(
+            lead_byte,
+            i32_type.const_int(UTF8_FOUR_BYTE_PAYLOAD, false),
+            "cat.payload4",
+        )?;
         let wide = self
             .builder
-            .build_select(three_byte, payload_three, payload_four, "cat.wide")
-            .map_err(llvm_err)?
+            .build_select(three_byte, payload_three, payload_four, "cat.wide")?
             .into_int_value();
         let multi = self
             .builder
-            .build_select(two_byte, payload_two, wide, "cat.multi")
-            .map_err(llvm_err)?
+            .build_select(two_byte, payload_two, wide, "cat.multi")?
             .into_int_value();
         let start = self
             .builder
-            .build_select(ascii, lead_byte, multi, "cat.start")
-            .map_err(llvm_err)?
+            .build_select(ascii, lead_byte, multi, "cat.start")?
             .into_int_value();
-        self.builder
-            .build_store(scalar_slot, start)
-            .map_err(llvm_err)?;
+        self.builder.build_store(scalar_slot, start)?;
         let next = self
             .builder
-            .build_int_add(offset, i64_type.const_int(1, false), "cat.next")
-            .map_err(llvm_err)?;
-        self.builder
-            .build_store(cursor_slot, next)
-            .map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(head)
-            .map_err(llvm_err)?;
+            .build_int_add(offset, i64_type.const_int(1, false), "cat.next")?;
+        self.builder.build_store(cursor_slot, next)?;
+        self.builder.build_unconditional_branch(head)?;
 
         // The two halves of "there is another continuation byte" need separate blocks:
         // the byte may only be read once the cursor is known to be inside the string.
         self.builder.position_at_end(head);
         let cursor = self
             .builder
-            .build_load(i64_type, cursor_slot, "cat.c")
-            .map_err(llvm_err)?
+            .build_load(i64_type, cursor_slot, "cat.c")?
             .into_int_value();
-        let readable = self
-            .builder
-            .build_int_compare(IntPredicate::ULT, cursor, len, "cat.readable")
-            .map_err(llvm_err)?;
+        let readable =
+            self.builder
+                .build_int_compare(IntPredicate::ULT, cursor, len, "cat.readable")?;
         self.builder
-            .build_conditional_branch(readable, peek, done)
-            .map_err(llvm_err)?;
+            .build_conditional_branch(readable, peek, done)?;
 
         self.builder.position_at_end(peek);
         let byte = self.load_byte_as_i32(base, cursor, "cat.byte")?;
-        let masked = self
-            .builder
-            .build_and(
-                byte,
-                i32_type.const_int(UTF8_CONTINUATION_MASK, false),
-                "cat.cont.mask",
-            )
-            .map_err(llvm_err)?;
-        let is_continuation = self
-            .builder
-            .build_int_compare(
-                IntPredicate::EQ,
-                masked,
-                i32_type.const_int(UTF8_CONTINUATION_BITS, false),
-                "cat.is.cont",
-            )
-            .map_err(llvm_err)?;
+        let masked = self.builder.build_and(
+            byte,
+            i32_type.const_int(UTF8_CONTINUATION_MASK, false),
+            "cat.cont.mask",
+        )?;
+        let is_continuation = self.builder.build_int_compare(
+            IntPredicate::EQ,
+            masked,
+            i32_type.const_int(UTF8_CONTINUATION_BITS, false),
+            "cat.is.cont",
+        )?;
         self.builder
-            .build_conditional_branch(is_continuation, fold, done)
-            .map_err(llvm_err)?;
+            .build_conditional_branch(is_continuation, fold, done)?;
 
         self.builder.position_at_end(fold);
         let acc = self
             .builder
-            .build_load(i32_type, scalar_slot, "cat.acc")
-            .map_err(llvm_err)?
+            .build_load(i32_type, scalar_slot, "cat.acc")?
             .into_int_value();
-        let shifted = self
-            .builder
-            .build_left_shift(
-                acc,
-                i32_type.const_int(UTF8_CONTINUATION_SHIFT, false),
-                "cat.shift",
-            )
-            .map_err(llvm_err)?;
-        let carried = self
-            .builder
-            .build_and(
-                byte,
-                i32_type.const_int(UTF8_CONTINUATION_PAYLOAD, false),
-                "cat.carried",
-            )
-            .map_err(llvm_err)?;
-        let folded = self
-            .builder
-            .build_or(shifted, carried, "cat.folded")
-            .map_err(llvm_err)?;
-        self.builder
-            .build_store(scalar_slot, folded)
-            .map_err(llvm_err)?;
-        let advanced = self
-            .builder
-            .build_int_add(cursor, i64_type.const_int(1, false), "cat.advanced")
-            .map_err(llvm_err)?;
-        self.builder
-            .build_store(cursor_slot, advanced)
-            .map_err(llvm_err)?;
-        self.builder
-            .build_unconditional_branch(head)
-            .map_err(llvm_err)?;
+        let shifted = self.builder.build_left_shift(
+            acc,
+            i32_type.const_int(UTF8_CONTINUATION_SHIFT, false),
+            "cat.shift",
+        )?;
+        let carried = self.builder.build_and(
+            byte,
+            i32_type.const_int(UTF8_CONTINUATION_PAYLOAD, false),
+            "cat.carried",
+        )?;
+        let folded = self.builder.build_or(shifted, carried, "cat.folded")?;
+        self.builder.build_store(scalar_slot, folded)?;
+        let advanced =
+            self.builder
+                .build_int_add(cursor, i64_type.const_int(1, false), "cat.advanced")?;
+        self.builder.build_store(cursor_slot, advanced)?;
+        self.builder.build_unconditional_branch(head)?;
 
         self.builder.position_at_end(done);
         let result = self
             .builder
-            .build_load(i32_type, scalar_slot, "cat.result")
-            .map_err(llvm_err)?;
-        self.builder.build_return(Some(&result)).map_err(llvm_err)?;
+            .build_load(i32_type, scalar_slot, "cat.result")?;
+        self.builder.build_return(Some(&result))?;
 
         Ok(())
     }
@@ -338,16 +266,14 @@ impl<'ctx> CodegenContext<'ctx> {
         // address stays inside the string's own UTF-8 allocation.
         let ptr = unsafe {
             self.builder
-                .build_in_bounds_gep(i8_type, base, &[index], "cat.gep")
-                .map_err(llvm_err)?
+                .build_in_bounds_gep(i8_type, base, &[index], "cat.gep")?
         };
         let byte = self
             .builder
-            .build_load(i8_type, ptr, "cat.raw")
-            .map_err(llvm_err)?
+            .build_load(i8_type, ptr, "cat.raw")?
             .into_int_value();
         self.builder
             .build_int_z_extend(byte, i32_type, name)
-            .map_err(llvm_err)
+            .map_err(CodegenError::from)
     }
 }
