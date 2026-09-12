@@ -37,6 +37,7 @@ mod loop_adapters;
 mod operator_traits;
 mod statements;
 mod tensor_index;
+mod tensor_reduce;
 mod tensor_shape;
 mod tensors;
 mod types;

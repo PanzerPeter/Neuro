@@ -5,6 +5,7 @@
 
 use super::{TypeChecker, CLONE_METHOD};
 use crate::errors::TypeError;
+use crate::type_checkers::tensor_reduce::is_reduce_method;
 use crate::type_checkers::tensor_shape::is_shape_method;
 use crate::type_checkers::tensors::DEVICE_TYPE_NAME;
 use crate::types::{CollectionKind, Type};
@@ -225,6 +226,18 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
                 Some(self.check_tensor_shape_method(&element, &shape, object, m, args, call_span))
+            }
+            // The four reductions READ the receiver: they produce a scalar or allocate a
+            // fresh, smaller tensor, and leave the buffer they summarised alone. So they
+            // match on the referent, which accepts `&Tensor<T, S>` too, and record no
+            // move: `w.mean()` must not consume a weight.
+            (Type::Tensor { element, shape }, m) if is_reduce_method(m) => {
+                let (element, shape) = (element.clone(), shape.clone());
+                let referent = recv.referent().clone();
+                if self.reject_dynamic_extent(&shape, &format!("`.{m}`"), &referent, call_span) {
+                    return Some(Type::Unknown);
+                }
+                Some(self.check_tensor_reduce(&element, &shape, m, args, call_span))
             }
             (Type::Tensor { shape, .. }, TENSOR_TO_METHOD)
                 if !matches!(recv, Type::Reference { .. }) =>

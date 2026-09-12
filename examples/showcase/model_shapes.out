@@ -3,4 +3,6 @@ projection [4, 4] via identity  =     16 params
 dense      [8, 4] + bias [8]    =     40 params
 hidden  [784, 128] + bias [128] = 100480 params
 row_width over [3,4] and [5,4]  =      8 wide
-total parameters                = 100576
+one-hot columns set             = 1110
+identity trace / value span     =      4 / 1
+total parameters                = 100584

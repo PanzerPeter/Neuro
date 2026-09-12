@@ -106,7 +106,10 @@ Key design goals:
   `?` (`Tensor<f32, [?, 784]>`) has no compile-time extent, so one signature accepts every
   extent at that position while the axes beside it stay checked; a statically shaped tensor
   widens into a `?` and not back, and anything needing the extent is a compile error.
-  By-value arithmetic and the reductions are later work
+  A tensor is summarised with `.sum()` / `.mean()` / `.max()` / `.min()`, whole-tensor or
+  along one `axis:` (a position, a dimension name, or a negative index from the end), which
+  drops that axis and keeps the rest; unlike a shape cast a reduction READS its receiver, so
+  a borrowed weight can be summarised without being moved. By-value arithmetic is later work
 
 ### Variables
 

@@ -423,6 +423,19 @@ the result's linear index rather than a nest of `rank` loops: both stride vector
 constants, so a result index decomposes into coordinates with constant `udiv`/`urem` and
 recomposes into a source offset with constant `mul`, and the IR is the same size at every rank.
 
+`expressions/tensor_reduce.rs` owns `HirExprKind::TensorReduce`: `.sum()`, `.mean()`,
+`.max()` and `.min()`. Reducing along axis `k` splits the flat run into three constant
+factors — `outer` elements above the axis, `mid` along it, `inner` below — so result slot
+`r` gathers `(r / inner) * mid * inner + j * inner + (r % inner)` for `j` in `0..mid`, and a
+whole-tensor reduction is that same walk with `outer` and `inner` both 1. Two counted loops,
+never a nest of `rank` of them, for the reason the permuted copy gives. The accumulator
+starts at the run's FIRST element rather than at an identity, which is what gives `.max()` and
+`.min()` a starting value without a per-dtype sentinel (the checker has already refused an
+empty run). A sum reuses `codegen_int_arith`, so an overflowing reduction panics exactly where
+an overflowing `+` would; `.mean()` divides the float accumulator by the run length. Nothing
+is moved or released here: an axis reduction allocates its own handle and a whole-tensor one
+allocates nothing, so the receiver's buffer stays its owner's.
+
 `expressions/tensor_index.rs` owns `HirExprKind::TensorIndex`. Every stride is a compile-time
 constant (every extent is part of the type), so the index is arithmetic on the flat row-major
 run behind `data`: each `Position` axis contributes `position * stride[k]` and each `Range` axis

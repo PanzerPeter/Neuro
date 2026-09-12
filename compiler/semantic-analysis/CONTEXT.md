@@ -696,6 +696,23 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   shape-generic definition while the two reordering methods still work. The label in
   `.flatten(dims: ...)` is bound by the `argument-binding` slice, whose seeded builtin
   signature is the one method entry it carries.
+- **Tensor reductions, in `type_checkers/tensor_reduce.rs`.** `.sum()`, `.mean()`,
+  `.max()` and `.min()` reach `check_tensor_reduce` from the builtin arm, matched on the
+  REFERENT rather than on `recv`: a reduction reads the buffer it summarises, records no
+  move, and so accepts `&Tensor<T, S>` where the consuming shape casts do not. With no
+  argument the result is the element type; with an `axis:` argument it is the tensor of the
+  remaining axes, each keeping its name. The argument is read as syntax for the same reason
+  `.permute`'s is — a dimension NAME resolves against the receiver's shape and no value
+  scope declares it — and a negative index counts from the end, which is how the
+  specification spells the last axis. The element must be an integer or `f32`/`f64`
+  (`TensorReduceElementType`); `.mean` narrows that to `f32`/`f64`, an integer mean having
+  no rounding rule in the specification (`TensorReduceMeanNotFloat`); a reduced run of zero
+  elements has no value to produce, `.max()` least of all, so the whole family reports
+  `TensorReduceEmpty` rather than each inventing an identity. Every extent must be a number
+  here (`TensorShapeCastSymbolicExtent`, `TensorDynamicExtent`): the run length decides
+  whether the reduction has a value, and the backend walks the buffer at strides the shape
+  supplies. The `axis:` label is bound by the `argument-binding` slice's seeded builtin
+  signatures.
 - **Tensor slicing and indexing, in `type_checkers/tensor_index.rs`.** `check_tensor_index`
   takes one argument per axis and answers one of two types: an axis given a `Position` is
   DROPPED and one given a `Range` (a `..` full axis is the range over the whole extent)

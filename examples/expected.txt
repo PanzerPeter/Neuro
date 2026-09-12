@@ -73,6 +73,7 @@ types/tensor_shape_generics.nr      41
 types/tensor_named_dimensions.nr    33
 types/tensor_shape_manipulation.nr  44
 types/tensor_dynamic_shapes.nr      42
+types/tensor_reductions.nr          21
 types/tuples.nr                     62
 types/type_aliases.nr               17
 types/underscore_separators.nr      0
@@ -134,7 +135,7 @@ showcase/generic_toolkit.nr 85
 showcase/inventory_ledger.nr 181
 showcase/job_queue.nr       139
 showcase/log_builder.nr     64
-showcase/model_shapes.nr    224
+showcase/model_shapes.nr    232
 showcase/mutable_borrows.nr 47
 showcase/named_axes.nr      70
 showcase/num_algorithms.nr  33

@@ -7,8 +7,9 @@
 //   `impl` per layer kind · a fixed-size array walked by `for`-in · string
 //   interpolation with the format mini-language · tensor ownership: moves,
 //   `.clone()`, and the `.to(device)` transfer · a dynamic `?` axis reading two
-//   shapes through one signature · a weight matrix at real scale, built in one
-//   function and returned by value.
+//   shapes through one signature · reductions (`.sum()`, `.max()`, `.min()`) over a
+//   borrowed table and over a struct's own weight field · a weight matrix at real
+//   scale, built in one function and returned by value.
 //
 // Every weight below is a real buffer the binary carries or fills at startup;
 // a tensor is not `Copy`, so building a layer MOVES its weights into it, and a
@@ -193,6 +194,21 @@ func main() -> i32 {
     val row_widths = row_width(&on_host) + row_width(&wide)
     println("row_width over [3,4] and [5,4]  = {row_widths:>6} wide")
     total = total + row_widths
+
+    // A reduction READS its receiver, so the same table is summarised here and still
+    // owned afterwards. `on_host` is one-hot, so the column sums say which columns any
+    // row sets, and the whole-tensor sum counts the rows that set one.
+    val columns_set: Tensor<f32, [4]> = on_host.sum(axis: 0)
+    val rows_set = on_host.sum() as i32
+    println("one-hot columns set             = {columns_set[0]:.0}{columns_set[1]:.0}{columns_set[2]:.0}{columns_set[3]:.0}")
+    total = total + rows_set
+
+    // The identity projection's weights are read straight out of the struct field that
+    // owns them: 4 ones on the diagonal, a largest element of 1, a smallest of 0.
+    val diagonal = projection.weights.sum() as i32
+    val span = (projection.weights.max() - projection.weights.min()) as i32
+    println("identity trace / value span     = {diagonal:>6} / {span}")
+    total = total + diagonal + span
 
     println("total parameters                = {total:>6}")
     return total % 256

@@ -193,6 +193,19 @@ pub enum HirExprKind {
         receiver: Box<HirExpr>,
         permutation: Option<Vec<usize>>,
     },
+    /// A reduction over a tensor's elements: `.sum()`, `.mean()`, `.max()`, `.min()`.
+    ///
+    /// `axis` is `None` for a whole-tensor reduction, whose type is the element type,
+    /// and `Some(k)` for a reduction along one axis, whose type is an
+    /// [`HirType::Tensor`] carrying the receiver's other axes in order.
+    ///
+    /// The receiver is READ, not consumed: a reduction allocates its own result (or
+    /// none at all), so the tensor it summarises stays alive and usable afterwards.
+    TensorReduce {
+        receiver: Box<HirExpr>,
+        op: HirReduceOp,
+        axis: Option<usize>,
+    },
     /// Tuple literal `(e0, e1, ...)`. The element types live on the elements;
     /// this expression's `ty` is the [`HirType::Tuple`] of them.
     TupleLiteral {
@@ -334,4 +347,19 @@ pub enum HirTensorAxis {
     Position(HirExpr),
     /// The half-open sub-range `[start, end)` of the axis that survives.
     Range { start: usize, end: usize },
+}
+
+/// Which reduction a [`HirExprKind::TensorReduce`] performs.
+///
+/// The four are one node rather than four because they differ only in the element
+/// operation a backend folds with; the traversal, the axis arithmetic, and the result
+/// shape are identical.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HirReduceOp {
+    Sum,
+    /// The arithmetic mean, which the checker admits on floating-point elements only:
+    /// an integer mean would have to pick a rounding rule the specification does not give.
+    Mean,
+    Max,
+    Min,
 }

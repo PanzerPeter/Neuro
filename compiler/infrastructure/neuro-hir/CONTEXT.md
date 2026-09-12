@@ -8,7 +8,7 @@ Provide the typed High-Level IR node definitions: the stable, backend-agnostic c
 - Public types: `HirProgram`, `HirItem`, `HirFunction`, `HirParam`, `HirStruct`, `HirField`,
   `HirEnum`, `HirEnumVariant`, `HirEnumField`, `HirImpl`, `HirMethod`, `HirSelfParam`, `HirConst`,
   `HirTrait`, `HirClosure`, `HirCapture`, `HirStmt`, `HirExpr`, `HirExprKind`, `HirFieldInit`,
-  `HirType`, `HirCollectionKind`
+  `HirType`, `HirCollectionKind`, `HirReduceOp`
 
 ## Shared Kernel
 - shared-types: `Span`, `Literal`, `FormatSpec` embedded in HIR nodes
@@ -53,6 +53,13 @@ it the *typed* contract:
    the result. `permutation` is `Some(order)` only when the element order changes, and then
    `order[d]` is the receiver axis result axis `d` came from; `None` is the order-preserving
    case, which is pure metadata over the same buffer.
+   `HirExprKind::TensorReduce { receiver, op, axis }` is the reduction beside them:
+   `HirReduceOp::{Sum, Mean, Max, Min}` says which fold, `axis` is `None` for a
+   whole-tensor reduction (whose `ty` is the element type) and `Some(k)` for one along an
+   axis (whose `ty` is the tensor of the surviving axes, names kept). It READS the
+   receiver where a shape cast consumes it: the result is a scalar or a fresh, smaller
+   buffer, so the tensor it summarises stays alive. The four folds are one node because
+   they differ only in the element operation, never in the traversal.
    `HirStmt::TensorCompoundAssign { target, op, value, ty, span }` is the in-place update
    beside them: `ty` is the target's tensor type and `value` is either that same type or a
    reference to it, an owned operand being consumed by the update and a borrowed one only

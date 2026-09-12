@@ -332,12 +332,25 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("`.{method}` at {span:?} needs every extent of the receiver to be known here, but '{name}' is a shape parameter; a shape-generic tensor cannot be reshaped until it is instantiated")]
+    #[error("`.{method}` at {span:?} needs every extent of the receiver to be known here, but '{name}' is a shape parameter; a shape-generic tensor's extents are not numbers until it is instantiated")]
     TensorShapeCastSymbolicExtent {
         method: String,
         name: String,
         span: Span,
     },
+
+    #[error("`.{method}()` at {span:?} reduces a tensor's elements, which requires an integer or `f32`/`f64` element type; this tensor holds {element}")]
+    TensorReduceElementType {
+        method: String,
+        element: Type,
+        span: Span,
+    },
+
+    #[error("`.mean()` at {span:?} averages {element} elements, which has no rounding rule; sum with `.sum()` and divide, or build the tensor at `f32`/`f64`")]
+    TensorReduceMeanNotFloat { element: Type, span: Span },
+
+    #[error("`.{method}()` at {span:?} reduces over no elements, so it has no value to produce; reduce a tensor whose reduced axis is non-empty")]
+    TensorReduceEmpty { method: String, span: Span },
 
     #[error("`Tensor::{ctor}` at {span:?} does not apply to {ty}: {reason}")]
     TensorConstructorNotApplicable {

@@ -23,7 +23,8 @@ expression already carries the type the checker resolved for it.
 - Implemented: tensors `Tensor<T, [d0, ...]>`: annotations, literal
   coercion, the construction helpers, the ownership surface (`.clone()`, `.to(device)`),
   in-place compound assignment (`w -= g`), shape manipulation
-  (`.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`), shape generics
+  (`.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`), reductions
+  (`.sum()` / `.mean()` / `.max()` / `.min()`), shape generics
   `Tensor<f32, [M, K]>`, and dynamic axes `Tensor<f32, [?, 784]>`
 
 ## Primitive Types
@@ -1187,7 +1188,9 @@ Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
   (see [Named dimensions](#named-dimensions))
 - Implemented: dynamic shapes `Tensor<f32, [?, 784]>`
   (see [Dynamic shapes](#dynamic-shapes))
-- Planned: by-value tensor arithmetic (`a + b`, `a @ b`) and the reductions
+- Implemented: reductions `.sum()` / `.mean()` / `.max()` / `.min()`, whole-tensor and
+  along an axis (see [Reductions](#reductions))
+- Planned: by-value tensor arithmetic (`a + b`, `a @ b`)
 - Planned: broadcasting rules
 
 ## Type Safety Guarantees
@@ -1930,6 +1933,67 @@ whose extent is a shape parameter has no element count to check against, so `.re
 `.flatten` are not available inside a shape-generic function; `.t()` and `.permute` are,
 since they only reorder axes.
 
+### Reductions
+
+A reduction folds a tensor's elements. Written with no argument it folds all of them and
+produces one scalar of the element type; written with `axis:` it folds along that axis
+alone, which drops that axis from the result and leaves every other one — extent and
+dimension name both — exactly as it was.
+
+```neuro
+val grid: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+
+val total: i32 = grid.sum()                        // 21
+val peak: i32 = grid.max()                         // 6
+
+val row_totals: Tensor<i32, [2]> = grid.sum(axis: 1)   // (6, 15)
+val col_totals: Tensor<i32, [3]> = grid.sum(axis: 0)   // (5, 7, 9)
+```
+
+| Method | Result |
+|---|---|
+| `.sum()` / `.sum(axis: k)` | the elements added |
+| `.mean()` / `.mean(axis: k)` | the arithmetic mean; `f32`/`f64` elements only |
+| `.max()` / `.min()`, with or without `axis:` | the largest / smallest element |
+
+Unlike the shape casts, a reduction **reads** its receiver. It produces a scalar, or
+allocates a fresh and smaller tensor, and leaves the buffer it summarised where it was, so
+it is offered on `&Tensor<T, S>` too: a weight can be summarised without being moved out of
+whatever owns it.
+
+```neuro
+func spread(scores: &Tensor<i32, [4]>) -> i32 {
+    scores.max() - scores.min()
+}
+
+val scores: Tensor<i32, [4]> = [4, 9, 2, 7]
+val range = spread(&scores)
+val total = scores.sum()                  // fine: `scores` was never moved
+```
+
+The axis may be written as a position, as a **dimension name** the receiver's type
+declares, or as a negative index counting from the end, so `axis: -1` is the last axis
+whatever the rank is. A name resolves against the receiver's own shape, the same rule
+`.permute` follows.
+
+```neuro
+val frame: Tensor<f64, [height: 2, width: 3]> = [[0.0, 3.0, 6.0], [1.0, 4.0, 9.0]]
+
+val column_means: Tensor<f64, [width: 3]> = frame.mean(axis: height)
+val row_peaks: Tensor<f64, [height: 2]> = frame.max(axis: -1)
+```
+
+Reducing a rank-1 tensor along its only axis leaves the rank-0 `Tensor<T, []>`, the shape
+`Tensor::scalar` builds.
+
+Three rules are compile-time errors. The element type must be an integer or `f32`/`f64`: a
+`bool` tensor has nothing to fold. `.mean()` narrows that to `f32`/`f64`, because an
+integer mean would have to pick a rounding rule the language does not give — sum and divide
+explicitly instead. And a reduction over **no** elements is rejected outright rather than
+given an identity value, since `.max()` of nothing has no answer. A receiver whose extent is
+a shape parameter or a `?` has no run length either, so a reduction needs a tensor whose
+shape is numbers.
+
 ### Dynamic shapes
 
 An axis written `?` has no compile-time extent. It opts that one axis out of
@@ -1981,11 +2045,11 @@ in-place compound assignment. Build such a tensor at a static shape and pass it 
 ### What tensors cannot do yet
 
 A tensor can be built, bound, moved, cloned, passed, returned, transferred with
-`.to(device)`, updated in place, stored in a struct, indexed, sliced, and reshaped with
-`.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`. What is still
+`.to(device)`, updated in place, stored in a struct, indexed, sliced, reshaped with
+`.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`, and reduced with
+`.sum()` / `.mean()` / `.max()` / `.min()`. What is still
 later work is writing through an index (`t[i, j] = v`), by-value tensor arithmetic
-(`a + b`, `a @ b`), the reductions
-(`.sum()`, `.mean()`, `.max()`, `.min()`), and the step and reverse index forms
+(`a + b`, `a @ b`), the functional `.reduce(init, |acc, x| ...)`, and the step and reverse index forms
 (`t[(0..n).step(2)]`, `t[(0..n).rev()]`), which wait on `.step(n)` / `.rev()` existing on
 ranges at all. A dynamic `?` axis is accepted, but only as a widening: nothing that needs
 an extent works on one, and there is no run-time shape check that would let a `?` be

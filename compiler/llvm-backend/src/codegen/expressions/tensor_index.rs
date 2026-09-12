@@ -67,7 +67,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// The element buffer of the indexed tensor. A borrowed receiver lowers to the
     /// address of the handle pointer, an owned one to the handle pointer itself.
-    fn tensor_index_data(
+    pub(super) fn tensor_index_data(
         &mut self,
         object: &HirExpr,
         source_ty: &Type,

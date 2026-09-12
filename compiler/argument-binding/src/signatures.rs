@@ -4,6 +4,9 @@ use std::collections::HashMap;
 
 use ast_types::{GenericArg, GenericParam, ImplDef, Item, Parameter, TraitDef, Type};
 
+/// The label `.sum` / `.mean` / `.max` / `.min` take their reduction axis under.
+const REDUCTION_AXIS_LABEL: &str = "axis";
+
 /// What one parameter accepts at a call site.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ParamBinding {
@@ -155,6 +158,22 @@ impl SignatureTable {
                 }],
             },
         );
+        // The four tensor reductions take their axis under a label in the
+        // specification (`matrix.sum(axis: 1)`), and are compiler-known for the same
+        // reason `flatten` is.
+        for reduction in ["sum", "mean", "max", "min"] {
+            self.record_method(
+                reduction,
+                Signature {
+                    params: vec![ParamBinding {
+                        name: Some(REDUCTION_AXIS_LABEL.to_string()),
+                        internal: REDUCTION_AXIS_LABEL.to_string(),
+                        required: false,
+                        ty: None,
+                    }],
+                },
+            );
+        }
     }
 
     fn collect(&mut self, items: &[Item]) {

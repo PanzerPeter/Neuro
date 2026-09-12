@@ -10,6 +10,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.24.0] - 2026-09-12
+
+### Added
+
+- `semantic`, `codegen`: tensor reductions. `.sum()`, `.mean()`, `.max()` and `.min()` fold
+  a tensor's elements to one scalar of the element type, or fold along a single axis with
+  `t.sum(axis: 1)`, which drops that axis and keeps every other extent and dimension name.
+  Reducing a rank-1 tensor along its only axis yields the rank-0 `Tensor<T, []>`.
+- `semantic`: the axis may be written as a position, as a dimension name the receiver's own
+  type declares (`frame.mean(axis: height)`), or as a negative index counting from the end
+  (`axis: -1` is the last axis at any rank). Like `.permute`'s entries it is read as syntax
+  and never as a value, so a local binding of the same name neither shadows the axis nor is
+  shadowed by it.
+- `semantic`: a reduction READS its receiver where the shape casts consume theirs, so it is
+  offered on `&Tensor<T, S>` and leaves the tensor usable afterwards: a weight can be
+  summarised without being moved out of whatever owns it.
+- `semantic`: reductions require an integer or `f32`/`f64` element type; `.mean()` narrows
+  that to `f32`/`f64`, an integer mean having no rounding rule in the specification; and a
+  reduction over no elements is refused outright rather than given an identity value, since
+  `.max()` of nothing has no answer. A shape parameter or a `?` extent leaves the run length
+  unknown and reports the existing diagnostic for that.
+- `infra`: `HirExprKind::TensorReduce { receiver, op, axis }` with `HirReduceOp`. The four
+  folds are one node because they differ only in the element operation, never in the
+  traversal; `axis` is already resolved to an index, negatives counted from the end.
+- `build`: `argument-binding` seeds the `axis:` label for the four reductions beside
+  `flatten(dims:)`, through `record_method`, so a program declaring its own `sum` or `min`
+  with different parameter names is reported as an ambiguity rather than silently bound.
+- `docs`: `examples/types/tensor_reductions.nr`, a Reductions section in the type reference,
+  and reductions over a borrowed table and a struct's own weight field in
+  `examples/showcase/model_shapes.nr`.
+
+### Changed
+
+- `semantic`: the symbolic-extent diagnostic no longer says "cannot be reshaped", which was
+  wrong for the reductions that now share it; it states that a shape-generic tensor's
+  extents are not numbers until it is instantiated.
+
+
 ## [2.23.0] - 2026-09-12
 
 ### Added

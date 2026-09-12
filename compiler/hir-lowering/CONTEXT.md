@@ -292,6 +292,12 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   the result keeps the names its axes brought with them, and a merged or re-extented axis is
   unnamed. The checker validated all of this, so a shape that does not work out here is a
   `LoweringError::Malformed`.
+  Reductions live in `tensor_reduce.rs`: `.sum()`, `.mean()`, `.max()` and `.min()` are
+  intercepted in the same place and for the same reason (an `axis:` argument may be a
+  dimension name), and `lower_tensor_reduce` emits `HirExprKind::TensorReduce` carrying the
+  resolved `HirReduceOp` and the axis as an index, with a negative one already counted from
+  the end. The receiver is left alone rather than moved: a reduction reads it, so a borrowed
+  receiver lowers here too.
   Slicing and indexing live in `tensor_index.rs`: `lower_tensor_index` folds each range bound to
   the constant the checker already proved it to be (`HirTensorAxis::Range { start, end }`, with
   a `..` full axis becoming the whole extent and an inclusive range stopping one further on),

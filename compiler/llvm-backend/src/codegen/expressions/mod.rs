@@ -18,6 +18,7 @@ mod methods;
 mod slices;
 mod struct_eq;
 mod tensor_index;
+mod tensor_reduce;
 mod tensors;
 mod tuples;
 mod unary;
@@ -192,6 +193,11 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::TensorIndex { object, axes } => {
                 let result_ty = Type::from_hir(&expr.ty);
                 self.codegen_tensor_index(object, axes, &result_ty, expr.span.start)
+            }
+            // `.sum()` / `.mean()` / `.max()` / `.min()`, whole-tensor or along one axis.
+            HirExprKind::TensorReduce { receiver, op, axis } => {
+                let result_ty = Type::from_hir(&expr.ty);
+                self.codegen_tensor_reduce(receiver, *op, *axis, &result_ty, expr.span.start)
             }
             // `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`.
             HirExprKind::TensorShapeCast {

@@ -47,7 +47,9 @@ isolation:
   arm's buffer *moves* into the struct that keeps it, `.clone()` is what buys a second
   owner, `&Tensor` reads one without consuming it, and `.to(Device::CPU)` is the
   consuming device transfer: each one moving, copying, or handing on a DLPack handle.
-  A `?` dynamic axis reads two different heights through one signature. Exit `224`.
+  A `?` dynamic axis reads two different heights through one signature, and the
+  reductions summarise both a borrowed table and a struct's own weight field without
+  moving either. Exit `232`.
 - [`showcase/optimizer_step.nr`](showcase/optimizer_step.nr): a weight update
   written in place, the shape a training step has. The `*Assign` compound
   operators (`+=`, `-=`, `*=`, `/=`, `%=`) on tensors working together with
@@ -364,8 +366,15 @@ No Rust edits are needed: discovery is automatic.
   stay checked. Widening goes one way — a statically shaped tensor is accepted where a `?`
   is expected, not the reverse — and a `?`-shaped tensor binds, moves, is returned and is
   released like any other, while anything needing the extent (a constructor, a literal,
-  `.clone()`, an index, a shape cast) is a compile error naming the axis. By-value
-  arithmetic and the reductions are later work. A tensor value is a
+  `.clone()`, an index, a shape cast) is a compile error naming the axis. Reductions are
+  supported (`types/tensor_reductions.nr`, combined with the rest in
+  `showcase/model_shapes.nr`): `.sum()`, `.mean()`, `.max()` and `.min()` fold the whole
+  tensor to a scalar, or fold along one `axis:` — a position, a dimension name, or a
+  negative index from the end — dropping that axis and keeping every other name and
+  extent. A reduction reads its receiver rather than consuming it, so it works through a
+  borrow; `.mean()` is `f32`/`f64`-only, and a reduction over no elements is a compile
+  error rather than an invented identity. By-value
+  arithmetic is later work. A tensor value is a
   DLPack handle over an out-of-line buffer, so one of any size compiles at any optimization
   level and the same pointer is what a foreign consumer would read;
   `showcase/model_shapes.nr` returns a 100352-parameter weight matrix by value.

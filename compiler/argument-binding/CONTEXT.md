@@ -22,16 +22,17 @@ Reads and rewrites the AST it is handed; touches no files.
   positional call they always saw, which is what makes a named argument cost nothing at
   runtime: it produces the same IR as writing the arguments in order.
 - **A compiler-known callee has no `Item` to read its labels off, so its signature is
-  seeded.** `SignatureTable::build` calls `seed_builtins` before `collect`, which records two
-  entries, both spelled with their labels in the specification but constructed by the compiler
+  seeded.** `SignatureTable::build` calls `seed_builtins` before `collect`, which records the
+  entries spelled with their labels in the specification but constructed by the compiler
   rather than declared in the prelude: the associated function
-  `Tensor::random_normal(mean:, std:)`, and the instance method `tensor.flatten(dims:)`, the
-  one builtin *method* that carries a label. Seeding first means a program declaring its own
-  `Tensor` overwrites the associated entry instead of competing with it. `flatten` is seeded
-  through `record_method` rather than inserted, so a program whose own `flatten` names its
-  parameters differently is reported as the ambiguity it is instead of silently binding
-  against the builtin. Both labels are optional, so `.flatten()` and a fully positional
-  `random_normal(0.0f32, 0.02f32)` pass through untouched.
+  `Tensor::random_normal(mean:, std:)`, and the labelled builtin *methods*
+  `tensor.flatten(dims:)` and the four tensor reductions
+  `.sum(axis:)` / `.mean(axis:)` / `.max(axis:)` / `.min(axis:)`. Seeding first means a program declaring its own
+  `Tensor` overwrites the associated entry instead of competing with it. The methods are seeded
+  through `record_method` rather than inserted, so a program whose own `flatten` or `min`
+  names its parameters differently is reported as the ambiguity it is instead of silently
+  binding against the builtin. Every label here is optional, so `.flatten()`, `t.sum()` and a
+  fully positional `random_normal(0.0f32, 0.02f32)` pass through untouched.
 - **Permuting the arguments also permutes when they are evaluated, so a call that would
   notice is rewritten instead** (`hoisting.rs`). Every later stage evaluates an argument
   where it finds it, so a bare permutation ran `f(second: b(), first: a())` as `a()` then

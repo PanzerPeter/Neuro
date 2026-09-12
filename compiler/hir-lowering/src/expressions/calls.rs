@@ -430,6 +430,15 @@ impl Lowerer {
             return self.lower_tensor_shape_cast(object, method, args, span);
         }
 
+        // A reduction reads its receiver rather than consuming it, so a borrowed one is
+        // lowered here too. Its `axis:` argument is never lowered as a value:
+        // `.sum(axis: width)` names an axis, not a variable.
+        if crate::tensor_reduce::is_reduce_method(method)
+            && matches!(recv.referent(), HirType::Tensor { .. })
+        {
+            return self.lower_tensor_reduce(object, method, args, span);
+        }
+
         let (lowered_args, result_ty) = if let HirType::Struct(struct_name) = recv.referent() {
             let struct_name = struct_name.clone();
             if let Some(mangled) = self

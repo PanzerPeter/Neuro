@@ -18,6 +18,7 @@ mod match_tests;
 mod newtype_tests;
 mod slice_tests;
 mod string_tests;
+mod tensor_reduce_tests;
 mod tensor_shape_tests;
 mod tensor_tests;
 mod trait_tests;

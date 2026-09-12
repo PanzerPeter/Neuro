@@ -264,6 +264,7 @@ pub(crate) mod operator_traits;
 mod resolution;
 mod statements;
 mod tensor_index;
+mod tensor_reduce;
 mod tensor_shape;
 mod tensors;
 mod val_else;
