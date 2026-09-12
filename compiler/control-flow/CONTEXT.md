@@ -8,9 +8,6 @@ Hold the Control Flow Graph data structures. The slice reserves the boundary a f
 - Input: none
 - Output: `Result<ControlFlowGraph, ControlFlowError>`
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-
 ## Shared Kernel
 None. The slice owns its own `ControlFlowError` and touches no infrastructure crate.
 

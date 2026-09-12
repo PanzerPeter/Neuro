@@ -8,9 +8,6 @@ Transform a Neuro token stream into a typed Abstract Syntax Tree for later compi
 - Input: `source: &str`
 - Output: `Result<Vec<Item>, ParseError>`
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-
 ## Shared Kernel
 - ast-types: owns the AST node definitions, so semantic-analysis and the backends consume the
   tree without depending on this slice

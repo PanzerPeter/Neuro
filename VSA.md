@@ -1,8 +1,11 @@
-# Vertical Slice Architecture: Solo-Agent AI Base Guidelines v4.4
+# Vertical Slice Architecture: Neuro Compiler Rules v5.0
 
-> **Priority: Highest.** Every rule is a compiler error. Blocker-severity violations MUST be refused: state the rule ID and propose a compliant alternative.
-> **Context:** 1 human + 1 AI agent | 20–50K LOC | No backward compatibility.
-> Supersedes: v4.3 | Created: 2026-05-16
+> **Priority: highest.** Every rule here is a build rule. Violations of a BLOCKER rule
+> must be refused: state the rule ID and propose a compliant alternative.
+> **Context:** 1 human + 1 AI agent. Rust compiler workspace. No backward compatibility.
+> **Scope:** this file owns architecture only. Versioning, roadmap, and execution
+> protocol live elsewhere and are not restated here.
+> Supersedes: the generic v4.4 base ruleset.
 
 ---
 
@@ -10,170 +13,150 @@
 
 | Term | Definition |
 |------|-----------|
-| **Slice** | One business capability owning its own entry point, logic, and data. Zero runtime dependency on other Slices. |
-| **Feature Folder** | Physical directory for a Slice. ALL files for that capability live here. No exceptions. |
-| **Shared Kernel** | Infrastructure adapters and pure domain utilities. ZERO business logic permitted. |
-| **Integration Event** | Immutable fact emitted by a Slice after a state change. Consumed asynchronously. Describes what happened, not what to do next. |
-| **Public Read Model** | Read-only DTO a Slice exposes explicitly for cross-slice synchronous reads. A contract, not a model leak. |
-| **Domain Utility** | Pure function or value type with zero side effects. Shared Kernel eligible only when it contains no slice-specific rules. |
-| **CONTEXT.md** | Machine-readable contract file at each Slice root. The AI's cross-session memory for that Slice. Not documentation. |
-| **Hard Gate** | A point in autonomous execution where the AI MUST pause for explicit written confirmation regardless of `CTX-002`. |
+| **Slice** | One compiler capability owning its own entry point, internals, and tests. A crate under `compiler/`. Zero runtime dependency on other Slices. |
+| **Shared Kernel** | The crates under `compiler/infrastructure/`. Contract types and adapters only: no compilation logic. |
+| **Driver** | `neurc`. The only crate permitted to depend on every Slice. Owns pipeline orchestration. |
+| **Contract Type** | A type crossing a Slice boundary: AST nodes, HIR nodes, `Span`, diagnostics. Lives in the Shared Kernel, never in a Slice. |
+| **CONTEXT.md** | Contract file at each crate root. The agent's cross-session memory for that Slice. Not documentation. |
+| **Hard Gate** | A point where the agent must pause for explicit written confirmation. |
+
+A Slice here is a **pipeline stage**, not a business transaction. Stages are ordered and
+each consumes the previous stage's output type. Independence means no stage imports
+another; it does not mean stages are unordered.
 
 ---
 
 ## 2. Project Context
 
-**`CTX-001` [BLOCKER]** No migration paths, compatibility shims, versioned endpoints, deprecated code paths, or adapter layers. If a better design exists, refactor completely.
+**`CTX-001` [BLOCKER]** No migration paths, compatibility shims, versioned APIs,
+deprecated code paths, or adapter layers. If a better design exists, refactor completely.
+Leaving old and new patterns coexisting after any single step is forbidden.
 
-**`CTX-002` [ULTRA]: Continuous Execution Protocol**
-To minimize token overhead and latency, refactoring tasks MUST be executed as a continuous, autonomous stream. The AI is authorized to complete the entire scope without pausing for developer confirmation unless a Hard Gate or terminal error is encountered.
+**`CTX-002` [BLOCKER] Hard Gates.** Refactoring runs as a continuous stream without
+per-step confirmation. Pause and wait for explicit written confirmation only when:
 
-1. **Initial Assessment (The Single Gate):** Output a high-level execution plan and a list of files to be modified. Immediately follow this with: *"Starting continuous execution. I will pause only at Hard Gates, terminal errors, or if $N$ files are modified without success."*
-2. **Autonomous Chaining:** Execute all changes sequentially. Each response starts with a progress indicator (e.g., `[Step 3/8]`) and ends with an internal logic check before proceeding to the next file.
-3. **Hard Gates (mandatory pause regardless of `CTX-002`):**
-   - A new or modified **persistence schema** is required. Output the proposed schema and wait for explicit written confirmation. Silence, absence of objection, or topic continuation is NOT approval.
-   - A **`RT-001` trigger** fires (Handler exceeds 300 lines or 5 injected dependencies). Halt, present the split plan, wait for confirmation.
-   - The proposed change **contradicts an established pattern** already present in the codebase.
-   - A **missing dependency** or **circular logic** is encountered.
-4. **Final Reconciliation:** Upon completion, provide a concise summary of all changes and a verification command (e.g., a test suite run or `git diff` summary).
+- A **Shared Kernel public type changes** (an AST node, an HIR node, a diagnostic shape).
+  Every downstream Slice is affected. Present the proposed type and wait.
+- A **new workspace member** is proposed. Present the Slice boundary and entry point first.
+- A change would require a **new cross-slice dependency**. There is exactly one
+  allowlisted exception (Section 4) and adding a second is a Hard Gate.
+- A **refactoring trigger** fires (Section 11).
+- A **circular dependency** or a **missing dependency** is encountered.
 
-Leaving old and new patterns coexisting after any single step is **FORBIDDEN**.
+Silence, absence of objection, or topic continuation is not approval.
 
-**`CTX-003` [HIGH]** No team-onboarding docs, contribution guides, or changelogs unless explicitly requested.
-
-**`CTX-004` [HIGH]** Generated code must be production-grade. No scaffolding, stubs, or "implement later" placeholders unless the developer explicitly requests a skeleton.
+**`CTX-003` [HIGH]** Generated code is production-grade. No scaffolding, stubs, or
+"implement later" placeholders unless a skeleton is explicitly requested.
 
 ---
 
-## 3. AI Hard Constraints
+## 3. Hard Constraints
 
 ### NEVER
 | ID | Rule |
 |----|------|
-| `AC-001` | Create Technical Slices (e.g., Slices/Authorization, Slices/EmailSender, Slices/Cache). These are Shared Kernel concerns. |
-| `AC-002` | Allow any Slice to import, instantiate, or call the internal classes, handlers, repositories, or entities of another Slice. Only Public Read Models and Integration Events cross slice boundaries. |
-| `AC-003` | Generate commented-out code or dead code blocks. → CM-002 |
-| `AC-004` | Leave stub implementations unfinished (`NotImplementedException`, `pass`, `todo!()`) unless the developer explicitly requests a skeleton. → CTX-004 |
-| `AC-005` | Use generic file names: `utils`, `helpers`, `common`, `misc`, `shared`, `base`, `manager`, `processor`, or `handler` without a Feature prefix. |
-| `AC-006` | Generate backward-compatible constructs: versioned interfaces, deprecated annotations, adapter wrappers, or migration-comment TODOs. → CTX-001 |
-| `AC-007` | Write comments that describe WHAT the code does. Comments explain WHY only. → CM-001 |
-| `AC-008` | Generate internal barrel/index files inside a Slice. Barrel files are permitted only at the Slice root to define its public export surface. |
+| `AC-001` | Create a Slice for a technical layer (`compiler/caching`, `compiler/logging`, `compiler/traversal`). Slices are named for compiler capabilities. Technical concerns belong in the Shared Kernel or inside the one Slice that needs them. |
+| `AC-002` | **[BLOCKER]** Import, call, or re-export another Slice's items. Slices depend on Shared Kernel crates only. Enforced by `test_no_cross_slice_dependencies`. |
+| `AC-003` | Commit commented-out code or dead code blocks. → CM-002 |
+| `AC-004` | Leave `todo!()`, `unimplemented!()`, or a function returning an empty result as a placeholder. A stub Slice is worse than a missing one. → CTX-003 |
+| `AC-005` | Name a crate or module `utils`, `helpers`, `common`, `misc`, `manager`, `processor`, or `base`. |
+| `AC-006` | Generate backward-compatible constructs: versioned traits, deprecation attributes, wrapper shims, migration TODOs. → CTX-001 |
+| `AC-007` | Write comments describing WHAT the code does. Comments explain WHY. → CM-001 |
+| `AC-008` | Put logic in `lib.rs`. A Slice's `lib.rs` declares its public surface and nothing else. Internal `mod.rs` files are required by Rust and are exempt. |
+| `AC-009` | Put compilation logic in a Shared Kernel crate. Shared Kernel crates define types and pure operations on them. |
 
 ### ALWAYS
 | ID | Rule |
 |----|------|
-| `AC-009` | Require explicit, named Input and Output DTOs at every Slice entry point. Never return an internal domain model directly. **Exception:** at Small scale (1–14 Slices), Output DTO may be omitted when the DB entity shape exactly matches the required response and no transformation is needed. |
-| `AC-010` | Validate input at the Slice boundary before it reaches the Handler. → EP-VALIDATION |
-| `AC-011` | Update the affected Slice's CONTEXT.md in the same response as any interface, schema, or event change. Never let CONTEXT.md fall out of sync. → Section 12 |
-| `AC-012` | Apply guard clauses and early returns at the top of every function. Nested conditional depth beyond 2 MUST be refactored before delivery. → CQ-001 |
-| `AC-013` | Use named constants for every magic number, magic string, and configuration value. → CM-004 |
+| `AC-010` | A Slice exposes exactly one public entry function. Its input and output types are named and owned by the Shared Kernel or by the Slice itself, never borrowed from a sibling Slice. |
+| `AC-011` | Return `Result<T, E>` from the entry point. Errors are values. Panics are reserved for compiler bugs that cannot be expressed as a diagnostic. |
+| `AC-012` | **[BLOCKER]** Update the affected Slice's CONTEXT.md in the same commit as any change to its entry point, public surface, or Shared Kernel dependency. → Section 12 |
+| `AC-013` | Guard clauses and early returns at the top of every function. Nested conditional depth beyond 2 must be refactored before delivery. → CQ-001 |
+| `AC-014` | Named constants for every magic number and magic string. → CM-004 |
 
 ---
 
-## 4. AI Interaction Protocol
+## 4. Slice Boundaries
 
-**Step 1: Complexity Check**
-If fewer than 5 distinct business operations AND clearly a prototype or utility script, warn that VSA adds structural overhead. Proceed only on developer confirmation or if the project is already established as VSA.
+**Pipeline order.** Source, then lexical analysis, syntax parsing, module resolution,
+semantic analysis, HIR lowering, backend codegen, link. `neurc` calls each in turn and
+carries the value from one to the next. A Slice never calls the next stage itself.
 
-**Step 2: Boundary Proposal**
-Before writing implementation code, output:
-- (a) Slice name and its single business responsibility.
-- (b) Full file/folder tree.
-- (c) Input DTO, Output DTO, and Handler signature.
-- (d) Persistence schema if applicable: triggers a **Hard Gate** (→ CTX-002.3).
+**The one allowlisted exception.** `syntax-parsing` depends on `lexical-analysis`, so that
+`parse()` calls `tokenize()` internally rather than making the Driver orchestrate a pair
+that is never useful apart. It is named in `compiler/syntax-parsing/CONTEXT.md` and
+allowlisted by name in `compiler/neurc/tests/architecture_tests.rs`. A second exception
+is a Hard Gate and must pass that test's review, not merely be added to it.
 
-Infer from context first. Ask ONE clarifying question only if a boundary is genuinely ambiguous after inference.
+**Dev-dependencies are unrestricted.** A Slice may depend on any other Slice in
+`[dev-dependencies]` to drive its tests through real source. The architecture test reads
+`[dependencies]` only, by design: test coupling costs nothing at runtime.
 
-**Step 3: Completeness Check**
-After generating a Slice, verify all mandatory components exist: Entry Point, Input Model, Validator, Handler, CONTEXT.md. Generate any missing component before ending the response.
+**`SB-001` [BLOCKER] Contract ownership.** A type crossing a Slice boundary lives in the
+Shared Kernel. A Slice must not define a type that a sibling Slice needs to name. If two
+Slices need the same type, it is a contract type and moves to `infrastructure/`; that move
+is a Hard Gate because it changes every downstream consumer.
 
-**Step 4: Consistency Scan**
-After any change, report:
-- Other Slices affected by the interface or schema change.
-- Stale CONTEXT.md files referencing the modified surface.
-- Shared Kernel utilities that may have absorbed business logic.
+**`SB-002` [HIGH] Promotion gate.** Moving anything into the Shared Kernel requires either
+(a) it is a contract type per SB-001, or (b) an explicit `/abstract [Name]` command from
+the developer. Detecting duplication is not authorisation to promote. → RT-004
 
-Do not silently leave inconsistencies.
+**`SB-003` [HIGH] Deletion test.** Deleting a Slice folder plus its workspace member entry
+and its call site in the Driver must leave the workspace compiling. If deletion requires
+editing another Slice, the boundary is wrong.
 
 ---
 
 ## 5. Core Principles
 
-### Cohesion over DRY
-Always duplicate business logic across Slices. Do NOT create a shared module based on predicted future divergence. LLMs cannot reliably predict domain evolution. Business logic moves to the Shared Kernel as a Domain Utility ONLY on explicit developer command: `/abstract [LogicName]`. Without that command, **duplication is the default and correct action.**
+**Cohesion over DRY.** Duplicate logic across Slices by default. Do not build a shared
+module on predicted future divergence.
 
-**`PURE-FN-EXCEPTION`:** Pure functions with zero side effects representing a universal domain concept (e.g., Money arithmetic, VAT calculation, slug generation) are Shared Kernel eligible from initial creation WITHOUT requiring `/abstract`, provided: (a) zero side effects, (b) no branch logic tied to any specific Slice's business rules, (c) genuinely universal across any Slice.
+*Compiler carve-out:* traversal and type reasoning over a contract type is not duplication
+to be shared. Each stage interprets the shared AST or HIR for its own purpose, and those
+interpretations legitimately resemble each other. Never move a type-checking rule into a
+Shared Kernel crate to avoid rewriting a match arm. A shared match arm couples the stages
+the architecture exists to separate.
 
-### Abstract Command Integrity
-If the AI detects identical business logic duplicated across three or more Slices and no `/abstract` command has been issued, it MUST proactively flag `RT-005` and surface the duplication. It MUST NOT silently proceed or self-promote the logic to the Shared Kernel. The `/abstract` command is the only valid promotion gate.
+**Fail-slow diagnostics.** A stage collects every error it can in one pass and returns them
+together, so one compile shows the full error set. A stage that returns on the first error
+is a bug unless the error makes further analysis meaningless.
 
-### Slice Independence
-Deleting a Slice folder plus its DI registration and event subscriptions must leave the project in a compilable, fully functional state. If deletion requires modifying code inside another Slice, the boundaries are wrong.
+**Single responsibility per Slice.** A Slice performs one pipeline transformation. If its
+purpose needs "and" to state, split it. → RT-002
 
-### Transactional Integrity
-One Slice = One Transaction. Never coordinate DB transactions across Slice boundaries. Multi-slice state changes use the Saga pattern via Integration Events.
-
-### Error Handling
-Slices MUST NOT use exceptions for business flow control. Return a Result/Either type from Handler to Entry Point. Exceptions are reserved for unexpected infrastructure failures only.
-
-### Single Responsibility per Slice
-A Slice performs exactly one primary business action. If the Slice name requires the word "and," split it. The business action must be expressible in one imperative sentence without conjunctions.
-
-### No Speculative Generality
-Do not generate abstractions, interfaces, or extension points for capabilities that do not yet exist. Build for the current requirement. Introduce extensibility at the moment it is needed.
+**No speculative generality.** No traits with one implementor, no extension points for
+capabilities that do not exist, no generic parameter with one instantiation. Abstract at
+the moment the second case appears, not before.
 
 ---
 
 ## 6. Slice Anatomy
 
-### Mandatory Components
-| Role | Responsibility |
-|------|---------------|
-| **Entry Point** | Routes, HTTP binding, Entry Point → Handler call, Result → protocol response. Zero business logic. |
-| **Input Model** | Immutable DTO/Command/Query. Named `[Feature]Command` or `[Feature]Query`. |
-| **Validator** | Enforces all invariants checkable without a DB call. DB checks (uniqueness, existence) belong in the Handler. |
-| **Handler** | Single class. Orchestrates domain logic, persistence, event publishing. The only business logic location. |
-| **CONTEXT.md** | Machine-readable contract. Updated on every interface or schema change. |
-
-### Optional Components
-| Role | When Required |
-|------|--------------|
-| **Domain Model** | Only when the Slice has complex encapsulated invariants. Omit for simple CRUD. |
-| **Repository** | When the Handler has more than one DB operation or a non-trivial query. Small scale: inline persistence in Handler is permitted. |
-| **Output Model** | Named `[Feature]Response`. Required when response shape differs from the DB entity. At Small scale, may be omitted when shapes match exactly. |
-| **Projection** | Required only for cross-slice synchronous reads. |
+| Component | Required | Responsibility |
+|-----------|----------|----------------|
+| `lib.rs` | yes | Public surface: the entry function, its error type, `pub use` of nothing else. No logic. → AC-008 |
+| Entry function | yes | One per Slice. Named for the transformation (`tokenize`, `parse`, `check_program`, `lower_program`). |
+| Error type | yes | Carries a `Span`. Built on the `diagnostics` crate. → Section 10 |
+| Internal modules | yes | `pub(crate)` by default. One module per sub-concern, not per file-size limit. |
+| `tests/` | yes | Integration tests driving the entry function. → Section 13 |
+| `CONTEXT.md` | yes | → Section 12 |
 
 ---
 
-## 7. File Naming Conventions
+## 7. Naming
 
-**`FN-001`** Pattern: `[FeatureName].[Role].[ext]`
-- `FeatureName` = PascalCase business capability (`PlaceOrder`, `RegisterUser`, `GenerateInvoice`)
-- `Role` drawn exclusively from the Role Vocabulary below
+**`FN-001`** Crates are kebab-case and named for the transformation: `lexical-analysis`,
+`hir-lowering`. Modules and files are snake_case. Types are PascalCase. This is idiomatic
+Rust; no role suffix scheme is imposed on top of it.
 
-### Role Vocabulary
-| Role | Purpose |
-|------|---------|
-| `Handler` | The UseCase/Handler class. One per Slice. |
-| `Command` | A mutating Input DTO. |
-| `Query` | A read-only Input DTO. |
-| `Validator` | Input validation logic. |
-| `Repository` | Data access abstraction. |
-| `Response` | Output DTO returned from the entry point. |
-| `Endpoint` | Entry point: controller, route, or consumer. |
-| `Model` | Domain or persistence model internal to the Slice. |
-| `Event` | Integration event emitted by the Slice. |
-| `Projection` | Public Read Model for cross-slice reads. |
-| `DomainService` | Complex domain logic with zero infrastructure dependencies. |
+**`FN-002`** Test files: `tests/<subject>_tests.rs` for integration tests;
+`src/**/tests/` or `src/tests.rs` for unit tests co-located with what they cover.
 
-**`FN-002`** Test files: `[FeatureName].[Role].Test.[ext]`, co-located in `/tests` within the Feature Folder.
-Example: `PlaceOrder.Handler.Test.ts`
-
-**`FN-003`** Shared Kernel files: `[ConceptName].[Role].[ext]`
-ConceptName is a domain concept, never a technical descriptor.
-Examples: `Money.ValueObject.ts` | `Logger.Adapter.ts` | `DatabaseConnection.Config.ts`
-
-**Forbidden names:** `utils` | `helpers` | `common` | `misc` | `shared` | `manager` | `processor` | `base` (without feature prefix) | `index` (except Slice public barrel)
+**`FN-003`** Forbidden crate and module names: `utils`, `helpers`, `common`, `misc`,
+`manager`, `processor`, `base`. `shared-types` is exempt by name: it is the cross-slice
+contract crate, its contents are enumerated in its CONTEXT.md, and adding to it is
+governed by SB-001 rather than by convenience.
 
 ---
 
@@ -181,193 +164,127 @@ Examples: `Money.ValueObject.ts` | `Logger.Adapter.ts` | `DatabaseConnection.Con
 
 | ID | Severity | Rule |
 |----|----------|------|
-| `CM-001` | HIGH | Comments explain WHY, never WHAT. ❌ `// Loop through orders and sum the totals` ✅ `// Summed here rather than in the DB query because tax calculation requires hydrated domain objects.` |
-| `CM-002` | **BLOCKER** | Dead code MUST be deleted, never commented out. Use version control for history. |
-| `CM-003` | HIGH | TODO comments MUST include reason and context. ❌ `// TODO: fix this` ✅ `// TODO: Replace with event-driven approach once the Notification slice is implemented.` |
-| `CM-004` | MEDIUM | Replace magic numbers and non-obvious strings with named constants. If the constant name is not self-explanatory, add a WHY comment at the declaration, not at the usage site. ❌ `const timeout = 30000; // 30 second timeout` ✅ `const SESSION_EXPIRY_MS = 30_000; // Matches the upstream auth provider's token TTL.` |
-| `CM-005` | MEDIUM | Auto-generated doc comments that restate the function or parameter name are FORBIDDEN. Exception: public API surface methods with non-obvious behavior or constraints. |
-| `CM-006` | LOW | Section divider comments (`// ===== INIT =====`) are FORBIDDEN. A file requiring dividers to be navigable violates single responsibility: split it. |
-| `CM-007` | HIGH | Non-obvious business rules embedded in code MUST have a WHY comment explaining the business constraint. Example: `// Orders under €10 ineligible per carrier contract FUL-2024-03.` |
+| `CM-001` | HIGH | Comments explain WHY, never WHAT. Bad: `// loop over the items`. Good: `// Checked before mangling because a user name carrying its own separator would collide with a generated method symbol.` |
+| `CM-002` | **BLOCKER** | Dead code is deleted, never commented out. Version control is the history. Exception: the commented workspace members in the root `Cargo.toml` are a roadmap marker, not dead code. |
+| `CM-003` | HIGH | A TODO states the reason and the unblocking condition. Bad: `// TODO: fix`. Good: `// TODO: fold into the CFG pass once control-flow has a caller.` |
+| `CM-004` | MEDIUM | Magic numbers and non-obvious strings become named constants. The WHY comment goes at the declaration, not the use site. |
+| `CM-005` | MEDIUM | Doc comments that restate the item name are forbidden. Exception: a public entry point with non-obvious constraints or ordering requirements. |
+| `CM-006` | LOW | Section divider comments are forbidden. A file needing dividers to navigate wants splitting. |
+| `CM-007` | HIGH | A non-obvious language rule encoded in the compiler carries a WHY comment naming the rule. |
+| `CM-008` | **BLOCKER** | Every `unsafe` block carries a safety rationale stating the invariant the caller must uphold. |
 
 ---
 
-## 9. Code Quality Constraints
+## 9. Code Quality
 
 | ID | Severity | Rule |
 |----|----------|------|
-| `CQ-001` | HIGH | Guard clauses and early returns at the top of every function. Happy path = least indented path. Depth > 2 MUST be refactored before delivery. |
-| `CQ-002` | HIGH | No unused imports, variables, parameters, or unreachable code in any generated output. |
-| `CQ-003` | MEDIUM | Single nameable responsibility per function. Prefer extraction when a method exceeds 60 lines. |
-| `CQ-004` | HIGH | Boolean parameters that alter execution path are FORBIDDEN. Use separate explicitly named functions. ❌ `processOrder(order, isDraft: true)` ✅ `saveDraftOrder(order)` / `submitOrder(order)` |
-| `CQ-005` | MEDIUM | Nested ternaries limited to depth 1. Complex conditional assignment uses if/else or a lookup structure. |
-| `CQ-006` | MEDIUM | No generic abstractions, base classes, or factory patterns for a single concrete implementation. Abstract only when two or more concrete implementations exist. |
-| `CQ-007` | LOW | Prefer explicit over implicit. Avoid clever one-liners that sacrifice readability for brevity. |
-| `CQ-008` | MEDIUM | Config files include only actively used keys. No commented-out configuration options as reference. |
+| `CQ-001` | HIGH | Guard clauses first. Happy path is the least indented path. Depth beyond 2 is refactored before delivery. |
+| `CQ-002` | HIGH | No unused imports, variables, parameters, or unreachable code. `cargo clippy --workspace --all-targets -- -D warnings` is the gate. |
+| `CQ-003` | MEDIUM | One nameable responsibility per function. Extract when a function exceeds 60 lines. |
+| `CQ-004` | HIGH | A `bool` parameter that selects between behaviours is forbidden. Use two named functions or an enum. |
+| `CQ-005` | MEDIUM | Nested `if let` / ternary-equivalent chains limited to depth 1. Prefer `match` or a lookup table. |
+| `CQ-006` | MEDIUM | No trait, generic parameter, or builder for a single concrete case. → No speculative generality |
+| `CQ-007` | LOW | Explicit over clever. A one-liner that needs decoding at 3am is not shorter. |
+| `CQ-008` | MEDIUM | Config and manifest files carry only active keys. |
 
 ---
 
-## 10. Data Sovereignty
+## 10. Diagnostics
+
+There is no logging layer and none is to be added. A compiler's observable output is its
+diagnostics.
 
 | ID | Severity | Rule |
 |----|----------|------|
-| `DS-001` | **BLOCKER** | A Slice MUST own its tables/collections exclusively. Only the owning Slice may write to them. |
-| `DS-002` | **BLOCKER** | No SQL JOINs, subqueries, or cross-collection aggregations between tables owned by different Slices. |
-| `DS-003` | CRITICAL | Cross-slice data sync: (a) Mutations: async via Integration Events only. (b) Reads: sync via an explicitly defined Public Read Model only. Never reference the owning Slice's internal DTO, entity, or repository. |
-| `DS-004` | HIGH | Shared database table naming: `[slicename]_[tablename]` (lowercase snake_case). Example: `ordering_lines`, `catalog_products`. |
-| `DS-005` | HIGH | Integration Event schemas are immutable once published. Schema changes require a new event type. This is the only permitted deprecation scenario in this ruleset. |
+| `DG-001` | **BLOCKER** | Every user-facing error is built on the `diagnostics` crate. A Slice must not define its own error envelope or print to stderr directly. |
+| `DG-002` | HIGH | Every diagnostic carries a `Span` locating it in source. A diagnostic without a span is a compiler bug, not a user error. |
+| `DG-003` | HIGH | Infrastructure failures (file IO, linker invocation, LLVM initialisation) are caught at the adapter boundary and surfaced as a typed error, never as a panic at a Slice boundary. |
+| `DG-004` | MEDIUM | A diagnostic states what was found and what was expected. "Invalid syntax" is not a diagnostic. |
 
 ---
 
-## 11. Observability
+## 11. Refactoring Triggers
 
-Observability infrastructure lives exclusively in the Shared Kernel as zero-business-logic adapters. Slices consume these adapters via dependency injection and MUST NOT implement logging, tracing, or error formatting inline.
+When a trigger fires: report the ID and propose a concrete fix. Hard Gate triggers pause
+for confirmation before any code is written.
 
-| ID | Severity | Rule |
-|----|----------|------|
-| `OB-001` | HIGH | All Slices MUST emit structured log entries at Handler entry and exit. Minimum fields: `slice`, `operation`, `duration_ms`, `result` (`ok` or `error`). |
-| `OB-002` | HIGH | All error responses MUST conform to a single project-wide error envelope defined in the Shared Kernel. Slices MUST NOT define their own error shapes. |
-| `OB-003` | MEDIUM | Correlation/trace IDs MUST be propagated from the Entry Point through the Handler to any Integration Event emitted. The propagation mechanism is defined once in the Shared Kernel. |
-| `OB-004` | LOW | Infrastructure exceptions (DB, network, external service) MUST be caught at the adapter boundary, logged with full context, and re-surfaced as a typed infrastructure error, never as a raw exception at the Slice boundary. |
+**`RT-001` [HIGH]** A single `.rs` file exceeds 1000 lines.
+Action: identify the sub-concerns and propose a module split. Report the proposal; do not
+split a file as a side effect of unrelated work.
 
----
+**`RT-002` [HIGH] [Hard Gate]** A Slice's CONTEXT.md Purpose needs "and", or the Slice
+grows a second public entry function.
+Action: halt. Propose two named Slices with CONTEXT.md outlines for both.
 
-## 12. Refactoring Triggers
+**`RT-003` [HIGH]** A Shared Kernel crate gains a function containing a compilation rule
+rather than a type operation.
+Action: flag as a leak. Move the rule into the Slice that owns that stage. → AC-009
 
-When any trigger fires during **autonomous execution**: report the trigger ID, propose a concrete fix. If the trigger is marked **Hard Gate**, pause and wait for explicit written confirmation before continuing.
+**`RT-004` [MEDIUM]** Identical logic appears in three or more Slices and no `/abstract`
+command has been issued.
+Action: surface the duplication and stop. Do not self-promote to the Shared Kernel.
+`/abstract [Name]` is the only promotion gate. → SB-002
 
-**`RT-001` [BLOCKER] [Hard Gate]**
-Condition: Handler/UseCase exceeds 300 lines OR has more than 5 injected dependencies.
-Action: Halt. Identify sub-operations. Propose a split into separate named Commands. Present the plan before writing code.
-
-**`RT-002` [HIGH]**
-Condition: CONTEXT.md Purpose requires "and" to describe the Slice's responsibility, or describes two distinct outcomes.
-Action: Propose splitting into two named Slices. Present CONTEXT.md outlines for both before writing code.
-
-**`RT-003` [HIGH]**
-Condition: A Shared Kernel utility contains conditional logic tied to a specific business scenario.
-Action: Flag as God Utility. Move the business branch into the relevant Slice. The Shared Kernel function must remain pure.
-
-**`RT-004` [HIGH]**
-Condition: A Slice imports more than one other Slice's Public Read Model OR subscribes to more than three Integration Events.
-Action: Flag boundary misalignment. Propose Read Model replication or a boundary redraw.
-
-**`RT-005` [MEDIUM]**
-Condition: Identical validation logic duplicated across three or more Slices AND no `/abstract` command has been issued.
-Action: Flag the duplication. Propose moving it to a Shared Kernel Domain Utility with a WHY comment. Do NOT proceed with abstraction until the developer explicitly issues `/abstract [ValidatorName]`. Confirmation alone is insufficient.
+**`RT-005` [HIGH] [Hard Gate]** A Slice needs a type owned by a sibling Slice.
+Action: halt. Either the type is a contract type and moves to the Shared Kernel (SB-001),
+or the boundary is drawn wrong. Never add the cross-slice dependency.
 
 ---
 
-## 13. Living Context Documentation (CONTEXT.md)
+## 12. CONTEXT.md
 
-Every Slice MUST have a CONTEXT.md. It is a mandatory Slice component.
+Every crate under `compiler/` has one, infrastructure crates included. Presence and
+required sections are asserted by `test_all_slices_have_context_md`.
 
-Update CONTEXT.md in the **SAME response** as any change to: Input/Output DTO | DB table or collection | Published or consumed event | Slice name, Handler name, or Entry Point | Shared Kernel dependency.
-
-### Template
+Update it in the **same commit** as any change to: the entry function signature, the
+public surface, a Shared Kernel dependency, or the Slice's name.
 
 ```markdown
-# [SliceName]
+# [crate-name]
 
 ## Purpose
-[One sentence. The single business action this slice performs.]
+[One sentence. The single transformation this crate performs.]
 
 ## Entry Point
-- Type: [HTTP POST | HTTP GET | Event Consumer | CLI | ...]
-- Input: `[CommandName | QueryName]`
-- Output: `[ResponseName | void]`
-
-## Data Ownership
-- Tables: `[slicename_tablename]`
-- Events Published: `[EventName]`   ← omit if none
-- Events Consumed: `[EventName]`    ← omit if none
-- Public Read Model: `[ProjectionName]` ← omit if none
+- Type: [Library function | CLI | Type definitions only]
+- Input: `[type]`
+- Output: `[type]`
 
 ## Shared Kernel
-- [UtilityName]: [why]   ← omit section if none
+- [crate]: [what is used and why]
+[Note any dev-dependency on a sibling Slice here, stating that it is test-only.]
 
 ## Notes
-[Non-obvious design decisions or constraints only. Omit for straightforward slices.]
+[Non-obvious design decisions, ordering constraints, known limitations. Omit if none.]
 ```
 
 ---
 
-## 14. Context Scaling
-
-Slices within the same project may mature at different rates. Apply the scale tier to **each Slice individually** based on its own complexity, not the total project Slice count alone. When the project crosses a tier boundary, existing Slices are upgraded incrementally (not all at once) and the AI flags which Slices are below the new tier's requirements during the next Consistency Scan (→ Step 4).
-
-### Small (1–14 Slices)
-- DB entities may be used directly in Handlers. No Repository required.
-- Single shared DbContext or DB connection permitted.
-- In-memory event bus permitted.
-- Output Model may be omitted when the DB entity shape exactly matches the required response and no transformation is needed. → AC-009
-- All AC, DS, FN, CM, CQ rules apply without exception.
-- Input validation is always mandatory.
-
-### Medium (15–40 Slices)
-- Strict DTO separation: Input Model, Output Model, and DB Entity are distinct types.
-- Repository or Query Object required for all non-trivial persistence.
-- Slice-specific DbContext or namespace-isolated collection.
-- Persistent event bus required (in-process with durability guarantees or external broker).
-- Full CONTEXT.md template required.
-
-### Large (41+ Slices)
-All Medium requirements, plus:
-- Dedicated DbContext per Slice with no shared entity registration.
-- Outbox Pattern for all Integration Events.
-- Explicit Projection types for all cross-slice reads.
-- Architecture test suite enforcing no-cross-slice-reference rule. Generated once per project setup, not per Slice.
-
----
-
-## 15. Conflict Resolution
-
-**Shared Business Logic**
-Condition: Business logic used in two or more Slices.
-Action: Duplicate by default. Move to Shared Kernel ONLY on explicit `/abstract [LogicName]` command. Exception: `PURE-FN-EXCEPTION` (see Section 5).
-
-**Shared Infrastructure Logic**
-Condition: Purely technical logic (logging, email transport, DB connection, HTTP client).
-Action: Move to Shared Kernel. Implementation must be a generic adapter with zero awareness of any specific Slice.
-
-**Cross-Slice Read**
-Condition: Slice A needs data owned by Slice B to compose a response.
-Action:
-- Option 1 (infrequent reads): Gateway Aggregator at the entry point layer.
-- Option 2 (frequent reads): Slice A maintains a Read Model replica kept in sync via Integration Events.
-- FORBIDDEN: calling Slice B's repository, handler, or entity directly.
-
-**Ambiguous Slice Ownership**
-Condition: A new feature could belong to two existing Slices.
-Action: Identify which existing Slice's single responsibility would change. That Slice is the owner. If both would change, create a new Slice.
-
----
-
-## 16. Testing
+## 13. Testing
 
 | ID | Severity | Rule |
 |----|----------|------|
-| `TS-001` | HIGH | Generate tests ONLY when the developer appends `--test` to the prompt. Without `--test`, generate no test files. |
-| `TS-002` | HIGH | When `--test` is present, generate one Integration Test covering the full Slice from entry point through Handler to the real or in-memory database. Must assert on actual system state after execution (record persisted, event published), not only the return value. File: `[FeatureName].Integration.Test.[ext]`, co-located in `/tests` within the Feature Folder. |
-| `TS-003` | MEDIUM | Exception: if the Slice Handler contains complex branching or non-trivial domain calculations, also generate a targeted Unit Test for that logic in isolation. Mock only infrastructure boundaries (repository, event bus, external services). Do NOT mock domain services or value objects. File: `[FeatureName].Handler.Test.[ext]` |
+| `TS-001` | **BLOCKER** | Every behaviour change ships with tests in the same commit. Tests are not opt-in and are not deferred. |
+| `TS-002` | HIGH | Each Slice has integration tests driving its entry function over real input, asserting on the produced value, not on internals. |
+| `TS-003` | HIGH | Every fixed bug gets a regression test naming the bug in the test name. |
+| `TS-004` | HIGH | Error paths are tested. A Slice that only has happy-path tests is untested, because a compiler's job is largely rejection. |
+| `TS-005` | MEDIUM | A test asserting on a diagnostic asserts on its kind and span, not on its rendered message text. |
+| `TS-006` | LOW | Never write a test count into prose. The CI badge is the only honest source, and `tools/check_docs_hygiene.py` fails the build on a written-down total. |
 
 ---
 
-## 17. Extension Points
+## 14. Enforcement
 
-Child configs MUST inherit this file and implement all mandatory points. Child configs MUST NOT contradict any rule above.
+These rules are machine-checked. A rule with a test is not a guideline.
 
-| ID | Mandatory | Contract |
-|----|-----------|---------|
-| `EP-PROJECT-STRUCTURE` | ✅ | Concrete folder layout implementing `[Feature]/[Feature].[Role].[ext]`. Full Feature Folder template with all mandatory components. |
-| `EP-FILE-NAMING` | ✅ | Language casing rules (PascalCase / snake_case / kebab-case). Role Vocabulary mapped to idiomatic language names. |
-| `EP-ENDPOINT` | ✅ | Concrete Entry Point syntax: Minimal API / Controller / Route Handler / gRPC / GraphQL / CLI / Message Consumer. |
-| `EP-HANDLER` | ✅ | Concrete Handler pattern with Result/Either return type implementation. |
-| `EP-VALIDATION` | ✅ | Concrete validation wired at Slice boundary before Handler. Must show pipeline integration. |
-| `EP-RESULT-TYPE` | ✅ | Concrete Result/Either implementation replacing exceptions for all business outcomes. |
-| `EP-PERSISTENCE` | ✅ | Persistence pattern per scale: Small (inline) / Medium (Repository) / Large (Slice DbContext). Table naming convention implementation. |
-| `EP-DI-REGISTRATION` | ✅ | Slice self-registration supporting delete-folder → remove-registration compile test. |
-| `EP-TESTING` | ✅ | Integration test setup (real/in-memory DB). Confirm test file co-location in Feature Folder. |
-| `EP-OBSERVABILITY` | ✅ | Shared Kernel adapters for structured logging and error envelope. Correlation ID propagation strategy. |
-| `EP-EVENT-BUS` | ✅ at Medium+, ❌ at Small | Event bus per scale: Small (in-memory) / Medium (in-process persistent) / Large (Outbox + external broker). |
-| `EP-ARCH-TESTS` | ✅ at Large, ❌ below | Automated no-cross-slice-reference enforcement. Mandatory at Large scale (41+ Slices). |
-| `EP-CONTEXT-TEMPLATE` | ❌ | Language-specific CONTEXT.md additions (e.g., migration file names, package references). Must not contradict base template. |
+| Check | Enforces |
+|-------|----------|
+| `compiler/neurc/tests/architecture_tests.rs` | AC-002 (no cross-slice deps, one allowlisted exception), AC-009 (infrastructure depends on no Slice), AC-012 (CONTEXT.md presence and sections) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | CQ-002, and most of CQ-001 and CQ-005 |
+| `cargo fmt --all` | Formatting. Not negotiable and not discussed in review. |
+| `tools/check_docs_hygiene.py` | TS-006, plus the ban on written-down versions and private paths in tracked files |
+| `compiler/lexical-analysis/tests/tmlanguage_sync.rs` | The editor grammar tracks the lexer's token set |
+
+Everything else in this file is enforced by the agent reading it. That is the reason it is
+short: a rule nobody can check and nobody rereads is not a rule.

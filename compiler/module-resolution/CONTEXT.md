@@ -8,16 +8,14 @@ Expand a root `.nr` file into the single item list its program is built from, lo
 - Input: `root: &Path`, a `&dyn Fn(&str) -> Result<Vec<Item>, String>` parser supplied by the caller, and `prelude: &[PreludeVariant]`: the enum variants every module may write bare
 - Output: `Result<ResolvedProgram, ModuleError>`: `items: Vec<ast_types::Item>`, each stamped with the module it came from, one `ResolvedModule` per loaded file, and `no_prelude`, the root file's opt-out
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-- Reads `.nr` files from disk; writes nothing
-
 ## Shared Kernel
 - ast-types: the `Item` / `Stmt` / `Expr` / `Type` tree this slice walks and rewrites
 - shared-types: `Identifier`, `Span` on the nodes it rebuilds
 - thiserror: `ModuleError` derivation
 
 ## Notes
+Reads `.nr` files from disk; writes nothing.
+
 - The parser is **injected, not imported**. This slice would otherwise depend on
   `syntax-parsing`, a feature slice; `neurc` is the one place both meet, and it passes
   `syntax_parsing::parse` in. The slice's own unit tests use a stub parser, so it builds

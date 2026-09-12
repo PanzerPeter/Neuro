@@ -7,9 +7,6 @@ Map a `Span`'s byte offsets to human-readable line/column positions and extract 
 - Type: Library (no entry function: pure utilities)
 - Key types: `SourceFile`, `Position`
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-
 ## Shared Kernel
 - shared-types: `Span` is the input to every position-resolution operation
 

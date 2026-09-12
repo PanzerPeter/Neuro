@@ -19,9 +19,6 @@ legs build the placeholder.
   `func.func @neuro_smoke(index, index) -> index` with a single `arith.addi` body, verifies it,
   and returns its textual form.
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-
 ## Shared Kernel
 - `neuro-hir`: the typed HIR contract `lower_program` consumes, gated under `mlir`. The crate
   adds no business logic of its own; the gated path otherwise uses only third-party `melior` +

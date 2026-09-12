@@ -10,9 +10,6 @@ Provide the typed High-Level IR node definitions: the stable, backend-agnostic c
   `HirTrait`, `HirClosure`, `HirCapture`, `HirStmt`, `HirExpr`, `HirExprKind`, `HirFieldInit`,
   `HirType`, `HirCollectionKind`
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-
 ## Shared Kernel
 - shared-types: `Span`, `Literal`, `FormatSpec` embedded in HIR nodes
 - ast-types: `BinaryOp` / `UnaryOp` reused unchanged (pure data enums, identical between

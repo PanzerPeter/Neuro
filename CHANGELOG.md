@@ -10,6 +10,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.22.3] - 2026-09-12
+
+### Documentation
+
+- `docs`: rewrote `VSA.md` for the compiler domain. The previous file was a generic
+  CRUD/web-service ruleset: five data-sovereignty rules governing database tables no
+  crate owns, four observability rules demanding structured logs the workspace has no
+  dependency for, a `Handler`/`Endpoint`/`Repository` role vocabulary no Rust file uses,
+  and twelve extension points marked mandatory and left unimplemented. Three of its rules
+  contradicted repository practice outright: tests were opt-in behind a `--test` flag, a
+  changelog was forbidden, and the architecture test suite was declared unnecessary below
+  forty-one slices when it is in fact the gate this workspace runs on every commit.
+  Replaced with rules stated against this pipeline: a slice is a compiler stage, contract
+  types are owned by the shared kernel and moving one is a hard gate, diagnostics replace
+  logging, refactoring triggers are thresholded on Rust file size rather than on injected
+  dependency counts, and a closing table names which rules are machine-checked and by
+  which test.
+- `docs`: dropped the `Data Ownership` section from the `CONTEXT.md` contract. Every
+  crate carried it declaring none of the four things it tracked, and
+  `test_all_slices_have_context_md` asserted its presence. The section, the assertion, and
+  the line in `CONTRIBUTING.md` describing it are gone; the two crates whose entries also
+  stated a real side effect keep that line under `Notes`.
+
+
 ## [2.22.2] - 2026-09-11
 
 ### Documentation

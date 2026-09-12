@@ -8,9 +8,6 @@ Provide the lightweight, zero-business-logic data structures used universally ac
 - Public types: `Span`, `Identifier`, `Literal`, `IntSuffix`, `FloatSuffix`, `FormatSpec`,
   `FormatAlign`, `FormatKind`
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-
 ## Shared Kernel
 None. This is the lowest-level crate in the workspace.
 

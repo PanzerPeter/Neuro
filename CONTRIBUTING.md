@@ -192,7 +192,7 @@ compiler/
 4. Design a single public entry point
 5. Keep all internals `pub(crate)`
 6. Write comprehensive tests
-7. Add a `CONTEXT.md` with Purpose, Entry Point, Data Ownership, Shared Kernel, and Notes sections
+7. Add a `CONTEXT.md` with Purpose, Entry Point, Shared Kernel, and Notes sections
 
 ## Testing Requirements
 

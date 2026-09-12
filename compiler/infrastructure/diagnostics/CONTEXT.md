@@ -7,9 +7,6 @@ Provide structured diagnostic infrastructure (severity levels, error codes, a bu
 - Type: Library (no entry function: pure data and utilities)
 - Key types: `Diagnostic`, `DiagnosticCode`, `DiagnosticCollector`, `Severity`
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-
 ## Shared Kernel
 - shared-types: `Span`, embedded in every `Diagnostic` for source-location tagging
 

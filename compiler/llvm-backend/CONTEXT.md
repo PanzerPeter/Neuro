@@ -31,9 +31,6 @@ The module is stamped with the target triple and data layout before the pipeline
 the optimizer reasons about the real size, alignment, and pointer width of the types it
 transforms.
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-
 ## Shared Kernel
 - neuro-hir: the typed HIR lowered from (`HirProgram` / `HirExpr` / `HirType`)
 - ast-types: the `BinaryOp` / `UnaryOp` enums (reused unchanged by the HIR)

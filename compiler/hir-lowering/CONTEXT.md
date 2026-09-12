@@ -9,9 +9,6 @@ Lower a type-checked surface AST into the typed High-Level IR (`neuro-hir`), re-
   `semantic_analysis::type_check`)
 - Output: `Result<neuro_hir::HirProgram, LoweringError>`
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-
 ## Shared Kernel
 - ast-types: read-only traversal of the surface `Item` / `Stmt` / `Expr` / `Type` nodes
 - neuro-hir: the typed HIR node set produced as output

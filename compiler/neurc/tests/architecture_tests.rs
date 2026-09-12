@@ -159,7 +159,7 @@ fn test_all_slices_have_context_md() {
         "compiler/llvm-backend",
         "compiler/mlir-backend",
         "compiler/neurc",
-        // Infrastructure slices also require CONTEXT.md (VSA 4.4 AC-011)
+        // Infrastructure crates also require CONTEXT.md (VSA AC-012)
         "compiler/infrastructure/shared-types",
         "compiler/infrastructure/ast-types",
         "compiler/infrastructure/diagnostics",
@@ -172,19 +172,14 @@ fn test_all_slices_have_context_md() {
         let context_path = root.join(slice_path).join("CONTEXT.md");
         assert!(
             context_path.exists(),
-            "VSA 4.4 Section 13: Slice {} must have CONTEXT.md (AI contract file)",
+            "VSA Section 12: {} must have CONTEXT.md (agent contract file)",
             slice_path
         );
 
         let context_content = fs::read_to_string(&context_path)
             .unwrap_or_else(|_| panic!("Failed to read {}/CONTEXT.md", slice_path));
 
-        for section in &[
-            "## Purpose",
-            "## Entry Point",
-            "## Data Ownership",
-            "## Shared Kernel",
-        ] {
+        for section in &["## Purpose", "## Entry Point", "## Shared Kernel"] {
             assert!(
                 context_content.contains(section),
                 "CONTEXT.md in {} is missing '{}' section",

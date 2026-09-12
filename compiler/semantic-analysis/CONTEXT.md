@@ -9,9 +9,6 @@ Validate the type correctness and scope rules of a parsed Neuro program before c
 - Output: `Result<Vec<Warning>, Vec<TypeError>>`: `Ok` carries non-fatal lint warnings, `Err`
   fatal type errors. Warnings are dropped when errors are present.
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-
 ## Shared Kernel
 - ast-types: read-only traversal of `Item` / `Expr` / `Stmt` nodes
 - shared-types: `Span` embedded in every `TypeError`, `FormatSpec` for interpolation holes

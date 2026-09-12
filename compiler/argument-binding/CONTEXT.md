@@ -8,16 +8,14 @@ Bind every call site's arguments to the callee's parameters in declaration order
 - Input: `items: &mut [Item]`: the whole program, every module merged and the prelude prepended
 - Output: `Result<(), Vec<ArgumentError>>`: the items are rewritten in place; every call that cannot be bound is reported, not just the first
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-- Reads and rewrites the AST it is handed; touches no files
-
 ## Shared Kernel
 - ast-types: the `Item` / `Stmt` / `Expr` tree this slice walks and rewrites, and the `ParamLabel` a declaration carries
 - shared-types: `Identifier`, `Span` on the labels it matches and the errors it reports
 - thiserror: `ArgumentError` derivation
 
 ## Notes
+Reads and rewrites the AST it is handed; touches no files.
+
 - **A label is surface syntax, and this slice is where it stops.** `Expr::Call` carries
   `arg_labels` beside `args`; this pass permutes `args` into the callee's declaration order
   and empties `arg_labels`. Type checking, HIR lowering, and both backends therefore see the

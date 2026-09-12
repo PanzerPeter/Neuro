@@ -16,9 +16,6 @@ Provide the canonical Abstract Syntax Tree node definitions shared by every stag
   - `statements`: `Stmt`, `LoopAdapter`, `LoopAdapterKind`
   - `types`: `Type`, `ArraySize`, `TensorDim`, `TensorExtent`, `GenericArg`
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-
 ## Shared Kernel
 - shared-types: `Span`, `Identifier`, `Literal`, `FormatSpec` embedded in AST nodes
 

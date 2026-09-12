@@ -8,9 +8,6 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 - Input: `neurc check <file.nr>` | `neurc compile <file.nr> [-O<0-3>] [-o <output>]`
 - Output: an executable binary on success; diagnostics and non-fatal lint warnings to stderr
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-
 ## Shared Kernel
 - diagnostics: pipeline error formatting
 - ast-types: the parsed item list handed between the resolution, binding, and checking steps

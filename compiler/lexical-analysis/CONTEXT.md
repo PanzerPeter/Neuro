@@ -8,9 +8,6 @@ Transform raw Neuro source text into a validated token stream as the first stage
 - Input: `source: &str`
 - Output: `Result<Vec<Token>, LexError>`
 
-## Data Ownership
-- Tables / Events Published / Events Consumed / Public Read Model: none
-
 ## Shared Kernel
 - shared-types: `Span` for the byte range on every token, plus `IntSuffix` / `FloatSuffix`
 - diagnostics: error type infrastructure used by `LexError`
