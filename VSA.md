@@ -35,8 +35,6 @@ Leaving old and new patterns coexisting after any single step is forbidden.
 **`CTX-002` [BLOCKER] Hard Gates.** Refactoring runs as a continuous stream without
 per-step confirmation. Pause and wait for explicit written confirmation only when:
 
-- A **Shared Kernel public type changes** (an AST node, an HIR node, a diagnostic shape).
-  Every downstream Slice is affected. Present the proposed type and wait.
 - A **new workspace member** is proposed. Present the Slice boundary and entry point first.
 - A change would require a **new cross-slice dependency**. There is exactly one
   allowlisted exception (Section 4) and adding a second is a Hard Gate.

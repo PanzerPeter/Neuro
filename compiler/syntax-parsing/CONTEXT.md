@@ -181,6 +181,13 @@ the tuple-index parse, so it needs no expression grammar of its own.
   calls) and reverses it into source order on `Stmt::ForRange`/`ForEach`'s `adapters` field. Each
   takes exactly one argument (`LoopAdapterArity` otherwise). `.enumerate()` is recognised only at
   the outermost position: it yields pairs, so nothing beneath one could be handed a single element.
+- **`.rev()` is a range form, and the innermost one.** `strip_rev` peels it beneath the whole
+  adapter chain into `Stmt::ForRange`'s `reversed` field, and `index_argument_from`
+  (`expr_index.rs`) peels the same call off an index axis into `TensorIndexArg::Range`'s. The
+  language scopes it to ranges, so a receiver that is not one is `RevOnNonRange` rather than a method
+  resolved later: left to fall through it would be reported as a missing method, naming a
+  construct the language does not define on that type. `AdapterTakesNoArguments` covers `.rev(x)`
+  and `.enumerate(x)` alike.
   The cost of resolving them here is the same one `.enumerate()` pays (a user type with its own
   one-argument `.map` method cannot be a bare `for` head), and it buys the adapters over ranges and
   arrays, neither of which is an `Iterator` impl with a method to call.

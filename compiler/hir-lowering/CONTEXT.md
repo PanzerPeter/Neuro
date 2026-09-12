@@ -299,7 +299,7 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   the end. The receiver is left alone rather than moved: a reduction reads it, so a borrowed
   receiver lowers here too.
   Slicing and indexing live in `tensor_index.rs`: `lower_tensor_index` folds each range bound to
-  the constant the checker already proved it to be (`HirTensorAxis::Range { start, end }`, with
+  the constant the checker already proved it to be (`HirTensorAxis::Range { start, end, reversed }`, with
   a `..` full axis becoming the whole extent and an inclusive range stopping one further on),
   lowers a position as an ordinary expression, and computes the result type by dropping every
   axis given a position along with its name, keeping the name of every axis that survives. Both index spellings reach it: `Expr::TensorIndex`, and the
@@ -308,6 +308,9 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   `index: Option<String>` and define it in the loop scope as `LOOP_INDEX_TYPE` (`u64`), ahead of
   the element binding so the two collide rather than shadow. The free-variable walker binds it
   too, or a closure in the body captures it.
+- **Reversed ranges**: `ForRange`'s `reversed` flag rides through untouched, to the adapted
+  lowering as well as the plain one. Nothing about the bounds, the element type, or the body
+  changes with it; the direction is a backend traversal decision.
 - **Tuples**: `resolve_type` gives `HirType::Tuple`; a literal is typed by lowering each element
   (hinted by the expected tuple's element type when annotated) and `t.N` reads the N-th element
   type off the auto-derefed tuple type. Destructuring is parser-desugared.

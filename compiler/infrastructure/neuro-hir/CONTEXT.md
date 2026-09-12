@@ -43,7 +43,8 @@ it the *typed* contract:
    A fill and an identity stay separate nodes rather than expanding to elements,
    so a large tensor is one node and one loop instead of one node per element.
    `HirExprKind::TensorIndex { object, axes }` reads one back: `HirTensorAxis::Position(expr)`
-   drops its axis and `HirTensorAxis::Range { start, end }` keeps it, and the expression's own
+   drops its axis and `HirTensorAxis::Range { start, end, reversed }` keeps it (`reversed` is
+   `.rev()`, which changes the traversal order and not the extent), and the expression's own
    `ty` is what says which happened — an element type when every axis was a position, a
    `HirType::Tensor` of the survivors otherwise. A `..` full axis has no variant of its own: the
    checker resolved it to the range over the whole extent.
@@ -124,7 +125,9 @@ guarantees `else_block` diverges, so a backend may terminate it with `unreachabl
 **Enumerated loops are an option on the loop, not an adapter.** `HirStmt::ForRange` and
 `HirStmt::ForEach` carry `index: Option<String>`, the `u64` position binding of
 `for (i, x) in xs.enumerate()`. There is no iterator value in the HIR for an adapter to wrap, and
-a counted loop already computes the position it would yield.
+a counted loop already computes the position it would yield. `HirStmt::ForRange` carries
+`reversed: bool` for the same reason: `.rev()` reorders the bounds a counted loop already holds.
+An enumerated reversed loop counts its position up while its binding counts down.
 
 **Enums normalize three construction forms to one.** `HirType::Enum(String)` is nominal;
 `HirExprKind::EnumConstruct { enum_name, variant, tag, payload }` is what unit, tuple, and

@@ -61,6 +61,8 @@ pub enum HirStmt {
     },
     /// `index` is the `u64` position binding of an enumerated loop; `None` for a
     /// plain `for v in a..b`.
+    /// `reversed` walks the same bounds from the last value down to `start`; an
+    /// enumerated loop's `index` still counts up from zero either way.
     ForRange {
         label: Option<String>,
         index: Option<String>,
@@ -68,6 +70,7 @@ pub enum HirStmt {
         start: HirExpr,
         end: HirExpr,
         inclusive: bool,
+        reversed: bool,
         body: Vec<HirStmt>,
         span: Span,
     },

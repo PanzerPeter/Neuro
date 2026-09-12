@@ -61,8 +61,10 @@ impl Parser {
 }
 
 /// Classify a parsed index expression. A range is peeled out of one layer of
-/// parentheses so `t[(0..3)]` names the same axis range as `t[0..3]`.
+/// parentheses so `t[(0..3)]` names the same axis range as `t[0..3]`, and out of a
+/// `.rev()` call so `t[(0..3).rev()]` names that axis read back to front.
 fn index_argument_from(expr: Expr) -> TensorIndexArg {
+    let (expr, reversed) = strip_rev(expr);
     let expr = match expr {
         Expr::Paren(inner, _) if matches!(*inner, Expr::Range { .. }) => *inner,
         other => other,
@@ -77,8 +79,33 @@ fn index_argument_from(expr: Expr) -> TensorIndexArg {
             start,
             end,
             inclusive,
+            reversed,
             span,
         },
         other => TensorIndexArg::Position(other),
     }
 }
+
+/// Split a `.rev()` call off an axis argument, returning its receiver and whether the
+/// call was there. A `.rev()` over anything but a range falls through unchanged and is
+/// classified as a position, where the type checker reports it as the non-integer it is.
+fn strip_rev(expr: Expr) -> (Expr, bool) {
+    let Expr::Call { func, args, .. } = &expr else {
+        return (expr, false);
+    };
+    let Expr::FieldAccess { object, field, .. } = func.as_ref() else {
+        return (expr, false);
+    };
+    if field.name != REV_METHOD || !args.is_empty() {
+        return (expr, false);
+    }
+    let receiver = object.as_ref().clone();
+    match &receiver {
+        Expr::Range { .. } => (receiver, true),
+        Expr::Paren(inner, _) if matches!(**inner, Expr::Range { .. }) => (receiver, true),
+        _ => (expr, false),
+    }
+}
+
+/// The range adapter an axis argument may wear.
+const REV_METHOD: &str = "rev";

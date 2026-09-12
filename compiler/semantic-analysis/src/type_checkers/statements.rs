@@ -550,6 +550,7 @@ impl TypeChecker {
                 start,
                 end,
                 inclusive: _,
+                reversed: _,
                 adapters,
                 body,
                 span: _,

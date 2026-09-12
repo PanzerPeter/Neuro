@@ -184,6 +184,9 @@ Key design goals:
 - `loop { }` infinite loops (canonical infinite loop; exit via `break`)
 - Range-for loops: exclusive (`for i in 0..n`) and inclusive (`for i in 0..=n`)
 - `break` and `continue`
+- `.rev()` on a range (2B): `for i in (0..n).rev()` walks the same bounds from the top down,
+  and a tensor index axis takes it too (`t[(0..n).rev()]`), see
+  [control-flow.md](language-reference/control-flow.md#iterating-backwards-rev)
 - The `IntoIterator` / `Iterator` protocol (2A): `for x in e` calls `e.into_iter()` once and then
   `.next()` until it answers `None`, so any type implementing either prelude trait (an adapter
   wrapping another iterator included) stands in a `for` head. The built-in heads (range, array,

@@ -345,8 +345,13 @@ pub enum HirTensorAxis {
     /// A position along the axis; the axis is dropped from the result. The expression
     /// is any integer value, so it may only be known at run time.
     Position(HirExpr),
-    /// The half-open sub-range `[start, end)` of the axis that survives.
-    Range { start: usize, end: usize },
+    /// The half-open sub-range `[start, end)` of the axis that survives. `reversed`
+    /// reads it back to front, which changes the element order and not the extent.
+    Range {
+        start: usize,
+        end: usize,
+        reversed: bool,
+    },
 }
 
 /// Which reduction a [`HirExprKind::TensorReduce`] performs.

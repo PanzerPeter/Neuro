@@ -66,11 +66,14 @@ pub enum ParseError {
     #[error("`.char_indices()` is a complete `for` head: it already binds a position, so it takes no `.enumerate()` and no `.map` / `.filter` adapters")]
     CharIndicesHeadDecorated { span: Span },
 
-    #[error("`.enumerate()` takes no arguments")]
-    EnumerateTakesNoArguments { span: Span },
+    #[error("`.{adapter}()` takes no arguments")]
+    AdapterTakesNoArguments { adapter: String, span: Span },
 
     #[error("`.{adapter}()` takes exactly one argument: the function applied to each element")]
     LoopAdapterArity { adapter: String, span: Span },
+
+    #[error("`.rev()` reverses a range, so its receiver must be one: write `(start..end).rev()`")]
+    RevOnNonRange { span: Span },
 
     #[error("a `[...]` shape argument is only valid on a tensor type; `{name}` takes type or const arguments, as in `{name}<i32>`")]
     ShapeArgumentOnNonTensor { name: String, span: Span },

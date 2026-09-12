@@ -613,8 +613,8 @@ These are not bugs, but current limitations. See the
 4. **String interpolation holes**: a hole may not contain a `"` string literal, and an
    interpolated literal is not a constant pattern. Triple-quoted `"""` blocks and
    nesting block comments carry no such restriction
-5. **Ranges**: `a..b` and `a..=b` drive `for` loops and `.slice()`; `.rev()` and
-   `.step(n)` are not implemented yet
+5. **Ranges**: `a..b` and `a..=b` drive `for` loops and `.slice()`, and `.rev()`
+   reverses one; `.step(n)` is not implemented yet
 6. **Optimization**: `-O0` through `-O3` supported (higher levels may increase compile time)
 
 Planned features are tracked through project issues and changelog updates.

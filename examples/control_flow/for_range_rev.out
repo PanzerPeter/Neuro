@@ -1,0 +1,8 @@
+(0..5).rev()      = 4 3 2 1 0 
+(0..=5).rev()     = 5 4 3 2 1 0 
+(3..3).rev() runs = 0
+(10..14).rev()    = 0:13 1:12 2:11 3:10 
+odds doubled      = 10 6 2 
+samples[0]        = 10
+reversed[0]       = 50
+middle reversed   = 40 30 20

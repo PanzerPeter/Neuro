@@ -249,6 +249,12 @@ loop.
   so `xs[i]` needs no cast) in the same scope as the element binding, which is what makes
   `for (i, i) in ...` a `VariableAlreadyDefined` rather than a shadow.
 
+- **Reversed heads.** `Stmt::ForRange` and `TensorIndexArg::Range` carry a `reversed` flag
+  for `.rev()`, and the checker reads neither. A reversal changes the order values arrive in,
+  not the bounds, the element type, or a slice's surviving extent, so there is no rule here to
+  state and no diagnostic to raise: the parser has already rejected the only ill-formed case
+  (a receiver that is not a range).
+
 - **Adapted heads.** `type_checkers/loop_adapters.rs`. `check_loop_adapters` folds the head's
   `adapters` over the element type the base head produced: `.map(f)` replaces it with `f`'s
   return type, `.filter(p)` leaves it alone. Each function is checked in the scope *enclosing*

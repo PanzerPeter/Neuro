@@ -10,6 +10,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.25.0] - 2026-09-12
+
+### Added
+
+- `parser`, `codegen`: range `.rev()` for reverse iteration. `for i in (0..5).rev()` walks
+  4, 3, 2, 1, 0 and `for i in (0..=5).rev()` walks 5, 4, 3, 2, 1, 0, the two spellings
+  differing exactly where they always do. An empty range is empty in either direction.
+- `parser`, `codegen`: a tensor index axis takes `.rev()` too, reading that axis back to
+  front (`t[(0..n).rev()]`). Only the order changes: the surviving extent is the range's
+  either way, a sub-range reverses within its own bounds rather than the axis's, and each
+  axis decides independently, so `m[(0..2).rev(), ..]` flips the rows and leaves each row
+  alone. The slice remains a fresh owned copy, so the source keeps its own order.
+- `parser`: `.rev()` composes with everything a `for` head already carries and sits
+  innermost, beneath the `.map(f)` / `.filter(p)` chain and an outermost `.enumerate()`.
+  An enumerated reversed head counts its position up while its value counts down.
+- `infra`: `reversed: bool` on `Stmt::ForRange`, `TensorIndexArg::Range`,
+  `HirStmt::ForRange`, and `HirTensorAxis::Range`. A flag rather than a `LoopAdapter`,
+  which carries a callee expression a reversal has no use for.
+- `codegen`: a reversed counted loop keeps its ascending induction variable and mirrors it
+  onto the binding at the top of the body. Counting the binding down would have to step
+  below `start` to terminate, and on an unsigned range starting at zero that step wraps to
+  the top of the type, so the loop would never exit.
+- `docs`: `examples/control_flow/for_range_rev.nr`, `examples/showcase/replay_buffer.nr`,
+  an Iterating Backwards section in the control-flow reference, and a reversed-axis
+  paragraph in the tensor slicing reference.
+
+### Changed
+
+- `parser`: `.rev()` applies to a range and nothing else, which is what the language
+  specifies. `xs.rev()` over an array, a `Vec<T>`, a `&[T]`, or a protocol iterator is
+  rejected where the head is parsed, naming the range spelling that works, rather than
+  falling through to a missing-method report against a method the language never defines.
+- `parser`: `EnumerateTakesNoArguments` became `AdapterTakesNoArguments`, carrying the
+  adapter's name, so `.rev(2)` is not told it takes "exactly one argument: the function
+  applied to each element".
+- `infra`: the Shared Kernel type-change Hard Gate was dropped from `VSA.md` CTX-002. It
+  fired on almost every surface feature, which is not what a gate is for; the workspace
+  member, cross-slice dependency, refactoring trigger, and dependency cycle gates stand.
+
+### Fixed
+
+- `docs`: the tensor reference called a reversed range a compile error, which now reads as
+  the range whose start is past its end that it always meant, and the troubleshooting guide
+  no longer lists `.rev()` among the unimplemented range methods. `docs/BUGS.md` BUG-031
+  (`.step(n)`) stays open: its reasoning is updated now that the `.rev()` item has shipped
+  without widening to cover it.
+
+
 ## [2.24.0] - 2026-09-12
 
 ### Added

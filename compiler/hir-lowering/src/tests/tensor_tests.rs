@@ -270,7 +270,14 @@ func main() -> i32 {
         );
     };
     assert!(matches!(axes[0], HirTensorAxis::Position(_)));
-    assert_eq!(axes[1], HirTensorAxis::Range { start: 0, end: 3 });
+    assert_eq!(
+        axes[1],
+        HirTensorAxis::Range {
+            start: 0,
+            end: 3,
+            reversed: false
+        }
+    );
     assert_eq!(
         row.ty,
         HirType::Tensor {
@@ -301,8 +308,22 @@ func main() -> i32 {
             block.kind
         );
     };
-    assert_eq!(axes[0], HirTensorAxis::Range { start: 0, end: 3 });
-    assert_eq!(axes[1], HirTensorAxis::Range { start: 1, end: 3 });
+    assert_eq!(
+        axes[0],
+        HirTensorAxis::Range {
+            start: 0,
+            end: 3,
+            reversed: false
+        }
+    );
+    assert_eq!(
+        axes[1],
+        HirTensorAxis::Range {
+            start: 1,
+            end: 3,
+            reversed: false
+        }
+    );
     assert_eq!(
         block.ty,
         HirType::Tensor {

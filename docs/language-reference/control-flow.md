@@ -272,6 +272,43 @@ func sum_first_five() -> i32 {
 }
 ```
 
+### Iterating Backwards: `.rev()`
+
+`.rev()` on a range walks the same bounds from the top down. Like `.enumerate()`,
+a range must be parenthesised, because `..` binds looser than a method call:
+
+```neuro
+for i in (0..5).rev() {
+    // i takes values 4, 3, 2, 1, 0
+}
+
+for i in (0..=5).rev() {
+    // i takes values 5, 4, 3, 2, 1, 0
+}
+```
+
+The two spellings differ where they always do: `5` is not in `0..5`, so reversing
+it starts at `4`; it is in `0..=5`, so reversing that starts at `5`. An empty
+range is empty in either direction.
+
+`.rev()` applies to a **range only** — it reorders the bounds themselves, not an
+element stream, so `xs.rev()` over an array or a `Vec<T>` is a parse error naming
+the spelling that works. It composes with everything else a head may carry, and
+sits innermost, beneath the adapters and `.enumerate()`:
+
+```neuro
+for (rank, value) in (10..14).rev().enumerate() {
+    // rank:  0,  1,  2,  3     value: 13, 12, 11, 10
+}
+```
+
+The position still counts iterations upward while the value descends, for the
+same reason it counts from zero over any other head: it is a position, not a
+value the range holds.
+
+A range index into a tensor takes `.rev()` too, reading that axis back to front;
+see [Slicing and Indexing](types.md#tensor-slicing-and-indexing).
+
 ### Iterating with a Position: `.enumerate()`
 
 A `for` head may bind a pair instead of a single variable when the iterable ends

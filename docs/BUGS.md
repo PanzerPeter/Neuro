@@ -38,22 +38,24 @@ only in a `for` head and as the argument to `.slice()` / `.char_slice()`; any me
 one falls through to the diagnostic above. The diagnostic is accurate about what the checker
 supports and silent about the fact that the language defines the method.
 
-**Why this is filed rather than scheduled**: the tensor-index half *is* deferred in the
-internal notes archive, to the open roadmap item that adds `.rev()` to ranges. But that
-item's text names only `.rev()`, and the `for`-head form belongs to a sub-phase that closed
-long before it. The roadmap's own spec-coverage rule says a deferral written in the prose
-of a closed item is not tracking, and that every construct a spec section names needs
-either an implementation or a checkbox of its own. `.step(n)` has neither.
+**Why this is filed rather than scheduled**: the roadmap item that adds `.rev()` to ranges
+has since shipped, and it named only `.rev()`. The `for`-head form of `.step(n)` belongs to
+a sub-phase that closed long before that, and the tensor-index half was deferred in the
+internal notes archive to an item whose text never grew to cover it. The roadmap's own
+spec-coverage rule says a deferral written in the prose of a closed item is not tracking,
+and that every construct a spec section names needs either an implementation or a checkbox
+of its own. `.step(n)` has neither.
 
 **Workaround**: write the stride into the loop body or the index arithmetic
 (`for i in 0..3 { val j = i * 2 ... }`).
 
 **Fix sketch**: feature-sized, not a surgical fix, and it wants a checkbox before it is
-worked. Which line it goes on is a scheduling decision. The natural home is the existing
-open `.rev()` item, whose text would widen to name `.step(n)` as well: the two compose
-(`.rev().step(n)`), and both want the same strided-range representation (a stride field on
-the range value, honoured by the `for`-head lowering and by the tensor slice path that
-already handles a plain range).
+worked. Which line it goes on is a scheduling decision; a 2B line of its own, directly
+after the shipped `.rev()` one, is the natural place. Most of the shape is already there:
+`.rev()` is peeled in the parser as an innermost range form, ridden through as a flag on
+`Stmt::ForRange` and on `TensorIndexArg::Range`, and honoured by the counted-loop lowering
+and the tensor slice path. `.step(n)` is the same route with a stride instead of a flag,
+and the two compose (`.rev().step(n)`).
 
 ## BUG-030 — an element moved out of a `Vec` leaves the `Vec` owning it too
 

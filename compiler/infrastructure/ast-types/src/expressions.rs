@@ -451,10 +451,14 @@ pub enum TensorIndexArg {
     Position(Expr),
     /// A sub-range of the axis, `t[a..b]` or `t[a..=b]`. The axis survives at the
     /// range's own extent.
+    ///
+    /// `reversed` is `t[(a..b).rev()]`: the same sub-range, its elements read back to
+    /// front. Only the order changes, so the surviving extent is the range's either way.
     Range {
         start: Box<Expr>,
         end: Box<Expr>,
         inclusive: bool,
+        reversed: bool,
         span: Span,
     },
     /// The whole axis, `t[..]`. The axis survives at its declared extent.

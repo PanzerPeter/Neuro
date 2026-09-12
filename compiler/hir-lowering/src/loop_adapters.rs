@@ -239,6 +239,7 @@ impl Lowerer {
         start: HirExpr,
         end: HirExpr,
         inclusive: bool,
+        reversed: bool,
         adapters: &[LoopAdapter],
         body: &[Stmt],
         span: Span,
@@ -258,6 +259,7 @@ impl Lowerer {
                 start,
                 end,
                 inclusive,
+                reversed,
                 body: loop_body,
                 span,
             };

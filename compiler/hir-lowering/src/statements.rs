@@ -165,6 +165,7 @@ impl Lowerer {
                 start,
                 end,
                 inclusive,
+                reversed,
                 adapters,
                 body,
                 span,
@@ -174,7 +175,8 @@ impl Lowerer {
                 let iter_ty = start.ty.clone();
                 if !adapters.is_empty() {
                     return self.lower_adapted_for_range(
-                        label, index, iterator, start, end, *inclusive, adapters, body, *span,
+                        label, index, iterator, start, end, *inclusive, *reversed, adapters, body,
+                        *span,
                     );
                 }
                 let index_name = index.as_ref().map(|i| i.name.clone());
@@ -192,6 +194,7 @@ impl Lowerer {
                     start,
                     end,
                     inclusive: *inclusive,
+                    reversed: *reversed,
                     body,
                     span: *span,
                 })

@@ -1178,7 +1178,7 @@ Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
 - Implemented: static tensor types `Tensor<f32, [3, 3]>`, literal coercion, the
   construction helpers, tensor ownership, and in-place compound assignment
   (see [Tensor Types](#tensor-types))
-- Implemented: slicing and indexing `t[i, j]` / `t[1..3, ..]`
+- Implemented: slicing and indexing `t[i, j]` / `t[1..3, ..]` / `t[(0..n).rev()]`
   (see [Slicing and indexing](#slicing-and-indexing))
 - Implemented: shape generics and constraints, `func f<M, K>(t: &Tensor<f32, [M, K]>)`
   (see [Shape generics](#shape-generics))
@@ -1747,10 +1747,25 @@ is what lets a loop walk a tensor. A **range bound** must fold to a compile-time
 the extent it produces is part of the result's type, and a type cannot wait for a value.
 `t[0..k]` with a `mut k` is therefore a compile error naming that rule.
 
-A constant position outside its axis, a reversed range, and a range reaching past the
-extent are all compile errors. A run-time position is bounds-checked on the debug tier,
+A constant position outside its axis, a range whose start is past its end, and a range
+reaching past the extent are all compile errors. A run-time position is bounds-checked on the debug tier,
 the same tier an array index sits on: it panics in a debug build and the check is omitted
 under `-O 1` and above.
+
+A range argument may wear `.rev()`, which reads that axis back to front. Only the order
+changes: the surviving extent is the range's either way, and a sub-range reverses within
+its own bounds rather than the axis's.
+
+```neuro
+val samples: Tensor<i32, [5]> = [10, 20, 30, 40, 50]
+
+val newest: Tensor<i32, [5]> = samples[(0..5).rev()]   // 50, 40, 30, 20, 10
+val middle: Tensor<i32, [3]> = samples[(1..4).rev()]   // 40, 30, 20
+```
+
+Each axis decides its own direction, so `m[(0..2).rev(), ..]` flips the rows and leaves
+each row's own order alone. The same `.rev()` reverses a `for` range; see
+[Iterating Backwards](control-flow.md#iterating-backwards-rev).
 
 A slice is a **fresh owned tensor holding a copy**, not a view into the source. A tensor
 owns its buffer and releases it through its own DLPack deleter, so two tensors never share
@@ -2049,9 +2064,9 @@ A tensor can be built, bound, moved, cloned, passed, returned, transferred with
 `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`, and reduced with
 `.sum()` / `.mean()` / `.max()` / `.min()`. What is still
 later work is writing through an index (`t[i, j] = v`), by-value tensor arithmetic
-(`a + b`, `a @ b`), the functional `.reduce(init, |acc, x| ...)`, and the step and reverse index forms
-(`t[(0..n).step(2)]`, `t[(0..n).rev()]`), which wait on `.step(n)` / `.rev()` existing on
-ranges at all. A dynamic `?` axis is accepted, but only as a widening: nothing that needs
+(`a + b`, `a @ b`), the functional `.reduce(init, |acc, x| ...)`, and the step index form
+(`t[(0..n).step(2)]`), which waits on `.step(n)` existing on ranges at all. The reverse
+form `t[(0..n).rev()]` is implemented. A dynamic `?` axis is accepted, but only as a widening: nothing that needs
 an extent works on one, and there is no run-time shape check that would let a `?` be
 narrowed back to a literal. Symbolic
 extents are accepted on functions: a shape-generic struct, enum, or `impl` block is

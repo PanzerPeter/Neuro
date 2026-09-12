@@ -170,12 +170,15 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let elem_llvm = self.get_any_llvm_type(element)?;
 
-        // The surviving axes, paired with the source stride each one steps by.
-        let kept: Vec<usize> = axes
+        // The surviving axes, paired with the source stride each one steps by and whether
+        // `.rev()` reads that axis back to front.
+        let kept: Vec<(usize, bool)> = axes
             .iter()
             .enumerate()
-            .filter(|(_, index)| matches!(index, HirTensorAxis::Range { .. }))
-            .map(|(axis, _)| strides[axis])
+            .filter_map(|(axis, index)| match index {
+                HirTensorAxis::Range { reversed, .. } => Some((strides[axis], *reversed)),
+                HirTensorAxis::Position(_) => None,
+            })
             .collect();
         let result_strides = row_major_strides(result_shape);
         let count: usize = result_shape.iter().product();
@@ -212,9 +215,22 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(body);
         let mut source_index = base;
-        for (position, (extent, source_stride)) in result_shape.iter().zip(kept.iter()).enumerate()
+        for (position, (extent, (source_stride, reversed))) in
+            result_shape.iter().zip(kept.iter()).enumerate()
         {
             let coordinate = self.slice_coordinate(i, result_strides[position], *extent)?;
+            // A reversed axis reads the same sub-range in the opposite order, so the
+            // result's coordinate `c` names the source's `extent - 1 - c`. The base
+            // offset already carries the range's start, so the reflection is about the
+            // extent alone.
+            let coordinate = match reversed {
+                true => self.builder.build_int_sub(
+                    i64_type.const_int((*extent as u64).saturating_sub(1), false),
+                    coordinate,
+                    "tensor.slice.rev",
+                )?,
+                false => coordinate,
+            };
             let stepped = self.builder.build_int_mul(
                 coordinate,
                 i64_type.const_int(*source_stride as u64, false),

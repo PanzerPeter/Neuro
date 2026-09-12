@@ -83,12 +83,14 @@ walkers.
   as a `.slice` / `.char_slice` argument, and semantic analysis rejects it elsewhere. `for`-range
   loops keep their bounds on `Stmt::ForRange` and never produce it.
 - `Expr::TensorIndex { object, indices, span }` is the tensor index `t[i, j]` / `t[1..3, ..]`,
-  one `TensorIndexArg` per axis: `Position(Expr)`, `Range { start, end, inclusive }`,
+  one `TensorIndexArg` per axis: `Position(Expr)`, `Range { start, end, inclusive, reversed }`,
   or `FullAxis`. It is a node of its own rather than a widened `Expr::Index` because no other
   indexable type accepts more than one argument or a range, so the parser can tell the two
   apart with no types: a bracket holding one plain expression stays `Expr::Index` and
   everything else becomes this. `TensorIndexArg::Range` spells its bounds out instead of
-  holding an `Expr::Range`, since neither a range nor a bare `..` is a value here.
+  holding an `Expr::Range`, since neither a range nor a bare `..` is a value here. `reversed`
+  is `t[(a..b).rev()]`: the same surviving extent, read back to front, so only a backend's
+  traversal order depends on it.
 - `Type::Slice { element, span }` is `[T]`, the unsized run behind `&[T]` / `&mut [T]`. It shares
   its opening bracket with `Type::Array`, and the `;` (or its absence before `]`) is what the
   parser selects on. Like `Type::DynTrait` it is valid only as a reference referent; semantic
@@ -110,6 +112,10 @@ walkers.
   loop node rather than an adapter expression because there is no iterator protocol to return one
   from, and because a range has no value form to call a method on. Both walkers that bind loop
   variables must bind this one too, or a closure in the body captures it as a free variable.
+  `Stmt::ForRange` additionally carries `reversed: bool`, the `.rev()` head form: the same
+  bounds walked from the last value down to `start`. It is a flag on the range rather than a
+  `LoopAdapter` because it reorders the bounds themselves, not the element stream an adapter
+  sees, which is also why it sits beneath both `index` and `adapters`.
 - The same two nodes carry `adapters: Vec<LoopAdapter>`: the `.map(f)` / `.filter(p)` chain the
   head wore, in source order, each holding a `LoopAdapterKind` and the single `callee` expression.
   They ride on the loop node for the same reason `index` does: a range has no receiver to resolve

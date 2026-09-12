@@ -90,6 +90,7 @@ operators/operator_overloading.nr 24
 control_flow/control_flow.nr          31
 control_flow/for_enumerate.nr         56
 control_flow/for_range.nr             10
+control_flow/for_range_rev.nr         0
 control_flow/for_range_inclusive.nr   15
 control_flow/if_block_expressions.nr  149
 control_flow/iterator_protocol.nr     79
@@ -142,6 +143,7 @@ showcase/num_algorithms.nr  33
 showcase/optimizer_step.nr  32
 showcase/perceptron.nr      8
 showcase/ranked_finish.nr   176
+showcase/replay_buffer.nr   79
 showcase/render_settings.nr 99
 showcase/running_stats.nr   5
 showcase/sample_audit.nr    177

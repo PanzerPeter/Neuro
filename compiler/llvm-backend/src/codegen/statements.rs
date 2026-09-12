@@ -21,6 +21,8 @@ pub(crate) struct ForRangeHead<'a> {
     pub(crate) start: &'a HirExpr,
     pub(crate) end: &'a HirExpr,
     pub(crate) inclusive: bool,
+    /// `.rev()`: the same bounds walked from the last value down to `start`.
+    pub(crate) reversed: bool,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -508,6 +510,33 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
+    /// The value a reversed range's binding is mirrored around: `start + last`, where
+    /// `last` is the greatest value the range names.
+    ///
+    /// Subtracting the ascending induction variable from it yields `last` on the first
+    /// iteration and `start` on the final one. Both the sum and the subtraction wrap, and
+    /// wrapping is exactly right: every value the loop yields lies inside the element
+    /// type, so the arithmetic is correct modulo its width even when `start + last` is
+    /// not representable.
+    fn reversed_range_origin(
+        &self,
+        start: BasicValueEnum<'ctx>,
+        end: BasicValueEnum<'ctx>,
+        inclusive: bool,
+    ) -> CodegenResult<inkwell::values::IntValue<'ctx>> {
+        let end = end.into_int_value();
+        let last = match inclusive {
+            true => end,
+            false => self
+                .builder
+                .build_int_sub(end, end.get_type().const_int(1, false), "for.rev.last")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?,
+        };
+        self.builder
+            .build_int_add(start.into_int_value(), last, "for.rev.origin")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+    }
+
     /// Generate code for a for-range statement (`for i in start..end { ... }`).
     pub(crate) fn codegen_for_range(
         &mut self,
@@ -521,6 +550,7 @@ impl<'ctx> CodegenContext<'ctx> {
             start,
             end,
             inclusive,
+            reversed,
         } = head;
         let parent_fn = self
             .current_function
@@ -539,6 +569,24 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| {
                 CodegenError::LlvmError(format!("failed to initialize iterator: {}", e))
             })?;
+
+        // A reversed range keeps the ASCENDING induction variable and mirrors it onto the
+        // binding at the top of the body. Counting down in the binding itself would step
+        // past `start` to terminate, and on an unsigned range starting at zero that step
+        // wraps instead: `for i in (0..n).rev()` would never leave the loop.
+        let induction_alloca = match reversed {
+            true => {
+                let slot = self.entry_alloca(start_val.get_type(), "for.rev.k")?;
+                self.builder.build_store(slot, start_val).map_err(|e| {
+                    CodegenError::LlvmError(format!("failed to initialize iterator: {}", e))
+                })?;
+                slot
+            }
+            false => iter_alloca,
+        };
+        let mirror_origin = reversed
+            .then(|| self.reversed_range_origin(start_val, end_val, inclusive))
+            .transpose()?;
 
         let previous_var = self.variables.insert(iter_name.clone(), iter_alloca);
         let previous_var_type = self
@@ -574,8 +622,11 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         self.builder.position_at_end(cond_bb);
-        let iter_val = self.codegen_identifier(&iter_name)?;
-        let iter_int = iter_val.into_int_value();
+        let iter_int = self
+            .builder
+            .build_load(start_val.get_type(), induction_alloca, "for.cur")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_int_value();
         let end_int = end_val.into_int_value();
 
         let cmp_predicate = match (TypeMapper::is_unsigned_int(&iter_sem_ty), inclusive) {
@@ -598,6 +649,15 @@ impl<'ctx> CodegenContext<'ctx> {
             })?;
 
         self.builder.position_at_end(body_bb);
+        if let Some(origin) = mirror_origin {
+            let mirrored = self
+                .builder
+                .build_int_sub(origin, iter_int, "for.rev.cur")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder
+                .build_store(iter_alloca, mirrored)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        }
         if let Some(slot) = position_alloca {
             let position = self
                 .builder
@@ -640,14 +700,18 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         self.builder.position_at_end(step_bb);
-        let current_iter = self.codegen_identifier(&iter_name)?.into_int_value();
+        let current_iter = self
+            .builder
+            .build_load(start_val.get_type(), induction_alloca, "for.cur")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_int_value();
         let one = current_iter.get_type().const_int(1, false);
         let next_iter = self
             .builder
             .build_int_add(current_iter, one, "for.next")
             .map_err(|e| CodegenError::LlvmError(format!("failed to increment iterator: {}", e)))?;
         self.builder
-            .build_store(iter_alloca, next_iter)
+            .build_store(induction_alloca, next_iter)
             .map_err(|e| {
                 CodegenError::LlvmError(format!("failed to store incremented iterator: {}", e))
             })?;
@@ -730,6 +794,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 start,
                 end,
                 inclusive,
+                reversed,
                 body,
                 ..
             } => self.codegen_for_range(
@@ -740,6 +805,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     start,
                     end,
                     inclusive: *inclusive,
+                    reversed: *reversed,
                 },
                 body,
             ),

@@ -1,0 +1,7 @@
+episode            = 2 .. 12  (sum 42)
+replay[0]          = 12   (episode[0] still 2)
+tail newest-first  = 12 10 8
+weighted replay    = 182
+even frames        = 4 2 0 
+first below six    = index 5
+answer             = 79

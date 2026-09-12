@@ -89,6 +89,10 @@ pub enum Stmt {
     ///
     /// `adapters` are the `.map(f)` / `.filter(p)` calls the head wore, in source
     /// order; empty for a bare range.
+    ///
+    /// `reversed` is the `.rev()` head form: the same bounds, walked from the last
+    /// value down to `start`. It decorates the range itself rather than the element
+    /// stream, so it sits beneath every adapter in `adapters` and beneath `index`.
     ForRange {
         label: Option<Identifier>,
         index: Option<Identifier>,
@@ -96,6 +100,7 @@ pub enum Stmt {
         start: Expr,
         end: Expr,
         inclusive: bool,
+        reversed: bool,
         adapters: Vec<LoopAdapter>,
         body: Vec<Stmt>,
         span: Span,

@@ -170,7 +170,7 @@ impl Parser {
             // No range operator follows, so the whole iterable is already parsed:
             // either a sequence expression or a parenthesised range, each possibly
             // wearing an adapter chain.
-            let (iterable, adapters, enumerated) = strip_adapters(start)?;
+            let (iterable, adapters, enumerated, reversed) = strip_adapters(start)?;
             // `.char_indices()` binds its own position, so a chain around one would have
             // two sources for a single binding, and an adapter that drops or replaces
             // elements would leave the offsets naming text no longer being yielded.
@@ -206,6 +206,7 @@ impl Parser {
                     start: *start,
                     end: *end,
                     inclusive,
+                    reversed,
                     adapters,
                     body,
                     span,
@@ -243,6 +244,7 @@ impl Parser {
             start,
             end,
             inclusive,
+            reversed: false,
             adapters: Vec::new(),
             body,
             span: start_span.merge(end_span),
@@ -434,15 +436,20 @@ const CHAR_INDICES_METHOD: &str = "char_indices";
 const MAP_METHOD: &str = "map";
 /// The element-dropping adapter.
 const FILTER_METHOD: &str = "filter";
+/// The range-only adapter that walks the bounds from the top down.
+const REV_METHOD: &str = "rev";
 
 /// Split the whole adapter chain off a `for` loop's iterable: an outermost
-/// `.enumerate()`, then any number of `.map(f)` / `.filter(p)` calls beneath it.
+/// `.enumerate()`, then any number of `.map(f)` / `.filter(p)` calls, then an
+/// innermost `.rev()`.
 ///
 /// Returns the base iterable, the adapters in SOURCE order (the peel runs
-/// outside-in, so the collected list is reversed), and whether the head was
-/// enumerated. `.enumerate()` is recognised only at the outermost position: it
-/// yields pairs, and no adapter beneath one could be given a single element.
-fn strip_adapters(iterable: Expr) -> ParseResult<(Expr, Vec<LoopAdapter>, bool)> {
+/// outside-in, so the collected list is reversed), whether the head was
+/// enumerated, and whether it was reversed. `.enumerate()` is recognised only at the
+/// outermost position: it yields pairs, and no adapter beneath one could be given a
+/// single element. `.rev()` is recognised only at the innermost position, because it
+/// reorders a range's own bounds rather than the element stream an adapter sees.
+fn strip_adapters(iterable: Expr) -> ParseResult<(Expr, Vec<LoopAdapter>, bool, bool)> {
     let (mut current, enumerated) = strip_enumerate(iterable)?;
     let mut adapters = Vec::new();
     loop {
@@ -453,10 +460,43 @@ fn strip_adapters(iterable: Expr) -> ParseResult<(Expr, Vec<LoopAdapter>, bool)>
             }
             Peeled::Base(expr) => {
                 adapters.reverse();
-                return Ok((expr, adapters, enumerated));
+                let (base, reversed) = strip_rev(expr)?;
+                return Ok((base, adapters, enumerated, reversed));
             }
         }
     }
+}
+
+/// Split a trailing `.rev()` off the base iterable, returning the receiver and
+/// whether the adapter was there.
+///
+/// A receiver that is not a range is rejected here rather than left to fail later as
+/// an unresolved method: `.rev()` is specified on ranges only, and the alternative
+/// diagnostic names a method the language does not define on that type.
+fn strip_rev(iterable: Expr) -> ParseResult<(Expr, bool)> {
+    let Expr::Call {
+        func, args, span, ..
+    } = &iterable
+    else {
+        return Ok((iterable, false));
+    };
+    let Expr::FieldAccess { object, field, .. } = func.as_ref() else {
+        return Ok((iterable, false));
+    };
+    if field.name != REV_METHOD {
+        return Ok((iterable, false));
+    }
+    if !args.is_empty() {
+        return Err(ParseError::AdapterTakesNoArguments {
+            adapter: field.name.clone(),
+            span: *span,
+        });
+    }
+    let receiver = unwrap_paren(object.as_ref().clone());
+    if !matches!(receiver, Expr::Range { .. }) {
+        return Err(ParseError::RevOnNonRange { span: *span });
+    }
+    Ok((receiver, true))
 }
 
 /// One step of the adapter peel: either an adapter and the receiver under it, or
@@ -515,7 +555,10 @@ fn strip_enumerate(iterable: Expr) -> ParseResult<(Expr, bool)> {
         return Ok((iterable, false));
     }
     if !args.is_empty() {
-        return Err(ParseError::EnumerateTakesNoArguments { span: *span });
+        return Err(ParseError::AdapterTakesNoArguments {
+            adapter: field.name.clone(),
+            span: *span,
+        });
     }
     Ok((object.as_ref().clone(), true))
 }
@@ -726,12 +769,81 @@ mod tests {
     fn enumerate_with_arguments_is_rejected() {
         assert!(matches!(
             parse_err("func main() -> i32 { for (i, x) in xs.enumerate(2) { }\n 0 }"),
-            ParseError::EnumerateTakesNoArguments { .. }
+            ParseError::AdapterTakesNoArguments { .. }
         ));
     }
 
     /// The second pair-yielding head. Unlike `.enumerate()` the call stays in the tree:
     /// it is an intrinsic on the receiver, resolved by the passes downstream.
+    /// `.rev()` is peeled off the range the way `.enumerate()` is, so no pass
+    /// downstream meets a method call on a value ranges do not have.
+    #[test]
+    fn a_reversed_range_stays_a_range_loop() {
+        let Stmt::ForRange {
+            reversed,
+            inclusive,
+            ..
+        } = first_stmt("func main() -> i32 { for i in (0..4).rev() { }\n 0 }")
+        else {
+            panic!("expected a for-range");
+        };
+        assert!(reversed);
+        assert!(!inclusive);
+    }
+
+    #[test]
+    fn an_unreversed_range_is_not_marked() {
+        let Stmt::ForRange { reversed, .. } =
+            first_stmt("func main() -> i32 { for i in 0..4 { }\n 0 }")
+        else {
+            panic!("expected a for-range");
+        };
+        assert!(!reversed);
+    }
+
+    /// `.rev()` reorders the range's own bounds, so it sits beneath every adapter and
+    /// beneath `.enumerate()`, and all three survive one head together.
+    #[test]
+    fn rev_composes_with_enumerate_and_adapters() {
+        let stmt = first_stmt(
+            "func main() -> i32 { for (i, v) in (0..9).rev().filter(p).enumerate() { }\n 0 }",
+        );
+        let Stmt::ForRange {
+            reversed,
+            index,
+            adapters,
+            ..
+        } = stmt
+        else {
+            panic!("expected a for-range");
+        };
+        assert!(reversed);
+        assert_eq!(index.map(|i| i.name), Some("i".to_string()));
+        assert_eq!(adapters.len(), 1);
+    }
+
+    /// `.rev()` is a range form only. Left to fall through it would be reported as a
+    /// missing method, which names a construct the language does not define.
+    #[test]
+    fn rev_on_a_non_range_head_is_rejected() {
+        assert!(matches!(
+            parse_err("func main() -> i32 { for x in xs.rev() { }\n 0 }"),
+            ParseError::RevOnNonRange { .. }
+        ));
+        assert!(matches!(
+            parse_err("func main() -> i32 { for x in (0..4).map(f).rev() { }\n 0 }"),
+            ParseError::RevOnNonRange { .. }
+        ));
+    }
+
+    #[test]
+    fn rev_with_arguments_is_rejected() {
+        assert!(matches!(
+            parse_err("func main() -> i32 { for x in (0..4).rev(2) { }\n 0 }"),
+            ParseError::AdapterTakesNoArguments { adapter, .. } if adapter == "rev"
+        ));
+    }
+
     #[test]
     fn char_indices_binds_a_pair_and_keeps_its_call() {
         let stmt = first_stmt("func main() -> i32 { for (o, c) in s.char_indices() { }\n 0 }");

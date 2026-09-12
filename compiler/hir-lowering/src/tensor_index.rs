@@ -53,7 +53,7 @@ impl Lowerer {
         let extents = crate::static_extents(&shape)?;
         for (position, (index, extent)) in indices.iter().zip(extents.iter()).enumerate() {
             let axis = self.lower_tensor_axis(index, *extent)?;
-            if let HirTensorAxis::Range { start, end } = &axis {
+            if let HirTensorAxis::Range { start, end, .. } = &axis {
                 kept.push(end - start);
                 kept_names.push(names.0.get(position).cloned().flatten());
             }
@@ -88,6 +88,7 @@ impl Lowerer {
             TensorIndexArg::FullAxis(_) => Ok(HirTensorAxis::Range {
                 start: 0,
                 end: extent,
+                reversed: false,
             }),
             TensorIndexArg::Position(expr) => {
                 Ok(HirTensorAxis::Position(self.lower_expr(expr, None)?))
@@ -96,13 +97,18 @@ impl Lowerer {
                 start,
                 end,
                 inclusive,
+                reversed,
                 ..
             } => {
                 let start = const_int(start)?;
                 let end = const_int(end)?;
                 // An inclusive range names its last position, so it stops one further on.
                 let end = if *inclusive { end + 1 } else { end };
-                Ok(HirTensorAxis::Range { start, end })
+                Ok(HirTensorAxis::Range {
+                    start,
+                    end,
+                    reversed: *reversed,
+                })
             }
         }
     }

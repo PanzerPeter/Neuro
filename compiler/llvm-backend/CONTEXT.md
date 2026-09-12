@@ -611,6 +611,16 @@ than a position. The slot is never the induction variable itself even where the 
 `mem2reg` erases the copy, and aliasing a slot the loop steps would make a future edit silently
 wrong.
 
+`codegen_for_range` takes a `reversed` flag for `.rev()` and keeps its ASCENDING induction
+variable, mirroring it onto the user's binding at the top of the body (`start + last - k`).
+Counting the binding down instead would have to step below `start` to terminate, and on an
+unsigned range starting at zero that step wraps to the top of the type: the loop would never
+exit. Both the mirror's sum and its subtraction wrap, which is correct: every value yielded
+lies inside the element type, so the arithmetic is exact modulo its width. A reversed slice
+axis is the same reflection one level down: `copy_tensor_slice` maps result coordinate `c` to
+source `extent - 1 - c`, about the range's own extent, since the base offset already carries
+its start.
+
 ## Integer Overflow ABI
 Integer `+` / `-` / `*` and unary `-` honor the overflow rule, keyed off
 `OptimizationLevelSetting`:

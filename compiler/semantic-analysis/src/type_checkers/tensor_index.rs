@@ -106,6 +106,7 @@ impl TypeChecker {
                 end,
                 inclusive,
                 span,
+                ..
             } => self.resolve_range(start, end, *inclusive, axis, extent, *span),
         }
     }
