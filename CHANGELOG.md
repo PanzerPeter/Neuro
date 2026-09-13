@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `examples`: `showcase/named_axes.nr` now calls `.permute(...)` and `.reshape(...)`. Its
+  header comment already claimed `.permute`, but no line in the program used it, and neither
+  method appeared in any showcase: both shipped in 2B's shape-manipulation item exercised
+  only by their own example and test file, never in combination with other features. The
+  program keeps its exit code; the two new values are asserted through its golden `.out`.
+
+### Fixed
+
+- `docs`: `compiler/syntax-parsing/CONTEXT.md` documented `parse()` as the slice's only
+  public function. `parse_expr()` is public too and has been since the Pratt parser landed,
+  so the contract file understated the public surface it exists to record. It is now listed,
+  with the reason it is public (`tests/error_tests.rs` asserts on errors from bare expression
+  fragments) and the note that no slice or driver calls it.
+
 
 ## [2.26.2] - 2026-09-13
 

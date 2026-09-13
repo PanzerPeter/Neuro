@@ -3,7 +3,8 @@
 // This is an integration example: it exercises several features *together*
 // rather than in isolation:
 //   named tensor dimensions · shape manipulation (`.t()` / `.permute(...)` /
-//   `.flatten(...)`), which names those dimensions rather than counting axes ·
+//   `.reshape(...)` / `.flatten(...)`), which names those dimensions rather than
+//   counting axes ·
 //   structs holding tensor fields · a trait with an `impl` per layer kind ·
 //   shape-generic functions whose extents are inferred from the argument ·
 //   tensor slicing, which keeps the surviving axis's name · in-place `+=` on a
@@ -134,6 +135,20 @@ func main() -> i32 {
     val transposed: Tensor<i32, [hidden: 2, embed: 4]> = projection.weights.clone().t()
     val hidden_row: Tensor<i32, [embed: 4]> = transposed[1, ..]
     println("transposed projection row 1 sum   = {row_sum(&hidden_row):>4}")
+
+    // `.permute` reads as the rearrangement it performs: the axes are named, so
+    // putting `seq` first is checked against the names rather than against three
+    // anonymous positions. The extents travel with their names.
+    val by_seq: Tensor<i32, [seq: 3, batch: 2, embed: 4]> =
+        batch.clone().permute([seq, batch, embed])
+    val seq_token: Tensor<i32, [embed: 4]> = by_seq[2, 1, ..]
+    println("permuted token sum                = {row_sum(&seq_token):>4}")
+
+    // `.reshape` re-describes the same buffer rather than allocating: the two
+    // named projection axes collapse into one run of 8, and `-1` takes whatever
+    // extent is left over.
+    val weights_flat: Tensor<i32, [8]> = projection.weights.clone().reshape([-1])
+    println("projection weights flattened      = {row_sum(&weights_flat):>4}")
 
     // Merging `seq` and `embed` leaves `[batch: 2, 12]`, so one batch row is every
     // token it holds laid end to end.

@@ -8,6 +8,12 @@ Transform a Neuro token stream into a typed Abstract Syntax Tree for later compi
 - Input: `source: &str`
 - Output: `Result<Vec<Item>, ParseError>`
 
+`parse_expr(source: &str) -> Result<Expr, ParseError>` is also public. It is not a second
+pipeline entry point: no slice and no driver calls it. It exists so `tests/error_tests.rs`
+can drive the Pratt parser over a bare expression and assert on the `ParseError` a fragment
+produces, which `parse()` cannot express because every fragment would first have to be
+wrapped in an item.
+
 ## Shared Kernel
 - ast-types: owns the AST node definitions, so semantic-analysis and the backends consume the
   tree without depending on this slice
