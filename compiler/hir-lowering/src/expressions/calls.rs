@@ -439,6 +439,14 @@ impl Lowerer {
             return self.lower_tensor_reduce(object, method, args, span);
         }
 
+        // A selection reads its receiver too, and its arguments are never lowered as
+        // values: `.topk(k: 5, axis: classes)` names a width and an axis, not variables.
+        if crate::tensor_sort::is_sort_method(method)
+            && matches!(recv.referent(), HirType::Tensor { .. })
+        {
+            return self.lower_tensor_sort(object, method, args, span);
+        }
+
         let (lowered_args, result_ty) = if let HirType::Struct(struct_name) = recv.referent() {
             let struct_name = struct_name.clone();
             if let Some(mangled) = self

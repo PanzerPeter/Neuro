@@ -352,6 +352,30 @@ pub enum TypeError {
     #[error("`.{method}()` at {span:?} reduces over no elements, so it has no value to produce; reduce a tensor whose reduced axis is non-empty")]
     TensorReduceEmpty { method: String, span: Span },
 
+    #[error("`.{method}()` at {span:?} orders a tensor's elements, which requires an integer or `f32`/`f64` element type; this tensor holds {element}")]
+    TensorSortElementType {
+        method: String,
+        element: Type,
+        span: Span,
+    },
+
+    #[error("`.{method}()` at {span:?} orders one axis of a tensor, and a rank-0 tensor has none; order a tensor with at least one axis")]
+    TensorSortRankZero { method: String, span: Span },
+
+    #[error("`.{method}()` at {span:?} orders an axis with no elements, so there is no ordering to produce; order a tensor whose sorted axis is non-empty")]
+    TensorSortEmpty { method: String, span: Span },
+
+    #[error("the `{label}:` argument of `.{method}()` at {span:?} has to be a constant, because it decides the result's shape and the comparator before any element is read; write it as a literal, e.g. `{example}`")]
+    TensorSortArgNotConstant {
+        method: String,
+        label: String,
+        example: String,
+        span: Span,
+    },
+
+    #[error("`.topk(k: {k})` at {span:?} selects more elements than the sorted axis holds, which is {extent}; ask for between 1 and {extent}")]
+    TensorTopKOutOfRange { k: usize, extent: usize, span: Span },
+
     #[error("`Tensor::{ctor}` at {span:?} does not apply to {ty}: {reason}")]
     TensorConstructorNotApplicable {
         ctor: String,

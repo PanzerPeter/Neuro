@@ -26,13 +26,25 @@ Reads and rewrites the AST it is handed; touches no files.
   entries spelled with their labels in the specification but constructed by the compiler
   rather than declared in the prelude: the associated function
   `Tensor::random_normal(mean:, std:)`, and the labelled builtin *methods*
-  `tensor.flatten(dims:)` and the four tensor reductions
-  `.sum(axis:)` / `.mean(axis:)` / `.max(axis:)` / `.min(axis:)`. Seeding first means a program declaring its own
+  `tensor.flatten(dims:)`, the four tensor reductions
+  `.sum(axis:)` / `.mean(axis:)` / `.max(axis:)` / `.min(axis:)`, and the three order-based
+  selections `.sort(axis:, descending:)` / `.argsort(axis:, descending:)` / `.topk(k:, axis:)`.
+  Seeding first means a program declaring its own
   `Tensor` overwrites the associated entry instead of competing with it. The methods are seeded
   through `record_method` rather than inserted, so a program whose own `flatten` or `min`
   names its parameters differently is reported as the ambiguity it is instead of silently
-  binding against the builtin. Every label here is optional, so `.flatten()`, `t.sum()` and a
-  fully positional `random_normal(0.0f32, 0.02f32)` pass through untouched.
+  binding against the builtin. Every label here is optional except `.topk`'s `k:`, so
+  `.flatten()`, `t.sum()` and a fully positional `random_normal(0.0f32, 0.02f32)` pass through
+  untouched.
+- **A seeded builtin parameter may carry a default, which is the only reason a labelled call
+  can be shorter than its signature.** `ParamBinding::default` holds the expression bound when
+  a call leaves that parameter out, and `bind` fills every unfilled slot from it before the
+  permuted arguments are written back, so the type checker sees the complete argument list in
+  declaration order and never has to rediscover which label was written. Only the seeded
+  builtins have one: the language has no default-argument syntax, so a declared function's
+  parameters are all `default: None` and a labelled call to one still has to supply every
+  argument. A filled-in default is a constant the specification writes, so such a call is
+  never hoisted — there is no effect to order it against.
 - **Permuting the arguments also permutes when they are evaluated, so a call that would
   notice is rewritten instead** (`hoisting.rs`). Every later stage evaluates an argument
   where it finds it, so a bare permutation ran `f(second: b(), first: a())` as `a()` then

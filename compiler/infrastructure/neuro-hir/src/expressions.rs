@@ -206,6 +206,22 @@ pub enum HirExprKind {
         op: HirReduceOp,
         axis: Option<usize>,
     },
+    /// An order-based selection over one tensor axis: `.sort()`, `.argsort()`, `.topk()`.
+    ///
+    /// The three are one node because they differ only in what they write out of the
+    /// same per-axis ordering: the reordered elements, the ordering itself, or the
+    /// leading `k` of both. `axis` is always resolved to a concrete axis (the last one
+    /// when the call names none) and `descending` is a compile-time choice, because the
+    /// comparator a backend emits has to be picked before any element is read.
+    ///
+    /// The receiver is READ, not consumed: the result is freshly allocated, so the
+    /// tensor whose order is being taken stays alive and usable.
+    TensorSort {
+        receiver: Box<HirExpr>,
+        kind: HirSortKind,
+        axis: usize,
+        descending: bool,
+    },
     /// Tuple literal `(e0, e1, ...)`. The element types live on the elements;
     /// this expression's `ty` is the [`HirType::Tuple`] of them.
     TupleLiteral {
@@ -367,4 +383,18 @@ pub enum HirReduceOp {
     Mean,
     Max,
     Min,
+}
+
+/// What a [`HirExprKind::TensorSort`] writes out of the ordering it computes.
+///
+/// The expression's own `ty` carries the result shape, which is the receiver's for the
+/// first two and the receiver's with the sorted axis cut to `k` for the third.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HirSortKind {
+    /// `.sort()`: the elements in order.
+    Values,
+    /// `.argsort()`: the receiver indices that put the elements in order, as `i32`.
+    Indices,
+    /// `.topk(k:)`: the leading `k` elements and their indices, as a two-element tuple.
+    TopK(usize),
 }

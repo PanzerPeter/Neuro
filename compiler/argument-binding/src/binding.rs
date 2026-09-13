@@ -65,10 +65,13 @@ pub(crate) fn bind(
         }
     }
 
-    // A permutation needs one argument per parameter. Reporting the mismatch here rather
-    // than deferring to the type checker keeps the failure on the call that caused it:
-    // this pass returns before type checking runs at all.
-    if args.len() != sig.params.len() {
+    // A permutation needs one argument per parameter, unless the callee is one of the
+    // builtins whose omitted parameters have a specified default: those are filled in
+    // below and only a surplus is a count error. Reporting the mismatch here rather than
+    // deferring to the type checker keeps the failure on the call that caused it: this
+    // pass returns before type checking runs at all.
+    let defaulted = sig.has_defaults();
+    if args.len() > sig.params.len() || (args.len() != sig.params.len() && !defaulted) {
         return Err(ArgumentError::ArgumentCountMismatch {
             callee: callee.to_string(),
             expected: sig.params.len(),
@@ -120,20 +123,25 @@ pub(crate) fn bind(
         slots[target] = Some(index);
     }
 
-    // Equal counts plus distinct targets fill every slot; an unfilled one means a
-    // parameter went unmentioned while some other took two names, and naming it is more
-    // useful than the count.
+    // Equal counts plus distinct targets fill every slot; an unfilled one is the caller's
+    // omission, which the parameter's own default covers when it has one and is otherwise
+    // a parameter that went unmentioned while some other took two names. Naming it is
+    // more useful than the count.
     let mut order = Vec::with_capacity(slots.len());
+    let mut defaults = Vec::new();
     for (index, slot) in slots.iter().enumerate() {
         match slot {
             Some(from) => order.push(*from),
-            None => {
-                return Err(ArgumentError::MissingArgumentLabel {
-                    callee: callee.to_string(),
-                    label: sig.params[index].name.clone().unwrap_or_default(),
-                    span,
-                })
-            }
+            None => match &sig.params[index].default {
+                Some(default) => defaults.push((index, default.clone())),
+                None => {
+                    return Err(ArgumentError::MissingArgumentLabel {
+                        callee: callee.to_string(),
+                        label: sig.params[index].name.clone().unwrap_or_default(),
+                        span,
+                    })
+                }
+            },
         }
     }
 
@@ -141,7 +149,13 @@ pub(crate) fn bind(
     // every later stage evaluates them where it finds them. That is invisible while the
     // arguments only read values; when one of them carries an effect, the call is
     // rewritten instead into a block that runs them in the order they were written.
-    if hoisting::reorders_effects(&order, args) && hoisting::callee_allows_hoisting(func) {
+    //
+    // A call with a filled-in default is never hoisted: a default is a constant the
+    // specification writes, so it carries no effect to order against anything.
+    if defaults.is_empty()
+        && hoisting::reorders_effects(&order, args)
+        && hoisting::callee_allows_hoisting(func)
+    {
         hoisting::hoist(call, &order, sig);
         return Ok(Bound::Hoisted);
     }
@@ -150,6 +164,13 @@ pub(crate) fn bind(
     for from in order {
         if let Some(arg) = taken.get_mut(from).and_then(Option::take) {
             args.push(arg);
+        }
+    }
+    // The slots the caller filled were collected in declaration order, so a default
+    // belongs at its own declaration index once they are in place.
+    for (index, default) in defaults {
+        if index <= args.len() {
+            args.insert(index, default);
         }
     }
     labels.clear();

@@ -24,7 +24,8 @@ expression already carries the type the checker resolved for it.
   coercion, the construction helpers, the ownership surface (`.clone()`, `.to(device)`),
   in-place compound assignment (`w -= g`), shape manipulation
   (`.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`), reductions
-  (`.sum()` / `.mean()` / `.max()` / `.min()`), shape generics
+  (`.sum()` / `.mean()` / `.max()` / `.min()`), sorting and selection
+  (`.sort()` / `.argsort()` / `.topk(k:)`), shape generics
   `Tensor<f32, [M, K]>`, and dynamic axes `Tensor<f32, [?, 784]>`
 
 ## Primitive Types
@@ -1190,6 +1191,8 @@ Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
   (see [Dynamic shapes](#dynamic-shapes))
 - Implemented: reductions `.sum()` / `.mean()` / `.max()` / `.min()`, whole-tensor and
   along an axis (see [Reductions](#reductions))
+- Implemented: sorting and selection `.sort()` / `.argsort()` / `.topk(k:)`
+  (see [Sorting and selection](#sorting-and-selection))
 - Planned: by-value tensor arithmetic (`a + b`, `a @ b`)
 - Planned: broadcasting rules
 
@@ -2008,6 +2011,62 @@ explicitly instead. And a reduction over **no** elements is rejected outright ra
 given an identity value, since `.max()` of nothing has no answer. A receiver whose extent is
 a shape parameter or a `?` has no run length either, so a reduction needs a tensor whose
 shape is numbers.
+
+### Sorting and selection
+
+`.sort()`, `.argsort()` and `.topk()` order one axis of a tensor. They differ only in what
+they hand back: the elements in that order, the receiver positions that produce that order,
+or the leading `k` of both.
+
+```neuro
+val scores: Tensor<i32, [5]> = [5, 3, 9, 1, 7]
+
+val up: Tensor<i32, [5]> = scores.sort()                      // (1, 3, 5, 7, 9)
+val down: Tensor<i32, [5]> = scores.sort(descending: true)    // (9, 7, 5, 3, 1)
+val order: Tensor<i32, [5]> = scores.argsort()                // (3, 1, 0, 4, 2)
+
+val (top, at) = scores.topk(k: 3)     // top = (9, 7, 5), at = (2, 4, 0)
+```
+
+| Method | Result |
+|---|---|
+| `.sort()` / `.sort(axis: k, descending: d)` | the receiver's shape, elements in order |
+| `.argsort()` / `.argsort(axis: k, descending: d)` | the receiver's shape at `i32`: the positions that produce that order |
+| `.topk(k: n)` / `.topk(k: n, axis: k)` | a `(values, indices)` pair whose selected axis is `n` long |
+
+`axis:` takes a position, a dimension **name** the receiver's type declares, or a negative
+index counting from the end, and defaults to the last axis — the row of a matrix. `.topk`
+selects the `n` **greatest**, so it has no `descending:` of its own; its selected axis is
+`n` long in both results and carries no dimension name, a truncated axis no longer being
+the thing its name documented.
+
+An `argsort` entry is an ordinary integer, so it reads back into the tensor that produced
+it, which is what a reduction cannot do: `.max()` answers *what* the best element was and
+never *where*.
+
+```neuro
+val order: Tensor<i32, [4]> = v.argsort(descending: true)
+val best = order[0] as u64
+val value = v[best]
+```
+
+These methods are **native to the element dtype**. `f32` and `f64` sort directly, without
+wrapping every element in an ordered-float type first, and the comparator is IEEE-754
+ordered with one rule: `NaN` sorts to the **end**, whether the order is ascending or
+descending. Real workloads treat `NaN` as invalid, so pushing it to the back leaves the
+best candidates at the front where top-k expects them. A program that wants the "partial
+order returns nothing on `NaN`" semantics maps through an ordered-float wrapper first.
+
+Equal elements keep the order they were written in, which is what makes an `argsort` of a
+tensor with ties reproducible.
+
+Like a reduction, a selection **reads** its receiver: it allocates its own result and
+leaves the ordered buffer where it was, so it is offered on `&Tensor<T, S>` too.
+
+`k:` and `descending:` must be constants, because the result's shape and the comparator are
+both settled before any element is read; `k` must lie between `1` and the sorted axis's
+extent. The element type must be an integer or `f32`/`f64`, the receiver must have at least
+one axis, and its shape must be numbers rather than shape parameters or `?`.
 
 ### Dynamic shapes
 

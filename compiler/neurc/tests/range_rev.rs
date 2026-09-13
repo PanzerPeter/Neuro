@@ -1,6 +1,6 @@
-// End-to-end tests for `.rev()` on a range: descending `for`-head iteration (§1.6),
-// the reversed axis of a tensor index (§4.4), how the two compose with the adapters
-// and bindings a head already carries, and the diagnostics for a receiver `.rev()`
+// End-to-end tests for `.rev()` on a range: descending `for`-head iteration, the
+// reversed axis of a tensor index, how the two compose with the adapters and
+// bindings a head already carries, and the diagnostics for a receiver `.rev()`
 // does not apply to.
 mod common;
 use common::CompileTest;
@@ -228,7 +228,7 @@ func main() -> i32 {
     assert_eq!(exit, 1111 % 256);
 }
 
-/// §3.7 scopes `.rev()` to ranges. The receiver is checked where the head is parsed,
+/// `.rev()` is scoped to ranges. The receiver is checked where the head is parsed,
 /// so the diagnostic names the spelling that works rather than a missing method.
 #[test]
 fn rev_on_a_sequence_head_is_reported() {

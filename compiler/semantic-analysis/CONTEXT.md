@@ -719,6 +719,21 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   whether the reduction has a value, and the backend walks the buffer at strides the shape
   supplies. The `axis:` label is bound by the `argument-binding` slice's seeded builtin
   signatures.
+- **Tensor order-based selections, in `type_checkers/tensor_sort.rs`.** `.sort()`,
+  `.argsort()` and `.topk()` reach `check_tensor_sort` from the builtin arm, matched on the
+  REFERENT for the reason the reductions are: each allocates its own result, records no move,
+  and accepts `&Tensor<T, S>`. `.sort` answers the receiver's own type, `.argsort` the same
+  shape at `i32`, and `.topk` a `(values, indices)` tuple whose selected axis is `k` long and
+  unnamed, a truncated axis no longer being the thing its name documented. The arguments
+  arrive complete and in declaration order because `argument-binding` fills an omitted one
+  from its default, and all of them are read as syntax rather than as values: an axis may be
+  a dimension NAME, and `k:` and `descending:` decide the result's shape and the comparator
+  before any element exists (`TensorSortArgNotConstant`). The element must be an integer or
+  `f32`/`f64` (`TensorSortElementType`); a rank-0 receiver has no axis to order
+  (`TensorSortRankZero`); an empty axis has no ordering (`TensorSortEmpty`); and `k` must lie
+  in `1..=extent` (`TensorTopKOutOfRange`). Every extent must be a number here
+  (`TensorShapeCastSymbolicExtent`, `TensorDynamicExtent`), because the result's shape and
+  the backend's strides are both built from it.
 - **Tensor slicing and indexing, in `type_checkers/tensor_index.rs`.** `check_tensor_index`
   takes one argument per axis and answers one of two types: an axis given a `Position` is
   DROPPED and one given a `Range` (a `..` full axis is the range over the whole extent)

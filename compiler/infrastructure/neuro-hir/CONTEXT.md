@@ -61,6 +61,14 @@ it the *typed* contract:
    receiver where a shape cast consumes it: the result is a scalar or a fresh, smaller
    buffer, so the tensor it summarises stays alive. The four folds are one node because
    they differ only in the element operation, never in the traversal.
+   `HirExprKind::TensorSort { receiver, kind, axis, descending }` is the order-based
+   selection beside it: `HirSortKind::{Values, Indices, TopK(k)}` says what is written out of
+   the ordering, `axis` is always a resolved axis index (the last one when the call named
+   none) and `descending` is a compile-time choice, the comparator having to be picked before
+   any element is read. Its `ty` is the receiver's shape for `Values`, that shape at `I32`
+   for `Indices`, and the `Tuple` of both at a `k`-long selected axis for `TopK`. It READS the
+   receiver like the reduction does: the result is freshly allocated. The three are one node
+   because they compute the same per-axis ordering and differ only in what they write.
    `HirStmt::TensorCompoundAssign { target, op, value, ty, span }` is the in-place update
    beside them: `ty` is the target's tensor type and `value` is either that same type or a
    reference to it, an owned operand being consumed by the update and a borrowed one only

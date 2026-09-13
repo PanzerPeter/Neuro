@@ -74,6 +74,7 @@ types/tensor_named_dimensions.nr    33
 types/tensor_shape_manipulation.nr  44
 types/tensor_dynamic_shapes.nr      42
 types/tensor_reductions.nr          21
+types/tensor_sorting.nr             21
 types/tuples.nr                     62
 types/type_aliases.nr               17
 types/underscore_separators.nr      0
@@ -142,6 +143,7 @@ showcase/named_axes.nr      70
 showcase/num_algorithms.nr  33
 showcase/optimizer_step.nr  32
 showcase/perceptron.nr      8
+showcase/ranked_batch.nr    130
 showcase/ranked_finish.nr   176
 showcase/replay_buffer.nr   79
 showcase/render_settings.nr 99

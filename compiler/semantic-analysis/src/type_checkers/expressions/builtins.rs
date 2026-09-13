@@ -7,6 +7,7 @@ use super::{TypeChecker, CLONE_METHOD};
 use crate::errors::TypeError;
 use crate::type_checkers::tensor_reduce::is_reduce_method;
 use crate::type_checkers::tensor_shape::is_shape_method;
+use crate::type_checkers::tensor_sort::is_sort_method;
 use crate::type_checkers::tensors::DEVICE_TYPE_NAME;
 use crate::types::{CollectionKind, Type};
 use ast_types::Expr;
@@ -238,6 +239,18 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
                 Some(self.check_tensor_reduce(&element, &shape, m, args, call_span))
+            }
+            // The order-based selections read the receiver for the same reason the
+            // reductions do: each allocates its own result and leaves the buffer it
+            // ordered alone, so `&Tensor<T, S>` is an acceptable receiver and no move is
+            // recorded. `scores.topk(k: 5)` must not consume `scores`.
+            (Type::Tensor { element, shape }, m) if is_sort_method(m) => {
+                let (element, shape) = (element.clone(), shape.clone());
+                let referent = recv.referent().clone();
+                if self.reject_dynamic_extent(&shape, &format!("`.{m}`"), &referent, call_span) {
+                    return Some(Type::Unknown);
+                }
+                Some(self.check_tensor_sort(&element, &shape, m, args, call_span))
             }
             (Type::Tensor { shape, .. }, TENSOR_TO_METHOD)
                 if !matches!(recv, Type::Reference { .. }) =>

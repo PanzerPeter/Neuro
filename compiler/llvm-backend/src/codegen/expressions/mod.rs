@@ -19,6 +19,7 @@ mod slices;
 mod struct_eq;
 mod tensor_index;
 mod tensor_reduce;
+mod tensor_sort;
 mod tensors;
 mod tuples;
 mod unary;
@@ -198,6 +199,16 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::TensorReduce { receiver, op, axis } => {
                 let result_ty = Type::from_hir(&expr.ty);
                 self.codegen_tensor_reduce(receiver, *op, *axis, &result_ty, expr.span.start)
+            }
+            // `.sort()` / `.argsort()` / `.topk()`, along one axis.
+            HirExprKind::TensorSort {
+                receiver,
+                kind,
+                axis,
+                descending,
+            } => {
+                let result_ty = Type::from_hir(&expr.ty);
+                self.codegen_tensor_sort(receiver, *kind, *axis, *descending, &result_ty)
             }
             // `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`.
             HirExprKind::TensorShapeCast {

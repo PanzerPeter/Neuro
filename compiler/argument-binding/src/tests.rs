@@ -600,3 +600,96 @@ fn a_call_nested_in_a_hoisted_argument_is_bound_too() {
         .collect();
     assert_eq!(values, vec![1, 2]);
 }
+
+/// `receiver.method(args)` as the parser builds it, for the compiler-known methods whose
+/// signatures this pass seeds rather than reads off a declaration.
+fn builtin_call(method: &str, args: Vec<Arg>) -> Expr {
+    call(
+        Expr::FieldAccess {
+            object: Box::new(Expr::Identifier(ident("t"))),
+            field: ident(method),
+            span: span(),
+        },
+        args,
+    )
+}
+
+/// A program whose `main` makes one builtin method call.
+fn builtin_program(method: &str, args: Vec<Arg>) -> Vec<Item> {
+    vec![func(
+        "main",
+        Vec::new(),
+        vec![Stmt::Expr(builtin_call(method, args))],
+    )]
+}
+
+/// Each bound argument as a source-level word: an integer, a negated integer, or a bool.
+fn bound_words(items: &[Item]) -> Vec<String> {
+    let Some(Item::Function(main)) = items.last() else {
+        panic!("expected a trailing function item");
+    };
+    let Some(Stmt::Expr(Expr::Call {
+        args, arg_labels, ..
+    })) = main.body.first()
+    else {
+        panic!("expected a call statement");
+    };
+    assert!(arg_labels.is_empty(), "a label survived binding");
+    args.iter().map(word).collect()
+}
+
+fn word(expr: &Expr) -> String {
+    match expr {
+        Expr::Literal(Literal::Integer(v, _), _) => v.to_string(),
+        Expr::Literal(Literal::Boolean(v), _) => v.to_string(),
+        Expr::Unary { operand, .. } => format!("-{}", word(operand)),
+        other => panic!("unexpected bound argument {other:?}"),
+    }
+}
+
+#[test]
+fn an_omitted_builtin_parameter_is_filled_from_its_default() {
+    let mut items = builtin_program("sort", vec![named("axis", 0)]);
+    bind_arguments(&mut items).expect("binding failed");
+    assert_eq!(bound_words(&items), vec!["0", "false"]);
+}
+
+#[test]
+fn a_default_lands_at_its_own_declaration_index() {
+    let mut items = builtin_program(
+        "sort",
+        vec![(
+            Some(ident("descending")),
+            Expr::Literal(Literal::Boolean(true), span()),
+        )],
+    );
+    bind_arguments(&mut items).expect("binding failed");
+    assert_eq!(bound_words(&items), vec!["-1", "true"]);
+}
+
+#[test]
+fn topk_fills_its_axis_and_keeps_the_width_it_was_given() {
+    let mut items = builtin_program("topk", vec![named("k", 5)]);
+    bind_arguments(&mut items).expect("binding failed");
+    assert_eq!(bound_words(&items), vec!["5", "-1"]);
+}
+
+#[test]
+fn topk_requires_its_width_to_be_named() {
+    let mut items = builtin_program("topk", vec![positional(5)]);
+    let errors = bind_arguments(&mut items).expect_err("expected a rejection");
+    assert!(matches!(
+        errors.as_slice(),
+        [ArgumentError::MissingArgumentLabel { .. }]
+    ));
+}
+
+#[test]
+fn a_builtin_with_defaults_still_rejects_a_surplus_argument() {
+    let mut items = builtin_program(
+        "argsort",
+        vec![named("axis", 0), positional(1), positional(2)],
+    );
+    let errors = bind_arguments(&mut items).expect_err("expected a rejection");
+    assert!(!errors.is_empty(), "a surplus argument was accepted");
+}

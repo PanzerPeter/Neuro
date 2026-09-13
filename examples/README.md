@@ -19,7 +19,7 @@ Examples are grouped by topic so the set stays navigable as it grows:
 | Directory        | What it covers                                                         |
 | ---------------- | ---------------------------------------------------------------------- |
 | `basics/`        | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` to stdout |
-| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` byte sub-slices and `.char_slice(range)` codepoint sub-slices, the codepoint iterators `.chars()` / `.char_indices()`, borrowed slices `&[T]` / `&mut [T]` over arrays and `Vec`s, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), associated-type bounds (`T: Source<Item = i32>`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer, tensor construction, tensor indexing and slicing, tensor shape generics (`func f<M, K>(t: &Tensor<i32, [M, K]>)`), and dynamic tensor shapes (`Tensor<f32, [?, 784]>`) |
+| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` byte sub-slices and `.char_slice(range)` codepoint sub-slices, the codepoint iterators `.chars()` / `.char_indices()`, borrowed slices `&[T]` / `&mut [T]` over arrays and `Vec`s, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), associated-type bounds (`T: Source<Item = i32>`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer, tensor construction, tensor indexing and slicing, tensor shape generics (`func f<M, K>(t: &Tensor<i32, [M, K]>)`), dynamic tensor shapes (`Tensor<f32, [?, 784]>`), and tensor sorting and selection (`.sort()` / `.argsort()` / `.topk(k:)`) |
 | `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result`, `?` error propagation |
 | `control_flow/`  | `if`/`else`, `for`-ranges, `for i in (0..n).rev()`, `for (i, x) in xs.enumerate()`, the `.map(f)` / `.filter(p)` head adapters, the `IntoIterator` / `Iterator` protocol and hand-written adapters, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
 | `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`), the `@derive(Debug, PartialEq)` traits |
@@ -84,6 +84,14 @@ isolation:
   modulo + compound assignment + `Option`/`match` + tuples + loop-as-value,
   plus a **nesting block comment** shelving an alternative `isqrt` whose body
   carries a `/* */` comment of its own. Exit `33`.
+- [`showcase/ranked_batch.nr`](showcase/ranked_batch.nr): a batch of class scores
+  turned into predictions. `.sort()` / `.argsort()` / `.topk(k:, axis:)` with named
+  dimensions + tensor literal coercion + `.max(axis:)` / `.sum()` / `.mean()`
+  reductions + tensor slicing + `.t()` + in-place `+=` + a struct holding a tensor
+  field with `&self` methods + a reversed range head. The combination is the point:
+  an argsort index is an ordinary integer, so it reads BACK into the tensor that
+  produced it, which `.max()` cannot do at all: a reduction answers WHAT the best
+  score was and never WHERE. Exit `130`.
 - [`showcase/ranked_finish.nr`](showcase/ranked_finish.nr): a race result read
   by finishing position. `.enumerate()` over a fixed-size array, over the `Vec<i32>`
   that loop fills, and over a range, with `@derive(Copy)` structs + `&self`
@@ -380,7 +388,17 @@ No Rust edits are needed: discovery is automatic.
   negative index from the end — dropping that axis and keeping every other name and
   extent. A reduction reads its receiver rather than consuming it, so it works through a
   borrow; `.mean()` is `f32`/`f64`-only, and a reduction over no elements is a compile
-  error rather than an invented identity. By-value
+  error rather than an invented identity. Sorting and selection are supported
+  (`types/tensor_sorting.nr`, combined with the rest in `showcase/ranked_batch.nr`):
+  `.sort()` orders one axis, `.argsort()` answers the receiver positions that produce
+  that order, and `.topk(k:, axis:)` hands back the `k` greatest paired with where they
+  came from, the selected axis being `k` long and unnamed in the result. All three are
+  native to the element dtype, so `f32` and `f64` sort without an ordered-float wrapper,
+  and `NaN` sorts to the END in both directions. Equal elements keep source order, so an
+  argsort of a tensor with ties is reproducible. `axis:` takes a position, a dimension
+  name or a negative index and defaults to the last; `k:` and `descending:` must be
+  constants, since they decide the result's shape and the comparator. A selection reads
+  its receiver, so it works through a borrow. By-value
   arithmetic is later work. A tensor value is a
   DLPack handle over an out-of-line buffer, so one of any size compiles at any optimization
   level and the same pointer is what a foreign consumer would read;

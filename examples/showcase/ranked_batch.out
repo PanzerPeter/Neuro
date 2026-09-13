@@ -1,0 +1,12 @@
+row 0: class 1 at 2.50
+row 1: class 0 at 3.00
+row 2: class 3 at 4.00
+mean margin = 1.917
+class 0 across the batch = 0.50, 1.25, 3.00
+class 3: 1 row(s)
+class 2: 0 row(s)
+class 1: 1 row(s)
+class 0: 1 row(s)
+lifted peaks = 3.00, 3.50, 4.50
+total = 16.75, mean = 1.396, lifted = 11.00
+picked = 103

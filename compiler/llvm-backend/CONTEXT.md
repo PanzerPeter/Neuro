@@ -436,6 +436,18 @@ an overflowing `+` would; `.mean()` divides the float accumulator by the run len
 is moved or released here: an axis reduction allocates its own handle and a whole-tensor one
 allocates nothing, so the receiver's buffer stays its owner's.
 
+`expressions/tensor_sort.rs` owns `HirExprKind::TensorSort`: `.sort()`, `.argsort()` and
+`.topk()`. It walks the same `outer`/`mid`/`inner` split the reduction does, and builds, per
+run, a permutation of `0..mid` in one stack scratch array; the three methods then differ only
+in what the writer at the end reads out of it — the elements in that order, the permutation
+truncated to `i32`, or the leading `k` of both into a two-tensor tuple. The permutation is
+seeded with the identity and carried by a stable insertion sort, so equal elements never
+cross and an argsort of a tensor with ties is reproducible. The float comparator spells out
+only the two `NaN` tests: an ordered `<` / `>` is already false on a `NaN` operand, so
+"`a` is real AND (`a` beats `b` OR `b` is `NaN`)" is exactly the specification's rule that
+`NaN` sorts to the end whatever the direction. Nothing is moved or released here: every
+result is a fresh handle, so the receiver's buffer stays its owner's.
+
 `expressions/tensor_index.rs` owns `HirExprKind::TensorIndex`. Every stride is a compile-time
 constant (every extent is part of the type), so the index is arithmetic on the flat row-major
 run behind `data`: each `Position` axis contributes `position * stride[k]` and each `Range` axis

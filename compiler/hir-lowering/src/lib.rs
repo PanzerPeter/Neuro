@@ -39,6 +39,7 @@ mod statements;
 mod tensor_index;
 mod tensor_reduce;
 mod tensor_shape;
+mod tensor_sort;
 mod tensors;
 mod types;
 mod val_else;

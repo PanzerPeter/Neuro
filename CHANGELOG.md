@@ -10,6 +10,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.26.0] - 2026-09-13
+
+### Added
+
+- `semantic`, `codegen`: native tensor sorting and selection. `.sort()` orders one axis of
+  a tensor, `.argsort()` answers the receiver positions that produce that order, and
+  `.topk(k:, axis:)` hands back the `k` greatest paired with where they came from, as a
+  `(values, indices)` pair whose selected axis is `k` long. `axis:` takes a position, a
+  dimension name, or a negative index counting from the end, and defaults to the last axis;
+  `.sort` and `.argsort` take `descending:`. This completes sub-phase 2B.
+- `semantic`, `codegen`: the selections are native to the element dtype, so `f32` and `f64`
+  order directly with no ordered-float wrapper and no per-element trait dispatch. The
+  comparator is IEEE-754 ordered with one rule: `NaN` sorts to the end in both directions,
+  which keeps the best candidates at the front where top-k expects them.
+- `codegen`: equal elements keep the order they were written in, so an argsort of a tensor
+  with ties is reproducible.
+- `semantic`: a selection READS its receiver the way a reduction does — it allocates its own
+  result and leaves the ordered buffer alone — so `&Tensor<T, S>` is an acceptable receiver
+  and nothing is moved.
+- `infra`: a compiler-known method's parameter may carry a default, which is what lets a
+  labelled call supply only some of its labels (`.argsort(axis: -1)`, `.topk(k: 5)`). The
+  omitted parameter is filled into its declaration slot before the call reaches the type
+  checker, so every later stage still sees the complete positional list. Declared functions
+  are unaffected: the language has no default-argument syntax.
+- `tests`: end-to-end coverage for the three methods across default, positional, named and
+  negative axes, both directions, `NaN` placement, stability, a borrowed receiver, and
+  composition with `.t()`; plus the six rejections (non-numeric element, rank-0 receiver,
+  empty axis, a `k` wider than the axis, a runtime `k` / `descending:`, an unknown dimension
+  name, a dynamic extent, and an unlabelled `k`).
+- `docs`: `examples/types/tensor_sorting.nr` and the cumulative
+  `examples/showcase/ranked_batch.nr`, which combines the selections with named dimensions,
+  reductions, slicing, `.t()`, in-place `+=`, a struct holding a tensor field, and a
+  reversed range head.
+
+### Changed
+
+- `semantic`: `.topk`'s selected axis carries no dimension name in the result. A truncated
+  axis is no longer the thing its name documented, which is the rule the shape casts already
+  apply when an extent changes.
+
+
 ## [2.25.0] - 2026-09-12
 
 ### Added

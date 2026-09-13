@@ -298,6 +298,13 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   resolved `HirReduceOp` and the axis as an index, with a negative one already counted from
   the end. The receiver is left alone rather than moved: a reduction reads it, so a borrowed
   receiver lowers here too.
+  Order-based selections live in `tensor_sort.rs`: `.sort()`, `.argsort()` and `.topk()` are
+  intercepted in the same place and for the same reason, and `lower_tensor_sort` emits
+  `HirExprKind::TensorSort` carrying the `HirSortKind`, the resolved axis (the last one when
+  the call names none, a negative one already counted from the end) and the direction as a
+  constant. `.topk` lowers to `HirSortKind::TopK(k)` at `descending: true`, top-k being the
+  head of the descending order, and its type is the `HirType::Tuple` of the values tensor and
+  the `i32` index tensor. The receiver is read, not moved, so a borrowed one lowers here too.
   Slicing and indexing live in `tensor_index.rs`: `lower_tensor_index` folds each range bound to
   the constant the checker already proved it to be (`HirTensorAxis::Range { start, end, reversed }`, with
   a `..` full axis becoming the whole extent and an inclusive range stopping one further on),

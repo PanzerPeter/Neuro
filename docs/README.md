@@ -109,7 +109,12 @@ Key design goals:
   A tensor is summarised with `.sum()` / `.mean()` / `.max()` / `.min()`, whole-tensor or
   along one `axis:` (a position, a dimension name, or a negative index from the end), which
   drops that axis and keeps the rest; unlike a shape cast a reduction READS its receiver, so
-  a borrowed weight can be summarised without being moved. By-value arithmetic is later work
+  a borrowed weight can be summarised without being moved. One axis is ORDERED with
+  `.sort()`, `.argsort()` (the receiver positions that produce that order) and
+  `.topk(k:, axis:)` (the `k` greatest, paired with where they came from), all native to the
+  element dtype, so `f32` and `f64` sort without an ordered-float wrapper and `NaN` sorts to
+  the end in both directions; equal elements keep source order, and a selection READS its
+  receiver too. By-value arithmetic is later work
 
 ### Variables
 

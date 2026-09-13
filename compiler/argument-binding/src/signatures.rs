@@ -2,10 +2,46 @@
 
 use std::collections::HashMap;
 
-use ast_types::{GenericArg, GenericParam, ImplDef, Item, Parameter, TraitDef, Type};
+use ast_types::{Expr, GenericArg, GenericParam, ImplDef, Item, Parameter, TraitDef, Type};
+use shared_types::{Literal, Span};
 
-/// The label `.sum` / `.mean` / `.max` / `.min` take their reduction axis under.
-const REDUCTION_AXIS_LABEL: &str = "axis";
+/// The label `.sum` / `.mean` / `.max` / `.min` take their reduction axis under, and
+/// `.sort` / `.argsort` / `.topk` their sorted axis.
+const AXIS_LABEL: &str = "axis";
+
+/// The label `.sort` / `.argsort` take their direction under.
+const DESCENDING_LABEL: &str = "descending";
+
+/// The label `.topk` takes its selection width under.
+const K_LABEL: &str = "k";
+
+/// One optionally-named builtin parameter, with the expression bound when a call leaves
+/// it out.
+fn optional(label: &str, default: Option<Expr>) -> ParamBinding {
+    ParamBinding {
+        name: Some(label.to_string()),
+        internal: label.to_string(),
+        required: false,
+        ty: None,
+        default,
+    }
+}
+
+/// The default `axis:` of the order-based selections: `-1`, the last axis, which is how
+/// the specification spells "along the row".
+fn last_axis() -> Expr {
+    let span = Span::new(0, 0);
+    Expr::Unary {
+        op: ast_types::UnaryOp::Negate,
+        operand: Box::new(Expr::Literal(Literal::Integer(1, None), span)),
+        span,
+    }
+}
+
+/// The default `descending:` of `.sort` / `.argsort`: ascending order.
+fn ascending() -> Expr {
+    Expr::Literal(Literal::Boolean(false), Span::new(0, 0))
+}
 
 /// What one parameter accepts at a call site.
 #[derive(Debug, Clone, PartialEq)]
@@ -23,6 +59,10 @@ pub(crate) struct ParamBinding {
     /// argument to, so the argument is still typed by its parameter rather than by
     /// itself. `None` leaves the temporary to inference, which is always sound.
     pub(crate) ty: Option<Type>,
+    /// The expression bound when a call omits this parameter, for the compiler-known
+    /// methods whose specification gives one. A declared function has none: the language
+    /// has no default-argument syntax, so only the builtins seeded below carry these.
+    pub(crate) default: Option<Expr>,
 }
 
 /// A callee's parameters in declaration order: the order arguments are bound into.
@@ -41,6 +81,7 @@ impl Signature {
                     internal: p.name.name.clone(),
                     required: p.label.is_required(),
                     ty: annotatable_type(&p.ty, generics),
+                    default: None,
                 })
                 .collect(),
         }
@@ -71,6 +112,13 @@ impl Signature {
         self.params
             .iter()
             .position(|p| p.name.as_deref() == Some(label))
+    }
+
+    /// Whether any parameter can be left out of a labelled call and filled in from its
+    /// specified default, which is what lets a builtin be called with one of its two
+    /// labels rather than both.
+    pub(crate) fn has_defaults(&self) -> bool {
+        self.params.iter().any(|p| p.default.is_some())
     }
 
     /// Whether `label` names a parameter whose `_` label makes it positional-only.
@@ -136,6 +184,7 @@ impl SignatureTable {
                 internal: name.to_string(),
                 required: false,
                 ty: None,
+                default: None,
             })
             .collect();
         self.assoc.insert(
@@ -155,6 +204,7 @@ impl SignatureTable {
                     internal: "dims".to_string(),
                     required: false,
                     ty: None,
+                    default: None,
                 }],
             },
         );
@@ -165,15 +215,41 @@ impl SignatureTable {
             self.record_method(
                 reduction,
                 Signature {
-                    params: vec![ParamBinding {
-                        name: Some(REDUCTION_AXIS_LABEL.to_string()),
-                        internal: REDUCTION_AXIS_LABEL.to_string(),
-                        required: false,
-                        ty: None,
-                    }],
+                    params: vec![optional(AXIS_LABEL, None)],
                 },
             );
         }
+        // The order-based selections take two labels each, and the specification spells
+        // calls that give only one of them (`.argsort(axis: -1)`, `.topk(k: 5)`). The
+        // omitted one is filled from the default recorded here, so the type checker only
+        // ever sees the complete argument list in declaration order and never has to
+        // rediscover which label was written.
+        for selection in ["sort", "argsort"] {
+            self.record_method(
+                selection,
+                Signature {
+                    params: vec![
+                        optional(AXIS_LABEL, Some(last_axis())),
+                        optional(DESCENDING_LABEL, Some(ascending())),
+                    ],
+                },
+            );
+        }
+        self.record_method(
+            "topk",
+            Signature {
+                params: vec![
+                    ParamBinding {
+                        name: Some(K_LABEL.to_string()),
+                        internal: K_LABEL.to_string(),
+                        required: true,
+                        ty: None,
+                        default: None,
+                    },
+                    optional(AXIS_LABEL, Some(last_axis())),
+                ],
+            },
+        );
     }
 
     fn collect(&mut self, items: &[Item]) {
