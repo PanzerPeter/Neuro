@@ -10,6 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.28.1] - 2026-09-13
+
+### Fixed
+
+- LICENSE: eleven dangling section cross-references now resolve. Grants in
+  § 3 pointed one definition too far (Personal Use, Internal Business Use,
+  Commercial Distribution); § 3.2 pointed at Safety-Critical Applications
+  instead of Contributor License; the Alpha Notice Exemption was cited as
+  § 3.3 instead of § 4.3 in three places.
+
+### Added
+
+- LICENSE: definitions for "Neuro Project", "Neuro Project Contributors" and
+  "Written Notice" (§§ 1.13-1.15); the licensor was named as a party 23 times
+  but never defined.
+- LICENSE: an explicit acceptance clause opening Part III.
+- LICENSE: § 18.3 NOTICES, naming the channel for commercial-licence requests,
+  breach notices, and written permissions.
+- LICENSE: SPDX-License-Identifier header for licence scanners.
+
+### Changed
+
+- LICENSE: ASCII-only apart from §; aligned alpha banner, lettered § 7.2 list,
+  consistent all-caps in the title and § 15, all lines within 80 columns.
+
+
 ## [2.28.0] - 2026-09-13
 
 ### Added

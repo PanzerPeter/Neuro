@@ -1,10 +1,11 @@
 ===============================================================================
-                    Neuro SHARED SOURCE LICENSE
+                    NEURO SHARED SOURCE LICENSE
                         Version 2.1, May 2026
 ===============================================================================
 
-Copyright (C) 2024–2026 Neuro Project Contributors
+Copyright (C) 2024-2026 Neuro Project Contributors
 Project Repository: https://github.com/PanzerPeter/Neuro
+SPDX-License-Identifier: LicenseRef-Neuro-SSL-2.1
 
 All rights reserved except as explicitly and conditionally granted herein.
 
@@ -28,36 +29,36 @@ distribution of the Neuro compiler, toolchain, and associated materials
      competitive AI reproduction, and misleading fragmentation are in effect.
 
 ===============================================================================
-  PART I — ALPHA VERSION NOTICE (MANDATORY IN ORIGINAL AND DERIVATIVE WORKS
-            UNTIL INDEPENDENTLY CERTIFIED PER § 3.3)
+  PART I. ALPHA VERSION NOTICE (MANDATORY IN ORIGINAL AND DERIVATIVE WORKS
+            UNTIL INDEPENDENTLY CERTIFIED PER § 4.3)
 ===============================================================================
 
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  !!                                                                         !!
-  !!   THIS SOFTWARE IS IN ALPHA STAGE. IT IS PROVIDED "AS IS", WITHOUT     !!
-  !!   WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED   !!
-  !!   TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,   !!
-  !!   OR NON-INFRINGEMENT.                                                  !!
-  !!                                                                         !!
-  !!   IN NO EVENT SHALL THE AUTHORS, COPYRIGHT HOLDERS, OR CONTRIBUTORS     !!
-  !!   BE LIABLE FOR ANY CLAIM, DIRECT, INDIRECT, INCIDENTAL, SPECIAL,      !!
-  !!   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING BUT NOT LIMITED TO     !!
-  !!   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,      !!
-  !!   OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY      !!
-  !!   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT   !!
-  !!   (INCLUDING NEGLIGENCE) ARISING FROM THE USE OF THIS SOFTWARE.         !!
-  !!                                                                         !!
-  !!   USE OF THIS ALPHA SOFTWARE IS ENTIRELY AT YOUR OWN RISK.             !!
-  !!                                                                         !!
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!                                                                       !!
+  !!   THIS SOFTWARE IS IN ALPHA STAGE. IT IS PROVIDED "AS IS", WITHOUT    !!
+  !!   WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED !!
+  !!   TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, !!
+  !!   OR NON-INFRINGEMENT.                                                !!
+  !!                                                                       !!
+  !!   IN NO EVENT SHALL THE AUTHORS, COPYRIGHT HOLDERS, OR CONTRIBUTORS   !!
+  !!   BE LIABLE FOR ANY CLAIM, DIRECT, INDIRECT, INCIDENTAL, SPECIAL,     !!
+  !!   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING BUT NOT LIMITED TO   !!
+  !!   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,     !!
+  !!   OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY     !!
+  !!   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT !!
+  !!   (INCLUDING NEGLIGENCE) ARISING FROM THE USE OF THIS SOFTWARE.       !!
+  !!                                                                       !!
+  !!   USE OF THIS ALPHA SOFTWARE IS ENTIRELY AT YOUR OWN RISK.            !!
+  !!                                                                       !!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 This notice must be preserved verbatim in the original Software and in all
-Derivative Works UNLESS the Derivative Work qualifies for Alpha Notice
-Exemption under § 3.3. Any redistribution that omits this notice without
-qualifying for § 3.3 exemption is in material breach of this License.
+Derivative Works UNLESS the Derivative Work qualifies for the Alpha Notice
+Exemption under § 4.3. A redistribution that omits this notice without
+qualifying for that exemption is in material breach of this License.
 
 ===============================================================================
-  PART II — DEFINITIONS
+  PART II. DEFINITIONS
 ===============================================================================
 
 § 1. DEFINITIONS
@@ -70,7 +71,7 @@ qualifying for § 3.3 exemption is in material breach of this License.
   1.2  "Compiled Program" means any binary, object file, or other artifact
        produced by running the Neuro compiler over source code written by
        a third party. Compiled Programs are fully exempt from this License
-       (see § 2.0).
+       (see § 2).
 
   1.3  "Contributor" means any individual or legal entity that has submitted
        code, documentation, or other materials to the official Neuro project
@@ -131,9 +132,31 @@ qualifying for § 3.3 exemption is in material breach of this License.
        contribution alone or by combination of that contribution with the
        Software to which the contribution was submitted.
 
+  1.13 "Neuro Project" means the maintainers of the official project
+       repository acting collectively, and any legal entity they designate
+       in writing to administer this License. Where this License requires an
+       act by the Neuro Project (granting a written license, giving notice of
+       breach, granting consent, or issuing permission), that act is binding
+       only if made in writing and delivered under § 18.3.
+
+  1.14 "Neuro Project Contributors" means the Neuro Project together with
+       every Contributor (§ 1.3), each acting in respect of its own
+       contribution. Copyright in the Software is held by its respective
+       authors; no Contributor assigns copyright by contributing.
+
+  1.15 "Written Notice" means a communication in writing delivered through
+       the channel identified in § 18.3. A Written Notice is effective on
+       the date it is received.
+
 ===============================================================================
-  PART III — GRANTS OF RIGHTS
+  PART III. GRANTS OF RIGHTS
 ===============================================================================
+
+ACCEPTANCE. By exercising any right granted under this License, or by
+performing any act with respect to the Software that is regulated by
+copyright, you accept and agree to be bound by every term of this License.
+If you do not accept these terms, you have no rights under this License and
+must not use, copy, modify, or distribute the Software.
 
 § 2. COMPILED PROGRAM EXEMPTION (UNCONDITIONAL)
 
@@ -149,11 +172,11 @@ Subject to the conditions set forth in this License, the Neuro Project
 Contributors hereby grant you the following rights:
 
   3.1  PERSONAL USE: You may use, study, run, and modify the Software for
-       Personal Use (§ 1.8) without restriction beyond the conditions of
+       Personal Use (§ 1.7) without restriction beyond the conditions of
        this License.
 
   3.2  CONTRIBUTION: You may modify the Software and submit modifications as
-       contributions to the official project repository, subject to § 11.
+       contributions to the official project repository, subject to § 12.
        Contributing to Neuro is encouraged and explicitly welcomed.
 
   3.3  NON-COMMERCIAL DISTRIBUTION: You may distribute the Software or
@@ -161,7 +184,7 @@ Contributors hereby grant you the following rights:
        you satisfy all conditions of Part IV (Conditions).
 
   3.4  INTERNAL BUSINESS USE: Organizations may use the Software for Internal
-       Business Use (§ 1.9) without a separate commercial license, provided
+       Business Use (§ 1.8) without a separate commercial license, provided
        they satisfy the attribution conditions of § 6.1 in any internal
        materials that reference the Software.
 
@@ -172,7 +195,7 @@ Contributors hereby grant you the following rights:
        restriction and may be distributed commercially under their own terms.
 
   3.6  COMMERCIAL DISTRIBUTION: You may distribute the Software or Derivative
-       Works as part of Commercial Distribution (§ 1.10) provided that you
+       Works as part of Commercial Distribution (§ 1.9) provided that you
        satisfy all conditions of Part IV (Conditions), AND either:
 
          (a) Obtain a separate written Commercial Distribution License from
@@ -187,7 +210,7 @@ Contributors hereby grant you the following rights:
   No rights are granted beyond those explicitly stated in this § 3.
 
 ===============================================================================
-  PART IV — CONDITIONS
+  PART IV. CONDITIONS
 ===============================================================================
 
 § 4. ALPHA STATUS DISCLOSURE
@@ -216,15 +239,16 @@ Contributors hereby grant you the following rights:
              extends to its own users in connection with the Derivative Work,
              and does not pass such liability back to the Neuro Project
              Contributors. Liability for defects in the upstream Software
-             itself remains governed by §§ 14–15;
+             itself remains governed by §§ 14-15;
 
-         (d) The Derivative Work is labeled as a "fork of Neuro" per § 6 and
+         (d) The Derivative Work is labeled as a "fork of Neuro" per §§ 6.4
+             and 7, and
              does not imply Neuro Project endorsement of the stability claim.
 
   4.4  You may not represent the unmodified Software to end users as
        production-ready or suitable for mission-critical use.
 
-───────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------------------------------
 
 § 5. DOCUMENTATION OF MODIFICATIONS
 
@@ -242,7 +266,7 @@ Contributors hereby grant you the following rights:
          (c) Not represent or imply that a modified version is the original,
              unmodified Neuro project.
 
-───────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------------------------------
 
 § 6. MANDATORY ATTRIBUTION
 
@@ -251,7 +275,7 @@ Contributors hereby grant you the following rights:
        location (such as a README, About page, splash screen, or NOTICE file):
 
          Based on Neuro (https://github.com/PanzerPeter/Neuro)
-         Copyright (C) 2024–2026 Neuro Project Contributors
+         Copyright (C) 2024-2026 Neuro Project Contributors
 
   6.2  All existing copyright notices in the Software must be preserved
        verbatim in all copies and Derivative Works.
@@ -263,7 +287,7 @@ Contributors hereby grant you the following rights:
        or "derived from the Neuro project", provided such statement is
        accompanied by the attribution in § 6.1 and the disclaimer in § 7.3.
 
-───────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------------------------------
 
 § 7. NAMING AND IDENTITY OF DERIVATIVE WORKS
 
@@ -275,16 +299,17 @@ Contributors hereby grant you the following rights:
        thereto, in the name of a Derivative Work without explicit prior written
        consent from the Neuro Project:
 
-         — "Neuro" as a standalone product or project name;
-         — "Neuro Engine", "NeuroAI", "NeuroPlatform", or any compound
-           name in which "Neuro" is the dominant identifying element;
-         — The official Neuro project logotype, icon set, or visual identity.
+         (a) "Neuro" as a standalone product or project name;
+         (b) "Neuro Engine", "NeuroAI", "NeuroPlatform", or any compound
+             name in which "Neuro" is the dominant identifying element;
+         (c) The official Neuro project logotype, icon set, or visual
+             identity.
 
   7.3  You must include, in user-visible documentation, an explicit statement
        that your Derivative Work is not affiliated with, endorsed by, or an
        official release of the Neuro Project.
 
-───────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------------------------------
 
 § 8. SOURCE AVAILABILITY FOR BINARY DISTRIBUTIONS
 
@@ -305,7 +330,7 @@ Contributors hereby grant you the following rights:
 
   8.3  This section does NOT apply to Compiled Programs (§ 2).
 
-───────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------------------------------
 
 § 9. RESTRICTIONS ON COMPETITIVE AI REPRODUCTION
 
@@ -344,7 +369,7 @@ engineering for interoperability.
 
   9.3  PERMITTED AI-ASSISTED ACTIVITIES
 
-       Notwithstanding §§ 9.1–9.2, the following are expressly permitted:
+       Notwithstanding §§ 9.1-9.2, the following are expressly permitted:
 
          (a) Using AI Systems to assist in writing contributions to this
              Software submitted back to the official project under this License;
@@ -368,7 +393,7 @@ engineering for interoperability.
   9.4  RESPONSIBILITY FOR DIRECTED VIOLATIONS
 
        If an AI System acting under your explicit direction and on your behalf
-       commits an act prohibited under §§ 9.1–9.2, and you had actual knowledge
+       commits an act prohibited under §§ 9.1-9.2, and you had actual knowledge
        that such direction would result in a prohibited act, you are the
        responsible party for that violation.
 
@@ -382,7 +407,7 @@ engineering for interoperability.
        provisions shall be construed to achieve the nearest enforceable
        equivalent consistent with the intent expressed herein.
 
-───────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------------------------------
 
 § 10. TRADEMARK AND ENDORSEMENT RESTRICTIONS
 
@@ -395,7 +420,7 @@ engineering for interoperability.
        publication, product, or promotional material without written
        authorization from the Neuro Project.
 
-───────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------------------------------
 
 § 11. SAFETY-CRITICAL APPLICATIONS
 
@@ -418,7 +443,7 @@ engineering for interoperability.
        extent permitted by applicable law.
 
 ===============================================================================
-  PART V — CONTRIBUTION TERMS
+  PART V. CONTRIBUTION TERMS
 ===============================================================================
 
 § 12. CONTRIBUTOR LICENSE
@@ -450,9 +475,9 @@ engineering for interoperability.
          (c) A license mutually agreed upon in writing between the Neuro
              Project and the individual Contributor.
 
-       Relicensing under any license not in this enumerated list — including,
-       without limitation, any strong-copyleft license such as the GNU
-       General Public License — requires individual written consent from
+       Relicensing under any license not in this enumerated list, including
+       without limitation any strong-copyleft license such as the GNU
+       General Public License, requires individual written consent from
        each affected Contributor.
 
        ACCEPTANCE MECHANISM. Acceptance of this § 12.3 is operationalized
@@ -504,7 +529,7 @@ engineering for interoperability.
              CONTRIBUTING.md.
 
 ===============================================================================
-  PART VI — ENFORCEMENT
+  PART VI. ENFORCEMENT
 ===============================================================================
 
 § 13. LICENSE TERMINATION
@@ -548,7 +573,7 @@ engineering for interoperability.
        to enforce it in the future.
 
 ===============================================================================
-  PART VII — LEGAL PROVISIONS
+  PART VII. LEGAL PROVISIONS
 ===============================================================================
 
 § 14. DISCLAIMER OF WARRANTY
@@ -561,7 +586,7 @@ DISCLAIMER APPLIES TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW.
 
 § 15. LIMITATION OF LIABILITY
 
-IN NO EVENT SHALL THE Neuro PROJECT CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+IN NO EVENT SHALL THE NEURO PROJECT CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
 INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
 (INCLUDING BUT NOT LIMITED TO PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
 LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
@@ -577,18 +602,19 @@ APPLICABLE LAW.
        accordance with the laws of Hungary, without regard to conflict-of-law
        provisions. Any legal action or proceeding arising under this License
        shall be brought exclusively in the courts located in Budapest, Hungary,
-       and the parties hereby consent to personal jurisdiction and venue therein.
+       and the parties hereby consent to personal jurisdiction and venue
+       therein.
 
-  16.2 Dispute Resolution. Any dispute arising out of or relating to this
-       License that cannot be resolved informally within sixty (60) days of
-       written notice shall be resolved by binding arbitration in accordance
-       with the UNCITRAL Arbitration Rules in force at the time. The appointing
-       authority shall be the Arbitration Court attached to the Hungarian Chamber
-       of Commerce and Industry. The seat of arbitration shall be Budapest,
+  16.2 spute Resolution. Any dispute arising out of or relating to this License
+       that cannot be resolved informally within sixty (60) days of written
+       notice shall be resolved by binding arbitration in accordance with the
+       UNCITRAL Arbitration Rules in force at the time. The appointing authority
+       shall be the Arbitration Court attached to the Hungarian Chamber of
+       Commerce and Industry. The seat of arbitration shall be Budapest,
        Hungary. By default, proceedings shall be conducted entirely by written
        submission and video conference, without requiring travel by any party,
-       unless a party demonstrates a specific need for in-person proceedings
-       and the tribunal so directs. The language of the arbitration shall be
+       unless a party demonstrates a specific need for in-person proceedings and
+       the tribunal so directs. The language of the arbitration shall be
        English.
 
   16.3 Where mandatory local law renders arbitration unenforceable, disputes
@@ -637,22 +663,34 @@ APPLICABLE LAW.
        distribution. Recipients are not bound by updated versions unless they
        affirmatively accept and distribute a copy carrying an updated version.
 
+  18.3 NOTICES. Every notice, request, consent, or written license required
+       or permitted under this License, including a request for a Commercial
+       Distribution License (§ 3.6(a)), a notice of material breach (§ 13.2),
+       and a request for written permission under §§ 7.2 and 10, must be
+       delivered through the contact channel published at the official
+       project repository:
+
+         https://github.com/PanzerPeter/Neuro
+
+       The Neuro Project may designate a different channel by publishing it
+       at that repository. A Written Notice is effective on receipt.
+
 ===============================================================================
   REDISTRIBUTION COMPLIANCE CHECKLIST
 ===============================================================================
 
 Before distributing this Software or any Derivative Work, verify that you have:
 
-  [ ] Preserved the Alpha Version Notice (Part I) verbatim, OR qualified for
-      Alpha Notice Exemption per § 4.3 and documented the certification
+  [ ] Preserved the Alpha Version Notice (Part I) verbatim and disclosed
+      alpha status in user-facing materials (§ 4), OR qualified for the
+      Alpha Notice Exemption per § 4.3 and published the certification
   [ ] Included the mandatory attribution (§ 6.1)
   [ ] Preserved all existing copyright notices (§ 6.2)
   [ ] Created a CHANGES file for any modifications (§ 5)
   [ ] Used a clearly distinct name for any Derivative Work (§ 7)
-  [ ] Included source code or a valid written offer for binary distributions (§ 8)
+  [ ] Included source or a valid written offer for binary distributions (§ 8)
   [ ] Confirmed that no Competitive AI Reproduction occurred (§ 9.1)
   [ ] Not implied Neuro Project endorsement of your distribution (§ 10)
-  [ ] Included a user-facing alpha notice where required (§ 4)
   [ ] Obtained a Commercial Distribution License if required (§ 3.6)
 
 Note: Compiled Programs (§ 2) do not require this checklist.
