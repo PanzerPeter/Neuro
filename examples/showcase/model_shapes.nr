@@ -19,7 +19,7 @@
 // `-O 0`, and why a foreign consumer would take the same pointer unchanged. The report
 // here is built from the shapes, which are part of the types, and the exit code is the
 // total parameter count modulo 256; reading elements back out is
-// `types/tensor_indexing.nr`, and the in-place updates are in `optimizer_step.nr`.
+// `tensors/tensor_indexing.nr`, and the in-place updates are in `optimizer_step.nr`.
 
 enum Init {
     Zeros,

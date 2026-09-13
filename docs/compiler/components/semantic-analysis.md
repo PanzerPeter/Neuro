@@ -444,4 +444,4 @@ What the checker still owes:
 
 - [Type Systems](https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/)
 - [Bidirectional Type Checking](https://arxiv.org/abs/1908.05839)
-- Source: [compiler/semantic-analysis/src/lib.rs](../../compiler/semantic-analysis/src/lib.rs)
+- Source: [compiler/semantic-analysis/src/lib.rs](../../../compiler/semantic-analysis/src/lib.rs)

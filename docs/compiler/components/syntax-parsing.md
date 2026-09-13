@@ -472,4 +472,4 @@ Binary(Subtract)
 
 - [Pratt Parsing](https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html)
 - [Recursive Descent Parsing](https://craftinginterpreters.com/parsing-expressions.html)
-- Source: [compiler/syntax-parsing/src/lib.rs](../../compiler/syntax-parsing/src/lib.rs)
+- Source: [compiler/syntax-parsing/src/lib.rs](../../../compiler/syntax-parsing/src/lib.rs)

@@ -56,7 +56,7 @@ export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)
 > behind the off-by-default `mlir` cargo feature, so a normal build needs only
 > LLVM 20. To work on it you need an LLVM 20 install that includes MLIR plus a
 > matching libclang 20 (`MLIR_SYS_200_PREFIX` / `TABLEGEN_200_PREFIX` /
-> `LIBCLANG_PATH`); see [Optional: MLIR Backend](docs/getting-started/installation.md#optional-mlir-backend-phase-18).
+> `LIBCLANG_PATH`); see [Optional: MLIR Backend](docs/getting-started/installation.md#optional-mlir-backend).
 
 ```bash
 # Clone and verify the build

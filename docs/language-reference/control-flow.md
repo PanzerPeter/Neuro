@@ -307,7 +307,7 @@ same reason it counts from zero over any other head: it is a position, not a
 value the range holds.
 
 A range index into a tensor takes `.rev()` too, reading that axis back to front;
-see [Slicing and Indexing](types.md#tensor-slicing-and-indexing).
+see [Slicing and indexing](tensors.md#slicing-and-indexing).
 
 ### Iterating with a Position: `.enumerate()`
 

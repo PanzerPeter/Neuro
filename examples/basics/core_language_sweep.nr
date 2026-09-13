@@ -45,8 +45,8 @@ func test_if_else(x: i32) -> i32 {
 }
 
 func test_nested_if(x: i32, y: i32) -> i32 {
-    // Nested if/else with returns in all branches hits the Phase 1 CFG limitation;
-    // use a mutable accumulator + single return to stay within supported patterns.
+    // A mutable accumulator with one return, rather than a return per branch:
+    // both compile, and this form keeps the shape of the check obvious.
     mut result: i32 = 0
     if x > 0 {
         if y > 0 {

@@ -12,19 +12,23 @@ Every example currently prints, so every one has a `.out` file. The rule still r
 the other way too: a program that prints nothing has no `.out` file, and that absence
 is itself the expectation: its output must stay empty.
 
+Each program explains itself in a header comment. This file says where things are,
+not what each one does.
+
 ## Layout
 
-Examples are grouped by topic so the set stays navigable as it grows:
-
-| Directory        | What it covers                                                         |
-| ---------------- | ---------------------------------------------------------------------- |
-| `basics/`        | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` to stdout |
-| `types/`         | Primitive types, `char` literals, `f16`/`bf16` half-precision, literal suffixes, separators, casts, overflow, strings, string concatenation (`+`), string interpolation with the format mini-language, triple-quoted block strings, string slices (`&string`), `.slice(range)` byte sub-slices and `.char_slice(range)` codepoint sub-slices, the codepoint iterators `.chars()` / `.char_indices()`, borrowed slices `&[T]` / `&mut [T]` over arrays and `Vec`s, move semantics, deterministic `Drop` (scope-exit destructors), immutable borrows (`&T`), borrow exclusivity (`&`/`&mut` aliasing rules), returned references / lifetime elision, `@derive(Copy, Clone)`, type aliases, fixed-size arrays `[T; N]` (indexing, `.len()`, `for x in arr`), static & dynamic dispatch (`impl Trait`, `&dyn Trait`), associated-type bounds (`T: Source<Item = i32>`), `Option<T>` / `Result<T, E>` and generic enums, the standard collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, the growable `String` text buffer, tensor construction, tensor indexing and slicing, tensor shape generics (`func f<M, K>(t: &Tensor<i32, [M, K]>)`), dynamic tensor shapes (`Tensor<f32, [?, 784]>`), and tensor sorting and selection (`.sort()` / `.argsort()` / `.topk(k:)`) |
-| `operators/`     | Bitwise ops, compound assignment, integer intrinsic methods, operator overloading (`Add`/`Sub`/`Neg`/`PartialEq`), `??` coalescing on `Option`/`Result`, `?` error propagation |
-| `control_flow/`  | `if`/`else`, `for`-ranges, `for i in (0..n).rev()`, `for (i, x) in xs.enumerate()`, the `.map(f)` / `.filter(p)` head adapters, the `IntoIterator` / `Iterator` protocol and hand-written adapters, `while`, `loop`, block & `unsafe` expressions, lints, `panic`/`assert`/`unreachable`, `match` pattern matching, `val-else` unwrap-or-exit |
-| `structs/`       | Struct definition, field access/mutation, `impl` methods (`&self` and in-place `&mut self`), the `@derive(Debug, PartialEq)` traits |
-| `modules/`       | Multi-file programs: a sibling module, a `mod.nr` directory module and its child, reached through qualified paths and `import`, with `export` choosing each module's surface; plus inline `module { }` blocks, an `export import` re-export facade, the implicit prelude, and the `@no_prelude` opt-out |
-| `showcase/`      | **Bigger programs that combine many features at once**: incl. mutable borrows `&mut T` + `*` deref (`mutable_borrows.nr`) |
+| Directory       | What it covers | Reference |
+| --------------- | -------------- | --------- |
+| `basics/`       | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` | [Functions](../docs/language-reference/functions.md) |
+| `types/`        | Primitives, literal suffixes and separators, casts, overflow, half precision, arrays, tuples, destructuring, newtypes, aliases, `Option` / `Result`, collections, dispatch | [Types](../docs/language-reference/types.md) |
+| `strings/`      | `string` literals and slices, `char`, interpolation, triple-quoted blocks, codepoint iteration, the growable `String` | [Strings](../docs/language-reference/strings.md) |
+| `tensors/`      | `Tensor<T, [dims]>`: construction, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, dynamic axes | [Tensors](../docs/language-reference/tensors.md) |
+| `ownership/`    | Moves, `Copy` / `.clone()`, immutable and mutable borrows, borrow exclusivity, returned references, deterministic `Drop` | [Types](../docs/language-reference/types.md#references-immutable-borrows-t) |
+| `operators/`    | Bitwise ops, compound assignment, integer intrinsics, operator overloading, `??` coalescing, `?` propagation | [Operators](../docs/language-reference/operators.md) |
+| `control_flow/` | `if` / `else`, `for` over ranges and adapters, the iterator protocol, `while`, `loop`, block and `unsafe` expressions, `match`, `val-else`, panics, lints | [Control Flow](../docs/language-reference/control-flow.md) |
+| `structs/`      | Struct definition, field access and mutation, `&self` and `&mut self` methods, derives | [Structs](../docs/language-reference/structs.md) |
+| `modules/`      | Multi-file programs, `mod.nr` directory modules, qualified paths, `import`, inline `module` blocks, re-export facades, the prelude and its opt-out | [Modules](../docs/language-reference/modules.md) |
+| `showcase/`     | Bigger programs proving many features work **together** | see the index below |
 
 The single source of truth for each program's expected exit code is
 [`expected.txt`](expected.txt); for its expected output, the sibling `.out` file.
@@ -32,260 +36,6 @@ A multi-file program registers its root with an exit code and each of its other
 modules with the marker `module`: those have no `main` of their own and are
 compiled as part of the root that reaches into them, so only the root has output
 of its own to pin.
-
-## Showcase programs
-
-These exist specifically to prove features work *together*, not just in
-isolation:
-
-- [`showcase/model_shapes.nr`](showcase/model_shapes.nr): a network's layer stack
-  declared with real tensor parameters. Tensor literal coercion and the
-  construction helpers (`zeros`, `identity`, `random_normal`, `scalar`) working together
-  with structs holding tensor fields, an enum matched to pick an initializer, a trait
-  with an `impl` per layer kind, a fixed-size array walked by `for`-in, and string
-  interpolation with the format mini-language. A tensor is not `Copy`, so each `match`
-  arm's buffer *moves* into the struct that keeps it, `.clone()` is what buys a second
-  owner, `&Tensor` reads one without consuming it, and `.to(Device::CPU)` is the
-  consuming device transfer: each one moving, copying, or handing on a DLPack handle.
-  A `?` dynamic axis reads two different heights through one signature, and the
-  reductions summarise both a borrowed table and a struct's own weight field without
-  moving either. Exit `232`.
-- [`showcase/optimizer_step.nr`](showcase/optimizer_step.nr): a weight update
-  written in place, the shape a training step has. The `*Assign` compound
-  operators (`+=`, `-=`, `*=`, `/=`, `%=`) on tensors working together with
-  literal coercion and the construction helpers, an enum matched to pick a
-  schedule, a struct holding two tensor fields, borrowed tensor operands read
-  once per iteration of a `for` loop, string interpolation, slicing and
-  indexing, and shape generics: `descend<N>` and `first_row<M, K>` are each written once
-  and instantiated at every width the program uses. Every update writes into the buffer the target's DLPack handle already
-  addresses, so the handle and its `data` pointer are unchanged across the whole
-  run; the counters are then read back element by element through a borrow, and a
-  row and a sub-block are sliced out of the weight matrix and compared against the
-  matrix they came from. Each comparison is an `assert`, so a wrong element aborts
-  instead of returning. Exit `32`.
-- [`showcase/named_axes.nr`](showcase/named_axes.nr): a batch of token embeddings
-  with every tensor axis named. Named dimensions (`[batch: 2, seq: 3, embed: 4]`)
-  working together with structs holding tensor fields, a trait with an `impl` per
-  stage, shape-generic functions whose extent is inferred from the argument,
-  slicing that keeps the surviving axis's name, in-place `+=` on a tensor, a
-  fixed-size array walked by `for`-in, and string interpolation with the format
-  mini-language. Shape manipulation joins them: `.t()` transposes the projection
-  and `.flatten(dims: [seq, embed])` merges two axes *by name*, so the code says
-  which axes it is rearranging instead of counting positions. The names make axis
-  order part of each signature, so a transposed batch is a compile error rather
-  than a wrong answer; a shape that names nothing still passes to one that does,
-  which is what keeps every pre-existing tensor function usable. Exit `70`.
-- [`showcase/perceptron.nr`](showcase/perceptron.nr): a two-neuron feed-forward
-  pass. Structs + `impl` (method calling method) + `f64` math + ReLU branch +
-  `while` loop + `as` cast. Exit `8`.
-- [`showcase/num_algorithms.nr`](showcase/num_algorithms.nr): `isqrt`, `gcd`
-  (recursion), `is_prime`, `ipow` (saturating multiply), `pow_checked`
-  (`checked_mul` reporting overflow as `Option::None`). Loops + recursion +
-  modulo + compound assignment + `Option`/`match` + tuples + loop-as-value,
-  plus a **nesting block comment** shelving an alternative `isqrt` whose body
-  carries a `/* */` comment of its own. Exit `33`.
-- [`showcase/ranked_batch.nr`](showcase/ranked_batch.nr): a batch of class scores
-  turned into predictions. `.sort()` / `.argsort()` / `.topk(k:, axis:)` with named
-  dimensions + tensor literal coercion + `.max(axis:)` / `.sum()` / `.mean()`
-  reductions + tensor slicing + `.t()` + in-place `+=` + a struct holding a tensor
-  field with `&self` methods + a reversed range head. The combination is the point:
-  an argsort index is an ordinary integer, so it reads BACK into the tensor that
-  produced it, which `.max()` cannot do at all: a reduction answers WHAT the best
-  score was and never WHERE. Exit `130`.
-- [`showcase/ranked_finish.nr`](showcase/ranked_finish.nr): a race result read
-  by finishing position. `.enumerate()` over a fixed-size array, over the `Vec<i32>`
-  that loop fills, and over a range, with `@derive(Copy)` structs + `&self`
-  methods + `match` on the position + string interpolation. The combination is the
-  point: the `u64` position indexes back into the array that produced it, so each
-  runner is compared with the next: something `for runner in runners` cannot do.
-  Exit `176`.
-- [`showcase/replay_buffer.nr`](showcase/replay_buffer.nr): an episode buffer
-  written oldest-first and read newest-first. Range `.rev()` in a `for` head and on
-  a tensor index axis, with tensor slicing + `.sum()` reductions + `@derive(Copy)`
-  structs with `&self` methods + `.rev().enumerate()` + a `.filter(p)` head adapter
-  + a labelled `break` out of a descending scan. The combination is the point: the
-  reversed index builds a FRESH tensor, so the buffer keeps its own order and stays
-  readable and reducible afterwards, which the printed `episode[0]` shows. Exit `79`.
-- [`showcase/running_stats.nr`](showcase/running_stats.nr): an online mean
-  accumulator. Struct state, direct field mutation, `&self` query methods, `f64`
-  division, `as` casts, and `.is_nan()` screening a non-finite sample out of the
-  accumulator. Exit `5`.
-- [`showcase/simulation.nr`](showcase/simulation.nr): a bit-flag state machine.
-  Bitwise `<<`/`|`/`&`/`^`, `.shr(n)`, struct state, `&self` predicate +
-  popcount methods, `while` with `break`. Exit `2`.
-- [`showcase/status_report.nr`](showcase/status_report.nr): a formatted status
-  report, **printed to stdout with `println`**. String interpolation with the
-  format mini-language (`:04x`, `:.2`, `:+d`, `:>10`) rendering values that come
-  from a `@derive(Copy)` struct with `impl` methods, an enum with a payload
-  matched by `match`, a fixed-size array walked by `for`-in, `f64` math, and `+`
-  concatenation. Each line is printed and then checked against the exact text it
-  should produce. Exit `34`.
-- [`showcase/config_manifest.nr`](showcase/config_manifest.nr): a config
-  manifest rendered from typed records. **Triple-quoted block strings** carrying
-  the header, footer, and the expected document verbatim, working together with a
-  `@derive(Copy)` struct + `impl` methods, an enum with a payload matched by
-  `match`, a fixed-size array + `for`-in loop, `+` concatenation, and string
-  interpolation with the format mini-language (`:<10`, `:>4`, `:.3`). Exit `81`.
-- [`showcase/field_report.nr`](showcase/field_report.nr): the **2A sub-phase end to end**:
-  `@derive(Debug, PartialEq)`, `println`, `.is_nan()` on a computed NaN, one `&[T]` slice
-  parameter satisfied by both an array and a `Vec`, the `IntoIterator` / `Iterator` protocol
-  with `type Item` and an `Iterator<Item = i32>` bound, `.enumerate()` and a `.filter(p)`
-  adapter, and `.chars()` / `.char_indices()` over non-ASCII text: the byte offsets and the
-  codepoint count deliberately disagree. Exit `63`.
-- [`showcase/derived_records.nr`](showcase/derived_records.nr): `@derive(Debug, PartialEq)`
-  finding structural duplicates in a fixed-size array of records, working together with
-  `@derive(Copy, Clone)` structs + `impl` methods, a nested struct field, a counted
-  `for i in 0..n` loop with indexing, an enum + `match`, a labeled `break`, and string
-  interpolation with the format mini-language (`:?`, `:>2`, `:<6`). Exit `122`.
-- [`showcase/enum_records.nr`](showcase/enum_records.nr): pattern matching
-  deconstructing enums with associated data (all three variant
-  forms) alongside a struct with an enum field, `impl` methods, a fixed-size
-  array + `for`-in loop, plus value/or/range/guard patterns. Exit `46`.
-- [`showcase/unit_types.nr`](showcase/unit_types.nr): newtype units of measure
-  flowing through a struct with newtype fields, `impl` methods, an enum
-  + `match`, and a fixed-size array + `for`-in loop. Exit `94`.
-- [`showcase/generic_toolkit.nr`](showcase/generic_toolkit.nr): generic structs and
-  generic inherent impls, monomorphized per instance (`Pair<T, U>` inferred at
-  a literal, `Cell<T>::get` used at `i32` and `bool`), working together with generic
-  functions (`identity<T>`, `choose<T>`, `second<T, U>`), **const generic parameters**
-  (`Buffer<T, const CAP>` and `sum_all<const N>` with a `where N > 0` predicate),
-  **turbofish** (`identity::<i32>(8)`), a fixed-size array + `for`-in loop, an enum +
-  pattern matching, and a tuple used as a generic type argument. Exit `85`.
-- [`showcase/inventory_ledger.nr`](showcase/inventory_ledger.nr): the **standard
-  collections** carrying a small ledger: a `Vec<Item>` of `Copy` structs, a
-  `Vec<string>`, a `HashMap<string, i32>` name index, and a key-ordered
-  `BTreeMap<i32, i32>` report, working together with an `impl` block of `&self`
-  methods, an enum + `match` classifier, `Option` matching on every fallible
-  read, `??` unwrapping the reads that only need a default (including a
-  right-to-left chain), fixed-size arrays, and `for`-in over both arrays and
-  collections. Exit `181`.
-- [`showcase/borrowed_text.nr`](showcase/borrowed_text.nr): **explicit lifetime
-  annotations** `<'a>` on the classic `longest<'a>(a: &'a string, b: &'a string)
-  -> &'a string`, working together with immutable string borrows, zero-copy
-  `.slice(range)` / `.char_slice(range)` / `.len()`, an if-expression, and a lifetime
-  mixed with a type parameter (`tagged_len<'a, T>`) that monomorphizes on `T` only.
-  The lifetime is validated then erased: zero runtime cost. The two slice methods are
-  shown side by side on multi-byte text, where they part company. Exit `25`.
-- [`showcase/shape_traits.nr`](showcase/shape_traits.nr): **trait declarations**:
-  a `Shape` trait with a required `area` and a **default** `is_big` method, implemented
-  for two structs (`Square` inherits the default, `Rect` overrides it), dispatched
-  through a **trait-bounded generic** `scaled_area<T: Shape>` monomorphized per shape,
-  and combined with `&self` methods, `@derive(Copy)` structs, a fixed-size array +
-  `for`-in loop, and if-expressions. Also demonstrates **both dispatch forms**:
-  `describe(&impl Shape)` (static, monomorphized like the bound generic) and
-  `dyn_area` / `dyn_flag` taking `&dyn Shape` (dynamic, one body serving both shapes
-  through a vtable, reaching Square's inherited default and Rect's override). Exit
-  `161`.
-- [`showcase/typed_channels.nr`](showcase/typed_channels.nr): **associated types**: one
-  `Channel` trait whose `type Sample` each instrument binds differently (`f64`, `i32`, `bool`),
-  so three unrelated measurement types share one trait, which a trait fixed to a single sample
-  type could not do. Combined with a trait default method (`channel_id`, inherited by the tally
-  and overridden by the others), `@derive(Copy)` structs with `&self` methods, a drain returning
-  `Option<Self::Sample>` unwrapped by `match`, `Vec<i32>` + `for`-in, an if-expression, and
-  interpolation with the format mini-language (`:.1`, `:>4`). A `Channel<Sample = i32>`
-  bound then reads every counted channel through one generic body: the constraint the
-  trait declaration alone cannot express. Exit `108`.
-- [`showcase/vector_physics.nr`](showcase/vector_physics.nr): **operator traits**:
-  a `Copy` `Vec2` implementing `Add` / `Sub` / `Neg` / `PartialEq`, so `+` / `-` / unary
-  `-` / `==` dispatch to the impl methods, combined with an `&self` method, compound
-  assignment (`+=` desugaring through `Add`), a `while` loop, and if-expressions. The
-  operators are monomorphized to plain calls: no vtable. Exit `35`.
-- [`showcase/sensor_pipeline.nr`](showcase/sensor_pipeline.nr): **`Option` / `Result`**: a
-  reading looked up in an array (absent → `Option::None`) and validated (out of range →
-  `Result::Err`), combined with a struct + `impl` methods (`&self`), a borrowed struct parameter
-  (`&Sensor`), a fixed-size array + `for`-in loop, a generic function used at two type arguments,
-  a guarded `match` arm, and compound assignment. Exit `57`.
-- [`showcase/sensor_windows.nr`](showcase/sensor_windows.nr): **borrowed slices**: one
-  `Window::over(&[i32])` reader serving a fixed-size array, a `.slice(range)` window into it,
-  and a `Vec<i32>`, combined with a struct + `impl` methods (`&self`), an `Option<i32>`
-  unwrapped by `match`, `for (i, x) in xs.enumerate()`, an in-place clamp through a
-  `&mut [i32]`, and the format mini-language. Exit `85`.
-- [`showcase/closures.nr`](showcase/closures.nr): **closures and lambdas**: a
-  higher-order `map_sum(xs, f: (i32) -> i32)` applied with a closure literal that
-  **captures** an enclosing Copy variable by value, a **`move`** closure with a block
-  body and explicit return type, and a struct `impl` method, all combined with
-  fixed-size arrays + indexed iteration and a `while` loop. Each closure is lifted to a
-  `{ fn_ptr, env_ptr }` value; the environment holds the captured value. Exit `90`.
-- [`showcase/job_queue.nr`](showcase/job_queue.nr): **`val-else`**: three stages of a
-  job queue each unwrap-or-exit, exercising all three `else` forms: `|reason|` naming a
-  `Result`'s `Err` payload, `|verdict|` naming a plain enum's whole scrutinee for a nested
-  `match`, and a bare `else { break }` draining a `Vec` through `pop`. Combined with `??`
-  defaulting an absent lookup, a `@derive(Copy)` struct with an associated function and
-  `&self` method, an enum + guarded `match`, a fixed-size array, a range-`for`, and
-  `for`-in over the collection. Exit `139`.
-- [`showcase/log_builder.nr`](showcase/log_builder.nr): **the growable `String`**: a run
-  transcript assembled into one buffer that grows in place, instead of the `+` chain that
-  would reallocate and recopy the whole transcript once per event. Each line is appended
-  through a `&mut String` parameter. Combined with a `Vec<Event>` + `for`-in, a
-  `@derive(Copy, Clone)` struct with `&self` methods, an enum with a payload + `match`, and
-  string interpolation with the format mini-language (`:>4`, `:.1`, `:+d`). The finished
-  text is checked exactly, then `.clear()` proves the buffer is reusable. Exit `64`.
-- [`showcase/buffered_report.nr`](showcase/buffered_report.nr): **buffered standard
-  output**: a 240-line shift report followed by a banner larger than the output buffer
-  itself, so the lines held in the buffer, the drains that empty it, and the oversize
-  string that skips it all have to come out in the order they were written. Combined with a
-  `@derive(Copy, Clone)` struct with `&self` methods, a `Vec<Reading>` + `for`-in, the
-  growable `String` with `push_str`, and interpolation with the format mini-language
-  (`:>3`, `:.2`). Exit `40`: the number of readings at peak load.
-- [`showcase/scan_guard.nr`](showcase/scan_guard.nr): **deterministic `Drop` +
-  labeled breaks**: two `impl Drop` scope guards sharing a `&mut i32` counter while a
-  labeled `break` exits *two* nested loops at once, proving the destructors still run
-  on that path. Combined with a `Copy` struct + `&self` method, a fixed-size array with
-  indexed reads, and `match` over range and `_` patterns. Exit `160`.
-- [`showcase/sample_audit.nr`](showcase/sample_audit.nr): **the `?` propagation
-  operator**: a validator whose `Err` carries the offending sample, propagated with `?`
-  out of a `for`-in loop body (leaving the whole function, not the iteration), plus `?`
-  on an `Option` rebuilt as the caller's own `None`. Combined with a `@derive(Copy)`
-  struct + `&self` method, fixed-size arrays, `match` on the returned `Result`,
-  `val-else` with an `|e|` error binding, and `??` defaulting the reads that only need
-  a fallback. Exit `177`.
-- [`showcase/stream_pipeline.nr`](showcase/stream_pipeline.nr): **the iteration
-  protocol**: a `Readings` container implementing `IntoIterator`, the `ReadingsIter`
-  cursor it hands out implementing `Iterator`, and three adapters over it: a `Scaled`
-  transform, an `Above` filter that may pull several elements per step, and a `Shaped`
-  transform carrying a **closure in a struct field**. Two adapters are stacked over one
-  source and drained by a single `for` head, so nothing between the source and the loop
-  is ever materialized. Combined with an **associated-type bound**
-  (`S: Iterator<Item = i32>`) that is what lets an adapter call `self.inner.next()`,
-  generic structs monomorphized per instance, `@derive(Copy)` structs with `&mut self`
-  methods, `Option` + `match`, `Vec<i32>` + `for`-in, `.enumerate()` over a protocol
-  head, and interpolation with the format mini-language (`:>2`, `:>3`). The same
-  pipeline is then rewritten with the compiler's own **`.map(f)` / `.filter(p)` head
-  adapters**, which need no adapter type at all, and a filtered array head is
-  enumerated to show the position counting what the chain yielded. Exit `189`.
-- [`showcase/word_scanner.nr`](showcase/word_scanner.nr): **the codepoint
-  iterators**: a tokenizer that finds its cut points with `.char_indices()` byte offsets
-  and takes the cuts with zero-copy `.slice(range)` views, then counts each token's
-  scalars with `.chars()`. The text is deliberately not ASCII, where the two units
-  disagree. Combined with a struct + `&self` method and an associated function, the
-  growable `String` buffer and `.to_string()`, a heap-backed `Vec<string>` that frees at
-  scope exit, `.enumerate()` over that `Vec`, a `.filter(p)` adapter over the scalar
-  stream, and interpolation with the format mini-language (`:>6`, `:>2`). Exit `27`.
-- [`showcase/telemetry/main.nr`](showcase/telemetry/main.nr): **multi-file
-  compilation and `import`**: a root module reaching a sibling (`stats`), a `mod.nr`
-  directory module (`report`), and its child (`report::format`), naming them through a
-  name list, a rename, and a module alias. The **implicit prelude** carries `Some` / `None`
-  into the root module and into `report` with no import at all, while `stats` (which has
-  nothing fallible to say) opts out of it with **`@no_prelude`**. Also an **inline `module`
-  block** (`scoring`, with a private helper the surrounding file cannot name) and an
-  **`export import`** in `report/mod.nr` that re-exports its child's `clamp`, so `main`
-  reaches `report::clamp` without naming `format`. Combined with a struct +
-  `impl` methods built in one module and used in another, a generic function monomorphized
-  at `i32` and `bool`, a fixed-size array, a heap-backed `Vec<T>` that frees its buffer at
-  scope exit, an enum + `match`, and `??` defaulting an absent `Option`. Each module publishes
-  a surface with `export` and keeps the rest private: `Summary.total` and `report`'s `Band`
-  never leave the file that declares them. Exit `75`.
-
-- [`showcase/render_settings.nr`](showcase/render_settings.nr): **the sub-phase 1H
-  language-cleanup features together**: **named arguments** with external labels
-  (`quality q:`, `min floor:`) and a positional-only `_ factor`, **string interpolation**
-  with the format mini-language (`{w:>4}`), a **triple-quoted `"""` block** dedented
-  against its closing delimiter, and a **nested block comment**. Every named call is
-  written in an order that differs from the declaration, so the program's answer is only
-  right if the labels, not the positions, decided the binding. Combined with a
-  `@derive(Copy)` struct + `&self` / `&mut self` methods, an associated function, an enum
-  with a payload + `match`, a fixed-size array + `for`-in loop, and `??` defaulting an
-  `Option`. Exit `99`.
 
 ## Compiling and running
 
@@ -332,8 +82,9 @@ with every line quoted so trailing whitespace stays visible.
 ## Adding an example
 
 1. Drop a `.nr` file into the topic directory it belongs to (create a new
-   directory if no topic fits).
-2. Add one line to [`expected.txt`](expected.txt): `path/from/examples.nr  <exit-code>`.
+   directory if no topic fits), and open it with a comment saying what it shows.
+2. Add one line to [`expected.txt`](expected.txt), in that directory's section:
+   `path/from/examples.nr  <exit-code>`.
 3. If it prints, save exactly what it prints beside it as `<name>.out`:
    `cargo run -p neurc -- compile examples/<name>.nr -o /tmp/ex && /tmp/ex > examples/<name>.out`.
    Read that file before committing it: it is an assertion, so it is only worth
@@ -342,87 +93,48 @@ with every line quoted so trailing whitespace stays visible.
 
 No Rust edits are needed: discovery is automatic.
 
-## Known language limitations (affect what examples can do)
+## Showcase index
 
-- Fixed-size arrays `[T; N]` are supported (`types/arrays.nr`): literals,
-  indexing, element assignment, `.len()`, and `for x in arr` / `for x in &arr`.
-  Element types are limited to `Copy` scalars for now; growable `Vec<T>` and
-  `.enumerate()` are later phases.
-- Tuples `(T1, T2, ...)` are supported (`types/tuples.nr`): the tuple type,
-  literals, `.0` / `.1` index access, and destructuring binds `val (a, b) = t`
-  (with `_` wildcards and nesting). Elements are limited to `Copy` types for now,
-  so tuples holding a `string` or other non-Copy value are a later phase.
-- Tensor *construction* is supported (`types/tensor_construction.nr`): a nested array
-  literal coerces to `Tensor<T, [d0, ...]>` wherever an annotation says so, and
-  `Tensor::<T, [...]>::zeros()` / `ones()` / `identity()` / `random_normal(mean:, std:)` /
-  `scalar()` / `from()` build one where no annotation reaches. Tensors move rather than
-  copy. In-place compound assignment is supported too (`showcase/optimizer_step.nr`):
-  `w -= g` and the rest of the `*Assign` family update the target's own buffer
-  element-wise, allocating nothing. Slicing and indexing are supported
-  (`types/tensor_indexing.nr`): an index gives one argument per axis, an axis given a
-  position is dropped and one given a range or `..` survives, so `t[i, j]` reads an
-  element while `t[0, ..]` and `t[1..3, 2..5]` copy out a smaller tensor. Shape generics are
-  supported (`types/tensor_shape_generics.nr`): an extent may be a shape parameter inferred
-  from the argument's own shape (`func f<M, K>(t: &Tensor<i32, [M, K]>) -> Tensor<i32, [K]>`),
-  monomorphized per distinct set of extents and constrained by a `where` predicate; a shape
-  parameter written twice must agree. A tensor *literal* still needs literal extents, and a
-  shape-generic struct or `impl` is later work. Named dimensions are supported
-  (`types/tensor_named_dimensions.nr`, combined with the rest in `showcase/named_axes.nr`):
-  an axis may be written `[batch: 32, embed: 768]`, names are compared only where both
-  shapes supply one, a surviving axis keeps its name through an index, and a transposed
-  argument is a compile error naming the axis. Shape manipulation is supported
-  (`types/tensor_shape_manipulation.nr`): `.t()`, `.reshape([...])` with a `-1` extent the
-  compiler infers, `.permute([...])`, and `.flatten()` / `.flatten(dims: [...])`, all
-  computing the result's shape at compile time and all consuming the receiver so one buffer
-  is handed on rather than duplicated. `.permute` and `.flatten` take dimension NAMES as
-  well as positions, resolved against the receiver's own shape. Dynamic shapes are
-  supported (`types/tensor_dynamic_shapes.nr`): an axis written `?` has no compile-time
-  extent, so one signature accepts every extent at that position while the axes beside it
-  stay checked. Widening goes one way — a statically shaped tensor is accepted where a `?`
-  is expected, not the reverse — and a `?`-shaped tensor binds, moves, is returned and is
-  released like any other, while anything needing the extent (a constructor, a literal,
-  `.clone()`, an index, a shape cast) is a compile error naming the axis. Reductions are
-  supported (`types/tensor_reductions.nr`, combined with the rest in
-  `showcase/model_shapes.nr`): `.sum()`, `.mean()`, `.max()` and `.min()` fold the whole
-  tensor to a scalar, or fold along one `axis:` — a position, a dimension name, or a
-  negative index from the end — dropping that axis and keeping every other name and
-  extent. A reduction reads its receiver rather than consuming it, so it works through a
-  borrow; `.mean()` is `f32`/`f64`-only, and a reduction over no elements is a compile
-  error rather than an invented identity. Sorting and selection are supported
-  (`types/tensor_sorting.nr`, combined with the rest in `showcase/ranked_batch.nr`):
-  `.sort()` orders one axis, `.argsort()` answers the receiver positions that produce
-  that order, and `.topk(k:, axis:)` hands back the `k` greatest paired with where they
-  came from, the selected axis being `k` long and unnamed in the result. All three are
-  native to the element dtype, so `f32` and `f64` sort without an ordered-float wrapper,
-  and `NaN` sorts to the END in both directions. Equal elements keep source order, so an
-  argsort of a tensor with ties is reproducible. `axis:` takes a position, a dimension
-  name or a negative index and defaults to the last; `k:` and `descending:` must be
-  constants, since they decide the result's shape and the comparator. A selection reads
-  its receiver, so it works through a borrow. By-value
-  arithmetic is later work. A tensor value is a
-  DLPack handle over an out-of-line buffer, so one of any size compiles at any optimization
-  level and the same pointer is what a foreign consumer would read;
-  `showcase/model_shapes.nr` returns a 100352-parameter weight matrix by value.
-- Newtypes are supported (`types/newtype.nr`): `newtype Meters = i32` creates a
-  distinct nominal type wrapping an inner type, constructed `Meters(30)` and read
-  back with `.0`. Unlike a `type` alias, a newtype is *not* interchangeable with
-  its inner type. The inner type is limited to `Copy` types for now.
-- Struct and array destructuring patterns are supported (`types/destructuring.nr`):
-  `val Point { x, y } = p` binds each field by name; `val [a, b, c] = arr` binds
-  array elements positionally; `val [first, ..rest] = arr` captures the remainder as
-  a fresh `[T; N - k]` array, and a bare `..` ignores it. A rest-less array pattern
-  must match the array's length exactly.
-- Move semantics, borrows (`&T`/`&mut T`), borrow exclusivity, lifetime elision, and deterministic `Drop` are implemented (sub-phase 1C). The owning collections `Vec<T>`, `HashMap<K, V>`, and `BTreeMap<K, V>` are implemented (1G), as is the growable `String` text buffer: all four move on assignment and free their buffers at scope exit. What still leaks is the anonymous heap `string` that `+`, interpolation, and `String::to_string` produce, which no tracked binding owns.
-- `&self` and `&mut self` methods are supported; a `&mut self` method mutates
-  struct state in place (see `structs/mut_self_accumulator.nr`). Consuming `self`
-  is not yet supported.
-- Right shift is the `.shr(n)` method, not a `>>` operator (Phase 2+).
-- Prefer `return` over a tail-position `if`/`else` *expression* as a function's
-  implicit return value; assign it to a `val` first if you need the value form
-  (`val r = if c { a } else { b }`). The examples follow this convention.
+One line each. The program's own header comment is the full description.
+
+- [`borrowed_text.nr`](showcase/borrowed_text.nr): explicit lifetime annotations over borrowed text
+- [`buffered_report.nr`](showcase/buffered_report.nr): a shift report long enough to exercise buffered stdout
+- [`closures.nr`](showcase/closures.nr): closures and higher-order functions
+- [`config_manifest.nr`](showcase/config_manifest.nr): a config manifest rendered from typed records
+- [`derived_records.nr`](showcase/derived_records.nr): derived `Debug` and `PartialEq` over earlier features
+- [`enum_records.nr`](showcase/enum_records.nr): pattern matching over enums, structs, methods and arrays
+- [`field_report.nr`](showcase/field_report.nr): standard I/O driving a field report
+- [`generic_toolkit.nr`](showcase/generic_toolkit.nr): generics, const generics, turbofish and `where` clauses together
+- [`inventory_ledger.nr`](showcase/inventory_ledger.nr): the standard collections carrying an inventory ledger
+- [`job_queue.nr`](showcase/job_queue.nr): `val-else` early exit carrying a small job queue
+- [`log_builder.nr`](showcase/log_builder.nr): a run transcript assembled in one growable `String`
+- [`model_shapes.nr`](showcase/model_shapes.nr): a network's layer stack declared with real tensor parameters
+- [`mutable_borrows.nr`](showcase/mutable_borrows.nr): mutable borrows `&mut T` and the dereference operator `*`
+- [`named_axes.nr`](showcase/named_axes.nr): a batch of token embeddings with every tensor axis named
+- [`num_algorithms.nr`](showcase/num_algorithms.nr): a tiny integer-math toolkit
+- [`optimizer_step.nr`](showcase/optimizer_step.nr): a weight update written in place, the shape a training step has
+- [`perceptron.nr`](showcase/perceptron.nr): a two-neuron feed-forward pass
+- [`ranked_batch.nr`](showcase/ranked_batch.nr): ordering a tensor axis alongside the rest of the tensor surface
+- [`ranked_finish.nr`](showcase/ranked_finish.nr): `.enumerate()` carrying a position through earlier features
+- [`render_settings.nr`](showcase/render_settings.nr): a render pipeline configured by named arguments
+- [`replay_buffer.nr`](showcase/replay_buffer.nr): range `.rev()` driving a replay buffer
+- [`running_stats.nr`](showcase/running_stats.nr): an online mean accumulator
+- [`sample_audit.nr`](showcase/sample_audit.nr): `?` error propagation threaded through earlier features
+- [`scan_guard.nr`](showcase/scan_guard.nr): deterministic `Drop` and labeled loop exit together
+- [`sensor_pipeline.nr`](showcase/sensor_pipeline.nr): `Option` / `Result` over structs, methods, arrays and generics
+- [`sensor_windows.nr`](showcase/sensor_windows.nr): windowed sensor readings behind one slice signature
+- [`shape_traits.nr`](showcase/shape_traits.nr): trait declarations and both dispatch forms together
+- [`simulation.nr`](showcase/simulation.nr): a tiny bit-flag state machine
+- [`status_report.nr`](showcase/status_report.nr): a formatted status report built from live readings
+- [`stream_pipeline.nr`](showcase/stream_pipeline.nr): the iteration protocol carrying a small stream pipeline
+- [`telemetry/main.nr`](showcase/telemetry/main.nr): multi-file compilation and `import` over prior features
+- [`typed_channels.nr`](showcase/typed_channels.nr): associated types, one trait with three implementors
+- [`unit_types.nr`](showcase/unit_types.nr): newtype units of measure over structs, enums and methods
+- [`vector_physics.nr`](showcase/vector_physics.nr): operator traits driving a vector physics step
+- [`word_scanner.nr`](showcase/word_scanner.nr): the codepoint iterators driving a small tokenizer
 
 ## See also
 
-- [Language Reference](../docs/language-reference/types.md)
-- [CHANGELOG](../CHANGELOG.md)
-- [Compiler Documentation](../docs/README.md)
+- [Language Reference](../docs/language-reference/types.md), and the [documentation index](../docs/README.md)
+- [Known Bugs](../docs/BUGS.md): what is currently broken
+- [CHANGELOG](../CHANGELOG.md): what each release added

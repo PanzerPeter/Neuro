@@ -40,7 +40,7 @@ def main() -> int:
         return 1
 
     examples = [
-        ("basics/milestone.nr", 8),
+        ("basics/function_call.nr", 8),
         ("basics/factorial.nr", 120),
     ]
 

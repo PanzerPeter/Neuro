@@ -19,80 +19,86 @@
 # program: it has no `main`, and is compiled as part of the root that reaches
 # into it rather than on its own.
 
-# --- basics ---------------------------------------------------------------
-basics/assignment.nr            15
-basics/division.nr              16
-basics/expression_returns.nr    37
-basics/factorial.nr             120
-basics/fibonacci.nr             55
-basics/greeting.nr              5
-basics/hello.nr                 26
-basics/milestone.nr             8
-basics/named_arguments.nr       40
-basics/phase1_complete.nr       0
-basics/type_inference.nr        42
+# --- basics: functions, variables, arithmetic, recursion, stdout ------------
+basics/assignment.nr           15
+basics/core_language_sweep.nr  0
+basics/division.nr             16
+basics/expression_returns.nr   37
+basics/factorial.nr            120
+basics/fibonacci.nr            55
+basics/function_call.nr        8
+basics/greeting.nr             5
+basics/hello.nr                26
+basics/named_arguments.nr      40
+basics/type_inference.nr       42
 
-# --- types ----------------------------------------------------------------
+# --- types: primitives, literals, casts, arrays, slices, tuples, newtypes ---
 types/arrays.nr                     8
 types/assoc_bounds.nr               50
-types/borrow_exclusivity.nr         31
-types/char.nr                       65
 types/collections.nr                101
 types/constants.nr                  51
-types/copy_clone.nr                 14
+types/destructuring.nr              72
 types/dispatch.nr                   44
-types/drop.nr                       3
 types/extended_types.nr             0
 types/extended_types_arithmetic.nr  0
 types/float_ops.nr                  42
 types/float_suffixes.nr             0
 types/half_precision.nr             3
 types/integer_overflow.nr           55
-types/immutable_borrows.nr          0
 types/integer_suffixes.nr           0
-types/move_semantics.nr             0
 types/newtype.nr                    42
 types/option_result.nr              42
-types/returned_reference.nr         60
-types/string_builder.nr             27
-types/string_clone.nr               5
-types/string_concat.nr              10
-types/string_interpolation.nr       20
-types/triple_quoted.nr              6
-types/string_len.nr                 0
-types/string_slice.nr               0
-types/slices.nr                     43
-types/destructuring.nr              72
-types/string_slice_method.nr        12
-types/string_char_slice.nr          19
-types/string_chars.nr               31
-types/strings.nr                    0
-types/tensor_construction.nr        6
-types/tensor_indexing.nr            44
-types/tensor_shape_generics.nr      41
-types/tensor_named_dimensions.nr    33
-types/tensor_shape_manipulation.nr  44
-types/tensor_dynamic_shapes.nr      42
-types/tensor_reductions.nr          21
-types/tensor_sorting.nr             21
 types/tuples.nr                     62
 types/type_aliases.nr               17
 types/underscore_separators.nr      0
 
-# --- operators ------------------------------------------------------------
-operators/bitwise_ops.nr          1
-operators/compound_assignment.nr  21
-operators/error_propagation.nr    129
-operators/integer_methods.nr      0
-operators/null_coalesce.nr        75
-operators/operator_overloading.nr 24
+# --- strings: the `string` slice and the growable `String` buffer -----------
+strings/char.nr                  65
+strings/string_builder.nr        27
+strings/string_char_slice.nr     19
+strings/string_chars.nr          31
+strings/string_clone.nr          5
+strings/string_concat.nr         10
+strings/string_interpolation.nr  20
+strings/string_len.nr            0
+strings/string_slice.nr          0
+strings/string_slice_method.nr   12
+strings/strings.nr               0
+strings/triple_quoted.nr         6
 
-# --- control flow ---------------------------------------------------------
+# --- tensors: Tensor<T, [dims]>: construction, shapes, reductions, sorting --
+tensors/tensor_construction.nr        6
+tensors/tensor_dynamic_shapes.nr      42
+tensors/tensor_indexing.nr            44
+tensors/tensor_named_dimensions.nr    33
+tensors/tensor_reductions.nr          21
+tensors/tensor_shape_generics.nr      41
+tensors/tensor_shape_manipulation.nr  44
+tensors/tensor_sorting.nr             21
+
+# --- ownership: moves, borrows, exclusivity, lifetimes, Drop ----------------
+ownership/borrow_exclusivity.nr  31
+ownership/copy_clone.nr          14
+ownership/drop.nr                3
+ownership/immutable_borrows.nr   0
+ownership/move_semantics.nr      0
+ownership/returned_reference.nr  60
+ownership/slices.nr              43
+
+# --- operators: bitwise, compound assignment, overloading, `??`, `?` --------
+operators/bitwise_ops.nr           1
+operators/compound_assignment.nr   21
+operators/error_propagation.nr     129
+operators/integer_methods.nr       0
+operators/null_coalesce.nr         75
+operators/operator_overloading.nr  24
+
+# --- control_flow: if, for, while, loop, match, iterators, panics, lints ----
 control_flow/control_flow.nr          31
 control_flow/for_enumerate.nr         56
 control_flow/for_range.nr             10
-control_flow/for_range_rev.nr         0
 control_flow/for_range_inclusive.nr   15
+control_flow/for_range_rev.nr         0
 control_flow/if_block_expressions.nr  149
 control_flow/iterator_protocol.nr     79
 control_flow/labeled_breaks.nr        4
@@ -105,62 +111,63 @@ control_flow/unsafe_block.nr          24
 control_flow/val_else.nr              61
 control_flow/while_true_lint.nr       7
 
-# --- structs & methods ----------------------------------------------------
-structs/derives.nr  21
-structs/methods.nr  42
+# --- structs: definition, field access, impl methods, derives ---------------
+structs/derives.nr               21
+structs/methods.nr               42
 structs/mut_self_accumulator.nr  42
-structs/neuron.nr   4
-structs/structs.nr  50
-structs/struct_update.nr  14
+structs/neuron.nr                4
+structs/struct_update.nr         14
+structs/structs.nr               50
 
-# --- modules (multi-file programs) ----------------------------------------
-modules/main.nr             40
-modules/imports.nr          40
-modules/prelude.nr          25
-modules/no_prelude.nr       36
-modules/inline.nr           26
-modules/reexports.nr        10
-modules/api.nr              module
-modules/geometry.nr         module
-modules/shapes/mod.nr       module
-modules/shapes/area.nr      module
+# --- modules: multi-file programs, imports, visibility, re-exports ----------
+modules/api.nr          module
+modules/geometry.nr     module
+modules/imports.nr      40
+modules/inline.nr       26
+modules/main.nr         40
+modules/no_prelude.nr   36
+modules/prelude.nr      25
+modules/reexports.nr    10
+modules/shapes/area.nr  module
+modules/shapes/mod.nr   module
 
-# --- showcase (multiple features working together) ------------------------
-showcase/borrowed_text.nr   25
-showcase/buffered_report.nr 40
-showcase/closures.nr        90
-showcase/config_manifest.nr 80
-showcase/derived_records.nr 122
-showcase/enum_records.nr    46
-showcase/field_report.nr    63
-showcase/generic_toolkit.nr 85
-showcase/inventory_ledger.nr 181
-showcase/job_queue.nr       139
-showcase/log_builder.nr     64
-showcase/model_shapes.nr    232
-showcase/mutable_borrows.nr 47
-showcase/named_axes.nr      70
-showcase/num_algorithms.nr  33
-showcase/optimizer_step.nr  32
-showcase/perceptron.nr      8
-showcase/ranked_batch.nr    130
-showcase/ranked_finish.nr   176
-showcase/replay_buffer.nr   79
-showcase/render_settings.nr 99
-showcase/running_stats.nr   5
-showcase/sample_audit.nr    177
-showcase/scan_guard.nr      160
-showcase/sensor_pipeline.nr 57
-showcase/sensor_windows.nr  85
-showcase/shape_traits.nr    161
-showcase/simulation.nr      2
-showcase/status_report.nr   34
-showcase/stream_pipeline.nr 189
-showcase/telemetry/main.nr          75
-showcase/telemetry/stats.nr         module
-showcase/telemetry/report/mod.nr    module
-showcase/telemetry/report/format.nr module
-showcase/typed_channels.nr  108
-showcase/unit_types.nr      94
-showcase/vector_physics.nr  35
-showcase/word_scanner.nr    27
+# --- showcase: bigger programs proving features work together ---------------
+showcase/borrowed_text.nr            25
+showcase/buffered_report.nr          40
+showcase/closures.nr                 90
+showcase/config_manifest.nr          80
+showcase/derived_records.nr          122
+showcase/enum_records.nr             46
+showcase/field_report.nr             63
+showcase/generic_toolkit.nr          85
+showcase/inventory_ledger.nr         181
+showcase/job_queue.nr                139
+showcase/log_builder.nr              64
+showcase/model_shapes.nr             232
+showcase/mutable_borrows.nr          47
+showcase/named_axes.nr               70
+showcase/num_algorithms.nr           33
+showcase/optimizer_step.nr           32
+showcase/perceptron.nr               8
+showcase/ranked_batch.nr             130
+showcase/ranked_finish.nr            176
+showcase/render_settings.nr          99
+showcase/replay_buffer.nr            79
+showcase/running_stats.nr            5
+showcase/sample_audit.nr             177
+showcase/scan_guard.nr               160
+showcase/sensor_pipeline.nr          57
+showcase/sensor_windows.nr           85
+showcase/shape_traits.nr             161
+showcase/simulation.nr               2
+showcase/status_report.nr            34
+showcase/stream_pipeline.nr          189
+showcase/telemetry/main.nr           75
+showcase/telemetry/report/format.nr  module
+showcase/telemetry/report/mod.nr     module
+showcase/telemetry/stats.nr          module
+showcase/typed_channels.nr           108
+showcase/unit_types.nr               94
+showcase/vector_physics.nr           35
+showcase/word_scanner.nr             27
+

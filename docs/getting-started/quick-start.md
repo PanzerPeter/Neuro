@@ -131,9 +131,9 @@ func main() -> i32 {
 - Integer arithmetic
 - `return` statements (the program exits with the value `main` returns, here `26`)
 
-### milestone.nr
+### function_call.nr
 
-The source of [`examples/basics/milestone.nr`](../../examples/basics/milestone.nr):
+The source of [`examples/basics/function_call.nr`](../../examples/basics/function_call.nr):
 
 ```neuro
 func add(a: i32, b: i32) -> i32 {
@@ -142,6 +142,7 @@ func add(a: i32, b: i32) -> i32 {
 
 func main() -> i32 {
     val result = add(5, 3)
+    println("add(5, 3) = {result}")
     return result
 }
 ```
@@ -154,16 +155,16 @@ func main() -> i32 {
 Compile and run:
 
 ```bash
-cargo run -p neurc -- compile examples/basics/milestone.nr
+cargo run -p neurc -- compile examples/basics/function_call.nr
 
 # Windows
-.\examples\milestone.exe
+.\examples\basics\function_call.exe
 
 # Unix
-./examples/milestone
+./examples/basics/function_call
 ```
 
-Exit code: 8
+Prints `add(5, 3) = 8` and exits 8
 
 ## CLI Options
 

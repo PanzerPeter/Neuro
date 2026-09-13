@@ -60,7 +60,7 @@ Two limits are worth knowing. A hole may not contain a `"` string literal: the
 quote ends the enclosing literal, and the hole is reported as unterminated. And
 an interpolated literal is not a constant, so it cannot appear in a pattern.
 
-See [`examples/types/string_interpolation.nr`](../../examples/types/string_interpolation.nr)
+See [`examples/strings/string_interpolation.nr`](../../examples/strings/string_interpolation.nr)
 for every specifier checked against its expected output.
 
 ### Triple-Quoted Strings
@@ -99,7 +99,7 @@ Escapes and `{...}` interpolation holes work exactly as in a `"…"` literal. A
 block string produces the same `string` value and carries no runtime cost of its
 own.
 
-See [`examples/types/triple_quoted.nr`](../../examples/types/triple_quoted.nr)
+See [`examples/strings/triple_quoted.nr`](../../examples/strings/triple_quoted.nr)
 for each rule checked against its expected text.
 
 ### Identifiers
@@ -156,7 +156,7 @@ Point::new(1, 2)            // Associated function call
 Method-call syntax `receiver.method(args)` resolves against user-defined `impl` methods
 when the receiver is a struct, and against a fixed, compiler-known set of intrinsic methods
 when the receiver is a builtin type (`string.len()` and `.clone()`, the integer overflow
-methods, `.slice()`, and more). See [types.md](types.md#string-methods) for the string set
+methods, `.slice()`, and more). See [strings.md](strings.md#string-methods) for the string set
 and [types.md](types.md#integer-methods) for the integer set.
 
 ### Struct Literal Expressions

@@ -10,6 +10,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.26.1] - 2026-09-13
+
+### Changed
+
+- `docs`: `docs/README.md` is an index again. It had grown a "Current Features" section that
+  re-taught types, variables, functions, control flow, operators, structs, arrays, enums,
+  modules and pattern matching with code blocks, duplicating `docs/language-reference/`, plus
+  a pipeline diagram, an example tour, build steps and an architecture summary duplicating the
+  project README. All of it is deleted in favour of links to the page that owns each subject.
+- `docs`: split the language reference's god document. `docs/language-reference/types.md` had
+  accumulated primitives, both text types, structs, enums, borrows, arrays, tuples, tensors and
+  collections in one file. Text types now live in `docs/language-reference/strings.md` and
+  tensors in `docs/language-reference/tensors.md`, the page every Phase 2 item extends from
+  here. `types.md` keeps the scalar and compound types and points at both.
+- `examples`: `types/` had become the leftover bin, holding 45 of the 132 programs. Three
+  topics are drained out of it into directories of their own: `tensors/`, `strings/` and
+  `ownership/`. The harness discovers files recursively, so only `expected.txt` paths moved.
+- `examples`: `expected.txt` is regrouped to one section per directory, sorted and aligned
+  within each. Several sections were already ragged before the move.
+- `examples`: renamed two programs that asserted a roadmap state in their filename rather than
+  saying what they demonstrate: `basics/phase1_complete.nr` is now `basics/core_language_sweep.nr`
+  and `basics/milestone.nr` is now `basics/function_call.nr`.
+- `examples`: `examples/README.md` no longer carries a paragraph per showcase program. Every
+  showcase file already opens with a header comment saying the same thing, so the README keeps
+  a one-line index and the description stays next to the code it describes.
+
+### Fixed
+
+- `docs`: `docs/getting-started/quick-start.md` showed a version of `milestone.nr` without the
+  `println` the file actually contains, and pointed at binary paths (`./examples/milestone`)
+  that have not been correct since the examples were grouped into directories.
+- `docs`: repaired broken relative links. `llvm-backend.md`, `semantic-analysis.md` and
+  `syntax-parsing.md` each reached for `../../compiler/` from a directory two levels below
+  `docs/`, and `control-flow.md` linked a `#tensor-slicing-and-indexing` anchor that never
+  existed. `CONTRIBUTING.md` pointed at a heading anchor carrying a sub-phase number the
+  heading had since dropped.
+
+### Removed
+
+- `examples`: the "Known language limitations" section of `examples/README.md`. Limitations are
+  tracked as register entries, not as prose in a readme, and every item in it was already
+  registered except right shift, which is registered now. Two of its claims were also stale:
+  nested `if`/`else` with a return in every branch, and a tail-position `if`/`else` as a
+  function's value, both compile and run correctly.
+
+
 ## [2.26.0] - 2026-09-13
 
 ### Added
