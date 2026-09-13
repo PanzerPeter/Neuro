@@ -43,11 +43,11 @@ fn descending_reverses_the_order() {
 func main() -> i32 {
     val v: Tensor<i32, [4]> = [2, 8, 4, 6]
     val d: Tensor<i32, [4]> = v.sort(descending: true)
-    return d[0] * 100 + d[1] * 10 + d[2] + d[3] / 2
+    return d[0] * 10 + d[1] * 2 + d[2] + d[3] / 2
 }
 "#;
-    // 8*100 + 6*10 + 4 + 1 = 865, taken modulo the one-byte exit code.
-    assert_eq!(run_program("tensor_sort_desc.nr", source), 865 % 256);
+    // 8*10 + 6*2 + 4 + 1 = 97; ascending would read back as 38.
+    assert_eq!(run_program("tensor_sort_desc.nr", source), 97);
 }
 
 /// The two axes of one matrix order different runs, which a shape-only assertion misses.

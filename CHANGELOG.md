@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.26.2] - 2026-09-13
+
+### Fixed
+
+- `tests`: `descending_reverses_the_order` only passed on Unix. It returned 865 from `main`
+  and asserted `865 % 256`, which relied on the OS masking a wait status to one byte;
+  Windows reports the full 32-bit exit code, so the assertion read 865 against 97. The
+  read-back weights now keep the value under 256, the rule the rest of the file already
+  follows.
+
+
 ## [2.26.1] - 2026-09-13
 
 ### Changed
