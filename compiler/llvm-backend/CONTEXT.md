@@ -468,7 +468,8 @@ boundary. `type_mapping.rs` holds the layout (`dlpack_managed_tensor_type`), the
 (`dlpack_dtype`, covering every integer, float, `bf16`, and `bool` element), and the buffer sizing
 (`tensor_buffer_bytes`); `codegen/dlpack.rs` holds the emission.
 
-Fields are filled at construction: `version` `{1, 1}`, `manager_ctx` null, `deleter` the shared
+Fields are filled at construction: `version` `{1, 1}`, `manager_ctx` the control block below,
+`deleter` the shared
 `__neuro_dlpack_deleter`, `flags` 0 (the buffer is writable), `device` `{kDLCPU, 0}`, `ndim` the
 rank, `dtype` from the table with `lanes` 1, `byte_offset` 0, and `shape` / `strides` pointing at
 private constants named `__neuro_dlpack_shape_<mangle>` / `__neuro_dlpack_strides_<mangle>` and
@@ -476,8 +477,19 @@ shared by every value of that tensor type. Strides count **elements, not bytes**
 axis, so both pointers are null: DLPack's own spelling for a scalar. The globals are pointer
 fields, so dynamic shapes can later supply a per-value vector without changing the layout.
 
-Two allocations, not one fused block: the structure comes from `malloc`, the elements from the
-over-aligned allocator at 64 bytes, because DLPack requires a 64-byte-aligned `data` and `malloc`
+`manager_ctx` carries the compiler's own per-tensor control block
+(`dlpack_control_block_type`), which trails the exchange structure inside the SAME `malloc`
+(`dlpack_tensor_storage_type`): a struct's first field sits at offset 0, so the allocation's
+address is already the `DLManagedTensorVersioned*` a foreign consumer takes, and `deleter`'s one
+`free(self)` releases both. Reserving the field therefore costs a store, not an allocation. Its
+one field today is `data_bytes`, the unpadded element-buffer length; the arena registration a
+`pool` block needs and `@grad`'s gradient slot are added as fields rather than as a second
+layout. Nothing in the release path reads it, deliberately: a handle built by a foreign producer
+carries that producer's context in the same field, and `a_tensor_is_released_through_its_own_deleter`
+asserts the deleter never touches it.
+
+Two allocations for the tensor, not one: the structure and its control block come from `malloc`,
+the elements from the over-aligned allocator at 64 bytes, because DLPack requires a 64-byte-aligned `data` and `malloc`
 guarantees only `max_align_t`. Fusing them would need the structure's size rounded up to 64 as an
 IR constant expression, and LLVM 20 has been withdrawing constant-expression arithmetic; the
 element buffer's size is computable in Rust (`tensor_buffer_bytes`), the structure's is not. The

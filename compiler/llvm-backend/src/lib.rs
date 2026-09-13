@@ -498,8 +498,45 @@ mod tests {
         assert!(body.contains("store ptr @__neuro_dlpack_shape_f32_2x3"));
         assert!(body.contains("store ptr @__neuro_dlpack_strides_f32_2x3"));
         assert!(body.contains("store ptr @__neuro_dlpack_deleter"));
-        // `manager_ctx` is null: the deleter needs nothing beyond `self`.
-        assert!(body.contains("store ptr null, ptr %dlpack.field"));
+    }
+
+    /// `manager_ctx` carries the compiler's own per-tensor control block, which trails the
+    /// exchange structure inside the SAME allocation: reserving the field costs a store,
+    /// not a second `malloc` and not a second free.
+    #[test]
+    fn a_handle_carries_a_control_block_inside_its_own_allocation() {
+        let source = r#"
+            func main() -> i32 {
+                val m: Tensor<f32, [2, 3]> = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+                return 0
+            }
+        "#;
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+
+        // The control block is reached from the handle itself, so `manager_ctx` is an
+        // interior pointer rather than null.
+        assert!(
+            body.contains("%dlpack.control = getelementptr inbounds"),
+            "the control block trails the handle:\n{body}"
+        );
+        assert!(
+            !body.contains("store ptr null, ptr %dlpack.field"),
+            "`manager_ctx` is no longer null:\n{body}"
+        );
+        // Six f32 elements: the unpadded run the buffer holds.
+        assert!(
+            body.contains("store i64 24, ptr %dlpack.field"),
+            "the control block records the element buffer's byte length:\n{body}"
+        );
+        // One `malloc` for handle plus control block, one over-aligned allocation for the
+        // elements. The reservation added neither.
+        assert_eq!(body.matches("call ptr @malloc(").count(), 1);
+        assert_eq!(
+            body.matches(&format!("call ptr @{ALIGNED_ALLOC_FN}("))
+                .count(),
+            1
+        );
     }
 
     /// The element buffer comes from the over-aligned allocator at DLPack's 64-byte
@@ -575,6 +612,12 @@ mod tests {
             .expect("the deleter frees the structure");
         // The buffer is freed before the structure that names it.
         assert!(data_free < self_free);
+
+        // Two blocks, not three: the control block rides in the structure's allocation, so
+        // the deleter releases it without naming it. It also never READS `manager_ctx` —
+        // on a handle built elsewhere that field is a foreign producer's context.
+        assert!(!deleter.contains("dlpack.control"));
+        assert!(!deleter.contains("manager"));
     }
 
     /// The in-place guarantee, read off the IR: a compound assignment allocates nothing.

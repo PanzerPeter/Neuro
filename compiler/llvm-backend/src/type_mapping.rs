@@ -165,6 +165,34 @@ impl<'ctx> TypeMapper<'ctx> {
         Ok(elem_llvm.array_type(count as u32).into())
     }
 
+    /// The LLVM layout of the compiler's per-tensor control block, the structure
+    /// `manager_ctx` addresses.
+    ///
+    /// It is compiler-private: DLPack fixes the field's width and nothing else, so a
+    /// consumer may carry the pointer but may not read through it. Neuro reads it only on
+    /// handles it built itself, which is why the release path never touches it — a handle
+    /// arriving from a foreign producer carries that producer's context there.
+    pub(crate) fn dlpack_control_block_type(&self) -> inkwell::types::StructType<'ctx> {
+        self.context
+            .struct_type(&[self.context.i64_type().into()], false)
+    }
+
+    /// The block a tensor's handle is allocated out of: the exchange structure with the
+    /// control block trailing it.
+    ///
+    /// One allocation, not two. Field 0 of a struct sits at offset 0, so the block's
+    /// address IS the `DLManagedTensorVersioned*` a foreign consumer takes, and the
+    /// deleter's single `free(self)` releases the control block along with it.
+    pub(crate) fn dlpack_tensor_storage_type(&self) -> inkwell::types::StructType<'ctx> {
+        self.context.struct_type(
+            &[
+                self.dlpack_managed_tensor_type().into(),
+                self.dlpack_control_block_type().into(),
+            ],
+            false,
+        )
+    }
+
     /// The LLVM layout of `DLManagedTensorVersioned`, the structure a tensor
     /// value points at.
     ///
@@ -506,6 +534,30 @@ mod tests {
             .is_some_and(|field| field.into_int_type().get_bit_width() == 32));
         assert!(dl_tensor
             .get_field_type_at_index(6)
+            .is_some_and(|field| field.into_int_type().get_bit_width() == 64));
+    }
+
+    /// The control block trails the exchange structure in one allocation, so the storage
+    /// block's address is the handle address a foreign consumer is handed.
+    #[test]
+    fn the_control_block_trails_the_exchange_structure() {
+        let context = LLVMContext::create();
+        let mapper = TypeMapper::new(&context);
+        let storage = mapper.dlpack_tensor_storage_type();
+        assert_eq!(storage.count_fields(), 2);
+        assert_eq!(
+            storage.get_field_type_at_index(0),
+            Some(mapper.dlpack_managed_tensor_type().into())
+        );
+
+        let control: inkwell::types::StructType<'_> = storage
+            .get_field_type_at_index(1)
+            .and_then(|field| field.try_into().ok())
+            .expect("the second field is the control block");
+        // One field today: the element buffer's byte length.
+        assert_eq!(control.count_fields(), 1);
+        assert!(control
+            .get_field_type_at_index(0)
             .is_some_and(|field| field.into_int_type().get_bit_width() == 64));
     }
 }

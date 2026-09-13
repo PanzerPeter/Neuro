@@ -95,3 +95,28 @@ func main() -> i32 {
 "#;
     assert_eq!(run_program("dlpack_ownership.nr", source), 6);
 }
+
+/// The control block `manager_ctx` points at rides inside the handle's own allocation, so
+/// the one release a tensor performs frees it too. A program that builds, clones, moves
+/// and slices tensors of several element widths exercises every construction site against
+/// that: an over-read or a second free of the fused block shows up as a crash, not as a
+/// wrong exit code.
+#[test]
+fn a_control_block_is_released_with_the_handle_that_carries_it() {
+    let source = r#"
+func slice_of(t: &Tensor<i64, [4, 4]>) -> Tensor<i64, [4]> {
+    return t[0, ..]
+}
+
+func main() -> i32 {
+    val wide = Tensor::<i64, [4, 4]>::identity()
+    val row = slice_of(&wide)
+    val narrow = Tensor::<i8, [3]>::zeros()
+    val copied = narrow.clone()
+    val summed = wide.sum()
+    val moved = copied
+    return 7
+}
+"#;
+    assert_eq!(run_program("dlpack_control_block.nr", source), 7);
+}

@@ -10,6 +10,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.28.0] - 2026-09-13
+
+### Added
+
+- `codegen`: `manager_ctx` is reserved as the tensor control block (§4.14). Every DLPack
+  handle now carries a compiler-private structure in that field instead of null. It trails
+  the exchange structure inside the handle's own `malloc` (`dlpack_tensor_storage_type`), so
+  a struct's first field being at offset 0 means the allocation's address is still the
+  `DLManagedTensorVersioned*` a foreign consumer takes, and the deleter's one `free(self)`
+  releases both: the reservation costs a pointer store per tensor, not an allocation and not
+  a free. Its one field today is `data_bytes`, the unpadded element-buffer length. The
+  per-tensor state later items need — the arena registration a `pool` block performs, the
+  gradient slot `@grad` needs — is added here as a field rather than as a second layout
+  change.
+
+### Changed
+
+- `codegen`: the release path is now barred from reading `manager_ctx`, asserted on the
+  emitted deleter. A handle built by a foreign producer carries that producer's context in
+  the same field, so no path that may see an imported handle may dereference it.
+
 ## [2.27.0] - 2026-09-13
 
 ### Added

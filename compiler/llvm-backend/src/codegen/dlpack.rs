@@ -46,6 +46,13 @@ const FIELD_DELETER: u32 = 2;
 const FIELD_FLAGS: u32 = 3;
 const FIELD_DL_TENSOR: u32 = 4;
 
+/// The control block's index in the storage block. The exchange structure is field 0, and
+/// a struct's first field sits at offset 0, so the storage pointer needs no index at all.
+const FIELD_CONTROL: u32 = 1;
+
+/// Field indices into the control block.
+const FIELD_DATA_BYTES: u32 = 0;
+
 /// Field indices into the nested `DLTensor`.
 const FIELD_DATA: u32 = 0;
 const FIELD_DEVICE: u32 = 1;
@@ -59,10 +66,12 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Allocate a tensor's DLPack handle and its element buffer, fill every field of the
     /// structure, and return the handle, the pointer that *is* the tensor value.
     ///
-    /// The two allocations are separate rather than one fused block because fusing needs
-    /// the structure's size rounded up to [`DLPACK_DATA_ALIGN`] as an IR constant
-    /// expression, and LLVM 20 has been withdrawing constant-expression arithmetic. The
-    /// element buffer's size is computable in Rust; the structure's is not.
+    /// The handle and the control block `manager_ctx` addresses come from one `malloc`,
+    /// since neither has an alignment requirement the other does not. The ELEMENT buffer
+    /// stays a second allocation: fusing it needs the structure's size rounded up to
+    /// [`DLPACK_DATA_ALIGN`] as an IR constant expression, and LLVM 20 has been
+    /// withdrawing constant-expression arithmetic. The element buffer's size is computable
+    /// in Rust; the structure's is not.
     pub(crate) fn alloc_dlpack_tensor(
         &mut self,
         tensor_ty: &Type,
@@ -74,12 +83,15 @@ impl<'ctx> CodegenContext<'ctx> {
             ));
         };
 
-        let handle_ty = self.dlpack_managed_tensor_type();
+        let storage_ty = self.dlpack_tensor_storage_type();
         let i64_type = self.context.i64_type();
-        let handle_size = handle_ty.size_of().ok_or_else(|| {
-            CodegenError::InternalError("the DLPack structure has no size".to_string())
+        let storage_size = storage_ty.size_of().ok_or_else(|| {
+            CodegenError::InternalError("the DLPack storage block has no size".to_string())
         })?;
-        let handle = self.build_malloc(handle_size, name)?;
+        // Field 0 of the storage block is the exchange structure, and a struct's first
+        // field sits at offset 0, so this pointer is already the `DLManagedTensorVersioned*`
+        // a foreign consumer takes: the control block trailing it is invisible to them.
+        let handle = self.build_malloc(storage_size, name)?;
 
         // `aligned_alloc` wants a size that is a multiple of the alignment; a tensor
         // buffer is rounded up rather than passed through, since a small tensor's
@@ -107,7 +119,13 @@ impl<'ctx> CodegenContext<'ctx> {
             })?
             .into_pointer_value();
 
-        self.init_dlpack_handle(handle, data, element, &crate::types::static_extents(shape)?)?;
+        self.init_dlpack_handle(
+            handle,
+            data,
+            bytes,
+            element,
+            &crate::types::static_extents(shape)?,
+        )?;
         Ok(handle)
     }
 
@@ -116,6 +134,7 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         handle: PointerValue<'ctx>,
         data: PointerValue<'ctx>,
+        data_bytes: u64,
         element: &Type,
         shape: &[usize],
     ) -> CodegenResult<()> {
@@ -124,7 +143,6 @@ impl<'ctx> CodegenContext<'ctx> {
         let i16_type = self.context.i16_type();
         let i32_type = self.context.i32_type();
         let i64_type = self.context.i64_type();
-        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
 
         let version = self
             .context
@@ -134,12 +152,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 i32_type.const_int(DLPACK_VERSION_MINOR, false).into(),
             ]);
         self.store_handle_field(handle_ty, handle, &[FIELD_VERSION], version.into())?;
-        self.store_handle_field(
-            handle_ty,
-            handle,
-            &[FIELD_MANAGER_CTX],
-            ptr_type.const_null().into(),
-        )?;
+        let control = self.init_dlpack_control_block(handle, data_bytes)?;
+        self.store_handle_field(handle_ty, handle, &[FIELD_MANAGER_CTX], control.into())?;
         let deleter = self.get_or_define_dlpack_deleter()?;
         self.store_handle_field(
             handle_ty,
@@ -216,6 +230,42 @@ impl<'ctx> CodegenContext<'ctx> {
             i64_type.const_zero().into(),
         )?;
         Ok(())
+    }
+
+    /// Fill the control block trailing `handle` and return its address, the value
+    /// `manager_ctx` carries.
+    ///
+    /// The block is the compiler's own per-tensor state, reserved here so that the arena
+    /// registration a `pool` block needs and the gradient slot `@grad` needs are added as
+    /// fields rather than as a second layout. DLPack itself says nothing about the target:
+    /// a consumer passes the pointer back to the deleter and never reads through it.
+    fn init_dlpack_control_block(
+        &self,
+        handle: PointerValue<'ctx>,
+        data_bytes: u64,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        let storage_ty = self.dlpack_tensor_storage_type();
+        let control = self
+            .builder
+            .build_struct_gep(storage_ty, handle, FIELD_CONTROL, "dlpack.control")
+            .map_err(|_| {
+                CodegenError::InternalError(
+                    "the DLPack storage block has no control field".to_string(),
+                )
+            })?;
+        let control_ty = storage_ty
+            .get_field_type_at_index(FIELD_CONTROL)
+            .and_then(|field| field.try_into().ok())
+            .ok_or_else(|| {
+                CodegenError::InternalError("the DLPack control field is not a struct".to_string())
+            })?;
+        self.store_handle_field(
+            control_ty,
+            control,
+            &[FIELD_DATA_BYTES],
+            self.context.i64_type().const_int(data_bytes, false).into(),
+        )?;
+        Ok(control)
     }
 
     /// Re-describe an existing handle as a tensor of `tensor_ty`, leaving its `data`
@@ -355,7 +405,10 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Define the shared `deleter`, or return the existing definition.
     ///
     /// It frees the element buffer and then the structure, in that order, because reading
-    /// `data` out of the block it is about to free would be a use-after-free.
+    /// `data` out of the block it is about to free would be a use-after-free. The control
+    /// block needs no release of its own: it is part of the structure's allocation, so the
+    /// one `free(self)` takes both. The deleter deliberately does NOT read `manager_ctx` —
+    /// a handle built elsewhere carries a foreign context there.
     pub(crate) fn get_or_define_dlpack_deleter(&mut self) -> CodegenResult<FunctionValue<'ctx>> {
         if let Some(existing) = self.module.get_function(DLPACK_DELETER_FN) {
             return Ok(existing);

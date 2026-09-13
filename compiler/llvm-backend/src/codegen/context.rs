@@ -480,6 +480,11 @@ impl<'ctx> CodegenContext<'ctx> {
         self.type_mapper.dlpack_managed_tensor_type()
     }
 
+    /// The allocation a tensor's handle and its control block share.
+    pub(crate) fn dlpack_tensor_storage_type(&self) -> inkwell::types::StructType<'ctx> {
+        self.type_mapper.dlpack_tensor_storage_type()
+    }
+
     /// The DLPack type code and bit width of a tensor element type.
     pub(crate) fn dlpack_dtype(
         &self,
