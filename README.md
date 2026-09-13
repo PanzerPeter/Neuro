@@ -44,7 +44,7 @@ Neuro is an Ahead-of-Time (AOT) compiled language for AI workloads. Python is in
 
 - MLIR-based tensor operations, for static shape-verified tensor types
 - IR-level automatic differentiation via Enzyme
-- GPU acceleration via MLIR GPU dialects (nvgpu, rocdl, Triton)
+- GPU acceleration via MLIR GPU dialects (nvgpu, rocdl)
 
 ---
 
@@ -124,9 +124,11 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 
 > **Alpha memory warning.** Stack values are reclaimed on return and string literals live in `.rodata`, so neither leaks. Move semantics, borrows, deterministic `Drop`, and the owning collections have landed, so a `Vec`, `HashMap`, `BTreeMap`, or `String` frees its buffer at scope exit. A heap `string` (the one `+` concatenation and interpolation produce) is freed too when the compiler can prove who owns it: a temporary the statement consumes, or a binding whose initializer allocated it. A loop that formats output therefore holds steady rather than growing.
 >
-> What still leaks is a heap `string` that escapes what the compiler can follow: one stored into a collection or a struct field, one returned from a function, and the prior value of a reassigned binding. The ownership test answers conservatively by design, since freeing a `.rodata` literal would be far worse than holding a buffer.
+> What still leaks is a heap `string` that escapes what the compiler can follow: one stored into a collection, or one returned from a function. The ownership test answers conservatively by design, since freeing a `.rodata` literal would be far worse than holding a buffer.
 >
-> This block is removed once those results are tracked too. Until then, do not assume memory-safety semantics beyond what the table above claims.
+> Two further holes are structural rather than string-specific. The drop pass runs over bindings leaving scope and nothing else, so **a value held in a struct field is not released when the struct is**, and neither is the previous value of a binding you reassign. Both reach every owning type: a `Vec`, a `String` or a `Tensor` in a field is as affected as a heap `string`.
+>
+> All of it is scheduled: sub-phase 2F in the [Quick Roadmap](#quick-roadmap) is where drop coverage is completed. This block is removed when it lands. Until then, do not assume memory-safety semantics beyond what the table above claims.
 >
 > If memory-safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
 
@@ -464,7 +466,7 @@ Source (.nr)
 Tensor/AI path: typed High-Level IR (neuro-hir)
   → MLIR (linalg/tensor/func/arith, LLVM 20 / MLIR 20)
   → Enzyme MLIR AD pass (@grad)
-  → GPU dialects (nvgpu/rocdl/Triton) or llvm dialect
+  → GPU dialects (nvgpu/rocdl) or llvm dialect
   → inkwell → native code
 ```
 
@@ -477,19 +479,20 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | Phase | Goal | Status |
 |:---:|---|:---:|
 | **1** | **Core Language**: types, control flow, LLVM backend, ownership and borrow checking, generics, traits and dispatch, closures, enums and pattern matching, error handling, modules and prelude, string interpolation | Complete |
-| **2** | **Tensors and MLIR**: first-class tensor types lowered through MLIR Linalg, plus the pool allocator. Finishing it ships **v3.0.0** | In progress |
+| **2** | **Tensors and MLIR**: first-class tensor types lowered through MLIR Linalg, the pool allocator, and the value-model work the phases above it need. Finishing it ships **v3.0.0** | In progress |
 | 2A | Standard I/O and spec stragglers: `print` / `println`, `.is_nan()`, codepoint string APIs, `.enumerate()`, borrowed slices `&[T]`, the iterator protocol, `@derive(Debug, PartialEq)` | Complete |
 | 2B | Tensor core: `Tensor<T, [...]>`, literal coercion, move semantics, DLPack, slicing, shape generics, named dims, shape manipulation, dynamic shapes, reductions, sorting and selection | Complete |
-| 2C | MLIR lowering: tensor arithmetic to Linalg, broadcasting, matmul behind `@`, end-to-end HIR → MLIR → LLVM | Planned |
+| 2C | MLIR lowering: tensor arithmetic to Linalg, broadcasting, matmul behind `@`, end-to-end HIR → MLIR → LLVM | In progress |
 | 2D | Pool allocator: `pool` blocks, `PoolAware`, LIFO release at scope exit | Planned |
 | 2E | Functional sugar: pipeline `\|>`, composition `>>`, einstein notation, functional tensor ops | Planned |
+| 2F | Value model: by-value passing for non-`Copy` types, drop coverage for struct fields and reassigned bindings, assignment through an index or a field | Planned |
 | **3** | Automatic differentiation: Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | Planned |
-| **4** | GPU acceleration: MLIR GPU dialects (nvgpu / rocdl / Triton), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | Planned |
-| **5** | Neural network standard library: `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | Planned |
+| **4** | GPU acceleration: MLIR GPU dialects (nvgpu / rocdl), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | Planned |
+| **5** | Neural network standard library: hierarchical module namespaces, `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | Planned |
 | **6** | Async runtime: `async func`, `Future<T>`, `spawn`, `JoinHandle`, `join` / `race`, executor for data-loader / I/O overlap | Planned |
 | **7** | Interop and advanced features: Python FFI via DLPack, spread operator, advanced pattern matching, custom attributes, `defer` | Planned |
-| **8** | Developer experience: Language Server Protocol, diagnostics polish, formatter, `@test` runner | Planned |
-| **9** | Package manager and distribution: `neurpm`, cross-OS installer / uninstaller / self-updater, signed release binaries, optimization passes (loop unrolling, AD-aware inlining, LTO) | Planned |
+| **8** | Developer experience: debug info, incremental compilation, Language Server Protocol, diagnostics polish, formatter, `@test` runner | Planned |
+| **9** | Package manager and distribution: `neurpm`, cross-OS installer / uninstaller / self-updater, signed release binaries, matmul throughput, CPU parallelism, optimization passes (loop unrolling, AD-aware inlining, LTO) | Planned |
 
 ---
 
@@ -548,7 +551,7 @@ does not apply to already-open editors. During grammar work, symlinking the fold
 |---|---|
 | `.nr` | Neuro source files |
 | `.nrl` | Compiled library modules |
-| `.nrm` | Serialized model/matrix data |
+| `.nrm` | Serialized model data |
 | `.nrp` | Package definitions |
 
 ---

@@ -50,7 +50,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.26.2"
+version = "2.27.0"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Neuro Contributors"]
@@ -72,7 +72,7 @@ unicode-ident = "1.0"
 
 # LLVM Backend
 # Requires LLVM 20 installed system-wide (the backend emits LLVM IR via inkwell;
-# MLIR is not needed until the Phase 3 tensor dialects).
+# MLIR is not needed until the Phase 2C tensor dialects).
 # On CachyOS/Arch: sudo pacman -S llvm20
 # LLVM_SYS_201_PREFIX must point to the LLVM 20 installation (e.g. /usr/lib/llvm20).
 # Feature flag is llvm20-1 (inkwell uses the minor-version suffix scheme).
@@ -98,6 +98,12 @@ inkwell = { version = "0.10.0", default-features = false, features = ["llvm20-1"
 # one libLLVM-20 dylib). Arch's stock llvm20 omits MLIR; build LLVM 20 with
 # -DLLVM_ENABLE_PROJECTS=mlir or use a prefix that ships mlir-c headers + libMLIR.
 melior = "0.25.1"
+
+# melior 0.25 does not wrap `mlirTranslateModuleToLLVMIR`, so the MLIR -> LLVM IR
+# crossing calls it through the raw bindings. Pinned to the exact version melior
+# itself depends on, so both reach the SAME `mlir-sys` instance and its
+# `MlirOperation` / `LLVMContextRef` types unify.
+mlir-sys = "0.5.0"
 
 # Serialization
 serde_json = "1.0"

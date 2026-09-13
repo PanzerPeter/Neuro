@@ -23,8 +23,12 @@ const DLPACK_VERSION_MINOR: u64 = 1;
 /// this field rather than changing the layout.
 const DLPACK_DEVICE_CPU: u64 = 1;
 
-/// DLPack requires a tensor's `data` pointer to be 64-byte aligned, which is also the
-/// alignment the SIMD and device-transfer paths want.
+/// The alignment the SIMD and device-transfer paths want, and what this backend
+/// guarantees. It is deliberately NOT what the DLPack header asks for: that header
+/// specifies a `data` pointer "always aligned to 256 bytes as in CUDA", reached via
+/// `byte_offset`. No major implementation honours it (PyTorch, CuPy, TensorFlow and TVM
+/// all pass unaligned pointers with `byte_offset = 0`), so 64 interoperates with every
+/// consumer that exists while 256 would only satisfy a rule the ecosystem abandoned.
 const DLPACK_DATA_ALIGN: u64 = 64;
 
 /// `lanes` is 1 for every Neuro element type: a vector element would be a language

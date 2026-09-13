@@ -1,11 +1,11 @@
 # mlir-backend
 
 ## Purpose
-Lower the typed HIR to MLIR for the tensor / autodiff / GPU path. Today it is a scaffold: it consumes `neuro_hir::HirProgram` and emits a verifier-clean module of `func.func` declarations, proving the HIR → `melior` → verified MLIR pipeline end to end. Real body lowering (linalg / tensor dialects) is later work.
+Lower the typed HIR to MLIR for the tensor / autodiff / GPU path. Today it is a scaffold: it consumes `neuro_hir::HirProgram` and emits a verifier-clean module of `func.func` declarations, then carries that module on through the `llvm` dialect into a verified inkwell LLVM module, proving the HIR → MLIR → llvm dialect → inkwell pipeline end to end. Real body lowering (linalg / tensor dialects) is later work.
 
 ## Feature Gate
 The whole crate is opt-in behind the off-by-default `mlir` feature
-(`mlir = ["dep:melior", "dep:thiserror", "dep:neuro-hir"]`). Disabled, it compiles to an empty
+(`mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir"]`). Disabled, it compiles to an empty
 placeholder pulling in no MLIR toolchain (nor `neuro-hir`), so a default
 `cargo build/test --workspace` works on stock LLVM 20 on every CI OS. Enabled, it exposes the
 entry points below. CI provisions MLIR only on Linux, where the `--all-features` lint job and a
@@ -15,6 +15,9 @@ legs build the placeholder.
 ## Entry Points (feature `mlir`)
 - `lower_program(&HirProgram) -> Result<String, MlirError>`: walks the typed HIR and returns
   the textual form of a verified module of `func.func` declarations.
+- `translate_to_llvm_ir(&HirProgram) -> Result<String, MlirError>`: the same module carried on
+  through an MLIR conversion pipeline into the `llvm` dialect, translated into an inkwell LLVM
+  module, LLVM-verified, and returned as textual LLVM IR.
 - `emit_smoke_module() -> Result<String, MlirError>`, the HIR-independent wiring check: builds
   `func.func @neuro_smoke(index, index) -> index` with a single `arith.addi` body, verifies it,
   and returns its textual form.
@@ -22,9 +25,27 @@ legs build the placeholder.
 ## Shared Kernel
 - `neuro-hir`: the typed HIR contract `lower_program` consumes, gated under `mlir`. The crate
   adds no business logic of its own; the gated path otherwise uses only third-party `melior` +
-  `thiserror`.
+  `mlir-sys` + `inkwell` + `thiserror`.
 
 ## Notes
+**The MLIR → LLVM crossing.** `translate_to_llvm_ir` runs `func-to-llvm`, `arith-to-llvm`,
+`index-to-llvm` and then `reconcile-unrealized-casts`, that last one by necessity, since each
+conversion leaves `unrealized_conversion_cast` ops at its boundary with the dialects the others
+own and the translation rejects any that survive. It then calls `mlirTranslateModuleToLLVMIR`
+**directly through `mlir-sys`**: `melior 0.25` does not wrap it, and `mlir-sys 0.5.0` is pinned to
+the exact version melior itself depends on so both reach one crate instance and their
+`MlirOperation` / `LLVMContextRef` types unify.
+
+The `LLVMContext` the translation builds into is **inkwell's**, and the returned `LLVMModuleRef`
+is wrapped by `inkwell::module::Module` (sole owner, disposes on drop) and put through LLVM's
+verifier. That is the whole point of the entry point: `mlir-sys` and `llvm-sys` are independent
+bindings, and a build where they resolve to different `libLLVM-20` copies fails at this handoff
+rather than miscompiling later. Each binding declares its own opaque `LLVMContextRef` /
+`LLVMModuleRef` alias over the same C type, so the pointers are cast across.
+
+`register_all_llvm_translations` runs in `new_context()` for every path, not only the translating
+one: the translation interfaces have to be on the context that *built* the module.
+
 **Toolchain pinning.** `melior 0.25.1` is the newest release targeting MLIR 20 (via
 `mlir-sys 0.5.0`); `melior 0.26+` moved to MLIR 21/22. `mlir-sys` carries no `llvm-sys`
 dependency. It discovers MLIR through `MLIR_SYS_200_PREFIX` / `TABLEGEN_200_PREFIX` and links

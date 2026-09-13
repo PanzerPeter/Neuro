@@ -5,6 +5,61 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-032 — a diagnostic prints a raw `Span` struct instead of a source location
+
+- **Status**: open, confirmed
+- **Area**: `neurc` (driver output); the spans it needs are already carried by
+  `semantic-analysis` and `source-location`
+- **Severity**: major. It is the first thing every user of the compiler sees, on every
+  error, and the information it prints cannot be acted on without counting bytes by hand.
+
+Every type error is printed as a numbered list item whose location is a debug-formatted
+Rust struct. No file line, no column, no source snippet, no caret.
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val x: i32 = "hello"
+    return x
+}
+```
+
+Observed:
+
+```
+Type errors found in "bad.nr":
+  1. type mismatch at Span { start: 25, end: 45 }: expected i32, found string
+Error: 1 type error(s) found
+```
+
+Expected: the path, the line and column, the offending source line, and a caret under the
+span, in the shape every mainstream compiler has used for a decade.
+
+**Root cause**: the driver formats each error with its `Display` impl and prints it behind
+a counter. The span reaches it intact and is never resolved against the source file. The
+mapping already exists and is unused by this path: `SourceFile::position_at(offset)` returns
+a line and column, and `SourceFile::snippet(span)` returns the text. The `Span` reaching the
+user as `{ start, end }` is Rust's derived `Debug` leaking through a `Display`
+implementation, so the byte offsets are an internal representation, not a chosen format.
+
+**Why this is filed rather than scheduled**: the roadmap carries a cross-cutting track
+promising that every feature ships with actionable errors, and a later phase carries a
+"diagnostic polish pass". Polish is the wrong word for this and the wrong schedule: the
+rendering layer was never built, so the track has been unmet for every feature shipped so
+far, and waiting for that phase means several more years of it. It is a defect against a
+standing commitment, not a missing feature, which is why it is here.
+
+**Workaround**: none for a user. Byte offsets can be converted by hand
+(`head -c 25 file.nr | wc -l`).
+
+**Fix sketch**: resolve each error's span against the `SourceFile` the driver already holds
+and render it, in one place, for every diagnostic the driver prints (type errors, argument
+errors, warnings). Two helpers exist for the hard half. The renderer itself is the kind of
+thing worth taking off the shelf rather than hand-rolling: `annotate-snippets` is the crate
+rustc's own output is built on, and it takes a span, a source, and a label. The caret
+rendering is not where the value is; the resolution already written but never called is.
+
 ## BUG-031 — `.step(n)` on a range is specified but has no implementation and no checkbox
 
 - **Status**: open, confirmed

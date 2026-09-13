@@ -1,14 +1,13 @@
-use crate::errors::MlirError;
+use crate::{context::new_context, errors::MlirError};
 
 use melior::{
-    dialect::{func, llvm, DialectRegistry},
+    dialect::{func, llvm},
     ir::{
         attribute::{StringAttribute, TypeAttribute},
         operation::OperationLike,
         r#type::{FunctionType, IntegerType},
         BlockLike, Identifier, Location, Module, Operation, Region, Type,
     },
-    utility::register_all_dialects,
     Context,
 };
 use neuro_hir::{HirItem, HirProgram, HirSelfParam, HirType};
@@ -36,14 +35,21 @@ const CHAR_BITS: u32 = 32;
 /// mapping appears in value position, or [`MlirError::ModuleVerificationFailed`]
 /// if the constructed module fails MLIR's own verifier.
 pub fn lower_program(program: &HirProgram) -> Result<String, MlirError> {
-    let registry = DialectRegistry::new();
-    register_all_dialects(&registry);
+    let context = new_context();
+    let module = build_module(&context, program)?;
 
-    let context = Context::new();
-    context.append_dialect_registry(&registry);
-    context.load_all_available_dialects();
+    Ok(module.as_operation().to_string())
+}
 
-    let location = Location::unknown(&context);
+/// Build the verified scaffold module in a caller-owned context.
+///
+/// Split out of [`lower_program`] so the translating path can keep working on the
+/// live `Module` instead of re-parsing its printed form.
+pub(crate) fn build_module<'c>(
+    context: &'c Context,
+    program: &HirProgram,
+) -> Result<Module<'c>, MlirError> {
+    let location = Location::unknown(context);
     let module = Module::new(location);
 
     for item in &program.items {
@@ -51,7 +57,7 @@ pub fn lower_program(program: &HirProgram) -> Result<String, MlirError> {
             HirItem::Function(function) => {
                 let params: Vec<HirType> = function.params.iter().map(|p| p.ty.clone()).collect();
                 let op = declare_function(
-                    &context,
+                    context,
                     location,
                     &function.name,
                     &params,
@@ -70,7 +76,7 @@ pub fn lower_program(program: &HirProgram) -> Result<String, MlirError> {
                     params.extend(method.params.iter().map(|p| p.ty.clone()));
                     let name = format!("{}_{}", impl_block.type_name, method.name);
                     let op =
-                        declare_function(&context, location, &name, &params, &method.return_type)?;
+                        declare_function(context, location, &name, &params, &method.return_type)?;
                     module.body().append_operation(op);
                 }
             }
@@ -81,7 +87,7 @@ pub fn lower_program(program: &HirProgram) -> Result<String, MlirError> {
                 let mut params: Vec<HirType> = vec![environment_type(&closure.name)];
                 params.extend(closure.params.iter().map(|p| p.ty.clone()));
                 let op = declare_function(
-                    &context,
+                    context,
                     location,
                     &closure.name,
                     &params,
@@ -101,7 +107,7 @@ pub fn lower_program(program: &HirProgram) -> Result<String, MlirError> {
         return Err(MlirError::ModuleVerificationFailed);
     }
 
-    Ok(module.as_operation().to_string())
+    Ok(module)
 }
 
 /// The HIR type of a method receiver: a borrow of the owning struct for `&self` /

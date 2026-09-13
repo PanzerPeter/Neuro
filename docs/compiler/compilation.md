@@ -60,8 +60,10 @@ Native Executable (`.exe` on Windows, no extension on Unix)
 
 The typed HIR (`neuro-hir`) is the stable, backend-agnostic contract between the frontend (parser +
 type checker) and the backends. `llvm-backend` consumes it today; the experimental `mlir-backend`
-consumes the same HIR behind the off-by-default `mlir` feature (1D scaffold). See the
-[HIR Lowering](components/hir-lowering.md) and [LLVM Backend](components/llvm-backend.md) component
+consumes the same HIR behind the off-by-default `mlir` feature, and can carry its scaffold module
+on through the `llvm` dialect into a verified inkwell LLVM module. That path is not reachable from
+`neurc`: it runs from the slice's own tests. See the [HIR Lowering](components/hir-lowering.md),
+[LLVM Backend](components/llvm-backend.md) and [MLIR Backend](components/mlir-backend.md) component
 docs.
 
 ## Implementation

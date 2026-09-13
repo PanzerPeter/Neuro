@@ -1,14 +1,13 @@
-use crate::errors::MlirError;
+use crate::{context::new_context, errors::MlirError};
 
 use melior::{
-    dialect::{arith, func, DialectRegistry},
+    dialect::{arith, func},
     ir::{
         attribute::{StringAttribute, TypeAttribute},
         operation::OperationLike,
         r#type::FunctionType,
         Block, BlockLike, Location, Module, Region, RegionLike, Type,
     },
-    utility::register_all_dialects,
     Context,
 };
 
@@ -20,17 +19,21 @@ use melior::{
 /// against the active MLIR 20 toolchain. Used as the Phase 1.8 integration smoke
 /// test until real HIR lowering exists.
 pub fn emit_smoke_module() -> Result<String, MlirError> {
-    let registry = DialectRegistry::new();
-    register_all_dialects(&registry);
+    let context = new_context();
+    let module = build_smoke_module(&context)?;
 
-    let context = Context::new();
-    context.append_dialect_registry(&registry);
-    context.load_all_available_dialects();
+    Ok(module.as_operation().to_string())
+}
 
-    let location = Location::unknown(&context);
+/// Build the smoke module in a caller-owned context.
+///
+/// Split out of [`emit_smoke_module`] so the translating path can run a module
+/// that carries a real *body* through the crossing, not only declarations.
+pub(crate) fn build_smoke_module(context: &Context) -> Result<Module<'_>, MlirError> {
+    let location = Location::unknown(context);
     let module = Module::new(location);
 
-    let index_type = Type::index(&context);
+    let index_type = Type::index(context);
 
     let block = Block::new(&[(index_type, location), (index_type, location)]);
     let lhs = block.argument(0)?.into();
@@ -45,10 +48,10 @@ pub fn emit_smoke_module() -> Result<String, MlirError> {
     region.append_block(block);
 
     let function = func::func(
-        &context,
-        StringAttribute::new(&context, "neuro_smoke"),
+        context,
+        StringAttribute::new(context, "neuro_smoke"),
         TypeAttribute::new(
-            FunctionType::new(&context, &[index_type, index_type], &[index_type]).into(),
+            FunctionType::new(context, &[index_type, index_type], &[index_type]).into(),
         ),
         region,
         &[],
@@ -60,7 +63,7 @@ pub fn emit_smoke_module() -> Result<String, MlirError> {
         return Err(MlirError::ModuleVerificationFailed);
     }
 
-    Ok(module.as_operation().to_string())
+    Ok(module)
 }
 
 #[cfg(test)]

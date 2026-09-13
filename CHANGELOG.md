@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [2.27.0] - 2026-09-13
+
+### Added
+
+- `codegen`: `mlir-backend::translate_to_llvm_ir`, the end-to-end HIR → MLIR → `llvm`
+  dialect → inkwell path (feature `mlir`). An MLIR conversion pipeline (`func-to-llvm`,
+  `arith-to-llvm`, `index-to-llvm`, then `reconcile-unrealized-casts`) rewrites the module
+  into the `llvm` dialect, `mlirTranslateModuleToLLVMIR` builds the LLVM module *inside
+  inkwell's own `LLVMContext`*, and inkwell wraps and verifies it. `melior 0.25` does not
+  wrap that entry point, so the call goes through `mlir-sys` directly, pinned to the version
+  melior itself depends on. Handing the module across the two bindings in one shared context
+  is the point: an install where `mlir-sys` and `llvm-sys` resolve to different `libLLVM-20`
+  copies now fails at this handoff instead of miscompiling downstream.
+- `codegen`: `MlirError::PassPipelineFailed`, `MlirError::TranslationFailed`, and
+  `MlirError::LlvmVerificationFailed`: one variant per stage of that crossing, so a failure
+  names where it happened rather than collapsing into the MLIR verifier's error.
+
 ### Changed
 
 - `examples`: `showcase/named_axes.nr` now calls `.permute(...)` and `.reshape(...)`. Its
