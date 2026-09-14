@@ -5,7 +5,8 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 
 ## Entry Point
 - Type: CLI
-- Input: `neurc check <file.nr>` | `neurc compile <file.nr> [-O<0-3>] [-o <output>]`
+- Input: `neurc check <file.nr>` | `neurc compile <file.nr> [-O<0-3>] [-o <output>]` |
+  `neurc run <file.nr> [-O<0-3>]`
 - Output: an executable binary on success; diagnostics and non-fatal lint warnings to stderr
 
 ## Shared Kernel
@@ -32,6 +33,13 @@ Both `check_file` and `compile_file` run the same front half, so neither can ski
 4. `hir_lowering::lower_program`: the typed HIR. `check` reports the lowered item count;
    `compile` hands the HIR to `llvm_backend::compile`, which lowers native object code from it
    (the backend does not consume the AST).
+
+`run_file` adds nothing to that order. It calls `compile_file` with an output path inside a
+temporary directory, executes the result, and exits with the child's own status, so a Neuro
+program's exit code is what the shell sees and a `run` leaves no artifact in the source tree.
+`compile_file` therefore returns the path it linked rather than printing the success banner
+itself: the banner belongs to `compile`, and printing it under `run` would inject a compiler
+line into the program's own stdout.
 
 `compile_file` then checks the lowered HIR for a function named `main` **before** writing an
 object file. Without that check the pipeline ran to completion and handed a `main`-less object

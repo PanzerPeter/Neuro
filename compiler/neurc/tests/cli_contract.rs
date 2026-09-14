@@ -173,3 +173,87 @@ fn compile_reports_a_missing_main_itself() {
         "The linker was reached despite the missing `main`: {stderr}"
     );
 }
+
+/// `run` is only useful if the shell sees the program's own status, not the driver's.
+#[test]
+fn run_forwards_program_stdout_and_exit_code() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let source = r#"
+func main() -> i32 {
+    println("ran")
+    return 3
+}
+"#;
+    let source_path = write_source(&temp_dir, "run_exit.nr", source);
+
+    let output = Command::new(neurc_path())
+        .arg("run")
+        .arg(&source_path)
+        .output()
+        .expect("Failed to execute neurc run");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "Expected the program's own exit code, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("ran"),
+        "Expected the program's stdout, got: {stdout}"
+    );
+    assert!(
+        !stdout.contains("Successfully compiled"),
+        "`run` must not print the compile banner into the program's output: {stdout}"
+    );
+}
+
+/// The executable goes to a temporary directory, so `run` leaves the source tree clean.
+/// Without this, running an example twice would litter `examples/` with binaries.
+#[test]
+fn run_writes_no_executable_beside_the_source() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let source_path = write_source(&temp_dir, "run_clean.nr", "func main() -> i32 { 0 }\n");
+
+    let output = Command::new(neurc_path())
+        .arg("run")
+        .arg(&source_path)
+        .output()
+        .expect("Failed to execute neurc run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let leftovers: Vec<_> = fs::read_dir(temp_dir.path())
+        .expect("Failed to read temp directory")
+        .filter_map(|entry| entry.ok().map(|e| e.file_name()))
+        .filter(|name| name != "run_clean.nr")
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "`run` left artifacts beside the source: {leftovers:?}"
+    );
+}
+
+/// A non-`.nr` input is rejected by `run` for the same reason `compile` rejects it.
+#[test]
+fn run_rejects_a_non_nr_extension() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let source_path = write_source(&temp_dir, "wrong.txt", "func main() -> i32 { 0 }\n");
+
+    let output = Command::new(neurc_path())
+        .arg("run")
+        .arg(&source_path)
+        .output()
+        .expect("Failed to execute neurc run");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "Expected a non-zero exit");
+    assert!(
+        stderr.contains(".nr extension"),
+        "Expected an extension diagnostic, got: {stderr}"
+    );
+}

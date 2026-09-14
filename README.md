@@ -118,7 +118,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop`, `&T` / `&mut T` with flow-sensitive exclusivity, lifetime elision and annotations |
 | **Strings** | Immutable fat-pointer `string` with escapes, `&string` slices, `==`, `+` concatenation, `.len()` / `.clone()` / `.slice(a..b)` / `.char_slice(a..b)`, codepoint iteration with `.chars()` and `.char_indices()`, interpolation `"{x:.2}"`, triple-quoted `"""` blocks with dedent; growable `String` buffer for building text: `push_str` / `clear` / `to_string` |
 | **Modules & visibility** | Multi-file programs: every `.nr` file is a module and `mod.nr` directories nest; inline `module { }` blocks group within one file; `import math::{sqrt}`, `import ./utils`, `as` renames, module aliases, variant imports, and `export import` re-export facades; declarations and struct fields are private until `export` opts them in; an implicit prelude puts `Option` / `Result` and `Some` / `None` / `Ok` / `Err` in every module, with `@no_prelude` to opt out |
-| **Toolchain** | Native binaries via inkwell 0.10 / LLVM 20; `neurc check` and `neurc compile`; buffered `print` / `println` to stdout, line-buffered on a terminal and drained on every exit path; `panic` / `assert` / `unreachable` runtime with located diagnostics, covering array bounds, string slices, a zero divisor, and debug-build integer overflow, all outlined off the hot path |
+| **Toolchain** | Native binaries via inkwell 0.10 / LLVM 20; `neurc check`, `neurc run` and `neurc compile`; buffered `print` / `println` to stdout, line-buffered on a terminal and drained on every exit path; `panic` / `assert` / `unreachable` runtime with located diagnostics, covering array bounds, string slices, a zero divisor, and debug-build integer overflow, all outlined off the hot path |
 
 ### Current Memory Model
 
@@ -128,7 +128,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 >
 > Two further holes are structural rather than string-specific. The drop pass runs over bindings leaving scope and nothing else, so **a value held in a struct field is not released when the struct is**, and neither is the previous value of a binding you reassign. Both reach every owning type: a `Vec`, a `String` or a `Tensor` in a field is as affected as a heap `string`.
 >
-> All of it is scheduled: sub-phase 2F in the [Quick Roadmap](#quick-roadmap) is where drop coverage is completed. This block is removed when it lands. Until then, do not assume memory-safety semantics beyond what the table above claims.
+> All of it is scheduled: sub-phase 2E in the [Quick Roadmap](#quick-roadmap) is where drop coverage is completed. This block is removed when it lands. Until then, do not assume memory-safety semantics beyond what the table above claims.
 >
 > If memory-safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
 
@@ -277,14 +277,15 @@ print `20.x.y`.
 # Type-check a source file (no binary produced)
 cargo run -p neurc -- check examples/basics/hello.nr
 
-# Compile to a native executable
-cargo run -p neurc -- compile examples/basics/factorial.nr
+# Compile and run in one step, leaving no binary behind
+cargo run -p neurc -- run examples/basics/factorial.nr
 
-# Run the compiled binary (emitted next to the source file)
+# Or compile to a native executable, emitted next to the source file
+cargo run -p neurc -- compile examples/basics/factorial.nr
 ./examples/basics/factorial
 
 # After cargo install --path compiler/neurc:
-neurc compile examples/basics/factorial.nr
+neurc run examples/basics/factorial.nr
 ```
 
 ---
@@ -484,8 +485,8 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | 2B | Tensor core: `Tensor<T, [...]>`, literal coercion, move semantics, DLPack, slicing, shape generics, named dims, shape manipulation, dynamic shapes, reductions, sorting and selection | Complete |
 | 2C | MLIR lowering: tensor arithmetic to Linalg, broadcasting, matmul behind `@`, end-to-end HIR → MLIR → LLVM | In progress |
 | 2D | Pool allocator: `pool` blocks, `PoolAware`, LIFO release at scope exit | Planned |
-| 2E | Functional sugar: pipeline `\|>`, composition `>>`, einstein notation, functional tensor ops | Planned |
-| 2F | Value model: by-value passing for non-`Copy` types, drop coverage for struct fields and reassigned bindings, assignment through an index or a field | Planned |
+| 2E | Value model: by-value passing for non-`Copy` types, drop coverage for struct fields and reassigned bindings, assignment through an index or a field | Planned |
+| 2F | Functional sugar: pipeline `\|>`, composition `>>`, einstein notation, functional tensor ops | Planned |
 | **3** | Automatic differentiation: Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | Planned |
 | **4** | GPU acceleration: MLIR GPU dialects (nvgpu / rocdl), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | Planned |
 | **5** | Neural network standard library: hierarchical module namespaces, `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | Planned |

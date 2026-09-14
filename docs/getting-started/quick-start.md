@@ -202,6 +202,23 @@ neurc compile -O2 examples/basics/hello.nr
 neurc compile ../path/to/program.nr
 ```
 
+### Run Command
+
+```bash
+neurc run <file.nr> [options]
+```
+
+Compiles into a temporary directory, runs the program, and exits with the program's own
+status. Nothing is written beside the source, so this is the command to reach for while
+iterating; use `compile` when you want to keep the binary.
+
+**Options**:
+- `-O, --optimization <0-3>` - Optimization level (default: `0`)
+
+```bash
+neurc run examples/basics/hello.nr
+```
+
 ## Error Messages
 
 Errors print to stderr and the compiler exits with code `1`.
@@ -241,8 +258,8 @@ Error: 1 type error(s) found
 
 1. **Write** your Neuro code in a `.nr` file
 2. **Check** syntax and types: `neurc check program.nr`
-3. **Compile** to executable: `neurc compile program.nr`
-4. **Run** the program: `./program` (Unix) or `.\program.exe` (Windows)
+3. **Run** it: `neurc run program.nr`
+4. **Ship** a binary when you want one: `neurc compile program.nr`
 5. **Iterate** - fix errors and repeat
 
 ### Recommended Workflow
@@ -253,7 +270,10 @@ For faster iteration during development:
 # Check only (faster, no code generation)
 neurc check program.nr
 
-# When ready, compile and run
+# Compile and run in one step, leaving no binary behind
+neurc run program.nr
+
+# When you want to keep the executable
 neurc compile program.nr && ./program
 ```
 

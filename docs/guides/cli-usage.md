@@ -81,6 +81,34 @@ RUST_LOG=debug neurc compile examples/basics/hello.nr
 - 0: Compilation successful
 - 1: Compilation failed
 
+### run
+
+Compile a source file and run the resulting program immediately.
+
+**Syntax**:
+```bash
+neurc run <file.nr> [options]
+```
+
+**Options**:
+- `-O, --optimization <0-3>` - Optimization level (default: `0`); see [Optimization](#optimization)
+
+The executable is written to a temporary directory and removed once the program exits, so
+`run` never leaves a binary beside the source. Use `compile` when you want to keep one.
+
+**Examples**:
+```bash
+neurc run examples/basics/hello.nr
+neurc run examples/basics/hello.nr -O2
+```
+
+**Output**: the program's own stdout and stderr, with no compiler banner. Compiler and
+linker failures still report on stderr as `Run failed: <reason>` plus a `Caused by (n):` chain.
+
+**Exit codes**:
+- The program's own exit code, when it was built and started
+- 1: compilation, linking, or process startup failed, or the program was killed by a signal
+
 ## Environment Variables
 
 ### RUST_LOG

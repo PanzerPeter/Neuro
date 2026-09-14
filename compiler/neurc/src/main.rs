@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use llvm_backend::OptimizationLevelSetting;
+use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -37,6 +38,17 @@ enum Commands {
         optimization: u8,
     },
 
+    /// Compile a Neuro source file and run it immediately
+    Run {
+        /// Input source file
+        #[arg(value_name = "FILE")]
+        input: PathBuf,
+
+        /// Optimization level (0-3)
+        #[arg(short = 'O', long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=3))]
+        optimization: u8,
+    },
+
     /// Check syntax and types without generating code
     Check {
         /// Input source file
@@ -58,20 +70,26 @@ fn main() {
             input,
             output,
             optimization,
-        } => {
-            if let Err(e) = compile_file(&input, output.as_deref(), optimization) {
-                eprintln!("Compilation failed: {}", e);
-
-                // Print error chain for detailed context
-                let mut chain = e.chain();
-                chain.next(); // Skip the root error (already printed)
-                for (i, cause) in chain.enumerate() {
-                    eprintln!("  Caused by ({}): {}", i + 1, cause);
-                }
-
-                process::exit(1);
+        } => match compile_file(&input, output.as_deref(), optimization) {
+            Ok(output_path) => {
+                println!(
+                    "Successfully compiled {} -> {}",
+                    input.display(),
+                    output_path.display()
+                );
             }
-        }
+            Err(e) => report_failure("Compilation failed", &e),
+        },
+
+        // `run` forwards the program's own exit code, so a Neuro program's status is
+        // what the shell sees; a compiler or linker failure is the driver's own 1.
+        Commands::Run {
+            input,
+            optimization,
+        } => match run_file(&input, optimization) {
+            Ok(code) => process::exit(code),
+            Err(e) => report_failure("Run failed", &e),
+        },
 
         Commands::Check { input } => {
             if let Err(e) = check_file(&input) {
@@ -83,9 +101,50 @@ fn main() {
         Commands::Version => {
             println!("neurc {}", env!("CARGO_PKG_VERSION"));
             println!("Neuro Programming Language Compiler");
-            println!("Phase 1 - Alpha Development");
         }
     }
+}
+
+/// Print a failed pipeline's whole error chain to stderr and exit non-zero.
+///
+/// The chain is printed rather than the root alone because the root names the stage
+/// that failed and the causes name what it was doing: "Failed to link object file"
+/// without its cause tells the user nothing they can act on.
+fn report_failure(prefix: &str, error: &anyhow::Error) -> ! {
+    eprintln!("{}: {}", prefix, error);
+    let mut chain = error.chain();
+    chain.next(); // The root is already printed above.
+    for (i, cause) in chain.enumerate() {
+        eprintln!("  Caused by ({}): {}", i + 1, cause);
+    }
+    process::exit(1);
+}
+
+/// Compile `input` into a temporary directory, run the result, and return its exit code.
+///
+/// The executable is never written beside the source: a `run` leaves no artifact behind,
+/// which is what separates it from `compile` followed by an invocation. The temporary
+/// directory is removed when this function returns, after the child has exited.
+fn run_file(input: &Path, optimization: u8) -> Result<i32> {
+    let dir = tempfile::tempdir().context("Failed to create temporary directory")?;
+
+    // Keep the source's own name so the program sees a meaningful argv[0] and a crash
+    // reports something other than an anonymous temporary.
+    let stem = input.file_stem().unwrap_or_else(|| OsStr::new("program"));
+    let mut executable = dir.path().join(stem);
+    if cfg!(target_os = "windows") {
+        executable.set_extension("exe");
+    }
+
+    compile_file(input, Some(&executable), optimization)?;
+
+    let status = Command::new(&executable)
+        .status()
+        .with_context(|| format!("Failed to execute {}", executable.display()))?;
+
+    // A child killed by a signal carries no exit code; 1 keeps that a failure rather
+    // than reporting the run as a success.
+    Ok(status.code().unwrap_or(1))
 }
 
 /// Validate that a file has the .nr extension
@@ -200,8 +259,9 @@ fn print_warnings(warnings: &[semantic_analysis::Warning]) {
 ///
 /// Pipeline: read source → parse → type-check → lower to HIR → LLVM object
 /// code → link. `output` defaults to the input name without its extension
-/// (plus `.exe` on Windows).
-fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result<()> {
+/// (plus `.exe` on Windows). Returns the path of the executable it linked, which
+/// `run` needs and `compile` reports.
+fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result<PathBuf> {
     validate_source_file(input)?;
 
     let source = fs::read_to_string(input)
@@ -303,13 +363,7 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
 
     let _ = fs::remove_file(&object_path);
 
-    println!(
-        "Successfully compiled {} -> {}",
-        input.display(),
-        output_path.display()
-    );
-
-    Ok(())
+    Ok(output_path)
 }
 
 /// Link an object file to a native executable via the platform's C compiler,

@@ -10,6 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.31.0] - 2026-09-14
+
+### Added
+
+- infra: `neurc run <file.nr>` compiles into a temporary directory, runs the
+  program, and exits with the program's own status. The executable is removed
+  when the program exits, so running an example no longer leaves a binary beside
+  its source. `-O<0-3>` is accepted and means what it means for `compile`.
+
+### Changed
+
+- infra: `compile_file` returns the executable path it linked instead of
+  printing the success banner itself. The banner is `compile`'s, so `run` no
+  longer has a compiler line in the middle of the program's own stdout.
+- infra: `neurc version` no longer claims "Phase 1 - Alpha Development". The
+  open phase is tracked in the roadmap and the changelog, not in a banner that
+  had been wrong since Phase 1 closed.
+- docs: the roadmap's Phase 2 sub-phases 2E and 2F are swapped. The value model
+  and destruction work is now 2E, ahead of functional sugar at 2F: `|>` and `>>`
+  pipe values by value, which is exactly what the non-`Copy` value model does not
+  yet have, so the sugar had been scheduled above the floor it stands on.
+
+
 ## [2.30.0] - 2026-09-14
 
 ### Added
