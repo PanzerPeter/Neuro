@@ -211,6 +211,9 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("the operands of `@` at {span:?} do not multiply: {left} against {right}; matrix multiplication takes two rank-2 tensors whose inner axes agree, `[M, K] @ [K, N]` giving `[M, N]`")]
+    TensorMatMulMismatch { left: Type, right: Type, span: Span },
+
     #[error("this index at {span:?} names {found} axis/axes, but the tensor has rank {expected}; a tensor index gives one argument per axis")]
     TensorIndexRankMismatch {
         expected: usize,

@@ -412,6 +412,9 @@ impl<'ctx> CodegenContext<'ctx> {
                             a.wrapping_shl(b as u32),
                             &ty,
                         ))),
+                        BinaryOp::MatMul => Err(CodegenError::InternalError(
+                            "operator '@' is not valid in const expressions".into(),
+                        )),
                         BinaryOp::NullCoalesce => Err(CodegenError::InternalError(
                             "operator '??' is not valid in const expressions".into(),
                         )),

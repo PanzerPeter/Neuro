@@ -752,3 +752,77 @@ fn a_lone_range_index_is_a_tensor_index() {
     };
     assert!(matches!(indices[0], TensorIndexArg::Range { .. }));
 }
+
+// Appendix B row 4: `@` binds tighter than `*` and `+`, looser than `as`.
+
+#[test]
+fn test_matmul_binds_tighter_than_multiply() {
+    let expr = parse_expr("a @ b * c").expect("`@` before `*` should parse");
+    match expr {
+        Expr::Binary {
+            op, left, right, ..
+        } => {
+            assert_eq!(op, BinaryOp::Multiply);
+            assert!(matches!(
+                *left,
+                Expr::Binary {
+                    op: BinaryOp::MatMul,
+                    ..
+                }
+            ));
+            assert!(matches!(*right, Expr::Identifier(_)));
+        }
+        other => panic!("expected the product to be outermost, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_matmul_binds_tighter_than_add() {
+    let expr = parse_expr("a @ b + c").expect("`@` before `+` should parse");
+    match expr {
+        Expr::Binary { op, left, .. } => {
+            assert_eq!(op, BinaryOp::Add);
+            assert!(matches!(
+                *left,
+                Expr::Binary {
+                    op: BinaryOp::MatMul,
+                    ..
+                }
+            ));
+        }
+        other => panic!("expected the sum to be outermost, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_matmul_is_left_associative() {
+    let expr = parse_expr("a @ b @ c").expect("a chain of `@` should parse");
+    match expr {
+        Expr::Binary {
+            op, left, right, ..
+        } => {
+            assert_eq!(op, BinaryOp::MatMul);
+            assert!(matches!(
+                *left,
+                Expr::Binary {
+                    op: BinaryOp::MatMul,
+                    ..
+                }
+            ));
+            assert!(matches!(*right, Expr::Identifier(_)));
+        }
+        other => panic!("expected a left-nested chain, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_cast_binds_tighter_than_matmul() {
+    let expr = parse_expr("a @ b as f32").expect("`as` after `@` should parse");
+    match expr {
+        Expr::Binary { op, right, .. } => {
+            assert_eq!(op, BinaryOp::MatMul);
+            assert!(matches!(*right, Expr::Cast { .. }));
+        }
+        other => panic!("expected the cast on the right operand, got {:?}", other),
+    }
+}

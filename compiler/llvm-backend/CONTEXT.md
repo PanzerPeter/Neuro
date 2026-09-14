@@ -421,6 +421,19 @@ common case pays no coordinate arithmetic. The destination is always contiguous,
 counter is its slot index, and the result coordinates are decomposed once per iteration and
 shared by both sources.
 
+`@` branches out of `codegen_tensor_binary` into `codegen_tensor_matmul` before any of that: a
+matrix product contracts an axis instead of walking the result element for element, so it is a
+different loop shape rather than a different body. `emit_contraction_loop` walks the destination
+flat, one iteration per output element, recovering the row and column from the counter by
+division and remainder on `N`, and reduces over K in an inner loop. The accumulator is an entry
+`alloca` rather than a `phi`, because `tensor_element_arith` may split the body around an
+overflow guard and a `phi` would then have to chase whichever block came out of it. Both
+operands resolve through `codegen_tensor_operand`, the same handle/buffer/owned triple
+`codegen_operand_source` builds an `ElementSource` from, and an owned one is released by
+`release_consumed_buffer` once the product is built. Overflow and divide-by-zero guards are the
+element's, exactly as for the element-wise family, so an overflowing accumulation panics where
+an overflowing scalar `+` would.
+
 `codegen_tensor_shape_cast` (same file) lowers `HirExprKind::TensorShapeCast`: `.t()`,
 `.reshape(...)`, `.permute(...)` and `.flatten(...)`. It is not a `BuiltinMethod` — the method
 name alone would not say how the axes move, so lowering resolved that into the node's

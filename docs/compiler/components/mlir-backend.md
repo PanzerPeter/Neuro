@@ -9,8 +9,8 @@
 The MLIR backend is the tensor / autodiff / GPU lowering path. It consumes the same typed
 High-Level IR ([`neuro-hir`](hir-lowering.md)) the LLVM backend consumes and emits a verifier-clean
 MLIR module: one `func.func` *declaration* per function and `impl` method, except where a body is
-element-wise tensor arithmetic, which becomes a definition built from the `linalg` and `tensor`
-dialects. That module can be carried on through the `llvm` dialect into a verified inkwell LLVM
+element-wise tensor arithmetic or a matrix product, which becomes a definition built from the
+`linalg` and `tensor` dialects. That module can be carried on through the `llvm` dialect into a verified inkwell LLVM
 module, proving the HIR → MLIR → llvm dialect → inkwell pipeline end-to-end.
 
 Scalar arithmetic is deliberately **not** lowered here and never will be: it belongs to the
@@ -119,6 +119,52 @@ design; an extent that neither matches the result's nor is 1; an operand outrank
 a different element type; a `?` extent no operand can prove equal to the result's, which is
 never stretched because nothing at compile time can show it is 1; a literal operand; and
 `f16` / `bf16` elements.
+
+### Matrix multiplication
+
+`@` takes a path of its own: a matrix product contracts an axis rather than walking one, so its
+index space has a third dimension no operand of the result has. It emits three operations — a
+`tensor.empty`, a `linalg.generic` that fills it with the element's zero, and a second one that
+accumulates into the filled destination:
+
+```mlir
+#zero = affine_map<(d0, d1) -> ()>
+#out  = affine_map<(d0, d1) -> (d0, d1)>
+#lhs  = affine_map<(d0, d1, d2) -> (d0, d2)>
+#rhs  = affine_map<(d0, d1, d2) -> (d2, d1)>
+#acc  = affine_map<(d0, d1, d2) -> (d0, d1)>
+func.func @f(%arg0: tensor<2x3xf32>, %arg1: tensor<3x4xf32>) -> tensor<2x4xf32> {
+  %0 = tensor.empty() : tensor<2x4xf32>
+  %cst = arith.constant 0.000000e+00 : f32
+  %1 = linalg.generic {indexing_maps = [#zero, #out],
+                       iterator_types = ["parallel", "parallel"]}
+       ins(%cst : f32) outs(%0 : tensor<2x4xf32>) {
+  ^bb0(%in: f32, %out: f32):
+    linalg.yield %in : f32
+  } -> tensor<2x4xf32>
+  %2 = linalg.generic {indexing_maps = [#lhs, #rhs, #acc],
+                       iterator_types = ["parallel", "parallel", "reduction"]}
+       ins(%arg0, %arg1 : tensor<2x3xf32>, tensor<3x4xf32>)
+       outs(%1 : tensor<2x4xf32>) {
+  ^bb0(%in: f32, %in_0: f32, %out: f32):
+    %3 = arith.mulf %in, %in_0 : f32
+    %4 = arith.addf %out, %3 : f32
+    linalg.yield %4 : f32
+  } -> tensor<2x4xf32>
+  return %2 : tensor<2x4xf32>
+}
+```
+
+`(d0, d1, d2)` is (row, column, contracted), and the reduction iterator comes last because that
+is the order the maps number the dimensions in. The fill is not optional: a reduction reads its
+destination at every point, which is what makes it an accumulator, and `tensor.empty` is
+undefined memory.
+
+Named `linalg.matmul` and `linalg.fill` are not reachable — melior's ODS module generates from
+`LinalgOps.td` only — so all three generics go through one builder that takes its operand split,
+maps, iterators and body region as arguments. Every extent must be static: `tensor.dim` can
+recover a dynamic result axis but not the contracted one, which appears in no operand of the
+destination, so a `?` anywhere leaves the function a declaration.
 
 A `linalg` body does **not** survive `translate_to_llvm_ir`: the pipeline below covers
 `func` / `arith` / `index` only, and bufferizing `linalg` is later work. The crossing returns a

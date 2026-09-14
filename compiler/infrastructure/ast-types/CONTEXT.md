@@ -76,6 +76,9 @@ walkers.
   missed a trailing `loop`, which is how a tail `loop` used as an implicit return came to be
   compiled as a discarded value (BUG-005). `Stmt::Break` carries `value: Option<Expr>`;
   `while`/`for` stay unit and have no expression form.
+- `BinaryOp::MatMul` is the matrix product `a @ b`. It is a `BinaryOp` like any other, but it is
+  the one that is not element-wise on tensors — it contracts the operands' inner axis — so each
+  stage separates it from the arithmetic family rather than sharing an arm with it.
 - `Expr::Try { operand, span }` (postfix `?`) is a node of its own rather than a `BinaryOp`: it
   has one operand, and its type comes from that operand's success payload while its *failure*
   path is typed by the enclosing function's return type.

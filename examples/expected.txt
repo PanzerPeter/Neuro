@@ -72,6 +72,7 @@ tensors/tensor_dynamic_shapes.nr      42
 tensors/tensor_indexing.nr            44
 tensors/tensor_named_dimensions.nr    33
 tensors/tensor_operators.nr           36
+tensors/tensor_matmul.nr              4
 tensors/tensor_reductions.nr          21
 tensors/tensor_shape_generics.nr      41
 tensors/tensor_shape_manipulation.nr  44

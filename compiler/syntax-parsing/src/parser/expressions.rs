@@ -47,11 +47,18 @@ impl Parser {
             // reaches here with the newline already behind it. Skipping the newline
             // first instead let the NEXT line decide: `val a = f()` followed by a line
             // `(2 + 3)` parsed as a call of `f()`'s result, and a following `[1, 2]` as
-            // an index of it.
+            // an index of it. `@` joined that set when it became the matmul operator:
+            // a line opening with `@` is an attribute on the item below it, so a
+            // module `const` initializer must not swallow the `@derive` after it.
             if matches!(self.peek_kind(), Some(TokenKind::Newline))
                 && matches!(
                     self.peek_next_nonnewline_kind(),
-                    Some(TokenKind::Star | TokenKind::LeftParen | TokenKind::LeftBracket)
+                    Some(
+                        TokenKind::Star
+                            | TokenKind::LeftParen
+                            | TokenKind::LeftBracket
+                            | TokenKind::At
+                    )
                 )
             {
                 break;
@@ -808,6 +815,7 @@ impl Parser {
                 | TokenKind::Pipe
                 | TokenKind::Caret
                 | TokenKind::LeftShift
+                | TokenKind::At
                 | TokenKind::QuestionQuestion
         )
     }
@@ -832,6 +840,7 @@ impl Parser {
             TokenKind::Pipe => Ok(BinaryOp::BitOr),
             TokenKind::Caret => Ok(BinaryOp::BitXor),
             TokenKind::LeftShift => Ok(BinaryOp::Shl),
+            TokenKind::At => Ok(BinaryOp::MatMul),
             TokenKind::QuestionQuestion => Ok(BinaryOp::NullCoalesce),
             _ => Err(ParseError::UnexpectedToken {
                 found: token.kind.clone(),
@@ -858,6 +867,7 @@ impl Parser {
             TokenKind::QuestionQuestion => Precedence::NullCoalesce,
             TokenKind::Plus | TokenKind::Minus => Precedence::Sum,
             TokenKind::Star | TokenKind::Slash | TokenKind::Percent => Precedence::Product,
+            TokenKind::At => Precedence::MatMul,
             TokenKind::DotDot | TokenKind::DotDotEqual => Precedence::Range,
             TokenKind::As => Precedence::Cast,
             TokenKind::LeftParen => Precedence::Call,

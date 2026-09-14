@@ -81,13 +81,20 @@ the tuple-index parse, so it needs no expression grammar of its own.
   where a `{` cannot be a body block. Both restore the previous value on the error path too, so
   nesting composes: `if check(Point { x: 1 }) && flag { }` reads the literal inside the argument
   list and the trailing brace as the body.
-- **Statement boundaries.** `parse_expr_inner` treats a newline followed by `(`, `[`, or `*` as a
-  statement boundary. The rule is that **the line that ENDED decides**: a continuing line ends
+- **Statement boundaries.** `parse_expr_inner` treats a newline followed by `(`, `[`, `*`, or `@`
+  as a statement boundary. `@` is there because it spells both the matmul operator and the opening
+  of an attribute: without it a module `const`'s initializer reads the `@derive` on the next line
+  as a matrix product against `derive(Debug)`. The rule is that **the line that ENDED decides**: a continuing line ends
   with an operator, a comma, or an opening delimiter, all of which arrive here with no pending
   newline. Consulting the *following* token instead inverted it: `val a = f()` followed by a line
   `(2 + 3)` parsed as `f()(2 + 3)`, and a following `[1, 2]` as an index, both of which
   type-checked with a callable on the left. A leading `.` still continues, since it cannot start a
   statement.
+- **`@` (matmul) sits at `Precedence::MatMul`**, between `Product` and `Cast`: Appendix B row 4,
+  tighter than `*` so `a @ b * c` scales the product, looser than `as` so `a @ b as f32` casts the
+  right operand. It is an ordinary left-associative infix in `is_binary_op` /
+  `token_to_binary_op`; attributes are read by `parse_attributes` at item level only, so the
+  statement-boundary rule above is the whole of the disambiguation.
 - **Associated types are two productions, not one.** `parse_trait_def` reads a bare `type Name`
   into `TraitDef.assoc_types` and rejects `type Name = T` there, while `parse_impl_def` reads
   exactly the binding form into `ImplDef.assoc_types`: a trait that could supply a default

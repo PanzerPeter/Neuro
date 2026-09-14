@@ -1,5 +1,5 @@
-// The by-value tensor operators `a + b`, `&a + &b` and the scalar broadcast, plus the
-// shape rule they share with in-place compound assignment.
+// The by-value tensor operators `a + b`, `&a + &b`, `a @ b` and the scalar broadcast,
+// plus the shape rule the element-wise ones share with in-place compound assignment.
 //
 // Reached from the binary-operator arm of `check_expr` and from
 // `check_tensor_compound_assign`. Adds methods to the same `impl TypeChecker` block as
@@ -16,9 +16,10 @@ use shared_types::Span;
 /// makes `[2, 3] * [3]` the row-wise product rather than a rank error.
 const IMPLICIT_LEADING_EXTENT: usize = 1;
 
-/// Whether `op` is one of the element-wise arithmetic operators defined on tensors.
-/// Comparison, bitwise and logical operators have no tensor meaning: they would each
-/// have to answer with a `bool` tensor, which the language does not specify.
+/// Whether `op` is one of the arithmetic operators defined on tensors: the element-wise
+/// family and `@`. Comparison, bitwise and logical operators have no tensor meaning:
+/// they would each have to answer with a `bool` tensor, which the language does not
+/// specify.
 fn is_tensor_operator(op: BinaryOp) -> bool {
     matches!(
         op,
@@ -27,6 +28,7 @@ fn is_tensor_operator(op: BinaryOp) -> bool {
             | BinaryOp::Multiply
             | BinaryOp::Divide
             | BinaryOp::Modulo
+            | BinaryOp::MatMul
     )
 }
 
@@ -256,7 +258,120 @@ impl TypeChecker {
         right_ty: &Type,
         span: Span,
     ) -> Option<Type> {
-        let (element, shape) = match (lhs, rhs) {
+        // `@` is the one tensor operator that is not element-wise, so it joins its
+        // operands by contraction rather than by the broadcast rule below.
+        let (element, shape) = if matches!(op, BinaryOp::MatMul) {
+            self.matmul_shape(lhs, rhs, left_ty, right_ty, span)?
+        } else {
+            self.broadcast_operands(lhs, rhs, op, left_ty, right_ty, span)?
+        };
+
+        let result = Type::Tensor {
+            element: Box::new(element.clone()),
+            shape,
+        };
+        // The element carries the arithmetic, so the operator is defined exactly where it
+        // is defined on the scalar: `bool` has none, and the half-precision scalar
+        // contract stops short of it.
+        if !element.is_numeric() || element.is_half_float() {
+            self.record_error(TypeError::TensorElementNotArithmetic {
+                op: op.to_string(),
+                element,
+                span,
+            });
+            return None;
+        }
+        // The result is a fresh buffer, so its element count must be a number here; the
+        // operands' own extents are what it is computed from.
+        if let Type::Tensor { shape, .. } = &result {
+            let shape = shape.clone();
+            if self.reject_dynamic_extent(&shape, &format!("`{op}`"), &result, span) {
+                return None;
+            }
+        }
+        Some(result)
+    }
+
+    /// The contracted shape of `[M, K] @ [K, N]`, or `None` once a diagnostic has been
+    /// recorded for the operands.
+    ///
+    /// Matrix multiplication neither broadcasts nor stretches: it reads the inner axis of
+    /// each operand and contracts it away. A scalar operand therefore has nothing to
+    /// contract, and an operand of any rank but 2 has no inner axis to name — both are the
+    /// shape error rather than a silently different operation.
+    fn matmul_shape(
+        &mut self,
+        lhs: &Operand,
+        rhs: &Operand,
+        left_ty: &Type,
+        right_ty: &Type,
+        span: Span,
+    ) -> Option<(Type, Vec<TensorAxis>)> {
+        let (
+            Operand::Tensor { element, shape, .. },
+            Operand::Tensor {
+                element: other_element,
+                shape: other_shape,
+                ..
+            },
+        ) = (lhs, rhs)
+        else {
+            self.record_error(TypeError::TensorMatMulMismatch {
+                left: left_ty.clone(),
+                right: right_ty.clone(),
+                span,
+            });
+            return None;
+        };
+        if !element.is_compatible_with(other_element) {
+            self.record_error(TypeError::Mismatch {
+                expected: left_ty.clone(),
+                found: right_ty.clone(),
+                span,
+            });
+            return None;
+        }
+        // All three of M, K and N must be countable here: K to walk the contraction, and
+        // M x N to size the fresh result's buffer. A `?` supplies none of them.
+        if self.reject_dynamic_extent(shape, "`@`", left_ty, span)
+            || self.reject_dynamic_extent(other_shape, "`@`", right_ty, span)
+        {
+            return None;
+        }
+        let ([rows, inner], [contracted, columns]) = (shape.as_slice(), other_shape.as_slice())
+        else {
+            self.record_error(TypeError::TensorMatMulMismatch {
+                left: left_ty.clone(),
+                right: right_ty.clone(),
+                span,
+            });
+            return None;
+        };
+        // A shape parameter counts as equal to itself, which is what makes the `K` of
+        // `matmul<M, N, K>` check once at the declaration rather than per instantiation.
+        if inner.extent != contracted.extent || !inner.names_agree_with(contracted) {
+            self.record_error(TypeError::TensorMatMulMismatch {
+                left: left_ty.clone(),
+                right: right_ty.clone(),
+                span,
+            });
+            return None;
+        }
+        Some((element.clone(), vec![rows.clone(), columns.clone()]))
+    }
+
+    /// The element type and broadcast-joined shape of an element-wise operator's
+    /// operands, or `None` once a diagnostic has been recorded for them.
+    fn broadcast_operands(
+        &mut self,
+        lhs: &Operand,
+        rhs: &Operand,
+        op: BinaryOp,
+        left_ty: &Type,
+        right_ty: &Type,
+        span: Span,
+    ) -> Option<(Type, Vec<TensorAxis>)> {
+        let parts = match (lhs, rhs) {
             (
                 Operand::Tensor { element, shape, .. },
                 Operand::Tensor {
@@ -303,30 +418,7 @@ impl TypeChecker {
             (Operand::Scalar(_), Operand::Scalar(_)) => return None,
         };
 
-        let result = Type::Tensor {
-            element: Box::new(element.clone()),
-            shape,
-        };
-        // The element carries the arithmetic, so the operator is defined exactly where it
-        // is defined on the scalar: `bool` has none, and the half-precision scalar
-        // contract stops short of it.
-        if !element.is_numeric() || element.is_half_float() {
-            self.record_error(TypeError::TensorElementNotArithmetic {
-                op: op.to_string(),
-                element,
-                span,
-            });
-            return None;
-        }
-        // The result is a fresh buffer, so its element count must be a number here; the
-        // operands' own extents are what it is computed from.
-        if let Type::Tensor { shape, .. } = &result {
-            let shape = shape.clone();
-            if self.reject_dynamic_extent(&shape, &format!("`{op}`"), &result, span) {
-                return None;
-            }
-        }
-        Some(result)
+        Some(parts)
     }
 }
 

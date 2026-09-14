@@ -495,6 +495,10 @@ pub enum BinaryOp {
     BitOr,
     BitXor,
     Shl,
+    /// Matrix multiplication `a @ b`. Not element-wise:
+    /// it contracts the operands' inner axis, which is why it has a precedence of its
+    /// own between `as` and `*`.
+    MatMul,
     NullCoalesce,
 }
 
@@ -540,6 +544,7 @@ impl fmt::Display for BinaryOp {
             BinaryOp::BitOr => write!(f, "|"),
             BinaryOp::BitXor => write!(f, "^"),
             BinaryOp::Shl => write!(f, "<<"),
+            BinaryOp::MatMul => write!(f, "@"),
             BinaryOp::NullCoalesce => write!(f, "??"),
         }
     }

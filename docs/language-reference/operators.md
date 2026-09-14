@@ -75,9 +75,9 @@ val mod: i32 = 10 % 3        // 1
 ### On tensors: element-wise, with broadcasting
 
 All five arithmetic operators apply to tensors. They combine the operands element by
-element and allocate a **fresh** tensor, so `*` is the element-wise product rather than the
-matrix product (`@` is later work). Both owned and borrowed operands are accepted: an owned
-one is moved, a borrowed one is only read.
+element and allocate a **fresh** tensor, so `*` is the element-wise product; the matrix
+product is `@` below. Both owned and borrowed operands are accepted: an owned one is moved,
+a borrowed one is only read.
 
 ```neuro
 val m: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
@@ -92,6 +92,39 @@ wider one, and a lower-rank operand supplies the innermost axes. A scalar sits o
 side and takes the tensor's element type. The full rule, its edge cases, and the way
 compound assignment inherits it are in
 [Tensors — element-wise arithmetic](tensors.md#element-wise-arithmetic).
+
+### Matrix Multiplication (`@`)
+
+`@` is the matrix product, and it is the one tensor operator that is not element-wise: it
+**contracts** an axis instead of walking one. Element `[i, j]` of the result is the dot
+product of row `i` of the left operand and column `j` of the right.
+
+```neuro
+val a: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+val b: Tensor<i32, [3, 2]> = [[7, 8], [9, 10], [11, 12]]
+
+val c = &a @ &b               // [2, 2] — the inner 3 is contracted away
+```
+
+**Shape rule**: `[M, K] @ [K, N]` gives `[M, N]`. The two inner extents must agree, and a
+mismatch is a compile error. Both operands are rank 2 and neither broadcasts: there is no
+vector form and no scalar form of `@`. A `?` extent is rejected on either operand, because
+the contracted axis bounds the sum and the result's own two size its buffer.
+
+Shape parameters make the check generic — the repeated `K`
+below is verified once at the declaration rather than per call site:
+
+```neuro
+func project<M, N, K>(w: &Tensor<f32, [M, K]>, x: &Tensor<f32, [K, N]>) -> Tensor<f32, [M, N]> {
+    return w @ x
+}
+```
+
+**Precedence**: level 13 below, tighter than `*` and `+` and looser than `as`, matching
+mathematical convention: `a @ b + c` adds `c` to the product, and `a @ b * s` scales it.
+
+On a user type, `@` dispatches through the `MatMul` trait like every other overloadable
+operator. See [Tensors — matrix multiplication](tensors.md#matrix-multiplication).
 
 ## Comparison Operators
 
@@ -453,10 +486,11 @@ From highest to lowest, matching the parser's Pratt ladder:
 
 | Level | Operators | Associativity | Example |
 |-------|-----------|---------------|---------|
-| 16 (highest) | `.` | L-to-R | `p.x` |
-| 15 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | L-to-R | `f(x)?`, `arr[i]` |
-| 14 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
-| 13 | `as` | L-to-R | `n as f64` |
+| 17 (highest) | `.` | L-to-R | `p.x` |
+| 16 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | L-to-R | `f(x)?`, `arr[i]` |
+| 15 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
+| 14 | `as` | L-to-R | `n as f64` |
+| 13 | `@` | L-to-R | `w @ x` |
 | 12 | `*`, `/`, `%` | L-to-R | `a * b`, `n % 2` |
 | 11 | `+`, `-` | L-to-R | `a + b`, `x - y` |
 | 10 | `<<` | L-to-R | `a << 4` |
@@ -480,6 +514,8 @@ composition. |
 a + b * c       // Same as: a + (b * c)
 a * b + c       // Same as: (a * b) + c
 a < b == c < d  // Same as: (a < b) == (c < d)
+w @ x + b       // Same as: (w @ x) + b
+w @ x * s       // Same as: (w @ x) * s
 !a && b         // Same as: (!a) && b
 a || b && c     // Same as: a || (b && c)
 ```
@@ -643,6 +679,7 @@ if Vec2 { x: 1, y: 2 } == Vec2 { x: 1, y: 2 } { }   // via PartialEq::eq
 | `-a` | `Neg` | `neg` |
 | `~a` | `Not` | `not` |
 | `&` `\|` `^` `<<` | `BitAnd` `BitOr` `BitXor` `Shl` | `bitand` `bitor` `bitxor` `shl` |
+| `@` | `MatMul` | `matmul` |
 | `==` `!=` | `PartialEq` | `eq` `ne` |
 | `<` `<=` `>` `>=` | `Comparable` | `lt` `le` `gt` `ge` |
 
@@ -655,8 +692,8 @@ Rules and limits:
 - Compound assignment (`v += w`) works when the type implements the matching by-value
   operator: it desugars to `v = v + w`. In-place `*Assign` behaviour is compiler-known on
   tensors (see [Compound Assignment Operators](#compound-assignment-operators)) but not
-  yet declarable for a user type; matrix multiply `@` and auto-derived comparison defaults
-  are planned for later phases. The tensor arithmetic operators are compiler-known too,
+  yet declarable for a user type; auto-derived comparison defaults are planned for a later
+  phase. The tensor arithmetic operators are compiler-known too,
   and are not reached through an operator-trait impl.
 - Operator overloading is fully monomorphized and erased: each operator becomes the
   method call it stands for, with no vtable and no runtime cost.

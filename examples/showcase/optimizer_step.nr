@@ -9,8 +9,9 @@
 //   keeps one address across every step below · 2B's slicing and indexing,
 //   which is what finally reads the updated elements back out · 2B's shape
 //   generics, which let the step below be written ONCE for every width a layer
-//   in this program has · and 2C's by-value tensor operators with their
-//   broadcast shape rules, which give the same step its allocating form.
+//   in this program has · 2C's by-value tensor operators with their
+//   broadcast shape rules, which give the same step its allocating form · and
+//   2C's `@` operator, which turns those weights into an actual forward pass.
 //
 // `w -= g` updates the buffer `w`'s DLPack handle already addresses. Nothing is
 // allocated, no handle is replaced, and a pointer held by an optimizer or by a
@@ -18,8 +19,14 @@
 // desugaring `w = w - g` would build a second tensor per step and invalidate
 // both, which is why the compound operators are their own dispatch.
 //
-// 2C's by-value operators are the other half of that pair, and the last block
-// below is where the two meet: `&w - &(lr * g)` ALLOCATES a fresh tensor and
+// The last two blocks are where the sub-phase's own features meet. `@` contracts
+// an axis rather than walking one, so a `[4, 64]` batch against the `[64, 32]`
+// weight matrix gives `[4, 32]` activations — and the bias that is then added to
+// them is a `[32]` row broadcast down all four, which is the element-wise rule
+// from the block above doing its job on the matrix product's result.
+//
+// 2C's by-value operators are the other half of that pair, and the block below is
+// where the two meet: `&w - &(lr * g)` ALLOCATES a fresh tensor and
 // reads two borrows, which is exactly what makes it the wrong thing to run per
 // step and the right thing to compute a candidate with. Its operands broadcast:
 // a scalar learning rate stretches across every element, and a per-neuron bias
@@ -191,6 +198,24 @@ func main() -> i32 {
     assert(biased[63, 1] - biased[63, 0] == 1.0f32)
     assert(biased[0, 2] == candidate[0, 2])
     println("broadcast      a [32] bias reached row 0 and row 63 alike")
+
+    // A forward pass, at the width the layer actually has. `@` contracts the 64
+    // inputs away: a [4, 64] batch against the [64, 32] weights is [4, 32]
+    // activations, one row per sample. Every weight is 0.5 and every input 1.0, so
+    // each activation is 64 * 0.5 exactly, and the equality below is an equality.
+    val batch = Tensor::<f32, [4, 64]>::ones()
+    val activations = &batch @ &candidate
+    assert(activations[0, 0] == 32.0f32)
+    assert(activations[3, 31] == 32.0f32)
+    println("batch @ w      [4, 64] @ [64, 32] -> [4, 32], every unit at {activations[0, 0]}")
+
+    // The bias is the [32] row from above, broadcast down all four sample rows: the
+    // element-wise rule applied to what `@` just produced, which is the whole shape
+    // of a linear layer.
+    val shifted = &activations + &offsets
+    assert(shifted[0, 1] - shifted[0, 0] == 1.0f32)
+    assert(shifted[3, 1] - shifted[3, 0] == 1.0f32)
+    println("+ bias         a [32] row reached all 4 sample rows alike")
 
     // The trained buffers move into the layer; they are not copied.
     val layer = Layer { weights: weights, bias: bias, parameters: 2080 }

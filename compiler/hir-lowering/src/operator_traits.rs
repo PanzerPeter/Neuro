@@ -60,6 +60,11 @@ pub(crate) fn operator_trait_spec(name: &str) -> Option<OpTraitSpec> {
             unary: &[],
             has_output: true,
         },
+        "MatMul" => OpTraitSpec {
+            binary: &[("matmul", BinaryOp::MatMul)],
+            unary: &[],
+            has_output: true,
+        },
         "Neg" => OpTraitSpec {
             binary: &[],
             unary: &[("neg", UnaryOp::Negate)],

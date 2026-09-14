@@ -140,6 +140,14 @@ pub(super) fn binary_result_type(
         | BinaryOp::BitOr
         | BinaryOp::BitXor
         | BinaryOp::Shl => left.clone(),
+        // `@` is defined on tensors only; the tensor rule above has already taken every
+        // operand pair that reaches it, so a scalar one here is a checker escape.
+        BinaryOp::MatMul => {
+            return Err(LoweringError::UnsupportedOperand {
+                op: op.to_string(),
+                ty: left.to_string(),
+            })
+        }
         // `??` desugars to a `match` before any operand type is combined, so it never
         // reaches the operand-symmetric result rule.
         BinaryOp::NullCoalesce => {
@@ -210,10 +218,19 @@ fn tensor_result_type(
         ty: left.to_string(),
     };
     let (element, shape, names) = match (tensor_parts(left), tensor_parts(right)) {
+        // `@` contracts the operands' inner axis instead of joining their shapes, so it
+        // is separated before the element-wise rule rather than inside it.
+        (Some(l), Some(r)) if op == BinaryOp::MatMul => {
+            let (shape, names) = matmul_shape(l.1, l.2, r.1, r.2).ok_or_else(unsupported)?;
+            (l.0, shape, names)
+        }
         (Some(l), Some(r)) => {
             let (shape, names) = broadcast_shapes(l.1, l.2, r.1, r.2).ok_or_else(unsupported)?;
             (l.0, shape, names)
         }
+        // `@` has no scalar form: a scalar has no inner axis to contract, so the arm
+        // below would silently give it the element-wise operator's shape.
+        _ if op == BinaryOp::MatMul => return Err(unsupported()),
         // A scalar operand is stretched across every element, so the tensor side alone
         // decides the result's shape.
         (Some(t), None) | (None, Some(t)) => (t.0, t.1.to_vec(), t.2.clone()),
@@ -224,6 +241,30 @@ fn tensor_result_type(
         shape,
         names,
     })
+}
+
+/// The contracted shape of `[M, K] @ [K, N]`: the left operand's rows and the right
+/// operand's columns, with the inner axis read away. `None` where the checker would not
+/// have accepted the pair.
+fn matmul_shape(
+    left: &[Option<usize>],
+    left_names: &AxisNames,
+    right: &[Option<usize>],
+    right_names: &AxisNames,
+) -> Option<(Vec<Option<usize>>, AxisNames)> {
+    let ([rows, inner], [contracted, columns]) = (left, right) else {
+        return None;
+    };
+    if inner != contracted {
+        return None;
+    }
+    Some((
+        vec![*rows, *columns],
+        AxisNames(vec![
+            left_names.0.first().cloned().flatten(),
+            right_names.0.get(1).cloned().flatten(),
+        ]),
+    ))
 }
 
 /// The broadcast join of two shapes: align at the trailing axis, stretch an extent of 1,

@@ -1,7 +1,7 @@
 # mlir-backend
 
 ## Purpose
-Lower the typed HIR to MLIR for the tensor / autodiff / GPU path. It consumes `neuro_hir::HirProgram` and emits a verifier-clean module: a `func.func` declaration per function, except where a body is element-wise tensor arithmetic, which becomes a definition built from the `linalg` and `tensor` dialects. The same module carries on through the `llvm` dialect into a verified inkwell LLVM module, proving the HIR → MLIR → llvm dialect → inkwell pipeline end to end.
+Lower the typed HIR to MLIR for the tensor / autodiff / GPU path. It consumes `neuro_hir::HirProgram` and emits a verifier-clean module: a `func.func` declaration per function, except where a body is element-wise tensor arithmetic or a matrix product, which becomes a definition built from the `linalg` and `tensor` dialects. The same module carries on through the `llvm` dialect into a verified inkwell LLVM module, proving the HIR → MLIR → llvm dialect → inkwell pipeline end to end.
 
 ## Feature Gate
 The whole crate is opt-in behind the off-by-default `mlir` feature
@@ -61,7 +61,7 @@ Arch's stock `llvm20` omits MLIR, so build LLVM 20 with `-DLLVM_ENABLE_PROJECTS=
 function whose statements are `val` bindings and a final `return` over element-wise `+ - * /`
 on tensors into a `func.func` definition: one `tensor.empty` destination plus one
 `linalg.generic` per operator, with one indexing map per operand, all-`parallel` iterators, and
-an `arith` body terminated by `linalg.yield`. Float elements use the `arith` float operations
+an `arith` body terminated by `linalg.yield`. `@` is the exception and is described below. Float elements use the `arith` float operations
 and integer elements theirs, with division splitting on signedness.
 
 **Broadcasting is per-operand indexing maps.** Operand shapes align at their *trailing* axis,
@@ -87,6 +87,18 @@ operation stay on the inkwell backend permanently, so lowering them here would b
 copy the sub-phase's decision exists to prevent. `None` also covers `f16` / `bf16` elements,
 which carry no arithmetic in the HIR contract, and a scalar *literal* operand, since the body
 builder lowers variables and operators only.
+
+**A matrix product is a contracting `linalg.generic`.** `build_matmul` reads `@` instead of the
+element-wise path and emits the canonical three-operation shape: a `tensor.empty`, a
+`linalg.generic` that fills it with the element's zero from an `arith.constant` scalar input, and
+a second one whose index space is `(row, column, contracted)` with maps `(d0, d2)` / `(d2, d1)` /
+`(d0, d1)`, iterators `parallel, parallel, reduction`, and a multiply-accumulate body. The fill is
+not optional: a reduction READS its destination at every point, and `tensor.empty` is undefined
+memory. Named `linalg.matmul` and `linalg.fill` are still not reachable — melior's ODS module
+generates from `LinalgOps.td` only — so all three go through the one `generic_op` builder, which
+takes its operand split, maps, iterators and body region as arguments. Every extent must be
+static here: `tensor.dim` can recover a dynamic result axis but not the contracted one, which
+appears in no operand of the destination, so a `?` anywhere answers `Ok(None)`.
 
 A `linalg` body does **not** survive `translate_to_llvm_ir`: the conversion pipeline covers
 `func` / `arith` / `index` only, and bufferizing `linalg` on tensors is later work. The

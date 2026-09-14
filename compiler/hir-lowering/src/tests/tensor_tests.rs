@@ -475,3 +475,32 @@ func main() -> i32 {
     };
     assert_eq!(left.ty, HirType::F32);
 }
+
+/// `@` contracts rather than broadcasts, so the result carries the left operand's rows
+/// and the right operand's columns with the inner axis read away.
+#[test]
+fn a_matrix_product_carries_the_contracted_result_shape() {
+    let program = lower(
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val b: Tensor<i32, [3, 4]> = [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0]
+    ]
+    val product = &a @ &b
+    return 0
+}
+"#,
+    );
+    let body = function_body(&program, "main");
+    assert_eq!(
+        binding_init(body, "product").ty,
+        HirType::Tensor {
+            element: Box::new(HirType::I32),
+            shape: neuro_hir::static_shape(&[2, 4]),
+            names: AxisNames::default(),
+        }
+    );
+}

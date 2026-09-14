@@ -417,3 +417,21 @@ fn test_null_coalesce_binds_looser_than_logical_or() {
     };
     assert_eq!(iop, BinaryOp::Or);
 }
+
+/// `@` is both the matmul operator and the marker that opens an attribute. A `const`
+/// initializer is a full expression, so without the newline guard the `@derive` below
+/// would be read as a matrix product against `derive(Debug)`.
+#[test]
+fn test_attribute_after_a_const_is_not_a_matmul() {
+    let source = r#"
+        const WIDTH: i32 = 2
+
+        @derive(Debug)
+        struct Tag {
+            id: i32
+        }
+    "#;
+
+    let items = parse(source).expect("an attribute must open a new item");
+    assert_eq!(items.len(), 2);
+}

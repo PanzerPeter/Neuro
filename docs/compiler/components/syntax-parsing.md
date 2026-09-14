@@ -62,14 +62,20 @@ The parser is a **Pratt parser** (precedence climbing). The ladder, loosest firs
 | 10 | `<<` | Left |
 | 11 | `+`, `-` | Left |
 | 12 | `*`, `/`, `%` | Left |
-| 13 | `as` (cast) | Left |
-| 14 | `-`, `!`, `~` (unary) | Right |
-| 15 | call `f(...)`, index `a[i]`, `?`, turbofish `::<...>` | Left |
-| 16 (tightest) | `.` (field / method access) | Left |
+| 13 | `@` (matrix multiplication) | Left |
+| 14 | `as` (cast) | Left |
+| 15 | `-`, `!`, `~` (unary) | Right |
+| 16 | call `f(...)`, index `a[i]`, `?`, turbofish `::<...>` | Left |
+| 17 (tightest) | `.` (field / method access) | Left |
 
 There is no `>>` operator: right shift is the `.shr(n)` method, because `>>` is reserved for
 function composition. `??` associates right-to-left so `a ?? b ?? c` evaluates each fallback
 only when every left-hand side before it was absent.
+
+`@` spells both the matmul operator and the opening of an attribute. Attributes are read at
+item level only, so the two never compete except across a newline: a line beginning with `@`
+is therefore a statement boundary, alongside one beginning with `(`, `[` or `*`, and a module
+`const`'s initializer does not swallow the `@derive` written under it.
 
 ```neuro
 a + b * c       // a + (b * c)

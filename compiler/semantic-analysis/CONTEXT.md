@@ -521,16 +521,16 @@ same check for return-position `impl Trait<Assoc = U>`.
   result type into `operator_binary_impls` (`(struct, BinaryOp)` → `OperatorDispatch { rhs,
   result }`) or `operator_unary_impls`. In `check_expr` a binary or unary operator whose peeled
   left/operand type is a struct with a matching entry takes the impl's result type **before** the
-  built-in numeric and comparison paths. Not yet: user-declarable `*Assign` traits, `MatMul`/`@`,
-  and auto-derived trait default methods: each operator needs its own impl method.
+  built-in numeric and comparison paths. Not yet: user-declarable `*Assign` traits and
+  auto-derived trait default methods: each operator needs its own impl method.
 - **By-value tensor operators** (`type_checkers/tensor_broadcast.rs`) run **before** the
   operator-trait and built-in numeric paths, on either operand being a tensor or a borrow of
   one. `broadcast_shapes` joins the two shapes: aligned at the trailing axis, an extent of 1
   stretched across a wider one, a lower-rank operand supplying the innermost axes. A shape
   parameter's extent is never the axis that stretches (whether it is 1 is unknown until the
   instantiation) but is stretched into, since a literal 1 on the other side is known. A pair
-  that does not join is `TensorBroadcastMismatch`; only the five arithmetic operators are
-  defined (`InvalidBinaryOperator` otherwise); the element must have arithmetic
+  that does not join is `TensorBroadcastMismatch`; only the five arithmetic operators and `@`
+  are defined (`InvalidBinaryOperator` otherwise); the element must have arithmetic
   (`TensorElementNotArithmetic`); a `?` extent has no element count for the fresh result
   (`TensorDynamicExtent`); and an owned operand is moved once the operands are known to
   combine, so a rejected operator does not also report a use-after-move.
@@ -539,6 +539,17 @@ same check for return-position `impl Trait<Assoc = U>`.
   in reverse for a literal written to the left of a tensor BINDING, which is the one place a
   syntactic lookahead is used (a speculative `check_expr` would record the discarded attempt's
   diagnostics). A scalar beside anything else still needs its suffix.
+- **`@` is the one tensor operator that is not element-wise.** `matmul_shape` (same file) is
+  reached instead of the broadcast join and contracts rather than stretches: two rank-2 operands
+  whose inner axes agree give `[M, K] @ [K, N]` -> `[M, N]`, taking the left operand's row axis
+  and the right operand's column axis with their names. Anything else — a rank other than 2, a
+  scalar operand, a disagreeing inner extent, disagreeing axis NAMES on the contracted axis — is
+  `TensorMatMulMismatch`. `ArrayLen` equality is what compares the inner axes, so `matmul<M, N, K>`
+  checks its repeated `K` once at the declaration rather than per instantiation. A `?` is rejected
+  on BOTH operand shapes rather than only the result's (`TensorDynamicExtent`), because the
+  contracted axis bounds the loop even though it appears in neither operand's result. Everything
+  after the join — the element-arithmetic check, the move recording — is shared with the
+  element-wise operators. A user type reaches `@` through the `MatMul` operator trait instead.
 - **Compound assignment** (`Stmt::CompoundAssignment`) implements the operator-trait dispatch rule in
   `type_checkers/statements.rs`. A tensor target routes to `check_tensor_compound_assign`
   (`type_checkers/tensors.rs`), the compiler-known `*Assign` implementation; every other target

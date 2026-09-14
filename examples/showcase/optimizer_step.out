@@ -5,4 +5,6 @@ weights[0, ..]  is a [32] row, stable across the steps: true
 weights[0..2, 0..=1] is a [2, 2] block, corner matches: true
 by value       lr * grad moved element [0, 0] by 0.5
 broadcast      a [32] bias reached row 0 and row 63 alike
+batch @ w      [4, 64] @ [64, 32] -> [4, 32], every unit at 32.0
++ bias         a [32] row reached all 4 sample rows alike
 layer  [64, 32] + bias [32] =   2080 params, one buffer each

@@ -258,6 +258,19 @@ impl TypeChecker {
                 Some(left_ty)
             }
 
+            // `@` is defined on tensors only, and the tensor rule above has already taken
+            // every operand pair carrying one. A scalar pair here is an error, not a
+            // product.
+            BinaryOp::MatMul => {
+                self.record_error(TypeError::InvalidBinaryOperator {
+                    op: op.to_string(),
+                    left: left_ty,
+                    right: right_ty,
+                    span: *span,
+                });
+                Some(Type::Unknown)
+            }
+
             // Handled by the guard clause at the top of this function.
             BinaryOp::NullCoalesce => Some(Type::Unknown),
 

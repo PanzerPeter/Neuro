@@ -10,6 +10,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.33.0] - 2026-09-14
+
+### Added
+
+- parser: the matrix multiplication operator `@`, at Appendix B's precedence 4 —
+  tighter than `*` and `+`, looser than `as`, left-associative. `a @ b * s`
+  scales the product and `a @ b + c` adds to it, matching the convention on
+  paper.
+- semantic: the shape rule for `@`. `[M, K] @ [K, N]` gives `[M, N]`: the two
+  inner extents must agree and are contracted away, and the result keeps the
+  left operand's row axis and the right operand's column axis with their
+  dimension names. Shape parameters compare by name, so the repeated `K` of
+  `func product<M, N, K>(...)` is checked once at the declaration rather than
+  per call site. Unlike the element-wise operators `@` does not broadcast: an
+  operand of any rank but 2 and a scalar operand are both compile errors, and a
+  dynamic `?` extent is rejected on either operand, because the contracted axis
+  bounds the sum and the result's own two size its buffer.
+- codegen: the product itself. The destination is walked flat, one iteration per
+  output element with the row and column recovered from the counter, and the
+  contraction is an inner loop over K. Owned operands are consumed and their
+  buffers released; borrowed ones are only read, so `&w @ &x` keeps the weight
+  in its binding. Overflow and divide-by-zero guards are the element's, so an
+  overflowing accumulation panics where an overflowing scalar `+` would.
+- codegen: the MLIR form. A matrix product lowers to a `tensor.empty`, a
+  `linalg.generic` that fills it with the element's zero, and a second one whose
+  index space is `(row, column, contracted)` with iterators
+  `parallel, parallel, reduction` and a multiply-accumulate body. The fill is
+  not optional: a reduction reads its destination at every point, and
+  `tensor.empty` is undefined memory.
+- semantic: `impl MatMul for T` dispatches `a @ b` to `.matmul()` on a user type,
+  completing the operator-to-trait mapping.
+
+### Fixed
+
+- parser: a line opening with `@` now always begins a new item. `@` spells both
+  the matmul operator and the start of an attribute, so a module `const`'s
+  initializer read the `@derive` on the following line as a matrix product.
+
+
 ## [2.32.0] - 2026-09-14
 
 ### Added

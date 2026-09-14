@@ -600,6 +600,11 @@
           "match": "[+\\-*/%]"
         },
         {
+          "comment": "Matrix multiplication `a @ b`. `#attributes` is included ahead of `#operators` in the root pattern list and requires an identifier directly after the `@`, so `@derive(...)` is claimed there before this rule is ever reached.",
+          "name": "keyword.operator.matmul.neuro",
+          "match": "@"
+        },
+        {
           "name": "keyword.operator.comparison.neuro",
           "match": "[<>]"
         },

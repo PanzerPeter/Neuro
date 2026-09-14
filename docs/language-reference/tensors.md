@@ -169,7 +169,8 @@ shared with the standard collections.
 ## Element-wise arithmetic
 
 `+`, `-`, `*`, `/` and `%` combine two tensors element by element and hand back a **fresh**
-tensor. `*` is the element-wise product, not the matrix product.
+tensor. `*` is the element-wise product; the matrix product is
+[`@`](#matrix-multiplication).
 
 ```neuro
 val a: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
@@ -232,6 +233,51 @@ A scalar that already has a type is not converted for the operator's benefit, so
 value beside an `f32` tensor is a type mismatch. A bare literal takes the element's type
 when the tensor on the other side is written as a binding name; anywhere else it needs its
 suffix.
+
+## Matrix multiplication
+
+`@` is the matrix product. It is the one tensor operator that is not element-wise: it
+**contracts** an axis rather than walking one, so element `[i, j]` of the result is the dot
+product of row `i` of the left operand and column `j` of the right.
+
+```neuro
+val a: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+val b: Tensor<i32, [3, 2]> = [[7, 8], [9, 10], [11, 12]]
+
+val c = &a @ &b            // [2, 2]: c[0, 0] is 1*7 + 2*9 + 3*11 = 58
+```
+
+The shape rule is `[M, K] @ [K, N]` -> `[M, N]`. The two inner extents must agree and are
+what disappears; the result keeps the left operand's row axis and the right operand's
+column axis, with their dimension names. A mismatch is a compile error:
+
+```neuro
+val x: Tensor<f32, [2, 3]> = ...
+val y: Tensor<f32, [5, 6]> = ...
+val z = x @ y              // COMPILE ERROR: 3 does not meet 5
+```
+
+Unlike the element-wise operators, `@` does **not** broadcast. Both operands are rank 2:
+there is no vector form (a rank-1 operand has no inner axis to contract) and no scalar
+form. A `?` extent is rejected on either operand, because the contracted axis bounds the
+sum and the result's own two size its buffer.
+
+Shape parameters make it generic, and the repeated `K` is checked once at the declaration
+rather than per call site:
+
+```neuro
+func project<M, N, K>(w: &Tensor<f32, [M, K]>, x: &Tensor<f32, [K, N]>) -> Tensor<f32, [M, N]> {
+    return w @ x
+}
+```
+
+`@` binds tighter than `*` and `+` and looser than `as`, so `w @ x + b` adds the bias to
+the product — the shape a linear layer is written in, with the `[N]` bias broadcasting down
+the product's rows under the element-wise rule above. Like every tensor operator it takes
+owned or borrowed operands: `&w @ &x` reads a weight without moving it out of its binding.
+
+On a user type `@` dispatches through the `MatMul` trait, exactly as `+` does through `Add`
+(see [Operators](operators.md#operator-overloading)).
 
 ## Updating a tensor in place
 
@@ -656,11 +702,11 @@ in-place compound assignment. Build such a tensor at a static shape and pass it 
 
 A tensor can be built, bound, moved, cloned, passed, returned, transferred with
 `.to(device)`, combined element-wise with `+` / `-` / `*` / `/` / `%` and their broadcast
-rules, updated in place, stored in a struct, indexed, sliced, reshaped with
+rules, multiplied as a matrix with `@`, updated in place, stored in a struct, indexed, sliced, reshaped with
 `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`, and reduced with
 `.sum()` / `.mean()` / `.max()` / `.min()`. What is still
-later work is writing through an index (`t[i, j] = v`), matrix multiplication
-(`a @ b`), the functional `.reduce(init, |acc, x| ...)`, and the step index form
+later work is writing through an index (`t[i, j] = v`), the functional
+`.reduce(init, |acc, x| ...)`, and the step index form
 (`t[(0..n).step(2)]`), which waits on `.step(n)` existing on ranges at all. The reverse
 form `t[(0..n).rev()]` is implemented. A dynamic `?` axis is accepted, but only as a widening: nothing that needs
 an extent works on one, and there is no run-time shape check that would let a `?` be

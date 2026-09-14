@@ -903,6 +903,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_left_shift(lhs.into_int_value(), rhs.into_int_value(), "shltmp")
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?
                 .into()),
+            // `@` is defined on tensors only, and a tensor operand never reaches this
+            // scalar path: the guard above rejects it before the dispatch.
+            BinaryOp::MatMul => Err(CodegenError::InvalidOperandType {
+                op: op.to_string(),
+                ty: format!("{:?}", left_ty),
+            }),
             // HIR lowering desugars `??` into a `match`, so no binary node ever carries it.
             // Reaching here means the HIR was not produced by that pass: an ICE, not a panic.
             BinaryOp::NullCoalesce => Err(CodegenError::InternalError(

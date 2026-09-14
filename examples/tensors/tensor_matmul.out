@@ -1,0 +1,4 @@
+[2, 3] @ [3, 2] = [[58, 64], [139, 154]]
+w @ I           leaves every element alone
+project<M, N, K> [2, 2] @ [2, 3] -> [2, 3], corner 5.0
+w @ x * 2       binds as (w @ x) * 2, giving 1.0

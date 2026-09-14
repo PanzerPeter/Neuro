@@ -16,6 +16,7 @@ pub(crate) enum Precedence {
     Shift,        // <<
     Sum,          // + -
     Product,      // * / %
+    MatMul,       // @ (Appendix B row 4: tighter than `*`, looser than `as`)
     Cast,         // as
     Unary,        // - ! ~
     Call,         // function calls

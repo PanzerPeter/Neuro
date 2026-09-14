@@ -4,7 +4,7 @@ use ast_types::BinaryOp;
 use melior::{
     dialect::{arith, func},
     ir::{
-        attribute::{DenseI32ArrayAttribute, IntegerAttribute},
+        attribute::{DenseI32ArrayAttribute, FloatAttribute, IntegerAttribute},
         operation::OperationBuilder,
         Attribute, Block, BlockLike, Identifier, Location, Operation, Region, RegionLike, Type,
         Value,
@@ -13,13 +13,17 @@ use melior::{
 };
 use neuro_hir::{HirExpr, HirExprKind, HirFunction, HirStmt, HirType};
 
-/// `linalg.generic`'s operand split for an element-wise binary operation: two
-/// inputs, then the destination the result is written into.
-const ELEMENTWISE_OPERANDS: [i32; 2] = [2, 1];
-
 /// How many region arguments `linalg.generic` passes an element-wise binary body:
 /// one per operand, the destination's included.
 const ELEMENTWISE_BODY_ARGUMENTS: usize = 3;
+
+/// How many region arguments the zero-fill `linalg.generic` passes: the scalar it
+/// writes, then the destination slot it writes over.
+const FILL_BODY_ARGUMENTS: usize = 2;
+
+/// The index-space rank of a matrix product: two parallel axes over the result and
+/// one reduction axis over the contracted extent.
+const CONTRACTION_RANK: usize = 3;
 
 /// The only extent that may be stretched across a larger result axis. Any other
 /// mismatch is a shape error the frontend owns, not something to lower.
@@ -153,6 +157,12 @@ fn build_expression<'c, 'a>(
             .rev()
             .find(|(bound, _)| bound == name)
             .map(|(_, value)| *value)),
+        // `@` contracts an axis instead of walking the result element for element, so it
+        // is a different index space rather than a different body.
+        HirExprKind::Binary {
+            op: BinaryOp::MatMul,
+            ..
+        } => build_matmul(context, location, block, expression, scope),
         HirExprKind::Binary { .. } => {
             build_elementwise(context, location, block, expression, scope)
         }
@@ -207,21 +217,219 @@ fn build_elementwise<'c, 'a>(
     // The destination walks every result axis in order; that identity map is what
     // makes the operation element-wise rather than a gather.
     let destination_axes = Some((0..rank).map(Some).collect());
+    let body = Region::new();
+    body.append_block(scalar_body(location, element_type, scalar)?);
     let generic = generic_op(
         context,
         location,
-        Elementwise {
-            inputs: [lhs, rhs],
+        Generic {
+            inputs: &[lhs, rhs],
             destination,
             indexing_maps: indexing_maps(context, rank, &[&axes[0], &axes[1], &destination_axes])?,
-            iterators: parallel_iterators(context, rank)?,
+            iterators: iterator_types(context, rank, 0)?,
         },
         tensor_type,
-        element_type,
-        scalar,
+        body,
     )?;
 
     Ok(Some(block.append_operation(generic).result(0)?.into()))
+}
+
+/// Lower `a @ b` over two rank-2 tensors into the canonical `linalg` matrix product:
+/// a `tensor.empty` destination, a `linalg.generic` that fills it with the element's
+/// zero, and a second one that accumulates the product into it.
+///
+/// The fill is not optional. A reduction READS its destination at every point — that is
+/// what makes it an accumulator — and `tensor.empty` is undefined memory, so the sum
+/// would start from whatever the allocator last left there.
+fn build_matmul<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &'a Block<'c>,
+    expression: &HirExpr,
+    scope: &[(String, Value<'c, 'a>)],
+) -> Result<Option<Value<'c, 'a>>, MlirError> {
+    let HirExprKind::Binary { left, right, .. } = &expression.kind else {
+        return Ok(None);
+    };
+    let Some((element, result_shape)) = tensor_parts(&expression.ty) else {
+        return Ok(None);
+    };
+    let (Some(multiply), Some(add)) = (
+        scalar_op(BinaryOp::Multiply, element),
+        scalar_op(BinaryOp::Add, element),
+    ) else {
+        return Ok(None);
+    };
+    let Some(zero) = zero_attribute(context, element, map_type(context, element)?) else {
+        return Ok(None);
+    };
+    // Every extent must be static here. The destination's two are what `tensor.empty`
+    // is sized with, and the contracted one bounds the reduction; a `?` supplies none of
+    // them, and a `tensor.dim` cannot recover an axis the result does not have.
+    if !contraction_is_static(left, right, result_shape) {
+        return Ok(None);
+    }
+    let Some(lhs) = build_expression(context, location, block, left, scope)? else {
+        return Ok(None);
+    };
+    let Some(rhs) = build_expression(context, location, block, right, scope)? else {
+        return Ok(None);
+    };
+
+    let tensor_type = map_type(context, &expression.ty)?;
+    let element_type = map_type(context, element)?;
+    let rank = result_shape.len();
+
+    let empty = block
+        .append_operation(empty_tensor(location, tensor_type, &[])?)
+        .result(0)?
+        .into();
+    let identity = block
+        .append_operation(arith::constant(context, zero, location))
+        .result(0)?
+        .into();
+    let fill_body = Region::new();
+    fill_body.append_block(fill_block(location, element_type)?);
+    let destination_axes: OperandAxes = Some((0..rank).map(Some).collect());
+    let filled = block
+        .append_operation(generic_op(
+            context,
+            location,
+            Generic {
+                inputs: &[identity],
+                destination: empty,
+                indexing_maps: indexing_maps(context, rank, &[&None, &destination_axes])?,
+                iterators: iterator_types(context, rank, 0)?,
+            },
+            tensor_type,
+            fill_body,
+        )?)
+        .result(0)?
+        .into();
+
+    // `(d0, d1, d2)` is (row, column, contracted), so the left operand reads
+    // `(d0, d2)`, the right `(d2, d1)`, and the accumulator the result's own `(d0, d1)`.
+    let left_axes: OperandAxes = Some(vec![Some(0), Some(2)]);
+    let right_axes: OperandAxes = Some(vec![Some(2), Some(1)]);
+    let accumulator_axes: OperandAxes = Some(vec![Some(0), Some(1)]);
+    let body = Region::new();
+    body.append_block(contraction_block(location, element_type, multiply, add)?);
+
+    Ok(Some(
+        block
+            .append_operation(generic_op(
+                context,
+                location,
+                Generic {
+                    inputs: &[lhs, rhs],
+                    destination: filled,
+                    indexing_maps: indexing_maps(
+                        context,
+                        CONTRACTION_RANK,
+                        &[&left_axes, &right_axes, &accumulator_axes],
+                    )?,
+                    iterators: iterator_types(context, CONTRACTION_RANK, 1)?,
+                },
+                tensor_type,
+                body,
+            )?)
+            .result(0)?
+            .into(),
+    ))
+}
+
+/// Whether the three shapes really are the static `[M, K] @ [K, N] -> [M, N]` this
+/// path emits: two rank-2 operands agreeing on the contracted axis, and no `?` anywhere.
+///
+/// The frontend has already agreed all of that; it is re-derived here because a stage
+/// carries the rule it needs over the shared type rather than importing a sibling's,
+/// and because nothing in the compiler reaches this path from a compile yet.
+fn contraction_is_static(left: &HirExpr, right: &HirExpr, result: &[Option<usize>]) -> bool {
+    let (Some((_, left_shape)), Some((_, right_shape))) =
+        (tensor_parts(&left.ty), tensor_parts(&right.ty))
+    else {
+        return false;
+    };
+    let ([rows, columns], [left_rows, contracted], [contracted_again, right_columns]) =
+        (result, left_shape, right_shape)
+    else {
+        return false;
+    };
+    left_rows == rows
+        && right_columns == columns
+        && contracted == contracted_again
+        && [rows, columns, contracted]
+            .iter()
+            .all(|extent| extent.is_some())
+}
+
+/// The additive identity of `element`, as the attribute an `arith.constant` carries.
+/// `None` for an element the language gives no arithmetic, which is the same set
+/// `scalar_op` refuses.
+fn zero_attribute<'c>(
+    context: &'c Context,
+    element: &HirType,
+    element_type: Type<'c>,
+) -> Option<Attribute<'c>> {
+    match element {
+        HirType::F32 | HirType::F64 => Some(FloatAttribute::new(context, element_type, 0.0).into()),
+        HirType::I8
+        | HirType::I16
+        | HirType::I32
+        | HirType::I64
+        | HirType::U8
+        | HirType::U16
+        | HirType::U32
+        | HirType::U64 => Some(IntegerAttribute::new(element_type, 0).into()),
+        _ => None,
+    }
+}
+
+/// The zero-fill body: hand the scalar input straight through to the destination slot.
+fn fill_block<'c>(location: Location<'c>, element: Type<'c>) -> Result<Block<'c>, MlirError> {
+    let block = Block::new(&[(element, location); FILL_BODY_ARGUMENTS]);
+    let value = block.argument(0)?.into();
+
+    block.append_operation(
+        OperationBuilder::new("linalg.yield", location)
+            .add_operands(&[value])
+            .build()?,
+    );
+
+    Ok(block)
+}
+
+/// The matrix-product body: multiply the two operand elements and add the product to
+/// the accumulator the destination already carries.
+fn contraction_block<'c>(
+    location: Location<'c>,
+    element: Type<'c>,
+    multiply: ScalarOp,
+    add: ScalarOp,
+) -> Result<Block<'c>, MlirError> {
+    let block = Block::new(&[(element, location); ELEMENTWISE_BODY_ARGUMENTS]);
+
+    let product = block
+        .append_operation(multiply(
+            block.argument(0)?.into(),
+            block.argument(1)?.into(),
+            location,
+        ))
+        .result(0)?
+        .into();
+    let summed = block
+        .append_operation(add(block.argument(2)?.into(), product, location))
+        .result(0)?
+        .into();
+
+    block.append_operation(
+        OperationBuilder::new("linalg.yield", location)
+            .add_operands(&[summed])
+            .build()?,
+    );
+
+    Ok(block)
 }
 
 /// How an operand participates in a result of shape `result`, or `None` where it
@@ -310,42 +518,46 @@ fn dynamic_sizes<'c, 'a>(
 
 /// What one `linalg.generic` needs beyond its types: the inputs it reads, the
 /// destination it writes into, and the two attributes that say how each is walked.
-struct Elementwise<'c, 'a> {
-    inputs: [Value<'c, 'a>; 2],
+struct Generic<'c, 'a> {
+    inputs: &'a [Value<'c, 'a>],
     destination: Value<'c, 'a>,
     indexing_maps: Attribute<'c>,
     iterators: Attribute<'c>,
 }
 
-/// Assemble the `linalg.generic` itself, with the scalar body as its region.
+/// Assemble one `linalg.generic`, with `body` as its region.
+///
+/// Every shape this crate emits goes through here — the element-wise operation, the
+/// zero fill, and the matrix product — because the three differ only in their maps,
+/// their iterators and their body, which are exactly the arguments.
 fn generic_op<'c>(
     context: &'c Context,
     location: Location<'c>,
-    elementwise: Elementwise<'c, '_>,
+    generic: Generic<'c, '_>,
     tensor_type: Type<'c>,
-    element_type: Type<'c>,
-    scalar: ScalarOp,
+    body: Region<'c>,
 ) -> Result<Operation<'c>, MlirError> {
-    let body = Region::new();
-    body.append_block(scalar_body(location, element_type, scalar)?);
-
-    let [lhs, rhs] = elementwise.inputs;
+    let mut operands = generic.inputs.to_vec();
+    operands.push(generic.destination);
+    // `linalg.generic` splits its operands into the inputs it reads and the
+    // destinations it writes; there is exactly one of the latter here.
+    let segments = [generic.inputs.len() as i32, 1];
 
     Ok(OperationBuilder::new("linalg.generic", location)
-        .add_operands(&[lhs, rhs, elementwise.destination])
+        .add_operands(&operands)
         .add_results(&[tensor_type])
         .add_attributes(&[
             (
                 Identifier::new(context, "indexing_maps"),
-                elementwise.indexing_maps,
+                generic.indexing_maps,
             ),
             (
                 Identifier::new(context, "iterator_types"),
-                elementwise.iterators,
+                generic.iterators,
             ),
             (
                 Identifier::new(context, "operandSegmentSizes"),
-                DenseI32ArrayAttribute::new(context, &ELEMENTWISE_OPERANDS).into(),
+                DenseI32ArrayAttribute::new(context, &segments).into(),
             ),
         ])
         .add_regions([body])
@@ -443,7 +655,7 @@ fn scalar_op(op: BinaryOp, element: &HirType) -> Option<ScalarOp> {
 fn indexing_maps<'c>(
     context: &'c Context,
     rank: usize,
-    operands: &[&OperandAxes; ELEMENTWISE_BODY_ARGUMENTS],
+    operands: &[&OperandAxes],
 ) -> Result<Attribute<'c>, MlirError> {
     let maps = operands
         .iter()
@@ -477,10 +689,24 @@ fn affine_map(rank: usize, axes: &OperandAxes) -> String {
     format!("affine_map<({dimensions}) -> ({results})>")
 }
 
-/// Every axis of an element-wise operation is independent, so every iterator is
-/// `parallel`; a reduction is 2B's work and stays on inkwell.
-fn parallel_iterators<'c>(context: &'c Context, rank: usize) -> Result<Attribute<'c>, MlirError> {
-    let iterators = vec!["#linalg.iterator_type<parallel>"; rank].join(", ");
+/// One iterator per axis of the index space: the leading `rank - reductions` are
+/// `parallel`, the trailing `reductions` accumulate.
+///
+/// An element-wise operation has no reduction — every one of its axes is independent.
+/// A matrix product has exactly one, the contracted axis, and it comes last because
+/// that is the order the affine maps above number the dimensions in.
+fn iterator_types<'c>(
+    context: &'c Context,
+    rank: usize,
+    reductions: usize,
+) -> Result<Attribute<'c>, MlirError> {
+    let iterators = (0..rank)
+        .map(|axis| match axis < rank - reductions {
+            true => "#linalg.iterator_type<parallel>",
+            false => "#linalg.iterator_type<reduction>",
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
 
     parse_attribute(context, &format!("[{iterators}]"))
 }
@@ -856,6 +1082,150 @@ mod tests {
         assert!(
             !ir.contains("linalg.generic"),
             "expected no body for mixed element types:\n{ir}"
+        );
+    }
+
+    /// `func f(a: Tensor<T, [M, K]>, b: Tensor<T, [K, N]>) -> Tensor<T, [M, N]> { return a @ b }`
+    fn returns_product(element: HirType, m: usize, k: usize, n: usize) -> HirProgram {
+        let left = tensor(element.clone(), &[m, k]);
+        let right = tensor(element.clone(), &[k, n]);
+        let result = tensor(element, &[m, n]);
+        let product = binary(
+            BinaryOp::MatMul,
+            variable("a", left.clone()),
+            variable("b", right.clone()),
+            result.clone(),
+        );
+
+        HirProgram {
+            items: vec![HirItem::Function(HirFunction {
+                name: "f".to_string(),
+                params: vec![
+                    HirParam {
+                        name: "a".to_string(),
+                        ty: left,
+                        span: span(),
+                    },
+                    HirParam {
+                        name: "b".to_string(),
+                        ty: right,
+                        span: span(),
+                    },
+                ],
+                return_type: result,
+                body: vec![HirStmt::Return {
+                    value: Some(product),
+                    span: span(),
+                }],
+                span: span(),
+            })],
+        }
+    }
+
+    #[test]
+    fn lowers_a_matrix_product_to_a_contracting_linalg_generic() {
+        let ir = lower_program(&returns_product(HirType::F32, 2, 3, 4))
+            .expect("a matrix product should lower");
+
+        assert!(
+            ir.contains("affine_map<(d0, d1, d2) -> (d0, d2)>"),
+            "expected the left operand to read a row:\n{ir}"
+        );
+        assert!(
+            ir.contains("affine_map<(d0, d1, d2) -> (d2, d1)>"),
+            "expected the right operand to read a column:\n{ir}"
+        );
+        assert!(
+            ir.contains("affine_map<(d0, d1, d2) -> (d0, d1)>"),
+            "expected the accumulator to walk the result:\n{ir}"
+        );
+        assert!(
+            ir.contains(r#""parallel", "parallel", "reduction""#),
+            "expected the contracted axis to reduce, and only it:\n{ir}"
+        );
+        assert!(
+            ir.contains("arith.mulf") && ir.contains("arith.addf"),
+            "expected a multiply-accumulate body:\n{ir}"
+        );
+        assert!(
+            ir.contains("tensor<2x4xf32>"),
+            "expected the contracted result type:\n{ir}"
+        );
+    }
+
+    /// A reduction READS its destination at every point, so an uninitialized
+    /// `tensor.empty` would start each sum from whatever was already there.
+    #[test]
+    fn a_matrix_product_zeroes_its_destination_first() {
+        let ir = lower_program(&returns_product(HirType::F32, 2, 2, 2))
+            .expect("a matrix product should lower");
+
+        let fill = ir
+            .find("arith.constant")
+            .expect("expected the element's zero");
+        let product = ir.find(r#""reduction""#).expect("expected the contraction");
+        assert!(fill < product, "the fill must precede the product:\n{ir}");
+        assert!(
+            ir.contains("0.000000e+00"),
+            "expected a zero of the element type:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn an_integer_matrix_product_accumulates_with_addi() {
+        let ir = lower_program(&returns_product(HirType::I32, 2, 2, 2))
+            .expect("a matrix product should lower");
+
+        assert!(
+            ir.contains("arith.muli") && ir.contains("arith.addi"),
+            "expected the integer multiply-accumulate:\n{ir}"
+        );
+    }
+
+    /// `@` contracts an axis it must know the length of, and a `?` supplies none.
+    #[test]
+    fn a_dynamic_extent_leaves_a_matrix_product_a_declaration() {
+        let left = dynamic_rows(3);
+        let right = tensor(HirType::F32, &[3, 4]);
+        let result = HirType::Tensor {
+            element: Box::new(HirType::F32),
+            shape: vec![None, Some(4)],
+            names: AxisNames(vec![None, None]),
+        };
+        let product = binary(
+            BinaryOp::MatMul,
+            variable("a", left.clone()),
+            variable("b", right.clone()),
+            result.clone(),
+        );
+        let program = HirProgram {
+            items: vec![HirItem::Function(HirFunction {
+                name: "f".to_string(),
+                params: vec![
+                    HirParam {
+                        name: "a".to_string(),
+                        ty: left,
+                        span: span(),
+                    },
+                    HirParam {
+                        name: "b".to_string(),
+                        ty: right,
+                        span: span(),
+                    },
+                ],
+                return_type: result,
+                body: vec![HirStmt::Return {
+                    value: Some(product),
+                    span: span(),
+                }],
+                span: span(),
+            })],
+        };
+        let ir = lower_program(&program).expect("the program should still lower");
+
+        assert!(
+            !ir.contains(r#""reduction""#),
+            "a dynamic extent has no contraction to emit:\n{ir}"
         );
     }
 

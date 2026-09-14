@@ -99,8 +99,8 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   it lowers with the payload type as its expected type, which is what types a bare literal.
   `binary_result_type`'s `NullCoalesce` arm is unreachable by construction and says so.
   `success_variant`, `not_fallible`, and `fallible_base` are shared with the `?` desugar.
-- **Operator traits** (`operator_traits.rs` holds the table: `Add`, `Sub`, …, `PartialEq`,
-  `Comparable`). An operator-trait impl populates `operator_binary_impls` / `operator_unary_impls`
+- **Operator traits** (`operator_traits.rs` holds the table: `Add`, `Sub`, …, `MatMul`,
+  `PartialEq`, `Comparable`). An operator-trait impl populates `operator_binary_impls` / `operator_unary_impls`
   during `register_impl`; a `Binary` / `Unary` whose peeled left/operand type is a struct with a
   matching entry becomes the method call `a.op(b)`, a `Call` with a `FieldAccess` callee,
   identical to an ordinary method call, so the backend needs no operator awareness. A comparison
@@ -289,7 +289,11 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   operands, so failing here is a compiler bug rather than a diagnostic. `tensor_element` types
   a scalar operand by the tensor's element on both sides, including the compound-assignment
   right-hand side, or a bare literal would lower as the default `f64` and emit a mixed-width
-  instruction.
+  instruction. `@` takes `matmul_shape` in the same file instead of the broadcast join: it
+  contracts the operands' inner axis, so `[M, K] @ [K, N]` carries `[M, N]` with the left
+  operand's row name and the right operand's column name. A scalar operand is
+  `UnsupportedOperand` there rather than falling through to the element-wise arm, which would
+  silently give it the tensor's own shape.
   Shape manipulation lives in `tensor_shape.rs`: `.t()`, `.reshape(...)`, `.permute(...)` and
   `.flatten(...)` are intercepted in `lower_method_call` **before the arguments are lowered**,
   because a `.permute` entry may be a dimension name and would otherwise be looked up as a

@@ -1540,3 +1540,164 @@ func main() -> i32 {
         "the result has nowhere to go; got {errors:?}"
     );
 }
+
+// `@` — matrix multiplication.
+
+#[test]
+fn a_matrix_product_contracts_the_inner_axis() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val b: Tensor<i32, [3, 2]> = [[1, 2], [3, 4], [5, 6]]
+    val c: Tensor<i32, [2, 2]> = &a @ &b
+    return c[0, 0]
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "`[2, 3] @ [3, 2]` is `[2, 2]`; got {errors:?}"
+    );
+}
+
+/// The shape parameters make `K` a compile-time check written once, not per call site.
+#[test]
+fn a_matrix_product_checks_a_shape_parameter_at_the_declaration() {
+    let errors = semantic_errors(
+        r#"
+func product<M, N, K>(a: Tensor<f32, [M, K]>, b: Tensor<f32, [K, N]>) -> Tensor<f32, [M, N]> {
+    return a @ b
+}
+
+func main() -> i32 {
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "a repeated `K` contracts; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_matrix_product_rejects_a_disagreeing_inner_axis() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val b: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val c = a @ b
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorMatMulMismatch { .. })),
+        "3 does not meet 2; got {errors:?}"
+    );
+}
+
+/// `@` does not broadcast and has no vector form: a rank-1 operand has no inner axis.
+#[test]
+fn a_matrix_product_rejects_an_operand_that_is_not_rank_two() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [3]> = [1, 2, 3]
+    val b: Tensor<i32, [3]> = [1, 2, 3]
+    val c = a @ b
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorMatMulMismatch { .. })),
+        "a rank-1 operand has no inner axis; got {errors:?}"
+    );
+}
+
+/// A scalar stretches across an element-wise operator; it has nothing to contract.
+#[test]
+fn a_matrix_product_rejects_a_scalar_operand() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    val c = a @ 2
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorMatMulMismatch { .. })),
+        "a scalar has no inner axis; got {errors:?}"
+    );
+}
+
+/// All three of M, K and N must be countable: K bounds the contraction, M x N sizes the
+/// fresh result's buffer.
+#[test]
+fn a_matrix_product_rejects_a_dynamic_extent() {
+    let errors = semantic_errors(
+        r#"
+func widen(t: Tensor<i32, [2, 2]>) -> Tensor<i32, [?, 2]> {
+    return t
+}
+
+func main() -> i32 {
+    val a = widen(Tensor::<i32, [2, 2]>::ones())
+    val b: Tensor<i32, [2, 2]> = [[1, 0], [0, 1]]
+    val c = a @ b
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorDynamicExtent { .. })),
+        "a `?` extent counts nothing; got {errors:?}"
+    );
+}
+
+/// `impl MatMul for T` is the user-type half of the operator-to-trait mapping. The
+/// receiver is `Copy` because every operator trait's is, which is the R1 value-model
+/// limitation rather than anything to do with `@`.
+#[test]
+fn a_user_type_dispatches_the_operator_to_its_matmul_impl() {
+    let errors = semantic_errors(
+        r#"
+@derive(Copy, Clone)
+struct Rotation {
+    turns: i32
+}
+
+impl MatMul for Rotation {
+    type Output = Rotation
+
+    func matmul(self, rhs: Rotation) -> Rotation {
+        return Rotation { turns: self.turns + rhs.turns }
+    }
+}
+
+func main() -> i32 {
+    val a = Rotation { turns: 1 }
+    val b = Rotation { turns: 2 }
+    val c = a @ b
+    return c.turns
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "`@` dispatches to `MatMul`; got {errors:?}"
+    );
+}
