@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.34.1] - 2026-09-14
+
+### Fixed
+
+- semantic: a `val` binding whose initializer failed to type-check is now still bound,
+  at the unknown type, so a later use of the name no longer reports a phantom "undefined
+  variable". One bad initializer produced one error per subsequent mention of the
+  binding, burying the real diagnostic under errors chasing it. A parameter whose type
+  failed to resolve already carried this rule; the binding path now matches it.
+- semantic: a binding whose initializer DIVERGES — `val x = panic("boom")` — is rejected
+  as a binding with no value instead of type-checking and then aborting code generation
+  with an internal "void type cannot be used as a value". A diverging expression reports
+  the same unknown type a reported error does, so the two are now told apart by whether
+  anything was actually reported.
+
+
 ## [2.34.0] - 2026-09-14
 
 ### Added

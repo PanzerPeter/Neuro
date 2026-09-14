@@ -106,10 +106,15 @@ covers it instead. Without the rule the backend left the exit block without a re
 terminated it with `unreachable` (a legal terminator, so the verifier stayed silent), and the
 program ran off the end of the function at runtime.
 
-Relatedly, **a parameter whose type failed to resolve is still bound, at `Type::Unknown`.**
-Skipping it turned every use in the body into a second "undefined variable" report chasing an
-error already given; `Unknown` is compatible with everything, so binding it is what actually stops
-the cascade.
+Relatedly, **a name whose type failed to resolve is still bound, at `Type::Unknown`.** This
+holds in both places one can appear: a parameter whose type did not resolve, and a `Stmt::VarDecl`
+whose initializer did not type-check. Skipping either turned every later use of the name into a
+second "undefined variable" report chasing an error already given; `Unknown` is compatible with
+everything, so binding it is what actually stops the cascade. It applies only where the
+initializer was actually reported: `Type::Unknown` also comes back from a DIVERGING
+initializer (`panic`, `unreachable`), which produces no value to bind and is routed to
+`VoidBinding` below instead. The `Stmt::VarDecl` arm tells the two apart by whether the
+error list grew while the initializer was checked.
 
 ### Primitive and reference type contracts
 - Struct types are **nominal**: two `Type::Struct` are compatible iff their names match. The same
@@ -856,8 +861,11 @@ consts); a body `Stmt::Const` is validated in `check_stmt`. `Expr::Identifier` f
 Each closed a path where a program type-checked and then aborted codegen with an internal error:
 
 - **`VoidBinding`** (BUG-016). A binding whose initializer has type `void` is rejected in the
-  `Stmt::VarDecl` arm, beside the existing `Type::Unknown` guard and mirroring it: the error is
-  recorded and the name left undefined. Testing the binding's TYPE rather than its initializer's
+  `Stmt::VarDecl` arm, beside the `Type::Unknown` guard: the error is recorded and, unlike the
+  reported-`Unknown` case above, the name is left undefined. The arm also covers a DIVERGING
+  initializer, whose `Type::Unknown` reaches it unreported: `val x = panic("boom")` used to
+  type-check and then abort codegen with the same internal error this rule was written to
+  close. Testing the binding's TYPE rather than its initializer's
   shape is what makes one check cover every spelling: a `void` call is only two of them, the
   others being an `if`, a `match`, a bare block, a `loop { break }`, and an explicit `: void`
   annotation. Statement position is untouched, so `println("hi")` on its own line still compiles.

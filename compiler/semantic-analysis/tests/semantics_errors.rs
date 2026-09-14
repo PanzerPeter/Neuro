@@ -220,3 +220,53 @@ fn error_unmatchable_scrutinee_reports_once() {
         TypeError::UnsupportedMatchScrutinee { .. }
     ));
 }
+
+#[test]
+fn regression_failed_binding_does_not_cascade_into_undefined_variable() {
+    // A binding whose initializer does not type-check is still bound, at
+    // `Type::Unknown`, exactly as a parameter whose type failed to resolve is.
+    // Leaving the name undefined turned every later use into a second,
+    // misleading `UndefinedVariable` report chasing an error already given.
+    let source = r#"func test() -> i32 {
+        val a: i32 = 1
+        val b: bool = true
+        val c = a + b
+        return c + c
+    }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let result = type_check(&items);
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UndefinedVariable { .. })),
+        "the failed binding cascaded into an undefined-variable report: {errors:?}"
+    );
+    assert_eq!(
+        errors.len(),
+        1,
+        "expected only the initializer's own error: {errors:?}"
+    );
+}
+
+#[test]
+fn regression_diverging_initializer_is_rejected_as_a_valueless_binding() {
+    // `panic(...)` types as `Type::Unknown` because it diverges, not because an
+    // error was reported for it. Binding it produced a name with no value, which
+    // the checker passed and codegen could only answer as an internal error.
+    let source = r#"func test() -> i32 {
+        val x = panic("boom")
+        return 0
+    }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let result = type_check(&items);
+    assert!(result.is_err(), "a valueless binding must not type-check");
+    let errors = result.unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::VoidBinding { .. })),
+        "expected a VoidBinding diagnostic, got: {errors:?}"
+    );
+}

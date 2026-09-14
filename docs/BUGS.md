@@ -5,6 +5,74 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-033 — `&` does not accept a field or an element, only a bare variable
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (borrow checking); the same missing place-expression
+  machinery BUG-025 describes for assignment targets, on the rvalue side
+- **Severity**: major. It is what a layer type is written with, and the only escape
+  copies the buffer that move-by-default exists to avoid copying.
+
+`&x` type-checks only when `x` is a bare identifier. `&p.field` and `&arr[i]` are rejected
+as "not a place", for every element type, so a value held in a struct field cannot be
+borrowed at all. For a non-`Copy` field the two available spellings close on each other:
+the borrow is refused as not a place, and the bare field is refused as a move out of a
+`&self`.
+
+**Minimal repro**
+
+```neuro
+struct Layer { w: Tensor<i32, [2, 2]> }
+
+impl Layer {
+    func forward(&self, x: &Tensor<i32, [2, 2]>) -> Tensor<i32, [2, 2]> {
+        &self.w @ x
+    }
+}
+
+func main() -> i32 {
+    val l = Layer { w: [[1, 2], [3, 4]] }
+    val x: Tensor<i32, [2, 2]> = [[5, 6], [7, 8]]
+    return l.forward(&x)[0, 0]
+}
+```
+
+Expected: compiles and returns 19. Observed:
+
+```
+cannot borrow this expression: `&` requires a place (a variable); bind it to a `val` first
+```
+
+Dropping the `&` swaps one error for the other:
+
+```
+cannot move out of 'self': it is reached through a `&` borrow, which owns nothing to give
+away; bind a `.clone()` instead, or take the value by a binding that owns it
+```
+
+A scalar field shows the same restriction without the second half: `take(&p.a)` on a
+`struct Pair { a: i32 }` is rejected, and so is `take(&arr[0])`.
+
+**Root cause**: not yet confirmed in the code. The borrow check recognises exactly one
+place form, a name in the symbol table, so a field access or an index expression never
+reaches it.
+
+**Workaround**: `self.w.clone()`, which the move diagnostic names and which does compile
+and produce the right answer. It allocates a second buffer of the same shape on every
+call, so it is a workaround for correctness and not for a training loop.
+
+**Why this is filed rather than left to the sub-phase that covers it**: the value model
+sub-phase carries "place expressions" as an item, written against assignment targets
+(`t[i, j] = v`, `self.x += dx`), which is BUG-025's half. The rvalue borrow is not named
+there and is the half a layer type needs first. Whoever takes the place expression on
+should take both; this entry is here so the second half is not lost.
+
+**Fix sketch**: give the borrow check the same notion of a place that plain assignment
+already resolves — identifier, field access, index — and carry the resolved place through
+to codegen, which must produce the address of the field or element rather than of a named
+slot. Worth confirming against BUG-025 before starting: the two share the representation
+and are cheaper together than apart.
+
 ## BUG-032 — a diagnostic prints a raw `Span` struct instead of a source location
 
 - **Status**: open, confirmed

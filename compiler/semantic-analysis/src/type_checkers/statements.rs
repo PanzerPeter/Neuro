@@ -315,11 +315,16 @@ impl TypeChecker {
                 };
 
                 // Pass any declared type as the expected hint for inference.
+                // `Type::Unknown` comes back for two unrelated reasons — an error was
+                // reported here, or the initializer diverges (`panic`, `unreachable`) —
+                // and the two want opposite treatment below, so record which one it was.
+                let errors_before = self.errors.len();
                 let init_ty = if let Some(init_expr) = init {
                     self.check_expr(init_expr, declared_ty.as_ref())
                 } else {
                     None
                 };
+                let init_errored = self.errors.len() > errors_before;
 
                 let final_ty = match (declared_ty, init_ty) {
                     (Some(decl), Some(init)) => {
@@ -348,15 +353,31 @@ impl TypeChecker {
                     }
                 };
 
-                // Skip Unknown types to avoid cascading errors
-                if matches!(final_ty, Type::Unknown) {
+                // A binding whose initializer was already reported is still bound, at
+                // `Unknown`, exactly as a parameter whose type failed to resolve is
+                // (`declarations/functions.rs`). `Unknown` is compatible with
+                // everything, so binding it is what actually stops the cascade;
+                // leaving the name undefined turned every later use of it into a
+                // second, misleading "undefined variable" report chasing an error
+                // already given.
+                if init_errored && matches!(final_ty, Type::Unknown) {
+                    if let Err(duplicate_name) =
+                        self.symbols.define(name.name.clone(), final_ty, *mutable)
+                    {
+                        self.record_error(TypeError::VariableAlreadyDefined {
+                            name: duplicate_name,
+                            span: name.span,
+                        });
+                    }
                     return Some(());
                 }
 
                 // A binding needs a value, and `void` is not one. Reaching codegen
                 // with it is only answerable there as an internal error, because the
-                // value path has no representation for the absence of a value.
-                if matches!(final_ty, Type::Void) {
+                // value path has no representation for the absence of a value. A
+                // diverging initializer (`panic`, `unreachable`) is the same case
+                // wearing `Unknown`: it never produces a value to bind either.
+                if matches!(final_ty, Type::Void | Type::Unknown) {
                     self.record_error(TypeError::VoidBinding {
                         name: name.name.clone(),
                         span: *span,
