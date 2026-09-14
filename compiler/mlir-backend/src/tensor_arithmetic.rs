@@ -4,8 +4,10 @@ use ast_types::BinaryOp;
 use melior::{
     dialect::{arith, func},
     ir::{
-        attribute::DenseI32ArrayAttribute, operation::OperationBuilder, Attribute, Block,
-        BlockLike, Identifier, Location, Operation, Region, RegionLike, Type, Value,
+        attribute::{DenseI32ArrayAttribute, IntegerAttribute},
+        operation::OperationBuilder,
+        Attribute, Block, BlockLike, Identifier, Location, Operation, Region, RegionLike, Type,
+        Value,
     },
     Context,
 };
@@ -19,10 +21,26 @@ const ELEMENTWISE_OPERANDS: [i32; 2] = [2, 1];
 /// one per operand, the destination's included.
 const ELEMENTWISE_BODY_ARGUMENTS: usize = 3;
 
+/// The only extent that may be stretched across a larger result axis. Any other
+/// mismatch is a shape error the frontend owns, not something to lower.
+const BROADCAST_EXTENT: usize = 1;
+
+/// Where a stretched axis reads: element `0`, at every point of the result axis
+/// it covers. Written into the operand's affine map in place of a dimension.
+const STRETCHED_INDEX: &str = "0";
+
 /// The `arith` operation that carries one element of an element-wise tensor
 /// operation. A function pointer rather than an enum because every candidate
 /// already has this exact shape in `melior`.
 type ScalarOp = for<'c, 'a> fn(Value<'c, 'a>, Value<'c, 'a>, Location<'c>) -> Operation<'c>;
+
+/// How one operand is read at each point of the result's index space.
+///
+/// `None` is a scalar operand: it has no index space, so its affine map has no
+/// results and `linalg.generic` hands the same value to every point. `Some(axes)`
+/// is a tensor, one entry per axis of that operand: the result axis it walks, or
+/// `None` where a size-1 extent is stretched and the operand is read at index 0.
+type OperandAxes = Option<Vec<Option<usize>>>;
 
 /// Build the body region of a function whose statements are all tensor arithmetic.
 ///
@@ -37,9 +55,9 @@ pub(crate) fn build_body<'c>(
     location: Location<'c>,
     function: &HirFunction,
 ) -> Result<Option<Region<'c>>, MlirError> {
-    // Cheap filter first: a function that does not hand a static tensor back
-    // cannot be one of these, and every scalar function in the program hits it.
-    if static_tensor(&function.return_type).is_none() {
+    // Cheap filter first: a function that does not hand a tensor back cannot be
+    // one of these, and every scalar function in the program hits it.
+    if tensor_parts(&function.return_type).is_none() {
         return Ok(None);
     }
 
@@ -68,20 +86,13 @@ pub(crate) fn build_body<'c>(
     Ok(Some(region))
 }
 
-/// The element type and rank of a tensor whose every extent is known at compile time.
-///
-/// `None` for every other type, a dynamic `?` axis included: the destination this
-/// path builds is a `tensor.empty`, which needs one size operand per dynamic
-/// dimension, and nothing here computes those.
-fn static_tensor(ty: &HirType) -> Option<(&HirType, usize)> {
+/// A tensor's element type and its shape, `None` for every other type.
+fn tensor_parts(ty: &HirType) -> Option<(&HirType, &[Option<usize>])> {
     let HirType::Tensor { element, shape, .. } = ty else {
         return None;
     };
 
-    shape
-        .iter()
-        .all(Option::is_some)
-        .then(|| (element.as_ref(), shape.len()))
+    Some((element.as_ref(), shape.as_slice()))
 }
 
 /// Append the statements to `block`, reporting whether all of them were expressible.
@@ -160,15 +171,17 @@ fn build_elementwise<'c, 'a>(
     let HirExprKind::Binary { op, left, right } = &expression.kind else {
         return Ok(None);
     };
-    let Some((element, rank)) = static_tensor(&expression.ty) else {
+    let Some((element, result_shape)) = tensor_parts(&expression.ty) else {
         return Ok(None);
     };
-    // Broadcasting is the next 2C item. Requiring both operands to be the result's
-    // own type is what makes a single identity indexing map correct for all three.
-    if left.ty != expression.ty || right.ty != expression.ty {
-        return Ok(None);
-    }
     let Some(scalar) = scalar_op(*op, element) else {
+        return Ok(None);
+    };
+    let Some(axes) = [&left.ty, &right.ty]
+        .into_iter()
+        .map(|operand| broadcast_axes(operand, element, result_shape))
+        .collect::<Option<Vec<_>>>()
+    else {
         return Ok(None);
     };
     let Some(lhs) = build_expression(context, location, block, left, scope)? else {
@@ -177,65 +190,158 @@ fn build_elementwise<'c, 'a>(
     let Some(rhs) = build_expression(context, location, block, right, scope)? else {
         return Ok(None);
     };
+    let Some(sizes) = dynamic_sizes(context, location, block, result_shape, &[lhs, rhs], &axes)?
+    else {
+        return Ok(None);
+    };
 
     let tensor_type = map_type(context, &expression.ty)?;
     let element_type = map_type(context, element)?;
+    let rank = result_shape.len();
 
     let destination = block
-        .append_operation(empty_tensor(location, tensor_type)?)
+        .append_operation(empty_tensor(location, tensor_type, &sizes)?)
         .result(0)?
         .into();
 
+    // The destination walks every result axis in order; that identity map is what
+    // makes the operation element-wise rather than a gather.
+    let destination_axes = Some((0..rank).map(Some).collect());
     let generic = generic_op(
         context,
         location,
-        ElementwiseOperands {
+        Elementwise {
             inputs: [lhs, rhs],
             destination,
+            indexing_maps: indexing_maps(context, rank, &[&axes[0], &axes[1], &destination_axes])?,
+            iterators: parallel_iterators(context, rank)?,
         },
         tensor_type,
         element_type,
-        rank,
         scalar,
     )?;
 
     Ok(Some(block.append_operation(generic).result(0)?.into()))
 }
 
-/// The values one `linalg.generic` consumes, grouped the way its operand segments
-/// are: the inputs it reads, then the destination it writes into.
-struct ElementwiseOperands<'c, 'a> {
-    inputs: [Value<'c, 'a>; 2],
-    destination: Value<'c, 'a>,
+/// How an operand participates in a result of shape `result`, or `None` where it
+/// cannot: a stretched extent other than 1, a rank above the result's, an extent
+/// that cannot be proven equal to a `?`, or a different element type.
+///
+/// Shapes align at their **trailing** axis, so an operand of lower rank supplies
+/// the innermost axes and is repeated across the leading ones.
+fn broadcast_axes(
+    operand: &HirType,
+    element: &HirType,
+    result: &[Option<usize>],
+) -> Option<OperandAxes> {
+    if operand == element {
+        return Some(None);
+    }
+
+    let (operand_element, shape) = tensor_parts(operand)?;
+    if operand_element != element {
+        return None;
+    }
+    let offset = result.len().checked_sub(shape.len())?;
+
+    shape
+        .iter()
+        .enumerate()
+        .map(|(axis, extent)| match extent {
+            matched if *matched == result[offset + axis] => Some(Some(offset + axis)),
+            // A `?` operand extent is never stretched: nothing here can prove it
+            // is 1, and guessing wrong would silently read the wrong element.
+            Some(BROADCAST_EXTENT) => Some(None),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(Some)
 }
 
-/// Assemble the `linalg.generic` itself: identity maps over every operand, one
-/// `parallel` iterator per axis, and the scalar body as its region.
+/// One `index` value per dynamic result axis, sizing the `tensor.empty` the
+/// result is written into. `None` where no operand walks such an axis, leaving
+/// its extent unknowable at the destination.
+fn dynamic_sizes<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &'a Block<'c>,
+    result: &[Option<usize>],
+    values: &[Value<'c, 'a>; 2],
+    axes: &[OperandAxes],
+) -> Result<Option<Vec<Value<'c, 'a>>>, MlirError> {
+    let index_type = Type::index(context);
+    let mut sizes = Vec::new();
+
+    for (axis, extent) in result.iter().enumerate() {
+        if extent.is_some() {
+            continue;
+        }
+        // Only an operand that walks the axis carries its extent; a stretched
+        // operand is size 1 there and says nothing about the result.
+        let Some((value, position)) = values.iter().zip(axes).find_map(|(value, axes)| {
+            let position = axes
+                .as_ref()?
+                .iter()
+                .position(|walked| *walked == Some(axis))?;
+            Some((*value, position))
+        }) else {
+            return Ok(None);
+        };
+
+        let position = block
+            .append_operation(arith::constant(
+                context,
+                IntegerAttribute::new(index_type, position as i64).into(),
+                location,
+            ))
+            .result(0)?
+            .into();
+        sizes.push(
+            block
+                .append_operation(dim_op(location, value, position, index_type)?)
+                .result(0)?
+                .into(),
+        );
+    }
+
+    Ok(Some(sizes))
+}
+
+/// What one `linalg.generic` needs beyond its types: the inputs it reads, the
+/// destination it writes into, and the two attributes that say how each is walked.
+struct Elementwise<'c, 'a> {
+    inputs: [Value<'c, 'a>; 2],
+    destination: Value<'c, 'a>,
+    indexing_maps: Attribute<'c>,
+    iterators: Attribute<'c>,
+}
+
+/// Assemble the `linalg.generic` itself, with the scalar body as its region.
 fn generic_op<'c>(
     context: &'c Context,
     location: Location<'c>,
-    operands: ElementwiseOperands<'c, '_>,
+    elementwise: Elementwise<'c, '_>,
     tensor_type: Type<'c>,
     element_type: Type<'c>,
-    rank: usize,
     scalar: ScalarOp,
 ) -> Result<Operation<'c>, MlirError> {
     let body = Region::new();
     body.append_block(scalar_body(location, element_type, scalar)?);
 
-    let [lhs, rhs] = operands.inputs;
+    let [lhs, rhs] = elementwise.inputs;
 
     Ok(OperationBuilder::new("linalg.generic", location)
-        .add_operands(&[lhs, rhs, operands.destination])
+        .add_operands(&[lhs, rhs, elementwise.destination])
         .add_results(&[tensor_type])
         .add_attributes(&[
             (
                 Identifier::new(context, "indexing_maps"),
-                identity_maps(context, rank)?,
+                elementwise.indexing_maps,
             ),
             (
                 Identifier::new(context, "iterator_types"),
-                parallel_iterators(context, rank)?,
+                elementwise.iterators,
             ),
             (
                 Identifier::new(context, "operandSegmentSizes"),
@@ -272,10 +378,29 @@ fn scalar_body<'c>(
     Ok(block)
 }
 
-/// The destination `linalg.generic` writes its result into.
-fn empty_tensor<'c>(location: Location<'c>, tensor: Type<'c>) -> Result<Operation<'c>, MlirError> {
+/// The destination `linalg.generic` writes its result into. `sizes` carries one
+/// extent per dynamic axis, in shape order, which is what `tensor.empty` expects.
+fn empty_tensor<'c>(
+    location: Location<'c>,
+    tensor: Type<'c>,
+    sizes: &[Value<'c, '_>],
+) -> Result<Operation<'c>, MlirError> {
     Ok(OperationBuilder::new("tensor.empty", location)
+        .add_operands(sizes)
         .add_results(&[tensor])
+        .build()?)
+}
+
+/// The run-time extent of one axis of an operand, read back off the value itself.
+fn dim_op<'c>(
+    location: Location<'c>,
+    tensor: Value<'c, '_>,
+    axis: Value<'c, '_>,
+    index: Type<'c>,
+) -> Result<Operation<'c>, MlirError> {
+    Ok(OperationBuilder::new("tensor.dim", location)
+        .add_operands(&[tensor, axis])
+        .add_results(&[index])
         .build()?)
 }
 
@@ -313,19 +438,43 @@ fn scalar_op(op: BinaryOp, element: &HirType) -> Option<ScalarOp> {
     }
 }
 
-/// One identity affine map per `linalg.generic` operand: every operand is walked
-/// in the same order, which is what makes the operation element-wise.
-fn identity_maps<'c>(context: &'c Context, rank: usize) -> Result<Attribute<'c>, MlirError> {
+/// One affine map per `linalg.generic` operand, in operand order, saying where
+/// that operand is read at each point of the result's index space.
+fn indexing_maps<'c>(
+    context: &'c Context,
+    rank: usize,
+    operands: &[&OperandAxes; ELEMENTWISE_BODY_ARGUMENTS],
+) -> Result<Attribute<'c>, MlirError> {
+    let maps = operands
+        .iter()
+        .map(|axes| affine_map(rank, axes))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    parse_attribute(context, &format!("[{maps}]"))
+}
+
+/// The affine map for one operand: the result's dimensions on the left, and on
+/// the right the operand's own index per axis — a dimension where it walks that
+/// axis, `0` where it is stretched, and nothing at all when it is a scalar.
+fn affine_map(rank: usize, axes: &OperandAxes) -> String {
     let dimensions = (0..rank)
         .map(|axis| format!("d{axis}"))
         .collect::<Vec<_>>()
         .join(", ");
-    let map = format!("affine_map<({dimensions}) -> ({dimensions})>");
+    let results = match axes {
+        None => String::new(),
+        Some(axes) => axes
+            .iter()
+            .map(|walked| match walked {
+                Some(axis) => format!("d{axis}"),
+                None => STRETCHED_INDEX.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+    };
 
-    parse_attribute(
-        context,
-        &format!("[{}]", vec![map; ELEMENTWISE_BODY_ARGUMENTS].join(", ")),
-    )
+    format!("affine_map<({dimensions}) -> ({results})>")
 }
 
 /// Every axis of an element-wise operation is independent, so every iterator is
@@ -421,6 +570,51 @@ mod tests {
                 span: span(),
             }],
         )
+    }
+
+    /// `func f(a: A, b: B) -> R { return a + b }`, the shape every broadcast case
+    /// takes: two operand types that differ from each other and from the result.
+    fn returns_sum_over(left: HirType, right: HirType, result: HirType) -> HirProgram {
+        let sum = binary(
+            BinaryOp::Add,
+            variable("a", left.clone()),
+            variable("b", right.clone()),
+            result.clone(),
+        );
+
+        HirProgram {
+            items: vec![HirItem::Function(HirFunction {
+                name: "f".to_string(),
+                params: vec![
+                    HirParam {
+                        name: "a".to_string(),
+                        ty: left,
+                        span: span(),
+                    },
+                    HirParam {
+                        name: "b".to_string(),
+                        ty: right,
+                        span: span(),
+                    },
+                ],
+                return_type: result,
+                body: vec![HirStmt::Return {
+                    value: Some(sum),
+                    span: span(),
+                }],
+                span: span(),
+            })],
+        }
+    }
+
+    /// A tensor with one `?` axis and one static one, the shape a batch of rows
+    /// arriving from outside the program takes.
+    fn dynamic_rows(columns: usize) -> HirType {
+        HirType::Tensor {
+            element: Box::new(HirType::F32),
+            shape: vec![None, Some(columns)],
+            names: AxisNames::default(),
+        }
     }
 
     #[test]
@@ -532,46 +726,85 @@ mod tests {
     }
 
     #[test]
-    fn a_shape_mismatch_stays_a_declaration() {
-        // Broadcasting is the next 2C item, so unequal operand shapes are not
-        // lowered here rather than being lowered wrongly.
+    fn a_size_one_axis_is_stretched_across_the_result() {
         let result = tensor(HirType::F32, &[2, 3]);
-        let other = tensor(HirType::F32, &[3]);
-        let sum = binary(
-            BinaryOp::Add,
-            variable("a", result.clone()),
-            variable("b", other.clone()),
-            result.clone(),
-        );
+        let row = tensor(HirType::F32, &[1, 3]);
 
-        let program = HirProgram {
-            items: vec![HirItem::Function(HirFunction {
-                name: "f".to_string(),
-                params: vec![
-                    HirParam {
-                        name: "a".to_string(),
-                        ty: result.clone(),
-                        span: span(),
-                    },
-                    HirParam {
-                        name: "b".to_string(),
-                        ty: other,
-                        span: span(),
-                    },
-                ],
-                return_type: result,
-                body: vec![HirStmt::Return {
-                    value: Some(sum),
-                    span: span(),
-                }],
-                span: span(),
-            })],
-        };
+        let ir = lower_program(&returns_sum_over(result.clone(), row, result))
+            .expect("a size-1 axis should broadcast");
+        assert!(
+            ir.contains("affine_map<(d0, d1) -> (0, d1)>"),
+            "expected the stretched axis to read index 0:\n{ir}"
+        );
+        assert!(
+            ir.contains("affine_map<(d0, d1) -> (d0, d1)>"),
+            "expected the other operand to keep its identity map:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn a_lower_rank_operand_aligns_at_the_trailing_axis() {
+        let result = tensor(HirType::F32, &[2, 3]);
+        let row = tensor(HirType::F32, &[3]);
+
+        let ir = lower_program(&returns_sum_over(result.clone(), row, result))
+            .expect("a lower-rank operand should broadcast");
+        assert!(
+            ir.contains("affine_map<(d0, d1) -> (d1)>"),
+            "expected the operand to supply the innermost axis only:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn a_scalar_operand_broadcasts_with_an_empty_map() {
+        let result = tensor(HirType::F32, &[2, 3]);
+
+        let ir = lower_program(&returns_sum_over(result.clone(), HirType::F32, result))
+            .expect("a scalar operand should broadcast");
+        assert!(
+            ir.contains("affine_map<(d0, d1) -> ()>"),
+            "expected the scalar to be read at every point:\n{ir}"
+        );
+        assert!(
+            ir.contains("arith.addf"),
+            "expected the element-wise body op:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn a_dynamic_extent_sizes_its_destination_from_an_operand() {
+        let ty = dynamic_rows(4);
+
+        let ir = lower_program(&returns_sum_over(ty.clone(), ty.clone(), ty))
+            .expect("a `?` axis should lower");
+        assert!(
+            ir.contains("tensor.dim"),
+            "expected the extent read off an operand:\n{ir}"
+        );
+        assert!(
+            ir.contains("tensor.empty("),
+            "expected the destination to take a size operand:\n{ir}"
+        );
+        assert!(
+            ir.contains("linalg.generic"),
+            "expected the body to lower:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn an_extent_unprovable_against_a_dynamic_axis_stays_a_declaration() {
+        // A `?` operand extent may or may not be 1 at run time. Stretching it on
+        // the chance that it is would silently read the wrong element.
+        let program = returns_sum_over(
+            dynamic_rows(4),
+            tensor(HirType::F32, &[4]),
+            tensor(HirType::F32, &[2, 4]),
+        );
 
         let ir = lower_program(&program).expect("the function should still declare");
         assert!(
             !ir.contains("linalg.generic"),
-            "expected no body for a broadcast:\n{ir}"
+            "expected no body for an unprovable extent:\n{ir}"
         );
         assert!(
             ir.contains("private"),
@@ -580,34 +813,49 @@ mod tests {
     }
 
     #[test]
-    fn a_dynamic_extent_stays_a_declaration() {
-        let ty = HirType::Tensor {
-            element: Box::new(HirType::F32),
-            shape: vec![None, Some(4)],
-            names: AxisNames::default(),
-        };
-        let sum = binary(
-            BinaryOp::Add,
-            variable("a", ty.clone()),
-            variable("b", ty.clone()),
-            ty.clone(),
-        );
-        let program = program_over(
-            ty,
-            vec![HirStmt::Return {
-                value: Some(sum),
-                span: span(),
-            }],
+    fn a_stretched_extent_other_than_one_stays_a_declaration() {
+        let program = returns_sum_over(
+            tensor(HirType::F32, &[2, 3]),
+            tensor(HirType::F32, &[2]),
+            tensor(HirType::F32, &[2, 3]),
         );
 
-        let ir = lower_program(&program).expect("a `?` axis should still declare");
-        assert!(
-            ir.contains("tensor<?x4xf32>"),
-            "expected the dynamic type in the signature:\n{ir}"
-        );
+        let ir = lower_program(&program).expect("the function should still declare");
         assert!(
             !ir.contains("linalg.generic"),
-            "expected no body for a `?` axis:\n{ir}"
+            "expected no body for an incompatible extent:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn an_operand_outranking_the_result_stays_a_declaration() {
+        let program = returns_sum_over(
+            tensor(HirType::F32, &[3]),
+            tensor(HirType::F32, &[2, 3]),
+            tensor(HirType::F32, &[3]),
+        );
+
+        let ir = lower_program(&program).expect("the function should still declare");
+        assert!(
+            !ir.contains("linalg.generic"),
+            "expected no body for an over-ranked operand:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn a_differing_element_type_stays_a_declaration() {
+        // There is no implicit conversion in the language, so a mixed-element
+        // operation is a frontend error rather than something to lower.
+        let program = returns_sum_over(
+            tensor(HirType::F32, &[4]),
+            tensor(HirType::F64, &[4]),
+            tensor(HirType::F32, &[4]),
+        );
+
+        let ir = lower_program(&program).expect("the function should still declare");
+        assert!(
+            !ir.contains("linalg.generic"),
+            "expected no body for mixed element types:\n{ir}"
         );
     }
 

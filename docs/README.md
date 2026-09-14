@@ -70,7 +70,7 @@ current entry points when this directory disagrees.
 | Component | Library | Status |
 |---|---|---|
 | CPU codegen | inkwell (LLVM 20) | In use |
-| MLIR construction | melior (LLVM/MLIR 20) | Tensor arithmetic to linalg, behind the off-by-default `mlir` feature |
+| MLIR construction | melior (LLVM/MLIR 20) | Tensor arithmetic to linalg, broadcasting included, behind the off-by-default `mlir` feature |
 | Autodiff | Enzyme MLIR dialect | Phase 3+ |
 | GPU | MLIR nvgpu / rocdl / Triton | Phase 4+ |
 

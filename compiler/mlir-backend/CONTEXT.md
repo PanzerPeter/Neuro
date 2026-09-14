@@ -60,17 +60,33 @@ Arch's stock `llvm20` omits MLIR, so build LLVM 20 with `-DLLVM_ENABLE_PROJECTS=
 **Tensor arithmetic is the only body lowered here.** `tensor_arithmetic::build_body` turns a
 function whose statements are `val` bindings and a final `return` over element-wise `+ - * /`
 on tensors into a `func.func` definition: one `tensor.empty` destination plus one
-`linalg.generic` per operator, with identity indexing maps, all-`parallel` iterators, and an
-`arith` body terminated by `linalg.yield`. Float elements use the `arith` float operations and
-integer elements theirs, with division splitting on signedness.
+`linalg.generic` per operator, with one indexing map per operand, all-`parallel` iterators, and
+an `arith` body terminated by `linalg.yield`. Float elements use the `arith` float operations
+and integer elements theirs, with division splitting on signedness.
+
+**Broadcasting is per-operand indexing maps.** Operand shapes align at their *trailing* axis,
+so an operand of lower rank supplies the innermost axes and its map simply omits the leading
+result dimensions. An extent of 1 against a larger result extent is stretched: that axis maps
+to the constant `0`, so the operand is read at index 0 at every point the result axis covers. A
+scalar operand of the element type has no index space at all and maps to `()`, which is how
+`linalg.generic` hands one value to every point. The destination always keeps the identity map;
+that is what makes the operation element-wise rather than a gather. Any other mismatch — an
+extent neither equal nor 1, an operand outranking the result, or a different element type — is
+a shape error the frontend owns, so it answers `Ok(None)` rather than being lowered wrongly.
+
+**A `?` extent sizes the destination from an operand.** `tensor.empty` needs one `index`
+operand per dynamic axis, and those come from `tensor.dim` on an operand that walks that axis
+itself. A *stretched* operand cannot supply one: it is size 1 there and says nothing about the
+result. For the same reason a `?` operand extent is never stretched — nothing here can prove it
+is 1 at run time, and guessing wrong would silently read the wrong element — so a result axis
+no operand walks leaves the function a declaration.
 
 It answers `Ok(None)`, meaning "leave this function a declaration", for everything else, and
 that is a design decision rather than a gap to fill: scalar arithmetic and every 2B tensor
 operation stay on the inkwell backend permanently, so lowering them here would be the second
-copy the sub-phase's decision exists to prevent. `None` also covers what this item does not
-reach yet: operands whose shapes differ (broadcasting), a `?` extent (`tensor.empty` would need
-a size operand per dynamic axis), and `f16` / `bf16` elements, which carry no arithmetic in the
-HIR contract.
+copy the sub-phase's decision exists to prevent. `None` also covers `f16` / `bf16` elements,
+which carry no arithmetic in the HIR contract, and a scalar *literal* operand, since the body
+builder lowers variables and operators only.
 
 A `linalg` body does **not** survive `translate_to_llvm_ir`: the conversion pipeline covers
 `func` / `arith` / `index` only, and bufferizing `linalg` on tensors is later work. The

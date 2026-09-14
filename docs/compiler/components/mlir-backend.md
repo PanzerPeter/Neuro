@@ -91,10 +91,34 @@ func.func @f(%arg0: tensor<2x3xf32>, %arg1: tensor<2x3xf32>) -> tensor<2x3xf32> 
 ```
 
 Float elements use the `arith` float operations and integer elements theirs, with division
-splitting on signedness (`divsi` / `divui`). Anything the builder cannot express leaves the
-function an external declaration rather than failing: scalar bodies and every other tensor
-operation, which stay on the LLVM backend by design, and — for now — operands whose shapes differ
-(broadcasting), a `?` extent, and `f16` / `bf16` elements.
+splitting on signedness (`divsi` / `divui`).
+
+### Broadcasting
+
+Operands need not share the result's shape. Each one gets its own indexing map, computed from
+its shape against the result's, and it is that map alone which broadcasts:
+
+| Operand | Map, for a `[2, 3]` result | Meaning |
+| --- | --- | --- |
+| `Tensor<f32, [2, 3]>` | `(d0, d1) -> (d0, d1)` | walks every axis |
+| `Tensor<f32, [1, 3]>` | `(d0, d1) -> (0, d1)` | the size-1 axis is stretched: read at index 0 |
+| `Tensor<f32, [3]>` | `(d0, d1) -> (d1)` | lower rank, aligned at the trailing axis |
+| `f32` | `(d0, d1) -> ()` | a scalar, read at every point |
+
+Shapes align at the **trailing** axis, so a lower-rank operand supplies the innermost axes and
+repeats across the leading ones. The destination always keeps the identity map, which is what
+makes the operation element-wise rather than a gather.
+
+A dynamic `?` extent lowers too: `tensor.empty` takes one size operand per dynamic axis, read
+back with `tensor.dim` on an operand that walks that axis. A stretched operand cannot supply
+one, since it is size 1 there and says nothing about the result.
+
+Anything the builder cannot express leaves the function an external declaration rather than
+failing: scalar bodies and every other tensor operation, which stay on the LLVM backend by
+design; an extent that neither matches the result's nor is 1; an operand outranking the result;
+a different element type; a `?` extent no operand can prove equal to the result's, which is
+never stretched because nothing at compile time can show it is 1; a literal operand; and
+`f16` / `bf16` elements.
 
 A `linalg` body does **not** survive `translate_to_llvm_ir`: the pipeline below covers
 `func` / `arith` / `index` only, and bufferizing `linalg` is later work. The crossing returns a

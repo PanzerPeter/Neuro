@@ -10,6 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.30.0] - 2026-09-14
+
+### Added
+
+- codegen: element-wise tensor arithmetic broadcasts on the MLIR path. Each
+  `linalg.generic` operand gets its own indexing map, computed from that
+  operand's shape against the result's: shapes align at the trailing axis, an
+  extent of 1 is stretched across a larger one and reads index 0, a lower-rank
+  operand supplies the innermost axes, and a scalar operand of the element type
+  is read at every point.
+- codegen: a tensor with a dynamic `?` extent now carries arithmetic. The
+  `tensor.empty` destination takes one size operand per dynamic axis, read back
+  with `tensor.dim` from an operand that walks that axis.
+
+### Changed
+
+- codegen: an operand that cannot broadcast still leaves its function an
+  external declaration rather than being lowered wrongly. That covers an extent
+  neither equal nor 1, an operand outranking the result, a different element
+  type, and a `?` extent no operand can prove equal to the result's, which is
+  never stretched because nothing at compile time can show it is 1.
+
+
 ## [2.29.0] - 2026-09-14
 
 ### Added
