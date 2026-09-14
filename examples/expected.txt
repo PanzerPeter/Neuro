@@ -66,11 +66,12 @@ strings/string_slice_method.nr   12
 strings/strings.nr               0
 strings/triple_quoted.nr         6
 
-# --- tensors: Tensor<T, [dims]>: construction, shapes, reductions, sorting --
+# --- tensors: Tensor<T, [dims]>: construction, shapes, operators, reductions -
 tensors/tensor_construction.nr        6
 tensors/tensor_dynamic_shapes.nr      42
 tensors/tensor_indexing.nr            44
 tensors/tensor_named_dimensions.nr    33
+tensors/tensor_operators.nr           36
 tensors/tensor_reductions.nr          21
 tensors/tensor_shape_generics.nr      41
 tensors/tensor_shape_manipulation.nr  44

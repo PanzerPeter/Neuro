@@ -416,3 +416,62 @@ func main() -> i32 {
         ]
     );
 }
+
+/// The result of a by-value operator is a tensor of the broadcast shape, which is what
+/// tells the backend how big a buffer to allocate for it.
+#[test]
+fn a_by_value_operator_carries_the_broadcast_result_shape() {
+    let program = lower(
+        r#"
+func main() -> i32 {
+    val m: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val row: Tensor<i32, [3]> = [1, 1, 1]
+    val wide = &m + &row
+    return 0
+}
+"#,
+    );
+    let body = function_body(&program, "main");
+    assert_eq!(
+        binding_init(body, "wide").ty,
+        HirType::Tensor {
+            element: Box::new(HirType::I32),
+            shape: neuro_hir::static_shape(&[2, 3]),
+            names: AxisNames::default(),
+        }
+    );
+}
+
+/// A scalar operand is stretched, so the tensor side alone decides the result's shape —
+/// and the literal beside it takes the ELEMENT's type rather than the `f64` default, or
+/// the backend would emit a mixed-width instruction.
+#[test]
+fn a_scalar_operand_takes_the_element_type_from_either_side() {
+    let program = lower(
+        r#"
+func main() -> i32 {
+    val m: Tensor<f32, [2]> = [1.0, 2.0]
+    val scaled = &m * 2.0
+    val shrunk = 0.5 * m
+    return 0
+}
+"#,
+    );
+    let body = function_body(&program, "main");
+    let expected = HirType::Tensor {
+        element: Box::new(HirType::F32),
+        shape: neuro_hir::static_shape(&[2]),
+        names: AxisNames::default(),
+    };
+    assert_eq!(binding_init(body, "scaled").ty, expected);
+    assert_eq!(binding_init(body, "shrunk").ty, expected);
+
+    let HirExprKind::Binary { right, .. } = &binding_init(body, "scaled").kind else {
+        panic!("a tensor operator stays a binary node");
+    };
+    assert_eq!(right.ty, HirType::F32);
+    let HirExprKind::Binary { left, .. } = &binding_init(body, "shrunk").kind else {
+        panic!("a tensor operator stays a binary node");
+    };
+    assert_eq!(left.ty, HirType::F32);
+}

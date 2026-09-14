@@ -3,4 +3,6 @@ descend<N>      one template, [4] -> 0 and [2] -> 4
 first_row<M, K> [2, 3] -> a [3] row ending 9
 weights[0, ..]  is a [32] row, stable across the steps: true
 weights[0..2, 0..=1] is a [2, 2] block, corner matches: true
+by value       lr * grad moved element [0, 0] by 0.5
+broadcast      a [32] bias reached row 0 and row 63 alike
 layer  [64, 32] + bias [32] =   2080 params, one buffer each

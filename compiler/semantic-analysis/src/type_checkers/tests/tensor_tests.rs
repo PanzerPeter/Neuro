@@ -603,7 +603,7 @@ func main() -> i32 {
 }
 
 #[test]
-fn a_compound_assignment_rejects_a_differently_shaped_operand() {
+fn a_compound_assignment_rejects_an_operand_that_does_not_broadcast() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
@@ -621,8 +621,8 @@ func main() -> i32 {
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e, TypeError::Mismatch { .. })),
-        "the shape is part of the type; got {errors:?}"
+            .any(|e| matches!(e, TypeError::TensorBroadcastMismatch { .. })),
+        "a [3, 3] neither matches a [2, 2] nor stretches to it; got {errors:?}"
     );
 }
 
@@ -1288,5 +1288,255 @@ func main() -> i32 {
             .iter()
             .any(|e| matches!(e, TypeError::Mismatch { .. })),
         "`N` has no value to take from a `?` axis; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_by_value_operator_yields_a_tensor_of_the_joined_shape() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val b: Tensor<i32, [2, 3]> = [[1, 1, 1], [1, 1, 1]]
+    val sum: Tensor<i32, [2, 3]> = a + b
+    return sum[0, 0]
+}
+"#,
+    );
+    assert!(errors.is_empty(), "equal shapes add; got {errors:?}");
+}
+
+#[test]
+fn every_arithmetic_operator_is_defined_on_tensors() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2]> = [6, 8]
+    val b: Tensor<i32, [2]> = [2, 2]
+    val sum = &a + &b
+    val diff = &a - &b
+    val prod = &a * &b
+    val quot = &a / &b
+    val rem = &a % &b
+    return sum[0] + diff[0] + prod[0] + quot[0] + rem[0]
+}
+"#,
+    );
+    assert!(errors.is_empty(), "the arithmetic family; got {errors:?}");
+}
+
+/// The borrowed form is what keeps a weight inside a training loop: the operator reads
+/// its operands rather than consuming them, so both bindings survive the expression.
+#[test]
+fn borrowed_operands_are_read_rather_than_moved() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2]> = [1, 2]
+    val b: Tensor<i32, [2]> = [3, 4]
+    val first = &a + &b
+    val second = &a * &b
+    return first[0] + second[0]
+}
+"#,
+    );
+    assert!(errors.is_empty(), "borrowed operands; got {errors:?}");
+}
+
+#[test]
+fn an_owned_operand_moves_into_the_result() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2]> = [1, 2]
+    val b: Tensor<i32, [2]> = [3, 4]
+    val sum = a + b
+    return a[0]
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UseOfMovedValue { .. })),
+        "a by-value operand is consumed; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_size_one_axis_and_a_lower_rank_operand_broadcast() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val m: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    val row: Tensor<i32, [3]> = [10, 20, 30]
+    val col: Tensor<i32, [2, 1]> = [[100], [200]]
+    val wide: Tensor<i32, [2, 3]> = &m + &row
+    val tall: Tensor<i32, [2, 3]> = &m + &col
+    return wide[0, 0] + tall[0, 0]
+}
+"#,
+    );
+    assert!(errors.is_empty(), "broadcast shapes; got {errors:?}");
+}
+
+#[test]
+fn an_extent_neither_equal_nor_one_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2]> = [1, 2]
+    val b: Tensor<i32, [3]> = [1, 2, 3]
+    val sum = &a + &b
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorBroadcastMismatch { .. })),
+        "a [2] neither matches a [3] nor stretches to it; got {errors:?}"
+    );
+}
+
+/// The scalar may sit on either side, so `lr * grad` reads as it does on paper. An
+/// unsuffixed literal takes the element's type rather than the language default, which
+/// is what makes both spellings work without a suffix.
+#[test]
+fn a_scalar_broadcasts_from_either_side() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val matrix: Tensor<f32, [2, 2]> = [[1.0, 2.0], [3.0, 4.0]]
+    val scaled: Tensor<f32, [2, 2]> = &matrix * 2.0
+    val shrunk: Tensor<f32, [2, 2]> = 0.5 * matrix
+    return 0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "scalar broadcast; got {errors:?}");
+}
+
+#[test]
+fn a_scalar_of_the_wrong_type_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val matrix: Tensor<f32, [2, 2]> = [[1.0, 2.0], [3.0, 4.0]]
+    val bad = &matrix * 2.0f64
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })),
+        "a scalar is broadcast, not converted; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_comparison_has_no_tensor_meaning() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2]> = [1, 2]
+    val b: Tensor<i32, [2]> = [3, 4]
+    val worse = &a < &b
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::InvalidBinaryOperator { .. })),
+        "only the arithmetic family is defined; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_half_precision_element_has_no_operator() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<f16, [2]> = [1.0f16, 2.0f16]
+    val b: Tensor<f16, [2]> = [1.0f16, 2.0f16]
+    val sum = &a + &b
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorElementNotArithmetic { .. })),
+        "the half-precision contract stops short of arithmetic; got {errors:?}"
+    );
+}
+
+/// The result is a fresh buffer, so its element count has to be a number here.
+#[test]
+fn a_dynamic_extent_has_no_by_value_operator() {
+    let errors = semantic_errors(
+        r#"
+func widen(t: Tensor<i32, [4]>) -> Tensor<i32, [?]> {
+    return t
+}
+
+func main() -> i32 {
+    val a = widen(Tensor::<i32, [4]>::ones())
+    val b = widen(Tensor::<i32, [4]>::ones())
+    val sum = &a + &b
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorDynamicExtent { .. })),
+        "a `?` extent sizes no buffer; got {errors:?}"
+    );
+}
+
+/// Compound assignment takes the by-value operator's broadcast rules.
+#[test]
+fn a_compound_assignment_broadcasts_a_scalar_and_a_lower_rank_operand() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut w: Tensor<f32, [2, 3]> = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+    val row: Tensor<f32, [3]> = [1.0, 1.0, 1.0]
+    w *= 2.0
+    w += &row
+    return 0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "compound broadcast; got {errors:?}");
+}
+
+/// The in-place update writes back into the target's own buffer, so an operand may be
+/// stretched up to the target's shape but never past it.
+#[test]
+fn a_compound_assignment_rejects_an_operand_wider_than_its_target() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut row: Tensor<i32, [3]> = [1, 2, 3]
+    val grid: Tensor<i32, [2, 3]> = [[1, 1, 1], [2, 2, 2]]
+    row += &grid
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorBroadcastMismatch { .. })),
+        "the result has nowhere to go; got {errors:?}"
     );
 }

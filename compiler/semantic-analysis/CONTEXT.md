@@ -523,6 +523,22 @@ same check for return-position `impl Trait<Assoc = U>`.
   left/operand type is a struct with a matching entry takes the impl's result type **before** the
   built-in numeric and comparison paths. Not yet: user-declarable `*Assign` traits, `MatMul`/`@`,
   and auto-derived trait default methods: each operator needs its own impl method.
+- **By-value tensor operators** (`type_checkers/tensor_broadcast.rs`) run **before** the
+  operator-trait and built-in numeric paths, on either operand being a tensor or a borrow of
+  one. `broadcast_shapes` joins the two shapes: aligned at the trailing axis, an extent of 1
+  stretched across a wider one, a lower-rank operand supplying the innermost axes. A shape
+  parameter's extent is never the axis that stretches (whether it is 1 is unknown until the
+  instantiation) but is stretched into, since a literal 1 on the other side is known. A pair
+  that does not join is `TensorBroadcastMismatch`; only the five arithmetic operators are
+  defined (`InvalidBinaryOperator` otherwise); the element must have arithmetic
+  (`TensorElementNotArithmetic`); a `?` extent has no element count for the fresh result
+  (`TensorDynamicExtent`); and an owned operand is moved once the operands are known to
+  combine, so a rejected operator does not also report a use-after-move.
+  A scalar operand carries the element's own type: `tensor_element_expectation` types the
+  right operand by the left tensor's element, and `scalar_broadcast_expectation` does the same
+  in reverse for a literal written to the left of a tensor BINDING, which is the one place a
+  syntactic lookahead is used (a speculative `check_expr` would record the discarded attempt's
+  diagnostics). A scalar beside anything else still needs its suffix.
 - **Compound assignment** (`Stmt::CompoundAssignment`) implements the operator-trait dispatch rule in
   `type_checkers/statements.rs`. A tensor target routes to `check_tensor_compound_assign`
   (`type_checkers/tensors.rs`), the compiler-known `*Assign` implementation; every other target
@@ -531,10 +547,12 @@ same check for return-position `impl Trait<Assoc = U>`.
   tensor path checks the operand **before** the target's mutability, which is the evaluation
   order the language specifies; requires the element to have arithmetic
   (`TensorElementNotArithmetic` rejects `bool` and the half-precision types, matching their
-  scalar contract); accepts a `Tensor<T, S>` or a
-  `&Tensor<T, S>` operand of the target's own type and reports any other as `Mismatch`; and moves
-  an owned operand, so a right-hand side that moved the target itself (`w += w`) is
-  `UseOfMovedValue`.
+  scalar contract); and moves an owned operand, so a right-hand side that moved the target
+  itself (`w += w`) is `UseOfMovedValue`. The operand is accepted by
+  `compound_assign_operand_fits` (`tensor_broadcast.rs`), which takes the by-value operator's
+  broadcast rule with one asymmetry the in-place write forces: the join has to come back as the
+  TARGET's shape, so an operand may be stretched up to it but never past it. A scalar of the
+  element type is accepted the same way, which is what makes `w *= 2.0` the scalar broadcast.
 
 **Dynamic dispatch.** `resolve_type` delegates to a private `resolve_type_ctx(ty, behind_ref)`
 whose flag is set only by the `Reference` arm, so a bare `dyn Trait` is

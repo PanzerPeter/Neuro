@@ -166,6 +166,73 @@ field, and `.to(device)` all transfer ownership, and only the last owner release
 tensor held in a struct field is not released when the struct goes out of scope; that gap is
 shared with the standard collections.
 
+## Element-wise arithmetic
+
+`+`, `-`, `*`, `/` and `%` combine two tensors element by element and hand back a **fresh**
+tensor. `*` is the element-wise product, not the matrix product.
+
+```neuro
+val a: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+val b: Tensor<i32, [2, 3]> = [[10, 20, 30], [40, 50, 60]]
+
+val sum = &a + &b                          // both operands read, neither consumed
+val product = a * b                         // both operands moved
+```
+
+Every operator is defined on **borrowed** operands as well as owned ones. An owned operand
+is moved, exactly as passing a tensor to a function moves it; a borrowed one is only read,
+so a weight can feed an operator without leaving the binding that owns it. The result is a
+new buffer either way, which is what lets the operator read two borrows at once.
+
+The element type must have arithmetic (any integer, `f32`, or `f64`), and element
+arithmetic carries the same guards the scalar operator does: an overflowing element panics
+on the debug tier and a zero divisor panics in every build.
+
+### Broadcasting
+
+The two operand shapes are aligned at their **trailing** axis. An axis whose extent is `1`
+is stretched across the other operand's extent, and an operand of **lower rank** supplies
+the innermost axes and repeats across the leading ones.
+
+```neuro
+val m: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+
+val row: Tensor<i32, [3]> = [100, 200, 300]
+val wide = &m + &row                        // the row repeats down both rows of m
+
+val column: Tensor<i32, [2, 1]> = [[7], [9]]
+val tall = &m + &column                     // each column entry stretches across 3 columns
+```
+
+So a `[2, 3]` combines with a `[3]`, with a `[2, 1]`, and with a `[1, 3]`; it does not
+combine with a `[2]`, because 2 lines up against the 3 at the trailing axis and neither is
+`1`. A pair that does not broadcast is a compile error naming both shapes.
+
+A shape parameter's extent (see [shape generics](#shape-generics)) is never the axis that
+stretches: whether it is `1` is not known until the function is instantiated. It is still
+stretched *into*, since a literal `1` on the other side is known at the call site.
+
+A dynamic `?` axis has no by-value operator: the result is a fresh buffer and a `?` gives
+no element count to size it with.
+
+### Scalar broadcast
+
+A scalar sits on either side of the operator and is stretched across every element.
+
+```neuro
+val matrix: Tensor<f32, [2, 2]> = [[1.0, 2.0], [3.0, 4.0]]
+
+val scaled = &matrix * 2.0                  // 2.0 is an f32 literal here
+val shrunk = 0.5 * matrix                   // and so is 0.5
+```
+
+The scalar carries the tensor's **element type**: the `2.0` above is an `f32` literal
+because the tensor is an `f32` one, the same way `val x: f32 = 0.01` types its literal.
+A scalar that already has a type is not converted for the operator's benefit, so an `f64`
+value beside an `f32` tensor is a type mismatch. A bare literal takes the element's type
+when the tensor on the other side is written as a binding name; anywhere else it needs its
+suffix.
+
 ## Updating a tensor in place
 
 The compound assignment operators `+=`, `-=`, `*=`, `/=` and `%=` update a `mut` tensor's
@@ -182,9 +249,13 @@ for i in 0..8 {
 }
 ```
 
-The operand is a tensor of the same element type and shape, owned or borrowed: `w += g`
-consumes `g`, while `w += &g` reads it, so one operand can serve every iteration of a loop.
-The operand is evaluated before the target is borrowed for the update. The element type
+The operand is a tensor of the same element type, owned or borrowed: `w += g` consumes
+`g`, while `w += &g` reads it, so one operand can serve every iteration of a loop. It
+broadcasts under the rule above, with one asymmetry the in-place write forces: the result
+goes back into the buffer the target already owns, so an operand may be stretched **up to**
+the target's shape and never past it. A scalar is accepted the same way, which is what
+makes `w *= 2.0` the scalar broadcast. The operand is evaluated before the target is
+borrowed for the update. The element type
 must have arithmetic (any integer, `f32`, or `f64`), and element arithmetic carries the
 same guards the scalar operator does. See
 [Compound Assignment Operators](operators.md#compound-assignment-operators).
@@ -584,11 +655,12 @@ in-place compound assignment. Build such a tensor at a static shape and pass it 
 ## What tensors cannot do yet
 
 A tensor can be built, bound, moved, cloned, passed, returned, transferred with
-`.to(device)`, updated in place, stored in a struct, indexed, sliced, reshaped with
+`.to(device)`, combined element-wise with `+` / `-` / `*` / `/` / `%` and their broadcast
+rules, updated in place, stored in a struct, indexed, sliced, reshaped with
 `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`, and reduced with
 `.sum()` / `.mean()` / `.max()` / `.min()`. What is still
-later work is writing through an index (`t[i, j] = v`), by-value tensor arithmetic
-(`a + b`, `a @ b`), the functional `.reduce(init, |acc, x| ...)`, and the step index form
+later work is writing through an index (`t[i, j] = v`), matrix multiplication
+(`a @ b`), the functional `.reduce(init, |acc, x| ...)`, and the step index form
 (`t[(0..n).step(2)]`), which waits on `.step(n)` existing on ranges at all. The reverse
 form `t[(0..n).rev()]` is implemented. A dynamic `?` axis is accepted, but only as a widening: nothing that needs
 an extent works on one, and there is no run-time shape check that would let a `?` be
@@ -600,5 +672,5 @@ later work, so a shape parameter is a function's to declare.
 
 - [Types](types.md): the scalar element types a tensor holds, and the arrays it coerces from
 - [Functions](functions.md#generic-functions): how shape parameters are monomorphized
-- [Operators](operators.md): the compound-assignment family tensors implement
+- [Operators](operators.md): the arithmetic and compound-assignment families tensors implement
 - [examples/tensors/](../../examples/tensors/): a runnable program per feature on this page

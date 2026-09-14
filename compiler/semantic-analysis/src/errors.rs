@@ -203,6 +203,14 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("the operands of `{op}` at {span:?} do not broadcast: {left} against {right}; shapes align at the trailing axis, and an axis stretches only where its extent is 1")]
+    TensorBroadcastMismatch {
+        op: String,
+        left: Type,
+        right: Type,
+        span: Span,
+    },
+
     #[error("this index at {span:?} names {found} axis/axes, but the tensor has rank {expected}; a tensor index gives one argument per axis")]
     TensorIndexRankMismatch {
         expected: usize,

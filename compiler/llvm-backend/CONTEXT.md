@@ -409,6 +409,18 @@ buffer is not freed twice) while a borrowed one is only read. Element arithmetic
 guards: an overflowing element panics on the debug tier and a zero divisor panics in every
 build, exactly as the scalar operator does.
 
+`codegen_tensor_binary` (same file) is the by-value operator, dispatched from the `Binary` arm
+of `codegen_expr` on the **result** type rather than the left operand's, since either side may
+be the scalar being broadcast. It allocates, which is the whole difference from the compound
+form: a fresh handle and buffer, both operands read, and each owned operand released afterwards.
+Both nodes share `emit_elementwise_loop`. Each operand resolves to an `ElementSource`: a
+`Scalar` value, or a `Buffer` plus one flat stride per axis of the result, computed by
+`broadcast_strides`. A stretched axis carries stride **0**, which is the whole of broadcasting;
+an operand of the result's own shape is marked `contiguous` and walked slot for slot, so the
+common case pays no coordinate arithmetic. The destination is always contiguous, so the loop
+counter is its slot index, and the result coordinates are decomposed once per iteration and
+shared by both sources.
+
 `codegen_tensor_shape_cast` (same file) lowers `HirExprKind::TensorShapeCast`: `.t()`,
 `.reshape(...)`, `.permute(...)` and `.flatten(...)`. It is not a `BuiltinMethod` — the method
 name alone would not say how the axes move, so lowering resolved that into the node's

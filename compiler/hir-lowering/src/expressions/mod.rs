@@ -5,7 +5,7 @@
 
 mod calls;
 mod coalesce;
-mod coercion;
+pub(crate) mod coercion;
 mod enums;
 mod interpolation;
 mod matches;
@@ -131,7 +131,18 @@ impl Lowerer {
                 if matches!(op, ast_types::BinaryOp::NullCoalesce) {
                     return self.lower_null_coalesce(left, right, *span);
                 }
-                let left = self.lower_expr(left, None)?;
+                // A tensor operand types the SCALAR on the other side by its element
+                // (the tensor broadcast rule), in both directions. The right side is not lowered
+                // yet here, so the tensor on that side is recognized from the binding.
+                let left_expected = match right.as_ref() {
+                    Expr::Identifier(name) => self
+                        .lookup(&name.name)
+                        .as_ref()
+                        .and_then(coercion::tensor_element)
+                        .cloned(),
+                    _ => None,
+                };
+                let left = self.lower_expr(left, left_expected.as_ref())?;
                 // Operator-trait dispatch on a user type: desugar `a OP b` into the
                 // impl method call `a.op(b)`. The checker validated the impl, so a lookup
                 // hit means the call resolves.
@@ -146,7 +157,10 @@ impl Lowerer {
                         return self.build_operator_call(left, right, dispatch, *span);
                     }
                 }
-                let right = self.lower_expr(right, Some(&left.ty))?;
+                let right_expected = coercion::tensor_element(&left.ty)
+                    .cloned()
+                    .unwrap_or_else(|| left.ty.clone());
+                let right = self.lower_expr(right, Some(&right_expected))?;
                 // `@derive(PartialEq)` equality: no method to dispatch to, so the node
                 // stays a binary one and the backend expands it over the fields. Handled
                 // before the shared result rule, which admits no aggregate operand.

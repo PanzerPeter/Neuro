@@ -72,6 +72,27 @@ val mod: i32 = 10 % 3        // 1
 **Types**: Works with integer types
 **Requirement**: Both operands must be integers
 
+### On tensors: element-wise, with broadcasting
+
+All five arithmetic operators apply to tensors. They combine the operands element by
+element and allocate a **fresh** tensor, so `*` is the element-wise product rather than the
+matrix product (`@` is later work). Both owned and borrowed operands are accepted: an owned
+one is moved, a borrowed one is only read.
+
+```neuro
+val m: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+val row: Tensor<i32, [3]> = [100, 200, 300]
+
+val doubled = &m * 2          // a scalar stretches across every element
+val shifted = &m + &row       // a lower-rank operand repeats across the leading axes
+```
+
+Shapes broadcast: they align at the trailing axis, an extent of `1` stretches across a
+wider one, and a lower-rank operand supplies the innermost axes. A scalar sits on either
+side and takes the tensor's element type. The full rule, its edge cases, and the way
+compound assignment inherits it are in
+[Tensors — element-wise arithmetic](tensors.md#element-wise-arithmetic).
+
 ## Comparison Operators
 
 All comparison operators return `bool`.
@@ -339,9 +360,13 @@ statement.
 The rules:
 
 - The target must be a `mut` tensor binding.
-- The operand is a tensor of the **same** element type and shape, either owned or
-  borrowed. `w += g` consumes `g`; `w += &g` reads it, so one gradient can serve every
-  iteration of a loop. A different shape is a compile error naming both types.
+- The operand is a tensor of the **same** element type, either owned or borrowed.
+  `w += g` consumes `g`; `w += &g` reads it, so one gradient can serve every iteration of
+  a loop. Shapes broadcast exactly as they do for the by-value operators, with one
+  asymmetry: the result goes back into the target's own buffer, so an operand may be
+  stretched **up to** the target's shape and never past it. A shape that does not is a
+  compile error naming both types. A scalar operand is accepted the same way, so
+  `w *= 2.0` is the scalar broadcast.
 - The right-hand side is evaluated **first**, before the target is borrowed for the
   update.
 - The element type must have arithmetic: any integer, `f32`, or `f64`. `bool` and the
@@ -631,7 +656,8 @@ Rules and limits:
   operator: it desugars to `v = v + w`. In-place `*Assign` behaviour is compiler-known on
   tensors (see [Compound Assignment Operators](#compound-assignment-operators)) but not
   yet declarable for a user type; matrix multiply `@` and auto-derived comparison defaults
-  are planned for later phases.
+  are planned for later phases. The tensor arithmetic operators are compiler-known too,
+  and are not reached through an operator-trait impl.
 - Operator overloading is fully monomorphized and erased: each operator becomes the
   method call it stands for, with no vtable and no runtime cost.
 

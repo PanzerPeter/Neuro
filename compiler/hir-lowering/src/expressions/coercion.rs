@@ -1,7 +1,7 @@
 //! Type derivation shared by the expression dispatch: the unsizing coercions,
 //! contextual literal typing, and the result type of a binary operator.
 
-use neuro_hir::{HirExpr, HirExprKind, HirType};
+use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirType};
 use shared_types::Literal;
 
 use crate::types::{float_suffix_type, int_suffix_type};
@@ -102,6 +102,13 @@ pub(super) fn binary_result_type(
     left: &HirType,
     right: &HirType,
 ) -> Result<HirType, LoweringError> {
+    // A tensor operand is element-wise and allocates a fresh result whose shape is
+    // the broadcast join of the two. Handled before the scalar rule below, which reads a
+    // tensor as an operand with no operator lowering.
+    if is_tensor(left) || is_tensor(right) {
+        return tensor_result_type(op, left, right);
+    }
+
     // Every operator below is emitted as one scalar instruction, or (for `==`, `!=`
     // and `+` on strings) as a byte compare or a concatenation. An aggregate operand
     // has no such lowering; it reaches here only from a monomorphized generic body,
@@ -153,5 +160,118 @@ fn has_operator_lowering(ty: &HirType) -> bool {
         HirType::Reference { inner, .. } => matches!(**inner, HirType::String),
         HirType::Bool | HirType::Char | HirType::String | HirType::F16 | HirType::BF16 => true,
         other => is_numeric(other),
+    }
+}
+
+/// The element type a tensor operand broadcasts a scalar operand against, when `ty` is a
+/// tensor or a borrow of one.
+///
+/// This is what types a bare literal written beside a tensor: `matrix * 2.0` is
+/// the scalar broadcast, so the literal is the element's type rather than the `f64` the
+/// language default would otherwise pick.
+pub(crate) fn tensor_element(ty: &HirType) -> Option<&HirType> {
+    match ty.referent() {
+        HirType::Tensor { element, .. } => Some(element),
+        _ => None,
+    }
+}
+
+/// Whether `ty` is a tensor, or a borrow of one. Every tensor operator is defined on
+/// borrowed operands too, so the two reach the element-wise rule together.
+fn is_tensor(ty: &HirType) -> bool {
+    matches!(ty.referent(), HirType::Tensor { .. })
+}
+
+/// The tensor a binary operand denotes: element type, shape, and axis names.
+fn tensor_parts(ty: &HirType) -> Option<(&HirType, &[Option<usize>], &AxisNames)> {
+    match ty.referent() {
+        HirType::Tensor {
+            element,
+            shape,
+            names,
+        } => Some((element, shape, names)),
+        _ => None,
+    }
+}
+
+/// The freshly allocated result of an element-wise tensor operator.
+///
+/// The checker has already accepted the operands, so the join here re-derives the shape
+/// it settled rather than re-deciding it: a stage carries the rule it needs over the
+/// shared type instead of importing a sibling's. A pair that does not join is therefore
+/// a compiler bug and answers `UnsupportedOperand`, not a diagnostic.
+fn tensor_result_type(
+    op: BinaryOp,
+    left: &HirType,
+    right: &HirType,
+) -> Result<HirType, LoweringError> {
+    let unsupported = || LoweringError::UnsupportedOperand {
+        op: op.to_string(),
+        ty: left.to_string(),
+    };
+    let (element, shape, names) = match (tensor_parts(left), tensor_parts(right)) {
+        (Some(l), Some(r)) => {
+            let (shape, names) = broadcast_shapes(l.1, l.2, r.1, r.2).ok_or_else(unsupported)?;
+            (l.0, shape, names)
+        }
+        // A scalar operand is stretched across every element, so the tensor side alone
+        // decides the result's shape.
+        (Some(t), None) | (None, Some(t)) => (t.0, t.1.to_vec(), t.2.clone()),
+        (None, None) => return Err(unsupported()),
+    };
+    Ok(HirType::Tensor {
+        element: Box::new(element.clone()),
+        shape,
+        names,
+    })
+}
+
+/// The broadcast join of two shapes: align at the trailing axis, stretch an extent of 1,
+/// and let a lower-rank operand supply the innermost axes. `None` where they do not join.
+fn broadcast_shapes(
+    left: &[Option<usize>],
+    left_names: &AxisNames,
+    right: &[Option<usize>],
+    right_names: &AxisNames,
+) -> Option<(Vec<Option<usize>>, AxisNames)> {
+    let rank = left.len().max(right.len());
+    let mut shape = Vec::with_capacity(rank);
+    let mut names = Vec::with_capacity(rank);
+    for position in 0..rank {
+        let depth = rank - 1 - position;
+        let l = left.len().checked_sub(depth + 1);
+        let r = right.len().checked_sub(depth + 1);
+        let (extent, name) = match (l, r) {
+            (Some(l), Some(r)) => join_extents(
+                left[l],
+                left_names.0.get(l).cloned().flatten(),
+                right[r],
+                right_names.0.get(r).cloned().flatten(),
+            )?,
+            (Some(l), None) => (left[l], left_names.0.get(l).cloned().flatten()),
+            (None, Some(r)) => (right[r], right_names.0.get(r).cloned().flatten()),
+            (None, None) => return None,
+        };
+        shape.push(extent);
+        names.push(name);
+    }
+    Some((shape, AxisNames(names)))
+}
+
+/// The result axis two aligned operand axes produce. A stretched axis contributes
+/// neither its extent nor its name.
+fn join_extents(
+    left: Option<usize>,
+    left_name: Option<String>,
+    right: Option<usize>,
+    right_name: Option<String>,
+) -> Option<(Option<usize>, Option<String>)> {
+    if left == right {
+        return Some((left, left_name.or(right_name)));
+    }
+    match (left, right) {
+        (Some(1), _) => Some((right, right_name)),
+        (_, Some(1)) => Some((left, left_name)),
+        _ => None,
     }
 }

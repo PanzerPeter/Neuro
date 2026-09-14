@@ -1,0 +1,8 @@
+sum[0, 0] = 11, sum[1, 2] = 26
+product[1, 1] = 100
+row broadcast: 303 and 306
+column broadcast: 8 and 13
+outer grid: 10, 60
+scalar broadcast: 18 and 101
+in place: 1.5 and 7.5
+rank 0: 42

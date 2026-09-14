@@ -55,15 +55,31 @@ impl TypeChecker {
 
         // Check both operands even if one fails, for better error reporting.
         // Left is checked bare to get its natural type, then right uses it
-        // as the expected type for symmetric inference.
-        let left_ty = self.check_expr(left, None).unwrap_or(Type::Unknown);
+        // as the expected type for symmetric inference. A tensor on the left expects the
+        // right to be its ELEMENT instead, so `matrix * 2.0` types its literal as
+        // the scalar being broadcast rather than as the default `f64`.
+        let left_expectation = self.scalar_broadcast_expectation(right);
+        let left_ty = self
+            .check_expr(left, left_expectation.as_ref())
+            .unwrap_or(Type::Unknown);
+        let right_expectation =
+            Self::tensor_element_expectation(&left_ty).unwrap_or_else(|| left_ty.clone());
         let right_ty = self
-            .check_expr(right, Some(&left_ty))
+            .check_expr(right, Some(&right_expectation))
             .unwrap_or(Type::Unknown);
 
         // If either operand is Unknown (error), propagate Unknown
         if matches!(left_ty, Type::Unknown) || matches!(right_ty, Type::Unknown) {
             return Some(Type::Unknown);
+        }
+
+        // A tensor operand takes the element-wise rule with its broadcast shape
+        // join, on either side of the operator. Checked before the built-in numeric path
+        // below, which reads a tensor as a non-numeric operand and rejects it.
+        if matches!(left_ty.referent(), Type::Tensor { .. })
+            || matches!(right_ty.referent(), Type::Tensor { .. })
+        {
+            return Some(self.check_tensor_binary(left, &left_ty, *op, right, &right_ty, *span));
         }
 
         // Operator-trait dispatch on a user type: when the left operand is

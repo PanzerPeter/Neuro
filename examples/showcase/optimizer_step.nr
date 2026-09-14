@@ -7,15 +7,23 @@
 //   tensor parameters · string interpolation with the format mini-language ·
 //   2B's in-place compound assignment, which is the reason the weight buffer
 //   keeps one address across every step below · 2B's slicing and indexing,
-//   which is what finally reads the updated elements back out · and 2B's shape
+//   which is what finally reads the updated elements back out · 2B's shape
 //   generics, which let the step below be written ONCE for every width a layer
-//   in this program has.
+//   in this program has · and 2C's by-value tensor operators with their
+//   broadcast shape rules, which give the same step its allocating form.
 //
 // `w -= g` updates the buffer `w`'s DLPack handle already addresses. Nothing is
 // allocated, no handle is replaced, and a pointer held by an optimizer or by a
 // foreign DLPack consumer stays valid across the statement. The by-value
 // desugaring `w = w - g` would build a second tensor per step and invalidate
 // both, which is why the compound operators are their own dispatch.
+//
+// 2C's by-value operators are the other half of that pair, and the last block
+// below is where the two meet: `&w - &(lr * g)` ALLOCATES a fresh tensor and
+// reads two borrows, which is exactly what makes it the wrong thing to run per
+// step and the right thing to compute a candidate with. Its operands broadcast:
+// a scalar learning rate stretches across every element, and a per-neuron bias
+// row stretches down the rows of the matrix it is added to.
 
 enum Schedule {
     Constant,
@@ -154,6 +162,35 @@ func main() -> i32 {
     val diagonal_matches = block[1, 1] == weights[1, 1]
     assert(diagonal_matches)
     println("weights[0..2, 0..=1] is a [2, 2] block, corner matches: {diagonal_matches}")
+
+    // 2C's by-value operators, at the same width. A scalar broadcasts across every
+    // element, so `lr * gradient` is the scaled step written the way it is on paper; the
+    // result is a fresh tensor, which is why both operands can be borrows and why
+    // neither `base` nor `gradient` is consumed here. Every value below is exactly
+    // representable, so the equalities are equalities and not tolerances.
+    val lr = 0.5f32
+    val base = Tensor::<f32, [64, 32]>::ones()
+    val gradient = Tensor::<f32, [64, 32]>::ones()
+    val scaled = lr * gradient
+    val candidate = &base - &scaled
+    val moved_by = base[0, 0] - candidate[0, 0]
+    assert(moved_by == 0.5f32)
+    println("by value       lr * grad moved element [0, 0] by {moved_by}")
+
+    // A rank-1 row aligns at the TRAILING axis and repeats down the leading one, so a
+    // [32] bias reaches all 64 neurons of a [64, 32] matrix from one row of numbers.
+    // Column 1 is the only one the bias moves, and it moves in every row alike.
+    val offsets: Tensor<f32, [32]> = [
+        0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    ]
+    val biased = &candidate + &offsets
+    assert(biased[0, 1] - biased[0, 0] == 1.0f32)
+    assert(biased[63, 1] - biased[63, 0] == 1.0f32)
+    assert(biased[0, 2] == candidate[0, 2])
+    println("broadcast      a [32] bias reached row 0 and row 63 alike")
 
     // The trained buffers move into the layer; they are not copied.
     val layer = Layer { weights: weights, bias: bias, parameters: 2080 }

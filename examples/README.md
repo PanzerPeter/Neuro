@@ -22,7 +22,7 @@ not what each one does.
 | `basics/`       | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` | [Functions](../docs/language-reference/functions.md) |
 | `types/`        | Primitives, literal suffixes and separators, casts, overflow, half precision, arrays, tuples, destructuring, newtypes, aliases, `Option` / `Result`, collections, dispatch | [Types](../docs/language-reference/types.md) |
 | `strings/`      | `string` literals and slices, `char`, interpolation, triple-quoted blocks, codepoint iteration, the growable `String` | [Strings](../docs/language-reference/strings.md) |
-| `tensors/`      | `Tensor<T, [dims]>`: construction, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, dynamic axes | [Tensors](../docs/language-reference/tensors.md) |
+| `tensors/`      | `Tensor<T, [dims]>`: construction, element-wise operators and broadcasting, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, dynamic axes | [Tensors](../docs/language-reference/tensors.md) |
 | `ownership/`    | Moves, `Copy` / `.clone()`, immutable and mutable borrows, borrow exclusivity, returned references, deterministic `Drop` | [Types](../docs/language-reference/types.md#references-immutable-borrows-t) |
 | `operators/`    | Bitwise ops, compound assignment, integer intrinsics, operator overloading, `??` coalescing, `?` propagation | [Operators](../docs/language-reference/operators.md) |
 | `control_flow/` | `if` / `else`, `for` over ranges and adapters, the iterator protocol, `while`, `loop`, block and `unsafe` expressions, `match`, `val-else`, panics, lints | [Control Flow](../docs/language-reference/control-flow.md) |
@@ -112,7 +112,7 @@ One line each. The program's own header comment is the full description.
 - [`mutable_borrows.nr`](showcase/mutable_borrows.nr): mutable borrows `&mut T` and the dereference operator `*`
 - [`named_axes.nr`](showcase/named_axes.nr): a batch of token embeddings with every tensor axis named
 - [`num_algorithms.nr`](showcase/num_algorithms.nr): a tiny integer-math toolkit
-- [`optimizer_step.nr`](showcase/optimizer_step.nr): a weight update written in place, the shape a training step has
+- [`optimizer_step.nr`](showcase/optimizer_step.nr): a weight update written in place and by value, the shape a training step has
 - [`perceptron.nr`](showcase/perceptron.nr): a two-neuron feed-forward pass
 - [`ranked_batch.nr`](showcase/ranked_batch.nr): ordering a tensor axis alongside the rest of the tensor surface
 - [`ranked_finish.nr`](showcase/ranked_finish.nr): `.enumerate()` carrying a position through earlier features

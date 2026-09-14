@@ -281,7 +281,15 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   whose lowering is type-directed: a tensor target becomes `HirStmt::TensorCompoundAssign`
   carrying the target's tensor type, and every other target has its `x = x OP rhs` desugar
   re-formed as an `Expr::Binary` and lowered through `lower_expr`, which is what keeps a user
-  operator-trait impl reachable through `+=`. By-value operators on tensors do not exist yet.
+  operator-trait impl reachable through `+=`. A by-value tensor operator stays an ordinary
+  `HirExprKind::Binary`; `binary_result_type` (`expressions/coercion.rs`) re-derives the
+  broadcast join over `Vec<Option<usize>>` and `AxisNames` so the node carries the fresh
+  result's shape, which is what tells the backend how big a buffer to allocate. A pair that
+  does not join is `LoweringError::UnsupportedOperand`: the checker already accepted the
+  operands, so failing here is a compiler bug rather than a diagnostic. `tensor_element` types
+  a scalar operand by the tensor's element on both sides, including the compound-assignment
+  right-hand side, or a bare literal would lower as the default `f64` and emit a mixed-width
+  instruction.
   Shape manipulation lives in `tensor_shape.rs`: `.t()`, `.reshape(...)`, `.permute(...)` and
   `.flatten(...)` are intercepted in `lower_method_call` **before the arguments are lowered**,
   because a `.permute` entry may be a dimension name and would otherwise be looked up as a

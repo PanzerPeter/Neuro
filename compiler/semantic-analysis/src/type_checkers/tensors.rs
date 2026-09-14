@@ -379,19 +379,17 @@ impl TypeChecker {
             return None;
         }
 
+        // The right-hand side is typed by the ELEMENT, not by the target: `w *= 2.0` is
+        // the scalar broadcast, and a tensor operand ignores the expectation anyway.
         let value_ty = self
-            .check_expr(value, Some(&tensor_ty))
+            .check_expr(value, Some(element))
             .unwrap_or(Type::Unknown);
         // A borrowed operand is read rather than consumed, which is what lets a weight
         // be updated from a tensor the caller still owns.
         let borrowed = matches!(value_ty, Type::Reference { .. });
-        if !matches!(value_ty, Type::Unknown) && !value_ty.referent().is_compatible_with(&tensor_ty)
+        if !matches!(value_ty, Type::Unknown)
+            && !self.compound_assign_operand_fits(&value_ty, &tensor_ty, op, span)
         {
-            self.record_error(TypeError::Mismatch {
-                expected: tensor_ty,
-                found: value_ty,
-                span,
-            });
             return None;
         }
         if !borrowed {

@@ -81,7 +81,11 @@ impl Lowerer {
                 // expression lowering.
                 let target_ty = self.lookup(&target.name);
                 if let Some(ty @ HirType::Tensor { .. }) = target_ty {
-                    let value = self.lower_expr(value, Some(&ty))?;
+                    // The right-hand side is typed by the ELEMENT, not by the target:
+                    // `w *= 2.0` is the scalar broadcast, and a tensor operand ignores
+                    // the expectation anyway.
+                    let element = crate::expressions::coercion::tensor_element(&ty).cloned();
+                    let value = self.lower_expr(value, element.as_ref())?;
                     return Ok(HirStmt::TensorCompoundAssign {
                         target: target.name.clone(),
                         op: *op,

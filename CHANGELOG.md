@@ -10,6 +10,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.32.0] - 2026-09-14
+
+### Added
+
+- codegen: by-value tensor operators and their broadcast shape rules. `+`, `-`,
+  `*`, `/` and `%` now combine two tensors element by element into a freshly
+  allocated result, on owned and borrowed operands alike (`a + b`, `&a + &b`).
+  An owned operand is moved and its buffer released once the result is built; a
+  borrowed one is only read, which is what lets a weight feed an operator
+  without leaving the binding that owns it.
+- semantic: NumPy-style broadcasting for those operators. Shapes align at the
+  trailing axis, an extent of 1 stretches across a wider one, and a lower-rank
+  operand supplies the innermost axes and repeats across the leading ones. A
+  pair that does not join is a compile error naming both shapes. A shape
+  parameter's extent is stretched into but never stretched, since whether it is
+  1 is not known until the instantiation; a dynamic `?` axis has no by-value
+  operator, because a fresh buffer needs an element count a `?` cannot give.
+- semantic: scalar broadcast on either side of the operator (`matrix * 2.0`,
+  `0.5 * matrix`). The scalar carries the tensor's element type, so an
+  unsuffixed literal beside a tensor binding is typed by the element rather than
+  the `f64` default.
+
+### Changed
+
+- semantic: in-place compound assignment on tensors takes the same broadcast
+  rules, with the one asymmetry the in-place write forces — the result goes back
+  into the target's own buffer, so an operand may be stretched up to the
+  target's shape and never past it. `w *= 2.0` and `w += &row` now compile.
+- codegen: the tensor compound assignment and the by-value operators share one
+  broadcast-strided element loop, where a stretched axis carries stride 0 and an
+  operand of the result's own shape is walked slot for slot.
+
 ## [2.31.1] - 2026-09-14
 
 ### Changed

@@ -57,6 +57,19 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::InterpString { parts } => self.codegen_interp_string(parts),
             HirExprKind::Variable(name) => self.codegen_identifier(name),
             HirExprKind::Binary { op, left, right } => {
+                // A tensor operator allocates a fresh buffer and loops, so it is the one
+                // binary node whose lowering is decided by the RESULT type: either operand
+                // may be the scalar being broadcast across it.
+                let result_ty = Type::from_hir(&expr.ty);
+                if matches!(result_ty, Type::Tensor { .. }) {
+                    return self.codegen_tensor_binary(
+                        left,
+                        *op,
+                        right,
+                        &result_ty,
+                        expr.span.start,
+                    );
+                }
                 // `codegen_binary` dispatches on the left-operand type (instruction
                 // width / signedness), which is the operand's own type rather than the
                 // expression's result type (e.g. `Bool` for a comparison).
