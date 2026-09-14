@@ -981,6 +981,9 @@ trait Consume { func take(self) -> i32 }   // not object-safe: consumes self
 trait Maker   { func build() -> i32 }      // not object-safe: no receiver
 ```
 
+A trait declaring an associated type is also rejected as `dyn` today: the trait-object type
+would have to bind it (`&dyn Iterator<Item = u32>`), and that form is not implemented yet.
+
 A `&mut self` method requires a `&mut dyn Trait` receiver; mutations through it are
 visible to the caller.
 

@@ -419,8 +419,9 @@ impl TypeChecker {
     /// Whether a trait is object-safe: every method must dispatch on a `&self`
     /// or `&mut self` receiver, and the trait must declare no associated type. A method
     /// with no receiver (associated function) or one that consumes `self` by value cannot
-    /// be placed behind a fixed-layout vtable; an associated type has no answer once the
-    /// implementor is erased, and naming one in the bound is the `Trait<Assoc = T>` form.
+    /// be placed behind a fixed-layout vtable. The associated-type clause is narrower: it
+    /// holds only until a trait-object type can bind one (`&dyn Iterator<Item = u32>`),
+    /// which is a Phase 5 item, so the reason it reports names the missing form.
     /// Returns `Ok(())` when safe, or `Err(reason)` naming the first offending member.
     pub(crate) fn trait_object_safety(&self, trait_name: &str) -> Result<(), String> {
         let Some(info) = self.traits.get(trait_name) else {

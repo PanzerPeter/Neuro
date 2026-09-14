@@ -189,8 +189,9 @@ pub(crate) struct BoundInfo {
 pub(crate) struct TraitInfo {
     pub(crate) methods: HashMap<String, TraitMethodSig>,
     /// Associated type names the trait declares (`type Item`). Every impl must bind
-    /// each one, and a trait declaring any is not object-safe: a trait object erases the
-    /// implementor, and with it the only thing that says what `Self::Item` is.
+    /// each one. A trait declaring any is not object-safe HERE because the binding form on
+    /// a trait object (`&dyn Iterator<Item = u32>`) is unimplemented, not because such a
+    /// trait is undispatchable: binding it is what fixes the vtable's layout. Phase 5.
     pub(crate) assoc_types: Vec<String>,
 }
 

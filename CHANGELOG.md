@@ -10,6 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.31.1] - 2026-09-14
+
+### Changed
+
+- docs: the two open design rulings in the limitation register are decided.
+  `dyn Trait<Assoc = T>` is a gap, not a language rule — the object-safety test
+  is about methods, and binding the associated type in the trait-object type is
+  what gives the vtable a fixed layout, so it gets a roadmap item at the head of
+  Phase 5 rather than a fourth object-safety clause. The spec now states that a
+  trait object over a trait with associated types must bind every one of them,
+  and the language reference no longer gives the reversed rationale.
+- docs: the shift asymmetry is settled as intended rather than pending. `>>` is
+  function composition, so a right-shift operator was foreclosed permanently;
+  demoting `<<` to a `.shl(n)` method would break a shipped operator and its
+  overloadable trait for symmetry alone. The spec says so, and the limitation
+  entry that tracked the open question is deleted.
+
+
 ## [2.31.0] - 2026-09-14
 
 ### Added

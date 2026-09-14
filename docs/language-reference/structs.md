@@ -501,9 +501,11 @@ demands: passing a `Channel` implementor whose `type Sample = f64` to a `Sample 
 is an error naming both types. A bound may only constrain an associated type the trait
 declares, and a bare bound still cannot type a call to a method that names one.
 
-A trait declaring an associated type remains **not object-safe**, so it has no `dyn` form: a
-trait object erases the implementor, which is exactly what the binding would have to come
-from.
+A trait declaring an associated type has **no `dyn` form yet**. The form that will work
+binds the associated type in the trait-object type itself — `&dyn Channel<Sample = i32>` —
+which is what keeps the vtable's signatures resolvable after the implementor is erased. The
+compiler does not accept it today and says so: `dyn` on such a trait is rejected as not
+object-safe, naming the associated type and the bound form that is not implemented.
 
 ## Unsupported (Phase 1+)
 
