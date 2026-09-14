@@ -10,6 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.34.0] - 2026-09-14
+
+### Added
+
+- codegen: the MLIR path bufferizes, so a `linalg` body now reaches LLVM IR as a
+  real loop nest instead of failing the crossing. `translate_to_llvm_ir` runs
+  `one-shot-bufferize` with function-boundary conversion,
+  `buffer-deallocation-pipeline` and `convert-linalg-to-loops` ahead of the
+  descent through `scf` / `cf` / `memref` into the `llvm` dialect. Element-wise
+  arithmetic, matrix products and a dynamic `?` extent all cross.
+
+### Changed
+
+- codegen: the `llvm`-dialect pipeline is named in text and parsed with melior's
+  `parse_pass_pipeline` rather than assembled from typed pass constructors,
+  because melior wraps no bufferization pass. The MLIR context now registers
+  MLIR's pass registry once, which a textually named pass requires.
+
+
 ## [2.33.0] - 2026-09-14
 
 ### Added

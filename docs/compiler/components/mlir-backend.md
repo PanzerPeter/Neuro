@@ -10,8 +10,9 @@ The MLIR backend is the tensor / autodiff / GPU lowering path. It consumes the s
 High-Level IR ([`neuro-hir`](hir-lowering.md)) the LLVM backend consumes and emits a verifier-clean
 MLIR module: one `func.func` *declaration* per function and `impl` method, except where a body is
 element-wise tensor arithmetic or a matrix product, which becomes a definition built from the
-`linalg` and `tensor` dialects. That module can be carried on through the `llvm` dialect into a verified inkwell LLVM
-module, proving the HIR → MLIR → llvm dialect → inkwell pipeline end-to-end.
+`linalg` and `tensor` dialects. That module can be carried on through bufferization and the `llvm` dialect into a verified
+inkwell LLVM module, where a `linalg` body arrives as a real loop nest, proving the
+HIR → MLIR → llvm dialect → inkwell pipeline end-to-end.
 
 Scalar arithmetic is deliberately **not** lowered here and never will be: it belongs to the
 [LLVM backend](llvm-backend.md) alone, so that tensor codegen does not exist in two maintained
@@ -166,23 +167,42 @@ maps, iterators and body region as arguments. Every extent must be static: `tens
 recover a dynamic result axis but not the contracted one, which appears in no operand of the
 destination, so a `?` anywhere leaves the function a declaration.
 
-A `linalg` body does **not** survive `translate_to_llvm_ir`: the pipeline below covers
-`func` / `arith` / `index` only, and bufferizing `linalg` is later work. The crossing returns a
-typed error rather than a wrong module.
+A `linalg` body survives `translate_to_llvm_ir`: the pipeline below bufferizes it and turns it
+into loops. See [MLIR to LLVM IR](#mlir-to-llvm-ir).
 
 ## MLIR to LLVM IR
 
-`translate_to_llvm_ir` runs a real MLIR conversion pipeline rather than emitting LLVM by hand:
+`translate_to_llvm_ir` runs a real MLIR pass pipeline rather than emitting LLVM by hand:
 
-1. `func-to-llvm`, `arith-to-llvm`, `index-to-llvm` rewrite the module into the `llvm` dialect.
-2. `reconcile-unrealized-casts` clears the `unrealized_conversion_cast` ops each conversion leaves
+1. `one-shot-bufferize{bufferize-function-boundaries=true}` rewrites tensor values into `memref`
+   buffers. The function-boundary flag is required, not a tuning knob: without it a `func.func`
+   keeps `tensor` in its signature, which `func-to-llvm` cannot convert.
+2. `buffer-deallocation-pipeline` gives each allocated buffer an owner and a release.
+3. `func.func(convert-linalg-to-loops)` turns the structured op into `scf` loops over element
+   loads and stores. It is nested under `func.func` because that is the operation it is anchored
+   on, and it must run *after* bufferization: against tensor operands it silently leaves the op
+   alone.
+4. `convert-scf-to-cf` and `finalize-memref-to-llvm` lower what those loops are made of, then
+   `func-to-llvm`, `arith-to-llvm`, `cf-to-llvm` and `index-to-llvm` take the rest into the
+   `llvm` dialect.
+5. `reconcile-unrealized-casts` clears the `unrealized_conversion_cast` ops each conversion leaves
    at its boundary with the dialects the others own. The translation rejects any that survive, so
    this pass runs last by necessity, not by convention.
-3. `mlirTranslateModuleToLLVMIR` builds the LLVM module. `melior 0.25` does not wrap it, so the
+6. `mlirTranslateModuleToLLVMIR` builds the LLVM module. `melior 0.25` does not wrap it, so the
    call goes through `mlir-sys` directly, pinned to the exact version melior itself depends on so
    both reach one crate instance.
-4. The resulting `LLVMModuleRef` is wrapped by `inkwell::module::Module` (sole owner, disposed on
+7. The resulting `LLVMModuleRef` is wrapped by `inkwell::module::Module` (sole owner, disposed on
    drop) and put through LLVM's verifier.
+
+The pipeline is named in text and parsed with `melior::utility::parse_pass_pipeline`, because
+melior wraps no bufferization pass and two of the three that carry a `linalg` body are
+bufferization passes. Textually named passes must be in the process-global pass registry, so the
+MLIR context builder calls `register_all_passes` once.
+
+A bufferized tensor parameter crosses as an exploded `memref` descriptor — allocated pointer,
+aligned pointer, offset, sizes, strides — and the result buffer belongs to the caller. That is
+MLIR's tensor ABI, not the single DLPack handle the LLVM backend uses, and the two do not meet:
+nothing in the compiler calls this path from a compile.
 
 The `LLVMContext` in step 3 is **inkwell's own**. That is deliberate: `mlir-sys` and `llvm-sys` are
 independent bindings, and an install where they resolve to different `libLLVM-20` copies fails at

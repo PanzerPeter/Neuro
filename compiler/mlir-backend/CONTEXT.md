@@ -1,7 +1,7 @@
 # mlir-backend
 
 ## Purpose
-Lower the typed HIR to MLIR for the tensor / autodiff / GPU path. It consumes `neuro_hir::HirProgram` and emits a verifier-clean module: a `func.func` declaration per function, except where a body is element-wise tensor arithmetic or a matrix product, which becomes a definition built from the `linalg` and `tensor` dialects. The same module carries on through the `llvm` dialect into a verified inkwell LLVM module, proving the HIR → MLIR → llvm dialect → inkwell pipeline end to end.
+Lower the typed HIR to MLIR for the tensor / autodiff / GPU path. It consumes `neuro_hir::HirProgram` and emits a verifier-clean module: a `func.func` declaration per function, except where a body is element-wise tensor arithmetic or a matrix product, which becomes a definition built from the `linalg` and `tensor` dialects. The same module carries on through bufferization and the `llvm` dialect into a verified inkwell LLVM module, so a `linalg` body arrives as a real loop nest and the HIR → MLIR → llvm dialect → inkwell pipeline is proven end to end.
 
 ## Feature Gate
 The whole crate is opt-in behind the off-by-default `mlir` feature
@@ -16,8 +16,8 @@ legs build the placeholder.
 - `lower_program(&HirProgram) -> Result<String, MlirError>`: walks the typed HIR and returns
   the textual form of a verified module of `func.func` declarations.
 - `translate_to_llvm_ir(&HirProgram) -> Result<String, MlirError>`: the same module carried on
-  through an MLIR conversion pipeline into the `llvm` dialect, translated into an inkwell LLVM
-  module, LLVM-verified, and returned as textual LLVM IR.
+  through a bufferization and conversion pipeline into the `llvm` dialect, translated into an
+  inkwell LLVM module, LLVM-verified, and returned as textual LLVM IR.
 - `emit_smoke_module() -> Result<String, MlirError>`, the HIR-independent wiring check: builds
   `func.func @neuro_smoke(index, index) -> index` with a single `arith.addi` body, verifies it,
   and returns its textual form.
@@ -31,10 +31,20 @@ The crate adds no business logic of its own beyond the lowering; it otherwise us
 third-party `melior` + `mlir-sys` + `inkwell` + `thiserror`.
 
 ## Notes
-**The MLIR → LLVM crossing.** `translate_to_llvm_ir` runs `func-to-llvm`, `arith-to-llvm`,
-`index-to-llvm` and then `reconcile-unrealized-casts`, that last one by necessity, since each
-conversion leaves `unrealized_conversion_cast` ops at its boundary with the dialects the others
-own and the translation rejects any that survive. It then calls `mlirTranslateModuleToLLVMIR`
+**The MLIR → LLVM crossing.** `translate_to_llvm_ir` runs `LLVM_LOWERING_PIPELINE`, named in
+text and parsed by `melior::utility::parse_pass_pipeline` because melior wraps no bufferization
+pass. Its first three entries are what carry a `linalg` body: `one-shot-bufferize` (with
+`bufferize-function-boundaries=true`, or a `func.func` keeps `tensor` in its signature and never
+converts) rewrites tensor values into `memref` buffers, `buffer-deallocation-pipeline` gives each
+one an owner, and only then does `convert-linalg-to-loops` — nested under `func.func`, which is
+what it is anchored on — produce `scf` loops; run before bufferization it silently leaves the op
+alone. The rest is the descent those loops land in: `convert-scf-to-cf`, `finalize-memref-to-llvm`,
+then `func` / `arith` / `cf` / `index` to LLVM and `reconcile-unrealized-casts` last by necessity,
+since each conversion leaves `unrealized_conversion_cast` ops at its boundary with the dialects the
+others own and the translation rejects any that survive. Pass names in a textual pipeline must be in
+the process-global registry, so `new_context` calls `register_all_passes` behind a `Once`.
+
+It then calls `mlirTranslateModuleToLLVMIR`
 **directly through `mlir-sys`**: `melior 0.25` does not wrap it, and `mlir-sys 0.5.0` is pinned to
 the exact version melior itself depends on so both reach one crate instance and their
 `MlirOperation` / `LLVMContextRef` types unify.
@@ -100,10 +110,11 @@ takes its operand split, maps, iterators and body region as arguments. Every ext
 static here: `tensor.dim` can recover a dynamic result axis but not the contracted one, which
 appears in no operand of the destination, so a `?` anywhere answers `Ok(None)`.
 
-A `linalg` body does **not** survive `translate_to_llvm_ir`: the conversion pipeline covers
-`func` / `arith` / `index` only, and bufferizing `linalg` on tensors is later work. The
-crossing fails as a typed `MlirError` rather than producing a wrong module, which
-`a_linalg_body_fails_the_crossing_as_a_typed_error` pins.
+**The bufferized function has MLIR's tensor ABI, not Neuro's.** A tensor parameter crosses as an
+exploded `memref` descriptor — allocated pointer, aligned pointer, offset, sizes, strides — where
+the LLVM backend's tensor is one pointer to a flat buffer behind a DLPack handle, and the result
+buffer is the caller's to free. Nothing calls the MLIR path from a compile, so the two never meet;
+the boundary layout is deliberately left at MLIR's default until something does.
 
 **What `lower_program` emits.** It registers all dialects, then maps each top-level `HirItem`:
 free functions, `impl` methods, and lifted closures become `func.func` *declarations* (empty

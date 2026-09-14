@@ -1,11 +1,39 @@
 use crate::{context::new_context, errors::MlirError, lower::build_module};
 
-use melior::{
-    ir::Module,
-    pass::{conversion, PassManager},
-    Context,
-};
+use melior::{ir::Module, pass::PassManager, utility::parse_pass_pipeline, Context};
 use neuro_hir::HirProgram;
+
+/// The route from the dialects this slice builds in down to the `llvm` dialect.
+///
+/// The first three entries are what carry a `linalg` body: `one-shot-bufferize`
+/// rewrites the tensor value semantics into `memref` buffers (function boundaries
+/// included, or a `func.func` would keep tensors in its signature and never
+/// convert), `buffer-deallocation-pipeline` gives every buffer it allocated an
+/// owner and a release, and only then can `convert-linalg-to-loops` turn the
+/// structured op into `scf` loops over loads and stores.
+///
+/// The rest is the descent those loops land in: `scf` becomes `cf` branches,
+/// `memref` becomes pointer arithmetic against `malloc`, and each remaining
+/// dialect converts on its own. `reconcile-unrealized-casts` runs last by
+/// necessity: every conversion above it leaves `unrealized_conversion_cast` ops
+/// at its boundary with the dialects the others own, and the translation rejects
+/// any that survive.
+///
+/// It is named in text rather than assembled from `melior`'s typed pass
+/// constructors because `one-shot-bufferize` has none: `melior 0.25` wraps the
+/// conversion and linalg passes but not the bufferization ones. Half the pipeline
+/// typed and half in text would be two spellings of one sequence.
+const LLVM_LOWERING_PIPELINE: &str = "builtin.module(\
+    one-shot-bufferize{bufferize-function-boundaries=true},\
+    buffer-deallocation-pipeline,\
+    func.func(convert-linalg-to-loops),\
+    convert-scf-to-cf,\
+    finalize-memref-to-llvm,\
+    convert-func-to-llvm,\
+    convert-arith-to-llvm,\
+    convert-cf-to-llvm,\
+    convert-index-to-llvm,\
+    reconcile-unrealized-casts)";
 
 /// Lower a typed HIR program through MLIR all the way to verified LLVM IR.
 ///
@@ -68,18 +96,12 @@ pub(crate) fn translate_module(
     Ok(llvm_module.print_to_string().to_string())
 }
 
-/// Rewrite a module built from the `func` / `arith` / `index` dialects into the
-/// `llvm` dialect, which is the only input `mlirTranslateModuleToLLVMIR` accepts.
-///
-/// `reconcile-unrealized-casts` runs last by necessity: each conversion above it
-/// leaves `unrealized_conversion_cast` ops at its boundary with the dialects the
-/// others own, and the translation rejects any that survive.
+/// Rewrite a module built from the `func` / `arith` / `index` / `linalg` /
+/// `tensor` dialects into the `llvm` dialect, which is the only input
+/// `mlirTranslateModuleToLLVMIR` accepts.
 fn convert_to_llvm_dialect(context: &Context, module: &mut Module<'_>) -> Result<(), MlirError> {
     let manager = PassManager::new(context);
-    manager.add_pass(conversion::create_func_to_llvm());
-    manager.add_pass(conversion::create_arith_to_llvm());
-    manager.add_pass(conversion::create_index_to_llvm());
-    manager.add_pass(conversion::create_reconcile_unrealized_casts());
+    parse_pass_pipeline(manager.as_operation_pass_manager(), LLVM_LOWERING_PIPELINE)?;
 
     manager
         .run(module)
@@ -149,21 +171,29 @@ mod tests {
         );
     }
 
-    /// `func f(a: Tensor<f32, [2]>, b: Tensor<f32, [2]>) -> Tensor<f32, [2]> { return a + b }`
-    fn program_with_tensor_arithmetic() -> HirProgram {
-        let ty = HirType::Tensor {
+    fn tensor(shape: Vec<Option<usize>>) -> HirType {
+        HirType::Tensor {
             element: Box::new(HirType::F32),
-            shape: static_shape(&[2]),
+            shape,
             names: AxisNames::default(),
-        };
-        let operand = |name: &str| {
+        }
+    }
+
+    /// `func f(a: Tensor<f32, L>, b: Tensor<f32, R>) -> Tensor<f32, Out> { return a <op> b }`
+    fn program_with_tensor_operator(
+        op: BinaryOp,
+        left: HirType,
+        right: HirType,
+        result: HirType,
+    ) -> HirProgram {
+        let operand = |name: &str, ty: &HirType| {
             HirExpr::new(
                 HirExprKind::Variable(name.to_string()),
                 ty.clone(),
                 Span::new(0, 0),
             )
         };
-        let param = |name: &str| HirParam {
+        let param = |name: &str, ty: &HirType| HirParam {
             name: name.to_string(),
             ty: ty.clone(),
             span: Span::new(0, 0),
@@ -172,16 +202,16 @@ mod tests {
         HirProgram {
             items: vec![HirItem::Function(HirFunction {
                 name: "f".to_string(),
-                params: vec![param("a"), param("b")],
-                return_type: ty.clone(),
+                params: vec![param("a", &left), param("b", &right)],
+                return_type: result.clone(),
                 body: vec![HirStmt::Return {
                     value: Some(HirExpr::new(
                         HirExprKind::Binary {
-                            op: BinaryOp::Add,
-                            left: Box::new(operand("a")),
-                            right: Box::new(operand("b")),
+                            op,
+                            left: Box::new(operand("a", &left)),
+                            right: Box::new(operand("b", &right)),
                         },
-                        ty,
+                        result,
                         Span::new(0, 0),
                     )),
                     span: Span::new(0, 0),
@@ -191,21 +221,77 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_linalg_body_fails_the_crossing_as_a_typed_error() {
-        // This pipeline converts `func` / `arith` / `index` and nothing else, so a
-        // `linalg` body on tensors has no route to the `llvm` dialect until the
-        // element-wise item bufferizes it. What this asserts is that the gap
-        // surfaces as an error rather than as a silently wrong LLVM module.
-        let error = translate_to_llvm_ir(&program_with_tensor_arithmetic())
-            .expect_err("linalg has no conversion in this pipeline");
-
+    /// The whole point of bufferizing: a `linalg` body is a definition on the far
+    /// side of the crossing, and the loads and stores prove it is the loop nest
+    /// rather than an emptied-out shell.
+    fn assert_is_a_lowered_body(ir: &str) {
         assert!(
-            matches!(
-                error,
-                MlirError::PassPipelineFailed | MlirError::TranslationFailed
-            ),
-            "expected a typed pipeline failure, got: {error}"
+            ir.contains("define") && ir.contains("@f"),
+            "expected a defined function, not a declaration:\n{ir}"
+        );
+        assert!(
+            ir.contains("load float") && ir.contains("store float"),
+            "expected the linalg body to have become element loads and stores:\n{ir}"
+        );
+        assert!(
+            !ir.contains("linalg.") && !ir.contains("memref"),
+            "expected nothing above the llvm dialect to survive:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn an_element_wise_linalg_body_reaches_llvm_ir() {
+        let shape = static_shape(&[2, 3]);
+        let ir = translate_to_llvm_ir(&program_with_tensor_operator(
+            BinaryOp::Add,
+            tensor(shape.clone()),
+            tensor(shape.clone()),
+            tensor(shape),
+        ))
+        .expect("an element-wise body should bufferize and translate");
+
+        assert_is_a_lowered_body(&ir);
+        assert!(
+            ir.contains("fadd float"),
+            "expected arith.addf to have become an LLVM fadd:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn a_contracting_linalg_body_reaches_llvm_ir() {
+        let ir = translate_to_llvm_ir(&program_with_tensor_operator(
+            BinaryOp::MatMul,
+            tensor(static_shape(&[2, 3])),
+            tensor(static_shape(&[3, 4])),
+            tensor(static_shape(&[2, 4])),
+        ))
+        .expect("a matrix product should bufferize and translate");
+
+        assert_is_a_lowered_body(&ir);
+        assert!(
+            ir.contains("fmul float"),
+            "expected the multiply-accumulate body:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn a_dynamic_extent_survives_the_crossing() {
+        // The destination is sized by `tensor.dim` on an operand, so bufferizing
+        // it has to keep that extent as a run-time value feeding the allocation
+        // rather than needing it as a constant.
+        let shape = vec![None];
+        let ir = translate_to_llvm_ir(&program_with_tensor_operator(
+            BinaryOp::Multiply,
+            tensor(shape.clone()),
+            tensor(shape.clone()),
+            tensor(shape),
+        ))
+        .expect("a dynamic extent should bufferize and translate");
+
+        assert_is_a_lowered_body(&ir);
+        assert!(
+            ir.contains("@malloc"),
+            "expected the destination buffer to be allocated at run time:\n{ir}"
         );
     }
 
