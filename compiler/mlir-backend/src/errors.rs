@@ -30,6 +30,12 @@ pub enum MlirError {
     #[error("translated LLVM module failed verification: {0}")]
     LlvmVerificationFailed(String),
 
+    /// MLIR rejected an attribute this backend generated from its textual form.
+    /// The text is produced by the lowering itself, never by a user, so this is a
+    /// compiler bug surfaced as a value rather than left to panic.
+    #[error("MLIR rejected the generated attribute `{0}`")]
+    AttributeSyntax(String),
+
     /// A melior call (block argument access, operation result access, ...) failed.
     #[error("melior operation failed: {0}")]
     Melior(#[from] melior::Error),

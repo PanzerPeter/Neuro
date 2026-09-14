@@ -444,7 +444,7 @@ compiler/
 ├── semantic-analysis/       # Type checker, scope analysis
 ├── hir-lowering/            # Type-checked AST → typed HIR
 ├── llvm-backend/            # HIR → object code (inkwell 0.10 / LLVM 20)
-├── mlir-backend/            # HIR → MLIR scaffold (off-by-default `mlir` feature)
+├── mlir-backend/            # HIR → MLIR linalg (off-by-default `mlir` feature)
 └── neurc/                   # CLI compiler driver (pipeline orchestration)
 ```
 

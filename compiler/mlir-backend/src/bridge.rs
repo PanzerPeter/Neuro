@@ -91,7 +91,11 @@ mod tests {
     use super::*;
 
     use crate::smoke::build_smoke_module;
-    use neuro_hir::{HirFunction, HirItem, HirParam, HirProgram, HirType};
+    use ast_types::BinaryOp;
+    use neuro_hir::{
+        static_shape, AxisNames, HirExpr, HirExprKind, HirFunction, HirItem, HirParam, HirProgram,
+        HirStmt, HirType,
+    };
     use shared_types::Span;
 
     fn program_with_one_function() -> HirProgram {
@@ -142,6 +146,66 @@ mod tests {
         assert!(
             ir.contains(" add "),
             "expected arith.addi to have become an LLVM add:\n{ir}"
+        );
+    }
+
+    /// `func f(a: Tensor<f32, [2]>, b: Tensor<f32, [2]>) -> Tensor<f32, [2]> { return a + b }`
+    fn program_with_tensor_arithmetic() -> HirProgram {
+        let ty = HirType::Tensor {
+            element: Box::new(HirType::F32),
+            shape: static_shape(&[2]),
+            names: AxisNames::default(),
+        };
+        let operand = |name: &str| {
+            HirExpr::new(
+                HirExprKind::Variable(name.to_string()),
+                ty.clone(),
+                Span::new(0, 0),
+            )
+        };
+        let param = |name: &str| HirParam {
+            name: name.to_string(),
+            ty: ty.clone(),
+            span: Span::new(0, 0),
+        };
+
+        HirProgram {
+            items: vec![HirItem::Function(HirFunction {
+                name: "f".to_string(),
+                params: vec![param("a"), param("b")],
+                return_type: ty.clone(),
+                body: vec![HirStmt::Return {
+                    value: Some(HirExpr::new(
+                        HirExprKind::Binary {
+                            op: BinaryOp::Add,
+                            left: Box::new(operand("a")),
+                            right: Box::new(operand("b")),
+                        },
+                        ty,
+                        Span::new(0, 0),
+                    )),
+                    span: Span::new(0, 0),
+                }],
+                span: Span::new(0, 0),
+            })],
+        }
+    }
+
+    #[test]
+    fn a_linalg_body_fails_the_crossing_as_a_typed_error() {
+        // This pipeline converts `func` / `arith` / `index` and nothing else, so a
+        // `linalg` body on tensors has no route to the `llvm` dialect until the
+        // element-wise item bufferizes it. What this asserts is that the gap
+        // surfaces as an error rather than as a silently wrong LLVM module.
+        let error = translate_to_llvm_ir(&program_with_tensor_arithmetic())
+            .expect_err("linalg has no conversion in this pipeline");
+
+        assert!(
+            matches!(
+                error,
+                MlirError::PassPipelineFailed | MlirError::TranslationFailed
+            ),
+            "expected a typed pipeline failure, got: {error}"
         );
     }
 

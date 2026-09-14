@@ -10,6 +10,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.29.0] - 2026-09-14
+
+### Added
+
+- codegen: tensor arithmetic lowers to the MLIR Linalg dialect. A function whose
+  body is element-wise `+ - * /` over tensors is emitted as a `func.func`
+  definition built from `tensor.empty` and `linalg.generic`, with an `arith`
+  body closed by `linalg.yield`. Float elements use the `arith` float
+  operations, integer elements theirs, with division splitting on signedness.
+- codegen: `HirType::Tensor` maps to a ranked MLIR tensor (`tensor<2x3xf32>`).
+  A dynamic `?` axis becomes MLIR's dynamic-size sentinel; a non-scalar element
+  is rejected, since `tensor<...>` does not accept an opaque pointer.
+
+### Changed
+
+- build: the `mlir` cargo feature is now permanently opt-in rather than a
+  staging step. The only Windows LLVM 20 distribution carrying what `llvm-sys`
+  needs ships no MLIR, so requiring it would stop `neurc.exe` being buildable.
+  Scalar codegen therefore stays on the LLVM backend alone, and only tensor
+  arithmetic goes through MLIR.
+- codegen: `mlir-backend` depends on `ast-types` under the `mlir` feature, for
+  the `BinaryOp` the HIR's binary expressions carry.
+
+### Known limitations
+
+- A `linalg` body does not reach LLVM IR: the conversion pipeline covers
+  `func` / `arith` / `index` only. The crossing returns a typed error rather
+  than a wrong module.
+- No broadcasting: both operands must already have the result's tensor type.
+  A `?` extent has no arithmetic either, since the destination is a
+  `tensor.empty` with no dynamic sizes computed for it.
+
+
 ## [2.28.1] - 2026-09-13
 
 ### Fixed

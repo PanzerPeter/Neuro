@@ -1,28 +1,36 @@
 # MLIR Backend (Experimental)
 
-**Status**: scaffold, off by default behind the `mlir` cargo feature
+**Status**: experimental, off by default behind the `mlir` cargo feature
 **Crate**: `compiler/mlir-backend`
 **Library**: melior 0.25.1 (Rust MLIR bindings, LLVM/MLIR 20)
 
 ## Overview
 
-The MLIR backend is the future tensor / autodiff / GPU lowering path (Phase 2+). It consumes the
-same typed High-Level IR ([`neuro-hir`](hir-lowering.md)) the LLVM backend consumes. The scaffold
-emits a trivial, verifier-clean MLIR module, one `func.func` *declaration* per function and `impl`
-method, and can carry that module on through the `llvm` dialect into a verified inkwell LLVM
-module, proving the HIR → MLIR → llvm dialect → inkwell pipeline end-to-end. Real body lowering
-(linalg / tensor dialects) is the rest of Phase 2.
+The MLIR backend is the tensor / autodiff / GPU lowering path. It consumes the same typed
+High-Level IR ([`neuro-hir`](hir-lowering.md)) the LLVM backend consumes and emits a verifier-clean
+MLIR module: one `func.func` *declaration* per function and `impl` method, except where a body is
+element-wise tensor arithmetic, which becomes a definition built from the `linalg` and `tensor`
+dialects. That module can be carried on through the `llvm` dialect into a verified inkwell LLVM
+module, proving the HIR → MLIR → llvm dialect → inkwell pipeline end-to-end.
+
+Scalar arithmetic is deliberately **not** lowered here and never will be: it belongs to the
+[LLVM backend](llvm-backend.md) alone, so that tensor codegen does not exist in two maintained
+copies.
 
 ## Feature Gate
 
 The path is opt-in behind the off-by-default `mlir` feature
-(`mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir"]`):
+(`mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir", "dep:ast-types"]`):
+
+The gate is permanent, not a staging step. The only Windows LLVM 20 build shipping the headers and
+import libraries `llvm-sys` needs carries no MLIR at all, so requiring MLIR would stop `neurc.exe`
+being buildable; Homebrew's `llvm@20` does carry it, and Arch's `llvm20` does not.
 
 - **Disabled (default)**: the crate compiles to an empty placeholder and pulls in no MLIR toolchain
   (nor `neuro-hir`), so `cargo build/test --workspace` works on a stock LLVM 20 install with no MLIR
   on every CI OS.
-- **Enabled**: pulls in `melior` + `mlir-sys` + `inkwell` + `neuro-hir` and exposes the entry points
-  below. CI provisions MLIR only on Linux, where the `--all-features` lint job and a dedicated
+- **Enabled**: pulls in `melior` + `mlir-sys` + `inkwell` + `neuro-hir` + `ast-types` and exposes the
+  entry points below. CI provisions MLIR only on Linux, where the `--all-features` lint job and a dedicated
   `cargo test -p mlir-backend --features mlir` smoke step exercise the gated code; the Windows/macOS
   legs build the placeholder.
 
@@ -37,26 +45,60 @@ pub fn translate_to_llvm_ir(program: &HirProgram) -> Result<String, MlirError>;
 pub fn emit_smoke_module() -> Result<String, MlirError>;
 ```
 
-- `lower_program`, the HIR → MLIR scaffold: registers all dialects, walks the typed HIR, and returns
-  the textual form of a **verified** module of `func.func` declarations.
+- `lower_program`, the HIR → MLIR lowering: registers all dialects, walks the typed HIR, and returns
+  the textual form of a **verified** module.
 - `translate_to_llvm_ir`, the full path: the same module, converted to the `llvm` dialect, translated
   into an inkwell LLVM module, LLVM-verified, and returned as textual LLVM IR.
 - `emit_smoke_module`, the HIR-independent `melior` wiring check: builds + verifies
   `func.func @neuro_smoke(index, index) -> index` with an `arith.addi` body.
 
-## Lowering Rules (scaffold)
+## Lowering Rules
 
 - Free functions and `impl` methods become `func.func` *declarations* (empty region, private
   visibility, external symbols, not definitions). A method receiver lowers to a pointer parameter.
   Structs and constants are skipped.
 - HIR scalar types map to MLIR scalars: `i8` to `i64`, `i1` for `bool`, `i32` for `char`,
   `f16` / `bf16` / `f32` / `f64`.
-- Every aggregate / reference / string type maps to an opaque `!llvm.ptr` until real tensor and
-  struct lowering lands (Phase 2+).
+- A tensor maps to a ranked MLIR tensor: `Tensor<f32, [2, 3]>` is `tensor<2x3xf32>`, and a dynamic
+  `?` axis becomes MLIR's dynamic-size sentinel. The element must map to an MLIR integer or float;
+  an aggregate element is a `MlirError::UnsupportedType`.
+- Every other aggregate / reference / string type maps to an opaque `!llvm.ptr` until real struct
+  lowering lands.
 - `void` is the empty result list in return position; anywhere else it is a
   `MlirError::UnsupportedType`.
-- Function bodies are intentionally **not** lowered yet; that is the Phase 2 linalg/tensor work. The
-  module is run through the MLIR verifier before its textual form is returned.
+- The module is run through the MLIR verifier before its textual form is returned.
+
+## Tensor Arithmetic
+
+A function whose body is a run of `val` bindings closed by one `return`, over element-wise
+`+ - * /` on tensors, is emitted as a definition instead. Each operator becomes a `tensor.empty`
+destination plus one `linalg.generic`:
+
+```mlir
+#map = affine_map<(d0, d1) -> (d0, d1)>
+func.func @f(%arg0: tensor<2x3xf32>, %arg1: tensor<2x3xf32>) -> tensor<2x3xf32> {
+  %0 = tensor.empty() : tensor<2x3xf32>
+  %1 = linalg.generic {indexing_maps = [#map, #map, #map],
+                       iterator_types = ["parallel", "parallel"]}
+       ins(%arg0, %arg1 : tensor<2x3xf32>, tensor<2x3xf32>)
+       outs(%0 : tensor<2x3xf32>) {
+  ^bb0(%in: f32, %in_0: f32, %out: f32):
+    %2 = arith.addf %in, %in_0 : f32
+    linalg.yield %2 : f32
+  } -> tensor<2x3xf32>
+  return %1 : tensor<2x3xf32>
+}
+```
+
+Float elements use the `arith` float operations and integer elements theirs, with division
+splitting on signedness (`divsi` / `divui`). Anything the builder cannot express leaves the
+function an external declaration rather than failing: scalar bodies and every other tensor
+operation, which stay on the LLVM backend by design, and — for now — operands whose shapes differ
+(broadcasting), a `?` extent, and `f16` / `bf16` elements.
+
+A `linalg` body does **not** survive `translate_to_llvm_ir`: the pipeline below covers
+`func` / `arith` / `index` only, and bufferizing `linalg` is later work. The crossing returns a
+typed error rather than a wrong module.
 
 ## MLIR to LLVM IR
 

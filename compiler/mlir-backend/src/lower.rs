@@ -1,12 +1,12 @@
-use crate::{context::new_context, errors::MlirError};
+use crate::{context::new_context, errors::MlirError, tensor_arithmetic};
 
 use melior::{
     dialect::{func, llvm},
     ir::{
         attribute::{StringAttribute, TypeAttribute},
         operation::OperationLike,
-        r#type::{FunctionType, IntegerType},
-        BlockLike, Identifier, Location, Module, Operation, Region, Type,
+        r#type::{FunctionType, IntegerType, RankedTensorType},
+        BlockLike, Identifier, Location, Module, Operation, Region, Type, TypeLike,
     },
     Context,
 };
@@ -21,19 +21,20 @@ const I64_BITS: u32 = 64;
 const BOOL_BITS: u32 = 1;
 const CHAR_BITS: u32 = 32;
 
-/// Lower a typed HIR program to a trivial MLIR module and return its textual form.
+/// Lower a typed HIR program to an MLIR module and return its textual form.
 ///
-/// This is the Phase 1.8 scaffold of the MLIR path: it walks the typed HIR and
-/// emits one `func.func` *declaration* (external, empty body) per free function
-/// and per `impl` method, mapping each HIR type to its MLIR counterpart. Function
-/// bodies are intentionally not lowered yet; that is the Phase 3+ tensor / linalg
-/// work; this stage proves the HIR → `melior` → verified MLIR pipeline end-to-end.
+/// Walks the typed HIR and emits one `func.func` per free function and per `impl`
+/// method, mapping each HIR type to its MLIR counterpart. A function whose body is
+/// element-wise tensor arithmetic becomes a *definition* built from the `linalg`
+/// and `tensor` dialects; every other function stays an external *declaration*
+/// (empty region), because scalar codegen belongs to the LLVM backend alone.
 ///
 /// # Errors
 ///
-/// Returns [`MlirError::UnsupportedType`] if a HIR type with no MLIR scaffold
-/// mapping appears in value position, or [`MlirError::ModuleVerificationFailed`]
-/// if the constructed module fails MLIR's own verifier.
+/// Returns [`MlirError::UnsupportedType`] if a HIR type with no MLIR mapping
+/// appears in value position, [`MlirError::AttributeSyntax`] if a generated
+/// `linalg` attribute is rejected, or [`MlirError::ModuleVerificationFailed`] if
+/// the constructed module fails MLIR's own verifier.
 pub fn lower_program(program: &HirProgram) -> Result<String, MlirError> {
     let context = new_context();
     let module = build_module(&context, program)?;
@@ -41,7 +42,7 @@ pub fn lower_program(program: &HirProgram) -> Result<String, MlirError> {
     Ok(module.as_operation().to_string())
 }
 
-/// Build the verified scaffold module in a caller-owned context.
+/// Build the verified module in a caller-owned context.
 ///
 /// Split out of [`lower_program`] so the translating path can keep working on the
 /// live `Module` instead of re-parsing its printed form.
@@ -56,13 +57,26 @@ pub(crate) fn build_module<'c>(
         match item {
             HirItem::Function(function) => {
                 let params: Vec<HirType> = function.params.iter().map(|p| p.ty.clone()).collect();
-                let op = declare_function(
-                    context,
-                    location,
-                    &function.name,
-                    &params,
-                    &function.return_type,
-                )?;
+                // A tensor-arithmetic body is the one kind this path defines rather
+                // than declares; everything else stays external, which is what keeps
+                // scalar codegen from existing twice.
+                let op = match tensor_arithmetic::build_body(context, location, function)? {
+                    Some(region) => define_function(
+                        context,
+                        location,
+                        &function.name,
+                        &params,
+                        &function.return_type,
+                        region,
+                    )?,
+                    None => declare_function(
+                        context,
+                        location,
+                        &function.name,
+                        &params,
+                        &function.return_type,
+                    )?,
+                };
                 module.body().append_operation(op);
             }
             HirItem::Impl(impl_block) => {
@@ -97,8 +111,7 @@ pub(crate) fn build_module<'c>(
             }
             // Structs, enums, constants, and traits carry no callable surface; a
             // trait item is only a vtable slot order, and its methods reach
-            // the module through the implementors' `impl` blocks. The scaffold
-            // module is a set of function declarations only.
+            // the module through the implementors' `impl` blocks.
             HirItem::Struct(_) | HirItem::Enum(_) | HirItem::Const(_) | HirItem::Trait(_) => {}
         }
     }
@@ -145,17 +158,7 @@ fn declare_function<'c>(
     param_types: &[HirType],
     return_type: &HirType,
 ) -> Result<Operation<'c>, MlirError> {
-    let inputs = param_types
-        .iter()
-        .map(|ty| map_type(context, ty))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let results = match return_type {
-        HirType::Void => Vec::new(),
-        other => vec![map_type(context, other)?],
-    };
-
-    let fn_type = FunctionType::new(context, &inputs, &results);
+    let fn_type = signature(context, param_types, return_type)?;
 
     // An empty region makes this an external declaration; private visibility keeps
     // it unexported, matching its declaration-only role in the scaffold module.
@@ -174,11 +177,67 @@ fn declare_function<'c>(
     ))
 }
 
-/// Map a resolved HIR type to its MLIR scaffold type.
+/// Build a `func.func` definition carrying an already-lowered body region.
 ///
-/// Scalars map to their natural MLIR types; every aggregate or reference type maps
-/// to an opaque LLVM pointer until real tensor / struct lowering lands (Phase 3+).
-fn map_type<'c>(context: &'c Context, ty: &HirType) -> Result<Type<'c>, MlirError> {
+/// The visibility attribute the declaration path sets is deliberately absent: a
+/// definition is the module's exported surface, and marking it private would hide
+/// the only function this path actually emits code for.
+fn define_function<'c>(
+    context: &'c Context,
+    location: Location<'c>,
+    name: &str,
+    param_types: &[HirType],
+    return_type: &HirType,
+    body: Region<'c>,
+) -> Result<Operation<'c>, MlirError> {
+    let fn_type = signature(context, param_types, return_type)?;
+
+    Ok(func::func(
+        context,
+        StringAttribute::new(context, name),
+        TypeAttribute::new(fn_type.into()),
+        body,
+        &[],
+        location,
+    ))
+}
+
+/// Map a HIR signature to its MLIR function type. `void` is the empty result list
+/// in return position, which is the one place it is not an unsupported type.
+fn signature<'c>(
+    context: &'c Context,
+    param_types: &[HirType],
+    return_type: &HirType,
+) -> Result<FunctionType<'c>, MlirError> {
+    let inputs = param_types
+        .iter()
+        .map(|ty| map_type(context, ty))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let results = match return_type {
+        HirType::Void => Vec::new(),
+        other => vec![map_type(context, other)?],
+    };
+
+    Ok(FunctionType::new(context, &inputs, &results))
+}
+
+/// MLIR's sentinel extent for a dynamically shaped `?` axis.
+///
+/// Read from the C API rather than written out as `i64::MIN` so the value tracks
+/// the toolchain instead of this file.
+fn dynamic_extent() -> u64 {
+    // SAFETY: a pure accessor over a compile-time constant. It takes no arguments,
+    // reads no context, and cannot fail.
+    (unsafe { mlir_sys::mlirShapedTypeGetDynamicSize() }) as u64
+}
+
+/// Map a resolved HIR type to its MLIR type.
+///
+/// Scalars map to their natural MLIR types and a tensor to a ranked MLIR tensor;
+/// every other aggregate or reference type maps to an opaque LLVM pointer until
+/// real struct lowering lands.
+pub(crate) fn map_type<'c>(context: &'c Context, ty: &HirType) -> Result<Type<'c>, MlirError> {
     let mapped = match ty {
         HirType::I8 | HirType::U8 => IntegerType::new(context, I8_BITS).into(),
         HirType::I16 | HirType::U16 => IntegerType::new(context, I16_BITS).into(),
@@ -220,13 +279,21 @@ fn map_type<'c>(context: &'c Context, ty: &HirType) -> Result<Type<'c>, MlirErro
                 "unsized `[{element}]` cannot appear in value position"
             )))
         }
-        // A tensor lowers to a Linalg-backed buffer, which arrives with 2C's tensor
-        // arithmetic. Mapping it to an opaque pointer in the meantime would be the one
-        // mapping this path exists to avoid.
-        HirType::Tensor { .. } => {
-            return Err(MlirError::UnsupportedType(format!(
-                "`{ty}` has no MLIR representation yet"
-            )))
+        HirType::Tensor { element, shape, .. } => {
+            let element_type = map_type(context, element)?;
+            // An aggregate element would have mapped to `!llvm.ptr`, which is not a
+            // type `tensor<...>` accepts; checking the MLIR type keeps this arm from
+            // drifting as the scalar arms above change.
+            if !element_type.is_integer() && !element_type.is_float() {
+                return Err(MlirError::UnsupportedType(format!(
+                    "tensor element `{element}` is not an MLIR scalar"
+                )));
+            }
+            let extents: Vec<u64> = shape
+                .iter()
+                .map(|extent| extent.map_or_else(dynamic_extent, |extent| extent as u64))
+                .collect();
+            RankedTensorType::new(&extents, element_type, None).into()
         }
     };
     Ok(mapped)

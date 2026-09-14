@@ -13,6 +13,7 @@ mlir-sys = { workspace = true, optional = true }
 inkwell = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 neuro-hir = { path = "../infrastructure/neuro-hir", optional = true }
+ast-types = { path = "../infrastructure/ast-types", optional = true }
 
 [dev-dependencies]
 shared-types = { path = "../infrastructure/shared-types" }
@@ -23,7 +24,7 @@ shared-types = { path = "../infrastructure/shared-types" }
 # builds compile a trivial placeholder so the workspace builds and tests on stock
 # LLVM 20 without MLIR. See CONTEXT.md.
 default = []
-mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir"]
+mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir", "dep:ast-types"]
 
 [lib]
 path = "src/lib.rs"
