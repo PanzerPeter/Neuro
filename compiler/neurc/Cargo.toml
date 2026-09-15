@@ -11,6 +11,7 @@ publish.workspace = true
 # Infrastructure
 neuro-hir = { path = "../infrastructure/neuro-hir" }
 ast-types = { path = "../infrastructure/ast-types" }
+shared-types = { path = "../infrastructure/shared-types" }
 
 # Feature Slices
 syntax-parsing = { path = "../syntax-parsing" }

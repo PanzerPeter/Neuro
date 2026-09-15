@@ -106,6 +106,22 @@ same one). The step width follows from the decoded scalar's own magnitude, so a 
 text once. `.chars()` fills the fields in: the lowering builds the struct literal, and the fields
 stay private so nothing else can.
 
+### Diagnostic rendering
+`render_diagnostic` resolves a type error's span against the source and prints the file, the
+line, the column, the offending line and a caret run under the span. A `TypeError`'s own
+`Display` carries no location any more: byte offsets are an internal representation, and
+`TypeError::span()` is what the driver renders instead. A use-after-move carries a second
+span and gets a `note: moved here` under the error, rendered by the same helper.
+
+Line and column are computed from the source text here rather than through
+`source_location::SourceFile`, whose column is a byte offset within the line: a caret placed
+at a byte column drifts off the text it underlines as soon as the line holds a multi-byte
+character.
+
+A program with more than one module prints the message alone. Spans share one space across
+merged modules (see the panic-location note below), so a span raised by an imported module
+resolved against the root file would point confidently at the wrong line.
+
 ### Remaining pipeline facts
 Lint warnings from `type_check` are forwarded to stderr by `print_warnings` in both entry
 points. Warnings never cause a non-zero exit: they are informational and may be silenced with

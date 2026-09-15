@@ -157,7 +157,12 @@ MLIR prefix's `lib/` second for the runtime `libMLIR`.
 **Symptoms**:
 ```
 Type errors found in "program.nr":
-  1. type mismatch at Span { start: 25, end: 42 }: expected i32, found f64
+error: type mismatch: expected i32, found f64
+ --> program.nr:2:5
+  |
+2 |     val x: i32 = 3.14
+  |     ^^^^^^^^^^^^^^^^^
+
 Error: 1 type error(s) found
 ```
 
@@ -201,7 +206,12 @@ takes_i32(x)  // OK
 **Symptoms**:
 ```
 Type errors found in "program.nr":
-  1. undefined variable 'z' at Span { start: 32, end: 33 }
+error: undefined variable 'z'
+ --> program.nr:2:14
+  |
+2 |     return z + 1
+  |            ^
+
 Error: 1 type error(s) found
 ```
 
@@ -244,7 +254,12 @@ func scoped() -> i32 {
 **Symptoms**:
 ```
 Type errors found in "program.nr":
-  1. cannot assign to immutable variable 'x' at Span { start: 55, end: 61 }
+error: cannot assign to immutable variable 'x'
+ --> program.nr:3:5
+  |
+3 |     x = 20
+  |     ^^^^^^
+
 Error: 1 type error(s) found
 ```
 
@@ -269,7 +284,12 @@ y = 20  // OK
 **Symptoms**:
 ```
 Type errors found in "program.nr":
-  1. missing return statement in function returning i32 at Span { start: 0, end: 120 }
+error: missing return statement in function returning i32
+ --> program.nr:1:1
+  |
+1 | func compute(x: i32) -> i32 {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 Error: 1 type error(s) found
 ```
 

@@ -89,8 +89,13 @@ temporary object file → link.
 
 **Example Error Output** (a program with a type mismatch):
 ```
-Type errors found:
-  1. cannot apply binary operator + to types string and i32 at Span { start: 29, end: 36 }
+Type errors found in "concat.nr":
+error: cannot apply binary operator + to types string and i32
+ --> concat.nr:2:13
+  |
+2 |     val s = "count: " + 1
+  |             ^^^^^^^^^^^^^
+
 Compilation failed: Type checking failed
   Caused by (1): 1 type error(s) found
 ```

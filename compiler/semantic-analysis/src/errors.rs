@@ -8,41 +8,41 @@ use crate::types::Type;
 /// Type checking errors with source location information
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum TypeError {
-    #[error("type mismatch at {span:?}: expected {expected}, found {found}")]
+    #[error("type mismatch: expected {expected}, found {found}")]
     Mismatch {
         expected: Type,
         found: Type,
         span: Span,
     },
 
-    #[error("undefined variable '{name}' at {span:?}")]
+    #[error("undefined variable '{name}'")]
     UndefinedVariable { name: String, span: Span },
 
-    #[error("undefined function '{name}' at {span:?}")]
+    #[error("undefined function '{name}'")]
     UndefinedFunction { name: String, span: Span },
 
-    #[error("'{name}' at {span:?} is a function, not a value; functions are not first-class here; wrap it in a closure with annotated parameters, e.g. `|x: T| -> R {{ {name}(x) }}`")]
+    #[error("'{name}' is a function, not a value; functions are not first-class here; wrap it in a closure with annotated parameters, e.g. `|x: T| -> R {{ {name}(x) }}`")]
     FunctionUsedAsValue { name: String, span: Span },
 
-    #[error("generic type parameter '{name}' at {span:?} shadows a built-in type name")]
+    #[error("generic type parameter '{name}' shadows a built-in type name")]
     GenericParamShadowsBuiltin { name: String, span: Span },
 
-    #[error("generic parameter '{name}' at {span:?} cannot be inferred from the call arguments; supply it explicitly with a turbofish, e.g. `f::<...>(...)`")]
+    #[error("generic parameter '{name}' cannot be inferred from the call arguments; supply it explicitly with a turbofish, e.g. `f::<...>(...)`")]
     GenericParamNotInferable { name: String, span: Span },
 
-    #[error("array length '{name}' at {span:?} is not a known constant; use an integer literal or an in-scope `const` generic parameter")]
+    #[error("array length '{name}' is not a known constant; use an integer literal or an in-scope `const` generic parameter")]
     UnknownArrayLength { name: String, span: Span },
 
-    #[error("undeclared lifetime `'{name}` at {span:?}; declare it in the generic parameter list, e.g. `func f<'{name}>(...)`")]
+    #[error("undeclared lifetime `'{name}`; declare it in the generic parameter list, e.g. `func f<'{name}>(...)`")]
     UndeclaredLifetime { name: String, span: Span },
 
-    #[error("const generic parameter '{name}' at {span:?} has non-integer type '{ty}'; const parameters must be an integer type")]
+    #[error("const generic parameter '{name}' has non-integer type '{ty}'; const parameters must be an integer type")]
     ConstParamNotInteger { name: String, ty: Type, span: Span },
 
-    #[error("`where` predicate at {span:?} is not satisfied for this instantiation")]
+    #[error("`where` predicate is not satisfied for this instantiation")]
     ConstPredicateViolated { span: Span },
 
-    #[error("turbofish at {span:?} supplies {found} generic argument(s), but '{name}' declares {expected}")]
+    #[error("turbofish supplies {found} generic argument(s), but '{name}' declares {expected}")]
     TurbofishCountMismatch {
         name: String,
         expected: usize,
@@ -50,28 +50,26 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("turbofish argument for parameter '{param}' at {span:?} has the wrong kind: a {expected} argument was expected")]
+    #[error("turbofish argument for parameter '{param}' has the wrong kind: a {expected} argument was expected")]
     TurbofishKindMismatch {
         param: String,
         expected: String,
         span: Span,
     },
 
-    #[error("type argument '{ty}' for generic parameter '{param}' at {span:?} is not Copy; generic type arguments are restricted to Copy types in this phase")]
+    #[error("type argument '{ty}' for generic parameter '{param}' is not Copy; generic type arguments are restricted to Copy types in this phase")]
     GenericArgumentNotCopy { param: String, ty: Type, span: Span },
 
-    #[error("generic struct '{name}' at {span:?} requires type arguments, e.g. `{name}<...>`")]
+    #[error("generic struct '{name}' requires type arguments, e.g. `{name}<...>`")]
     GenericStructNeedsArgs { name: String, span: Span },
 
-    #[error("generic enum '{name}' at {span:?} requires type arguments, e.g. `{name}<...>`")]
+    #[error("generic enum '{name}' requires type arguments, e.g. `{name}<...>`")]
     GenericEnumNeedsArgs { name: String, span: Span },
 
-    #[error("cannot infer the type arguments of generic enum '{name}' at {span:?}; annotate the target, e.g. `val x: {name}<...> = ...`, or construct a variant that carries them")]
+    #[error("cannot infer the type arguments of generic enum '{name}'; annotate the target, e.g. `val x: {name}<...> = ...`, or construct a variant that carries them")]
     GenericEnumNotInferable { name: String, span: Span },
 
-    #[error(
-        "generic type '{name}' at {span:?} expects {expected} type argument(s), found {found}"
-    )]
+    #[error("generic type '{name}' expects {expected} type argument(s), found {found}")]
     GenericArgCountMismatch {
         name: String,
         expected: usize,
@@ -79,29 +77,29 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("type argument list applied to non-generic type '{name}' at {span:?}")]
+    #[error("type argument list applied to non-generic type '{name}'")]
     NotAGenericType { name: String, span: Span },
 
-    #[error("nested generic type argument at {span:?} is not yet supported: a generic type may not be instantiated with an enclosing type parameter in this phase")]
+    #[error("nested generic type argument is not yet supported: a generic type may not be instantiated with an enclosing type parameter in this phase")]
     NestedGenericTypeArg { span: Span },
 
-    #[error("variable '{name}' already defined in this scope at {span:?}")]
+    #[error("variable '{name}' already defined in this scope")]
     VariableAlreadyDefined { name: String, span: Span },
 
-    #[error("function '{name}' already defined at {span:?}")]
+    #[error("function '{name}' already defined")]
     FunctionAlreadyDefined { name: String, span: Span },
 
-    #[error("incorrect number of arguments at {span:?}: expected {expected}, found {found}")]
+    #[error("incorrect number of arguments: expected {expected}, found {found}")]
     ArgumentCountMismatch {
         expected: usize,
         found: usize,
         span: Span,
     },
 
-    #[error("cannot apply operator {op} to type {ty} at {span:?}")]
+    #[error("cannot apply operator {op} to type {ty}")]
     InvalidOperator { op: String, ty: Type, span: Span },
 
-    #[error("struct '{struct_name}' cannot derive Copy at {span:?}: field '{field_name}' has type {field_type}, which is not Copy")]
+    #[error("struct '{struct_name}' cannot derive Copy: field '{field_name}' has type {field_type}, which is not Copy")]
     CopyDeriveNonCopyField {
         struct_name: String,
         field_name: String,
@@ -109,33 +107,33 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error(
-        "`@derive({name})` at {span:?} names no derivable trait: the derivable set is {derivable}"
-    )]
+    #[error("`@derive({name})` names no derivable trait: the derivable set is {derivable}")]
     UnknownDerive {
         name: String,
         derivable: String,
         span: Span,
     },
 
-    #[error("`@derive({name})` at {span:?} is specified but not implemented yet: write the impl by hand for now")]
+    #[error(
+        "`@derive({name})` is specified but not implemented yet: write the impl by hand for now"
+    )]
     UnimplementedDerive { name: String, span: Span },
 
-    #[error("`@derive({name})` is listed twice on struct '{struct_name}' at {span:?}")]
+    #[error("`@derive({name})` is listed twice on struct '{struct_name}'")]
     DuplicateDerive {
         struct_name: String,
         name: String,
         span: Span,
     },
 
-    #[error("struct '{struct_name}' both derives `{trait_name}` and declares `impl {trait_name} for {struct_name}` at {span:?}: keep one of them")]
+    #[error("struct '{struct_name}' both derives `{trait_name}` and declares `impl {trait_name} for {struct_name}`: keep one of them")]
     DeriveConflictsWithImpl {
         struct_name: String,
         trait_name: String,
         span: Span,
     },
 
-    #[error("struct '{struct_name}' cannot derive `{trait_name}` at {span:?}: field '{field_name}' has type {field_type}, which {reason}")]
+    #[error("struct '{struct_name}' cannot derive `{trait_name}`: field '{field_name}' has type {field_type}, which {reason}")]
     DeriveFieldUnsupported {
         struct_name: String,
         trait_name: String,
@@ -145,65 +143,65 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("type '{type_name}' implements Drop at {span:?} and so cannot be Copy: a type with a destructor must be moved, not duplicated")]
+    #[error("type '{type_name}' implements Drop and so cannot be Copy: a type with a destructor must be moved, not duplicated")]
     DropTypeCannotBeCopy { type_name: String, span: Span },
 
-    #[error("invalid `impl Drop for {type_name}` at {span:?}: {reason}")]
+    #[error("invalid `impl Drop for {type_name}`: {reason}")]
     InvalidDropImpl {
         type_name: String,
         reason: String,
         span: Span,
     },
 
-    #[error("unknown trait '{trait_name}' at {span:?}: no `trait {trait_name}` is declared")]
+    #[error("unknown trait '{trait_name}': no `trait {trait_name}` is declared")]
     UnknownTrait { trait_name: String, span: Span },
 
-    #[error("trait '{trait_name}' is already defined at {span:?}")]
+    #[error("trait '{trait_name}' is already defined")]
     TraitAlreadyDefined { trait_name: String, span: Span },
 
-    #[error("`dyn {trait_name}` at {span:?} is unsized and must appear behind a reference: write `&dyn {trait_name}` or `&mut dyn {trait_name}`")]
+    #[error("`dyn {trait_name}` is unsized and must appear behind a reference: write `&dyn {trait_name}` or `&mut dyn {trait_name}`")]
     DynTraitNotBehindReference { trait_name: String, span: Span },
 
-    #[error("`[{element}]` at {span:?} is unsized and must appear behind a reference: write `&[{element}]` or `&mut [{element}]`")]
+    #[error("`[{element}]` is unsized and must appear behind a reference: write `&[{element}]` or `&mut [{element}]`")]
     SliceNotBehindReference { element: String, span: Span },
 
-    #[error("tensor element type {ty} at {span:?} is not a numeric scalar; a tensor's element must be an integer, a floating-point type, or `bool`")]
+    #[error("tensor element type {ty} is not a numeric scalar; a tensor's element must be an integer, a floating-point type, or `bool`")]
     NonScalarTensorElement { ty: Type, span: Span },
 
-    #[error("`Tensor` at {span:?} needs a shape: write `Tensor<{element}, [3, 3]>`, or `Tensor<{element}, []>` for a rank-0 scalar tensor")]
+    #[error("`Tensor` needs a shape: write `Tensor<{element}, [3, 3]>`, or `Tensor<{element}, []>` for a rank-0 scalar tensor")]
     TensorShapeRequired { element: String, span: Span },
 
-    #[error("this literal at {span:?} has {found} element(s) where the tensor's shape declares {expected}")]
+    #[error("this literal has {found} element(s) where the tensor's shape declares {expected}")]
     TensorExtentMismatch {
         expected: usize,
         found: usize,
         span: Span,
     },
 
-    #[error("this literal at {span:?} is nested {found} deep, but the tensor has rank {expected}; a nested tensor literal must be rectangular and as deep as the shape is long")]
+    #[error("this literal is nested {found} deep, but the tensor has rank {expected}; a nested tensor literal must be rectangular and as deep as the shape is long")]
     TensorRankMismatch {
         expected: usize,
         found: usize,
         span: Span,
     },
 
-    #[error("a rank-0 tensor at {span:?} has no elements to write; build it with `Tensor::scalar(value)` instead of an array literal")]
+    #[error("a rank-0 tensor has no elements to write; build it with `Tensor::scalar(value)` instead of an array literal")]
     TensorScalarNeedsConstructor { span: Span },
 
-    #[error("the tensor type of `Tensor::{ctor}` at {span:?} cannot be inferred here; annotate the binding with `Tensor<T, [...]>`, or name it with a turbofish: `Tensor::<f32, [3, 3]>::{ctor}(...)`")]
+    #[error("the tensor type of `Tensor::{ctor}` cannot be inferred here; annotate the binding with `Tensor<T, [...]>`, or name it with a turbofish: `Tensor::<f32, [3, 3]>::{ctor}(...)`")]
     TensorTypeNotInferable { ctor: String, span: Span },
 
-    #[error("`Tensor` has no constructor named '{ctor}' at {span:?}; it provides `zeros`, `ones`, `identity`, `random_normal`, `scalar`, and `from`")]
+    #[error("`Tensor` has no constructor named '{ctor}'; it provides `zeros`, `ones`, `identity`, `random_normal`, `scalar`, and `from`")]
     UnknownTensorConstructor { ctor: String, span: Span },
 
-    #[error("compound assignment `{op}=` at {span:?} is not defined on a tensor of {element}: `{op}` requires an element type with arithmetic, so use an integer, `f32`, or `f64` tensor")]
+    #[error("compound assignment `{op}=` is not defined on a tensor of {element}: `{op}` requires an element type with arithmetic, so use an integer, `f32`, or `f64` tensor")]
     TensorElementNotArithmetic {
         op: String,
         element: Type,
         span: Span,
     },
 
-    #[error("the operands of `{op}` at {span:?} do not broadcast: {left} against {right}; shapes align at the trailing axis, and an axis stretches only where its extent is 1")]
+    #[error("the operands of `{op}` do not broadcast: {left} against {right}; shapes align at the trailing axis, and an axis stretches only where its extent is 1")]
     TensorBroadcastMismatch {
         op: String,
         left: Type,
@@ -211,17 +209,17 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("the operands of `@` at {span:?} do not multiply: {left} against {right}; matrix multiplication takes two rank-2 tensors whose inner axes agree, `[M, K] @ [K, N]` giving `[M, N]`")]
+    #[error("the operands of `@` do not multiply: {left} against {right}; matrix multiplication takes two rank-2 tensors whose inner axes agree, `[M, K] @ [K, N]` giving `[M, N]`")]
     TensorMatMulMismatch { left: Type, right: Type, span: Span },
 
-    #[error("this index at {span:?} names {found} axis/axes, but the tensor has rank {expected}; a tensor index gives one argument per axis")]
+    #[error("this index names {found} axis/axes, but the tensor has rank {expected}; a tensor index gives one argument per axis")]
     TensorIndexRankMismatch {
         expected: usize,
         found: usize,
         span: Span,
     },
 
-    #[error("index {index} at {span:?} is outside axis {axis}, whose extent is {extent}")]
+    #[error("index {index} is outside axis {axis}, whose extent is {extent}")]
     TensorIndexOutOfBounds {
         index: i128,
         axis: usize,
@@ -229,10 +227,10 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("the bounds of a tensor slice at {span:?} must be compile-time constants, because the sliced shape is part of the result's type; write literal bounds, or index one position with a runtime value")]
+    #[error("the bounds of a tensor slice must be compile-time constants, because the sliced shape is part of the result's type; write literal bounds, or index one position with a runtime value")]
     TensorSliceBoundNotConstant { span: Span },
 
-    #[error("the slice `{start}..{end}` at {span:?} does not name a sub-range of axis {axis}, whose extent is {extent}; a slice runs forward and stops at the extent")]
+    #[error("the slice `{start}..{end}` does not name a sub-range of axis {axis}, whose extent is {extent}; a slice runs forward and stops at the extent")]
     TensorSliceOutOfRange {
         start: i128,
         end: i128,
@@ -242,13 +240,13 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("{found} at {span:?} is not a tensor, so it takes one index and no range: index an array or a `Vec` with `xs[i]`, and take a sub-range of one with `xs.slice(a..b)`")]
+    #[error("{found} is not a tensor, so it takes one index and no range: index an array or a `Vec` with `xs[i]`, and take a sub-range of one with `xs.slice(a..b)`")]
     TensorIndexOnNonTensor { found: Type, span: Span },
 
-    #[error("tensor dimension '{name}' at {span:?} is not a known extent; use a non-negative integer, or declare it as a shape parameter of the enclosing function, e.g. `func f<{name}>(t: Tensor<f32, [{name}]>)`")]
+    #[error("tensor dimension '{name}' is not a known extent; use a non-negative integer, or declare it as a shape parameter of the enclosing function, e.g. `func f<{name}>(t: Tensor<f32, [{name}]>)`")]
     UnknownTensorDimension { name: String, span: Span },
 
-    #[error("shape parameter '{name}' at {span:?} is already {expected} here, but this argument makes it {found}; one shape parameter names one extent, so every position that writes it must agree")]
+    #[error("shape parameter '{name}' is already {expected} here, but this argument makes it {found}; one shape parameter names one extent, so every position that writes it must agree")]
     TensorShapeParamConflict {
         name: String,
         expected: u64,
@@ -256,10 +254,10 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("tensor dimension name '{name}' at {span:?} is used twice in one shape; each axis of a tensor needs its own name")]
+    #[error("tensor dimension name '{name}' is used twice in one shape; each axis of a tensor needs its own name")]
     DuplicateTensorAxisName { name: String, span: Span },
 
-    #[error("tensor axis {axis} is named '{expected}' here but '{found}' at {span:?}; the two shapes name the same axis differently, which is the transposition named dimensions exist to catch")]
+    #[error("tensor axis {axis} is named '{expected}' here but '{found}'; the two shapes name the same axis differently, which is the transposition named dimensions exist to catch")]
     TensorAxisNameMismatch {
         axis: usize,
         expected: String,
@@ -267,116 +265,116 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("this literal at {span:?} is written against a shape whose extent '{name}' is a shape parameter, so its length cannot be checked here; build the tensor with a constructor instead, e.g. `Tensor::<f32, [{name}]>::zeros()`")]
+    #[error("this literal is written against a shape whose extent '{name}' is a shape parameter, so its length cannot be checked here; build the tensor with a constructor instead, e.g. `Tensor::<f32, [{name}]>::zeros()`")]
     TensorLiteralSymbolicExtent { name: String, span: Span },
 
-    #[error("`.t()` at {span:?} transposes a matrix, but this tensor has rank {rank}; use `.permute([...])` to reorder the axes of a rank-{rank} tensor")]
+    #[error("`.t()` transposes a matrix, but this tensor has rank {rank}; use `.permute([...])` to reorder the axes of a rank-{rank} tensor")]
     TensorTransposeRank { rank: usize, span: Span },
 
-    #[error("`.{method}` at {span:?} needs its axes written as an array literal, e.g. `.{method}([{example}])`")]
+    #[error(
+        "`.{method}` needs its axes written as an array literal, e.g. `.{method}([{example}])`"
+    )]
     TensorShapeArgNotLiteral {
         method: String,
         example: String,
         span: Span,
     },
 
-    #[error("this extent at {span:?} is not a constant; `.reshape` takes an array of integer literals, with `-1` in at most one position to infer that extent")]
+    #[error("this extent is not a constant; `.reshape` takes an array of integer literals, with `-1` in at most one position to infer that extent")]
     TensorReshapeExtentNotConstant { span: Span },
 
-    #[error("`.reshape` at {span:?} writes `-1` more than once; only one extent can be inferred, because the rest have to determine it")]
+    #[error("`.reshape` writes `-1` more than once; only one extent can be inferred, because the rest have to determine it")]
     TensorReshapeRepeatedInference { span: Span },
 
-    #[error("`.reshape` at {span:?} would hold {found} elements but the receiver holds {expected}; a reshape rearranges a tensor's extents and cannot change how many elements it has")]
+    #[error("`.reshape` would hold {found} elements but the receiver holds {expected}; a reshape rearranges a tensor's extents and cannot change how many elements it has")]
     TensorReshapeElementCount {
         expected: usize,
         found: usize,
         span: Span,
     },
 
-    #[error("`-1` at {span:?} cannot be inferred: the other extents multiply to {known}, which does not divide the receiver's {total} elements")]
+    #[error("`-1` cannot be inferred: the other extents multiply to {known}, which does not divide the receiver's {total} elements")]
     TensorReshapeIndivisible {
         known: usize,
         total: usize,
         span: Span,
     },
 
-    #[error(
-        "this tensor has no dimension named '{name}' at {span:?}; its shape declares {declared}"
-    )]
+    #[error("this tensor has no dimension named '{name}'; its shape declares {declared}")]
     UnknownTensorAxisName {
         name: String,
         declared: String,
         span: Span,
     },
 
-    #[error("axis {axis} at {span:?} is out of range for a rank-{rank} tensor; axes are numbered 0 to {}", rank.saturating_sub(1))]
+    #[error("axis {axis} is out of range for a rank-{rank} tensor; axes are numbered 0 to {}", rank.saturating_sub(1))]
     TensorAxisOutOfRange {
         axis: usize,
         rank: usize,
         span: Span,
     },
 
-    #[error("`.{method}` at {span:?} names axis {axis} twice; each axis may be named once")]
+    #[error("`.{method}` names axis {axis} twice; each axis may be named once")]
     TensorAxisRepeated {
         method: String,
         axis: usize,
         span: Span,
     },
 
-    #[error("`.permute` at {span:?} was given {found} axes for a rank-{rank} tensor; a permutation names every axis exactly once")]
+    #[error("`.permute` was given {found} axes for a rank-{rank} tensor; a permutation names every axis exactly once")]
     TensorPermuteRank {
         found: usize,
         rank: usize,
         span: Span,
     },
 
-    #[error("`.flatten` at {span:?} was given axes that are not adjacent; flattening merges a contiguous run of axes into one, so name them in shape order")]
+    #[error("`.flatten` was given axes that are not adjacent; flattening merges a contiguous run of axes into one, so name them in shape order")]
     TensorFlattenNotAdjacent { span: Span },
 
-    #[error("`.flatten` at {span:?} was given an empty axis list; name the axes to merge, or call `.flatten()` to merge them all")]
+    #[error("`.flatten` was given an empty axis list; name the axes to merge, or call `.flatten()` to merge them all")]
     TensorFlattenNoAxes { span: Span },
 
-    #[error("{operation} at {span:?} needs every extent of `{ty}` at compile time, but an axis is `?`; a dynamic extent is not known until run time, so build or read the tensor at a static shape and pass it where a `?` is expected")]
+    #[error("{operation} needs every extent of `{ty}` at compile time, but an axis is `?`; a dynamic extent is not known until run time, so build or read the tensor at a static shape and pass it where a `?` is expected")]
     TensorDynamicExtent {
         operation: String,
         ty: Type,
         span: Span,
     },
 
-    #[error("`.{method}` at {span:?} needs every extent of the receiver to be known here, but '{name}' is a shape parameter; a shape-generic tensor's extents are not numbers until it is instantiated")]
+    #[error("`.{method}` needs every extent of the receiver to be known here, but '{name}' is a shape parameter; a shape-generic tensor's extents are not numbers until it is instantiated")]
     TensorShapeCastSymbolicExtent {
         method: String,
         name: String,
         span: Span,
     },
 
-    #[error("`.{method}()` at {span:?} reduces a tensor's elements, which requires an integer or `f32`/`f64` element type; this tensor holds {element}")]
+    #[error("`.{method}()` reduces a tensor's elements, which requires an integer or `f32`/`f64` element type; this tensor holds {element}")]
     TensorReduceElementType {
         method: String,
         element: Type,
         span: Span,
     },
 
-    #[error("`.mean()` at {span:?} averages {element} elements, which has no rounding rule; sum with `.sum()` and divide, or build the tensor at `f32`/`f64`")]
+    #[error("`.mean()` averages {element} elements, which has no rounding rule; sum with `.sum()` and divide, or build the tensor at `f32`/`f64`")]
     TensorReduceMeanNotFloat { element: Type, span: Span },
 
-    #[error("`.{method}()` at {span:?} reduces over no elements, so it has no value to produce; reduce a tensor whose reduced axis is non-empty")]
+    #[error("`.{method}()` reduces over no elements, so it has no value to produce; reduce a tensor whose reduced axis is non-empty")]
     TensorReduceEmpty { method: String, span: Span },
 
-    #[error("`.{method}()` at {span:?} orders a tensor's elements, which requires an integer or `f32`/`f64` element type; this tensor holds {element}")]
+    #[error("`.{method}()` orders a tensor's elements, which requires an integer or `f32`/`f64` element type; this tensor holds {element}")]
     TensorSortElementType {
         method: String,
         element: Type,
         span: Span,
     },
 
-    #[error("`.{method}()` at {span:?} orders one axis of a tensor, and a rank-0 tensor has none; order a tensor with at least one axis")]
+    #[error("`.{method}()` orders one axis of a tensor, and a rank-0 tensor has none; order a tensor with at least one axis")]
     TensorSortRankZero { method: String, span: Span },
 
-    #[error("`.{method}()` at {span:?} orders an axis with no elements, so there is no ordering to produce; order a tensor whose sorted axis is non-empty")]
+    #[error("`.{method}()` orders an axis with no elements, so there is no ordering to produce; order a tensor whose sorted axis is non-empty")]
     TensorSortEmpty { method: String, span: Span },
 
-    #[error("the `{label}:` argument of `.{method}()` at {span:?} has to be a constant, because it decides the result's shape and the comparator before any element is read; write it as a literal, e.g. `{example}`")]
+    #[error("the `{label}:` argument of `.{method}()` has to be a constant, because it decides the result's shape and the comparator before any element is read; write it as a literal, e.g. `{example}`")]
     TensorSortArgNotConstant {
         method: String,
         label: String,
@@ -384,10 +382,10 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("`.topk(k: {k})` at {span:?} selects more elements than the sorted axis holds, which is {extent}; ask for between 1 and {extent}")]
+    #[error("`.topk(k: {k})` selects more elements than the sorted axis holds, which is {extent}; ask for between 1 and {extent}")]
     TensorTopKOutOfRange { k: usize, extent: usize, span: Span },
 
-    #[error("`Tensor::{ctor}` at {span:?} does not apply to {ty}: {reason}")]
+    #[error("`Tensor::{ctor}` does not apply to {ty}: {reason}")]
     TensorConstructorNotApplicable {
         ctor: String,
         ty: Type,
@@ -395,29 +393,27 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("trait '{trait_name}' is not object-safe and cannot be used as `dyn {trait_name}` at {span:?}: {reason}")]
+    #[error("trait '{trait_name}' is not object-safe and cannot be used as `dyn {trait_name}`: {reason}")]
     TraitNotObjectSafe {
         trait_name: String,
         reason: String,
         span: Span,
     },
 
-    #[error("`impl Trait` at {span:?} is only allowed in a function parameter or return type")]
+    #[error("`impl Trait` is only allowed in a function parameter or return type")]
     ImplTraitNotAllowedHere { span: Span },
 
-    #[error("cannot infer the concrete type of the `impl {trait_name}` return at {span:?}: return a direct constructor (a struct literal or enum value); other forms await closures/iterators")]
+    #[error("cannot infer the concrete type of the `impl {trait_name}` return: return a direct constructor (a struct literal or enum value); other forms await closures/iterators")]
     ImplReturnNotInferable { trait_name: String, span: Span },
 
-    #[error("the `impl {trait_name}` return type at {span:?} resolves to `{ty}`, which does not implement '{trait_name}'")]
+    #[error("the `impl {trait_name}` return type resolves to `{ty}`, which does not implement '{trait_name}'")]
     ImplReturnDoesNotImplement {
         trait_name: String,
         ty: Type,
         span: Span,
     },
 
-    #[error(
-        "`impl {trait_name} for {type_name}` at {span:?} is missing required method '{method}'"
-    )]
+    #[error("`impl {trait_name} for {type_name}` is missing required method '{method}'")]
     MissingTraitMethod {
         trait_name: String,
         type_name: String,
@@ -425,14 +421,14 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("method '{method}' at {span:?} is not a member of trait '{trait_name}'")]
+    #[error("method '{method}' is not a member of trait '{trait_name}'")]
     NotATraitMethod {
         trait_name: String,
         method: String,
         span: Span,
     },
 
-    #[error("method '{method}' in `impl {trait_name} for {type_name}` at {span:?} does not match the trait signature: {detail}")]
+    #[error("method '{method}' in `impl {trait_name} for {type_name}` does not match the trait signature: {detail}")]
     TraitMethodSignatureMismatch {
         trait_name: String,
         type_name: String,
@@ -441,7 +437,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("type argument `{ty}` for '{param}' does not implement required trait '{trait_name}' at {span:?}")]
+    #[error("type argument `{ty}` for '{param}' does not implement required trait '{trait_name}'")]
     TraitBoundNotSatisfied {
         param: String,
         ty: Type,
@@ -449,7 +445,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("cannot apply binary operator {op} to types {left} and {right} at {span:?}")]
+    #[error("cannot apply binary operator {op} to types {left} and {right}")]
     InvalidBinaryOperator {
         op: String,
         left: Type,
@@ -457,21 +453,21 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("cannot compare values of type '{type_name}' with `{op}` at {span:?}: '{type_name}' implements no `PartialEq`; add `impl PartialEq for {type_name}` (the struct must derive `Copy`) or compare the fields")]
+    #[error("cannot compare values of type '{type_name}' with `{op}`: '{type_name}' implements no `PartialEq`; add `impl PartialEq for {type_name}` (the struct must derive `Copy`) or compare the fields")]
     MissingPartialEqImpl {
         type_name: String,
         op: String,
         span: Span,
     },
 
-    #[error("operator trait '{trait_name}' can only be implemented for a `Copy` type; '{type_name}' at {span:?} is not `Copy`")]
+    #[error("operator trait '{trait_name}' can only be implemented for a `Copy` type; '{type_name}' is not `Copy`")]
     OperatorTraitRequiresCopy {
         trait_name: String,
         type_name: String,
         span: Span,
     },
 
-    #[error("in `impl {trait_name}`, `type Output = {expected}` does not match method return type {found} at {span:?}")]
+    #[error("in `impl {trait_name}`, `type Output = {expected}` does not match method return type {found}")]
     AssociatedTypeMismatch {
         trait_name: String,
         expected: Type,
@@ -479,17 +475,17 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("`Self::{name}` at {span:?} has no binding here: an associated type is named inside the trait that declares it or an `impl` that binds it")]
+    #[error("`Self::{name}` has no binding here: an associated type is named inside the trait that declares it or an `impl` that binds it")]
     UnboundAssociatedType { name: String, span: Span },
 
-    #[error("trait '{trait_name}' declares no associated type '{name}' at {span:?}")]
+    #[error("trait '{trait_name}' declares no associated type '{name}'")]
     UnknownAssociatedType {
         trait_name: String,
         name: String,
         span: Span,
     },
 
-    #[error("`impl {trait_name} for {type_name}` at {span:?} does not bind associated type '{name}': add `type {name} = <type>`")]
+    #[error("`impl {trait_name} for {type_name}` does not bind associated type '{name}': add `type {name} = <type>`")]
     MissingAssociatedType {
         trait_name: String,
         type_name: String,
@@ -497,7 +493,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("method '{method}' of trait '{trait_name}' at {span:?} names associated type `Self::{assoc}`, which this bound leaves open: write `{trait_name}<{assoc} = T>` to say what it is")]
+    #[error("method '{method}' of trait '{trait_name}' names associated type `Self::{assoc}`, which this bound leaves open: write `{trait_name}<{assoc} = T>` to say what it is")]
     UnconstrainedAssociatedType {
         trait_name: String,
         method: String,
@@ -505,7 +501,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("bound `{trait_name}<{assoc} = {expected}>` at {span:?} is not satisfied by {ty}, which binds `{assoc}` to {found}")]
+    #[error("bound `{trait_name}<{assoc} = {expected}>` is not satisfied by {ty}, which binds `{assoc}` to {found}")]
     AssociatedTypeBoundMismatch {
         trait_name: String,
         assoc: String,
@@ -515,7 +511,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("`impl {trait_name} for {type_name}` at {span:?} requires `impl {supertrait} for {type_name}`")]
+    #[error("`impl {trait_name} for {type_name}` requires `impl {supertrait} for {type_name}`")]
     MissingSupertraitImpl {
         trait_name: String,
         supertrait: String,
@@ -523,152 +519,152 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("arithmetic operator {op} is not defined on half-precision type {ty} at {span:?}: compute in f32, e.g. `(a as f32 {op} b as f32)`")]
+    #[error("arithmetic operator {op} is not defined on half-precision type {ty}: compute in f32, e.g. `(a as f32 {op} b as f32)`")]
     HalfFloatArithmetic { op: String, ty: Type, span: Span },
 
-    #[error("return type mismatch at {span:?}: expected {expected}, found {found}")]
+    #[error("return type mismatch: expected {expected}, found {found}")]
     ReturnTypeMismatch {
         expected: Type,
         found: Type,
         span: Span,
     },
 
-    #[error("missing return statement in function returning {expected} at {span:?}")]
+    #[error("missing return statement in function returning {expected}")]
     MissingReturn { expected: Type, span: Span },
 
-    #[error("unknown type name '{name}' at {span:?}")]
+    #[error("unknown type name '{name}'")]
     UnknownTypeName { name: String, span: Span },
 
-    #[error("cannot call non-function type {ty} at {span:?}")]
+    #[error("cannot call non-function type {ty}")]
     NotCallable { ty: Type, span: Span },
 
-    #[error("variable '{name}' used without initialization at {span:?}")]
+    #[error("variable '{name}' used without initialization")]
     UninitializedVariable { name: String, span: Span },
 
-    #[error(
-        "cannot bind '{name}' at {span:?}: the initializer has type void, which is not a value"
-    )]
+    #[error("cannot bind '{name}': the initializer has type void, which is not a value")]
     VoidBinding { name: String, span: Span },
 
-    #[error("cannot assign to immutable variable '{name}' at {span:?}")]
+    #[error("cannot assign to immutable variable '{name}'")]
     AssignToImmutable { name: String, span: Span },
 
-    #[error("integer literal {value} out of range for type {ty} at {span:?}")]
+    #[error("integer literal {value} out of range for type {ty}")]
     IntegerLiteralOutOfRange { value: i128, ty: Type, span: Span },
 
-    #[error("literal -{magnitude} at {span:?} is negative and {ty} is unsigned: use a signed type, or `0{ty}.wrapping_sub({magnitude}{ty})` if the two's-complement wrap was intended")]
+    #[error("literal -{magnitude} is negative and {ty} is unsigned: use a signed type, or `0{ty}.wrapping_sub({magnitude}{ty})` if the two's-complement wrap was intended")]
     NegativeLiteralForUnsignedType {
         magnitude: i128,
         ty: Type,
         span: Span,
     },
 
-    #[error("'break' used outside of a loop at {span:?}")]
+    #[error("'break' used outside of a loop")]
     BreakOutsideLoop { span: Span },
 
-    #[error("'continue' used outside of a loop at {span:?}")]
+    #[error("'continue' used outside of a loop")]
     ContinueOutsideLoop { span: Span },
 
-    #[error("use of undefined loop label '{name}' at {span:?}")]
+    #[error("use of undefined loop label '{name}'")]
     UndefinedLabel { name: String, span: Span },
 
-    #[error("'break' with a value is only allowed in a 'loop'; 'while' and 'for' always yield unit, at {span:?}")]
+    #[error(
+        "'break' with a value is only allowed in a 'loop'; 'while' and 'for' always yield unit,"
+    )]
     BreakValueInUnitLoop { span: Span },
 
-    #[error("for-range bound must be an integer type, found {found} at {span:?}")]
+    #[error("for-range bound must be an integer type, found {found}")]
     InvalidForRangeType { found: Type, span: Span },
 
-    #[error("name '{name}' at {span:?} contains '__', which is reserved for compiler-generated symbols; use a single underscore")]
+    #[error("name '{name}' contains '__', which is reserved for compiler-generated symbols; use a single underscore")]
     ReservedNameSeparator { name: String, span: Span },
 
-    #[error("struct '{name}' already defined at {span:?}")]
+    #[error("struct '{name}' already defined")]
     StructAlreadyDefined { name: String, span: Span },
 
-    #[error("unknown struct '{name}' at {span:?}")]
+    #[error("unknown struct '{name}'")]
     UnknownStruct { name: String, span: Span },
 
-    #[error("struct '{struct_name}' has no field '{field_name}' at {span:?}")]
+    #[error("struct '{struct_name}' has no field '{field_name}'")]
     UnknownField {
         struct_name: String,
         field_name: String,
         span: Span,
     },
 
-    #[error("field '{field_name}' of struct '{struct_name}' is private to the module that declares it; write `export` before the field to make it reachable from another module (at {span:?})")]
+    #[error("field '{field_name}' of struct '{struct_name}' is private to the module that declares it; write `export` before the field to make it reachable from another module")]
     PrivateField {
         struct_name: String,
         field_name: String,
         span: Span,
     },
 
-    #[error("missing field '{field_name}' in struct literal for '{struct_name}' at {span:?}")]
+    #[error("missing field '{field_name}' in struct literal for '{struct_name}'")]
     MissingStructField {
         struct_name: String,
         field_name: String,
         span: Span,
     },
 
-    #[error("field '{field_name}' provided more than once in struct literal at {span:?}")]
+    #[error("field '{field_name}' provided more than once in struct literal")]
     DuplicateStructField { field_name: String, span: Span },
 
-    #[error("cannot assign to field '{field_name}' of immutable binding '{var_name}' at {span:?}")]
+    #[error("cannot assign to field '{field_name}' of immutable binding '{var_name}'")]
     AssignToImmutableField {
         var_name: String,
         field_name: String,
         span: Span,
     },
 
-    #[error("struct '{struct_name}' has no method '{method_name}' at {span:?}")]
+    #[error("struct '{struct_name}' has no method '{method_name}'")]
     MethodNotFound {
         struct_name: String,
         method_name: String,
         span: Span,
     },
 
-    #[error("impl block for '{type_name}' at {span:?}: '{self_param}' methods are not yet supported (ownership semantics pending)")]
+    #[error("impl block for '{type_name}': '{self_param}' methods are not yet supported (ownership semantics pending)")]
     UnsupportedSelfParam {
         type_name: String,
         self_param: String,
         span: Span,
     },
 
-    #[error("unknown type '{type_name}' in path expression '{type_name}::{member}' at {span:?}")]
+    #[error("unknown type '{type_name}' in path expression '{type_name}::{member}'")]
     UnknownPathType {
         type_name: String,
         member: String,
         span: Span,
     },
 
-    #[error("'{type_name}' has no associated function '{member}' at {span:?}")]
+    #[error("'{type_name}' has no associated function '{member}'")]
     UnknownAssociatedFunction {
         type_name: String,
         member: String,
         span: Span,
     },
 
-    #[error("constant '{name}' already defined at {span:?}")]
+    #[error("constant '{name}' already defined")]
     ConstAlreadyDefined { name: String, span: Span },
 
-    #[error("constant expression required at {span:?}: only literals, arithmetic on literals, and references to other constants are allowed")]
+    #[error("constant expression required: only literals, arithmetic on literals, and references to other constants are allowed")]
     InvalidConstExpr { span: Span },
 
-    #[error("const '{name}' references undefined constant '{referenced}' at {span:?}")]
+    #[error("const '{name}' references undefined constant '{referenced}'")]
     UndefinedConst {
         name: String,
         referenced: String,
         span: Span,
     },
 
-    #[error("comparison operators cannot be chained at {span:?}: use `&&` to combine separate comparisons")]
+    #[error("comparison operators cannot be chained: use `&&` to combine separate comparisons")]
     ComparisonChain { span: Span },
 
-    #[error("`??` expects an `Option<T>` or `Result<T, E>` on the left, found {found} at {span:?}: `??` unwraps a fallible value or falls back")]
+    #[error("`??` expects an `Option<T>` or `Result<T, E>` on the left, found {found}: `??` unwraps a fallible value or falls back")]
     NullCoalesceOnNonFallible { found: Type, span: Span },
 
-    #[error("`?` expects an `Option<T>` or `Result<T, E>`, found {found} at {span:?}: `?` unwraps a fallible value or propagates its failure")]
+    #[error("`?` expects an `Option<T>` or `Result<T, E>`, found {found}: `?` unwraps a fallible value or propagates its failure")]
     TryOnNonFallible { found: Type, span: Span },
 
-    #[error("`?` on a {operand} at {span:?} has nowhere to propagate: the enclosing function returns {found}, but it must return an `{expected}` for the failure to be forwarded; otherwise handle the value with `match`, `??`, or `val-else`")]
+    #[error("`?` on a {operand} has nowhere to propagate: the enclosing function returns {found}, but it must return an `{expected}` for the failure to be forwarded; otherwise handle the value with `match`, `??`, or `val-else`")]
     TryOutsideFallibleFunction {
         operand: Type,
         expected: String,
@@ -676,72 +672,78 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("the `else` branch of a `val-else` at {span:?} can fall through: it must exit the scope with `return`, `break`, `continue`, `panic(...)`, or `unreachable()`")]
+    #[error("the `else` branch of a `val-else` can fall through: it must exit the scope with `return`, `break`, `continue`, `panic(...)`, or `unreachable()`")]
     ValElseMustDiverge { span: Span },
 
-    #[error("`else |{name}|` at {span:?} has nothing to bind: `Option::None` carries no payload; write `else` or `else |_|`")]
+    #[error("`else |{name}|` has nothing to bind: `Option::None` carries no payload; write `else` or `else |_|`")]
     ValElseBindingOnOption { name: String, span: Span },
 
-    #[error("use of moved value '{name}' at {span:?}: it was moved at {moved_at:?}; bind a `.clone()` if you need an independent copy")]
+    #[error("use of moved value '{name}': bind a `.clone()` if you need an independent copy")]
     UseOfMovedValue {
         name: String,
         span: Span,
         moved_at: Span,
     },
 
-    #[error("'{name}' at {span:?} is moved out inside a loop body, but it is bound outside the loop: the next iteration would move it again. Move a `.clone()` instead, borrow it with `&`, or give the binding a fresh value before the iteration ends")]
+    #[error("'{name}' is moved out inside a loop body, but it is bound outside the loop: the next iteration would move it again. Move a `.clone()` instead, borrow it with `&`, or give the binding a fresh value before the iteration ends")]
     MovedInLoopBody { name: String, span: Span },
 
-    #[error("cannot move out of '{name}' at {span:?}: it is reached through a `&` borrow, which owns nothing to give away; bind a `.clone()` instead, or take the value by a binding that owns it")]
+    #[error("cannot move out of '{name}': it is reached through a `&` borrow, which owns nothing to give away; bind a `.clone()` instead, or take the value by a binding that owns it")]
     CannotMoveOutOfBorrow { name: String, span: Span },
 
-    #[error("cannot borrow this expression at {span:?}: `&` requires a place (a variable); bind it to a `val` first")]
+    #[error("cannot borrow this expression: `&` requires a place (a variable); bind it to a `val` first")]
     CannotBorrowValue { span: Span },
 
-    #[error("cannot mutably borrow '{name}' at {span:?}: `&mut` requires a `mut` binding; declare it with `mut`")]
+    #[error(
+        "cannot mutably borrow '{name}': `&mut` requires a `mut` binding; declare it with `mut`"
+    )]
     CannotBorrowMutably { name: String, span: Span },
 
-    #[error("cannot dereference a non-reference value of type `{found}` at {span:?}: `*` applies only to `&T` / `&mut T`")]
+    #[error("cannot dereference a non-reference value of type `{found}`: `*` applies only to `&T` / `&mut T`")]
     CannotDereference { found: Type, span: Span },
 
-    #[error("cannot assign through an immutable reference `&{inner}` at {span:?}: writing through `*` requires a `&mut {inner}`")]
+    #[error("cannot assign through an immutable reference `&{inner}`: writing through `*` requires a `&mut {inner}`")]
     CannotAssignThroughRef { inner: Type, span: Span },
 
-    #[error("cannot borrow '{name}' as mutable at {span:?}: it is already borrowed; a `&mut` borrow is exclusive, so no other borrow of '{name}' may be live at the same time")]
+    #[error("cannot borrow '{name}' as mutable: it is already borrowed; a `&mut` borrow is exclusive, so no other borrow of '{name}' may be live at the same time")]
     CannotMutablyBorrowWhileBorrowed { name: String, span: Span },
 
-    #[error("cannot borrow '{name}' as immutable at {span:?}: it is already mutably borrowed; an active `&mut` borrow excludes all other borrows of '{name}'")]
+    #[error("cannot borrow '{name}' as immutable: it is already mutably borrowed; an active `&mut` borrow excludes all other borrows of '{name}'")]
     CannotBorrowWhileMutablyBorrowed { name: String, span: Span },
 
-    #[error("cannot return a reference to '{name}' at {span:?}: it is local to this function and does not outlive the call; return a reference derived from a parameter instead")]
+    #[error("cannot return a reference to '{name}': it is local to this function and does not outlive the call; return a reference derived from a parameter instead")]
     ReturnsReferenceToLocal { name: String, span: Span },
 
-    #[error("a range expression `a..b` is only valid as the argument to `.slice()` or `.char_slice()` at {span:?}")]
+    #[error(
+        "a range expression `a..b` is only valid as the argument to `.slice()` or `.char_slice()`"
+    )]
     RangeNotAllowed { span: Span },
 
-    #[error("`.slice()` / `.char_slice()` expects a range argument `a..b` or `a..=b` at {span:?}")]
+    #[error("`.slice()` / `.char_slice()` expects a range argument `a..b` or `a..=b`")]
     SliceExpectsRange { span: Span },
 
-    #[error("array element type {ty} is not Copy at {span:?}: arrays of non-Copy element types (strings, non-Copy structs) are not yet supported")]
+    #[error("array element type {ty} is not Copy: arrays of non-Copy element types (strings, non-Copy structs) are not yet supported")]
     NonCopyArrayElement { ty: Type, span: Span },
 
-    #[error("cannot index a value of type {found} at {span:?}: indexing applies only to arrays `[T; N]` and `Vec<T>`")]
+    #[error("cannot index a value of type {found}: indexing applies only to arrays `[T; N]` and `Vec<T>`")]
     NotIndexable { found: Type, span: Span },
 
-    #[error("cannot iterate over a value of type {found} at {span:?}: a `for` head must be a range, an array, a `Vec<T>`, a `&[T]`, or a type implementing `IntoIterator` or `Iterator`")]
+    #[error("cannot iterate over a value of type {found}: a `for` head must be a range, an array, a `Vec<T>`, a `&[T]`, or a type implementing `IntoIterator` or `Iterator`")]
     NotIterable { found: Type, span: Span },
 
-    #[error("cannot iterate over a value of type {found} at {span:?}: the `IntoIterator` / `Iterator` protocol is implemented on the owned type, and a borrow of it is not a `for` head; iterate the value itself")]
+    #[error("cannot iterate over a value of type {found}: the `IntoIterator` / `Iterator` protocol is implemented on the owned type, and a borrow of it is not a `for` head; iterate the value itself")]
     BorrowedIterableHead { found: Type, span: Span },
 
-    #[error("`.{adapter}()` at {span:?} needs a function of one parameter, but was given {found}")]
+    #[error("`.{adapter}()` needs a function of one parameter, but was given {found}")]
     LoopAdapterNotCallable {
         adapter: String,
         found: Type,
         span: Span,
     },
 
-    #[error("`.{adapter}()` at {span:?} is applied to elements of type {expected}, but its function takes {found}")]
+    #[error(
+        "`.{adapter}()` is applied to elements of type {expected}, but its function takes {found}"
+    )]
     LoopAdapterInput {
         adapter: String,
         expected: Type,
@@ -749,7 +751,9 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("`.{adapter}()` at {span:?} needs a function returning {expected}, but its function returns {found}")]
+    #[error(
+        "`.{adapter}()` needs a function returning {expected}, but its function returns {found}"
+    )]
     LoopAdapterOutput {
         adapter: String,
         expected: String,
@@ -757,17 +761,17 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("cannot infer the element type of `{name}::new()` at {span:?}; annotate the binding, e.g. `val v: {name}<...> = {name}::new()`")]
+    #[error("cannot infer the element type of `{name}::new()`; annotate the binding, e.g. `val v: {name}<...> = {name}::new()`")]
     CollectionTypeNotInferable { name: String, span: Span },
 
-    #[error("{ty} cannot be stored in a `{collection}` at {span:?}: elements must be `Copy` or `string`")]
+    #[error("{ty} cannot be stored in a `{collection}`: elements must be `Copy` or `string`")]
     InvalidCollectionElement {
         collection: String,
         ty: Type,
         span: Span,
     },
 
-    #[error("{ty} is not a valid `{collection}` key at {span:?}: {reason}")]
+    #[error("{ty} is not a valid `{collection}` key: {reason}")]
     InvalidCollectionKey {
         collection: String,
         ty: Type,
@@ -775,71 +779,69 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("`impl Hashable for {type_name}` at {span:?} must provide exactly `func hash(&self) -> u64`")]
+    #[error("`impl Hashable for {type_name}` must provide exactly `func hash(&self) -> u64`")]
     InvalidHashableImpl { type_name: String, span: Span },
 
-    #[error("an index must be an integer, found {found} at {span:?}")]
+    #[error("an index must be an integer, found {found}")]
     IndexNotInteger { found: Type, span: Span },
 
-    #[error(
-        "array literal has {found} elements but type annotation expects {expected} at {span:?}"
-    )]
+    #[error("array literal has {found} elements but type annotation expects {expected}")]
     ArrayLengthMismatch {
         expected: usize,
         found: usize,
         span: Span,
     },
 
-    #[error("tuple element type {ty} is not Copy at {span:?}: tuples of non-Copy element types (strings, non-Copy structs) are not yet supported")]
+    #[error("tuple element type {ty} is not Copy: tuples of non-Copy element types (strings, non-Copy structs) are not yet supported")]
     NonCopyTupleElement { ty: Type, span: Span },
 
-    #[error("cannot index a value of type {found} at {span:?}: `.N` tuple indexing applies only to tuples `(T1, T2, ...)`")]
+    #[error("cannot index a value of type {found}: `.N` tuple indexing applies only to tuples `(T1, T2, ...)`")]
     NotATuple { found: Type, span: Span },
 
-    #[error("tuple index {index} is out of range at {span:?}: the tuple has {arity} elements")]
+    #[error("tuple index {index} is out of range: the tuple has {arity} elements")]
     TupleIndexOutOfBounds {
         index: usize,
         arity: usize,
         span: Span,
     },
 
-    #[error("cannot infer the element type of an empty array literal at {span:?}: add a type annotation like `[i32; 0]`")]
+    #[error("cannot infer the element type of an empty array literal: add a type annotation like `[i32; 0]`")]
     CannotInferEmptyArray { span: Span },
 
-    #[error("array destructuring pattern binds {expected} element(s) but the array has {found} at {span:?}: list every element or add a `..rest` pattern")]
+    #[error("array destructuring pattern binds {expected} element(s) but the array has {found}: list every element or add a `..rest` pattern")]
     ArrayPatternLengthMismatch {
         expected: usize,
         found: usize,
         span: Span,
     },
 
-    #[error("enum '{name}' is already defined at {span:?}")]
+    #[error("enum '{name}' is already defined")]
     EnumAlreadyDefined { name: String, span: Span },
 
-    #[error("type name '{name}' is already defined at {span:?}: a newtype may not reuse the name of an existing type")]
+    #[error("type name '{name}' is already defined: a newtype may not reuse the name of an existing type")]
     NewtypeAlreadyDefined { name: String, span: Span },
 
-    #[error("newtype '{name}' wraps non-Copy inner type {inner} at {span:?}: newtype inner types are restricted to Copy types in this phase")]
+    #[error("newtype '{name}' wraps non-Copy inner type {inner}: newtype inner types are restricted to Copy types in this phase")]
     NewtypeInnerNotCopy {
         name: String,
         inner: Type,
         span: Span,
     },
 
-    #[error("newtype '{name}' is cyclic at {span:?}: a newtype may not wrap itself directly or transitively")]
+    #[error("newtype '{name}' is cyclic: a newtype may not wrap itself directly or transitively")]
     CyclicNewtype { name: String, span: Span },
 
-    #[error("enum variant payload type {ty} is not supported at {span:?}: enum variants may only carry scalar Copy primitives (integers, floats, bool, char) in this phase")]
+    #[error("enum variant payload type {ty} is not supported: enum variants may only carry scalar Copy primitives (integers, floats, bool, char) in this phase")]
     UnsupportedEnumPayload { ty: Type, span: Span },
 
-    #[error("enum '{enum_name}' has no variant '{variant}' at {span:?}")]
+    #[error("enum '{enum_name}' has no variant '{variant}'")]
     UnknownEnumVariant {
         enum_name: String,
         variant: String,
         span: Span,
     },
 
-    #[error("enum variant '{enum_name}::{variant}' is a {expected} variant at {span:?}: {hint}")]
+    #[error("enum variant '{enum_name}::{variant}' is a {expected} variant: {hint}")]
     EnumVariantFormMismatch {
         enum_name: String,
         variant: String,
@@ -848,7 +850,9 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("enum variant '{enum_name}::{variant}' takes {expected} field(s) but {found} were provided at {span:?}")]
+    #[error(
+        "enum variant '{enum_name}::{variant}' takes {expected} field(s) but {found} were provided"
+    )]
     EnumVariantArityMismatch {
         enum_name: String,
         variant: String,
@@ -857,7 +861,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("enum variant '{enum_name}::{variant}' has no field '{field}' at {span:?}")]
+    #[error("enum variant '{enum_name}::{variant}' has no field '{field}'")]
     UnknownEnumField {
         enum_name: String,
         variant: String,
@@ -865,7 +869,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("missing field '{field}' for enum variant '{enum_name}::{variant}' at {span:?}")]
+    #[error("missing field '{field}' for enum variant '{enum_name}::{variant}'")]
     MissingEnumField {
         enum_name: String,
         variant: String,
@@ -873,7 +877,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("field '{field}' is set more than once for enum variant '{enum_name}::{variant}' at {span:?}")]
+    #[error("field '{field}' is set more than once for enum variant '{enum_name}::{variant}'")]
     DuplicateEnumField {
         enum_name: String,
         variant: String,
@@ -881,33 +885,35 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("non-exhaustive match at {span:?}: {reason}; add the missing pattern(s) or a `_` wildcard arm")]
+    #[error("non-exhaustive match: {reason}; add the missing pattern(s) or a `_` wildcard arm")]
     NonExhaustiveMatch { reason: String, span: Span },
 
-    #[error("cannot match on a value of type {ty} at {span:?}: `match` supports enums, integers, `char`, and `bool` in this phase")]
+    #[error("cannot match on a value of type {ty}: `match` supports enums, integers, `char`, and `bool` in this phase")]
     UnsupportedMatchScrutinee { ty: Type, span: Span },
 
-    #[error("this pattern matches {pattern_ty} but the value being matched has type {scrutinee_ty} at {span:?}")]
+    #[error(
+        "this pattern matches {pattern_ty} but the value being matched has type {scrutinee_ty}"
+    )]
     PatternTypeMismatch {
         pattern_ty: String,
         scrutinee_ty: Type,
         span: Span,
     },
 
-    #[error("match arms have incompatible types at {span:?}: expected {expected}, found {found}")]
+    #[error("match arms have incompatible types: expected {expected}, found {found}")]
     MatchArmTypeMismatch {
         expected: Type,
         found: Type,
         span: Span,
     },
 
-    #[error("a range pattern requires an ordered scalar (integer or `char`) at {span:?}")]
+    #[error("a range pattern requires an ordered scalar (integer or `char`)")]
     InvalidRangePattern { span: Span },
 
-    #[error("variant '{variant}' is written without its enum at {span:?}: qualify it as `Enum::{variant}` or import it with `import Enum::{{{variant}}}`")]
+    #[error("variant '{variant}' is written without its enum: qualify it as `Enum::{variant}` or import it with `import Enum::{{{variant}}}`")]
     UnimportedVariantPattern { variant: String, span: Span },
 
-    #[error("enum variant '{enum_name}::{variant}' is a {expected} variant; its pattern must match that form at {span:?}")]
+    #[error("enum variant '{enum_name}::{variant}' is a {expected} variant; its pattern must match that form")]
     VariantPatternFormMismatch {
         enum_name: String,
         variant: String,
@@ -915,37 +921,37 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("an alternative (`|`) pattern may not bind a variable at {span:?}: move the binding to a separate arm")]
+    #[error(
+        "an alternative (`|`) pattern may not bind a variable: move the binding to a separate arm"
+    )]
     OrPatternBinding { span: Span },
 
-    #[error("a payload sub-pattern must be a binding or `_` at {span:?}: match a payload value with a guard instead (e.g. `Some(n) if n == 0`)")]
+    #[error("a payload sub-pattern must be a binding or `_`: match a payload value with a guard instead (e.g. `Some(n) if n == 0`)")]
     RefutablePayloadPattern { span: Span },
 
-    #[error("closure parameter '{name}' needs a type annotation at {span:?}: write `|{name}: T| ...`; closure parameter-type inference is not yet supported")]
+    #[error("closure parameter '{name}' needs a type annotation: write `|{name}: T| ...`; closure parameter-type inference is not yet supported")]
     ClosureParamNeedsType { name: String, span: Span },
 
-    #[error("closure captures '{name}' of non-Copy type {ty} at {span:?}: only Copy values may be captured in this phase (capture by reference / move of owned values is not yet supported)")]
+    #[error("closure captures '{name}' of non-Copy type {ty}: only Copy values may be captured in this phase (capture by reference / move of owned values is not yet supported)")]
     ClosureCapturesNonCopy { name: String, ty: Type, span: Span },
 
-    #[error("closure assigns to captured variable '{name}' at {span:?}: a captured variable is read-only in this phase (mutable capture / FnMut is not yet supported)")]
+    #[error("closure assigns to captured variable '{name}': a captured variable is read-only in this phase (mutable capture / FnMut is not yet supported)")]
     ClosureAssignsCapture { name: String, span: Span },
 
-    #[error("a block-bodied closure needs an explicit return type at {span:?}: write `|params| -> R {{ ... }}` (only single-expression closures `|x| expr` infer their return type)")]
+    #[error("a block-bodied closure needs an explicit return type: write `|params| -> R {{ ... }}` (only single-expression closures `|x| expr` infer their return type)")]
     ClosureBlockNeedsReturnType { span: Span },
 
-    #[error("a value of type {ty} cannot be interpolated into a string at {span:?}: interpolation renders integers, floats, `bool`, `char`, and `string`")]
+    #[error("a value of type {ty} cannot be interpolated into a string: interpolation renders integers, floats, `bool`, `char`, and `string`")]
     UnformattableType { ty: Type, span: Span },
 
-    #[error("a value of struct type '{name}' cannot be interpolated at {span:?}: {hint}")]
+    #[error("a value of struct type '{name}' cannot be interpolated: {hint}")]
     UnrenderableStruct {
         name: String,
         hint: String,
         span: Span,
     },
 
-    #[error(
-        "format specifier `{spec}` does not apply to a value of type {ty} at {span:?}: {hint}"
-    )]
+    #[error("format specifier `{spec}` does not apply to a value of type {ty}: {hint}")]
     FormatSpecMismatch {
         spec: String,
         ty: Type,
@@ -953,13 +959,216 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("format field width {width} at {span:?} exceeds the maximum of {max}")]
+    #[error("format field width {width} exceeds the maximum of {max}")]
     FormatWidthTooLarge { width: u32, max: u32, span: Span },
 
-    #[error("format precision {precision} at {span:?} exceeds the maximum of {max}")]
+    #[error("format precision {precision} exceeds the maximum of {max}")]
     FormatPrecisionTooLarge {
         precision: u32,
         max: u32,
         span: Span,
     },
+}
+
+impl TypeError {
+    /// The source span this error points at.
+    ///
+    /// Every variant carries one: the driver resolves it against the source file
+    /// to render a line, a column and a caret, which is why the `Display` messages
+    /// above carry no location of their own.
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Mismatch { span, .. }
+            | Self::UndefinedVariable { span, .. }
+            | Self::UndefinedFunction { span, .. }
+            | Self::FunctionUsedAsValue { span, .. }
+            | Self::GenericParamShadowsBuiltin { span, .. }
+            | Self::GenericParamNotInferable { span, .. }
+            | Self::UnknownArrayLength { span, .. }
+            | Self::UndeclaredLifetime { span, .. }
+            | Self::ConstParamNotInteger { span, .. }
+            | Self::ConstPredicateViolated { span, .. }
+            | Self::TurbofishCountMismatch { span, .. }
+            | Self::TurbofishKindMismatch { span, .. }
+            | Self::GenericArgumentNotCopy { span, .. }
+            | Self::GenericStructNeedsArgs { span, .. }
+            | Self::GenericEnumNeedsArgs { span, .. }
+            | Self::GenericEnumNotInferable { span, .. }
+            | Self::GenericArgCountMismatch { span, .. }
+            | Self::NotAGenericType { span, .. }
+            | Self::NestedGenericTypeArg { span, .. }
+            | Self::VariableAlreadyDefined { span, .. }
+            | Self::FunctionAlreadyDefined { span, .. }
+            | Self::ArgumentCountMismatch { span, .. }
+            | Self::InvalidOperator { span, .. }
+            | Self::CopyDeriveNonCopyField { span, .. }
+            | Self::UnknownDerive { span, .. }
+            | Self::UnimplementedDerive { span, .. }
+            | Self::DuplicateDerive { span, .. }
+            | Self::DeriveConflictsWithImpl { span, .. }
+            | Self::DeriveFieldUnsupported { span, .. }
+            | Self::DropTypeCannotBeCopy { span, .. }
+            | Self::InvalidDropImpl { span, .. }
+            | Self::UnknownTrait { span, .. }
+            | Self::TraitAlreadyDefined { span, .. }
+            | Self::DynTraitNotBehindReference { span, .. }
+            | Self::SliceNotBehindReference { span, .. }
+            | Self::NonScalarTensorElement { span, .. }
+            | Self::TensorShapeRequired { span, .. }
+            | Self::TensorExtentMismatch { span, .. }
+            | Self::TensorRankMismatch { span, .. }
+            | Self::TensorScalarNeedsConstructor { span, .. }
+            | Self::TensorTypeNotInferable { span, .. }
+            | Self::UnknownTensorConstructor { span, .. }
+            | Self::TensorElementNotArithmetic { span, .. }
+            | Self::TensorBroadcastMismatch { span, .. }
+            | Self::TensorMatMulMismatch { span, .. }
+            | Self::TensorIndexRankMismatch { span, .. }
+            | Self::TensorIndexOutOfBounds { span, .. }
+            | Self::TensorSliceBoundNotConstant { span, .. }
+            | Self::TensorSliceOutOfRange { span, .. }
+            | Self::TensorIndexOnNonTensor { span, .. }
+            | Self::UnknownTensorDimension { span, .. }
+            | Self::TensorShapeParamConflict { span, .. }
+            | Self::DuplicateTensorAxisName { span, .. }
+            | Self::TensorAxisNameMismatch { span, .. }
+            | Self::TensorLiteralSymbolicExtent { span, .. }
+            | Self::TensorTransposeRank { span, .. }
+            | Self::TensorShapeArgNotLiteral { span, .. }
+            | Self::TensorReshapeExtentNotConstant { span, .. }
+            | Self::TensorReshapeRepeatedInference { span, .. }
+            | Self::TensorReshapeElementCount { span, .. }
+            | Self::TensorReshapeIndivisible { span, .. }
+            | Self::UnknownTensorAxisName { span, .. }
+            | Self::TensorAxisOutOfRange { span, .. }
+            | Self::TensorAxisRepeated { span, .. }
+            | Self::TensorPermuteRank { span, .. }
+            | Self::TensorFlattenNotAdjacent { span, .. }
+            | Self::TensorFlattenNoAxes { span, .. }
+            | Self::TensorDynamicExtent { span, .. }
+            | Self::TensorShapeCastSymbolicExtent { span, .. }
+            | Self::TensorReduceElementType { span, .. }
+            | Self::TensorReduceMeanNotFloat { span, .. }
+            | Self::TensorReduceEmpty { span, .. }
+            | Self::TensorSortElementType { span, .. }
+            | Self::TensorSortRankZero { span, .. }
+            | Self::TensorSortEmpty { span, .. }
+            | Self::TensorSortArgNotConstant { span, .. }
+            | Self::TensorTopKOutOfRange { span, .. }
+            | Self::TensorConstructorNotApplicable { span, .. }
+            | Self::TraitNotObjectSafe { span, .. }
+            | Self::ImplTraitNotAllowedHere { span, .. }
+            | Self::ImplReturnNotInferable { span, .. }
+            | Self::ImplReturnDoesNotImplement { span, .. }
+            | Self::MissingTraitMethod { span, .. }
+            | Self::NotATraitMethod { span, .. }
+            | Self::TraitMethodSignatureMismatch { span, .. }
+            | Self::TraitBoundNotSatisfied { span, .. }
+            | Self::InvalidBinaryOperator { span, .. }
+            | Self::MissingPartialEqImpl { span, .. }
+            | Self::OperatorTraitRequiresCopy { span, .. }
+            | Self::AssociatedTypeMismatch { span, .. }
+            | Self::UnboundAssociatedType { span, .. }
+            | Self::UnknownAssociatedType { span, .. }
+            | Self::MissingAssociatedType { span, .. }
+            | Self::UnconstrainedAssociatedType { span, .. }
+            | Self::AssociatedTypeBoundMismatch { span, .. }
+            | Self::MissingSupertraitImpl { span, .. }
+            | Self::HalfFloatArithmetic { span, .. }
+            | Self::ReturnTypeMismatch { span, .. }
+            | Self::MissingReturn { span, .. }
+            | Self::UnknownTypeName { span, .. }
+            | Self::NotCallable { span, .. }
+            | Self::UninitializedVariable { span, .. }
+            | Self::VoidBinding { span, .. }
+            | Self::AssignToImmutable { span, .. }
+            | Self::IntegerLiteralOutOfRange { span, .. }
+            | Self::NegativeLiteralForUnsignedType { span, .. }
+            | Self::BreakOutsideLoop { span, .. }
+            | Self::ContinueOutsideLoop { span, .. }
+            | Self::UndefinedLabel { span, .. }
+            | Self::BreakValueInUnitLoop { span, .. }
+            | Self::InvalidForRangeType { span, .. }
+            | Self::ReservedNameSeparator { span, .. }
+            | Self::StructAlreadyDefined { span, .. }
+            | Self::UnknownStruct { span, .. }
+            | Self::UnknownField { span, .. }
+            | Self::PrivateField { span, .. }
+            | Self::MissingStructField { span, .. }
+            | Self::DuplicateStructField { span, .. }
+            | Self::AssignToImmutableField { span, .. }
+            | Self::MethodNotFound { span, .. }
+            | Self::UnsupportedSelfParam { span, .. }
+            | Self::UnknownPathType { span, .. }
+            | Self::UnknownAssociatedFunction { span, .. }
+            | Self::ConstAlreadyDefined { span, .. }
+            | Self::InvalidConstExpr { span, .. }
+            | Self::UndefinedConst { span, .. }
+            | Self::ComparisonChain { span, .. }
+            | Self::NullCoalesceOnNonFallible { span, .. }
+            | Self::TryOnNonFallible { span, .. }
+            | Self::TryOutsideFallibleFunction { span, .. }
+            | Self::ValElseMustDiverge { span, .. }
+            | Self::ValElseBindingOnOption { span, .. }
+            | Self::UseOfMovedValue { span, .. }
+            | Self::MovedInLoopBody { span, .. }
+            | Self::CannotMoveOutOfBorrow { span, .. }
+            | Self::CannotBorrowValue { span, .. }
+            | Self::CannotBorrowMutably { span, .. }
+            | Self::CannotDereference { span, .. }
+            | Self::CannotAssignThroughRef { span, .. }
+            | Self::CannotMutablyBorrowWhileBorrowed { span, .. }
+            | Self::CannotBorrowWhileMutablyBorrowed { span, .. }
+            | Self::ReturnsReferenceToLocal { span, .. }
+            | Self::RangeNotAllowed { span, .. }
+            | Self::SliceExpectsRange { span, .. }
+            | Self::NonCopyArrayElement { span, .. }
+            | Self::NotIndexable { span, .. }
+            | Self::NotIterable { span, .. }
+            | Self::BorrowedIterableHead { span, .. }
+            | Self::LoopAdapterNotCallable { span, .. }
+            | Self::LoopAdapterInput { span, .. }
+            | Self::LoopAdapterOutput { span, .. }
+            | Self::CollectionTypeNotInferable { span, .. }
+            | Self::InvalidCollectionElement { span, .. }
+            | Self::InvalidCollectionKey { span, .. }
+            | Self::InvalidHashableImpl { span, .. }
+            | Self::IndexNotInteger { span, .. }
+            | Self::ArrayLengthMismatch { span, .. }
+            | Self::NonCopyTupleElement { span, .. }
+            | Self::NotATuple { span, .. }
+            | Self::TupleIndexOutOfBounds { span, .. }
+            | Self::CannotInferEmptyArray { span, .. }
+            | Self::ArrayPatternLengthMismatch { span, .. }
+            | Self::EnumAlreadyDefined { span, .. }
+            | Self::NewtypeAlreadyDefined { span, .. }
+            | Self::NewtypeInnerNotCopy { span, .. }
+            | Self::CyclicNewtype { span, .. }
+            | Self::UnsupportedEnumPayload { span, .. }
+            | Self::UnknownEnumVariant { span, .. }
+            | Self::EnumVariantFormMismatch { span, .. }
+            | Self::EnumVariantArityMismatch { span, .. }
+            | Self::UnknownEnumField { span, .. }
+            | Self::MissingEnumField { span, .. }
+            | Self::DuplicateEnumField { span, .. }
+            | Self::NonExhaustiveMatch { span, .. }
+            | Self::UnsupportedMatchScrutinee { span, .. }
+            | Self::PatternTypeMismatch { span, .. }
+            | Self::MatchArmTypeMismatch { span, .. }
+            | Self::InvalidRangePattern { span, .. }
+            | Self::UnimportedVariantPattern { span, .. }
+            | Self::VariantPatternFormMismatch { span, .. }
+            | Self::OrPatternBinding { span, .. }
+            | Self::RefutablePayloadPattern { span, .. }
+            | Self::ClosureParamNeedsType { span, .. }
+            | Self::ClosureCapturesNonCopy { span, .. }
+            | Self::ClosureAssignsCapture { span, .. }
+            | Self::ClosureBlockNeedsReturnType { span, .. }
+            | Self::UnformattableType { span, .. }
+            | Self::UnrenderableStruct { span, .. }
+            | Self::FormatSpecMismatch { span, .. }
+            | Self::FormatWidthTooLarge { span, .. }
+            | Self::FormatPrecisionTooLarge { span, .. } => *span,
+        }
+    }
 }

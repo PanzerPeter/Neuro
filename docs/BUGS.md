@@ -73,61 +73,6 @@ to codegen, which must produce the address of the field or element rather than o
 slot. Worth confirming against BUG-025 before starting: the two share the representation
 and are cheaper together than apart.
 
-## BUG-032 — a diagnostic prints a raw `Span` struct instead of a source location
-
-- **Status**: open, confirmed
-- **Area**: `neurc` (driver output); the spans it needs are already carried by
-  `semantic-analysis` and `source-location`
-- **Severity**: major. It is the first thing every user of the compiler sees, on every
-  error, and the information it prints cannot be acted on without counting bytes by hand.
-
-Every type error is printed as a numbered list item whose location is a debug-formatted
-Rust struct. No file line, no column, no source snippet, no caret.
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    val x: i32 = "hello"
-    return x
-}
-```
-
-Observed:
-
-```
-Type errors found in "bad.nr":
-  1. type mismatch at Span { start: 25, end: 45 }: expected i32, found string
-Error: 1 type error(s) found
-```
-
-Expected: the path, the line and column, the offending source line, and a caret under the
-span, in the shape every mainstream compiler has used for a decade.
-
-**Root cause**: the driver formats each error with its `Display` impl and prints it behind
-a counter. The span reaches it intact and is never resolved against the source file. The
-mapping already exists and is unused by this path: `SourceFile::position_at(offset)` returns
-a line and column, and `SourceFile::snippet(span)` returns the text. The `Span` reaching the
-user as `{ start, end }` is Rust's derived `Debug` leaking through a `Display`
-implementation, so the byte offsets are an internal representation, not a chosen format.
-
-**Why this is filed rather than scheduled**: the roadmap carries a cross-cutting track
-promising that every feature ships with actionable errors, and a later phase carries a
-"diagnostic polish pass". Polish is the wrong word for this and the wrong schedule: the
-rendering layer was never built, so the track has been unmet for every feature shipped so
-far, and waiting for that phase means several more years of it. It is a defect against a
-standing commitment, not a missing feature, which is why it is here.
-
-**Workaround**: none for a user. Byte offsets can be converted by hand
-(`head -c 25 file.nr | wc -l`).
-
-**Fix sketch**: resolve each error's span against the `SourceFile` the driver already holds
-and render it, in one place, for every diagnostic the driver prints (type errors, argument
-errors, warnings). Two helpers exist for the hard half. The renderer itself is the kind of
-thing worth taking off the shelf rather than hand-rolling: `annotate-snippets` is the crate
-rustc's own output is built on, and it takes a span, a source, and a label. The caret
-rendering is not where the value is; the resolution already written but never called is.
-
 ## BUG-031 — `.step(n)` on a range is specified but has no implementation and no checkbox
 
 - **Status**: open, confirmed
@@ -223,58 +168,6 @@ place either. What a partial move of a collection means is a language decision t
 does not make: fixed arrays and tuples sidestep it by rejecting non-`Copy` elements
 outright, and a `Vec` does not. Decide the rule first (reject the move outright, as Rust
 does; require `.clone()`; or add a borrowing index form), then implement it.
-
-## BUG-028 — an annotation's type does not reach a `break` value
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (expected-type propagation)
-- **Severity**: minor — the compiler rejects a program the equivalent `if`, `match`, and
-  block forms all accept; it never miscompiles
-
-An expected type flows into an `if` arm, a `match` arm, a bare block's tail, and a
-function's `return`, so a tensor literal written in any of those coerces against the
-annotation. It does not flow into the value of a `break`, so the same literal in a value
-loop is typed as a plain array and then fails to match.
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    mut i = 0
-    val t: Tensor<i32, [2]> = loop {
-        i = i + 1
-        if i == 1 { break [10, 20] }
-    }
-    return t[0] + t[1]
-}
-```
-
-Expected: compiles and returns 30, the way every other form of the same program does.
-Observed:
-
-```
-type mismatch: expected Tensor<i32, [2]>, found [i32; 2]
-```
-
-These three are accepted, which is what makes the `break` case a defect rather than a
-missing feature: `val t: Tensor<i32, [2]> = if c { [1, 2] } else { [3, 4] }`, the same with
-`match`, and the same with a bare block. An explicit constructor in the `break`
-(`break Tensor::<i32, [2]>::ones()`) is also accepted, so only the literal coercion is
-affected.
-
-**Root cause**: `check_loop_expr` takes the expected type but passes it no further than its
-own fallback for a loop with no `break`; `check_loop_body` never receives it, so `LoopContext`
-carries no expected type and the `Stmt::Break` arm checks its value with no annotation to
-coerce against.
-
-**Workaround**: write the constructor instead of the literal, or bind the literal to an
-annotated `val` inside the loop and `break` that.
-
-**Fix sketch**: thread the expected type through `check_loop_body` into `LoopContext`, and
-have the `Stmt::Break` arm pass it to `check_expr` as the expected type of the break value.
-The agreement check between several `break`s in one loop stays as it is. A regression test
-wants the repro above plus a loop whose `break`s disagree, so the added expectation does not
-mask a genuine mismatch.
 
 ## BUG-027 — a const generic parameter cannot be passed to another generic call
 

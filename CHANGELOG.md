@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- neurc: every type error now names a source location a reader can act on — the file,
+  the line, the column, the offending line of source and a caret under the span —
+  instead of a debug-printed `Span { start, end }` of byte offsets. A use-after-move
+  additionally renders a `note: moved here` at the second location it carries. The
+  line/column mapping the driver needed was already written and had never been called
+  from this path. Diagnostics from a multi-module program print the message alone: a
+  span there indexes the module that raised it, not the root file.
+- semantic: a by-value tensor operator naming the same binding on both sides — `a + a`,
+  `a @ a` — is rejected as a use-after-move. The operator consumes both operands, but
+  both were type-checked before either move was recorded, so the second read saw a
+  binding that still looked owned: the program compiled and gave two owners to one
+  buffer, which was then freed twice at run time. The borrowed form `&a + &a`, which
+  owns nothing to move, is unaffected.
+- codegen: a function whose body ends in an `if` with a `return` in every arm no longer
+  fails the LLVM verifier when it returns anything but `i32`. Such an `if` produces no
+  value, but it was still read as the implicit return, yielding the placeholder that
+  stands in for a void position. The same body written with tail expressions compiled;
+  the two forms now agree.
+- semantic: an annotation's type reaches the value of a `break`, so a tensor literal in
+  a value loop coerces the way the same literal does in an `if` arm, a `match` arm or a
+  block tail. The expected type stopped at the loop expression and never entered the
+  loop body. Several `break`s in one loop must still agree on a type.
+
 
 ## [2.34.1] - 2026-09-14
 

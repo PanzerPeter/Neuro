@@ -36,7 +36,7 @@ RUST_LOG=debug neurc check examples/basics/function_call.nr
 
 **Output**:
 - Success: `Type checking passed for "examples/basics/hello.nr" (1 module(s), 11 HIR items)`
-- Failure: `Type errors found in "<file>":` followed by a numbered error list, then `Error: N type error(s) found`
+- Failure: `Type errors found in "<file>":`, then one located diagnostic per error, then `Error: N type error(s) found`
 
 **Exit codes**:
 - 0: No errors found
@@ -239,13 +239,23 @@ Error: Module error: failed to parse module `bad.nr`: unexpected token RightBrac
 Example:
 ```
 Type errors found in "bad.nr":
-  1. type mismatch at Span { start: 25, end: 42 }: expected i32, found bool
+error: type mismatch: expected i32, found bool
+ --> bad.nr:2:5
+  |
+2 |     val x: i32 = true
+  |     ^^^^^^^^^^^^^^^^^
+
 Error: 1 type error(s) found
 ```
 
 **Information provided**:
-- A numbered list of every type error (the type checker keeps going after the first)
-- Each error's kind, its byte range in the source (`Span`), and the expected/found types
+- Every type error, not just the first: the type checker keeps going
+- Each error's kind, the file, line and column it occurs at, the offending line of source
+  with a caret under the span, and the expected/found types
+- A use-after-move adds a `note: moved here` pointing at where the value went
+
+A program spread over several modules prints the message without a location: a span there
+indexes the module that raised the error rather than the file named on the command line.
 
 ### Code Generation and Link Errors
 

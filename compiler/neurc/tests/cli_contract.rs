@@ -257,3 +257,39 @@ fn run_rejects_a_non_nr_extension() {
         "Expected an extension diagnostic, got: {stderr}"
     );
 }
+
+/// A diagnostic names a source location a reader can act on: the file, the line, the
+/// column, the offending line of source, and a caret under the span. Byte offsets are
+/// an internal representation and must not reach the user.
+#[test]
+fn check_command_error_renders_source_location() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let source = "func main() -> i32 {\n    val x: i32 = \"hello\"\n    return x\n}\n";
+
+    let source_path = write_source(&temp_dir, "located.nr", source);
+
+    let output = Command::new(neurc_path())
+        .arg("check")
+        .arg(&source_path)
+        .output()
+        .expect("Failed to execute neurc check");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !stderr.contains("Span {"),
+        "A raw Span must never reach the user, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("located.nr:2:5"),
+        "Expected a file:line:column location, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("val x: i32 = \"hello\""),
+        "Expected the offending source line, got: {stderr}"
+    );
+    assert!(
+        stderr.contains('^'),
+        "Expected a caret under the span, got: {stderr}"
+    );
+}

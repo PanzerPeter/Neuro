@@ -250,7 +250,12 @@ func main() -> i32 {
 Error output:
 ```
 Type errors found in "mismatch.nr":
-  1. type mismatch at Span { start: 25, end: 42 }: expected i32, found bool
+error: type mismatch: expected i32, found bool
+ --> mismatch.nr:2:5
+  |
+2 |     val x: i32 = true
+  |     ^^^^^^^^^^^^^^^^^
+
 Error: 1 type error(s) found
 ```
 

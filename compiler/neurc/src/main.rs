@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use llvm_backend::OptimizationLevelSetting;
+use shared_types::Span;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
@@ -212,6 +213,98 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
     })
 }
 
+/// Render one diagnostic with its source location: the message, the file, the line
+/// and column, the offending source line, and a caret under the span.
+///
+/// `source` is `None` when the program spans several modules. A span then indexes
+/// the text of whichever module raised the error, not the root file's, so resolving
+/// it here would point confidently at the wrong line; the message is printed alone.
+///
+/// Line and column are computed from the source text rather than through
+/// `source_location::SourceFile`, whose column is a byte offset within the line: a
+/// caret placed at a byte column drifts away from the text it is meant to underline
+/// as soon as the line holds a multi-byte character.
+fn render_diagnostic(path: &Path, source: Option<&str>, message: &str, span: Span) -> String {
+    render_labeled("error", path, source, message, span)
+}
+
+/// Render one labeled span, the body of both an `error:` and its `note:` lines.
+fn render_labeled(
+    label: &str,
+    path: &Path,
+    source: Option<&str>,
+    message: &str,
+    span: Span,
+) -> String {
+    let bare = || format!("{}: {}", label, message);
+    let Some(source) = source else { return bare() };
+    if span.start > span.end
+        || span.end > source.len()
+        || !source.is_char_boundary(span.start)
+        || !source.is_char_boundary(span.end)
+    {
+        return bare();
+    }
+
+    let line_start = source[..span.start].rfind('\n').map_or(0, |i| i + 1);
+    let line_end = source[span.start..]
+        .find('\n')
+        .map_or(source.len(), |i| span.start + i);
+    let line_no = source[..line_start].matches('\n').count() + 1;
+    let column = source[line_start..span.start].chars().count() + 1;
+    // A span may run past the end of its first line (a multi-line expression); the
+    // caret underlines the part that is on the line being shown, and never nothing.
+    let width = source[span.start..span.end.min(line_end)]
+        .chars()
+        .count()
+        .max(1);
+
+    let gutter = " ".repeat(line_no.to_string().len());
+    format!(
+        "{label}: {message}\n\
+         {gutter}--> {path}:{line_no}:{column}\n\
+         {gutter} |\n\
+         {line_no} | {line}\n\
+         {gutter} | {pad}{carets}",
+        label = label,
+        message = message,
+        gutter = gutter,
+        path = path.display(),
+        line_no = line_no,
+        column = column,
+        line = source[line_start..line_end].trim_end_matches('\r'),
+        pad = " ".repeat(column - 1),
+        carets = "^".repeat(width),
+    )
+}
+
+/// Report type errors against the source they came from.
+///
+/// `source` is `None` for a multi-module program: see [`render_diagnostic`].
+fn report_type_errors(
+    path: &Path,
+    source: Option<&str>,
+    errors: &[semantic_analysis::TypeError],
+) -> anyhow::Error {
+    eprintln!("Type errors found in {:?}:", path);
+    for error in errors {
+        eprintln!(
+            "{}",
+            render_diagnostic(path, source, &error.to_string(), error.span())
+        );
+        // A use-after-move carries a second location: where the value went. It is the
+        // half of that diagnostic a reader cannot find on their own.
+        if let semantic_analysis::TypeError::UseOfMovedValue { moved_at, .. } = error {
+            eprintln!(
+                "{}",
+                render_labeled("note", path, source, "moved here", *moved_at)
+            );
+        }
+        eprintln!();
+    }
+    anyhow::anyhow!("{} type error(s) found", errors.len())
+}
+
 /// Check a Neuro source file for syntax and type errors
 fn check_file(path: &PathBuf) -> anyhow::Result<()> {
     validate_source_file(path)?;
@@ -237,14 +330,18 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
             );
             Ok(())
         }
-        Err(errors) => {
-            eprintln!("Type errors found in {:?}:", path);
-            for (i, error) in errors.iter().enumerate() {
-                eprintln!("  {}. {}", i + 1, error);
-            }
-            Err(anyhow::anyhow!("{} type error(s) found", errors.len()))
-        }
+        Err(errors) => Err(report_type_errors(
+            path,
+            single_module_source(path, module_count).as_deref(),
+            &errors,
+        )),
     }
+}
+
+/// The source text to resolve diagnostics against, or `None` when the program has
+/// more than one module or the file cannot be re-read.
+fn single_module_source(path: &Path, module_count: usize) -> Option<String> {
+    (module_count == 1).then(|| fs::read_to_string(path).ok())?
 }
 
 /// Render lint warnings to stderr. Warnings never block compilation; they are
@@ -280,11 +377,8 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
     log::debug!("Type checking...");
     let warnings = semantic_analysis::type_check(&ast)
         .map_err(|errors| {
-            eprintln!("Type errors found:");
-            for (i, error) in errors.iter().enumerate() {
-                eprintln!("  {}. {}", i + 1, error);
-            }
-            anyhow::anyhow!("{} type error(s) found", errors.len())
+            let rendered = (module_count == 1).then_some(source.as_str());
+            report_type_errors(input, rendered, &errors)
         })
         .context("Type checking failed")?;
     print_warnings(&warnings);
