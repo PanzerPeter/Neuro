@@ -574,6 +574,13 @@ written per arm, loaded at the merge block. A trailing `if` acting as a block's 
 arrives as a `HirStmt::Expr` holding an if-expression: **hir-lowering owns that promotion**, so
 the backend needs no rule of its own and `codegen_body` handles only `HirStmt::Expr` tails.
 
+`codegen_body` applies the same test to a function body's tail: a `HirStmt::Expr` counts as the
+implicit return only when its own type is not `HirType::Void`. A trailing `if` with a `return` in
+every arm is typed `void`, having no value to give; reading it as the implicit return returned the
+`i32` placeholder that stands in for a void position, so a function returning anything else failed
+the verifier with `ret i32 0`. Such a body takes the statement path, whose dead merge block is
+already closed with `unreachable`.
+
 `codegen_block_expr` reads a trailing `HirStmt::Expr` as the block's value only when its type is
 not `HirType::Void`: a block ending in a call to a unit function has no value, and asking for one
 failed with "function call returned void when value expected". A `void` tail is emitted through

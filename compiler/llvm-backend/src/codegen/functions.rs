@@ -1,6 +1,6 @@
 use inkwell::types::*;
 use inkwell::values::*;
-use neuro_hir::{HirExpr, HirFunction, HirImpl, HirMethod, HirSelfParam, HirStmt};
+use neuro_hir::{HirExpr, HirFunction, HirImpl, HirMethod, HirSelfParam, HirStmt, HirType};
 use std::collections::HashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
@@ -451,8 +451,15 @@ impl<'ctx> CodegenContext<'ctx> {
         body: &[HirStmt],
         return_type: &Type,
     ) -> CodegenResult<()> {
-        let tail_is_value =
-            !matches!(return_type, Type::Void) && matches!(body.last(), Some(HirStmt::Expr(_)));
+        // A tail expression whose own type is `void` yields no value, whatever the
+        // function returns: a trailing `if` whose every arm ends in `return` is lowered
+        // that way. Reading it as the implicit return produces the placeholder that
+        // stands in for a void position, and returning that places an `i32` in a
+        // function whose return type is anything else. The statement path below is what
+        // such a body wants: its blocks all terminate, and the dead merge block after
+        // them is closed with `unreachable`.
+        let tail_is_value = !matches!(return_type, Type::Void)
+            && matches!(body.last(), Some(HirStmt::Expr(e)) if !matches!(e.ty, HirType::Void));
 
         if tail_is_value {
             for stmt in &body[..body.len() - 1] {

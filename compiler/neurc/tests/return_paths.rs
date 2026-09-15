@@ -243,3 +243,51 @@ func main() -> i32 {
         .expect("compile/run failed");
     assert_eq!(exit, 5);
 }
+
+/// A trailing `if` whose every arm ends in `return` produces no value of its own. It
+/// was still read as the function's implicit return, which returned the placeholder
+/// that stands in for a void position: an `i32` in a function returning a tensor, and
+/// an LLVM verifier failure. The same body written with tail expressions compiled.
+#[test]
+fn regression_diverging_tail_if_in_a_tensor_returning_function() {
+    let test = CompileTest::new();
+    let source = r#"
+func pick(n: i32, a: Tensor<i32, [2]>, b: Tensor<i32, [2]>) -> Tensor<i32, [2]> {
+    if n == 0 { return a + b } else { return b }
+}
+func main() -> i32 {
+    val a: Tensor<i32, [2]> = [1, 2]
+    val b: Tensor<i32, [2]> = [3, 4]
+    val c = pick(0, a, b)
+    return c[0] + c[1]
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("diverging_tail_if_tensor.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 10);
+}
+
+/// The same program written as tail expressions rather than `return`s: the two forms
+/// are equivalent and must agree.
+#[test]
+fn regression_diverging_tail_if_agrees_with_the_tail_expression_form() {
+    let test = CompileTest::new();
+    let source = r#"
+func pick(n: i32, a: Tensor<i32, [2]>, b: Tensor<i32, [2]>) -> Tensor<i32, [2]> {
+    if n == 0 { a + b } else { b }
+}
+func main() -> i32 {
+    val a: Tensor<i32, [2]> = [1, 2]
+    val b: Tensor<i32, [2]> = [3, 4]
+    val c = pick(0, a, b)
+    return c[0] + c[1]
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("tail_if_tensor.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 10);
+}
