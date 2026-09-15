@@ -45,7 +45,7 @@ Design goals:
 
 ## User Guides
 
-- [CLI Usage](guides/cli-usage.md): `neurc check`, `neurc run`, `neurc compile`, flags
+- [CLI Usage](guides/cli-usage.md): `neurc check`, `neurc run`, `neurc compile`, flags, `--emit obj` and the NumPy interop recipe
 - [Troubleshooting](guides/troubleshooting.md): common problems and solutions
 - [Known Bugs](BUGS.md): the open defect register
 

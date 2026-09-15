@@ -106,6 +106,12 @@ Compilation failed: Type checking failed
 it validates a program (including that it lowers cleanly to HIR) without producing a binary.
 `neurc compile` runs the full pipeline.
 
+`--emit obj` stops one step short of the linker and writes the object file to the output path
+instead. It carries no `main` requirement, because an object may be a library; the default
+`--emit exe` still demands an entry point. See
+[CLI Usage](../guides/cli-usage.md#emitting-an-object-file) for linking one into a shared
+library a foreign DLPack consumer can call.
+
 ### Linking
 
 The driver shells out to a linker driver (a C compiler front-ending the real linker, which brings
@@ -128,6 +134,7 @@ neurc compile <INPUT> [OPTIONS]  # Full pipeline to a native binary
 **Options** (for `compile`):
 - `-o, --output <FILE>`, output executable path (defaults to the input filename, `.exe` on Windows)
 - `-O <LEVEL>`, optimization level (0 to 3)
+- `--emit <exe|obj>`, artifact to write (defaults to `exe`)
 
 **Examples**:
 ```bash

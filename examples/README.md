@@ -112,7 +112,7 @@ One line each. The program's own header comment is the full description.
 - [`mutable_borrows.nr`](showcase/mutable_borrows.nr): mutable borrows `&mut T` and the dereference operator `*`
 - [`named_axes.nr`](showcase/named_axes.nr): a batch of token embeddings with every tensor axis named
 - [`num_algorithms.nr`](showcase/num_algorithms.nr): a tiny integer-math toolkit
-- [`optimizer_step.nr`](showcase/optimizer_step.nr): a weight update written in place and by value, plus the forward pass `@` makes of it
+- [`optimizer_step.nr`](showcase/optimizer_step.nr): a weight update written in place and by value, all three broadcast forms, plus the forward pass `@` makes of it
 - [`perceptron.nr`](showcase/perceptron.nr): a two-neuron feed-forward pass
 - [`ranked_batch.nr`](showcase/ranked_batch.nr): ordering a tensor axis alongside the rest of the tensor surface
 - [`ranked_finish.nr`](showcase/ranked_finish.nr): `.enumerate()` carrying a position through earlier features

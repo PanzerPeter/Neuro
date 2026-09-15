@@ -54,6 +54,7 @@ neurc compile <file.nr> [options]
 **Options**:
 - `-o, --output <FILE>` - Specify output executable path (default: the input filename without its extension)
 - `-O, --optimization <0-3>` - Optimization level (default: `0`); see [Optimization](#optimization)
+- `--emit <exe|obj>` - Artifact to write (default: `exe`); see [Emitting an object file](#emitting-an-object-file)
 
 **Examples**:
 ```bash
@@ -72,6 +73,37 @@ neurc compile ../path/to/program.nr
 # With debug logging
 RUST_LOG=debug neurc compile examples/basics/hello.nr
 ```
+
+#### Emitting an object file
+
+`--emit obj` stops before the linker and writes the object file to the output path. Because
+an object may be a library, it does **not** require a `main` function; the default
+`--emit exe` still does.
+
+This is how a Neuro module is made callable from another language. A tensor value is a
+DLPack handle (see [tensors](../language-reference/tensors.md)), so a function returning
+`Tensor<T, S>` returns a `DLManagedTensorVersioned*` that NumPy, PyTorch or JAX consumes
+with no conversion step:
+
+```bash
+neurc compile --emit obj -o tensors.o tensors.nr
+cc -shared -o libtensors.so tensors.o -lm
+```
+
+```python
+import ctypes, numpy as np
+lib = ctypes.CDLL("./libtensors.so")
+lib.make_batch.restype = ctypes.c_void_p
+```
+
+`tools/dlpack_differential.py` is a worked version of exactly this: it links a library of
+tensor-returning functions and checks every result against NumPy's own, reading dtype, rank,
+extents and strides from the handle. Run it with
+`python tools/dlpack_differential.py --neurc target/debug/neurc`, or as part of the suite
+through `cargo test -p neurc --test numpy_differential`.
+
+`neurc` does not link the shared library itself: `-shared` is the platform C compiler's job,
+and on Windows a DLL additionally needs an export list.
 
 **Output**:
 - Success: `Successfully compiled <input.nr> -> <output_path>`

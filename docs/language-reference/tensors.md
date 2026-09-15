@@ -166,6 +166,14 @@ field, and `.to(device)` all transfer ownership, and only the last owner release
 tensor held in a struct field is not released when the struct goes out of scope; that gap is
 shared with the standard collections.
 
+That the handle is really consumable is checked, not asserted. Compile a module of
+tensor-returning functions with `neurc compile --emit obj`, link it into a shared library,
+and NumPy imports each result with `numpy.from_dlpack` — reading the dtype, rank, extents
+and strides off the handle and taking ownership of it.
+`tools/dlpack_differential.py` does this for every tensor operation below and compares the
+elements against NumPy's own answer; see
+[emitting an object file](../guides/cli-usage.md#emitting-an-object-file).
+
 ## Element-wise arithmetic
 
 `+`, `-`, `*`, `/` and `%` combine two tensors element by element and hand back a **fresh**

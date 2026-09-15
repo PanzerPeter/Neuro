@@ -217,6 +217,17 @@ func main() -> i32 {
     assert(shifted[3, 1] - shifted[3, 0] == 1.0f32)
     println("+ bias         a [32] row reached all 4 sample rows alike")
 
+    // The third broadcast form, and the one the other two do not cover: an extent of 1
+    // STRETCHES. A [4, 1] per-sample weight is a column of four numbers, and it reaches
+    // all 32 activations of its own row while leaving the other rows to their own factor.
+    // The [32] bias above went the other way, down the rows; this goes across them.
+    val sample_weights: Tensor<f32, [4, 1]> = [[1.0], [2.0], [3.0], [4.0]]
+    val weighted = &shifted * &sample_weights
+    assert(weighted[0, 0] == shifted[0, 0])
+    assert(weighted[1, 0] == shifted[1, 0] * 2.0f32)
+    assert(weighted[3, 31] == shifted[3, 31] * 4.0f32)
+    println("* [4, 1]       a stretched axis scaled each sample row on its own")
+
     // The trained buffers move into the layer; they are not copied.
     val layer = Layer { weights: weights, bias: bias, parameters: 2080 }
     val line = layer.describe()

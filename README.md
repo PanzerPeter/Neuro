@@ -118,7 +118,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop`, `&T` / `&mut T` with flow-sensitive exclusivity, lifetime elision and annotations |
 | **Strings** | Immutable fat-pointer `string` with escapes, `&string` slices, `==`, `+` concatenation, `.len()` / `.clone()` / `.slice(a..b)` / `.char_slice(a..b)`, codepoint iteration with `.chars()` and `.char_indices()`, interpolation `"{x:.2}"`, triple-quoted `"""` blocks with dedent; growable `String` buffer for building text: `push_str` / `clear` / `to_string` |
 | **Modules & visibility** | Multi-file programs: every `.nr` file is a module and `mod.nr` directories nest; inline `module { }` blocks group within one file; `import math::{sqrt}`, `import ./utils`, `as` renames, module aliases, variant imports, and `export import` re-export facades; declarations and struct fields are private until `export` opts them in; an implicit prelude puts `Option` / `Result` and `Some` / `None` / `Ok` / `Err` in every module, with `@no_prelude` to opt out |
-| **Toolchain** | Native binaries via inkwell 0.10 / LLVM 20; `neurc check`, `neurc run` and `neurc compile`; buffered `print` / `println` to stdout, line-buffered on a terminal and drained on every exit path; `panic` / `assert` / `unreachable` runtime with located diagnostics, covering array bounds, string slices, a zero divisor, and debug-build integer overflow, all outlined off the hot path |
+| **Toolchain** | Native binaries via inkwell 0.10 / LLVM 20; `neurc check`, `neurc run` and `neurc compile`, with `--emit obj` for an object a C toolchain can link into a shared library that NumPy imports zero-copy; buffered `print` / `println` to stdout, line-buffered on a terminal and drained on every exit path; `panic` / `assert` / `unreachable` runtime with located diagnostics, covering array bounds, string slices, a zero divisor, and debug-build integer overflow, all outlined off the hot path |
 
 ### Current Memory Model
 
@@ -483,7 +483,7 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | **2** | **Tensors and MLIR**: first-class tensor types lowered through MLIR Linalg, the pool allocator, and the value-model work the phases above it need. Finishing it ships **v3.0.0** | In progress |
 | 2A | Standard I/O and spec stragglers: `print` / `println`, `.is_nan()`, codepoint string APIs, `.enumerate()`, borrowed slices `&[T]`, the iterator protocol, `@derive(Debug, PartialEq)` | Complete |
 | 2B | Tensor core: `Tensor<T, [...]>`, literal coercion, move semantics, DLPack, slicing, shape generics, named dims, shape manipulation, dynamic shapes, reductions, sorting and selection | Complete |
-| 2C | MLIR lowering: tensor arithmetic to Linalg, broadcasting, matmul behind `@`, end-to-end HIR → MLIR → LLVM | In progress |
+| 2C | MLIR lowering: tensor arithmetic to Linalg, broadcasting, matmul behind `@`, end-to-end HIR → MLIR → LLVM, results checked against NumPy through the DLPack handle | Complete |
 | 2D | Pool allocator: `pool` blocks, `PoolAware`, LIFO release at scope exit | Planned |
 | 2E | Value model: by-value passing for non-`Copy` types, drop coverage for struct fields and reassigned bindings, assignment through an index or a field | Planned |
 | 2F | Functional sugar: pipeline `\|>`, composition `>>`, einstein notation, functional tensor ops | Planned |

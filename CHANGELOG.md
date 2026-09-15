@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.35.0] - 2026-09-15
+
+### Added
+
+- tests: a differential harness checks tensor results against NumPy through the DLPack
+  handle. `tools/dlpack_differential.py` links a library of tensor-returning Neuro
+  functions, imports each result with `numpy.from_dlpack` — zero-copy, NumPy reading the
+  dtype, rank, extents and strides off the handle itself — and compares it against NumPy's
+  own answer. Fourteen cases cover element-wise arithmetic, all three broadcast forms, the
+  matrix product `@`, axis reductions, rank 0, `.t()` / `.reshape`, and five element types.
+  It also asserts that the importer took ownership of the handle, so every case's `deleter`
+  runs: the first coverage of the foreign side of that release path. `cargo test -p neurc
+  --test numpy_differential` runs it, and skips with a printed reason where python3, NumPy
+  2.1+ or a C compiler is missing. A second test perturbs every expectation and requires
+  all of them to be rejected.
+- neurc: `compile --emit obj` writes the object file instead of linking an executable, and
+  does not require a `main` function, since an object may be a library. This is what makes
+  a Neuro module callable from another language: link it with `cc -shared` and a function
+  returning `Tensor<T, S>` hands a foreign consumer the DLPack handle directly. The default
+  `--emit exe` is unchanged.
+
+
+## [2.34.2] - 2026-09-15
+
 ### Fixed
 
 - neurc: every type error now names a source location a reader can act on — the file,

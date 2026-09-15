@@ -5,9 +5,11 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 
 ## Entry Point
 - Type: CLI
-- Input: `neurc check <file.nr>` | `neurc compile <file.nr> [-O<0-3>] [-o <output>]` |
+- Input: `neurc check <file.nr>` |
+  `neurc compile <file.nr> [-O<0-3>] [-o <output>] [--emit exe|obj]` |
   `neurc run <file.nr> [-O<0-3>]`
-- Output: an executable binary on success; diagnostics and non-fatal lint warnings to stderr
+- Output: an executable binary on success, or an unlinked object file under `--emit obj`;
+  diagnostics and non-fatal lint warnings to stderr
 
 ## Shared Kernel
 - ast-types: the parsed item list handed between the resolution, binding, and checking steps
@@ -46,6 +48,24 @@ object file. Without that check the pipeline ran to completion and handed a `mai
 to the system linker, so the user saw `undefined reference to 'main'` naming the C runtime's
 startup object rather than their own program. `check` is unaffected: type-checking a module
 with no `main` is legitimate.
+
+### `--emit`
+`--emit obj` stops the pipeline one step earlier and writes the object file to the output path
+instead of handing it to the linker. It also lifts the `main` requirement above: an object may
+be a library, and a library has no entry point. That is the whole of the difference — the same
+front half, the same backend call, the same object bytes the executable path would have linked.
+
+It exists because a foreign consumer cannot call into an executable. A tensor value IS a
+`DLManagedTensorVersioned*`, and the only way to check that claim against a real DLPack
+consumer is to link the tensor-returning functions into a shared library and let NumPy import
+the handle; `tools/dlpack_differential.py` does exactly that, driven from
+`tests/numpy_differential.rs`. `neurc` deliberately does NOT learn to link the shared library
+itself: `-shared` is trivial on Unix and needs an export list on Windows, and choosing that
+export convention is a decision no caller has yet asked for.
+
+`--emit obj` does not reach the MLIR backend. That path is still unreferenced by the driver
+(the MLIR backend is off by default and `neurc` has no dependency on it); `--emit` names the
+artifact, not the pipeline that produced it.
 
 ### The prelude
 `prelude::load()` parses `prelude.nr` once into a `Prelude` value that answers two questions:

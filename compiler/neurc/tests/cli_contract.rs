@@ -293,3 +293,85 @@ fn check_command_error_renders_source_location() {
         "Expected a caret under the span, got: {stderr}"
     );
 }
+
+/// `--emit obj` stops before the linker and writes the object file itself. The magic bytes
+/// are asserted rather than the file's mere existence: an object file that is really a
+/// linked executable would satisfy a size check and fail at the first `-shared` link.
+#[test]
+fn emit_obj_writes_a_relocatable_object() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let source_path = write_source(
+        &temp_dir,
+        "library.nr",
+        "func main() -> i32 {\n    return 0\n}\n",
+    );
+    let object_path = temp_dir.path().join("library.o");
+
+    let output = Command::new(neurc_path())
+        .arg("compile")
+        .arg("--emit")
+        .arg("obj")
+        .arg("-o")
+        .arg(&object_path)
+        .arg(&source_path)
+        .output()
+        .expect("Failed to execute neurc compile");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "Expected --emit obj to succeed, stderr: {stderr}"
+    );
+
+    let bytes = fs::read(&object_path).expect("--emit obj must write the output path");
+    assert!(
+        bytes.len() > 4,
+        "Expected an object file with content, got {} bytes",
+        bytes.len()
+    );
+    // ELF, Mach-O (64-bit, either endianness) and COFF, the three this backend targets.
+    let magic = &bytes[..4];
+    assert!(
+        magic == b"\x7fELF"
+            || magic == b"\xcf\xfa\xed\xfe"
+            || magic == b"\xfe\xed\xfa\xcf"
+            || bytes[..2] == [0x64, 0x86]
+            || bytes[..2] == [0x4c, 0x01],
+        "Expected an object file's magic bytes, got {magic:02x?}"
+    );
+}
+
+/// An object file may be a library, and a library has no entry point, so `--emit obj`
+/// carries none of the `main` requirement an executable does. Without this the harness
+/// that links a shared library of tensor-returning functions could not compile one.
+#[test]
+fn emit_obj_does_not_require_a_main_function() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let source_path = write_source(
+        &temp_dir,
+        "no_main.nr",
+        "func twice(value: i32) -> i32 {\n    return value * 2\n}\n",
+    );
+    let object_path = temp_dir.path().join("no_main.o");
+
+    let output = Command::new(neurc_path())
+        .arg("compile")
+        .arg("--emit")
+        .arg("obj")
+        .arg("-o")
+        .arg(&object_path)
+        .arg(&source_path)
+        .output()
+        .expect("Failed to execute neurc compile");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "Expected a `main`-less module to emit an object, stderr: {stderr}"
+    );
+    assert!(
+        object_path.is_file(),
+        "Expected the object file at {}",
+        object_path.display()
+    );
+}

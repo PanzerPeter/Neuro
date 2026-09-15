@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use llvm_backend::OptimizationLevelSetting;
 use shared_types::Span;
 use std::ffi::OsStr;
@@ -22,6 +22,20 @@ struct Cli {
     command: Commands,
 }
 
+/// What `compile` writes to the output path.
+///
+/// `Obj` stops the pipeline one step before the linker so the object can be linked by
+/// something other than a C runtime startup — a shared library a foreign consumer loads,
+/// which is what the DLPack differential harness needs to reach a tensor-returning
+/// function. It therefore carries no entry-point requirement: a library has no `main`.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum EmitKind {
+    /// A native executable, linked through the platform C compiler
+    Exe,
+    /// An unlinked object file
+    Obj,
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Compile Neuro source files
@@ -37,6 +51,10 @@ enum Commands {
         /// Optimization level (0-3)
         #[arg(short = 'O', long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=3))]
         optimization: u8,
+
+        /// Artifact to write
+        #[arg(long, value_name = "KIND", default_value = "exe")]
+        emit: EmitKind,
     },
 
     /// Compile a Neuro source file and run it immediately
@@ -71,7 +89,8 @@ fn main() {
             input,
             output,
             optimization,
-        } => match compile_file(&input, output.as_deref(), optimization) {
+            emit,
+        } => match compile_file(&input, output.as_deref(), optimization, emit) {
             Ok(output_path) => {
                 println!(
                     "Successfully compiled {} -> {}",
@@ -137,7 +156,7 @@ fn run_file(input: &Path, optimization: u8) -> Result<i32> {
         executable.set_extension("exe");
     }
 
-    compile_file(input, Some(&executable), optimization)?;
+    compile_file(input, Some(&executable), optimization, EmitKind::Exe)?;
 
     let status = Command::new(&executable)
         .status()
@@ -352,13 +371,19 @@ fn print_warnings(warnings: &[semantic_analysis::Warning]) {
     }
 }
 
-/// Compile a Neuro source file to a native executable.
+/// Compile a Neuro source file to a native executable, or to an unlinked object file.
 ///
 /// Pipeline: read source → parse → type-check → lower to HIR → LLVM object
-/// code → link. `output` defaults to the input name without its extension
-/// (plus `.exe` on Windows). Returns the path of the executable it linked, which
-/// `run` needs and `compile` reports.
-fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result<PathBuf> {
+/// code → link. `emit` decides whether the last step runs. For an executable `output`
+/// defaults to the input name without its extension (plus `.exe` on Windows); for an
+/// object it defaults to the input name with the platform object extension. Returns the
+/// path it wrote, which `run` needs and `compile` reports.
+fn compile_file(
+    input: &Path,
+    output: Option<&Path>,
+    optimization: u8,
+    emit: EmitKind,
+) -> Result<PathBuf> {
     validate_source_file(input)?;
 
     let source = fs::read_to_string(input)
@@ -395,10 +420,12 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
     // An executable needs an entry point. Without this the pipeline runs to
     // completion and the failure surfaces as the system linker's `undefined
     // reference to 'main'`, which names the C runtime rather than the program.
-    if !hir
-        .items
-        .iter()
-        .any(|item| matches!(item, neuro_hir::HirItem::Function(f) if f.name == MAIN_FUNCTION))
+    // An object file is not linked here and may well be a library, so it is exempt.
+    if emit == EmitKind::Exe
+        && !hir
+            .items
+            .iter()
+            .any(|item| matches!(item, neuro_hir::HirItem::Function(f) if f.name == MAIN_FUNCTION))
     {
         anyhow::bail!(
             "no `{}` function found in {}: an executable needs an entry point",
@@ -423,6 +450,15 @@ fn compile_file(input: &Path, output: Option<&Path>, optimization: u8) -> Result
     } else {
         "o"
     };
+
+    if emit == EmitKind::Obj {
+        let output_path = output
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| input.with_extension(object_extension));
+        fs::write(&output_path, &object_code)
+            .with_context(|| format!("Failed to write object file {}", output_path.display()))?;
+        return Ok(output_path);
+    }
 
     let mut object_file = tempfile::Builder::new()
         .suffix(&format!(".{}", object_extension))
