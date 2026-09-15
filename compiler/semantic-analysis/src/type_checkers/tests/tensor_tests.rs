@@ -1701,3 +1701,66 @@ func main() -> i32 {
         "`@` dispatches to `MatMul`; got {errors:?}"
     );
 }
+
+/// A by-value tensor operator consumes both operands, so naming one binding on both
+/// sides moves it twice. Both operands are type-checked before either move is
+/// recorded, so the right one used to be read while the binding still looked owned:
+/// the program compiled and handed codegen two owners of one buffer.
+#[test]
+fn the_same_binding_on_both_sides_of_a_by_value_operator_is_a_move_twice() {
+    for op in ["+", "-", "*", "@"] {
+        let errors = semantic_errors(&format!(
+            r#"
+func main() -> i32 {{
+    val a: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    val c = a {op} a
+    return c[0, 0]
+}}
+"#
+        ));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, TypeError::UseOfMovedValue { .. })),
+            "expected a use-after-move for `a {op} a`; got {errors:?}"
+        );
+    }
+}
+
+/// The borrowed form is the one that is meant to work: it owns nothing to move, so
+/// the same binding may appear on both sides.
+#[test]
+fn the_same_binding_on_both_sides_of_a_borrowed_operator_is_accepted() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    val c = &a + &a
+    return c[0, 0]
+}
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors; got {errors:?}");
+}
+
+/// A move that predates the expression is reported where the operand is read. The
+/// check above must not report it a second time.
+#[test]
+fn an_operand_moved_before_the_operator_is_reported_once() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2]> = [1, 2]
+    val b: Tensor<i32, [2]> = [3, 4]
+    val c = a + b
+    val d = a + b
+    return c[0] + d[0]
+}
+"#,
+    );
+    let moves = errors
+        .iter()
+        .filter(|e| matches!(e, TypeError::UseOfMovedValue { .. }))
+        .count();
+    assert_eq!(moves, 2, "expected one per moved operand; got {errors:?}");
+}

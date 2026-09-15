@@ -323,6 +323,13 @@ the source moved when the consumed expression is a place of a move-tracked type
 original move span; `SymbolInfo.moved_at` holds the per-binding state and reassigning a `mut`
 clears it. `.clone()` borrows rather than moving: the canonical opt-out.
 
+A consuming position checked *after* another one in the same expression has to see the
+earlier move. `place_moved_at` answers where a place's root binding was moved, and the by-value
+tensor operator uses it: both operands are type-checked before either move is recorded, so
+`a + a` read the right operand while the binding still looked owned, compiled, and gave two
+owners to one buffer. It reports `UseOfMovedValue` only when *this* expression is what
+invalidated the operand; a move that predates it is already reported where the operand is read.
+
 A place is more than a bare identifier. `place_origin` resolves a field path (`l.w`,
 `o.inner.w`) to the type it denotes and to whether reaching it crossed a reference; an index
 place is not resolved, which is BUG-030. A field move is marked against the place's **ROOT

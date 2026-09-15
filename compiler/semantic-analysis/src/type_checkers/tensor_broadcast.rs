@@ -238,10 +238,30 @@ impl TypeChecker {
         // The move is recorded only once the operands are known to combine: a rejected
         // operator leaves the bindings usable, so the one diagnostic is the shape error
         // rather than a use-after-move cascade behind it.
+        // Whether the right operand was already invalid on the way in. A move that
+        // predates this expression was reported where the operand was read, so only a
+        // move this expression itself performs is news below.
+        let right_moved_on_entry = self.place_moved_at(right).is_some();
+
         if matches!(lhs, Operand::Tensor { owned: true, .. }) {
             self.record_move(left);
         }
         if matches!(rhs, Operand::Tensor { owned: true, .. }) {
+            // Both operands are type-checked before either move is recorded, so the
+            // right one was read while a binding the left has since moved out of still
+            // looked owned. `a + a` would otherwise pass the checker and hand codegen
+            // two owners of one buffer, which frees it twice. The compound form applies
+            // the same rule to `w += w`.
+            if !right_moved_on_entry {
+                if let Some((name, moved_at)) = self.place_moved_at(right) {
+                    self.record_error(TypeError::UseOfMovedValue {
+                        name,
+                        span: right.span(),
+                        moved_at,
+                    });
+                    return Type::Unknown;
+                }
+            }
             self.record_move(right);
         }
         result

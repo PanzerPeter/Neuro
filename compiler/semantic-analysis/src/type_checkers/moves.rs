@@ -87,6 +87,21 @@ impl TypeChecker {
         self.symbols.mark_moved(&root, place.span());
     }
 
+    /// Where the binding `expr` is rooted in was moved out, if it already has been.
+    ///
+    /// Used where a consuming position is checked *after* another consuming position
+    /// in the same expression has been recorded, so that the second one sees the
+    /// first one's move instead of reading a binding that only still looks owned.
+    pub(crate) fn place_moved_at(&self, expr: &Expr) -> Option<(String, Span)> {
+        let mut place = expr;
+        while let Expr::Paren(inner, _) = place {
+            place = inner;
+        }
+        let root = Self::place_root_name(place)?;
+        let moved_at = self.symbols.lookup(&root)?.moved_at?;
+        Some((root, moved_at))
+    }
+
     /// The type a place expression denotes, paired with whether reaching it
     /// crossed a reference.
     ///
