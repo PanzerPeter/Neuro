@@ -63,6 +63,10 @@ the backend rejected it as "void type cannot be used as a value", but only when 
 arm happened to be written first.
 
 ### Nodes with a deliberately chosen type
+An `Expr::Pool` lowers to `HirType::Void` whatever its body ends with, and its body is lowered
+against no expected type: a `pool` is not an expression, so a trailing value has nowhere to go
+and must not drag a contextual type into the block.
+
 Three have no first-class source form: a `loop` value-expression takes its `break v` type (or
 `void`); a method-name callee `FieldAccess` carries the *call's* result type, since there is no
 method value; a `Range` carries `void`, being valid only as a `string.slice` /

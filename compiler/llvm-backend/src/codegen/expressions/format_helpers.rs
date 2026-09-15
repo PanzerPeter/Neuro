@@ -115,7 +115,7 @@ impl<'ctx> CodegenContext<'ctx> {
         size: IntValue<'ctx>,
         name: &str,
     ) -> CodegenResult<PointerValue<'ctx>> {
-        let malloc = self.get_or_declare_malloc();
+        let malloc = self.alloc_fn()?;
         self.builder
             .build_call(malloc, &[size.into()], name)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?

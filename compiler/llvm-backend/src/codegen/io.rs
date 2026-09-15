@@ -143,7 +143,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         if owns_argument {
-            let free_fn = self.get_or_declare_free();
+            let free_fn = self.release_fn()?;
             self.builder.build_call(free_fn, &[ptr.into()], "")?;
         }
 

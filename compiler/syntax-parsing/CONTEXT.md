@@ -303,6 +303,13 @@ written and resolves nothing: matching a label to a parameter needs the callee, 
   optional trailing same-line label with no newline skip, so a line-final `break` is never a
   labeled break.
 
+- **Pool blocks.** `parse_pool_expr` reads `pool` then an optional label then a brace block,
+  producing `Expr::Pool`. The label follows the keyword instead of preceding it the way a loop
+  label does: a loop label is a jump target `break` has to see in scope, so `Parser::active_labels`
+  tracks it, while a pool label is quoted only in a diagnostic and needs no scope at all. A `pool`
+  in statement position needs no case in `parse_stmt`: it falls through to expression parsing, as
+  `unsafe` does.
+
 ### Precedence table facts worth knowing
 `?` maps to `Precedence::Call`: postfix, binding as tightly as a call or index, so `f(x)? + 1`
 adds to the unwrapped payload and `parse(s)?.field` reads a field of it. No new level was needed.

@@ -481,6 +481,42 @@ fn test_function_call_with_complex_args() {
 }
 
 #[test]
+fn test_parse_pool_block() {
+    let result = parse_expr("pool {\n    val x = 1\n}");
+    assert!(result.is_ok());
+    match result.unwrap() {
+        Expr::Pool { label, stmts, .. } => {
+            assert!(label.is_none());
+            assert_eq!(stmts.len(), 1);
+        }
+        other => panic!("Expected pool block, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_labeled_pool_block() {
+    let result = parse_expr("pool training {\n    val x = 1\n}");
+    assert!(result.is_ok());
+    match result.unwrap() {
+        Expr::Pool { label, stmts, .. } => {
+            assert_eq!(label.map(|l| l.name), Some("training".to_string()));
+            assert_eq!(stmts.len(), 1);
+        }
+        other => panic!("Expected labeled pool block, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_pool_block_empty() {
+    let result = parse_expr("pool { }");
+    assert!(result.is_ok());
+    match result.unwrap() {
+        Expr::Pool { stmts, .. } => assert_eq!(stmts.len(), 0),
+        other => panic!("Expected empty pool block, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_parse_unsafe_block_with_value() {
     let result = parse_expr("unsafe { 42 }");
     assert!(result.is_ok());

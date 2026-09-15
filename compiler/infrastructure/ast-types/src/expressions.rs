@@ -135,6 +135,20 @@ pub enum Expr {
         stmts: Vec<Stmt>,
         span: Span,
     },
+    /// Arena-scoped block: `pool { ... }` / `pool label { ... }`.
+    ///
+    /// Every allocation emitted lexically inside the body is taken from a linear
+    /// bump arena that the block releases in one step at its closing brace. A
+    /// callee's allocations are not the block's to reclaim and stay on the heap.
+    ///
+    /// `label` names the arena in diagnostics and nothing else: no expression
+    /// refers to it, because a `pool` is not a value and cannot be broken out of.
+    /// The block always evaluates to unit.
+    Pool {
+        label: Option<Identifier>,
+        stmts: Vec<Stmt>,
+        span: Span,
+    },
     /// Borrow expression `&place` / `&mut place`: takes a non-owning
     /// reference to `operand` without moving it. The operand is a place expression
     /// (an identifier); the result has type `&T` (or `&mut T` when `mutable`).
@@ -422,6 +436,7 @@ impl Expr {
             Expr::Block { span, .. } => *span,
             Expr::Loop { span, .. } => *span,
             Expr::Unsafe { span, .. } => *span,
+            Expr::Pool { span, .. } => *span,
             Expr::Reference { span, .. } => *span,
             Expr::Deref { span, .. } => *span,
             Expr::Range { span, .. } => *span,

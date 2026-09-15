@@ -76,6 +76,12 @@ walkers.
   missed a trailing `loop`, which is how a tail `loop` used as an implicit return came to be
   compiled as a discarded value (BUG-005). `Stmt::Break` carries `value: Option<Expr>`;
   `while`/`for` stay unit and have no expression form.
+- `Expr::Pool { label, stmts, span }` is the arena block `pool { }` / `pool label { }`. It is
+  an expression node although a `pool` is not an expression in the language: every block-bodied
+  construct in the pipeline is one, and a statement-only shape would have to be threaded through
+  the same "is the tail value-producing?" tests `Expr::Loop` above exists to avoid. It always
+  types as unit, so a trailing value in the body has nowhere to go. `label` is diagnostic-only:
+  nothing refers to it, and there is no `break` out of a pool.
 - `BinaryOp::MatMul` is the matrix product `a @ b`. It is a `BinaryOp` like any other, but it is
   the one that is not element-wise on tensors — it contracts the operands' inner axis — so each
   stage separates it from the arithmetic family rather than sharing an arm with it.

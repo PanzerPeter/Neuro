@@ -155,6 +155,27 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Codegen a block expression: run stmts, return the last `Stmt::Expr`'s value.
+    /// Emit a `pool { }` block: take the arena mark, emit the body with allocations
+    /// routed to the bump path, then restore the mark, which releases everything the
+    /// body allocated at once.
+    ///
+    /// A body that cannot fall through (a panic) leaves the block terminated and needs
+    /// no restore: the process is on its way out, and the arena dies with it.
+    pub(crate) fn codegen_pool_expr(
+        &mut self,
+        stmts: &[HirStmt],
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let mark = self.emit_arena_mark()?;
+        self.pool_depth += 1;
+        let result = self.codegen_block_expr(stmts);
+        self.pool_depth -= 1;
+        result?;
+        if !self.current_block_terminated() {
+            self.emit_arena_release(mark)?;
+        }
+        Ok(self.context.i32_type().const_int(0, false).into())
+    }
+
     pub(crate) fn codegen_block_expr(
         &mut self,
         stmts: &[HirStmt],

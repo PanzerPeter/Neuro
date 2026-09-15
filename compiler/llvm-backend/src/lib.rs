@@ -417,7 +417,7 @@ fn emit_object_code(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codegen::context::{ALIGNED_ALLOC_FN, ALIGNED_FREE_FN};
+    use crate::codegen::context::ALIGNED_ALLOC_FN;
     use type_mapping::TypeMapper;
 
     /// Parse and lower `source` to typed HIR for the backend smoke tests. Mirrors the
@@ -605,10 +605,10 @@ mod tests {
         // corrupts the heap rather than leaking.
         let deleter = function_body(&ir, "__neuro_dlpack_deleter");
         let data_free = deleter
-            .find(&format!("call void @{ALIGNED_FREE_FN}(ptr %dlpack.data)"))
+            .find("call void @__neuro_aligned_release(ptr %dlpack.data)")
             .expect("the deleter frees the element buffer");
         let self_free = deleter
-            .rfind("call void @free(ptr %0)")
+            .rfind("call void @__neuro_release(ptr %0)")
             .expect("the deleter frees the structure");
         // The buffer is freed before the structure that names it.
         assert!(data_free < self_free);
@@ -618,6 +618,74 @@ mod tests {
         // on a handle built elsewhere that field is a foreign producer's context.
         assert!(!deleter.contains("dlpack.control"));
         assert!(!deleter.contains("manager"));
+    }
+
+    /// The arena's shape, read off the IR: a pool block is a mark and a restore, and
+    /// the allocations between them take the bump path instead of libc.
+    #[test]
+    fn a_pool_block_marks_and_restores_the_arena() {
+        let source = r#"
+            func main() -> i32 {
+                pool {
+                    val joined = "a" + "b"
+                    println(joined)
+                }
+                return 0
+            }
+        "#;
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+
+        let mark = body
+            .find("call i64 @__neuro_arena_mark()")
+            .expect("entering a pool reads the arena mark");
+        let alloc = body
+            .find("call ptr @__neuro_arena_alloc(")
+            .expect("an allocation written inside the block comes from the arena");
+        let release = body
+            .find("call void @__neuro_arena_release(")
+            .expect("leaving a pool restores the mark");
+        assert!(mark < alloc && alloc < release);
+    }
+
+    /// The same allocation outside a pool stays on libc: the bump path is entered by
+    /// where the code is written, never by what it allocates.
+    #[test]
+    fn an_allocation_outside_a_pool_stays_on_the_heap() {
+        let source = r#"
+            func main() -> i32 {
+                val joined = "a" + "b"
+                println(joined)
+                return 0
+            }
+        "#;
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        assert!(body.contains("call ptr @malloc("));
+        assert!(!body.contains("__neuro_arena"));
+    }
+
+    /// Nested pools share one arena: the inner block restores to its own mark, which
+    /// is why nesting needs no second chunk and no second offset.
+    #[test]
+    fn nested_pools_take_nested_marks() {
+        let source = r#"
+            func main() -> i32 {
+                pool outer {
+                    val a = "a" + "b"
+                    pool inner {
+                        val b = "c" + "d"
+                        println(b)
+                    }
+                    println(a)
+                }
+                return 0
+            }
+        "#;
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        assert_eq!(body.matches("call i64 @__neuro_arena_mark()").count(), 2);
+        assert_eq!(body.matches("call void @__neuro_arena_release(").count(), 2);
     }
 
     /// The in-place guarantee, read off the IR: a compound assignment allocates nothing.
@@ -864,8 +932,12 @@ mod tests {
     }
 
     /// Calls to `free` in the body of the function named `name`.
+    /// Releases emitted in `name`. Every release goes through the arena wrapper,
+    /// which forwards to libc for anything the pool arena does not own.
     fn free_calls(ir: &str, name: &str) -> usize {
-        function_body(ir, name).matches("call void @free(").count()
+        function_body(ir, name)
+            .matches("call void @__neuro_release(")
+            .count()
     }
 
     #[test]

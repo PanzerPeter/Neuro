@@ -138,7 +138,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_int_add(len1, len2, "cat.len")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
-        let malloc_fn = self.get_or_declare_malloc();
+        let malloc_fn = self.alloc_fn()?;
         let buf = self
             .builder
             .build_call(malloc_fn, &[total_len.into()], "cat.buf")

@@ -161,6 +161,22 @@ impl TypeChecker {
         Some(ty)
     }
 
+    /// A `pool` block introduces a scope and an arena region, and always yields unit:
+    /// it is not an expression in the language, so a trailing value has nowhere to go.
+    /// The escape rules that make the arena safe ride the region opened here.
+    pub(super) fn check_pool_block_expr(
+        &mut self,
+        label: Option<&str>,
+        stmts: &[ast_types::Stmt],
+    ) -> Option<Type> {
+        self.symbols.push_scope();
+        self.push_pool(label);
+        let _ = self.check_block_expr_type(stmts, None);
+        self.pop_pool();
+        self.symbols.pop_scope();
+        Some(Type::Void)
+    }
+
     /// Check all stmts in a block and return the type of the trailing expression, or Void.
     ///
     /// An `if` written in statement position parses to `Stmt::If`, never

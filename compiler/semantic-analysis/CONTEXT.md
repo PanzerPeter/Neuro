@@ -870,6 +870,27 @@ consts); a body `Stmt::Const` is validated in `check_stmt`. `Expr::Identifier` f
 `constants` after the symbol table, so const names work in any expression context. Errors:
 `ConstAlreadyDefined`, `InvalidConstExpr`.
 
+### Pool blocks
+`type_checkers/pools.rs` carries the escape rules `pool { }` needs. A pool's arena is
+released at the block's closing brace, so anything that carries arena memory past it, or jumps
+over it, is rejected there and nowhere else. `pool_stack` holds one `PoolContext` per open block,
+recording two floors taken at the opening brace: the symbol-table scope index, which tells the
+block's own bindings from the ones it inherits, and the `loop_stack` depth, which tells a jump
+that stays inside the block from one that leaves it.
+
+The checks hang off the statement arms that already know the types: every assignment form calls
+`check_pool_store` with the PLACE's type, `Stmt::DerefAssignment` calls `check_pool_ref_store`
+with the referent type (the place behind a reference is not resolved here, so the type alone
+decides), and `Return` / `Break` / `Continue` call the control-flow pair. All five are inert when
+`pool_stack` is empty, which is every program that writes no `pool`.
+
+What may cross the boundary is decided by TYPE, not by where the value came from: only a type
+carrying no pointer at all (the scalars, `void`, an enum, a newtype, and arrays and tuples of
+those) may be stored into a place that outlives the block. Proving which allocation a `string`
+or a tensor actually holds is the ownership analysis 2D's later items build; until it exists the
+conservative test is the only sound one, and it is why `total = total + 1` compiles inside a pool
+while `name = a + b` does not.
+
 ### Three rules that exist because the backend cannot answer them
 Each closed a path where a program type-checked and then aborted codegen with an internal error:
 

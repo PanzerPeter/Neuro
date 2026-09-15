@@ -143,6 +143,9 @@ pub(crate) struct TypeChecker {
     /// loop-nesting count used to reject `break` / `continue` outside any loop;
     /// each entry carries its label and value-break typing state.
     loop_stack: Vec<LoopContext>,
+    /// Currently open `pool` blocks, innermost last. Empty outside a pool, which
+    /// is what every escape check tests first.
+    pool_stack: Vec<PoolContext>,
 }
 
 /// The construction form of an enum variant, determining how it is built:
@@ -257,6 +260,20 @@ struct LoopContext {
     has_break: bool,
 }
 
+/// One open `pool` block. The arena it names is released at the block's closing
+/// brace, so both depths recorded here answer the same question: does this place,
+/// or this jump, reach past that brace?
+struct PoolContext {
+    /// How the pool is named in a diagnostic: its label when it carries one.
+    pool: String,
+    /// Index of the scope the pool's own body opened. A binding whose defining
+    /// scope is below it was declared before the pool and outlives the arena.
+    scope_floor: usize,
+    /// `loop_stack` depth at the opening brace. A `break` / `continue` resolving to
+    /// a loop below it jumps out of the block.
+    loop_floor: usize,
+}
+
 mod closures;
 mod collections;
 mod declarations;
@@ -267,6 +284,7 @@ mod loop_adapters;
 mod matches;
 mod moves;
 pub(crate) mod operator_traits;
+mod pools;
 mod resolution;
 mod statements;
 mod tensor_broadcast;
@@ -319,6 +337,7 @@ impl TypeChecker {
             current_function_return_type: None,
             current_fn_outliving: HashSet::new(),
             loop_stack: Vec::new(),
+            pool_stack: Vec::new(),
         }
     }
 

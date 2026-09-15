@@ -920,6 +920,41 @@ store), so a moved value is dropped exactly once.
 **Known limits**: reassigning a `Drop` binding does not drop its prior value, and a struct's `Drop`
 fields are not auto-dropped (no recursive glue).
 
+## Pool Arena ABI
+`arena.rs` carries the allocator behind `pool { }`: two internal globals,
+`__neuro_arena_base` (the chunk, `malloc`ed lazily on the first `pool` a run reaches) and
+`__neuro_arena_offset` (the first free byte in it). `codegen_pool_expr` calls
+`__neuro_arena_mark` to read the offset, emits the body, and calls `__neuro_arena_release` with
+that mark, which is the whole bulk free. Nesting needs nothing more: an inner block's mark is a
+larger offset. A body that cannot fall through (a panic) gets no release, since the process is
+leaving anyway.
+
+**Which allocations the arena captures is decided at compile time, by `pool_depth`.** Every
+allocation site asks `alloc_fn` / `aligned_alloc_fn` for its allocator, and those hand back the
+arena's bump functions only while codegen is emitting the inside of a pool body. An allocation a
+CALLEE makes is emitted while that callee's own body is being generated, with `pool_depth` back
+at zero, so it stays on the heap: the arena holds what the block writes, which is what makes the
+rule sound without an ownership analysis. It costs the arena's speed on such a path, never its
+safety.
+
+**Every release goes through a wrapper**, `__neuro_release` and `__neuro_aligned_release`
+(`release_fn` / `aligned_release_fn`), which return without calling libc when the pointer lies
+inside the chunk. Arena memory is reclaimed by the mark restore, and handing it to `free` would
+corrupt the heap. The wrapper is unconditional rather than pool-dependent because a buffer
+allocated inside a pool can be released anywhere, including in a function emitted earlier; only
+the pointer says which allocator owns it. In a program with no `pool` nothing ever stores a
+non-null base, so the check folds away.
+
+The two libc pairs stay distinct through the wrappers, since `free` cannot release an
+over-aligned block on Windows. `realloc` is NOT wrapped and needs no arena path: the only
+buffers it grows (a `Vec`'s and a `String` builder's) are produced by `realloc` from a null
+pointer, so they never come from the arena at all. A map's table does, through `malloc`, and its
+growth path frees the old table through the wrapper.
+
+**Known limits**: the chunk is reserved once and never released, an allocation that does not fit
+falls back to the heap (correct, not fast), and `Vec` / `String` buffers stay off the arena for
+the `realloc` reason above.
+
 ## Collections ABI
 `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, and `String` share one by-value header:
 `{ ptr buffer, i64 len, i64 cap, i64 used }` (`TypeMapper::collection_header_type`), held in the

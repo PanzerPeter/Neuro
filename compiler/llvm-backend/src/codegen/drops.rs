@@ -100,7 +100,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "str.drop.buf",
             )
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let free_fn = self.get_or_declare_free();
+        let free_fn = self.release_fn()?;
         self.builder
             .build_call(free_fn, &[buffer.into()], "")
             .map_err(|e| CodegenError::LlvmError(format!("failed to free string: {}", e)))?;

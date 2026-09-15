@@ -102,6 +102,14 @@ pub enum HirExprKind {
     Unsafe {
         stmts: Vec<HirStmt>,
     },
+    /// `pool { ... }` block: an arena region. Allocations emitted inside the body
+    /// are taken from a bump arena the block releases in one step at its exit;
+    /// allocations a callee makes are not the block's and stay on the heap. Always
+    /// evaluates to unit. `label` names the arena in diagnostics only.
+    Pool {
+        label: Option<String>,
+        stmts: Vec<HirStmt>,
+    },
     /// Borrow `&place` / `&mut place`.
     Reference {
         operand: Box<HirExpr>,

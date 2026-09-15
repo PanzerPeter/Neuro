@@ -968,6 +968,21 @@ pub enum TypeError {
         max: u32,
         span: Span,
     },
+
+    #[error("{place} outlives {pool}, so storing a value of type '{ty}' there would leave the arena that the block releases at its closing brace; declare the binding inside the pool, or build the value outside it")]
+    PoolStoreEscapes {
+        place: String,
+        ty: Type,
+        pool: String,
+        span: Span,
+    },
+
+    #[error("'{keyword}' may not leave {pool}; the arena is released at the block's closing brace and jumping past it would skip that release")]
+    PoolControlFlowEscapes {
+        keyword: String,
+        pool: String,
+        span: Span,
+    },
 }
 
 impl TypeError {
@@ -1168,7 +1183,9 @@ impl TypeError {
             | Self::UnrenderableStruct { span, .. }
             | Self::FormatSpecMismatch { span, .. }
             | Self::FormatWidthTooLarge { span, .. }
-            | Self::FormatPrecisionTooLarge { span, .. } => *span,
+            | Self::FormatPrecisionTooLarge { span, .. }
+            | Self::PoolStoreEscapes { span, .. }
+            | Self::PoolControlFlowEscapes { span, .. } => *span,
         }
     }
 }

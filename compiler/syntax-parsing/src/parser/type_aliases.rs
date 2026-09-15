@@ -409,6 +409,7 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
         Expr::Block { stmts, .. } => rewrite_block(stmts, resolved),
         Expr::Loop { body, .. } => rewrite_block(body, resolved),
         Expr::Unsafe { stmts, .. } => rewrite_block(stmts, resolved),
+        Expr::Pool { stmts, .. } => rewrite_block(stmts, resolved),
         Expr::Reference { operand, .. } => rewrite_expr(operand, resolved),
         Expr::Deref { operand, .. } => rewrite_expr(operand, resolved),
         Expr::Range { start, end, .. } => {

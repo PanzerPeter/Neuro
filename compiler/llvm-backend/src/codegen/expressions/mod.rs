@@ -148,6 +148,9 @@ impl<'ctx> CodegenContext<'ctx> {
             // `unsafe` is inert: lower its body identically to a bare block.
             HirExprKind::Unsafe { stmts } => self.codegen_block_expr(stmts),
 
+            // A `pool` yields unit; its value is the arena region around the body.
+            HirExprKind::Pool { stmts, .. } => self.codegen_pool_expr(stmts),
+
             // Borrow `&place` / `&mut place`: the value of the borrow is
             // the storage pointer of the place. Every local/parameter is an alloca, so
             // its address is exactly the pointer already held in `variables`. Mutability

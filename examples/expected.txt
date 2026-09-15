@@ -84,6 +84,7 @@ ownership/copy_clone.nr          14
 ownership/drop.nr                3
 ownership/immutable_borrows.nr   0
 ownership/move_semantics.nr      0
+ownership/pool_arena.nr          3
 ownership/returned_reference.nr  60
 ownership/slices.nr              43
 
@@ -134,6 +135,7 @@ modules/shapes/area.nr  module
 modules/shapes/mod.nr   module
 
 # --- showcase: bigger programs proving features work together ---------------
+showcase/batch_arena.nr              4
 showcase/borrowed_text.nr            25
 showcase/buffered_report.nr          40
 showcase/closures.nr                 90

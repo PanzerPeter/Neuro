@@ -104,6 +104,21 @@ impl SymbolTable {
         }
     }
 
+    /// How many scopes are currently open. Paired with [`SymbolTable::defining_depth`]
+    /// to tell a binding declared inside a region from one that outlives it, which is
+    /// what a `pool` block needs to know about an assignment's target.
+    pub(crate) fn depth(&self) -> usize {
+        self.scopes.len()
+    }
+
+    /// Index of the innermost scope that defines `name`, or `None` when the name is
+    /// not a live binding.
+    pub(crate) fn defining_depth(&self, name: &str) -> Option<usize> {
+        self.scopes
+            .iter()
+            .rposition(|scope| scope.contains_key(name))
+    }
+
     /// Look up a variable in all scopes (innermost to outermost)
     pub(crate) fn lookup(&self, name: &str) -> Option<&SymbolInfo> {
         for scope in self.scopes.iter().rev() {

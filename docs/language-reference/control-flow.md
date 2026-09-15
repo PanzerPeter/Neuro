@@ -125,6 +125,66 @@ func scoped() -> i32 {
 }
 ```
 
+## Pool Blocks
+
+A `pool` block is a scope whose allocations come from one contiguous bump arena
+instead of the heap. Leaving the block moves the bump pointer back, releasing
+everything the body allocated in a single step, whatever it allocated and however
+much of it there was.
+
+```neuro
+pool {
+    val label = "batch " + "one"
+    val scratch = Tensor::<f32, [16, 16]>::zeros()
+    println(label)
+}
+// the arena is back to its mark here
+```
+
+A pool may carry a label, which names the arena in a diagnostic and nothing else:
+a `pool` is not a value, and nothing can refer to its label or break out of it.
+Labels earn their keep once pools nest, which is the loop shape they exist for:
+
+```neuro
+pool training {
+    for epoch in 0..100 {
+        pool batch {
+            // every intermediate here is gone at the closing brace, so
+            // the loop's memory use does not grow with the epoch count
+        }
+    }
+}
+```
+
+The arena captures the allocations the block itself writes. One a called function
+makes belongs to whoever that function hands it to, which the compiler cannot
+prove here, so it stays an ordinary heap allocation: the arena's speed is lost on
+that path and never its safety.
+
+Two rules keep arena memory from outliving the block, both checked at compile time:
+
+- **Nothing that outlives the block may be written from inside it.** Storing a
+  `string`, a collection, a tensor or a struct into a binding declared before the
+  `pool` would leave it addressing bytes the block's exit reclaims. Scalars cross
+  freely: an `i32` carries no address.
+- **`return`, `break` and `continue` may not leave the block.** Each would jump
+  past the arena release. Write the exit outside the pool instead; a `break`
+  targeting a loop opened *inside* the block is fine, because it stays in it.
+
+```neuro
+mut total: i32 = 0
+mut name: string = ""
+pool {
+    total = total + 1        // fine: a scalar carries no arena address
+    name = "a" + "b"         // error: `name` outlives the arena
+}
+```
+
+See [`examples/ownership/pool_arena.nr`](../../examples/ownership/pool_arena.nr)
+for a runnable program, and
+[`examples/showcase/batch_arena.nr`](../../examples/showcase/batch_arena.nr) for a
+batched forward pass built inside one.
+
 ## Nested If Statements
 
 ```neuro

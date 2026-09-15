@@ -546,6 +546,18 @@ impl Lowerer {
                 Ok(HirExpr::new(HirExprKind::Unsafe { stmts }, ty, *span))
             }
 
+            // A `pool` yields unit whatever its body ends with, so the body is
+            // lowered against no expected type and the block's own type is Void.
+            Expr::Pool { label, stmts, span } => {
+                let (stmts, _) = self.lower_block_value(stmts, None)?;
+                let label = label.as_ref().map(|id| id.name.clone());
+                Ok(HirExpr::new(
+                    HirExprKind::Pool { label, stmts },
+                    HirType::Void,
+                    *span,
+                ))
+            }
+
             Expr::Loop { label, body, span } => {
                 let label_name = label.as_ref().map(|l| l.name.clone());
                 self.loop_stack.push(LoopCtx {

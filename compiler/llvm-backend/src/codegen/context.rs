@@ -310,6 +310,11 @@ pub(crate) struct CodegenContext<'ctx> {
     /// identically share one body instead of emitting the diagnostic machinery twice.
     pub(crate) cold_thunks: HashMap<(bool, String), FunctionValue<'ctx>>,
 
+    /// How many `pool` blocks enclose the code being emitted. Non-zero routes each
+    /// allocation emitted here to the arena instead of libc; the depth itself is a
+    /// compile-time count, since a nested pool shares the one arena.
+    pub(crate) pool_depth: usize,
+
     /// Every `abort` and `llvm.trap` call emitted, in emission order. Neither runs an
     /// exit hook, so buffered standard output has to be drained immediately in front of
     /// them; `finalize_stdout_buffer` does that once the module is known to print at all.
@@ -347,6 +352,7 @@ impl<'ctx> CodegenContext<'ctx> {
             enum_variants: HashMap::new(),
             cold_thunks: HashMap::new(),
             process_exit_points: Vec::new(),
+            pool_depth: 0,
         }
     }
 

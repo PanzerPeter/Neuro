@@ -16,6 +16,7 @@ mod loop_adapter_tests;
 mod loop_tests;
 mod match_tests;
 mod newtype_tests;
+mod pool_tests;
 mod slice_tests;
 mod string_tests;
 mod tensor_reduce_tests;

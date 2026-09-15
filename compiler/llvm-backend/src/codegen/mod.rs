@@ -1,3 +1,4 @@
+pub(crate) mod arena;
 pub(crate) mod closures;
 pub(crate) mod collections;
 pub(crate) mod context;

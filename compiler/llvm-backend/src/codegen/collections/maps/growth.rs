@@ -103,7 +103,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_int_mul(new_cap, stride, "cap.bytes")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
-        let malloc = self.get_or_declare_malloc();
+        let malloc = self.alloc_fn()?;
         let fresh = self
             .builder
             .build_call(malloc, &[bytes.into()], "table.new")
@@ -224,7 +224,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
         self.builder.position_at_end(exit_bb);
-        let free = self.get_or_declare_free();
+        let free = self.release_fn()?;
         self.builder
             .build_call(free, &[old_buffer.into()], "")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;

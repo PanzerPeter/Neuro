@@ -38,6 +38,13 @@ fn tokenize_loop_keyword() {
 }
 
 #[test]
+fn tokenize_pool_keyword() {
+    let result = tokenize("pool").unwrap();
+    assert_eq!(result.len(), 2); // keyword + EOF
+    assert!(matches!(result[0].kind, TokenKind::Pool));
+}
+
+#[test]
 fn tokenize_question_operators() {
     // Longest match decides: `??` stays one coalescing token, and a lone `?` is the
     // error-propagation operator rather than half of one.

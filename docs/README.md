@@ -38,7 +38,7 @@ Design goals:
 | [Variables](language-reference/variables.md) | `val`, `mut`, reassignment, scoping |
 | [Functions](language-reference/functions.md) | Declarations, parameters, named arguments, returns, generics, dispatch, closures |
 | [Expressions](language-reference/expressions.md) | Expression syntax and evaluation order |
-| [Control Flow](language-reference/control-flow.md) | `if`/`else`, `while`, `loop`, `for`, `break`/`continue`, `match`, `val-else` |
+| [Control Flow](language-reference/control-flow.md) | `if`/`else`, `while`, `loop`, `for`, `break`/`continue`, `match`, `val-else`, `pool` arena blocks |
 | [Operators](language-reference/operators.md) | Arithmetic, comparison, logical, bitwise, cast, overloading, `??`, `?` |
 | [Structs](language-reference/structs.md) | User-defined types, `impl` methods, associated functions, derives, enums |
 | [Modules](language-reference/modules.md) | Multi-file programs, `mod.nr` directories, qualified paths, `import`, inline `module` blocks, `export import` re-exports, visibility |

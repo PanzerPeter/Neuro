@@ -321,6 +321,8 @@ impl Parser {
 
             TokenKind::Unsafe => self.parse_unsafe_expr(token.span),
 
+            TokenKind::Pool => self.parse_pool_expr(token.span),
+
             TokenKind::Match => self.parse_match_expr(token.span),
 
             // Closure literals: `|params| body`, `|| body`, or `move |params| body`.
@@ -555,6 +557,37 @@ impl Parser {
         let close = self.consume(TokenKind::RightBrace, "'}'")?;
         let span = start_span.merge(close.span);
         Ok(Expr::Unsafe { stmts, span })
+    }
+
+    /// Parse `pool { ... }` or `pool label { ... }`. The `pool` keyword is already
+    /// consumed.
+    ///
+    /// The label sits after the keyword rather than before it, as loop labels do:
+    /// a loop label is a jump target that `break` names, so it is introduced where a
+    /// jump can see it, while a pool label is only ever quoted back in a diagnostic.
+    fn parse_pool_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
+        self.skip_newlines();
+        let label = match self.peek().map(|t| &t.kind) {
+            Some(TokenKind::Identifier(name)) => {
+                let name = name.clone();
+                let span = self.advance().map(|t| t.span).unwrap_or(start_span);
+                self.skip_newlines();
+                Some(Identifier { name, span })
+            }
+            _ => None,
+        };
+        self.consume(TokenKind::LeftBrace, "'{' after 'pool'")?;
+        self.skip_newlines();
+
+        let mut stmts = Vec::new();
+        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            self.parse_stmt_into(&mut stmts)?;
+            self.skip_newlines();
+        }
+
+        let close = self.consume(TokenKind::RightBrace, "'}'")?;
+        let span = start_span.merge(close.span);
+        Ok(Expr::Pool { label, stmts, span })
     }
 
     /// Parse a comma-separated argument list, stopping at the closing `)` (which the

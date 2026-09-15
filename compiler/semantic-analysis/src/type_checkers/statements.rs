@@ -463,6 +463,7 @@ impl TypeChecker {
             }
 
             Stmt::Return { value, span } => {
+                self.check_pool_return(*span);
                 // Cloned to release the borrow on `self` before `check_expr`.
                 let expected_return = self.current_function_return_type.clone();
                 let return_ty = if let Some(expr) = value {
@@ -823,6 +824,8 @@ impl TypeChecker {
                     }
                 };
 
+                self.check_pool_store(&target.name, &element_ty, *span);
+
                 let idx_ty = self.check_expr(index, None).unwrap_or(Type::Unknown);
                 if !matches!(idx_ty, Type::Unknown) && !idx_ty.is_integer() {
                     self.record_error(TypeError::IndexNotInteger {
@@ -848,6 +851,7 @@ impl TypeChecker {
 
             Stmt::Break { label, value, span } => {
                 self.check_loop_control_label(label.as_ref(), *span, true);
+                self.check_pool_loop_jump("break", label.as_ref().map(|l| l.name.as_str()), *span);
                 self.record_break_target(label.as_ref());
                 if let Some(value_expr) = value {
                     let expected = self.break_target_expected(label.as_ref());
@@ -863,6 +867,11 @@ impl TypeChecker {
 
             Stmt::Continue { label, span } => {
                 self.check_loop_control_label(label.as_ref(), *span, false);
+                self.check_pool_loop_jump(
+                    "continue",
+                    label.as_ref().map(|l| l.name.as_str()),
+                    *span,
+                );
                 Some(())
             }
 
@@ -916,6 +925,7 @@ impl TypeChecker {
 
                 if let Some(expected_ty) = field_ty {
                     self.reject_private_field(&struct_name, &field.name, field.span);
+                    self.check_pool_store(&object.name, &expected_ty, *span);
                     if let Some(actual_ty) = self.check_expr(value, Some(&expected_ty)) {
                         if !actual_ty.is_compatible_with(&expected_ty) {
                             self.record_error(TypeError::Mismatch {
@@ -973,6 +983,7 @@ impl TypeChecker {
                     }
                 };
 
+                self.check_pool_ref_store(&inner_ty, *span);
                 let value_ty = self
                     .check_expr(value, Some(&inner_ty))
                     .unwrap_or(Type::Unknown);
@@ -1066,6 +1077,8 @@ impl TypeChecker {
         // fresh value, clearing any prior moved-out state on it.
         self.record_move(value);
         self.symbols.clear_moved(&target.name);
+
+        self.check_pool_store(&target.name, &value_ty, span);
 
         // A direct `&place` / `&mut place` RHS makes the target hold a new
         // persistent borrow of that place.

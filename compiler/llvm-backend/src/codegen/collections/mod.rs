@@ -116,7 +116,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// never-allocated collection holds a null buffer, which `free` accepts.
     pub(crate) fn emit_collection_free(&mut self, header: PointerValue<'ctx>) -> CodegenResult<()> {
         let buffer = self.load_header_buffer(header)?;
-        let free_fn = self.get_or_declare_free();
+        let free_fn = self.release_fn()?;
         self.builder
             .build_call(free_fn, &[buffer.into()], "")
             .map_err(|e| CodegenError::LlvmError(format!("failed to free buffer: {}", e)))?;

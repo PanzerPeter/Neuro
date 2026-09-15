@@ -283,7 +283,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_int_mul(len, stride, "keys.bytes")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let malloc = self.get_or_declare_malloc();
+        let malloc = self.alloc_fn()?;
         let buffer = self
             .builder
             .build_call(malloc, &[bytes.into()], "keys.buf")

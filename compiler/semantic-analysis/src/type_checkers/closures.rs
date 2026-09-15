@@ -392,7 +392,9 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
                 collect_block(block, fv);
             }
         }
-        Expr::Block { stmts, .. } | Expr::Unsafe { stmts, .. } => collect_block(stmts, fv),
+        Expr::Block { stmts, .. } | Expr::Unsafe { stmts, .. } | Expr::Pool { stmts, .. } => {
+            collect_block(stmts, fv)
+        }
         Expr::Loop { body, .. } => collect_block(body, fv),
         Expr::Reference { operand, .. } => collect_expr(operand, fv),
         Expr::Deref { operand, .. } => collect_expr(operand, fv),

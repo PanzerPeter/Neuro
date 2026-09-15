@@ -127,7 +127,7 @@ impl<'ctx> CodegenContext<'ctx> {
         match piece.owner {
             PieceOwner::Borrowed => Ok(()),
             PieceOwner::Owned => {
-                let free_fn = self.get_or_declare_free();
+                let free_fn = self.release_fn()?;
                 self.builder.build_call(free_fn, &[piece.ptr.into()], "")?;
                 Ok(())
             }
@@ -161,7 +161,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_conditional_branch(same, cont_bb, free_bb)?;
 
         self.builder.position_at_end(free_bb);
-        let free_fn = self.get_or_declare_free();
+        let free_fn = self.release_fn()?;
         self.builder.build_call(free_fn, &[candidate.into()], "")?;
         self.builder.build_unconditional_branch(cont_bb)?;
 
@@ -347,7 +347,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let quoted = self.build_quoted(value, b'"')?;
             // `__neuro_quote` always allocates, so a buffer we brought in is now dead.
             if matches!(incoming, PieceOwner::Owned) {
-                let free_fn = self.get_or_declare_free();
+                let free_fn = self.release_fn()?;
                 self.builder.build_call(free_fn, &[source.into()], "")?;
             }
             return Ok((quoted, PieceOwner::Owned));
@@ -409,7 +409,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let (encoded_ptr, _) = self.split_string_value(encoded)?;
             let quoted = self.build_quoted(encoded, b'\'')?;
             // `__neuro_quote` always allocates, so the encoding it read is now dead.
-            let free_fn = self.get_or_declare_free();
+            let free_fn = self.release_fn()?;
             self.builder
                 .build_call(free_fn, &[encoded_ptr.into()], "")?;
             return Ok((quoted, PieceOwner::Owned));

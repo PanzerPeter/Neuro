@@ -99,7 +99,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // has no such requirement, and the rounding is harmless there.
         let bytes = self.tensor_buffer_bytes(tensor_ty)?;
         let padded = bytes.div_ceil(DLPACK_DATA_ALIGN) * DLPACK_DATA_ALIGN;
-        let aligned_alloc = self.get_or_declare_aligned_alloc();
+        let aligned_alloc = self.aligned_alloc_fn()?;
         let alignment = i64_type.const_int(DLPACK_DATA_ALIGN, false);
         let size = i64_type.const_int(padded, false);
         // `aligned_alloc(alignment, size)` against `_aligned_malloc(size, alignment)`:
@@ -432,8 +432,8 @@ impl<'ctx> CodegenContext<'ctx> {
         // The buffer goes back to the release paired with the over-aligned allocation and
         // the structure to plain `free`: the two blocks come from different allocators on
         // Windows, where crossing them corrupts the heap.
-        let aligned_free_fn = self.get_or_declare_aligned_free();
-        let free_fn = self.get_or_declare_free();
+        let aligned_free_fn = self.aligned_release_fn()?;
+        let free_fn = self.release_fn()?;
         self.builder
             .build_call(aligned_free_fn, &[data.into()], "")?;
         self.builder.build_call(free_fn, &[handle.into()], "")?;

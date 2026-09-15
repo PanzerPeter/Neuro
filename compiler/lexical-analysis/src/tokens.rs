@@ -127,6 +127,8 @@ pub enum TokenKind {
     Newtype,
     #[token("unsafe")]
     Unsafe,
+    #[token("pool")]
+    Pool,
     #[token("move")]
     Move,
     #[token("self")]
@@ -407,6 +409,7 @@ impl Token {
             TokenKind::Type => "type",
             TokenKind::Newtype => "newtype",
             TokenKind::Unsafe => "unsafe",
+            TokenKind::Pool => "pool",
             TokenKind::Move => "move",
             TokenKind::SelfLower => "self",
             TokenKind::SelfUpper => "Self",

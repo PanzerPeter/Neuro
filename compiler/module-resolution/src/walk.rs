@@ -377,9 +377,10 @@ fn walk_expr(expr: &mut Expr, f: SiteFn) -> Result<(), ModuleError> {
             }
             Ok(())
         }
-        Expr::Block { stmts, .. } | Expr::Unsafe { stmts, .. } | Expr::Loop { body: stmts, .. } => {
-            walk_stmts(stmts, f)
-        }
+        Expr::Block { stmts, .. }
+        | Expr::Unsafe { stmts, .. }
+        | Expr::Pool { stmts, .. }
+        | Expr::Loop { body: stmts, .. } => walk_stmts(stmts, f),
         Expr::Reference { operand, .. } | Expr::Deref { operand, .. } => walk_expr(operand, f),
         Expr::Range { start, end, .. } => {
             walk_expr(start, f)?;

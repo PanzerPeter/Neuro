@@ -225,9 +225,10 @@ fn walk_expr(expr: &mut Expr, f: CallFn, errors: &mut Vec<ArgumentError>) {
                 walk_stmts(block, f, errors);
             }
         }
-        Expr::Block { stmts, .. } | Expr::Unsafe { stmts, .. } | Expr::Loop { body: stmts, .. } => {
-            walk_stmts(stmts, f, errors)
-        }
+        Expr::Block { stmts, .. }
+        | Expr::Unsafe { stmts, .. }
+        | Expr::Pool { stmts, .. }
+        | Expr::Loop { body: stmts, .. } => walk_stmts(stmts, f, errors),
         Expr::Range { start, end, .. } => {
             walk_expr(start, f, errors);
             walk_expr(end, f, errors);

@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.36.0] - 2026-09-15
+
+### Added
+
+- codegen: `pool { }` and `pool label { }` blocks allocate from a linear arena. What the
+  block itself allocates — a concatenated `string`, a rendered number, a map's table, a
+  tensor buffer — comes from one contiguous bump region instead of the heap, and leaving
+  the block moves the bump pointer back, releasing all of it in a single store whatever it
+  held and however much of it there was. Pools nest: an inner block takes its own mark, so
+  a `pool` inside a loop keeps the loop's memory use flat across iterations. The label
+  names the arena in a diagnostic and nothing else; a `pool` is not a value and cannot be
+  broken out of. Every release in the program now runs through a wrapper that recognizes
+  arena memory and returns without calling libc, so the ordinary drop path works unchanged
+  inside a block.
+- semantic: two escape rules keep arena memory from outliving its block. Storing a value
+  that could carry a pointer — a `string`, a collection, a tensor, a struct, a reference —
+  into a binding declared before the `pool` is rejected, while scalars cross freely, which
+  is what keeps a loop counter or an accumulated `f32` usable inside one. `return`, `break`
+  and `continue` may not leave the block, since each would jump past the arena release; a
+  `break` targeting a loop opened inside the block is fine.
+- docs: `pool` blocks documented in the Control Flow reference, with
+  `examples/ownership/pool_arena.nr` as a runnable walkthrough and
+  `examples/showcase/batch_arena.nr` running a batched forward pass — matrix product,
+  broadcast and reductions — inside nested arenas.
+
 ## [2.35.0] - 2026-09-15
 
 ### Added

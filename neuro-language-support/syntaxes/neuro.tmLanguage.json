@@ -421,7 +421,7 @@
       "patterns": [
         {
           "name": "keyword.control.neuro",
-          "match": "\\b(if|else|while|for|in|break|continue|return|match|loop)\\b"
+          "match": "\\b(if|else|while|for|in|break|continue|return|match|loop|pool)\\b"
         },
         {
           "name": "keyword.declaration.neuro",

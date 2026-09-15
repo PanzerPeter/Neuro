@@ -188,6 +188,11 @@ impl TypeChecker {
             // its trailing expression's type, exactly like a bare block.
             Expr::Unsafe { stmts, .. } => self.check_unsafe_block_expr(stmts, expected),
 
+            Expr::Pool { label, stmts, .. } => {
+                let label = label.as_ref().map(|id| id.name.clone());
+                self.check_pool_block_expr(label.as_deref(), stmts)
+            }
+
             // Borrow `&place` / `&mut place`. The result type is `&T`
             // (or `&mut T`). Checking the operand reads its type without consuming it:
             // a borrow never moves the borrowed value, which is the whole point of a
