@@ -100,6 +100,10 @@ struct LoopCtx {
     /// The agreed type of value-carrying `break`s seen so far, `None` until the
     /// first one. The loop expression evaluates to this (or `void` when absent).
     value_ty: Option<HirType>,
+    /// The type the loop expression is lowered against, or `None` outside a value
+    /// position. A `break v` adopts it so `v` lowers against the annotation, the
+    /// same way an `if` arm or a block tail in that position does.
+    expected: Option<HirType>,
     /// Whether any `break` targeted this loop. With none the loop has no exit
     /// edge and diverges, so it takes its context's expected type, which the checker
     /// applies the same rule.

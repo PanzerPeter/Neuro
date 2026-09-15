@@ -246,6 +246,11 @@ struct LoopContext {
     /// The agreed type of value-carrying `break`s seen so far, or `None` until the
     /// first one. All value-breaks targeting the same loop must agree on type.
     break_value_ty: Option<Type>,
+    /// The type the loop expression itself is checked against, or `None` outside
+    /// a value position. A `break v` adopts it as the expected type of `v`, so a
+    /// literal in a value loop coerces exactly as it does in an `if` arm, a
+    /// `match` arm, or a block tail.
+    expected_ty: Option<Type>,
     /// Whether any `break` at all targeted this loop. A `loop` with none has no
     /// exit edge, so it never produces a value: it diverges, and adopts its
     /// context's expected type exactly as the panic-family builtins do.

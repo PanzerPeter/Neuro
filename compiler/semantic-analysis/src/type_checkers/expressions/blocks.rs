@@ -140,7 +140,7 @@ impl TypeChecker {
         body: &[ast_types::Stmt],
         expected: Option<&Type>,
     ) -> Option<Type> {
-        let exit = self.check_loop_body(label.as_ref(), true, body);
+        let exit = self.check_loop_body(label.as_ref(), true, expected, body);
         match exit.value_ty {
             Some(ty) => Some(ty),
             None if exit.has_break => Some(Type::Void),

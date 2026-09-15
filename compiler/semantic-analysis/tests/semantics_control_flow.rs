@@ -186,3 +186,27 @@ fn error_while_condition_not_bool() {
         .iter()
         .any(|e| matches!(e, TypeError::Mismatch { .. })));
 }
+
+/// The expected type now reaches a `break` value, so the agreement check between
+/// several `break`s in one loop must still fire: an added expectation must not
+/// coerce a genuine mismatch into agreement.
+#[test]
+fn error_break_values_disagree_under_an_annotation() {
+    let source = r#"func main() -> i32 {
+        mut i = 0
+        val t: Tensor<i32, [2]> = loop {
+            i = i + 1
+            if i == 1 { break [10, 20] }
+            if i == 2 { break 7 }
+        }
+        return t[0]
+    }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let errors = type_check(&items).expect_err("disagreeing break values must be rejected");
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })),
+        "Expected a type mismatch, got: {errors:?}"
+    );
+}

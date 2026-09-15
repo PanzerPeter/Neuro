@@ -195,6 +195,7 @@ impl TypeChecker {
         &mut self,
         label: Option<&Identifier>,
         is_value_loop: bool,
+        expected: Option<&Type>,
         body: &[Stmt],
     ) -> LoopExit {
         let move_snapshot = self.symbols.snapshot_moves();
@@ -202,6 +203,7 @@ impl TypeChecker {
             label: label.map(|l| l.name.clone()),
             is_value_loop,
             break_value_ty: None,
+            expected_ty: expected.cloned(),
             has_break: false,
         });
         self.symbols.push_scope();
@@ -238,6 +240,22 @@ impl TypeChecker {
         if let Some(ctx) = target {
             ctx.has_break = true;
         }
+    }
+
+    /// The expected type of the loop a `break` targets, so `break v` checks `v`
+    /// against the same annotation the loop expression is checked against. Without
+    /// it a literal in a value loop is typed on its own and then fails to match an
+    /// annotation an `if` arm or a block tail in the same position would satisfy.
+    fn break_target_expected(&self, label: Option<&Identifier>) -> Option<Type> {
+        let target = match label {
+            Some(label) => self
+                .loop_stack
+                .iter()
+                .rev()
+                .find(|ctx| ctx.label.as_deref() == Some(label.name.as_str())),
+            None => self.loop_stack.last(),
+        };
+        target.and_then(|ctx| ctx.expected_ty.clone())
     }
 
     /// Record a value-carrying `break v` against its target loop: the
@@ -559,7 +577,7 @@ impl TypeChecker {
                 }
 
                 // A `while` always yields unit, so it is not a value loop.
-                let _ = self.check_loop_body(label.as_ref(), false, body);
+                let _ = self.check_loop_body(label.as_ref(), false, None, body);
 
                 Some(())
             }
@@ -621,6 +639,7 @@ impl TypeChecker {
                     label: label.as_ref().map(|l| l.name.clone()),
                     is_value_loop: false,
                     break_value_ty: None,
+                    expected_ty: None,
                     has_break: false,
                 });
                 self.symbols.push_scope();
@@ -715,6 +734,7 @@ impl TypeChecker {
                     label: label.as_ref().map(|l| l.name.clone()),
                     is_value_loop: false,
                     break_value_ty: None,
+                    expected_ty: None,
                     has_break: false,
                 });
                 self.symbols.push_scope();
@@ -830,7 +850,10 @@ impl TypeChecker {
                 self.check_loop_control_label(label.as_ref(), *span, true);
                 self.record_break_target(label.as_ref());
                 if let Some(value_expr) = value {
-                    let value_ty = self.check_expr(value_expr, None).unwrap_or(Type::Unknown);
+                    let expected = self.break_target_expected(label.as_ref());
+                    let value_ty = self
+                        .check_expr(value_expr, expected.as_ref())
+                        .unwrap_or(Type::Unknown);
                     if !matches!(value_ty, Type::Unknown) {
                         self.record_break_value(label.as_ref(), value_ty, *span);
                     }

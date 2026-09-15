@@ -232,7 +232,8 @@ pointer and is a `Mismatch`. No move is recorded: the text is read, not consumed
 
 ### Loops
 `loop_stack: Vec<LoopContext>` (innermost last) carries each active loop's label,
-`is_value_loop`, accumulated `break_value_ty`, and `has_break`. `check_loop_body` pushes a context
+`is_value_loop`, accumulated `break_value_ty`, the `expected_ty` the loop expression is
+checked against, and `has_break`. `check_loop_body` pushes a context
 for `while` / `for` / `loop` and returns `LoopExit { value_ty, has_break }`; only `loop` is a value
 loop.
 
@@ -242,6 +243,11 @@ loop.
 - **Value breaks.** `record_break_value` rejects a value targeting a `while` / `for`
   (`BreakValueInUnitLoop`), sets the loop's type on the first value-break, and reports a `Mismatch`
   on a disagreeing later one.
+- **Expected type.** `check_loop_body` carries the loop expression's expected type into its
+  `LoopContext`, and the `Stmt::Break` arm reads it back through `break_target_expected` — by
+  label, so a `break outer v` adopts the annotation of the loop it actually leaves. Without it a
+  literal in `break [10, 20]` was typed on its own and then failed against an annotation the
+  `if`-arm, `match`-arm and block-tail spellings of the same program all satisfied.
 - **`Expr::Loop`'s type** is its agreed value-break type; unit when only plain `break`s target it;
   and **the expected type when no `break` targets it at all**. Such a loop never reaches its exit,
   so it satisfies any context: the same divergent contract the panic-family builtins carry. That

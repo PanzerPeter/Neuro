@@ -80,6 +80,10 @@ An `Expr::Loop` with no `break` targeting it lowers to the **expected** type rat
 (`LoopCtx.has_break`, set by `record_break_target`), so the dead exit-block result slot is still
 typed for the position the loop sits in.
 
+`LoopCtx` also carries the loop's own expected type, and a `break v` lowers `v` against it
+(`break_target_expected`, resolved by label). The checker threads the same expectation, so a
+tensor literal in a `break` is typed as a tensor in both slices instead of as a plain array.
+
 ### Desugars this slice owns
 Each produces existing HIR nodes, so no backend learns the construct exists.
 

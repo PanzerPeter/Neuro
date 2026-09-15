@@ -282,8 +282,9 @@ impl Lowerer {
             }
 
             Stmt::Break { label, value, span } => {
+                let expected = self.break_target_expected(label.as_ref().map(|l| l.name.as_str()));
                 let value = match value {
-                    Some(expr) => Some(self.lower_expr(expr, None)?),
+                    Some(expr) => Some(self.lower_expr(expr, expected.as_ref())?),
                     None => None,
                 };
                 self.record_break_target(label.as_ref().map(|l| l.name.as_str()));
@@ -441,6 +442,7 @@ impl Lowerer {
             label: label.as_ref().map(|l| l.name.clone()),
             is_value,
             value_ty: None,
+            expected: None,
             has_break: false,
         });
         self.push_scope();
@@ -466,6 +468,13 @@ impl Lowerer {
         if let Some(ctx) = self.break_target(label) {
             ctx.has_break = true;
         }
+    }
+
+    /// The expected type of the loop a `break` targets, so `break v` lowers `v`
+    /// against the same annotation the loop expression carries.
+    fn break_target_expected(&mut self, label: Option<&str>) -> Option<HirType> {
+        self.break_target(label)
+            .and_then(|ctx| ctx.expected.clone())
     }
 
     /// The loop a `break` refers to: the innermost one carrying `label`, or the

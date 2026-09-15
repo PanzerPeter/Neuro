@@ -158,3 +158,49 @@ func main() -> i32 {
         "value-breaks with disagreeing types must be a compile error"
     );
 }
+
+/// An annotation's type reaches the value of a `break`, so a literal written there
+/// coerces exactly as it does in an `if` arm, a `match` arm or a block tail. Without
+/// it the literal was typed on its own and rejected against the annotation the three
+/// equivalent spellings below all satisfy.
+#[test]
+fn regression_annotation_reaches_break_value() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut i = 0
+    val t: Tensor<i32, [2]> = loop {
+        i = i + 1
+        if i == 1 { break [10, 20] }
+    }
+    return t[0] + t[1]
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("loop_break_annotation.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 30, "break value should coerce to the annotation");
+}
+
+/// The expectation follows the label, not the innermost loop: a `break outer v`
+/// carries the annotation of the loop it actually leaves.
+#[test]
+fn regression_annotation_reaches_labeled_break_value() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val t: Tensor<i32, [2]> = outer: loop {
+        loop {
+            break outer [3, 4]
+        }
+    }
+    return t[0] + t[1]
+}
+"#;
+
+    let exit_code = test
+        .compile_and_run("loop_break_labeled_annotation.nr", source)
+        .expect("Compilation or execution failed");
+    assert_eq!(exit_code, 7);
+}

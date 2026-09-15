@@ -552,6 +552,7 @@ impl Lowerer {
                     label: label_name.clone(),
                     is_value: true,
                     value_ty: None,
+                    expected: expected.cloned(),
                     has_break: false,
                 });
                 self.push_scope();
