@@ -397,7 +397,10 @@ def run(neurc, corrupt):
     """Compile, import and compare every case. Returns the list of failure reports."""
     failures = []
     imported = []
-    with tempfile.TemporaryDirectory() as work_dir:
+    # Windows keeps a loaded module's file locked and `ctypes` has no portable unload,
+    # so the directory may refuse to go. Losing a temp directory is not a failed
+    # comparison; the check below has already run by then.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work_dir:
         library = ctypes.CDLL(str(build_library(neurc, Path(work_dir))))
         for case in CASES:
             expected = case.reference()

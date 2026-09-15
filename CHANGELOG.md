@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.36.1] - 2026-09-15
+
+### Fixed
+
+- tests: the DLPack differential harness no longer fails on Windows while tearing down. The
+  shared library it links stays mapped for the life of the process, and Windows refuses to
+  unlink a mapped file, so removing the temporary directory raised after every comparison
+  had already passed. The teardown now tolerates a directory that will not go.
+
 ## [2.36.0] - 2026-09-15
 
 ### Added
