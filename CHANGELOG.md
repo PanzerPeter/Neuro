@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.40.0] - 2026-09-17
+
+### Added
+
+- semantic: borrowee tracking, closing the borrow checker's one unsound gap. The
+  aliasing rules were enforced between borrows only; the borrowed place itself was
+  untracked, so a value could be moved out from under a live `&` and leave the borrow
+  pointing at storage the binding had given away. Three new diagnostics:
+  `cannot use '<name>' while it is mutably borrowed` (any access through the frozen
+  name while a `&mut` is held by a live binding), `cannot move out of '<name>' while it
+  is borrowed`, and `cannot assign to '<name>' while it is borrowed`. A `&mut` passed to
+  a call still ends with that call, so a later operand of the same statement may name
+  the place.
+- examples: `showcase/borrow_discipline.nr`, combining `&mut self` methods, arrays and
+  `for` loops, and string interpolation with borrows scoped and read through.
+
+### Changed
+
+- examples: `ownership/borrow_exclusivity.nr` now scopes its second `&mut`, which the
+  new rule requires; its output and exit code are unchanged.
+
 ## [2.39.2] - 2026-09-17
 
 ### Removed

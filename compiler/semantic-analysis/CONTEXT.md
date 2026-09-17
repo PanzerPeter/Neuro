@@ -393,9 +393,26 @@ At a `&place` site a `&mut` is rejected while any borrow is live
 its old borrow first. Transient borrows are dropped at the end of every statement
 (`clear_transient_borrows`), so a borrow never outlives the statement that took it.
 
-This is **lexical, not NLL**: only direct-borrow initializers create tracked persistent borrows,
-so the analysis never rejects a valid program, but it may miss borrows escaping through compound
-expressions. Read/move-while-borrowed is not yet checked: it awaits full lifetime inference.
+**Borrowee access** (`check_borrowee_read` in `expressions/places.rs`, `reject_move_of_borrowee`
+in `moves.rs`, the target check in `check_assignment`). The rules above govern borrows against
+each other; these three govern the borrowed place itself. A read of a binding is
+`CannotUseWhileMutablyBorrowed` while an exclusive borrow is held by a live binding; a move out
+of it (or out of a field of it) is `CannotMoveWhileBorrowed` while ANY borrow is live; assigning
+to it is `CannotAssignWhileBorrowed` on the same ground, checked before the RHS so `r = &mut x`
+does not conflict with the borrow it installs.
+
+The read rule reads the **persistent** counts only, the other two read persistent plus transient.
+A `&mut` handed to a call is over when the call returns, but the transient counter survives to
+the end of the statement, so counting it there would reject `combine(bump(&mut y), y)`. There is
+no equivalent sound program on the move side. `in_borrow_operand` suppresses the read rule while
+the operand of `&` / `&mut` is typed: naming a place in order to borrow it is not an access to it,
+and the borrow site has its own diagnostic. The move rule stands down when a persistent exclusive
+borrow is live, because the read rule has already reported that name.
+
+This is **lexical, not NLL**: a borrow held by a binding freezes its borrowee for that binding's
+whole scope, so code reads back through the borrow or confines it to a block. Only direct-borrow
+initializers create tracked persistent borrows, so borrows escaping through compound expressions
+are still missed.
 
 **Returned-reference outlives** (lifetime elision; `declarations/` + `statements.rs`). A
 function or method whose declared return type is a `Type::Reference` must not return a reference

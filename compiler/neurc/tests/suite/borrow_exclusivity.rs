@@ -106,7 +106,8 @@ func main() -> i32 {
 #[test]
 fn borrow_released_at_scope_exit_runs() {
     // The branch-scoped `&mut x` is released when the `if` body ends, leaving `x`
-    // free for the later exclusive borrow `b`.
+    // free for the later exclusive borrow `b`. `b` is still live at the return, so
+    // the value is read back through the borrow rather than through `x`'s own name.
     run_expecting(
         r#"
 func main() -> i32 {
@@ -117,9 +118,94 @@ func main() -> i32 {
     }
     val b: &mut i32 = &mut x
     *b = *b + 5
-    return x
+    return *b
 }
 "#,
         25,
+    );
+}
+
+#[test]
+fn reading_the_borrowee_while_mutably_borrowed_is_rejected() {
+    expect_compile_error(
+        r#"
+func main() -> i32 {
+    mut n: i32 = 1
+    val r: &mut i32 = &mut n
+    val read: i32 = n
+    *r = 5
+    return read
+}
+"#,
+        "cannot use 'n' while it is mutably borrowed",
+    );
+}
+
+#[test]
+fn moving_the_borrowee_out_from_under_a_borrow_is_rejected() {
+    // The unsound half: `b` would be left pointing into a buffer `s` gave away.
+    expect_compile_error(
+        r#"
+func consume(s: string) -> u64 { s.len() }
+func main() -> i32 {
+    val s: string = "hello"
+    val b: &string = &s
+    val n: u64 = consume(s)
+    return n as i32
+}
+"#,
+        "cannot move out of 's' while it is borrowed",
+    );
+}
+
+#[test]
+fn assigning_to_the_borrowee_is_rejected() {
+    expect_compile_error(
+        r#"
+func main() -> i32 {
+    mut n: i32 = 1
+    val r: &i32 = &n
+    n = 5
+    return *r
+}
+"#,
+        "cannot assign to 'n' while it is borrowed",
+    );
+}
+
+#[test]
+fn reads_through_a_live_shared_borrow_run() {
+    // A shared borrow leaves the borrowee readable through its own name: only the
+    // exclusive borrow freezes it.
+    run_expecting(
+        r#"
+func main() -> i32 {
+    val x: i32 = 21
+    val a: &i32 = &x
+    val b: &i32 = &x
+    return x + *a + *b - 21
+}
+"#,
+        42,
+    );
+}
+
+#[test]
+fn a_transient_mutable_borrow_frees_the_name_when_its_call_returns() {
+    // `bump(&mut n)` is finished before the second operand is evaluated, so reading
+    // `n` there is not a read under a live borrow even though the statement goes on.
+    run_expecting(
+        r#"
+func bump(n: &mut i32) -> i32 {
+    *n = *n + 1
+    return *n
+}
+func combine(a: i32, b: i32) -> i32 { a + b }
+func main() -> i32 {
+    mut n: i32 = 20
+    return combine(bump(&mut n), n)
+}
+"#,
+        42,
     );
 }

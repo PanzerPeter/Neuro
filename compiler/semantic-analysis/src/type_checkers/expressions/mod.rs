@@ -72,6 +72,7 @@ impl TypeChecker {
                             moved_at,
                         });
                     }
+                    self.check_borrowee_read(&ident.name, ident.span);
                     Some(ty)
                 } else if let Some(const_ty) = self.constants.get(&ident.name).cloned() {
                     Some(const_ty)

@@ -704,6 +704,15 @@ pub enum TypeError {
     #[error("cannot borrow '{name}' as immutable: it is already mutably borrowed; an active `&mut` borrow excludes all other borrows of '{name}'")]
     CannotBorrowWhileMutablyBorrowed { name: String, span: Span },
 
+    #[error("cannot use '{name}' while it is mutably borrowed: a `&mut` borrow is exclusive, so every access to '{name}' must go through the borrow until it ends")]
+    CannotUseWhileMutablyBorrowed { name: String, span: Span },
+
+    #[error("cannot move out of '{name}' while it is borrowed: the borrow would be left pointing at a value '{name}' no longer owns; end the borrow first, or move a `.clone()`")]
+    CannotMoveWhileBorrowed { name: String, span: Span },
+
+    #[error("cannot assign to '{name}' while it is borrowed: the borrow would be left pointing at the replaced value; end the borrow first, or write through the borrow with `*`")]
+    CannotAssignWhileBorrowed { name: String, span: Span },
+
     #[error("cannot return a reference to '{name}': it is local to this function and does not outlive the call; return a reference derived from a parameter instead")]
     ReturnsReferenceToLocal { name: String, span: Span },
 
@@ -1137,6 +1146,9 @@ impl TypeError {
             | Self::CannotAssignThroughRef { span, .. }
             | Self::CannotMutablyBorrowWhileBorrowed { span, .. }
             | Self::CannotBorrowWhileMutablyBorrowed { span, .. }
+            | Self::CannotUseWhileMutablyBorrowed { span, .. }
+            | Self::CannotMoveWhileBorrowed { span, .. }
+            | Self::CannotAssignWhileBorrowed { span, .. }
             | Self::ReturnsReferenceToLocal { span, .. }
             | Self::RangeNotAllowed { span, .. }
             | Self::SliceExpectsRange { span, .. }

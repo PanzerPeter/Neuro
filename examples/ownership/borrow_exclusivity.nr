@@ -5,6 +5,10 @@
 //   * a `&mut T` borrow is exclusive: while it is live, no other borrow
 //     (shared or mutable) of the same place may exist.
 //
+// A third rule governs the borrowed place itself: while a `&mut` of it is live,
+// the place may not be read, written, or moved through its own name — every
+// access goes through the borrow.
+//
 // A borrow held by a binding lives until that binding leaves scope; a borrow
 // passed to a function ends with the call. This program uses only borrow
 // patterns the checker accepts, then returns a value derived from them.
@@ -42,8 +46,11 @@ func main() -> i32 {
         val r: &mut i32 = &mut value
         *r = *r + 3                   // value = 8
     }
-    val rd: &mut i32 = &mut value
-    *rd = *rd + 1                     // value = 9
+    if true {
+        val rd: &mut i32 = &mut value
+        *rd = *rd + 1                 // value = 9
+    }
+    // Both borrows have ended, so `value` is readable through its own name again.
     total = total + value             // 22 + 9 = 31
     println("scoped &mut, then new -> value {value}, total {total}")
 

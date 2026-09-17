@@ -150,6 +150,10 @@ pub(crate) struct TypeChecker {
     /// Currently open `pool` blocks, innermost last. Empty outside a pool, which
     /// is what every escape check tests first.
     pool_stack: Vec<PoolContext>,
+    /// Set while the operand of a `&` / `&mut` is being typed. Naming a place in
+    /// order to borrow it is not an access to it, so the borrowee-access rule is
+    /// suppressed there and the borrow-site exclusivity rules apply instead.
+    in_borrow_operand: bool,
 }
 
 /// The construction form of an enum variant, determining how it is built:
@@ -343,6 +347,7 @@ impl TypeChecker {
             current_fn_outliving: HashSet::new(),
             loop_stack: Vec::new(),
             pool_stack: Vec::new(),
+            in_borrow_operand: false,
         }
     }
 

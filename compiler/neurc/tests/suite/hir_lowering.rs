@@ -83,7 +83,7 @@ fn lowers_control_flow_and_borrows() {
                  mut x: i32 = 3\n\
                  val r = &mut x\n\
                  *r = 4\n\
-                 val s = sum(x)\n\
+                 val s = sum(*r)\n\
                  0\n\
                }";
     let program = lower(src);

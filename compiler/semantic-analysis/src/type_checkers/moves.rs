@@ -61,6 +61,7 @@ impl TypeChecker {
             let binding_ty = self.symbols.lookup(&ident.name).map(|info| info.ty.clone());
 
             if binding_ty.is_some_and(|ty| self.is_type_move_tracked(&ty)) {
+                self.reject_move_of_borrowee(&ident.name, ident.span);
                 self.symbols.mark_moved(&ident.name, ident.span);
             }
             return;
@@ -84,7 +85,37 @@ impl TypeChecker {
             return;
         }
 
+        self.reject_move_of_borrowee(&root, place.span());
         self.symbols.mark_moved(&root, place.span());
+    }
+
+    /// Reject moving `name` out from under a live borrow: the borrow would be left
+    /// pointing at storage the binding no longer owns.
+    ///
+    /// Every borrow counts, transient ones included: a `&mut` in flight as another
+    /// operand of the same call is exactly as dangling as one a binding holds.
+    ///
+    /// An exclusive borrow held by a *binding* is the one case skipped, because it
+    /// froze the name against any access at all and the read arm has already reported
+    /// naming it here; reporting again would name one mistake twice.
+    fn reject_move_of_borrowee(&mut self, name: &str, span: Span) {
+        let Some((shared, exclusive)) = self.symbols.borrow_counts(name) else {
+            return;
+        };
+        if shared + exclusive == 0 {
+            return;
+        }
+        if self
+            .symbols
+            .persistent_borrow_counts(name)
+            .is_some_and(|(_, persistent_exclusive)| persistent_exclusive > 0)
+        {
+            return;
+        }
+        self.record_error(TypeError::CannotMoveWhileBorrowed {
+            name: name.to_string(),
+            span,
+        });
     }
 
     /// Where the binding `expr` is rooted in was moved out, if it already has been.
@@ -774,6 +805,166 @@ mod tests {
         assert!(
             errs.iter().any(|e| e.contains("cannot move out of 'self'")),
             "a &self receiver owns nothing to give away; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn reading_a_borrowee_while_mutably_borrowed_is_rejected() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                mut n: i32 = 1
+                val r: &mut i32 = &mut n
+                val read: i32 = n
+                *r = 5
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("cannot use 'n' while it is mutably borrowed")),
+            "reading a place under a live &mut must be rejected; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn reading_a_borrowee_while_shared_borrowed_is_accepted() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                val n: i32 = 1
+                val r: &i32 = &n
+                val read: i32 = n
+                return read + *r
+            }
+            "#,
+        );
+        assert!(
+            errs.is_empty(),
+            "a shared borrow must still allow reads; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn moving_a_borrowee_while_shared_borrowed_is_rejected() {
+        let errs = errors(
+            r#"
+            func consume(s: string) -> u64 { s.len() }
+            func main() -> i32 {
+                val s: string = "hello"
+                val b: &string = &s
+                val n: u64 = consume(s)
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("cannot move out of 's' while it is borrowed")),
+            "moving out from under a live & must be rejected; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn moving_a_borrowed_field_names_the_root_binding() {
+        let errs = errors(
+            r#"
+            struct Holder { name: string }
+            func consume(s: string) -> u64 { s.len() }
+            func main() -> i32 {
+                val h = Holder { name: "hi" }
+                val b: &Holder = &h
+                val n: u64 = consume(h.name)
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("cannot move out of 'h' while it is borrowed")),
+            "a borrowed struct must not give a field away; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn assigning_to_a_borrowee_is_rejected() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                mut n: i32 = 1
+                val r: &i32 = &n
+                n = 5
+                return *r
+            }
+            "#,
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("cannot assign to 'n' while it is borrowed")),
+            "writing a place under a live borrow must be rejected; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn taking_a_borrow_is_not_a_borrowee_read() {
+        // `&x` names `x` in order to borrow it; that is the borrow site's own rule,
+        // not an access through the name, so only one diagnostic may fire here.
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                mut n: i32 = 1
+                val a: &mut i32 = &mut n
+                val b: &mut i32 = &mut n
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            !errs
+                .iter()
+                .any(|e| e.contains("cannot use 'n' while it is mutably borrowed")),
+            "a borrow operand must not report a borrowee read; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn a_borrow_released_at_scope_exit_frees_the_name() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                mut n: i32 = 1
+                if true {
+                    val r: &mut i32 = &mut n
+                    *r = 5
+                }
+                return n
+            }
+            "#,
+        );
+        assert!(
+            errs.is_empty(),
+            "a borrow that has left scope must not freeze the name; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn a_transient_borrow_does_not_freeze_the_name_for_the_statement() {
+        // `bump(&mut n)` has returned by the time the next operand is evaluated, so
+        // its borrow is over even though the statement is not.
+        let errs = errors(
+            r#"
+            func bump(n: &mut i32) -> i32 { *n = *n + 1  return *n }
+            func combine(a: i32, b: i32) -> i32 { a + b }
+            func main() -> i32 {
+                mut n: i32 = 1
+                return combine(bump(&mut n), n)
+            }
+            "#,
+        );
+        assert!(
+            errs.is_empty(),
+            "a returned call's borrow must not outlive the call; got {errs:?}"
         );
     }
 

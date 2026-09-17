@@ -150,6 +150,17 @@ impl SymbolTable {
         ))
     }
 
+    /// Borrows against `place` held by a live reference binding, as
+    /// `(shared, exclusive)`. Unlike [`borrow_counts`] this excludes the transient
+    /// borrows taken earlier in the current statement, which end with the call or
+    /// expression that took them rather than freezing the place for the statement.
+    ///
+    /// [`borrow_counts`]: SymbolTable::borrow_counts
+    pub(crate) fn persistent_borrow_counts(&self, place: &str) -> Option<(u32, u32)> {
+        let info = self.lookup(place)?;
+        Some((info.shared_persistent, info.exclusive_persistent))
+    }
+
     /// Register a borrow of `place` that lives only for the current statement
     /// (a call argument, a condition, a returned reference). Cleared by
     /// [`clear_transient_borrows`]. No-op when `place` is not a live binding.

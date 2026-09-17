@@ -726,6 +726,15 @@ The borrow checker enforces two coexistence rules at compile time:
 - **A `&mut T` borrow is exclusive**: while it is live, no other borrow of that place
   shared or mutable, may exist.
 
+A third rule governs the **borrowee** — the place the borrow points at — rather than the
+borrows against each other:
+
+- While a `&mut T` of a place is live, the place may not be **read**, **written**, or
+  **moved** through its own name. Every access goes through the borrow.
+- While *any* borrow of a place is live, the value may not be **moved out** of it, nor the
+  binding **assigned** a new one. Either would leave the borrow pointing at storage the
+  binding no longer owns.
+
 A borrow's region is **lexical**. A borrow held by a binding (`val r = &x`) lives until that
 binding leaves scope; a borrow passed to a function, used in a condition, or returned ends
 with the statement that took it. So sequential borrows in separate statements never conflict,
@@ -752,12 +761,32 @@ func main() -> i32 {
 }
 ```
 
-The diagnostics are `cannot borrow '<name>' as mutable` (a `&mut` while any borrow is live) and
-`cannot borrow '<name>' as immutable` (a `&` while a `&mut` is live).
+```neuro
+func consume(s: string) -> u64 { s.len() }
 
-> **Deferred:** this is a lexical check, not non-lexical liveness (NLL). Reading or moving a
-> value while it is borrowed lands with full **lifetime inference**, which extends the same
-> borrow-region analysis.
+func main() -> i32 {
+    mut n: i32 = 1
+    val r: &mut i32 = &mut n
+    val read: i32 = n         // ERROR: cannot use 'n' while it is mutably borrowed
+    *r = 5                    // write through the borrow instead
+
+    val s: string = "hello"
+    val b: &string = &s
+    val len: u64 = consume(s) // ERROR: cannot move out of 's' while it is borrowed
+    return 0
+}
+```
+
+The diagnostics are `cannot borrow '<name>' as mutable` (a `&mut` while any borrow is live),
+`cannot borrow '<name>' as immutable` (a `&` while a `&mut` is live),
+`cannot use '<name>' while it is mutably borrowed` (any access through the frozen name),
+`cannot move out of '<name>' while it is borrowed`, and
+`cannot assign to '<name>' while it is borrowed`.
+
+> **Deferred:** the borrow region is lexical, not non-lexical liveness (NLL). A borrow held by
+> a binding freezes its borrowee until that binding leaves scope, even when the borrow is never
+> used again, so code reads back through the borrow or confines it to a block. NLL lands with
+> full **lifetime inference**, which extends the same borrow-region analysis.
 
 ### Lifetimes, Returned References
 

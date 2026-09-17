@@ -34,6 +34,35 @@ impl TypeChecker {
         }
     }
 
+    /// Diagnose a read of `name` through its own name while a `&mut` of it is live.
+    /// A shared borrow tolerates reads, so only the exclusive count matters.
+    ///
+    /// Only borrows held by a live reference binding freeze the name. A transient
+    /// `&mut` handed to a call ends when that call returns, so a later operand of the
+    /// same statement — `combine(bump(&mut y), y)` — reads a place nothing is
+    /// borrowing any more, and the statement-wide transient count cannot tell that
+    /// from a borrow still in flight.
+    ///
+    /// Not called for the operand of `&`/`&mut` itself: taking a borrow is not an
+    /// access through the name, and the exclusivity rule at the borrow site already
+    /// reports the conflicting case. [`in_borrow_operand`] is what tells the two apart.
+    ///
+    /// [`in_borrow_operand`]: TypeChecker::in_borrow_operand
+    pub(crate) fn check_borrowee_read(&mut self, name: &str, span: Span) {
+        if self.in_borrow_operand {
+            return;
+        }
+        let Some((_, exclusive)) = self.symbols.persistent_borrow_counts(name) else {
+            return;
+        };
+        if exclusive > 0 {
+            self.record_error(TypeError::CannotUseWhileMutablyBorrowed {
+                name: name.to_string(),
+                span,
+            });
+        }
+    }
+
     /// Borrow `&place` / `&mut place`. The result type is `&T`
     /// (or `&mut T`). Checking the operand reads its type without consuming it:
     /// a borrow never moves the borrowed value, which is the whole point of a
@@ -60,17 +89,17 @@ impl TypeChecker {
         };
         let Some((name, is_mut_binding)) = binding else {
             self.record_error(TypeError::CannotBorrowValue { span: *span });
-            let _ = self.check_expr(operand, None);
+            let _ = self.check_borrow_operand(operand);
             return Some(Type::Unknown);
         };
         // `&mut` demands a `mut` binding: you cannot acquire write access
         // through a reference to a value you may not write directly.
         if mutable && !is_mut_binding {
             self.record_error(TypeError::CannotBorrowMutably { name, span: *span });
-            let _ = self.check_expr(operand, None);
+            let _ = self.check_borrow_operand(operand);
             return Some(Type::Unknown);
         }
-        let inner = self.check_expr(operand, None)?;
+        let inner = self.check_borrow_operand(operand)?;
         if matches!(inner, Type::Unknown) {
             return Some(Type::Unknown);
         }
@@ -104,6 +133,19 @@ impl TypeChecker {
             inner: Box::new(inner),
             mutable,
         })
+    }
+
+    /// Type the operand of a borrow without treating it as an access to the borrowee.
+    ///
+    /// `&x` reads `x`'s type, not its value, so the rule that freezes a mutably-borrowed
+    /// place against access through its own name does not apply to the borrow site
+    /// itself; the exclusivity rules above govern it instead.
+    fn check_borrow_operand(&mut self, operand: &Expr) -> Option<Type> {
+        let outer = self.in_borrow_operand;
+        self.in_borrow_operand = true;
+        let ty = self.check_expr(operand, None);
+        self.in_borrow_operand = outer;
+        ty
     }
 
     /// Dereference `*operand`: the result is the referent type `T`. The

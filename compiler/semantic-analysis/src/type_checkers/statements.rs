@@ -1063,6 +1063,19 @@ impl TypeChecker {
     ) -> Option<()> {
         let expected_ty = self.symbols.lookup(&target.name).map(|s| s.ty.clone());
 
+        // Replacing the value destroys what every live borrow of the target points at,
+        // so the borrowee rules apply to the write as much as to a read or a move.
+        // Tested before the RHS is checked: a `&target` appearing in the RHS is a borrow
+        // this assignment does not conflict with.
+        if let Some((shared, exclusive)) = self.symbols.borrow_counts(&target.name) {
+            if shared > 0 || exclusive > 0 {
+                self.record_error(TypeError::CannotAssignWhileBorrowed {
+                    name: target.name.clone(),
+                    span: target.span,
+                });
+            }
+        }
+
         // If the target was a reference binding, its previous borrow ends
         // here: release it before the new value is checked so that
         // re-borrowing the same place (`r = &mut x`) is not a false
