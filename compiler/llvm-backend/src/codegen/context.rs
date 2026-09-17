@@ -6,7 +6,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context as LLVMContext;
 use inkwell::module::Module;
 use inkwell::types::BasicTypeEnum;
-use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use source_location::SourceFile;
 use std::collections::HashMap;
 
@@ -215,6 +215,10 @@ pub(crate) enum DropTarget {
     /// `HeapString`, a tensor's type alone proves the ownership: every construction
     /// allocates, and there is no borrowed spelling of an owned tensor.
     TensorBuffer,
+    /// A `PoolAware` value the enclosing `pool` body owns. It carries a drop flag so a
+    /// move out of it is tracked like any other, but its release is the arena's LIFO
+    /// sweep at the block's closing brace, not this binding's scope exit.
+    PoolRegistered,
 }
 
 /// Central state container for LLVM IR code generation.
@@ -277,6 +281,12 @@ pub(crate) struct CodegenContext<'ctx> {
     /// with no Drop types, in which case all drop machinery below stays inert.
     pub(crate) drop_types: std::collections::HashSet<String>,
 
+    /// Names of structs implementing `PoolAware` (`impl PoolAware for T`). Inside a
+    /// `pool` body a binding of such a type is registered with the arena instead of
+    /// being dropped at its own scope exit. Empty for programs that declare no
+    /// implementation, in which case no registry is emitted at all.
+    pub(crate) pool_aware_types: std::collections::HashSet<String>,
+
     /// Stack of lexical drop scopes, innermost last. Each scope lists the owned
     /// `Drop`-typed bindings declared in it, in declaration order; on normal scope
     /// exit they are dropped in reverse (LIFO). Empty unless `drop_types` is non-empty.
@@ -315,6 +325,11 @@ pub(crate) struct CodegenContext<'ctx> {
     /// compile-time count, since a nested pool shares the one arena.
     pub(crate) pool_depth: usize,
 
+    /// The arena mark of each open `pool` region, innermost last. A registration hands
+    /// the innermost mark to `register_with_pool` as the active arena's identity, which
+    /// is the only thing `PoolHandle` carries.
+    pub(crate) pool_marks: Vec<IntValue<'ctx>>,
+
     /// Every `abort` and `llvm.trap` call emitted, in emission order. Neither runs an
     /// exit hook, so buffered standard output has to be drained immediately in front of
     /// them; `finalize_stdout_buffer` does that once the module is known to print at all.
@@ -347,12 +362,14 @@ impl<'ctx> CodegenContext<'ctx> {
             trait_methods: HashMap::new(),
             vtables: HashMap::new(),
             drop_types: std::collections::HashSet::new(),
+            pool_aware_types: std::collections::HashSet::new(),
             drop_scopes: Vec::new(),
             name_scopes: Vec::new(),
             enum_variants: HashMap::new(),
             cold_thunks: HashMap::new(),
             process_exit_points: Vec::new(),
             pool_depth: 0,
+            pool_marks: Vec::new(),
         }
     }
 
@@ -459,6 +476,13 @@ impl<'ctx> CodegenContext<'ctx> {
 
     pub(crate) fn set_drop_types(&mut self, drop_types: std::collections::HashSet<String>) {
         self.drop_types = drop_types;
+    }
+
+    pub(crate) fn set_pool_aware_types(
+        &mut self,
+        pool_aware_types: std::collections::HashSet<String>,
+    ) {
+        self.pool_aware_types = pool_aware_types;
     }
 
     /// Record each enum's payload word count so enum types map to the

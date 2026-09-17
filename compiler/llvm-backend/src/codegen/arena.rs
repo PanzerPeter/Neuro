@@ -23,8 +23,9 @@ use inkwell::values::{FunctionValue, GlobalValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, IntPredicate};
 
 use crate::errors::{CodegenError, CodegenResult};
+use crate::types::Type;
 
-use super::context::CodegenContext;
+use super::context::{CodegenContext, DropTarget};
 
 /// Bytes reserved for the arena the first time a run enters a `pool`.
 ///
@@ -47,6 +48,22 @@ const ARENA_ALLOC_FN: &str = "__neuro_arena_alloc";
 const ARENA_ALIGNED_ALLOC_FN: &str = "__neuro_arena_aligned_alloc";
 const RELEASE_FN: &str = "__neuro_release";
 const ALIGNED_RELEASE_FN: &str = "__neuro_aligned_release";
+const POOL_HEAD_GLOBAL: &str = "__neuro_pool_head";
+const POOL_REGISTER_FN: &str = "__neuro_pool_register";
+const POOL_SWEEP_FN: &str = "__neuro_pool_sweep";
+
+/// Fields of a registration cell: the previously registered cell, the instance, its
+/// `bulk_release` thunk, and the instance's drop flag. Pushing onto the head is what
+/// makes the list reverse-registration order the moment it is walked forward.
+const CELL_NEXT: u32 = 0;
+const CELL_INSTANCE: u32 = 1;
+const CELL_RELEASE: u32 = 2;
+const CELL_FLAG: u32 = 3;
+const CELL_FIELDS: u64 = 4;
+
+/// The prelude struct `register_with_pool` names. Matched here by name, the way the
+/// trait itself is: a program that shadows it withdraws the opt-in with it.
+const POOL_HANDLE_STRUCT: &str = "PoolHandle";
 
 impl<'ctx> CodegenContext<'ctx> {
     /// The allocator the code being emitted right now must call for a plain buffer:
@@ -106,6 +123,367 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_call(release, &[mark.into()], "")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         Ok(())
+    }
+
+    /// Read the registration list's head, which a `pool` body saves on entry and hands
+    /// back to [`emit_pool_sweep`](CodegenContext::emit_pool_sweep) as the point the
+    /// sweep must stop at. A nested block therefore releases its own registrations and
+    /// leaves the enclosing block's alone.
+    pub(crate) fn emit_pool_head(&self) -> CodegenResult<PointerValue<'ctx>> {
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        Ok(self
+            .builder
+            .build_load(ptr_type, self.pool_head().as_pointer_value(), "pool.head")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_pointer_value())
+    }
+
+    /// Push `instance` onto the registration list of the innermost open `pool`.
+    ///
+    /// `release` is the instance's `bulk_release` thunk and `flag` its drop flag, so a
+    /// value moved out of the binding before the block ends is swept once, from
+    /// whichever binding still owns it.
+    pub(crate) fn emit_pool_register(
+        &self,
+        instance: PointerValue<'ctx>,
+        release: FunctionValue<'ctx>,
+        flag: PointerValue<'ctx>,
+    ) -> CodegenResult<()> {
+        let register = self.get_or_build_pool_register()?;
+        self.builder
+            .build_call(
+                register,
+                &[
+                    instance.into(),
+                    release.as_global_value().as_pointer_value().into(),
+                    flag.into(),
+                ],
+                "",
+            )
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Run `bulk_release` over everything registered since `stop`, newest first, and
+    /// unlink each cell as it goes. Emitted immediately before the mark restore: the
+    /// cells themselves live in the arena, so the restore reclaims them too.
+    pub(crate) fn emit_pool_sweep(&self, stop: PointerValue<'ctx>) -> CodegenResult<()> {
+        let sweep = self.get_or_build_pool_sweep()?;
+        self.builder
+            .build_call(sweep, &[stop.into()], "")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        Ok(())
+    }
+
+    /// The struct a `pool` body registers its `PoolAware` bindings through, when one is
+    /// open and `struct_name` opts in. `None` leaves the binding on the ordinary drop
+    /// path, which is what every type outside a pool takes.
+    pub(crate) fn pool_registered_type(&self, ty: &Type) -> Option<String> {
+        if self.pool_depth == 0 {
+            return None;
+        }
+        let Type::Struct(name) = ty else {
+            return None;
+        };
+        self.pool_aware_types.contains(name).then(|| name.clone())
+    }
+
+    /// Bind `name` to the arena instead of to its own scope exit: call the type's
+    /// `register_with_pool` with the active arena's handle, then push the instance onto
+    /// the registration list the block's closing brace sweeps in reverse.
+    ///
+    /// For a value the block constructs. A value moved into `name` from a binding the
+    /// block already registered takes
+    /// [`transfer_pool_registration`](CodegenContext::transfer_pool_registration).
+    pub(crate) fn register_pool_aware(
+        &mut self,
+        name: &str,
+        struct_name: &str,
+        storage_ptr: PointerValue<'ctx>,
+    ) -> CodegenResult<()> {
+        let registrar = self.pool_aware_method(struct_name, "register_with_pool")?;
+        let handle = self.emit_pool_handle()?;
+        // `register_with_pool` takes `&self`, which this backend passes by value; only
+        // the `&mut self` of `bulk_release` arrives as a pointer.
+        let receiver = self
+            .builder
+            .build_load(
+                self.get_struct_llvm_type(struct_name)?,
+                storage_ptr,
+                "pool.receiver",
+            )
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder
+            .build_call(registrar, &[receiver.into(), handle.into()], "")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.transfer_pool_registration(name, struct_name, storage_ptr)
+    }
+
+    /// Put `name` on the registration list without announcing a new resource.
+    ///
+    /// A move hands the same external resource to a new binding, and the language has
+    /// `register_with_pool` called by the *constructor*, so running it again here would
+    /// register one resource twice. The list entry is still needed: the source binding's
+    /// flag was cleared by the move, so this is the binding the sweep must release, and
+    /// its position in the list is where ownership actually ended up.
+    pub(crate) fn transfer_pool_registration(
+        &mut self,
+        name: &str,
+        struct_name: &str,
+        storage_ptr: PointerValue<'ctx>,
+    ) -> CodegenResult<()> {
+        let release = self.pool_aware_method(struct_name, "bulk_release")?;
+        let flag = self.register_local_drop(name, storage_ptr, DropTarget::PoolRegistered)?;
+        self.emit_pool_register(storage_ptr, release, flag)
+    }
+
+    fn pool_aware_method(
+        &self,
+        struct_name: &str,
+        method: &str,
+    ) -> CodegenResult<FunctionValue<'ctx>> {
+        let mangled = format!("{struct_name}__{method}");
+        self.functions
+            .get(&mangled)
+            .copied()
+            .ok_or(CodegenError::UndefinedFunction(mangled))
+    }
+
+    /// A `PoolHandle` holding the innermost open pool's arena mark, which is what
+    /// distinguishes one live arena region from another. Stack-allocated per
+    /// registration: `register_with_pool` takes it by reference and may not keep it.
+    fn emit_pool_handle(&self) -> CodegenResult<PointerValue<'ctx>> {
+        let mark = *self.pool_marks.last().ok_or_else(|| {
+            CodegenError::InternalError("pool registration outside a pool region".to_string())
+        })?;
+        let handle_type = self.get_any_llvm_type(&Type::Struct(POOL_HANDLE_STRUCT.to_string()))?;
+        let handle = self.entry_alloca(handle_type, "pool.handle")?;
+        let id = self
+            .builder
+            .build_struct_gep(handle_type, handle, 0, "pool.handle.id")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder
+            .build_store(id, mark)
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        Ok(handle)
+    }
+
+    /// The `{ next, instance, release, flag }` cell one registration occupies.
+    fn pool_cell_type(&self) -> inkwell::types::StructType<'ctx> {
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        self.context
+            .struct_type(&[ptr_type.into(); CELL_FIELDS as usize], false)
+    }
+
+    fn pool_head(&self) -> GlobalValue<'ctx> {
+        if let Some(existing) = self.module.get_global(POOL_HEAD_GLOBAL) {
+            return existing;
+        }
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let global = self.module.add_global(ptr_type, None, POOL_HEAD_GLOBAL);
+        global.set_linkage(Linkage::Internal);
+        global.set_initializer(&ptr_type.const_null());
+        global
+    }
+
+    fn get_or_build_pool_register(&self) -> CodegenResult<FunctionValue<'ctx>> {
+        if let Some(existing) = self.module.get_function(POOL_REGISTER_FN) {
+            return Ok(existing);
+        }
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let function = self.module.add_function(
+            POOL_REGISTER_FN,
+            self.context
+                .void_type()
+                .fn_type(&[ptr_type.into(), ptr_type.into(), ptr_type.into()], false),
+            Some(Linkage::Internal),
+        );
+        // Resolved before the detached body opens: building a helper's body inside
+        // another's would leave the builder parked in the wrong block on the way out.
+        let alloc = self.get_or_build_arena_alloc()?;
+        self.detached(|| {
+            let entry = self.context.append_basic_block(function, "entry");
+            let link = self.context.append_basic_block(function, "link");
+            let done = self.context.append_basic_block(function, "done");
+            let cell_type = self.pool_cell_type();
+
+            self.builder.position_at_end(entry);
+            let size = cell_type.size_of().ok_or_else(|| {
+                CodegenError::InternalError("registration cell has no size".into())
+            })?;
+            let cell = self
+                .builder
+                .build_call(alloc, &[size.into()], "pool.cell")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| CodegenError::InternalError("arena alloc returned void".into()))?
+                .into_pointer_value();
+            // An allocator that failed leaves the instance unregistered rather than
+            // storing through null; its own `Drop` is all that is owed then.
+            let missing = self
+                .builder
+                .build_is_null(cell, "pool.cell.missing")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder
+                .build_conditional_branch(missing, done, link)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+            self.builder.position_at_end(link);
+            let head_global = self.pool_head();
+            let head = self
+                .builder
+                .build_load(ptr_type, head_global.as_pointer_value(), "pool.head")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let fields = [
+                (CELL_NEXT, head),
+                (
+                    CELL_INSTANCE,
+                    function.get_nth_param(0).ok_or_else(|| {
+                        CodegenError::InternalError("register lost its instance".into())
+                    })?,
+                ),
+                (
+                    CELL_RELEASE,
+                    function.get_nth_param(1).ok_or_else(|| {
+                        CodegenError::InternalError("register lost its thunk".into())
+                    })?,
+                ),
+                (
+                    CELL_FLAG,
+                    function.get_nth_param(2).ok_or_else(|| {
+                        CodegenError::InternalError("register lost its flag".into())
+                    })?,
+                ),
+            ];
+            for (index, value) in fields {
+                let slot = self
+                    .builder
+                    .build_struct_gep(cell_type, cell, index, "pool.cell.field")
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                self.builder
+                    .build_store(slot, value)
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            }
+            self.builder
+                .build_store(head_global.as_pointer_value(), cell)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder
+                .build_unconditional_branch(done)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+            self.builder.position_at_end(done);
+            self.builder
+                .build_return(None)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            Ok(())
+        })?;
+        Ok(function)
+    }
+
+    fn get_or_build_pool_sweep(&self) -> CodegenResult<FunctionValue<'ctx>> {
+        if let Some(existing) = self.module.get_function(POOL_SWEEP_FN) {
+            return Ok(existing);
+        }
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let bool_type = self.context.bool_type();
+        let function = self.module.add_function(
+            POOL_SWEEP_FN,
+            self.context.void_type().fn_type(&[ptr_type.into()], false),
+            Some(Linkage::Internal),
+        );
+        let release = self.release_fn()?;
+        self.detached(|| {
+            let entry = self.context.append_basic_block(function, "entry");
+            let walk = self.context.append_basic_block(function, "walk");
+            let body = self.context.append_basic_block(function, "body");
+            let call = self.context.append_basic_block(function, "call");
+            let unlink = self.context.append_basic_block(function, "unlink");
+            let done = self.context.append_basic_block(function, "done");
+            let cell_type = self.pool_cell_type();
+            let head_global = self.pool_head();
+            let stop = function
+                .get_first_param()
+                .ok_or_else(|| CodegenError::InternalError("sweep lost its stop cell".into()))?
+                .into_pointer_value();
+
+            self.builder.position_at_end(entry);
+            self.builder
+                .build_unconditional_branch(walk)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+            self.builder.position_at_end(walk);
+            let cell = self
+                .builder
+                .build_load(ptr_type, head_global.as_pointer_value(), "pool.cell")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .into_pointer_value();
+            let reached_stop = self
+                .builder
+                .build_int_compare(IntPredicate::EQ, cell, stop, "pool.at.stop")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder
+                .build_conditional_branch(reached_stop, done, body)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+            self.builder.position_at_end(body);
+            let mut loaded = Vec::with_capacity(CELL_FIELDS as usize);
+            for index in [CELL_NEXT, CELL_INSTANCE, CELL_RELEASE, CELL_FLAG] {
+                let slot = self
+                    .builder
+                    .build_struct_gep(cell_type, cell, index, "pool.cell.field")
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                loaded.push(
+                    self.builder
+                        .build_load(ptr_type, slot, "pool.cell.value")
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into_pointer_value(),
+                );
+            }
+            let (next, instance, thunk, flag) = (loaded[0], loaded[1], loaded[2], loaded[3]);
+            // Unlinked before the call so a `bulk_release` that itself enters a pool
+            // cannot walk a cell this sweep has already claimed.
+            self.builder
+                .build_store(head_global.as_pointer_value(), next)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let live = self
+                .builder
+                .build_load(bool_type, flag, "pool.cell.live")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .into_int_value();
+            self.builder
+                .build_conditional_branch(live, call, unlink)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+            self.builder.position_at_end(call);
+            let thunk_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
+            self.builder
+                .build_indirect_call(thunk_type, thunk, &[instance.into()], "")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder
+                .build_store(flag, bool_type.const_zero())
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder
+                .build_unconditional_branch(unlink)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+            self.builder.position_at_end(unlink);
+            // A no-op for the cells the arena holds; it matters only for one the
+            // allocator spilled to the heap because the chunk was full.
+            self.builder
+                .build_call(release, &[cell.into()], "")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder
+                .build_unconditional_branch(walk)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+            self.builder.position_at_end(done);
+            self.builder
+                .build_return(None)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            Ok(())
+        })?;
+        Ok(function)
     }
 
     fn arena_base(&self) -> GlobalValue<'ctx> {

@@ -902,7 +902,9 @@ binding of a `Drop` type. `drop_types: HashSet<String>` (filled by `compile` fro
 blocks) gates everything: when it is empty the scope stack stays empty and zero IR is emitted, so
 non-Drop programs are unaffected. `drop_scopes: Vec<Vec<DropEntry>>` is a stack of lexical scopes;
 each `DropEntry` records the binding name, storage `alloca`, an `i1` drop flag, and a `DropTarget`
-(`UserDrop(struct)` | `Collection` | `HeapString` | `TensorBuffer`).
+(`UserDrop(struct)` | `Collection` | `HeapString` | `TensorBuffer` | `PoolRegistered`).
+`PoolRegistered` is the one target `emit_drops_through` skips: its release belongs to the pool
+sweep below, and the entry exists only so the flag tracks moves like any other.
 
 `codegen_function` / `codegen_method` open the body scope and register by-value `Drop`,
 collection, or tensor parameters for destruction at function exit; `codegen_var_decl` registers a local and
@@ -951,9 +953,31 @@ buffers it grows (a `Vec`'s and a `String` builder's) are produced by `realloc` 
 pointer, so they never come from the arena at all. A map's table does, through `malloc`, and its
 growth path frees the old table through the wrapper.
 
+### `PoolAware` registration and the LIFO sweep
+`pool_aware_types: HashSet<String>` (filled by `compile` from `impl PoolAware for T` blocks) gates
+this half exactly as `drop_types` gates the Drop ABI: while it is empty no registry global, no
+helper, and no sweep call is emitted, and a pool's exit stays the single store above.
+
+Inside a pool body, `codegen_var_decl` sends a binding of a `PoolAware` struct to
+`register_pool_aware` INSTEAD of `register_local_drop`, so the type's `Drop` does not also run:
+the sweep replaces it. That emits the type's own `{T}__register_with_pool(self, handle)`
+(a `&self` receiver, so by value) and then `__neuro_pool_register`. `PoolHandle` is a stack slot
+holding the innermost `pool_marks` entry, the active arena region's identity. An initializer that
+merely MOVES an already-registered binding takes `transfer_pool_registration` instead, which pushes
+the list entry without re-running the constructor hook.
+
+The list is a single `__neuro_pool_head` global of `{ next, instance, bulk_release, flag }` cells
+bump-allocated from the arena itself, pushed at the head. `codegen_pool_expr` reads the head on
+entry and hands it to `__neuro_pool_sweep` as a stop marker, so a nested block releases its own
+registrations and leaves the enclosing block's alone. The sweep walks the list forward, which IS
+reverse registration order, unlinks each cell before calling its `bulk_release(&mut self)` thunk
+indirectly, honours the cell's flag so a moved-out value is passed over, and runs before
+`__neuro_arena_release` reclaims the memory the instances and the cells live in.
+
 **Known limits**: the chunk is reserved once and never released, an allocation that does not fit
 falls back to the heap (correct, not fast), and `Vec` / `String` buffers stay off the arena for
-the `realloc` reason above.
+the `realloc` reason above. Registration follows bindings, so a `PoolAware` temporary is never
+registered, and the sweep issues one call per instance rather than batching per device.
 
 ## Collections ABI
 `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, and `String` share one by-value header:

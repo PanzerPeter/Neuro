@@ -3,7 +3,8 @@
 // This is an integration example: it exercises several features *together*
 // rather than in isolation:
 //   2D's `pool` block, taking its arena mark once per batch · 2D's `PoolAware`
-//   opt-in, which is what lets a type with a destructor live in the arena ·
+//   opt-in and its reverse-order release sweep, which is what lets a type with a
+//   destructor live in the arena ·
 //   2B's tensor literal coercion and construction helpers · 2C's `@` matrix
 //   multiplication and its by-value element-wise operators with scalar and row
 //   broadcast · 2B's reductions, which read a batch back out as one number ·
@@ -25,7 +26,9 @@
 // therefore owns, has a destructor: a type with one is refused by a pool unless it
 // also implements `PoolAware`, because the arena's release is a single store and
 // cannot run a destructor per object. Deleting the `impl PoolAware` block below is
-// enough to make this program stop compiling.
+// enough to make this program stop compiling. Inside the arena that trait REPLACES the
+// destructor: the two notes each step builds are released by one reverse-order sweep at
+// the block's brace, newest first, not one at a time as they go out of scope.
 
 // A running tally, carried across the batches on the stack rather than in the
 // arena. Its fields are scalars, so it never allocates at all.
@@ -54,14 +57,17 @@ impl Drop for StepLog {
     }
 }
 
-// The opt-in. `register_with_pool` hands the arena the handle this value owns and
-// `bulk_release` is what the arena calls to give it back; for a note that owns no
-// external resource both are empty, and saying so is the point: the type is
-// declaring that its release can be batched.
+// The opt-in. `register_with_pool` hands the arena the handle this value owns, and
+// `bulk_release` is what the arena calls to give it back. Both run: the first at the
+// point the value is constructed, the second during the arena's sweep at the closing
+// brace — and never the `Drop` above, which is the whole trade the trait offers.
+// The sweep walks registrations in reverse, so of the two notes each step builds, the
+// one opened last is the one released first.
 impl PoolAware for StepLog {
     func register_with_pool(&self, arena: &PoolHandle) {
     }
     func bulk_release(&mut self) {
+        println("  note {self.step} released")
     }
 }
 
@@ -97,8 +103,9 @@ func main() -> i32 {
 
                 val mean = shifted.mean()
                 val top = shifted.max()
-                val note = StepLog { step: step }
-                println("step {note.step}: mean={mean:.3} max={top:.3}")
+                val opened = StepLog { step: step }
+                val queued = StepLog { step: step + 100 }
+                println("step {opened.step}: mean={mean:.3} max={top:.3}")
 
                 // Scalars may cross the arena boundary; the tensors above may not.
                 running = running + mean

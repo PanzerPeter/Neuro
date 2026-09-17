@@ -199,13 +199,21 @@ fn build_module<'ctx>(
     }
 
     // Collect the structs implementing `Drop` so codegen can insert their
-    // scope-exit destructor calls. Semantic analysis has already validated the
-    // `impl Drop for T { func drop(&mut self) }` shape and the no-Copy rule.
+    // scope-exit destructor calls, and the structs implementing `PoolAware` so a
+    // `pool` body registers them with the arena instead. Semantic analysis has already
+    // validated both shapes.
     let mut drop_types: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut pool_aware_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     for item in items {
         if let HirItem::Impl(impl_def) = item {
-            if impl_def.trait_name.as_deref() == Some("Drop") {
-                drop_types.insert(impl_def.type_name.clone());
+            match impl_def.trait_name.as_deref() {
+                Some("Drop") => {
+                    drop_types.insert(impl_def.type_name.clone());
+                }
+                Some("PoolAware") => {
+                    pool_aware_types.insert(impl_def.type_name.clone());
+                }
+                _ => {}
             }
         }
     }
@@ -216,6 +224,7 @@ fn build_module<'ctx>(
     codegen_ctx.set_enum_words(enum_words);
     codegen_ctx.set_enum_variants(enum_variants);
     codegen_ctx.set_drop_types(drop_types);
+    codegen_ctx.set_pool_aware_types(pool_aware_types);
     codegen_ctx.set_trait_methods(trait_methods);
 
     // Supply source so panic-family builtins can render `file:line:col` in their
@@ -463,6 +472,78 @@ mod tests {
             Some(end) => &rest[..end],
             None => rest,
         }
+    }
+
+    /// The prelude declarations the `PoolAware` tests need. `module_ir` drives the
+    /// pipeline without `neurc`, which is what prepends the real prelude.
+    const POOL_AWARE_PRELUDE: &str = "
+        struct PoolHandle { id: u64 }
+        trait PoolAware {
+            func register_with_pool(&self, arena: &PoolHandle)
+            func bulk_release(&mut self)
+        }
+        struct Handle { id: i32 }
+        impl PoolAware for Handle {
+            func register_with_pool(&self, arena: &PoolHandle) { }
+            func bulk_release(&mut self) { }
+        }
+    ";
+
+    /// Section 4.9's release order, read off the IR: every `PoolAware` value the block
+    /// owns is registered where it is built, and the sweep that releases them runs
+    /// before the mark restore that reclaims the memory they live in.
+    #[test]
+    fn a_pool_sweeps_its_registrations_before_reclaiming_the_arena() {
+        let source = format!(
+            "{POOL_AWARE_PRELUDE}
+            func main() -> i32 {{
+                pool scratch {{
+                    val first = Handle {{ id: 1 }}
+                    val second = Handle {{ id: 2 }}
+                }}
+                return 0
+            }}"
+        );
+        let ir = module_ir(&source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+
+        let registrations = body.matches("call void @__neuro_pool_register").count();
+        assert_eq!(
+            registrations, 2,
+            "one registration per owned value:\n{body}"
+        );
+        assert_eq!(
+            body.matches("call void @Handle__register_with_pool")
+                .count(),
+            2,
+            "the type's own hook runs at each construction:\n{body}"
+        );
+
+        let sweep = body
+            .find("call void @__neuro_pool_sweep")
+            .expect("no sweep emitted");
+        let reclaim = body
+            .find("call void @__neuro_arena_release")
+            .expect("no mark restore emitted");
+        assert!(sweep < reclaim, "sweep must precede the restore:\n{body}");
+    }
+
+    /// A pool whose values are plain data owes the arena nothing per object, so none of
+    /// the registry is emitted and its exit stays the single store it was.
+    #[test]
+    fn a_pool_without_pool_aware_values_emits_no_registry() {
+        let source = r#"
+            struct Point { x: i32 }
+            func main() -> i32 {
+                pool scratch {
+                    val p = Point { x: 1 }
+                }
+                return 0
+            }
+        "#;
+        let ir = module_ir(source, OptimizationLevelSetting::O0);
+        assert!(!ir.contains("__neuro_pool_register"), "{ir}");
+        assert!(!ir.contains("__neuro_pool_sweep"), "{ir}");
     }
 
     /// A tensor value is a filled-in `DLManagedTensorVersioned`, not a bare

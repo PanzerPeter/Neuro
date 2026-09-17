@@ -71,6 +71,9 @@ impl<'ctx> CodegenContext<'ctx> {
             // (field / index assignment) that must recover a struct or array name, and
             // hands back whatever the name meant before. That goes into the enclosing
             // scope's frame so leaving the block puts the outer binding back.
+            let pool_registered = self.pool_registered_type(&target_sem);
+            let moves_a_registration =
+                init.is_some_and(|expr| self.moves_a_pool_registration(expr));
             let shadowed = self.bind_name(name, alloca, alloca_ty, target_sem);
             if let Some(scope) = self.name_scopes.last_mut() {
                 scope.push(shadowed);
@@ -81,7 +84,16 @@ impl<'ctx> CodegenContext<'ctx> {
             if let Some(expr) = init {
                 self.mark_moved_for_drop(expr);
             }
-            if let Some(target) = drop_target {
+            // A `PoolAware` binding inside a `pool` is released by the arena's sweep at
+            // the block's brace instead of by its own scope, so it takes one path or the
+            // other and never both.
+            if let Some(struct_name) = pool_registered {
+                if moves_a_registration {
+                    self.transfer_pool_registration(name, &struct_name, alloca)?;
+                } else {
+                    self.register_pool_aware(name, &struct_name, alloca)?;
+                }
+            } else if let Some(target) = drop_target {
                 self.register_local_drop(name, alloca, target)?;
             }
         }

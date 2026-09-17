@@ -6,8 +6,45 @@
 // sibling and a nested block, which is what breaks first if the mark, the restore, or
 // the release wrapper is wrong. The arena's shape is asserted on the IR, in
 // `llvm-backend`'s own tests.
+//
+// The `PoolAware` sweep is the exception: it IS observable, because the order the arena
+// calls `bulk_release` in is the order the program prints in. Those tests read stdout.
 mod common;
 use common::CompileTest;
+use std::process::Command;
+
+/// Compile and run `source`, returning its standard output with line endings
+/// normalized (fd 1 is a text-mode descriptor on Windows, and these tests assert which
+/// lines were written rather than the platform's line-ending policy).
+fn stdout_of(test: &CompileTest, filename: &str, source: &str) -> String {
+    let source_path = test.write_source(filename, source);
+    let exe = test.compile(&source_path).expect("compile failed");
+    let output = Command::new(&exe).output().expect("run failed");
+    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+}
+
+/// A type that is both `Drop` and `PoolAware`, printing from all three hooks so a test
+/// can tell which of them the arena actually ran.
+const TRACED_HANDLE: &str = r#"
+struct Handle {
+    id: i32
+}
+
+impl Drop for Handle {
+    func drop(&mut self) {
+        println("drop {self.id}")
+    }
+}
+
+impl PoolAware for Handle {
+    func register_with_pool(&self, arena: &PoolHandle) {
+        println("register {self.id}")
+    }
+    func bulk_release(&mut self) {
+        println("release {self.id}")
+    }
+}
+"#;
 
 #[test]
 fn a_pool_block_runs_its_body() {
@@ -312,4 +349,92 @@ func main() -> i32 {
         .compile_and_run("pool_drop_outside.nr", source)
         .expect("compile/run failed");
     assert_eq!(exit, 5);
+}
+
+#[test]
+fn a_pool_registers_at_construction_and_sweeps_in_reverse() {
+    // The whole guarantee in one program: `register_with_pool` runs where the value is
+    // built, `bulk_release` runs at the closing brace in reverse registration order,
+    // and the ordinary destructor does not run at all inside the block.
+    let test = CompileTest::new();
+    let source = format!(
+        "{TRACED_HANDLE}
+func main() -> i32 {{
+    pool scratch {{
+        val first = Handle {{ id: 1 }}
+        val second = Handle {{ id: 2 }}
+        val third = Handle {{ id: 3 }}
+        println(\"body\")
+    }}
+    println(\"after\")
+    0
+}}"
+    );
+    let printed = stdout_of(&test, "pool_sweep_order.nr", &source);
+    assert_eq!(
+        printed,
+        "register 1\nregister 2\nregister 3\nbody\nrelease 3\nrelease 2\nrelease 1\nafter\n"
+    );
+}
+
+#[test]
+fn a_pool_aware_value_outside_a_pool_still_runs_its_destructor() {
+    // The trait is an arena opt-in, not a replacement for `Drop`: with no pool open
+    // there is no registration list to join and the destructor is all that is owed.
+    let test = CompileTest::new();
+    let source = format!(
+        "{TRACED_HANDLE}
+func main() -> i32 {{
+    val lone = Handle {{ id: 9 }}
+    println(\"body\")
+    0
+}}"
+    );
+    let printed = stdout_of(&test, "pool_aware_outside.nr", &source);
+    assert_eq!(printed, "body\ndrop 9\n");
+}
+
+#[test]
+fn a_nested_pool_sweeps_only_what_it_registered() {
+    // The inner block stops at the head the outer block saved, so the outer block's
+    // registrations survive it and are swept, still newest first, one brace later.
+    let test = CompileTest::new();
+    let source = format!(
+        "{TRACED_HANDLE}
+func main() -> i32 {{
+    pool outer {{
+        val kept = Handle {{ id: 1 }}
+        pool inner {{
+            val scratch = Handle {{ id: 2 }}
+        }}
+        println(\"between\")
+    }}
+    0
+}}"
+    );
+    let printed = stdout_of(&test, "pool_sweep_nested.nr", &source);
+    assert_eq!(
+        printed,
+        "register 1\nregister 2\nrelease 2\nbetween\nrelease 1\n"
+    );
+}
+
+#[test]
+fn a_registered_value_moved_into_another_binding_is_released_once() {
+    // Registration reuses the binding's drop flag, so a move clears the source exactly
+    // as it does on the ordinary drop path and the sweep passes over it.
+    let test = CompileTest::new();
+    let source = format!(
+        "{TRACED_HANDLE}
+func main() -> i32 {{
+    pool scratch {{
+        val original = Handle {{ id: 4 }}
+        val moved = original
+        println(\"moved {{moved.id}}\")
+    }}
+    0
+}}"
+    );
+    let printed = stdout_of(&test, "pool_sweep_moved.nr", &source);
+    assert_eq!(printed, "register 4\nmoved 4\nrelease 4\n");
 }

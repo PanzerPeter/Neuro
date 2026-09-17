@@ -213,19 +213,39 @@ impl PoolAware for Handle {
     func register_with_pool(&self, arena: &PoolHandle) {
     }
     func bulk_release(&mut self) {
+        println("swept {self.id}")
     }
 }
 ```
 
-With that impl in place the same `pool` block compiles. A type with no destructor at
-all needs neither: its memory goes back with the bulk arena free and nothing else is
-owed. Building the value *before* the `pool` is the other way out: it never comes
-from the arena, so its ordinary destructor still applies.
+With that impl in place the same `pool` block compiles. Inside the block the two
+methods are what run, and the `Drop` above is not: `register_with_pool` is called
+where the value is constructed, and `bulk_release` at the closing brace. Outside a
+`pool` the opposite holds, and the destructor runs as it always did.
+
+The sweep walks the registrations in **reverse order of construction**, the same
+order stack values are destroyed in. That is what makes a resource safe to depend on
+another: a view is released before the tensor it borrows from, and an operation
+before the stream it was queued on, because each registered after the thing it
+depends on.
+
+```neuro
+pool scratch {
+    val first = Handle { id: 1 }
+    val second = Handle { id: 2 }
+}
+// prints: swept 2, then swept 1
+```
+
+A type with no destructor at all needs neither method: its memory goes back with the
+bulk arena free and nothing else is owed. Building the value *before* the `pool` is
+the other way out: it never comes from the arena, so its ordinary destructor still
+applies.
 
 | Type | In a `pool`? |
 | --- | --- |
 | No `Drop` | yes, reclaimed by the bulk arena free |
-| `PoolAware` (with or without `Drop`) | yes |
+| `PoolAware` (with or without `Drop`) | yes, `bulk_release` in reverse construction order at the block's exit |
 | `Drop` only | no, a compile error naming the pool |
 
 See [`examples/ownership/pool_arena.nr`](../../examples/ownership/pool_arena.nr)

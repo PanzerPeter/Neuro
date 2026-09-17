@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.38.0] - 2026-09-17
+
+### Added
+
+- codegen: a `PoolAware` value a `pool` block owns is now registered with the arena where
+  it is constructed and released by the arena's own sweep at the block's closing brace,
+  in reverse construction order. `register_with_pool` runs at the construction site and
+  `bulk_release` during the sweep, and inside the block they replace the type's `Drop`
+  rather than running alongside it; outside a `pool` the destructor runs as before. The
+  reverse order is the guarantee the trait exists for: a resource is never released
+  before something that was queued on it. A nested block releases only what it
+  registered, a value moved between bindings is released once, and a program that
+  implements the trait nowhere emits none of the registry.
+
+### Changed
+
+- docs: `examples/ownership/pool_arena.nr` and `examples/showcase/batch_arena.nr` now
+  print from `bulk_release` rather than from `Drop`, which is what the arena calls.
+
 ## [2.37.0] - 2026-09-17
 
 ### Added

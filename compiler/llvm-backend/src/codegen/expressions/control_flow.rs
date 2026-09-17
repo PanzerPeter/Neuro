@@ -156,8 +156,9 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Codegen a block expression: run stmts, return the last `Stmt::Expr`'s value.
     /// Emit a `pool { }` block: take the arena mark, emit the body with allocations
-    /// routed to the bump path, then restore the mark, which releases everything the
-    /// body allocated at once.
+    /// routed to the bump path, sweep the `PoolAware` instances the body registered in
+    /// reverse order, then restore the mark, which releases everything the body
+    /// allocated at once.
     ///
     /// A body that cannot fall through (a panic) leaves the block terminated and needs
     /// no restore: the process is on its way out, and the arena dies with it.
@@ -166,11 +167,25 @@ impl<'ctx> CodegenContext<'ctx> {
         stmts: &[HirStmt],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let mark = self.emit_arena_mark()?;
+        // Nothing can register unless the program implements the trait somewhere, and a
+        // block with no registrations must keep costing exactly one store to leave.
+        let registered = match self.pool_aware_types.is_empty() {
+            true => None,
+            false => Some(self.emit_pool_head()?),
+        };
         self.pool_depth += 1;
+        self.pool_marks.push(mark);
         let result = self.codegen_block_expr(stmts);
+        let _ = self.pool_marks.pop();
         self.pool_depth -= 1;
         result?;
         if !self.current_block_terminated() {
+            // Every `PoolAware` instance the block registered is released in reverse
+            // registration order, and only then does the mark restore reclaim the memory
+            // they were living in.
+            if let Some(registered) = registered {
+                self.emit_pool_sweep(registered)?;
+            }
             self.emit_arena_release(mark)?;
         }
         Ok(self.context.i32_type().const_int(0, false).into())

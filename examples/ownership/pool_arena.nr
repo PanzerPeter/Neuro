@@ -21,6 +21,9 @@
 //     implements `PoolAware`. The arena is released in one store and cannot run a
 //     destructor per object; `PoolAware` is how a type says its release can be
 //     batched into the arena's own sweep instead. `Round` below is that opt-in.
+//     Inside the block the sweep REPLACES the destructor, and it runs in reverse
+//     registration order at the closing brace, so a resource is never released
+//     before something that was queued on it.
 //
 // The arena captures what the block writes, not what its callees write: a buffer a
 // called function allocates belongs to whoever that function hands it to, so it stays
@@ -40,13 +43,14 @@ impl Drop for Round {
 }
 
 // The opt-in. A type that owns an external resource hands it to the arena in
-// `register_with_pool` and gives it back in `bulk_release`; this marker owns nothing
-// outside itself, so both are empty and the impl is purely the declaration that its
-// release is safe to batch.
+// `register_with_pool`, which the arena calls where the value is constructed, and gives
+// it back in `bulk_release`, which the arena calls during its sweep. The `Drop` above
+// runs only outside a pool; inside one, the line below is what prints.
 impl PoolAware for Round {
     func register_with_pool(&self, arena: &PoolHandle) {
     }
     func bulk_release(&mut self) {
+        println("  round {self.index} marker swept")
     }
 }
 

@@ -131,14 +131,14 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Record an owned `Drop`-typed binding for destruction at scope exit.
     ///
     /// Allocates the binding's `i1` drop flag (initialized `true`) and pushes a
-    /// [`DropEntry`] onto the innermost scope. The caller must have verified the
-    /// binding's type needs one via [`drop_target`].
+    /// [`DropEntry`] onto the innermost scope, handing the flag back. The caller must
+    /// have verified the binding's type needs one via [`drop_target`].
     pub(crate) fn register_local_drop(
         &mut self,
         name: &str,
         storage_ptr: PointerValue<'ctx>,
         target: DropTarget,
-    ) -> CodegenResult<()> {
+    ) -> CodegenResult<PointerValue<'ctx>> {
         let bool_ty = self.context.bool_type();
         let flag_ptr = self.entry_alloca(bool_ty, "drop.flag")?;
         self.builder
@@ -153,7 +153,21 @@ impl<'ctx> CodegenContext<'ctx> {
                 target,
             });
         }
-        Ok(())
+        Ok(flag_ptr)
+    }
+
+    /// Whether `expr` names a binding the enclosing `pool` already registered, making
+    /// this initializer a transfer of a live registration rather than a construction.
+    pub(crate) fn moves_a_pool_registration(&self, expr: &HirExpr) -> bool {
+        let HirExprKind::Variable(name) = &expr.kind else {
+            return false;
+        };
+        self.drop_scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.iter().rev())
+            .find(|entry| &entry.name == name)
+            .is_some_and(|entry| matches!(entry.target, DropTarget::PoolRegistered))
     }
 
     /// Clear the drop flag of the place named by `expr` if it is a tracked `Drop`
@@ -206,6 +220,12 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut pending: Vec<(PointerValue<'ctx>, PointerValue<'ctx>, DropTarget)> = Vec::new();
         for scope in self.drop_scopes[min_index..].iter().rev() {
             for entry in scope.iter().rev() {
+                // A pool-registered value outlives its own scope on purpose: its
+                // release is the arena's LIFO sweep at the pool's closing brace, so every
+                // such binding in the block is released in one ordered pass.
+                if matches!(entry.target, DropTarget::PoolRegistered) {
+                    continue;
+                }
                 pending.push((entry.storage_ptr, entry.flag_ptr, entry.target.clone()));
             }
         }
@@ -261,6 +281,11 @@ impl<'ctx> CodegenContext<'ctx> {
             DropTarget::Collection => self.emit_collection_free(storage_ptr)?,
             DropTarget::HeapString => self.emit_heap_string_free(storage_ptr)?,
             DropTarget::TensorBuffer => self.emit_tensor_buffer_free(storage_ptr)?,
+            DropTarget::PoolRegistered => {
+                return Err(CodegenError::InternalError(
+                    "a pool-registered value reached the per-scope drop path".to_string(),
+                ))
+            }
         }
         // Clear the flag so a re-reachable drop site cannot run the destructor twice.
         self.builder
