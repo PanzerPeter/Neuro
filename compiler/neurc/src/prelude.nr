@@ -172,3 +172,25 @@ export enum Device {
     CPU,
     GPU(i32)
 }
+
+// The arena a `pool` block allocates from, as a type a pool-aware constructor can
+// name. It carries the arena's identity and nothing else: a program never builds one,
+// and the only thing it is useful for is being handed to `register_with_pool`.
+export struct PoolHandle {
+    id: u64
+}
+
+// The opt-in that lets a type holding an external resource live in a `pool`.
+//
+// A pool releases its arena in one store at the closing brace, so it cannot run an
+// arbitrary destructor per object without giving up the O(1) free. A type that owns
+// only memory needs no destructor and is allowed in a pool as it stands; a type that
+// implements `Drop` and nothing else is rejected from one. Implementing `PoolAware` is
+// how such a type says its release can be batched: it registers its handle with the
+// arena at construction, and the arena releases every registered handle in one sweep
+// at pool exit, in reverse registration order so a resource is never released before
+// something queued on it.
+export trait PoolAware {
+    func register_with_pool(&self, arena: &PoolHandle)
+    func bulk_release(&mut self)
+}

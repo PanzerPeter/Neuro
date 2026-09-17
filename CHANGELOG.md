@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.37.0] - 2026-09-17
+
+### Added
+
+- semantic: the `PoolAware` trait, and the rule it is the opt-out from. A `pool` block
+  releases its arena in a single store, so it cannot run an arbitrary destructor per
+  object: a value of a type that implements `Drop` is now refused wherever the block
+  would own it, whether the value is written in the block or handed back by a function
+  the block calls, and the diagnostic names the pool and the constructing function.
+  Implementing `PoolAware` for the type accepts it again. A type with no destructor is
+  unaffected, and so is a value built before the block, which never comes from the arena.
+- infra: `PoolAware` and `PoolHandle` join the prelude as ordinary declarations, so a
+  program may shadow them like any other prelude name.
+
 ## [2.36.1] - 2026-09-15
 
 ### Fixed

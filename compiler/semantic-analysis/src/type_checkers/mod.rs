@@ -62,6 +62,10 @@ pub(crate) struct TypeChecker {
     /// one compares its fields; the operator does not route through a method, so this is
     /// distinct from a hand-written `impl PartialEq` in `operator_binary_impls`.
     partial_eq_structs: HashSet<String>,
+    /// Names of structs with an `impl Drop` block. A `pool` block refuses to own a value
+    /// of one unless it is also `PoolAware`: the arena releases in a single store and
+    /// cannot run an arbitrary destructor per object.
+    drop_structs: HashSet<String>,
     /// Methods per struct: struct_name → method_name → mangled function key in `functions`
     ///
     /// The mangled key follows the convention `StructName__methodName`.
@@ -315,6 +319,7 @@ impl TypeChecker {
             clone_structs: HashSet::new(),
             debug_structs: HashSet::new(),
             partial_eq_structs: HashSet::new(),
+            drop_structs: HashSet::new(),
             impl_methods: HashMap::new(),
             mut_self_methods: HashSet::new(),
             generic_funcs: HashMap::new(),

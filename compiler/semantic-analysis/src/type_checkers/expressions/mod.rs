@@ -123,7 +123,15 @@ impl TypeChecker {
                 args,
                 span,
                 ..
-            } => self.check_call_expr(func, type_args, args, span, expected),
+            } => {
+                let ty = self.check_call_expr(func, type_args, args, span, expected);
+                // A call inside a pool hands the block a value it now owns, so the
+                // `Drop`-only rejection applies here and names the callee.
+                if let Some(ty) = &ty {
+                    self.check_pool_construction(ty, callee_name(func).as_deref(), *span);
+                }
+                ty
+            }
 
             Expr::Path {
                 type_name,
@@ -141,7 +149,13 @@ impl TypeChecker {
                 fields,
                 base,
                 span,
-            } => self.check_struct_literal_expr(name, fields, base, span),
+            } => {
+                let ty = self.check_struct_literal_expr(name, fields, base, span);
+                if let Some(ty) = &ty {
+                    self.check_pool_construction(ty, None, *span);
+                }
+                ty
+            }
 
             // Struct-variant enum construction `E::V { field: expr, ... }`.
             Expr::EnumStructLiteral {
@@ -283,5 +297,18 @@ impl TypeChecker {
                 span,
             } => Some(self.check_closure(params, ret.as_ref(), body, *is_move, *span)),
         }
+    }
+}
+
+/// The name a call expression's callee reads as, for a diagnostic that has to say which
+/// function produced a value. `None` where the callee is computed rather than named.
+fn callee_name(func: &Expr) -> Option<String> {
+    match func {
+        Expr::Identifier(ident) => Some(ident.name.clone()),
+        Expr::FieldAccess { field, .. } => Some(field.name.clone()),
+        Expr::Path {
+            type_name, member, ..
+        } => Some(format!("{}::{}", type_name.name, member.name)),
+        _ => None,
     }
 }

@@ -2,12 +2,13 @@
 //
 // This is an integration example: it exercises several features *together*
 // rather than in isolation:
-//   2D's `pool` block, taking its arena mark once per batch · 2B's tensor
-//   literal coercion and construction helpers · 2C's `@` matrix multiplication
-//   and its by-value element-wise operators with scalar and row broadcast ·
-//   2B's reductions, which read a batch back out as one number · a struct with
-//   a method on `&self` · a `for` loop over a range · string interpolation with
-//   the format mini-language.
+//   2D's `pool` block, taking its arena mark once per batch · 2D's `PoolAware`
+//   opt-in, which is what lets a type with a destructor live in the arena ·
+//   2B's tensor literal coercion and construction helpers · 2C's `@` matrix
+//   multiplication and its by-value element-wise operators with scalar and row
+//   broadcast · 2B's reductions, which read a batch back out as one number ·
+//   a struct with a method on `&self` · a `for` loop over a range · string
+//   interpolation with the format mini-language.
 //
 // The shape a training loop actually has: weights and running totals declared
 // OUTSIDE the arena, so they survive it, and every per-batch intermediate built
@@ -16,11 +17,15 @@
 // sum per step, and its high-water mark never moves — which is the whole reason
 // to reach for an arena over the heap in a loop like this.
 //
-// The two rules the block enforces are both visible here. `running` and `steps`
-// are an `f32` and an `i32`, so the inner block may write them: a scalar carries
-// no address into the arena. No tensor declared before the `pool` is written from
+// Three rules the block enforces are visible here. `running` and `steps` are an
+// `f32` and an `i32`, so the inner block may write them: a scalar carries no
+// address into the arena. No tensor declared before the `pool` is written from
 // inside it, and no `break` or `return` leaves the block — the loop's exit is the
-// loop's own, one level out.
+// loop's own, one level out. And `StepLog`, which the inner block builds and
+// therefore owns, has a destructor: a type with one is refused by a pool unless it
+// also implements `PoolAware`, because the arena's release is a single store and
+// cannot run a destructor per object. Deleting the `impl PoolAware` block below is
+// enough to make this program stop compiling.
 
 // A running tally, carried across the batches on the stack rather than in the
 // arena. Its fields are scalars, so it never allocates at all.
@@ -34,6 +39,29 @@ impl Tally {
     // rendered and then kept.
     func render(&self) -> string {
         return "{self.steps} batches, mean sum {self.total:.3}"
+    }
+}
+
+// A per-step scratch note, built inside the arena. It holds a destructor, so it is
+// exactly the shape a pool would otherwise refuse.
+struct StepLog {
+    step: i32
+}
+
+impl Drop for StepLog {
+    func drop(&mut self) {
+        println("  step {self.step} closed")
+    }
+}
+
+// The opt-in. `register_with_pool` hands the arena the handle this value owns and
+// `bulk_release` is what the arena calls to give it back; for a note that owns no
+// external resource both are empty, and saying so is the point: the type is
+// declaring that its release can be batched.
+impl PoolAware for StepLog {
+    func register_with_pool(&self, arena: &PoolHandle) {
+    }
+    func bulk_release(&mut self) {
     }
 }
 
@@ -69,7 +97,8 @@ func main() -> i32 {
 
                 val mean = shifted.mean()
                 val top = shifted.max()
-                println("step {step}: mean={mean:.3} max={top:.3}")
+                val note = StepLog { step: step }
+                println("step {note.step}: mean={mean:.3} max={top:.3}")
 
                 // Scalars may cross the arena boundary; the tensors above may not.
                 running = running + mean

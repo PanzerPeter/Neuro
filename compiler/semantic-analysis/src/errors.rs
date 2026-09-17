@@ -983,6 +983,17 @@ pub enum TypeError {
         pool: String,
         span: Span,
     },
+
+    #[error("'{type_name}' implements 'Drop' but not 'PoolAware', so a value of it{origin} may not be owned by {pool}; the arena is released in one store and cannot run a destructor per object. Implement 'PoolAware' for '{type_name}', or build the value outside the pool")]
+    PoolDropOnlyValue {
+        type_name: String,
+        /// Where the value came from, rendered into the message: `" returned by 'open'"`
+        /// for a call, empty for a literal written in the block itself. The diagnostic
+        /// names the constructing function when there is one.
+        origin: String,
+        pool: String,
+        span: Span,
+    },
 }
 
 impl TypeError {
@@ -1185,7 +1196,8 @@ impl TypeError {
             | Self::FormatWidthTooLarge { span, .. }
             | Self::FormatPrecisionTooLarge { span, .. }
             | Self::PoolStoreEscapes { span, .. }
-            | Self::PoolControlFlowEscapes { span, .. } => *span,
+            | Self::PoolControlFlowEscapes { span, .. }
+            | Self::PoolDropOnlyValue { span, .. } => *span,
         }
     }
 }

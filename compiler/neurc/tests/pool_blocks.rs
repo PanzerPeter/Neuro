@@ -180,3 +180,136 @@ func main() -> i32 {
         "unexpected diagnostic: {error}"
     );
 }
+
+#[test]
+fn a_drop_only_value_owned_by_a_pool_is_rejected() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Handle {
+    id: i32
+}
+
+impl Drop for Handle {
+    func drop(&mut self) {
+        println("released {self.id}")
+    }
+}
+
+func main() -> i32 {
+    pool scratch {
+        val h = Handle { id: 1 }
+    }
+    0
+}
+"#;
+    let error = test
+        .check("pool_drop_only.nr", source)
+        .expect_err("an arbitrary destructor cannot run under a single-store release");
+    assert!(
+        error.contains("'PoolAware'") && error.contains("'scratch'"),
+        "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
+fn a_drop_only_value_returned_by_a_call_names_that_function() {
+    // The rejection has to reach a value the block owns wherever it was built, and to
+    // say which function built it.
+    let test = CompileTest::new();
+    let source = r#"
+struct Handle {
+    id: i32
+}
+
+impl Drop for Handle {
+    func drop(&mut self) {
+        println("released {self.id}")
+    }
+}
+
+func open(id: i32) -> Handle {
+    Handle { id: id }
+}
+
+func main() -> i32 {
+    pool {
+        val h = open(4)
+    }
+    0
+}
+"#;
+    let error = test
+        .check("pool_drop_only_call.nr", source)
+        .expect_err("a value a callee built is still owned by the block");
+    assert!(
+        error.contains("returned by 'open'"),
+        "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
+fn a_pool_aware_type_runs_inside_a_pool() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Handle {
+    id: i32
+}
+
+impl Drop for Handle {
+    func drop(&mut self) {
+        println("released {self.id}")
+    }
+}
+
+impl PoolAware for Handle {
+    func register_with_pool(&self, arena: &PoolHandle) {
+    }
+    func bulk_release(&mut self) {
+    }
+}
+
+func main() -> i32 {
+    mut seen: i32 = 0
+    pool scratch {
+        val h = Handle { id: 7 }
+        seen = h.id
+    }
+    seen
+}
+"#;
+    let exit = test
+        .compile_and_run("pool_aware.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 7);
+}
+
+#[test]
+fn a_drop_only_value_built_before_the_pool_is_untouched() {
+    // The rule is about what the block owns. Something built outside it never comes
+    // from the arena, so its ordinary destructor still applies.
+    let test = CompileTest::new();
+    let source = r#"
+struct Handle {
+    id: i32
+}
+
+impl Drop for Handle {
+    func drop(&mut self) {
+        println("released {self.id}")
+    }
+}
+
+func main() -> i32 {
+    val outer = Handle { id: 5 }
+    mut seen: i32 = 0
+    pool {
+        seen = outer.id
+    }
+    seen
+}
+"#;
+    let exit = test
+        .compile_and_run("pool_drop_outside.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 5);
+}

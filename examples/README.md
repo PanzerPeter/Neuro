@@ -97,7 +97,7 @@ No Rust edits are needed: discovery is automatic.
 
 One line each. The program's own header comment is the full description.
 
-- [`batch_arena.nr`](showcase/batch_arena.nr): a batched forward pass run inside nested `pool` arenas
+- [`batch_arena.nr`](showcase/batch_arena.nr): a batched forward pass run inside nested `pool` arenas, with a `PoolAware` scratch type
 - [`borrowed_text.nr`](showcase/borrowed_text.nr): explicit lifetime annotations over borrowed text
 - [`buffered_report.nr`](showcase/buffered_report.nr): a shift report long enough to exercise buffered stdout
 - [`closures.nr`](showcase/closures.nr): closures and higher-order functions

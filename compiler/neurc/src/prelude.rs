@@ -87,7 +87,10 @@ impl Prelude {
 
 /// Prelude declarations written against other prelude declarations, and the names each
 /// needs. Shadowing a needed name takes the dependent declaration down with it.
-const PRELUDE_DEPENDENCIES: &[(&str, &[&str])] = &[("Chars", &["Option", "Iterator"])];
+const PRELUDE_DEPENDENCIES: &[(&str, &[&str])] = &[
+    ("Chars", &["Option", "Iterator"]),
+    ("PoolAware", &["PoolHandle"]),
+];
 
 /// Every prelude name a program's own declarations displace: the names it declares
 /// outright, plus the prelude declarations written against those.

@@ -884,6 +884,17 @@ with the referent type (the place behind a reference is not resolved here, so th
 decides), and `Return` / `Break` / `Continue` call the control-flow pair. All five are inert when
 `pool_stack` is empty, which is every program that writes no `pool`.
 
+One rule there is not an escape rule. `check_pool_construction` refuses a value of a `Drop`-only
+struct that the block would OWN: the arena is released in a single store and cannot run an
+arbitrary destructor per object. It hangs off the two `check_expr` arms that hand the block a
+fresh owned value, `Expr::StructLiteral` and `Expr::Call`, and the call form names the callee in
+the diagnostic (`PoolDropOnlyValue`). `drop_structs` is filled by `register_drop_impl` during the
+declaration pass, so it is complete before any body is checked. The opt-out is the prelude's
+`PoolAware` trait: an `impl PoolAware for T` lands in `trait_impls` through the ordinary
+conformance path, and a pair present there is accepted. `PoolAware` is therefore NOT a lang-item
+here the way `Drop` and `Hashable` are. Only its name is known, and its shape is checked by
+`check_trait_conformance` against the prelude declaration like any user trait.
+
 What may cross the boundary is decided by TYPE, not by where the value came from: only a type
 carrying no pointer at all (the scalars, `void`, an enum, a newtype, and arrays and tuples of
 those) may be stored into a place that outlives the block. Proving which allocation a `string`

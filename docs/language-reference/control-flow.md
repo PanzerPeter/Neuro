@@ -180,6 +180,54 @@ pool {
 }
 ```
 
+### Destructors and `PoolAware`
+
+A third rule is about what the block *owns* rather than about what escapes it. The
+arena is released in one store, so it cannot run a destructor per object without
+giving up the thing it exists for. A value of a type that implements `Drop` is
+therefore refused wherever the block would own it, whether it is written in the
+block or handed back by a function the block calls:
+
+```neuro
+struct Handle {
+    id: i32
+}
+
+impl Drop for Handle {
+    func drop(&mut self) {
+        println("released {self.id}")
+    }
+}
+
+pool scratch {
+    val h = Handle { id: 1 }   // error: 'Handle' implements 'Drop' but not 'PoolAware'
+}
+```
+
+`PoolAware` is how a type says its release can be batched instead. Implementing it
+registers the external resource the value holds with the arena, and the arena
+releases every registered resource in one sweep at the block's exit:
+
+```neuro
+impl PoolAware for Handle {
+    func register_with_pool(&self, arena: &PoolHandle) {
+    }
+    func bulk_release(&mut self) {
+    }
+}
+```
+
+With that impl in place the same `pool` block compiles. A type with no destructor at
+all needs neither: its memory goes back with the bulk arena free and nothing else is
+owed. Building the value *before* the `pool` is the other way out: it never comes
+from the arena, so its ordinary destructor still applies.
+
+| Type | In a `pool`? |
+| --- | --- |
+| No `Drop` | yes, reclaimed by the bulk arena free |
+| `PoolAware` (with or without `Drop`) | yes |
+| `Drop` only | no, a compile error naming the pool |
+
 See [`examples/ownership/pool_arena.nr`](../../examples/ownership/pool_arena.nr)
 for a runnable program, and
 [`examples/showcase/batch_arena.nr`](../../examples/showcase/batch_arena.nr) for a

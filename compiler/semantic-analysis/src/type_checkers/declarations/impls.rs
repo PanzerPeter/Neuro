@@ -308,6 +308,8 @@ impl TypeChecker {
     /// registered by the normal `impl` path under `T__drop`; this only enforces the
     /// lang-item shape and records `T` as a Drop type for scope-exit insertion.
     pub(super) fn register_drop_impl(&mut self, def: &ImplDef, struct_name: &str) {
+        self.drop_structs.insert(struct_name.to_string());
+
         if self.copy_structs.contains(struct_name) {
             self.record_error(TypeError::DropTypeCannotBeCopy {
                 type_name: struct_name.to_string(),

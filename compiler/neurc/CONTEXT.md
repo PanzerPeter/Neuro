@@ -77,12 +77,16 @@ what keeps `prelude.nr` the single place the prelude's contents are stated; modu
 
 A prelude item whose name the program already declares is dropped, so a local declaration
 shadows it. The items are otherwise ordinary declarations: nothing downstream special-cases
-`Option` or `Result`.
+`Option` or `Result`. `PoolAware` and `PoolHandle` are the one pair a compiler pass looks up by
+name: `semantic-analysis` asks whether a type has an `impl PoolAware` before letting a `pool`
+block own a value with a destructor. It reads the answer out of the ordinary trait-impl table, so
+the declaration here stays an ordinary trait and a program that shadows `PoolAware` gets its own.
 
 Dropping one item takes with it every prelude declaration written against it. `Chars::next`
 returns `Option<char>`, so a program declaring its own `Option` would leave the prelude's own
-body compiled against a type that is no longer there. `PRELUDE_DEPENDENCIES` records that
-edge (`Chars` needs `Option` and `Iterator`), and `dropped_declarations` closes over it.
+body compiled against a type that is no longer there. `PRELUDE_DEPENDENCIES` records those
+edges (`Chars` needs `Option` and `Iterator`; `PoolAware` needs `PoolHandle`), and
+`dropped_declarations` closes over them.
 `is_dropped` also drops an `impl` block extending a displaced type: those methods belong to the
 prelude's type, not to whatever the program put in its place.
 
@@ -98,7 +102,8 @@ either in the whole program or absent from all of it.
 
 `prelude.nr` currently declares `Option<T>`, `Result<T, E>`, the `OrderedF32` / `OrderedF64`
 validating wrappers, the `Iterator` / `IntoIterator` protocol traits, `Chars`, the codepoint
-iterator `string.chars()` hands out, and `Device`, the enum `tensor.to(device)` takes. The wrappers exist so
+iterator `string.chars()` hands out, `Device`, the enum `tensor.to(device)` takes, and the
+`PoolHandle` / `PoolAware` pair a type implements to be allowed inside a `pool`. The wrappers exist so
 an ordered map can be keyed on a float: IEEE-754 `<` is a partial order, so a raw float key
 could be inserted and never found again. Hence `@derive(Copy, Clone)`, a `new` constructor
 that panics on NaN, and `PartialEq` + `Comparable` impls. They deliberately do **not**
