@@ -369,11 +369,13 @@ func main() -> i32 {
 }
 ```
 
-**Restrictions (this phase).** Type arguments are restricted to `Copy` types (a bare type
-parameter has no move semantics yet). A generic struct is usable only *with* type arguments;
-its bare name is rejected. A generic instantiated with an enclosing type parameter (a
-`Wrapper<T>` field inside another generic struct) is a documented limitation, deferred with
-broader generic support.
+**Restrictions (this phase).** Type arguments are restricted to `Copy` types, because an
+instance *holds* the value and a non-`Copy` value may not yet be held inside another value.
+A generic **function**'s type argument carries no such restriction (see
+[Functions](functions.md#ownership-through-a-type-parameter)). A generic struct is usable only
+*with* type arguments; its bare name is rejected. A generic instantiated with an enclosing type
+parameter (a `Wrapper<T>` field inside another generic struct) is a documented limitation,
+deferred with broader generic support.
 
 ### Const (value) parameters
 

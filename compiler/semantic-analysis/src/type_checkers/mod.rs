@@ -469,6 +469,12 @@ impl TypeChecker {
     pub(crate) fn is_type_copy(&self, ty: &Type) -> bool {
         match ty {
             Type::String | Type::Void | Type::Function { .. } | Type::Unknown => false,
+            // An abstract type parameter answers for every instantiation at once, and a
+            // generic body is checked exactly once, so the only sound answer is the
+            // conservative one. Callers whose position IS re-validated per instance —
+            // an array or tuple annotation in a signature, a `@derive(Copy)` field —
+            // defer explicitly at their own site instead, as `is_debug_renderable` does.
+            Type::Generic(_) => false,
             Type::Struct(name) => self.copy_structs.contains(name),
             // A newtype forwards `Copy` from its inner type. Cycles are
             // rejected at registration, so this recursion terminates.
@@ -506,6 +512,12 @@ impl TypeChecker {
     pub(crate) fn is_type_move_tracked(&self, ty: &Type) -> bool {
         match ty {
             Type::String => true,
+            // An abstract type parameter stands for whatever a call site substitutes, so
+            // the only answer sound for EVERY instantiation is the conservative one:
+            // track it. A body that survives this check is valid when `T` is `string` and
+            // merely over-restricted when `T` is `i32`, whereas the reverse would let a
+            // template move a buffer twice once it was instantiated with an owner.
+            Type::Generic(_) => true,
             Type::Struct(name) => !self.copy_structs.contains(name),
             Type::Collection { .. } => true,
             Type::Tensor { .. } => true,

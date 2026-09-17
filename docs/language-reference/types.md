@@ -572,7 +572,7 @@ Variants may be written qualified (`Option::Some`, `Result::Err`) or, because th
 ### Phase 1 Limitations
 
 - **Payloads are scalar `Copy` primitives only**, integers, floats, `bool`, `char`. A payload of `string`, a struct, an array, a tuple, or a reference is rejected (`UnsupportedEnumPayload`); broader payloads arrive with heap support. The rule is enforced **per instance**, so `Option<i32>` is available while `Option<string>` is not yet.
-- **Type arguments are `Copy`**, the same restriction generic functions and structs carry this phase.
+- **Type arguments are `Copy`**, the same restriction generic structs carry this phase (a generic *function*'s type argument does not: see [Functions](functions.md#ownership-through-a-type-parameter)).
 - **No `impl` blocks on enums**, methods (and therefore `Option`/`Result` helpers such as `.map_err`) need impls over enums, which are struct-only today.
 - **No lifetime parameters on an enum**, with scalar-only payloads there is nothing to annotate; `enum E<'a, T>` is a parse error.
 
@@ -783,10 +783,11 @@ The diagnostics are `cannot borrow '<name>' as mutable` (a `&mut` while any borr
 `cannot move out of '<name>' while it is borrowed`, and
 `cannot assign to '<name>' while it is borrowed`.
 
-> **Deferred:** the borrow region is lexical, not non-lexical liveness (NLL). A borrow held by
-> a binding freezes its borrowee until that binding leaves scope, even when the borrow is never
-> used again, so code reads back through the borrow or confines it to a block. NLL lands with
-> full **lifetime inference**, which extends the same borrow-region analysis.
+> **By design:** the borrow region is **lexical**, not non-lexical liveness (NLL). A borrow held
+> by a binding freezes its borrowee until that binding leaves scope, even when the borrow is
+> never used again. Code is written around it: read back through the borrow, or confine the
+> borrow to a block, and the block is what separates a shared read from a later `&mut`. A borrow
+> passed to a call ends with that call, so sequential calls never conflict.
 
 ### Lifetimes, Returned References
 

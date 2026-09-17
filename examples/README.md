@@ -106,7 +106,7 @@ One line each. The program's own header comment is the full description.
 - [`derived_records.nr`](showcase/derived_records.nr): derived `Debug` and `PartialEq` over earlier features
 - [`enum_records.nr`](showcase/enum_records.nr): pattern matching over enums, structs, methods and arrays
 - [`field_report.nr`](showcase/field_report.nr): standard I/O driving a field report
-- [`generic_toolkit.nr`](showcase/generic_toolkit.nr): generics, const generics, turbofish and `where` clauses together
+- [`generic_toolkit.nr`](showcase/generic_toolkit.nr): generics, const generics, turbofish and `where` clauses together, plus a non-`Copy` type argument and `Drop` across a generic boundary
 - [`inventory_ledger.nr`](showcase/inventory_ledger.nr): the standard collections carrying an inventory ledger
 - [`job_queue.nr`](showcase/job_queue.nr): `val-else` early exit carrying a small job queue
 - [`log_builder.nr`](showcase/log_builder.nr): a run transcript assembled in one growable `String`

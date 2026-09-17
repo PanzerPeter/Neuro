@@ -491,6 +491,27 @@ impl Type {
         matches!(self, Type::F32 | Type::F64)
     }
 
+    /// Whether an abstract type parameter appears anywhere in this type.
+    ///
+    /// A position that is re-validated once per instantiation — an array or tuple
+    /// annotation in a generic signature, a `@derive(Copy)` field — cannot ask
+    /// [`TypeChecker::is_type_copy`] about a type still carrying a `T`, because that
+    /// answers `false` for every instantiation at once. Such a site defers on this
+    /// predicate and lets the construction site's concrete argument answer instead.
+    pub(crate) fn mentions_generic(&self) -> bool {
+        match self {
+            Type::Generic(_) => true,
+            Type::Reference { inner, .. } | Type::Slice(inner) => inner.mentions_generic(),
+            Type::Array { element, .. } => element.mentions_generic(),
+            Type::Tuple(elements) => elements.iter().any(Type::mentions_generic),
+            Type::Function { params, ret } => {
+                params.iter().any(Type::mentions_generic) || ret.mentions_generic()
+            }
+            Type::Collection { args, .. } => args.iter().any(Type::mentions_generic),
+            _ => false,
+        }
+    }
+
     /// Check if this is a half-precision floating-point type (`f16`/`bf16`).
     pub(crate) fn is_half_float(&self) -> bool {
         matches!(self, Type::F16 | Type::BF16)

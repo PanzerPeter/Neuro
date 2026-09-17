@@ -624,8 +624,9 @@ These are not bugs, but current limitations. See the
 [Quick Roadmap](../../README.md#quick-roadmap) for what is landed and what is planned.
 
 1. **Type inference**: bare numeric literals default to `i32` / `f64` unless a type is in scope
-2. **Generic type arguments**: restricted to `Copy` types, and a generic may not be
-   instantiated with an enclosing type parameter (no `Option<T>` inside a `func f<T>`)
+2. **Generic type arguments**: a generic *function* takes any type, but a generic **struct**
+   or **enum** is restricted to `Copy` type arguments, and a generic may not be instantiated
+   with an enclosing type parameter (no `Option<T>` inside a `func f<T>`)
 3. **Strings are immutable**: `+`, `.len()`, `.clone()`, `.slice(a..b)`,
    `.char_slice(a..b)`, `.chars()`, `.char_indices()`. Build text that
    grows with the `String` buffer (`String::new` / `.push_str` / `.clear` /

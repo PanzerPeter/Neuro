@@ -382,8 +382,11 @@ the borrow checker, enums and pattern matching, generics, traits, and dispatch h
 landed. See the [Quick Roadmap](../../../README.md#quick-roadmap) for the phase now open.
 What the checker still owes:
 
-- [ ] **Generic type arguments beyond `Copy`**: type arguments are `Copy`-restricted, and a
-      generic may not be instantiated with an enclosing type parameter
+- [ ] **Generic struct and enum type arguments beyond `Copy`**: a generic function's type
+      argument is unconstrained (the abstract body is move-checked against a `T` that is
+      itself treated as non-`Copy`), but a struct or enum instance holds the value and is
+      still `Copy`-restricted; and a generic may not be instantiated with an enclosing type
+      parameter
 - [ ] **A `never` type**: divergence is modelled with `Unknown` today, which is compatible
       with everything by design; a dedicated bottom type would let the checker distinguish
       "diverges" from "unknown because an error was already reported"

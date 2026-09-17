@@ -9,19 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.41.0] - 2026-09-17
+
+### Added
+
+- semantic: a generic function's type argument may be any type. A non-`Copy` value —
+  a struct holding a `string`, a `string`, a `Vec`, a tensor — now crosses a generic
+  boundary by value, and a `Drop` type's destructor runs exactly once whether the
+  callee consumes the value or returns it. The abstract-body soundness condition that
+  the old `Copy` restriction stood in for is now discharged where the body is: inside a
+  generic body a type parameter is move-tracked and treated as non-`Copy`, so
+  `val a = v; val b = v` over a `T` is `use of moved value`, a closure may not capture
+  a `T`-typed binding, and `[v, v]` / `(v, v)` over a `T` is rejected by the aggregate
+  element rule. A `[T; N]` or `(T, U)` written in a signature is unaffected: that
+  position is re-checked against the concrete type at each call.
+- examples: `showcase/generic_toolkit.nr` gained a non-`Copy` pass — a struct holding a
+  `string` moved through `identity<T>`, and two `Drop` guards crossing the generic
+  boundary in opposite directions — alongside the const generics, enums and arrays it
+  already combined. Its exit code moves from 85 to 87.
+
+### Changed
+
+- semantic: a generic *struct* or *enum* type argument is still restricted to `Copy`
+  types, and is now the only place that restriction lives. An instance holds the value,
+  and holding a non-`Copy` value in an aggregate is not built yet.
+
 ## [2.40.0] - 2026-09-17
 
 ### Added
 
-- semantic: borrowee tracking, closing the borrow checker's one unsound gap. The
-  aliasing rules were enforced between borrows only; the borrowed place itself was
-  untracked, so a value could be moved out from under a live `&` and leave the borrow
-  pointing at storage the binding had given away. Three new diagnostics:
+- semantic: borrowee tracking. The aliasing rules were enforced between borrows only;
+  the borrowed place itself was untracked, so a value could be moved out from under a
+  live `&` and leave the borrow pointing at storage the binding had given away. Three
+  new diagnostics:
   `cannot use '<name>' while it is mutably borrowed` (any access through the frozen
   name while a `&mut` is held by a live binding), `cannot move out of '<name>' while it
   is borrowed`, and `cannot assign to '<name>' while it is borrowed`. A `&mut` passed to
   a call still ends with that call, so a later operand of the same statement may name
-  the place.
+  the place. The rules read the borrows the checker tracks, which are those a direct
+  `&place` initializer creates; a borrow that reaches a binding through a call return is
+  still untracked and still escapes them, now filed as BUG-035.
 - examples: `showcase/borrow_discipline.nr`, combining `&mut self` methods, arrays and
   `for` loops, and string interpolation with borrows scoped and read through.
 

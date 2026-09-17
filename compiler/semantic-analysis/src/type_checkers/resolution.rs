@@ -204,7 +204,10 @@ impl TypeChecker {
                 span,
             } => {
                 let element_ty = self.resolve_type(element)?;
-                if !self.is_type_copy(&element_ty) {
+                // A `[T; N]` in a generic signature defers: the caller's own annotation
+                // for the argument it passes is resolved here too, so `[Guard; 3]` is
+                // rejected where it is written rather than where `T` stands in for it.
+                if !element_ty.mentions_generic() && !self.is_type_copy(&element_ty) {
                     self.record_error(TypeError::NonCopyArrayElement {
                         ty: element_ty,
                         span: *span,
@@ -240,7 +243,8 @@ impl TypeChecker {
                 let mut resolved = Vec::with_capacity(elements.len());
                 for element in elements {
                     let element_ty = self.resolve_type(element)?;
-                    if !self.is_type_copy(&element_ty) {
+                    // Defers per instance for the same reason the array arm above does.
+                    if !element_ty.mentions_generic() && !self.is_type_copy(&element_ty) {
                         self.record_error(TypeError::NonCopyTupleElement {
                             ty: element_ty,
                             span: *span,

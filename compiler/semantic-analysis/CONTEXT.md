@@ -318,8 +318,8 @@ there is no `Stmt::Loop`.
 binding when placed into a new owner: a `val`/`mut` initializer, an assignment RHS, a `return`, a
 struct-literal or struct-field assignment value, or a by-value call argument. `record_move` marks
 the source moved when the consumed expression is a place of a move-tracked type
-(`is_type_move_tracked` is true for `Type::String`, every collection, every tensor, and any
-`Type::Struct` not deriving `Copy`). Reading a moved binding is `UseOfMovedValue`, carrying the
+(`is_type_move_tracked` is true for `Type::String`, every collection, every tensor, any
+`Type::Struct` not deriving `Copy`, and every `Type::Generic`). Reading a moved binding is `UseOfMovedValue`, carrying the
 original move span; `SymbolInfo.moved_at` holds the per-binding state and reassigning a `mut`
 clears it. `.clone()` borrows rather than moving: the canonical opt-out.
 
@@ -438,11 +438,22 @@ signature carrying `Type::Generic` placeholders plus the ordered parameter names
 puts its parameters in scope so `resolve_type` maps their names to `Generic`. Generic bodies are
 checked **once, abstractly**, so only type-agnostic operations type-check there: an instantiation
 that needs more is `hir-lowering`'s to refuse. `check_generic_call` infers each type argument by
-unifying declared parameter types against argument types (`unify_generic`), validates arity and
-the `Copy`-argument restriction, checks trait bounds (`check_trait_bounds` /
-`TraitBoundNotSatisfied`, keyed off `GenericFnSig.bounds`), and returns the substituted return
-type. Errors: `GenericParamShadowsBuiltin`, `GenericParamNotInferable` (fires at the call site,
-since turbofish exists), `GenericArgumentNotCopy`.
+unifying declared parameter types against argument types (`unify_generic`), validates arity,
+checks trait bounds (`check_trait_bounds` / `TraitBoundNotSatisfied`, keyed off
+`GenericFnSig.bounds`), and returns the substituted return type. A **type argument carries no
+`Copy` requirement**: the abstract body was already checked against a conservatively non-`Copy`
+`T`, so it holds for every instantiation. Errors: `GenericParamShadowsBuiltin`,
+`GenericParamNotInferable` (fires at the call site, since turbofish exists).
+
+**`Type::Generic` answers `false` to `is_type_copy` and `true` to `is_type_move_tracked`**, which
+is what makes checking the body once sound: a second read of a `T`-typed binding is
+`UseOfMovedValue`, a closure may not capture one, and `[v, v]` / `(v, v)` are rejected by the
+aggregate element rule. Three positions are re-validated once per instantiation and therefore
+defer on `Type::mentions_generic` instead of asking `is_type_copy`: an array and a tuple
+annotation in `resolve_type`, and `validate_copy_derive`'s field scan. That keeps
+`func first<T>(a: [T; 3])` and `@derive(Copy) struct Buffer<T, const CAP> { data: [T; CAP] }`
+working, since the caller's own annotation for the concrete argument is checked where it is
+written.
 
 **Structs and impls.** A generic `StructDef` goes to `generic_structs`, with its
 placeholder-typed fields also kept in `struct_defs` under the base name so generic-`impl` method
@@ -452,9 +463,11 @@ bodies check abstractly; the bare name is `GenericStructNeedsArgs`. A generic `i
 from `check_generic_struct_literal` after inferring the arguments from field values) materializes
 a distinct nominal `Type::Struct("Base<args>")` with concrete fields (`substitute_generic`) and
 per-instance methods (`remap_method_type`) registered on demand, so downstream field access and
-method dispatch reuse the ordinary struct machinery. Type arguments are `Copy`-restricted. Errors:
-`GenericArgCountMismatch`, `NotAGenericType`, `NestedGenericTypeArg` (a generic instantiated with
-an enclosing type parameter is deferred).
+method dispatch reuse the ordinary struct machinery. Type arguments are `Copy`-restricted here
+and in `register_generic_enum`, unlike a generic *function*'s: a struct or enum instance would
+hold the value, and holding a non-`Copy` value in an aggregate is not built yet. Errors:
+`GenericArgCountMismatch`, `NotAGenericType`, `GenericArgumentNotCopy`, `NestedGenericTypeArg`
+(a generic instantiated with an enclosing type parameter is deferred).
 
 **Enums.** `generic_enums` (base → template) and `enum_instances` (instance → base + arguments).
 Pass 0 routes an `EnumDef` with generics to `register_generic_enum`, which resolves the template's

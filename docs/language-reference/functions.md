@@ -863,8 +863,48 @@ func scaled_area<T: Shape>(s: &T, factor: i32) -> i32 {
 // error: type argument `NoImpl` for 'T' does not implement required trait 'Shape'
 ```
 
-**Restrictions (this phase).** Type arguments are restricted to `Copy` types. Generic structs and
-`impl` blocks are supported too (see [Structs](structs.md#generic-structs-and-impls)).
+### Ownership through a type parameter
+
+A generic body is checked **once**, before any type argument is known, so a type parameter has
+to answer for every instantiation at once. It is therefore treated as **non-`Copy`**: a
+`T`-typed binding is *moved* when it is placed into a new owner, and reading it afterwards is a
+`use of moved value` error even where the call site later supplies `i32`.
+
+```neuro
+func dup<T>(v: T) -> T {
+    val a = v
+    val b = v        // error: use of moved value 'v'
+    b
+}
+```
+
+That is what leaves a type argument unconstrained: because the body already holds for the most
+restrictive case, a non-`Copy` type argument needs no further check.
+
+```neuro
+struct Holder {
+    name: string
+}
+
+func identity<T>(x: T) -> T {
+    x
+}
+
+val h = identity(Holder { name: "held" })   // identity<Holder>: moved in, moved back out
+val s = identity("text")                    // identity<string>
+val n = identity(41)                        // identity<i32>
+```
+
+The value is passed by value and returned by value, and a [`Drop`](structs.md#destructors-impl-drop) type's
+destructor runs exactly once per value, whether the callee consumes it or hands it back.
+
+**Restrictions (this phase).** The same conservatism bars a `T` from the positions restricted to
+`Copy` types: a closure may not capture a `T`-typed binding, and `[v, v]` or `(v, v)` over a `T`
+is rejected as a non-`Copy` aggregate element. A `[T; N]` or `(T, U)` written in a *signature* is
+unaffected, since that position is re-checked against the concrete type at each call. Generic
+**struct** and **enum** type arguments are still restricted to `Copy` types, because an instance
+holds the value (see [Structs](structs.md#generic-structs-and-impls)); generic `impl` blocks are
+supported.
 
 ### Const (value) parameters
 

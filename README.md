@@ -107,7 +107,7 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 |---|---|
 | **Types & inference** | `i8` through `u64`, `f16`/`bf16`/`f32`/`f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, type aliases, `.is_nan()` |
 | **Functions & control flow** | Recursion, forward refs, implicit returns, named arguments with external labels (`clamp(x, min: 0.0)`); `if`/`elif`/`else`, `while`, `loop`, range-`for`, `for i in (0..n).rev()`, `for (i, x) in xs.enumerate()`, labelled `break`/`continue`, block-as-value; `for` over any type implementing the prelude's `IntoIterator` / `Iterator` protocol, plus `.map(f)` / `.filter(p)` head adapters |
-| **Generics** | Generic functions, structs, and impls plus const generics, `where` clauses, and turbofish, all fully monomorphized at zero runtime cost |
+| **Generics** | Generic functions, structs, and impls plus const generics, `where` clauses, and turbofish, all fully monomorphized at zero runtime cost; a generic function takes a type argument of any type, moving a non-`Copy` value in and out by value |
 | **Traits & dispatch** | Required and default methods, associated types (`type Item` / `Self::Item`) and `Trait<Assoc = T>` bounds, operator traits, `impl Trait` (static) and `dyn Trait` (vtable) dispatch with object-safety checks |
 | **Closures & lambdas** | `\|x: i32\| x * x`, `move` closures, `(T) -> R` function types, higher-order functions; compiled to `{ fn_ptr, env_ptr }`, no heap |
 | **Structs & methods** | Fields, shorthand init, functional update `..base`, `impl` blocks with `&self` / `&mut self` methods and associated functions; `@derive(Copy, Clone, Debug, PartialEq)` for copying, `{p:?}` rendering, and structural equality |

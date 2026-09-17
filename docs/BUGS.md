@@ -5,6 +5,60 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-035 — a borrow reaching a binding through a call return is not tracked
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (borrow checking); `borrow_target_of` in
+  `type_checkers/statements.rs`
+- **Severity**: major — memory-unsafe. The borrowee rules accept a program that leaves a
+  reference pointing into a freed buffer, and the compiler says nothing.
+
+A borrow becomes a tracked *persistent* borrow only when the initializer is syntactically a
+borrow of a named place (`val r = &x`, or a `.slice(range)` view). A borrow that reaches the
+binding any other way — most commonly as the return value of a function that takes one and
+hands it back — attaches to nothing. The borrowee rules read those tracked counts, so for such
+a binding they see no live borrow and every one of them stands down.
+
+**Minimal repro**
+
+```neuro
+func id(s: &string) -> &string { s }
+func consume(s: string) -> u64 { s.len() }
+
+func main() -> i32 {
+    val s: string = "hello"
+    val b: &string = id(&s)
+    val n: u64 = consume(s)
+    return b.len() as i32
+}
+```
+
+Expected: rejected with `cannot move out of 's' while it is borrowed`. Observed: type checking
+passes, `s` is moved into `consume`, and `b.len()` then reads the buffer `consume` released.
+
+The direct spelling of the same program is correctly rejected, which isolates the trigger:
+replace `id(&s)` with `&s` and the diagnostic fires. The read half escapes the same way —
+`val r: &mut i32 = pick(&mut n); val read: i32 = n` compiles, where the direct `&mut n` form
+does not.
+
+**Root cause**: confirmed in the code, and recorded as a known property of the pass in
+`compiler/semantic-analysis/CONTEXT.md` ("only direct-borrow initializers create tracked
+persistent borrows"). Before the borrowee rules existed, missing such a borrow cost only an
+exclusivity diagnostic between two borrows; it now costs a dangling-pointer diagnostic, which
+is what promotes the known conservatism to a defect.
+
+**Workaround**: bind the borrow directly (`val b: &string = &s`) where the borrowee must stay
+frozen. There is no workaround that keeps the indirect spelling.
+
+**Fix sketch**: the borrow must be carried by the *type*, not recovered from the initializer's
+syntax. A reference-typed binding whose initializer is a call needs the callee's elided output
+lifetime resolved to the argument it came from — the same input-to-output mapping
+`check_returned_reference` already relies on via `current_fn_outliving` — and then
+`attach_borrow` against that argument's root place. Ranking the whole-function approach: this is
+the point where per-binding counters stop paying for themselves and a borrow set keyed by
+(place, region) starts to. Regression tests want the repro above, the `&mut` read variant, and a
+callee returning a reference derived from `self`.
+
 ## BUG-034 — a local shadowing a labelled top-level `func` is checked against the function
 
 - **Status**: open, confirmed

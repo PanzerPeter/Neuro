@@ -60,7 +60,10 @@ func main() -> i32 { firstof(5) }
 }
 
 #[test]
-fn non_copy_generic_argument_is_rejected() {
+fn non_copy_generic_argument_is_accepted() {
+    // A type argument carries no `Copy` requirement: the template was move-checked
+    // against an abstract `T` that is conservatively non-`Copy`, so it stays valid
+    // whichever type the call site supplies.
     let errors = semantic_errors(
         r#"
 func identity<T>(x: T) -> T { x }
@@ -68,12 +71,80 @@ func main() -> i32 { val s = identity("hi")
     return 0 }
 "#,
     );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+#[test]
+fn use_after_move_through_an_abstract_type_is_rejected() {
+    // The abstract body is checked once, so `T` must answer for its non-`Copy`
+    // instantiations: binding `v` twice would move one owner twice at `T = string`.
+    let errors = semantic_errors(
+        r#"
+func dup<T>(v: T) -> T { val a = v
+    val b = v
+    b }
+func main() -> i32 { return 0 }
+"#,
+    );
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e, TypeError::GenericArgumentNotCopy { .. })),
-        "a non-Copy type argument must be reported; got {errors:?}"
+            .any(|e| matches!(e, TypeError::UseOfMovedValue { .. })),
+        "a second move of an abstract-typed binding must be reported; got {errors:?}"
     );
+}
+
+#[test]
+fn closure_capturing_an_abstract_type_is_rejected() {
+    // A capture duplicates the binding into the closure, so every call would run the
+    // destructor of one owner again once `T` was instantiated with a `Drop` type.
+    let errors = semantic_errors(
+        r#"
+func hold<T>(v: T) -> i32 { val f = |x: i32| -> i32 { val held = v
+        x }
+    f(1) }
+func main() -> i32 { return 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ClosureCapturesNonCopy { .. })),
+        "capturing an abstract-typed binding must be reported; got {errors:?}"
+    );
+}
+
+#[test]
+fn array_literal_of_an_abstract_element_is_rejected() {
+    // `[v, v]` duplicates the owner the same way a capture does, and the aggregate
+    // element rule is what says so; an abstract element type may not dodge it.
+    let errors = semantic_errors(
+        r#"
+func dup<T>(v: T) -> i32 { val a = [v, v]
+    0 }
+func main() -> i32 { return 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::NonCopyArrayElement { .. })),
+        "an array literal over an abstract element type must be reported; got {errors:?}"
+    );
+}
+
+#[test]
+fn an_abstract_element_in_a_signature_still_resolves() {
+    // The deferral half of the rule: `[T; N]` in a signature is re-validated at each
+    // call, where the caller's own annotation for the argument is what carries `Copy`.
+    let errors = semantic_errors(
+        r#"
+func first<T>(a: [T; 3]) -> T { a[0] }
+func main() -> i32 { val xs: [i32; 3] = [1, 2, 3]
+    return first(xs) }
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
 }
 
 #[test]

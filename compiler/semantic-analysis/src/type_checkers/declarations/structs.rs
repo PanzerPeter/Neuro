@@ -221,7 +221,9 @@ impl TypeChecker {
         let mut offenders: Vec<(String, Type, Span)> = Vec::new();
         if let Some(fields) = self.struct_defs.get(&def.name.name) {
             for (field_name, field_ty) in fields {
-                if !self.is_type_copy(field_ty) {
+                // A field mentioning `T` defers to each instance: the type argument a
+                // construction site supplies is checked for `Copy` where it is written.
+                if !field_ty.mentions_generic() && !self.is_type_copy(field_ty) {
                     let span = def
                         .fields
                         .iter()

@@ -120,22 +120,97 @@ func main() -> i32 {
 }
 
 #[test]
-fn non_copy_type_argument_is_rejected() {
+fn non_copy_type_argument_runs_end_to_end() {
     let test = CompileTest::new();
-    // Generic type arguments are restricted to Copy types this phase; `string` is not.
+    // One template instantiated at a non-`Copy` struct and at `string`, each moved in
+    // by value and moved back out, alongside the `Copy` instance that shares the name.
     let source = r#"
+struct Holder {
+    name: string
+}
+
 func identity<T>(x: T) -> T {
     x
 }
 
 func main() -> i32 {
-    val s = identity("hello")
+    val h = identity(Holder { name: "held" })
+    val s = identity("text")
+    println("{h.name} {s}")
+    return identity(40) + 2
+}
+"#;
+    let exit = test
+        .compile_and_run("generic_non_copy.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 42);
+}
+
+#[test]
+fn a_drop_value_through_a_generic_by_value_drops_once() {
+    let test = CompileTest::new();
+    // The by-value ABI's correctness condition: a destructor runs exactly once per
+    // value whether the generic callee swallows it or hands it back. Two guards go in,
+    // so a duplicated owner would report more than 2 and a lost one fewer.
+    let source = r#"
+struct Guard {
+    sink: &mut i32
+}
+
+impl Drop for Guard {
+    func drop(&mut self) {
+        *self.sink = *self.sink + 1
+    }
+}
+
+func swallow<T>(v: T) -> i32 {
+    0
+}
+
+func passthrough<T>(v: T) -> T {
+    v
+}
+
+func main() -> i32 {
+    mut dropped: i32 = 0
+    {
+        val a = Guard { sink: &mut dropped }
+        val ignored = swallow(a)
+    }
+    {
+        val b = Guard { sink: &mut dropped }
+        val c = passthrough(b)
+    }
+    return dropped
+}
+"#;
+    let exit = test
+        .compile_and_run("generic_drop_once.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 2);
+}
+
+#[test]
+fn capturing_an_abstract_type_in_a_closure_is_rejected() {
+    let test = CompileTest::new();
+    // A capture duplicates the binding, which the template cannot allow: at
+    // `T = string` every call would hand the closure the same buffer to free.
+    let source = r#"
+func hold<T>(v: T) -> i32 {
+    val f = |x: i32| -> i32 {
+        val held = v
+        x
+    }
+    f(1)
+}
+
+func main() -> i32 {
     return 0
 }
 "#;
-    let path = test.write_source("generic_non_copy.nr", source);
+    let path = test.write_source("generic_capture.nr", source);
     assert!(
         test.compile(&path).is_err(),
-        "a non-Copy type argument must be rejected"
+        "a closure capturing an abstract-typed binding must be rejected"
     );
 }

@@ -355,26 +355,15 @@ impl TypeChecker {
             self.record_move(arg);
         }
 
-        // Every parameter must be bound (by inference or turbofish); a type argument must
-        // be Copy (the abstract-body soundness condition). A const parameter binds to a
-        // `ConstValue`, which is exempt from the Copy check.
+        // Every parameter must be bound, by inference or turbofish. A type argument is
+        // unconstrained: the body was move-checked against an abstract `T` that is
+        // conservatively non-`Copy`, so it stays valid whichever type arrives here.
         for pname in &sig.param_names {
-            match subst.get(pname) {
-                Some(Type::ConstValue(_)) => {}
-                Some(ty) if !self.is_type_copy(ty) => {
-                    self.record_error(TypeError::GenericArgumentNotCopy {
-                        param: pname.clone(),
-                        ty: ty.clone(),
-                        span,
-                    });
-                }
-                Some(_) => {}
-                None => {
-                    self.record_error(TypeError::GenericParamNotInferable {
-                        name: pname.clone(),
-                        span,
-                    });
-                }
+            if !subst.contains_key(pname) {
+                self.record_error(TypeError::GenericParamNotInferable {
+                    name: pname.clone(),
+                    span,
+                });
             }
         }
 
