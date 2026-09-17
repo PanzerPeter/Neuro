@@ -11,10 +11,12 @@
 //
 // Three rules keep the arena safe, all checked at compile time:
 //
-//   * Nothing that outlives the block may be written from inside it. Storing a
-//     `string`, a collection or a tensor into a binding declared before the `pool`
-//     would leave that binding pointing at bytes the block's exit reclaims. Scalars
-//     are free to cross: an `i32` carries no address.
+//   * Nothing that outlives the block may be written from inside it, unless the value
+//     is provably off the arena. Storing a `string`, a collection or a tensor into a
+//     binding declared before the `pool` would leave that binding pointing at bytes the
+//     block's exit reclaims. Scalars are free to cross: an `i32` carries no address.
+//     So is anything the compiler can trace to the heap, which is the `summary` line
+//     below.
 //   * `return`, `break` and `continue` may not leave the block. Each would jump past
 //     the arena release, so the compiler asks for the exit to be written outside.
 //   * A value the block owns may not have a destructor unless its type also
@@ -29,6 +31,14 @@
 // called function allocates belongs to whoever that function hands it to, so it stays
 // an ordinary heap allocation. That costs the arena's speed on such a path and never
 // its safety.
+//
+// That same fact is what lets a call's result leave the block. `describe` is a function
+// you declared, so its text is heap memory and `summary` may keep it past the closing
+// brace; `"run-" + "042"` is written in the block, so it may not. The trace has to hold
+// all the way down: every argument must itself be off the arena, or the callee could be
+// handing back the pointer the block gave it. Where the compiler cannot prove the owner
+// — a builtin method inlined on the spot, or a call through a trait object whose
+// implementation is only known at runtime — the value stays in the block.
 
 // A round marker built inside the arena. It has a destructor, so a `pool` would refuse
 // to own one, so the `impl PoolAware` beneath it is what makes this program compile.
@@ -62,6 +72,7 @@ func describe(rows: i64, cols: i64) -> string {
 
 func main() -> i32 {
     mut total_rounds: i32 = 0
+    mut summary: string = "no rounds yet"
 
     pool training {
         // Allocated in the arena: the concatenation writes into the bump region.
@@ -81,12 +92,19 @@ func main() -> i32 {
 
                 // A scalar may be stored into the counter declared outside the pool.
                 total_rounds = total_rounds + 1
+
+                // And so may this, because `describe` allocates outside the arena.
+                // Writing `summary = line` instead would not compile: `line` is the
+                // block's own.
+                summary = describe(round as i64, 16)
             }
         }
 
         println("pool training closing, {total_rounds} rounds done")
     }
 
-    // Everything both arenas held is released by now, in two stores.
+    // Everything both arenas held is released by now, in two stores, and `summary`
+    // still reads correctly because it never pointed into either.
+    println("last round shape {summary}")
     total_rounds
 }

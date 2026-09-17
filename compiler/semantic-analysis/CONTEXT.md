@@ -879,10 +879,11 @@ block's own bindings from the ones it inherits, and the `loop_stack` depth, whic
 that stays inside the block from one that leaves it.
 
 The checks hang off the statement arms that already know the types: every assignment form calls
-`check_pool_store` with the PLACE's type, `Stmt::DerefAssignment` calls `check_pool_ref_store`
-with the referent type (the place behind a reference is not resolved here, so the type alone
-decides), and `Return` / `Break` / `Continue` call the control-flow pair. All five are inert when
-`pool_stack` is empty, which is every program that writes no `pool`.
+`check_pool_store` with the PLACE's type and the VALUE expression, `Stmt::DerefAssignment` calls
+`check_pool_ref_store` with the referent type and the value (the place behind a reference is not
+resolved here, so the referent type stands in for it), and `Return` / `Break` / `Continue` call the
+control-flow pair. All five are inert when `pool_stack` is empty, which is every program that
+writes no `pool`.
 
 One rule there is not an escape rule. `check_pool_construction` refuses a value of a `Drop`-only
 struct that the block would OWN: the arena is released in a single store and cannot run an
@@ -895,12 +896,28 @@ conformance path, and a pair present there is accepted. `PoolAware` is therefore
 here the way `Drop` and `Hashable` are. Only its name is known, and its shape is checked by
 `check_trait_conformance` against the prelude declaration like any user trait.
 
-What may cross the boundary is decided by TYPE, not by where the value came from: only a type
-carrying no pointer at all (the scalars, `void`, an enum, a newtype, and arrays and tuples of
-those) may be stored into a place that outlives the block. Proving which allocation a `string`
-or a tensor actually holds is the ownership analysis 2D's later items build; until it exists the
-conservative test is the only sound one, and it is why `total = total + 1` compiles inside a pool
-while `name = a + b` does not.
+What may cross the boundary is decided by the place's TYPE and by the value's PROVENANCE, in that
+order. A type carrying no pointer at all (the scalars, `void`, an enum, a newtype, and arrays and
+tuples of those) crosses unconditionally, which is why `total = total + 1` compiles inside a pool.
+Everything else has to pass `off_arena`, which returns true only where the source PROVES the value
+holds no arena memory:
+
+- a literal, including a `string` one, whose bytes live in `.rodata` rather than an allocation;
+- a binding of pointerless type, or one declared before the OUTERMOST open pool (the outermost,
+  not the innermost: an enclosing block's arena outlives a nested block's release too);
+- `&e`, `*e`, `(e)`, `e as T` and a unary operator over a value that passes;
+- a call to a function this program DECLARES — a free function found in `functions`, or an
+  associated function / method found through `impl_methods` — whose receiver and every argument
+  also pass. A callee's body is emitted with the backend's pool depth back at zero, so what it
+  allocates comes from libc; the operand walk is what rules out its handing back arena memory it
+  was given.
+
+Everything else is arena memory by assumption. Two exclusions carry the weight and are deliberate.
+A `dyn` receiver fails `callee_is_user_code`, because the implementation behind the vtable is not
+known until runtime and neither is what it allocates — the case the conservative fallback exists
+for. A builtin or collection method fails it too, for the opposite reason: its body is not a
+function at all but instructions inlined where the call was written, so it DOES take the bump path.
+`name = a + b` is still refused; `name = render(step)` is not.
 
 ### Three rules that exist because the backend cannot answer them
 Each closed a path where a program type-checked and then aborted codegen with an internal error:

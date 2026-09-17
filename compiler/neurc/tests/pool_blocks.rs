@@ -200,6 +200,151 @@ func main() -> i32 {
 }
 
 #[test]
+fn a_value_a_callee_built_survives_the_pool() {
+    // The counterpart to the test above, and the reason the escape rule reads the VALUE
+    // and not only the place. `render` is emitted as its own function, outside every
+    // arena, so what it returns is heap memory that the block's release does not touch.
+    // Reading it back after the closing brace is what proves the routing is real.
+    let test = CompileTest::new();
+    let source = r#"
+func render(n: i32) -> string {
+    "row {n}"
+}
+
+func main() -> i32 {
+    mut out: string = ""
+    pool scratch {
+        out = render(7)
+    }
+    println("{out}")
+    out.len() as i32
+}
+"#;
+    let stdout = stdout_of(&test, "pool_callee_value.nr", source);
+    assert_eq!(stdout, "row 7\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn a_value_from_a_dyn_call_may_not_cross_the_pool_boundary() {
+    // The named case for the conservative fallback: behind a trait object the callee is
+    // not known at compile time, so neither is what it allocates or who owns it.
+    let test = CompileTest::new();
+    let source = r#"
+trait Namer {
+    func name(&self) -> string
+}
+
+struct Plain {
+    tag: i32
+}
+
+impl Namer for Plain {
+    func name(&self) -> string {
+        "plain"
+    }
+}
+
+func main() -> i32 {
+    val p = Plain { tag: 1 }
+    val d: &dyn Namer = &p
+    mut out: string = ""
+    pool scratch {
+        out = d.name()
+    }
+    0
+}
+"#;
+    let error = test
+        .check("pool_dyn_escape.nr", source)
+        .expect_err("a dyn call's result has no provable owner");
+    assert!(error.contains("outlives"), "unexpected diagnostic: {error}");
+}
+
+#[test]
+fn the_same_call_on_a_concrete_receiver_compiles() {
+    // The pair to the test above. Both call the same method body; only the dispatch
+    // differs, which is what makes the rejection a statement about `dyn` rather than
+    // about the method.
+    let test = CompileTest::new();
+    let source = r#"
+trait Namer {
+    func name(&self) -> string
+}
+
+struct Plain {
+    tag: i32
+}
+
+impl Namer for Plain {
+    func name(&self) -> string {
+        "plain"
+    }
+}
+
+func main() -> i32 {
+    val p = Plain { tag: 1 }
+    mut out: string = ""
+    pool scratch {
+        out = p.name()
+    }
+    println("{out}")
+    0
+}
+"#;
+    let stdout = stdout_of(&test, "pool_static_ok.nr", source);
+    assert_eq!(stdout, "plain\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn a_drop_only_value_reaching_a_pool_through_dyn_is_rejected() {
+    // The other half of the same fallback: the arena cannot prove it does not own what
+    // a vtable call handed back, so a `Drop`-only value arriving that way is refused at
+    // the call site rather than silently registered for a per-object destructor.
+    let test = CompileTest::new();
+    let source = r#"
+struct Handle {
+    id: i32
+}
+
+impl Drop for Handle {
+    func drop(&mut self) {
+        println("released {self.id}")
+    }
+}
+
+trait Factory {
+    func make(&self) -> Handle
+}
+
+struct RealFactory {
+    seed: i32
+}
+
+impl Factory for RealFactory {
+    func make(&self) -> Handle {
+        Handle { id: self.seed }
+    }
+}
+
+func main() -> i32 {
+    val f = RealFactory { seed: 2 }
+    val d: &dyn Factory = &f
+    pool scratch {
+        val h = d.make()
+    }
+    0
+}
+"#;
+    let error = test
+        .check("pool_dyn_drop_only.nr", source)
+        .expect_err("a Drop-only value through a vtable is still owned by the block");
+    assert!(
+        error.contains("implements 'Drop'") && error.contains("'scratch'"),
+        "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
 fn a_return_inside_a_pool_is_rejected() {
     let test = CompileTest::new();
     let source = r#"

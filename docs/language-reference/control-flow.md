@@ -163,10 +163,10 @@ that path and never its safety.
 
 Two rules keep arena memory from outliving the block, both checked at compile time:
 
-- **Nothing that outlives the block may be written from inside it.** Storing a
-  `string`, a collection, a tensor or a struct into a binding declared before the
-  `pool` would leave it addressing bytes the block's exit reclaims. Scalars cross
-  freely: an `i32` carries no address.
+- **Nothing that outlives the block may be written from inside it, unless the value
+  is provably off the arena.** Storing a `string`, a collection, a tensor or a
+  struct into a binding declared before the `pool` would leave it addressing bytes
+  the block's exit reclaims. Scalars cross freely: an `i32` carries no address.
 - **`return`, `break` and `continue` may not leave the block.** Each would jump
   past the arena release. Write the exit outside the pool instead; a `break`
   targeting a loop opened *inside* the block is fine, because it stays in it.
@@ -179,6 +179,35 @@ pool {
     name = "a" + "b"         // error: `name` outlives the arena
 }
 ```
+
+"Provably off the arena" is the exception that makes the first rule usable, and it
+follows from the paragraph above: a function's body is emitted outside every arena,
+so what it returns is heap memory the block's release never touches. A call to a
+function you declared therefore crosses the boundary, as long as every argument and
+the receiver cross it too — otherwise the callee could be handing back the very
+pointer the block gave it.
+
+```neuro
+func render(n: i32) -> string {
+    "row {n}"
+}
+
+mut kept: string = ""
+pool {
+    val step = 7
+    kept = render(step)          // fine: `render`'s allocation is heap memory
+    kept = render(step).clone()  // error: `.clone()` is inlined here, in the arena
+}
+println(kept)                    // still valid after the release
+```
+
+The last two lines are the whole rule in miniature. A builtin method such as
+`.clone()` is not a function the backend emits somewhere else; it is instructions
+placed where you wrote them, which puts its allocation in the arena. A call through
+a trait object (`&dyn Renderer`) is refused for the opposite reason: the
+implementation behind the vtable is not known until the program runs, so neither is
+what it allocates. Where the compiler cannot prove the owner, the value stays in the
+block. That costs the arena's speed on such a path and never its safety.
 
 ### Destructors and `PoolAware`
 

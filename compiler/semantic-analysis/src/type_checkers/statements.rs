@@ -824,7 +824,7 @@ impl TypeChecker {
                     }
                 };
 
-                self.check_pool_store(&target.name, &element_ty, *span);
+                self.check_pool_store(&target.name, &element_ty, value, *span);
 
                 let idx_ty = self.check_expr(index, None).unwrap_or(Type::Unknown);
                 if !matches!(idx_ty, Type::Unknown) && !idx_ty.is_integer() {
@@ -925,7 +925,7 @@ impl TypeChecker {
 
                 if let Some(expected_ty) = field_ty {
                     self.reject_private_field(&struct_name, &field.name, field.span);
-                    self.check_pool_store(&object.name, &expected_ty, *span);
+                    self.check_pool_store(&object.name, &expected_ty, value, *span);
                     if let Some(actual_ty) = self.check_expr(value, Some(&expected_ty)) {
                         if !actual_ty.is_compatible_with(&expected_ty) {
                             self.record_error(TypeError::Mismatch {
@@ -983,7 +983,7 @@ impl TypeChecker {
                     }
                 };
 
-                self.check_pool_ref_store(&inner_ty, *span);
+                self.check_pool_ref_store(&inner_ty, value, *span);
                 let value_ty = self
                     .check_expr(value, Some(&inner_ty))
                     .unwrap_or(Type::Unknown);
@@ -1078,7 +1078,7 @@ impl TypeChecker {
         self.record_move(value);
         self.symbols.clear_moved(&target.name);
 
-        self.check_pool_store(&target.name, &value_ty, span);
+        self.check_pool_store(&target.name, &value_ty, value, span);
 
         // A direct `&place` / `&mut place` RHS makes the target hold a new
         // persistent borrow of that place.

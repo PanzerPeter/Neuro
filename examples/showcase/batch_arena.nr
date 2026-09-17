@@ -18,7 +18,7 @@
 // sum per step, and its high-water mark never moves — which is the whole reason
 // to reach for an arena over the heap in a loop like this.
 //
-// Three rules the block enforces are visible here. `running` and `steps` are an
+// Four rules the block enforces are visible here. `running` and `steps` are an
 // `f32` and an `i32`, so the inner block may write them: a scalar carries no
 // address into the arena. No tensor declared before the `pool` is written from
 // inside it, and no `break` or `return` leaves the block — the loop's exit is the
@@ -29,6 +29,14 @@
 // enough to make this program stop compiling. Inside the arena that trait REPLACES the
 // destructor: the two notes each step builds are released by one reverse-order sweep at
 // the block's brace, newest first, not one at a time as they go out of scope.
+//
+// The fourth is the string `headline` the inner block writes back out. A `string`
+// carries a pointer, so the arena refuses one whose allocation it cannot account for:
+// `headline = "step " + "{step}"` inside the block does not compile. What DOES compile
+// is the line below it, because `summarize` is a declared function and its body is
+// emitted outside every arena — the text it returns is ordinary heap memory the block's
+// release never touches, which is why it is still readable after the closing brace. Only
+// what the compiler can trace to the heap crosses; everything it cannot trace stays in.
 
 // A running tally, carried across the batches on the stack rather than in the
 // arena. Its fields are scalars, so it never allocates at all.
@@ -43,6 +51,13 @@ impl Tally {
     func render(&self) -> string {
         return "{self.steps} batches, mean sum {self.total:.3}"
     }
+}
+
+// Called from inside the arena, written outside it. Every allocation this makes is
+// emitted with its own body, so the text it hands back is heap memory and may be stored
+// into a binding that outlives the pool.
+func summarize(step: i32, mean: f32) -> string {
+    return "kept step {step} at mean {mean:.3}"
 }
 
 // A per-step scratch note, built inside the arena. It holds a destructor, so it is
@@ -88,6 +103,7 @@ func main() -> i32 {
 
     mut running: f32 = 0.0
     mut steps: i32 = 0
+    mut headline: string = "no batches yet"
 
     pool training {
         println("bias total = {bias.sum():.2}")
@@ -110,11 +126,16 @@ func main() -> i32 {
                 // Scalars may cross the arena boundary; the tensors above may not.
                 running = running + mean
                 steps = steps + 1
+
+                // And so may this string, because the compiler can trace it to the heap.
+                headline = summarize(step, mean)
             }
         }
     }
 
-    // Both arenas are back to their marks by here; the tally never left the stack.
+    // Both arenas are back to their marks by here; the tally never left the stack, and
+    // `headline` still reads correctly because it never pointed into one.
+    println(headline)
     val tally = Tally { steps: steps, total: running }
     println(tally.render())
 

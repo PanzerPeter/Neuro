@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.39.0] - 2026-09-17
+
+### Added
+
+- semantic: a `pool` block now judges a store by the VALUE's provenance as well as the
+  place's type, so a value the compiler can trace to the heap may be kept past the
+  block's closing brace. A call to a function the program declares qualifies, because
+  its body is emitted outside every arena — as long as its receiver and every argument
+  qualify too, since otherwise the callee could hand back the pointer the block gave it.
+  Literals, bindings of pointerless type, and bindings declared before the outermost open
+  pool qualify as well. Everything else is arena memory by assumption: a builtin method
+  is emitted inline at the call site and does take the arena, and a call through a trait
+  object has no owner the compiler can name, which is the case the rule exists for.
+  `total = total + 1` compiled inside a pool before this; `kept = render(step)` did not.
+
+### Changed
+
+- docs: `examples/ownership/pool_arena.nr` and `examples/showcase/batch_arena.nr` each
+  keep a summary line built inside the arena by a declared function, and read it back
+  after the release. `docs/language-reference/control-flow.md` states the provenance rule
+  and the two cases it refuses.
+
 ## [2.38.0] - 2026-09-17
 
 ### Added
