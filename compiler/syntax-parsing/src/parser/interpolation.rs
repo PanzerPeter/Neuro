@@ -4,9 +4,9 @@
 use lexical_analysis::{tokenize, InterpChunk, TokenKind};
 use shared_types::{FormatAlign, FormatKind, FormatSpec, Span};
 
-use crate::ast::{Expr, InterpPart};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
+use ast_types::{Expr, InterpPart};
 
 use super::Parser;
 

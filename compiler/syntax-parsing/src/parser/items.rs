@@ -1,12 +1,12 @@
 use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
-use crate::ast::{
+use crate::errors::{ParseError, ParseResult};
+use crate::precedence::Precedence;
+use ast_types::{
     Attribute, ConstDef, GenericParam, GenericParamKind, Item, MethodDef, ModuleDef, NewtypeDef,
     TraitBound, TraitMethod, Type,
 };
-use crate::errors::{ParseError, ParseResult};
-use crate::precedence::Precedence;
 
 use super::type_aliases::{expand_type_aliases, TypeAliasDecl};
 use super::Parser;

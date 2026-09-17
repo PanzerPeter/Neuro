@@ -648,13 +648,6 @@ pub enum TypeError {
     #[error("constant expression required: only literals, arithmetic on literals, and references to other constants are allowed")]
     InvalidConstExpr { span: Span },
 
-    #[error("const '{name}' references undefined constant '{referenced}'")]
-    UndefinedConst {
-        name: String,
-        referenced: String,
-        span: Span,
-    },
-
     #[error("comparison operators cannot be chained: use `&&` to combine separate comparisons")]
     ComparisonChain { span: Span },
 
@@ -1129,7 +1122,6 @@ impl TypeError {
             | Self::UnknownAssociatedFunction { span, .. }
             | Self::ConstAlreadyDefined { span, .. }
             | Self::InvalidConstExpr { span, .. }
-            | Self::UndefinedConst { span, .. }
             | Self::ComparisonChain { span, .. }
             | Self::NullCoalesceOnNonFallible { span, .. }
             | Self::TryOnNonFallible { span, .. }

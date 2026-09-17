@@ -3,8 +3,8 @@
 use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
-use crate::ast::{ImportDef, ImportName, ImportSelection};
 use crate::errors::{ParseError, ParseResult};
+use ast_types::{ImportDef, ImportName, ImportSelection};
 
 use super::Parser;
 

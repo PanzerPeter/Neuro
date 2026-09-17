@@ -1,9 +1,9 @@
 use lexical_analysis::TokenKind;
 use shared_types::{Identifier, Span};
 
-use crate::ast::{Expr, Stmt};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
+use ast_types::{Expr, Stmt};
 
 use super::Parser;
 

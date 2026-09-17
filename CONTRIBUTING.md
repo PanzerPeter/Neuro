@@ -216,6 +216,12 @@ cargo test test_tokenize_string_escapes
 cargo test -- --nocapture
 ```
 
+End-to-end tests live in `compiler/neurc/tests/suite/`, one file per language
+feature, all compiled into the single `suite` test target. A new file goes there
+and gets a `mod` line in `suite/main.rs`: Cargo links one executable per
+`tests/*.rs`, so a file added at the `tests/` root costs a whole extra binary on
+every build.
+
 ### Test Quality
 
 - Tests must be isolated, with no shared mutable state between them

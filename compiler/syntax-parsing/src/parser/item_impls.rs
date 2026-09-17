@@ -5,8 +5,8 @@
 use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
-use crate::ast::{ImplDef, TraitDef, TraitMethod};
 use crate::errors::{ParseError, ParseResult};
+use ast_types::{ImplDef, TraitDef, TraitMethod};
 
 use super::statements::stmt_span;
 use super::Parser;
@@ -111,7 +111,7 @@ impl Parser {
     /// Parse an optional `<T1, T2, ...>` type-argument list applied to a type name
     /// E.g. the `<T>` in `impl<T> Wrapper<T>`. Returns an empty vector when no
     /// `<` follows. Shares the delimiter grammar with [`Parser::parse_type`].
-    pub(crate) fn parse_optional_type_args(&mut self) -> ParseResult<Vec<crate::ast::Type>> {
+    pub(crate) fn parse_optional_type_args(&mut self) -> ParseResult<Vec<ast_types::Type>> {
         if !self.check(&TokenKind::Less) {
             return Ok(Vec::new());
         }
@@ -135,7 +135,7 @@ impl Parser {
     /// Used by operator-trait impls to declare their `Output`.
     pub(super) fn parse_assoc_type_binding(
         &mut self,
-    ) -> ParseResult<(Identifier, crate::ast::Type)> {
+    ) -> ParseResult<(Identifier, ast_types::Type)> {
         self.consume(TokenKind::Type, "'type'")?;
         self.skip_newlines();
         let name = self.consume_identifier("associated type name")?;

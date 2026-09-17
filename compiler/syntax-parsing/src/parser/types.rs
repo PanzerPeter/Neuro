@@ -1,8 +1,8 @@
 use lexical_analysis::TokenKind;
 use shared_types::{Identifier, Span};
 
-use crate::ast::{ArraySize, GenericArg, TensorDim, TensorExtent, Type};
 use crate::errors::{ParseError, ParseResult};
+use ast_types::{ArraySize, GenericArg, TensorDim, TensorExtent, Type};
 
 use super::Parser;
 
@@ -513,9 +513,9 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{GenericArg, Item, Stmt, TensorDim, TensorExtent, Type};
     use crate::errors::ParseError;
     use crate::parse;
+    use ast_types::{GenericArg, Item, Stmt, TensorDim, TensorExtent, Type};
 
     /// An unnamed axis of a literal extent, the shape a test without dimension names writes.
     fn dim(extent: usize) -> TensorDim {
@@ -789,7 +789,7 @@ mod tests {
         assert_eq!(func.generics.len(), 1);
         assert!(matches!(
             func.generics[0].kind,
-            crate::ast::GenericParamKind::Const(_)
+            ast_types::GenericParamKind::Const(_)
         ));
     }
 
@@ -804,7 +804,7 @@ mod tests {
         let [param] = &func.generics[..] else {
             panic!("expected one generic parameter, got {:?}", func.generics);
         };
-        let crate::ast::GenericParamKind::Const(ty) = &param.kind else {
+        let ast_types::GenericParamKind::Const(ty) = &param.kind else {
             panic!("expected a const parameter, got {:?}", param.kind);
         };
         assert!(matches!(ty, Type::Named(id) if id.name == "u32"));
@@ -821,7 +821,7 @@ mod tests {
         let [param] = &func.generics[..] else {
             panic!("expected one generic parameter");
         };
-        assert!(matches!(param.kind, crate::ast::GenericParamKind::Type));
+        assert!(matches!(param.kind, ast_types::GenericParamKind::Type));
     }
 
     /// A `?` is claimed as a shape wherever it appears in the list, so a static axis
@@ -862,7 +862,7 @@ mod tests {
     }
 
     /// The initializer expression of the first `val` in the first function body.
-    fn first_var_init(items: &[Item]) -> Option<crate::ast::Expr> {
+    fn first_var_init(items: &[Item]) -> Option<ast_types::Expr> {
         for item in items {
             if let Item::Function(func) = item {
                 for stmt in &func.body {
@@ -880,7 +880,7 @@ mod tests {
         let src = "func main() -> i32 { val z = Tensor::<f32, [3, 3]>::zeros()\n return 0 }";
         let items = parse(src).expect("parses");
         let init = first_var_init(&items).expect("has a var decl");
-        let crate::ast::Expr::Call {
+        let ast_types::Expr::Call {
             func,
             type_args,
             args,
@@ -900,7 +900,7 @@ mod tests {
         };
         assert!(matches!(**element_type, Type::Named(ref i) if i.name == "f32"));
         assert_eq!(*shape, vec![dim(3), dim(3)]);
-        let crate::ast::Expr::Path {
+        let ast_types::Expr::Path {
             type_name, member, ..
         } = *func
         else {
@@ -917,7 +917,7 @@ mod tests {
         let src = "func main() -> i32 { val s = Tensor::<f32, []>::scalar(1.0)\n return 0 }";
         let items = parse(src).expect("parses");
         let init = first_var_init(&items).expect("has a var decl");
-        let crate::ast::Expr::Call { type_args, .. } = init else {
+        let ast_types::Expr::Call { type_args, .. } = init else {
             panic!("expected a call");
         };
         let [GenericArg::Type(Type::Tensor { shape, .. })] = &type_args[..] else {

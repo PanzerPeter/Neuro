@@ -5,12 +5,12 @@
 use lexical_analysis::TokenKind;
 use shared_types::{Identifier, Span};
 
-use crate::ast::{
+use crate::errors::{ParseError, ParseResult};
+use crate::precedence::Precedence;
+use ast_types::{
     Attribute, Expr, FunctionDef, GenericParam, GenericParamKind, MethodDef, ParamLabel, Parameter,
     SelfParam, TensorExtent, TraitBound, Type,
 };
-use crate::errors::{ParseError, ParseResult};
-use crate::precedence::Precedence;
 
 use super::items::desugar_impl_trait_params;
 use super::statements::stmt_span;
@@ -601,7 +601,7 @@ fn collect_shape_params(ty: &Type, out: &mut Vec<String>) {
         }
         Type::Generic { args, .. } => {
             for arg in args {
-                if let crate::ast::GenericArg::Type(inner) = arg {
+                if let ast_types::GenericArg::Type(inner) = arg {
                     collect_shape_params(inner, out);
                 }
             }

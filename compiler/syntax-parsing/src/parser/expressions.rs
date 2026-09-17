@@ -1,9 +1,9 @@
 use lexical_analysis::{StringValue, Token, TokenKind};
 use shared_types::{Identifier, Literal, Span};
 
-use crate::ast::{BinaryOp, ClosureParam, Expr, GenericArg, Stmt, UnaryOp};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
+use ast_types::{BinaryOp, ClosureParam, Expr, GenericArg, Stmt, UnaryOp};
 
 use super::expr_index::IndexArguments;
 use super::interpolation::parse_interp_string;

@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
-use crate::ast::{Expr, InterpPart, Item, Stmt, TensorIndexArg, Type};
 use crate::errors::{ParseError, ParseResult};
+use ast_types::{Expr, InterpPart, Item, Stmt, TensorIndexArg, Type};
 
 use super::Parser;
 
@@ -167,7 +167,7 @@ fn rewrite_type(ty: &mut Type, resolved: &HashMap<String, Type>) {
         }
         Type::Generic { args, .. } => {
             for arg in args {
-                if let crate::ast::GenericArg::Type(inner) = arg {
+                if let ast_types::GenericArg::Type(inner) = arg {
                     rewrite_type(inner, resolved);
                 }
             }
@@ -204,13 +204,13 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
         Item::Enum(def) => {
             for variant in &mut def.variants {
                 match &mut variant.payload {
-                    crate::ast::VariantPayload::Unit => {}
-                    crate::ast::VariantPayload::Tuple(tys) => {
+                    ast_types::VariantPayload::Unit => {}
+                    ast_types::VariantPayload::Tuple(tys) => {
                         for ty in tys.iter_mut() {
                             rewrite_type(ty, resolved);
                         }
                     }
-                    crate::ast::VariantPayload::Struct(fields) => {
+                    ast_types::VariantPayload::Struct(fields) => {
                         for field in fields.iter_mut() {
                             rewrite_type(&mut field.ty, resolved);
                         }
@@ -485,9 +485,9 @@ fn rewrite_index_arg(index: &mut TensorIndexArg, resolved: &HashMap<String, Type
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{Item, Stmt, Type};
     use crate::errors::ParseError;
     use crate::parse;
+    use ast_types::{Item, Stmt, Type};
 
     /// Pull the declared type of the first `val` in the first function body.
     fn first_var_type(items: &[Item]) -> Option<Type> {

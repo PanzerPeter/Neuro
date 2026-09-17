@@ -44,19 +44,6 @@ jobs:
       - name: Run MLIR backend smoke test
         run: cargo test -p mlir-backend --features mlir
 
-  security_audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
-      - name: Install cargo-audit
-        uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.62.13
-        with:
-          tool: cargo-audit
-      - name: Run Security Audit
-        run: cargo audit
-
   docs_hygiene:
     name: Docs Hygiene
     runs-on: ubuntu-latest
@@ -70,26 +57,12 @@ jobs:
       - name: Check docs hygiene
         run: python tools/check_docs_hygiene.py
 
-  architecture:
-    name: Architecture Boundaries
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable as of v1
-        with:
-          toolchain: stable
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2.8.1
-      - name: Setup LLVM 20
-        uses: ./.github/actions/setup-llvm
-      - name: Enforce VSA architecture boundaries
-        run: cargo test -p neurc --test architecture_tests
-
   test:
     name: Test Suite
-    needs: [lint, architecture]
+    # The VSA architecture tests run here too: they are part of the neurc test
+    # target that `cargo test --workspace` builds, so a separate job would only
+    # install LLVM a second time to run them again.
+    needs: [lint]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:

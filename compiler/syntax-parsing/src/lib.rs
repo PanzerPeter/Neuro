@@ -1,12 +1,14 @@
 // Feature slice for AST generation and syntax analysis.
 // Public API: the `parse()` and `parse_expr()` entry points.
 
-mod ast;
 mod errors;
 mod parser;
 mod precedence;
 
-pub use ast::{
+// The AST types live in infrastructure/ast-types so semantic-analysis and the
+// backends can consume them without a cross-slice dependency on this one. They
+// are re-exported here for callers that only want the parser's own surface.
+pub use ast_types::{
     ArraySize, Attribute, BinaryOp, EnumDef, EnumPatternPayload, EnumVariant, Expr, FieldDef,
     FieldInit, FieldPattern, FunctionDef, GenericArg, GenericParamKind, ImplDef, ImportDef,
     ImportName, ImportSelection, InterpPart, Item, MatchArm, MethodDef, ModuleDef, ParamLabel,

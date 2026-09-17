@@ -160,11 +160,13 @@ Where tests go:
   internal functions.
 - **Slice integration tests**: the crate's `tests/` directory, exercising the
   slice's public entry point.
-- **End-to-end tests**: `compiler/neurc/tests/`, one file per language
-  feature. These compile real `.nr` source with the built `neurc` binary and
+- **End-to-end tests**: `compiler/neurc/tests/suite/`, one file per language
+  feature, each a module of the single `suite` test target (declare it in
+  `suite/main.rs`; a new file at `tests/` root would link a whole extra
+  binary). These compile real `.nr` source with the built `neurc` binary and
   run it. Use the `CompileTest` helper in
-  `compiler/neurc/tests/common/mod.rs`; it writes sources to a temp dir and
-  resolves the binary through `CARGO_BIN_EXE_neurc`.
+  `compiler/neurc/tests/suite/compile_harness/mod.rs`; it writes sources to a
+  temp dir and resolves the binary through `CARGO_BIN_EXE_neurc`.
 - **Example programs**: `examples/`, grouped by topic. Each program is pinned
   two ways: its `main` return value is its process exit code, registered in
   `examples/expected.txt`, and its stdout is fixed byte for byte in a sibling
@@ -184,8 +186,8 @@ counts, on prose copies of the workspace version, and on references to
 local-only paths.
 
 CI additionally runs the suite on Linux/macOS/Windows against stable and
-nightly, `cargo audit`, benchmark regression budgets, release smoke tests
-(`tools/run_release_smoke_tests.py`), and coverage.
+nightly, OSV-Scanner over the dependency graph, benchmark regression budgets,
+release smoke tests (`tools/run_release_smoke_tests.py`), and coverage.
 
 ## Security Considerations
 

@@ -112,7 +112,8 @@ Every row below is implemented, tested, and usable today. Depth lives elsewhere:
 | **Closures & lambdas** | `\|x: i32\| x * x`, `move` closures, `(T) -> R` function types, higher-order functions; compiled to `{ fn_ptr, env_ptr }`, no heap |
 | **Structs & methods** | Fields, shorthand init, functional update `..base`, `impl` blocks with `&self` / `&mut self` methods and associated functions; `@derive(Copy, Clone, Debug, PartialEq)` for copying, `{p:?}` rendering, and structural equality |
 | **Enums & newtypes** | Unit, tuple, and struct-field variants; generic enums monomorphized per type argument; `newtype` for distinct nominal wrappers |
-| **Arrays, tuples & collections** | Fixed-size `[T; N]` and anonymous tuples over `Copy` elements; borrowed slices `&[T]` / `&mut [T]` with zero-copy `.slice(range)` over an array or a `Vec`; heap-backed `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, `String` that move on assignment and free at scope exit; `Tensor<T, [d0, ...]>` built from an annotated nested literal or `Tensor::<T, [...]>::zeros()` / `ones()` / `identity()` / `random_normal()` / `scalar()` / `from()`, owning its buffer with `.clone()`, `.to(device)`, element-wise `+` / `-` / `*` / `/` / `%` with NumPy-style broadcasting and scalar broadcast, matrix multiplication `a @ b`, in-place `+=` / `-=` / `*=` / `/=` / `%=`, `t[i, j]` / `t[0, ..]` / `t[1..3, 2..5]` / `t[(0..n).rev()]` slicing, shape generics `func f<M, K>(t: &Tensor<f32, [M, K]>)`, named dimensions `Tensor<f32, [batch: 32, embed: 768]>`, shape manipulation `.t()` / `.reshape([-1])` / `.permute([height, width, channels])` / `.flatten(dims: [...])`, reductions `.sum()` / `.mean()` / `.max()` / `.min()` with an optional `axis:`, native `.sort()` / `.argsort()` / `.topk(k:)` ordering with `NaN` last, and dynamic axes `Tensor<f32, [?, 784]>` |
+| **Arrays, tuples & collections** | Fixed-size `[T; N]`, anonymous tuples, zero-copy slices `&[T]` / `&mut [T]`, and heap-backed `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` / `String` that move on assignment and free at scope exit ([reference](docs/language-reference/types.md)) |
+| **Tensors** | `Tensor<T, [d0, ...]>` owning its buffer, with shapes checked at compile time: broadcasting element-wise math, `a @ b` matmul, `t[1..3, 2..5]` slicing, shape generics, named and dynamic axes, reductions, `.sort()` / `.argsort()` / `.topk()` ([reference](docs/language-reference/tensors.md)) |
 | **Pattern matching** | Exhaustive `match` expressions over variant / literal / or / range / wildcard patterns with `if` guards, plus `val Point { x, y } = p` and `val [a, ..rest] = arr` destructuring |
 | **`Option` / `Result`** | `Option<T>` and `Result<T, E>` from the implicit prelude. They are ordinary generic enums, available with no declaration and no import, variants included; `??` unwraps either with a lazy fallback; `?` propagates the failure to the caller; `val-else` unwraps or exits the scope; `checked_add` / `checked_sub` / `checked_mul` report integer overflow as `Option::None` |
 | **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop`, `&T` / `&mut T` with flow-sensitive exclusivity, lifetime elision and annotations; `pool { }` / `pool label { }` arena blocks, where what the block allocates comes from one bump region and goes back in a single store at its closing brace, a type with a destructor implements `PoolAware` to live in one and is released by the arena's reverse-order sweep, and a value the compiler can trace to the heap may be kept past the block |
@@ -195,7 +196,7 @@ brew install llvm@20
 export LLVM_SYS_201_PREFIX="$(brew --prefix llvm@20)"
 ```
 
-**Windows 10 / 11 (x64)** needs a longer walkthrough; see below.
+**Windows 10 / 11 (x64)** needs a different LLVM package; see [below](#windows-10--11-x64).
 
 ### Step 2: Build
 
@@ -218,56 +219,15 @@ has already added to `PATH`.
 
 ### Windows 10 / 11 (x64)
 
-Windows needs the MSVC toolchain, not GNU, and LLVM does not come from a package
-manager. Four extra steps, after which Step 2 above runs unchanged.
-
-**Install Visual Studio Build Tools.** Download from
-[visualstudio.microsoft.com/downloads](https://visualstudio.microsoft.com/downloads/)
-under *Tools for Visual Studio* → *Build Tools for Visual Studio 2022*, and select the
-**Desktop development with C++** workload. 2019 or later works.
-
-**Install Rust.** Run `rustup-init.exe` from [rustup.rs](https://rustup.rs/) and choose
-*1) Proceed with standard installation*, which selects the
-`stable-x86_64-pc-windows-msvc` toolchain. Open a new PowerShell window afterwards so
-`cargo` and `rustc` are on `PATH`.
-
-**Install LLVM 20** to a path without spaces (the NSIS installer enforces this):
-
-```powershell
-$version = "20.1.8"
-$url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/LLVM-$version-win64.exe"
-curl.exe -fsSL -o "$env:TEMP\llvm-installer.exe" $url
-Start-Process "$env:TEMP\llvm-installer.exe" -ArgumentList "/S /D=C:\LLVM" -Wait -PassThru | Out-Null
-```
-
-The installer is also downloadable by hand from the
-[LLVM releases page](https://github.com/llvm/llvm-project/releases).
-
-**Point the build at it.** No admin rights needed:
-
-```powershell
-[Environment]::SetEnvironmentVariable(
-    "LLVM_SYS_201_PREFIX", "C:\LLVM",
-    [EnvironmentVariableTarget]::User
-)
-$current = [Environment]::GetEnvironmentVariable("Path", "User")
-[Environment]::SetEnvironmentVariable("Path", "$current;C:\LLVM\bin", "User")
-```
-
-Close and reopen PowerShell, then check with `llvm-config --version`, which should
-print `20.x.y`.
-
-> **Troubleshooting Windows build errors**
->
-> - *`llvm-sys` build script cannot find LLVM*: confirm `LLVM_SYS_201_PREFIX`
->   is set in the **current** shell session (`echo $env:LLVM_SYS_201_PREFIX`)
->   and points to a directory that contains `bin\llvm-config.exe`.
-> - *`link.exe` not found*: the MSVC Build Tools are not on `PATH`. Run the
->   build from a **Developer PowerShell** / **x64 Native Tools Command Prompt**
->   or install the *C++ build tools* workload as described above.
-> - *Version mismatch (`llvm-sys-201` requires LLVM 20)*: an older LLVM is on
->   `PATH`. Set `LLVM_SYS_201_PREFIX` explicitly to the LLVM 20 prefix and
->   ensure `C:\LLVM\bin` precedes any other LLVM entries in `PATH`.
+Windows needs the MSVC toolchain and a **full LLVM 20 development build**: the
+official LLVM installer ships Clang and `LLVM-C.dll` but no `llvm-config.exe`,
+no headers and no static libraries, so `llvm-sys` cannot build against it. The
+PowerShell walkthrough, including the packaged dev build CI uses and the CRT
+variant to pick, is in
+[the installation guide](https://neuro-lang.netlify.app/getting-started/installation/#windows-msvc)
+([docs/getting-started/installation.md](docs/getting-started/installation.md)).
+[Troubleshooting](docs/guides/troubleshooting.md) covers the build errors that
+follow from getting it wrong.
 
 ---
 

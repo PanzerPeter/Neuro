@@ -7,9 +7,9 @@
 use lexical_analysis::TokenKind;
 use shared_types::{Identifier, Span};
 
-use crate::ast::{Expr, LoopAdapter, LoopAdapterKind, Stmt};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
+use ast_types::{Expr, LoopAdapter, LoopAdapterKind, Stmt};
 
 use super::statements::stmt_span;
 use super::Parser;
@@ -590,9 +590,9 @@ fn unwrap_paren(expr: Expr) -> Expr {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{Item, Stmt};
     use crate::errors::ParseError;
     use crate::parse;
+    use ast_types::{Item, Stmt};
 
     /// The first statement of the first function body.
     fn first_stmt(source: &str) -> Stmt {
@@ -628,14 +628,14 @@ mod tests {
         let Stmt::ForEach { iterable, .. } = stmt else {
             panic!("expected a for-each");
         };
-        assert!(matches!(iterable, crate::ast::Expr::Identifier(id) if id.name == "xs"));
+        assert!(matches!(iterable, ast_types::Expr::Identifier(id) if id.name == "xs"));
     }
 
     /// The chain is recorded in source order, so the lowering applies it left to
     /// right over the elements.
     #[test]
     fn an_adapter_chain_is_kept_in_source_order() {
-        use crate::ast::LoopAdapterKind;
+        use ast_types::LoopAdapterKind;
         let stmt = first_stmt("func main() -> i32 { for v in xs.map(f).filter(p).map(g) { }\n 0 }");
         let Stmt::ForEach {
             iterable, adapters, ..
@@ -643,7 +643,7 @@ mod tests {
         else {
             panic!("expected a for-each");
         };
-        assert!(matches!(iterable, crate::ast::Expr::Identifier(id) if id.name == "xs"));
+        assert!(matches!(iterable, ast_types::Expr::Identifier(id) if id.name == "xs"));
         let kinds: Vec<LoopAdapterKind> = adapters.iter().map(|a| a.kind).collect();
         assert_eq!(
             kinds,
@@ -858,7 +858,7 @@ mod tests {
         };
         assert_eq!(index.map(|i| i.name), Some("o".to_string()));
         assert_eq!(iterator.name, "c");
-        assert!(matches!(iterable, crate::ast::Expr::Call { .. }));
+        assert!(matches!(iterable, ast_types::Expr::Call { .. }));
     }
 
     #[test]

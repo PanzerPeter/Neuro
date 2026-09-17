@@ -74,9 +74,6 @@ enum Commands {
         #[arg(value_name = "FILE")]
         input: PathBuf,
     },
-
-    /// Display version information
-    Version,
 }
 
 fn main() {
@@ -116,11 +113,6 @@ fn main() {
                 eprintln!("Error: {}", e);
                 process::exit(1);
             }
-        }
-
-        Commands::Version => {
-            println!("neurc {}", env!("CARGO_PKG_VERSION"));
-            println!("Neuro Programming Language Compiler");
         }
     }
 }

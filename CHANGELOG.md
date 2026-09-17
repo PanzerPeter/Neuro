@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.39.2] - 2026-09-17
+
+### Removed
+
+- infra: `neurc version`. The driver already declares `#[command(version)]`, so
+  `neurc --version` printed the same number; the subcommand appeared in no test, no
+  document and no example. Use `neurc --version`.
+- semantic: the `UndefinedConst` type error variant, which no analysis ever
+  constructed. A `const` referring to a name that does not resolve is reported by
+  the checks that do run.
+- parser: `syntax-parsing/src/ast/`, a module whose only content was a re-export of
+  `ast_types`, which the parser's own modules then imported through a second
+  re-export in `lib.rs`. Three hand-maintained name lists for one set of types. The
+  parser now imports `ast_types` directly; `syntax_parsing`'s public re-export is
+  unchanged, so no consumer moves.
+- ci: the `Architecture Boundaries` job. It provisioned a runner and an LLVM 20
+  install to run `cargo test -p neurc --test architecture_tests`, which the test
+  matrix already runs six times over as part of `cargo test --workspace`.
+- ci: the `Security Audit` job. OSV-Scanner reads the same RustSec advisory
+  database over the same dependency graph, on pull requests, pushes and a weekly
+  schedule. `cargo audit` remains a documented local command.
+
+### Changed
+
+- tests: the `neurc` end-to-end tests are one Cargo test target instead of 111.
+  Every file moved to `compiler/neurc/tests/suite/` and is declared in
+  `suite/main.rs`; `architecture_tests`, `examples` and `numpy_differential` stay
+  separate targets because published documentation names them. Cargo links one
+  executable per `tests/*.rs`, so the previous layout rebuilt and stored 111 copies
+  of the same harness: 716 MB of debug test executables, now 18 MB.
+- docs: the README's Windows walkthrough is replaced by a link to the installation
+  guide. It described the official LLVM NSIS installer, which ships no
+  `llvm-config.exe`, no headers and no static libraries, so `llvm-sys` cannot build
+  against it; the guide's packaged development build is the one that works.
+- docs: the README capability table's collections row is split into a collections
+  row and a tensor row, each one line, both linking to their language reference
+  page.
+
 ## [2.39.1] - 2026-09-17
 
 ### Added

@@ -262,21 +262,18 @@ fn test_ast_types_in_infrastructure() {
         "ast-types infrastructure crate must exist (VSA requirement)"
     );
 
-    // Verify syntax-parsing doesn't define AST types anymore
-    let syntax_ast_mod = root.join("compiler/syntax-parsing/src/ast/mod.rs");
-    let ast_mod_content =
-        fs::read_to_string(&syntax_ast_mod).expect("Failed to read syntax-parsing/src/ast/mod.rs");
-
+    // Verify syntax-parsing neither defines AST types nor keeps a local `ast`
+    // module in front of them: the parser imports `ast_types` directly.
     assert!(
-        ast_mod_content.contains("pub use ast_types::"),
-        "syntax-parsing/src/ast/mod.rs should re-export from ast_types, not define types"
+        !root.join("compiler/syntax-parsing/src/ast").exists(),
+        "syntax-parsing must not carry an `ast` module: AST types are owned by \
+         the ast-types infrastructure crate and imported from it directly"
     );
 
-    // Verify old AST definition files are deleted
+    let lib_rs = fs::read_to_string(root.join("compiler/syntax-parsing/src/lib.rs"))
+        .expect("Failed to read syntax-parsing/src/lib.rs");
     assert!(
-        !root
-            .join("compiler/syntax-parsing/src/ast/expressions.rs")
-            .exists(),
-        "Old AST definition files should be deleted from syntax-parsing"
+        lib_rs.contains("pub use ast_types::"),
+        "syntax-parsing/src/lib.rs should re-export from ast_types, not define types"
     );
 }

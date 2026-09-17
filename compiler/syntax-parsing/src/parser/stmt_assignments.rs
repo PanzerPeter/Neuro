@@ -6,9 +6,9 @@
 use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
-use crate::ast::{BinaryOp, Stmt};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
+use ast_types::{BinaryOp, Stmt};
 
 use super::Parser;
 

@@ -5,9 +5,9 @@
 use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
-use crate::ast::{Attribute, Expr, FieldDef, FieldInit, StructDef};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
+use ast_types::{Attribute, Expr, FieldDef, FieldInit, StructDef};
 
 use super::Parser;
 

@@ -3,9 +3,9 @@
 use lexical_analysis::TokenKind;
 use shared_types::{Identifier, Span};
 
-use crate::ast::Stmt;
 use crate::errors::ParseResult;
 use crate::precedence::Precedence;
+use ast_types::Stmt;
 
 use super::Parser;
 

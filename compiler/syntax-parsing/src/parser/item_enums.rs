@@ -5,9 +5,9 @@
 use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
-use crate::ast::{EnumDef, EnumVariant, Expr, FieldDef, FieldInit, VariantPayload};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
+use ast_types::{EnumDef, EnumVariant, Expr, FieldDef, FieldInit, VariantPayload};
 
 use super::Parser;
 
@@ -69,7 +69,7 @@ impl Parser {
         if self.check(&TokenKind::LeftParen) {
             self.advance(); // consume '('
             self.skip_newlines();
-            let mut tys: Vec<crate::ast::Type> = Vec::new();
+            let mut tys: Vec<ast_types::Type> = Vec::new();
             if !self.check(&TokenKind::RightParen) {
                 loop {
                     tys.push(self.parse_type()?);

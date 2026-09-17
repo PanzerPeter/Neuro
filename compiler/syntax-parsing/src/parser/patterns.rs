@@ -3,9 +3,9 @@
 use lexical_analysis::{StringValue, TokenKind};
 use shared_types::{Identifier, Literal, Span};
 
-use crate::ast::{EnumPatternPayload, Expr, FieldPattern, MatchArm, Pattern};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
+use ast_types::{EnumPatternPayload, Expr, FieldPattern, MatchArm, Pattern};
 
 use super::statements::stmt_span;
 use super::Parser;
