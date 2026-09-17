@@ -2,8 +2,8 @@
 // `BTreeMap<K, V>`: construction, the method surface, `Option`-returning readers,
 // growth and rehashing under load, ownership (move + scope-exit free), and the
 // `OrderedF32` key wrapper that gives an ordered map a total order over floats.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 use std::process::Command;
 

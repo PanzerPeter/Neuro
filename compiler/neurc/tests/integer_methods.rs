@@ -2,8 +2,8 @@
 // End-to-end coverage: these dispatch through the builtin-method intrinsic path and lower
 // to LLVM arithmetic / saturating intrinsics. Tests compile in the default (debug) profile,
 // so the wrapping cases also prove they never trap on overflow.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn wrapping_add_wraps_without_trapping() {

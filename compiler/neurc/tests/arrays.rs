@@ -1,8 +1,8 @@
 // End-to-end tests for fixed-size arrays `[T; N]`: literals, indexing,
 // element assignment, `.len()`, `for x in arr` / `for x in &arr` iteration, and
 // the debug-build out-of-bounds panic.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 use std::process::Command;
 

@@ -4,8 +4,8 @@
 // produces its own specialized struct and methods, monomorphized before codegen at
 // zero runtime cost. These tests drive the whole pipeline
 // (parse → type-check → HIR lowering → LLVM → native binary) and assert on the exit code.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn generic_struct_literal_infers_and_reads_field() {

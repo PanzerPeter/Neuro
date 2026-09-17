@@ -5,8 +5,8 @@
 // once the dropping scope has closed. This exercises scope-exit insertion, LIFO
 // order, move elision (a moved value is not double-dropped), and the Copy/Drop
 // conflict rule end-to-end.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 use std::fs;
 use std::process::Command;

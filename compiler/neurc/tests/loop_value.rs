@@ -1,6 +1,6 @@
 // `loop` as a value expression: `val x = loop { ... break v }`.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn test_loop_expression_yields_break_value() {

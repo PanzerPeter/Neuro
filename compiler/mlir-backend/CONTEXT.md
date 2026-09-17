@@ -18,9 +18,13 @@ legs build the placeholder.
 - `translate_to_llvm_ir(&HirProgram) -> Result<String, MlirError>`: the same module carried on
   through a bufferization and conversion pipeline into the `llvm` dialect, translated into an
   inkwell LLVM module, LLVM-verified, and returned as textual LLVM IR.
-- `emit_smoke_module() -> Result<String, MlirError>`, the HIR-independent wiring check: builds
-  `func.func @neuro_smoke(index, index) -> index` with a single `arith.addi` body, verifies it,
-  and returns its textual form.
+The HIR-independent wiring check that used to sit beside them, `emit_smoke_module`, is gone
+from the public surface: `build_smoke_module` is `pub(crate)` and compiled only under `test`,
+because the Phase 1.8 condition it was written for ("until real HIR lowering exists") is met
+and nothing outside the crate ever called it. It still builds
+`func.func @neuro_smoke(index, index) -> index` with a single `arith.addi` body, and `bridge`'s
+tests still carry that module across to LLVM IR, because it is the one module with a real body
+rather than only declarations.
 
 ## Shared Kernel
 - `neuro-hir`: the typed HIR contract `lower_program` consumes, gated under `mlir`.

@@ -1,6 +1,6 @@
 // Basic feature tests: simple returns, variables, and arithmetic operations
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn test_simple_return() {

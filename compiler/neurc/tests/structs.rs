@@ -1,7 +1,7 @@
 // Struct type tests (Phase 2)
 // Tests struct definition, instantiation, field access, and field mutation.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 // ── AC1/AC2: struct definition and instantiation compile end-to-end ──────────
 

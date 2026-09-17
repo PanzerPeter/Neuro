@@ -7,9 +7,9 @@
 // and adding it to the minimum panics exactly when it is negative, so bracketing a
 // difference between the two proves every element of it is zero. A wrong element aborts
 // the program instead of returning its exit code.
-mod common;
+mod compile_harness;
 
-use common::CompileTest;
+use compile_harness::CompileTest;
 
 fn run_program(name: &str, source: &str) -> i32 {
     CompileTest::new()

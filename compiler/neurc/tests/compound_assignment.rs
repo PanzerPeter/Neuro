@@ -2,8 +2,8 @@
 // Each operator is desugared to a plain assignment at parse time, so these tests
 // also validate that the desugaring path reaches semantic analysis and codegen
 // correctly for both integer and float types.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn test_plus_equal_i32() {

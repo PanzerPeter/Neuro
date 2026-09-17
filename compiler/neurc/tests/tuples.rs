@@ -1,8 +1,8 @@
 // End-to-end tests for tuples `(T1, T2, ...)`: the tuple type annotation,
 // tuple literals, `.N` constant index access, destructuring binds (flat, nested,
 // and `_` wildcard), and tuples crossing function boundaries.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn tuple_index_reads_elements() {

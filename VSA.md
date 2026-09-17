@@ -190,8 +190,14 @@ governed by SB-001 rather than by convenience.
 
 ## 10. Diagnostics
 
-There is no logging layer and none is to be added. A compiler's observable output is its
-diagnostics.
+No Slice logs. A compiler's user-visible output is its diagnostics, and a Slice returns
+those to the Driver as values (DG-001) rather than emitting them. A Slice must not depend on
+`log`, `tracing`, or any logging crate, and must not write to stdout or stderr.
+
+The Driver is the one exception and is already using it: `neurc` carries `log` + `env_logger`
+so `RUST_LOG=debug` traces the pipeline stages, the linker invocation, and the driver that was
+chosen. That is a developer facility on the orchestration layer, off unless asked for, and
+separate from diagnostics. Extending it is fine; pushing it down into a Slice is not.
 
 | ID | Severity | Rule |
 |----|----------|------|

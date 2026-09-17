@@ -4,8 +4,8 @@
 // expected text and reports the first mismatch as its exit code, so a failure
 // names the specifier that broke rather than just "not zero".
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 /// A `check` helper plus a `main` that runs `cases` and returns the tag of the
 /// first mismatching one, or 0 when they all render as expected.

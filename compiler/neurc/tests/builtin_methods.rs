@@ -1,7 +1,7 @@
 // Builtin method dispatch on primitive & string types (Phase 1.5)
 // End-to-end coverage for the first intrinsic: `string.len()`.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn string_len_returns_byte_length() {

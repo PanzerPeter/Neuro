@@ -295,18 +295,24 @@ neurc run examples/basics/factorial.nr
 ### Variables and Types
 
 ```neuro
-// Immutable by default
-val x: i32 = 42
-val name: string = "Neuro"
+func main() -> i32 {
+    // Immutable by default
+    val x: i32 = 42
+    val name: string = "Neuro"
 
-// Mutable with reassignment
-mut counter: i32 = 0
-counter = counter + 1
+    // Mutable with reassignment
+    mut counter: i32 = 0
+    counter = counter + 1
 
-// Type inference works for both val and mut
-val pi = 3.14159   // inferred f64
-val n  = 100       // inferred i32
-mut count = 0      // inferred i32; type annotation optional
+    // Type inference works for both val and mut
+    val pi = 3.14159   // inferred f64
+    val n  = 100       // inferred i32
+    mut count = 0      // inferred i32; type annotation optional
+    count = n
+
+    println("{name}: x={x} counter={counter} pi={pi:.5} count={count}")
+    return x
+}
 ```
 
 ### Functions

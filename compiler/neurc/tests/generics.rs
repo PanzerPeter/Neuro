@@ -5,8 +5,8 @@
 // is fully erased before codegen. These tests drive the whole pipeline
 // (parse → type-check → HIR lowering → LLVM → native binary) and assert on the
 // program's exit code.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn identity_at_multiple_types() {

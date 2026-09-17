@@ -1,6 +1,6 @@
 // Labeled break / continue tests: `outer: for ... { break outer }`.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn test_labeled_break_exits_outer_loop() {

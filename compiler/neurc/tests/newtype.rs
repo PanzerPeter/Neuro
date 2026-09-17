@@ -3,8 +3,8 @@
 // value is read via `.0`, and (unlike a transparent `type` alias) the newtype is
 // not interchangeable with its inner type. These tests exercise the full pipeline:
 // parse → type-check → HIR lowering → LLVM codegen → native run.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn newtype_construction_and_inner_access_run() {

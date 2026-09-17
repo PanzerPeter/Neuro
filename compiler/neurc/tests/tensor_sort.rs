@@ -6,9 +6,9 @@
 // column sorted as if it were a row has exactly the same type.
 //
 // An exit code is one byte, so each expected value is kept below 256.
-mod common;
+mod compile_harness;
 
-use common::CompileTest;
+use compile_harness::CompileTest;
 
 /// Compile and run `source`, returning its exit code.
 fn run_program(name: &str, source: &str) -> i32 {

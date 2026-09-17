@@ -5,6 +5,61 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-034 — a local shadowing a labelled top-level `func` is checked against the function
+
+- **Status**: open, confirmed
+- **Area**: `argument-binding` (call-site signature table); the rest of the compiler already
+  honours the shadow
+- **Severity**: minor — the compiler rejects a valid program; it never miscompiles, and
+  renaming the local works
+
+A `val` binding may shadow a top-level `func` of the same name, and the type checker and the
+backend both honour it: the call reaches the local and the program runs. Argument binding runs
+before type checking and resolves a called name in its table of top-level functions alone. A
+function enters that table only if it declares an external parameter label, so the defect needs
+both halves: the shadowed function must be labelled, and its arity must differ from the local's.
+Then the call is validated against the *function's* signature and rejected.
+
+**Minimal repro**
+
+```neuro
+func scale(factor: i32, by amount: i32) -> i32 { factor * amount }
+
+func main() -> i32 {
+    val scale = |a: i32| -> i32 { a + 1 }
+    return scale(5)
+}
+```
+
+Expected: compiles and returns 6. Observed, before type checking runs at all:
+
+```
+Argument errors found:
+  1. 'scale' takes 2 argument(s), but 1 given
+```
+
+Two neighbouring programs show the shadow itself is supported and isolate the trigger. Drop the
+label (`func scale(value: i32)`) and the same shadowing program compiles and exits 6, because an
+unlabelled function never enters the table. Give the local the *same* arity as the labelled
+function and `scale(5, by: 2)` compiles and exits 7 — the label is checked against the function
+and then bound positionally to the closure, which takes no labels at all.
+
+**Root cause**: confirmed in the code, and already written down as a known property of the pass
+in `compiler/argument-binding/CONTEXT.md` ("Local bindings are not tracked"). The walk that
+validates calls looks a bare callee up in the table of labelled top-level declarations; nothing
+in it knows which names a local binding has taken over in the enclosing scope.
+
+**Workaround**: rename the local, or call the shadowed function with its own arity.
+
+**Fix sketch**: the pass needs a scope stack, not a flat table — push a frame per block, record
+every `val` / `mut` / closure parameter name in it, and skip label validation for a callee whose
+name a live local holds. That also closes the third shape above, where a label survives onto a
+closure call that cannot take one. It is the same scope walk module resolution needs for its own
+shadowing gap (it rewrites an imported name whether or not a local covers it), so the two are
+worth taking together rather than each growing a private half-version. Regression tests want the
+repro above, the same-arity labelled call, and a call placed after the local goes out of scope,
+which must still reach the function.
+
 ## BUG-033 — `&` does not accept a field or an element, only a bare variable
 
 - **Status**: open, confirmed

@@ -4,9 +4,9 @@
 // `neurc check` and never reaches the backend. The second group compiles and runs a
 // program, because its subject is the LLVM slot a declared type produces, which type
 // checking alone cannot observe.
-mod common;
+mod compile_harness;
 
-use common::CompileTest;
+use compile_harness::CompileTest;
 
 #[test]
 fn i64_annotation_accepts_a_small_literal() {
@@ -156,7 +156,7 @@ fn a_literal_too_large_for_u32_is_rejected() {
 // type annotations are honoured at the LLVM IR level, not just semantically.
 
 mod codegen_regressions {
-    use super::common::CompileTest;
+    use super::compile_harness::CompileTest;
 
     #[test]
     fn regression_i64_annotation_creates_i64_alloca() {

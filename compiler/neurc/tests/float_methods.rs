@@ -4,8 +4,8 @@
 // and lowers to an unordered self-comparison (`fcmp uno`). NaN is the only value it
 // answers `true` for, which is what makes it necessary: `x != x` is false for NaN too,
 // so the test is not expressible with the comparison operators.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn is_nan_detects_nan_and_rejects_ordinary_values() {

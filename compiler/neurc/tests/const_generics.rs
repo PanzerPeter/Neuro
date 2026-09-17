@@ -5,8 +5,8 @@
 // `where` clause carries value predicates checked at each instantiation. These tests
 // drive the whole pipeline (parse → type-check → HIR lowering → LLVM → native binary)
 // and assert on the program's exit code.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn const_param_inferred_from_array_length() {

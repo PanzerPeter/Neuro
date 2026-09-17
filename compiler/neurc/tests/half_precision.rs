@@ -3,8 +3,8 @@
 // The scalar contract is deliberately narrow: binding, copy, `==`/`!=`, and
 // `as`-cast to/from any numeric type, but no arithmetic (compute in `f32`).
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn f16_cast_round_trip_through_int() {

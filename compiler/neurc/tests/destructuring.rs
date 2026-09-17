@@ -2,8 +2,8 @@
 // field binds `val Point { x, y } = p`, positional array binds `val [a, b] = arr`,
 // the trailing rest `val [first, ..rest] = arr`, nested patterns, and the arity
 // rules. Tuple destructuring is covered separately in `tuples.rs`.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn struct_destructure_binds_fields() {

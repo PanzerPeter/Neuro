@@ -7,8 +7,8 @@
 // a function-local value (or of a by-value parameter) would dangle and is
 // rejected at compile time. Covers both end-to-end accept+run and the rejection
 // diagnostics emitted by `neurc compile`.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 fn expect_compile_error(source: &str, needle: &str) {
     let test = CompileTest::new();

@@ -1,6 +1,6 @@
 // Arithmetic operator tests: basic operations, division, modulo, and complex expressions
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn test_arithmetic_operations() {

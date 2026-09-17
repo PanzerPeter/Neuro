@@ -5,8 +5,8 @@
 // so a desugar that dropped, repeated, or mis-ordered an element would fail here rather
 // than merely type-check.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 /// A hand-written cursor over the integers `[start, end)`, plus the container that
 /// hands one out. Every program below builds on these.

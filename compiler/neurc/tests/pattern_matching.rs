@@ -3,8 +3,8 @@
 // and combination with prior features (structs via enum struct variants, functions,
 // arithmetic).
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn matches_all_enum_variant_forms_with_payload_binding() {

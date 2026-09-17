@@ -5,8 +5,8 @@
 // The unit tests in the `module-resolution` slice cover discovery against a stub parser;
 // these compile and run the real thing.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 /// Compile `root` after writing every `(path, source)` pair, and return the exit code.
 fn run_program(files: &[(&str, &str)], root: &str) -> Result<i32, String> {

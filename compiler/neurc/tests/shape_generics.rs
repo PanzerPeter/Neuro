@@ -6,8 +6,8 @@
 // checked at the call that supplies the offending extent. These tests drive the whole
 // pipeline (parse → type-check → HIR lowering → LLVM → native binary) and assert on the
 // program's exit code.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn shape_parameters_are_inferred_from_the_argument() {

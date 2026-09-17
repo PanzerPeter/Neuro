@@ -2,8 +2,8 @@
 // type is, so a generic body can call a method whose signature names it. Each program
 // compiles to a native binary and runs; the exit code encodes the computed result.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn a_constrained_bound_dispatches_an_associated_signature() {

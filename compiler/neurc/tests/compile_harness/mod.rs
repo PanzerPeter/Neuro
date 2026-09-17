@@ -1,5 +1,6 @@
-// Shared test utilities for neurc integration tests
-// Provides CompileTest helper for end-to-end compilation testing
+// End-to-end compile-and-run harness for the neurc integration suite.
+// Owns CompileTest: writes a .nr source to a temp dir, drives `neurc`, and returns
+// the compiler output or the linked binary's exit status for assertion.
 
 use std::fs;
 use std::path::PathBuf;

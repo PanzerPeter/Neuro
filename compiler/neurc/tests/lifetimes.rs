@@ -4,8 +4,8 @@
 // list, then erased, so they add zero runtime cost and never change a reference's
 // type. These tests exercise the full pipeline: parse → type-check → HIR lowering →
 // LLVM codegen → native run.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn longest_returns_the_longer_borrow() {

@@ -2,8 +2,8 @@
 // annotation, appending owned and borrowed text, byte length, buffer-retaining `clear`,
 // the copy back out to an immutable `string`, ownership (move + scope-exit free), and
 // growth well past the initial capacity.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn builds_text_and_copies_it_out() {

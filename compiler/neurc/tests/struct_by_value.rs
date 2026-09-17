@@ -3,8 +3,8 @@
 // The backend needs the struct's field layout to build its LLVM type in each of
 // these; the frontend accepts them all, so codegen must too.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn struct_as_free_function_parameter_and_return() {

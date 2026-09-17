@@ -104,8 +104,11 @@ Reads and rewrites the AST it is handed; touches no files.
   grammar (`Attribute.args`) and are not handled here.
 - **Local bindings are not tracked**, the same limitation module resolution documents for
   rewriting. A closure named `f` shadowing a top-level `func f` is looked up as the function,
-  so a required label on that function would be enforced against the closure call. Only a
-  program that shadows a labelled function by name can notice.
+  so a label declared on that function is enforced against the closure call. Only a program
+  that shadows a *labelled* function by name can notice, since an unlabelled one never enters
+  the table. Filed as BUG-034 in `docs/BUGS.md`: when the two arities differ the call is
+  rejected outright, which is the compiler refusing a program the rest of it compiles
+  correctly.
 - **A missed call would be silent, so it is made loud.** If this walk failed to reach a call,
   its labels would survive and the arguments would stay in written order, the one way a named
   argument could bind to the wrong parameter instead of failing. `hir-lowering` refuses a call

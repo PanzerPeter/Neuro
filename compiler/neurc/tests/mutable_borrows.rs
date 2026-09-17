@@ -3,8 +3,8 @@
 // dereference operator (read and write), and the borrow rules: `&mut` requires a
 // `mut` binding, `*` applies only to references, and writing through `*` requires
 // a `&mut`. Covers end-to-end compile+run and the rejection diagnostics.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 use std::fs;
 use std::process::Command;

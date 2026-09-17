@@ -3,9 +3,9 @@
 // real program end to end: every element type allocated and released, a clone producing a
 // second handle, and a handle crossing every ownership boundary the language has without a
 // double free or a leak.
-mod common;
+mod compile_harness;
 
-use common::CompileTest;
+use compile_harness::CompileTest;
 
 fn run_program(name: &str, source: &str) -> i32 {
     CompileTest::new()

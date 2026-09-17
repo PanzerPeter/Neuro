@@ -5,8 +5,8 @@
 // the type checker against the module each item carries: these tests exercise both paths
 // through the real compiler.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 /// Compile `root` after writing every `(path, source)` pair, and return the exit code.
 fn run_program(files: &[(&str, &str)], root: &str) -> Result<i32, String> {

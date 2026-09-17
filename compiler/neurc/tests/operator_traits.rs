@@ -3,8 +3,8 @@
 // `PartialEq`/`Comparable` gets the matching operator, dispatched to its impl method and
 // monomorphized to a plain call: no vtable. These exercise the full pipeline:
 // parse → type-check → HIR lowering → LLVM codegen → native run.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn arithmetic_and_unary_operators_dispatch() {

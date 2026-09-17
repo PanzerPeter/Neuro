@@ -6,9 +6,9 @@
 // value assertions prove the run-time half of that — a widened tensor is still the same
 // DLPack handle addressing the same buffer, so it moves, is stored, and is released with
 // no extent involved.
-mod common;
+mod compile_harness;
 
-use common::CompileTest;
+use compile_harness::CompileTest;
 
 /// Compile and run `source`, returning its exit code.
 fn run_program(name: &str, source: &str) -> i32 {

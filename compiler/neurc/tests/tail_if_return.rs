@@ -2,8 +2,8 @@
 // The parser represents a statement-position `if` as `Stmt::If`, so the backend's
 // implicit-return lowering must recognise a trailing `Stmt::If` (with an `else`)
 // and yield its value: not fall through with `unreachable` (which segfaulted).
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn tail_if_as_implicit_return() {

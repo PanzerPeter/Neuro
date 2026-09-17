@@ -9,8 +9,8 @@
 //
 // The `PoolAware` sweep is the exception: it IS observable, because the order the arena
 // calls `bulk_release` in is the order the program prints in. Those tests read stdout.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 use std::process::Command;
 
 /// Compile and run `source`, returning its standard output with line endings

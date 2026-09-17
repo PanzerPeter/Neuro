@@ -1,7 +1,7 @@
 // Expression-based return tests (Phase 1 Feature)
 // Tests implicit returns where the last expression in a function is returned
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn test_expression_return_simple() {

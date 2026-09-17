@@ -3,8 +3,8 @@
 // and into struct fields. Pattern matching (payload extraction) is a separate
 // roadmap item, so these assert construction + round-trip, not deconstruction.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn constructs_all_three_variant_forms() {

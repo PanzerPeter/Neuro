@@ -7,8 +7,8 @@
 // spellings are the reason the check tests the binding's TYPE rather than whether its
 // initializer happens to be a call: only two of these have a callee at all.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 /// Compile `source` and return the compiler's combined output, asserting it failed.
 fn expect_compile_error(filename: &str, source: &str) -> String {

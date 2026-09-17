@@ -10,8 +10,8 @@
 // variable"), and lowering reported "void type cannot be used as a value". Writing the
 // same two arms in the other order worked, which is the disagreement these tests pin.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn regression_if_with_a_panicking_first_arm_keeps_the_other_arm_type() {

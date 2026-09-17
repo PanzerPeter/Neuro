@@ -4,8 +4,8 @@
 // runtime trait object dispatched through a vtable. Each program compiles to a native
 // binary and runs; the exit code encodes the computed result.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn impl_trait_argument_dispatches_statically() {

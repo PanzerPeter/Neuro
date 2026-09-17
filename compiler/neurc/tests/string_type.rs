@@ -1,7 +1,7 @@
 // String type tests (Phase 1)
 // Tests string literals, parameters, and string variable handling
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn test_string_literal_return() {

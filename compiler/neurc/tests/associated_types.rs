@@ -2,8 +2,8 @@
 // `Self::Item` names the binding in signatures and bodies. Each program compiles to a
 // native binary and runs; the exit code encodes the computed result.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn an_impl_binds_the_associated_type_its_trait_declares() {

@@ -2,8 +2,8 @@
 // reversed axis of a tensor index, how the two compose with the adapters and
 // bindings a head already carries, and the diagnostics for a receiver `.rev()`
 // does not apply to.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn an_exclusive_range_counts_down_from_its_last_value() {

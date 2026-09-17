@@ -2,8 +2,8 @@
 // every head shape they apply to, how a chain composes, how they interact with
 // `.enumerate()` and with the loop's other machinery (labels, `continue`, nesting),
 // and the diagnostics for a malformed adapter.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 use std::process::Command;
 

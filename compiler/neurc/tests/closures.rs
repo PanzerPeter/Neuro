@@ -1,7 +1,7 @@
 // End-to-end tests for closures and lambdas: closure literals with
 // Copy-by-value capture, direct calls, and higher-order functions.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn single_expression_closure() {

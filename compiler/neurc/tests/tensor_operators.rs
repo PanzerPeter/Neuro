@@ -6,9 +6,9 @@
 // leaves its operands' buffers to be released. Elements are read back by indexing, which
 // 2B's slicing item made available, so the assertions are on values rather than on a
 // panicking guard.
-mod common;
+mod compile_harness;
 
-use common::CompileTest;
+use compile_harness::CompileTest;
 
 fn run_program(name: &str, source: &str) -> i32 {
     CompileTest::new()

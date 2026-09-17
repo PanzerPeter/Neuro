@@ -7,8 +7,8 @@
 // value happened to be callable (a closure binding), the misparse type-checked and
 // silently ran a different program.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 fn run(filename: &str, source: &str) -> i32 {
     let test = CompileTest::new();

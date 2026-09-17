@@ -11,8 +11,8 @@
 // bindings at the same type the IR is well formed, just wrong.
 //
 // One case per block form, because each opens its scope through a different lowering.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn regression_bare_block_binding_does_not_outlive_its_block() {

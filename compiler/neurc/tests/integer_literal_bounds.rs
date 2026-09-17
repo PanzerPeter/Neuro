@@ -5,8 +5,8 @@
 // maximum. Range-checking the magnitude alone rejected every such value, and carrying
 // the magnitude as an `i64` in the lexer put `i64::MIN` and the upper half of `u64` out
 // of reach before a type was even known. Both ends must now round-trip.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn regression_most_negative_signed_literals_are_accepted() {

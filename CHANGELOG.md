@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.39.1] - 2026-09-17
+
+### Added
+
+- docs: BUG-034 — a local binding that shadows a *labelled* top-level `func` of a different
+  arity is rejected before type checking. Argument binding resolves a called name in its table
+  of labelled top-level declarations and does not track locals, so the call is validated against
+  the function's signature. The rest of the compiler honours the shadow: drop the label, or give
+  the local the function's arity, and the same program compiles and the local wins.
+
+### Changed
+
+- codegen: `llvm-backend`'s unit tests moved out of `lib.rs` into `src/tests.rs`, leaving the
+  crate root declaring its public surface and nothing else.
+- codegen: `mlir-backend` no longer exports `emit_smoke_module`. The melior wiring check it
+  wrapped is compiled only under `test` now — nothing outside the crate ever called it, and the
+  condition it was written for ("until real HIR lowering exists") has been met.
+- infra: the architecture rules scope the no-logging rule to slices. A slice still must not log
+  or write to stdout or stderr; `neurc`'s `RUST_LOG` pipeline trace is named as the driver-level
+  exception it has always been in practice.
+- tests: the `neurc` integration harness module is `compile_harness` rather than `common`, which
+  the naming rules forbid.
+- docs: the README's variables snippet is a whole program, so every code block in the file
+  type-checks.
+
+### Removed
+
+- build: the unreferenced `release-with-debug` cargo profile.
+
 ## [2.39.0] - 2026-09-17
 
 ### Added

@@ -6,8 +6,8 @@
 // other item kind (structs, enums, traits, constants) was already order-independent,
 // and the LLVM backend already pre-declared every signature; only the type checker
 // insisted on definition-before-use.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn regression_call_before_definition() {

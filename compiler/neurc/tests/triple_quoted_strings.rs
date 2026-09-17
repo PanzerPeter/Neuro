@@ -4,8 +4,8 @@
 // text it should dedent to and returns 0 only on an exact match, so a failure
 // means the value reaching codegen differed: not merely that the source lexed.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 /// Compile a `main` that returns 0 when `block` evaluates to `expected`.
 fn assert_block_equals(name: &str, block: &str, expected: &str) {

@@ -3,8 +3,8 @@
 // arguments, `match` deconstruction, flow across function and struct boundaries, the
 // prelude's shadowing rule, and the phase's documented limits.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn option_is_available_without_declaring_it() {

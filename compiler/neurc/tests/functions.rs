@@ -1,6 +1,6 @@
 // Function call tests: parameters, nested calls, and function composition
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn test_function_call() {

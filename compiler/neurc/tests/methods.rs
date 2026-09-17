@@ -1,7 +1,7 @@
 // Method and impl block tests (Phase 2)
 // Covers AC1–AC6: &self methods, associated functions, call syntax, error cases.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 // ── AC1/AC2: &self method, compiles and returns correct value ───────────────
 

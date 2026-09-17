@@ -11,8 +11,8 @@
 // continuation byte, or a cursor that advanced by the wrong width, would produce the
 // wrong exit code here rather than merely type-check.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 use std::fs;
 use std::process::Command;

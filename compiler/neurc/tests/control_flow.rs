@@ -1,6 +1,6 @@
 // Control flow tests: if/else, comparisons, and logical operators
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn test_if_else_true() {

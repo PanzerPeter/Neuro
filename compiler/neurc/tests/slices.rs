@@ -2,8 +2,8 @@
 // coercion from an array and a `Vec`, `.slice(range)` sub-ranges, `.len()`,
 // indexing, iteration, writes through a mutable slice, and the runtime bounds
 // panics on both the range and the index paths.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 use std::process::Command;
 

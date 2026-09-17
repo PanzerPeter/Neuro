@@ -4,9 +4,9 @@
 // The names are a frontend-only annotation, so the value assertions here also prove the
 // erasure: a named shape reaches the backend as the shape it always was, and the program
 // computes the same answer it would have without the names.
-mod common;
+mod compile_harness;
 
-use common::CompileTest;
+use compile_harness::CompileTest;
 
 /// Compile and run `source`, returning its exit code.
 fn run_program(name: &str, source: &str) -> i32 {

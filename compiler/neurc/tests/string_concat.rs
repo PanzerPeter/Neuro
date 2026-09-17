@@ -1,8 +1,8 @@
 // String concatenation tests (Phase 1.7)
 // `string + string` allocates a new owned, immutable string on the heap.
 // Correctness is verified at runtime through the existing byte-level `==`.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn test_concat_two_literals() {

@@ -1,8 +1,8 @@
 // Tensor value construction (Phase 2B): nested-array-literal coercion and the
 // six construction helpers, end to end through `neurc compile` and the linked binary.
-mod common;
+mod compile_harness;
 
-use common::CompileTest;
+use compile_harness::CompileTest;
 
 /// Compile and run `source`, returning its exit code.
 fn run_program(name: &str, source: &str) -> i32 {

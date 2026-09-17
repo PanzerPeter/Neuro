@@ -1,7 +1,7 @@
 // Struct shorthand + functional-update syntax (Phase 2A)
 // `Point { x, y }` shorthand and `Point { x: 1.0, ..p }` update syntax.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 // ── AC1: field-init shorthand binds the same-named value in scope ─────────────
 

@@ -6,9 +6,9 @@
 // A transpose that only relabelled the axes would put the wrong number at `t[0, 1]`.
 //
 // An exit code is one byte, so each expected value is kept below 256.
-mod common;
+mod compile_harness;
 
-use common::CompileTest;
+use compile_harness::CompileTest;
 
 /// Compile and run `source`, returning its exit code.
 fn run_program(name: &str, source: &str) -> i32 {

@@ -8,10 +8,9 @@
 //! The MLIR path is gated behind the off-by-default `mlir` feature so the
 //! workspace still builds and tests on a stock LLVM 20 install without an MLIR
 //! toolchain. With the feature disabled this crate is an empty placeholder; with
-//! it enabled it pulls in `melior` and exposes `lower_program` (HIR → MLIR),
+//! it enabled it pulls in `melior` and exposes `lower_program` (HIR → MLIR) and
 //! `translate_to_llvm_ir` (that module carried on through the `llvm` dialect into
-//! an inkwell LLVM module), plus `emit_smoke_module` (the pure-`melior` wiring
-//! check).
+//! an inkwell LLVM module).
 
 #[cfg(feature = "mlir")]
 mod bridge;
@@ -21,7 +20,7 @@ mod context;
 mod errors;
 #[cfg(feature = "mlir")]
 mod lower;
-#[cfg(feature = "mlir")]
+#[cfg(all(feature = "mlir", test))]
 mod smoke;
 #[cfg(feature = "mlir")]
 mod tensor_arithmetic;
@@ -32,5 +31,3 @@ pub use bridge::translate_to_llvm_ir;
 pub use errors::MlirError;
 #[cfg(feature = "mlir")]
 pub use lower::lower_program;
-#[cfg(feature = "mlir")]
-pub use smoke::emit_smoke_module;

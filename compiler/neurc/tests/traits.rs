@@ -2,8 +2,8 @@
 // trait-bounded generics. Each program compiles to a native binary and runs; the exit
 // code encodes the computed result.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn default_method_dispatches_to_required_method() {

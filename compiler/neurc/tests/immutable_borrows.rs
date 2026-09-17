@@ -2,8 +2,8 @@
 // Verifies `&T` reference types and `&place` borrow expressions: borrowing does
 // not move the borrowee, references are Copy, and method/field access auto-derefs
 // through a borrow. Covers end-to-end compile+run and the borrow-a-temporary error.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 use std::fs;
 use std::process::Command;

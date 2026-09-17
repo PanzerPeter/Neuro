@@ -50,7 +50,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.39.0"
+version = "2.39.1"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Neuro Contributors"]
@@ -147,8 +147,3 @@ lto = true
 inherits = "dev"
 opt-level = 1
 
-# Profile for release builds with debug info
-[profile.release-with-debug]
-inherits = "release"
-debug = true
-strip = false

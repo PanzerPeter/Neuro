@@ -3,8 +3,8 @@
 // underlying UTF-8 bytes for any combination of owned `string` and `&string`,
 // auto-dereferencing a borrowed operand. Reference-peeling is limited to string,
 // so `i32 == &string` and `&i32 == i32` remain type errors.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 use std::fs;
 use std::process::Command;

@@ -6,8 +6,8 @@
 // which declare their own), so these programs exercise the shipped surface exactly as
 // a user writes it.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn val_else_unwraps_a_result_and_forwards_the_error() {

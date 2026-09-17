@@ -5,8 +5,8 @@
 // the first `*/` closed the outer comment, the remaining body would reach the
 // parser as garbage and compilation would fail outright.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 /// Compile and run `source`, asserting it exits with `expected_exit`.
 fn assert_exit(name: &str, source: &str, expected_exit: i32) {

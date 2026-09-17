@@ -1,6 +1,6 @@
 // Integration tests for integer literal type suffixes
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn suffix_i64_infers_without_annotation() {

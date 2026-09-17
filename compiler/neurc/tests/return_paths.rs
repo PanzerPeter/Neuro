@@ -7,8 +7,8 @@
 // block without a return, LLVM terminated it with `unreachable` (a legal terminator, so
 // the verifier stayed silent), and the program ran off the end of the function.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 /// Compile `source` and return the compiler's output, asserting it was rejected.
 fn expect_rejected(filename: &str, source: &str) -> String {

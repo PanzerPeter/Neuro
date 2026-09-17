@@ -1,4 +1,4 @@
-use crate::{context::new_context, errors::MlirError};
+use crate::errors::MlirError;
 
 use melior::{
     dialect::{arith, func},
@@ -11,24 +11,13 @@ use melior::{
     Context,
 };
 
-/// Builds a trivial, verifiable MLIR module and returns its textual form.
+/// Build a trivial, verifiable MLIR module in a caller-owned context.
 ///
-/// The module defines `func.func @neuro_smoke(index, index) -> index` returning
-/// the sum of its arguments. It exercises dialect registration (`func`, `arith`)
-/// and the MLIR verifier end-to-end, confirming that `melior` is wired correctly
-/// against the active MLIR 20 toolchain. Used as the Phase 1.8 integration smoke
-/// test until real HIR lowering exists.
-pub fn emit_smoke_module() -> Result<String, MlirError> {
-    let context = new_context();
-    let module = build_smoke_module(&context)?;
-
-    Ok(module.as_operation().to_string())
-}
-
-/// Build the smoke module in a caller-owned context.
-///
-/// Split out of [`emit_smoke_module`] so the translating path can run a module
-/// that carries a real *body* through the crossing, not only declarations.
+/// It defines `func.func @neuro_smoke(index, index) -> index` returning the sum of
+/// its arguments, which exercises dialect registration (`func`, `arith`) and the
+/// MLIR verifier end-to-end and so confirms `melior` is wired correctly against the
+/// active MLIR 20 toolchain. The context is the caller's so `bridge` can carry this
+/// module, which has a real *body* rather than only declarations, across to LLVM IR.
 pub(crate) fn build_smoke_module(context: &Context) -> Result<Module<'_>, MlirError> {
     let location = Location::unknown(context);
     let module = Module::new(location);
@@ -70,9 +59,15 @@ pub(crate) fn build_smoke_module(context: &Context) -> Result<Module<'_>, MlirEr
 mod tests {
     use super::*;
 
+    use crate::context::new_context;
+
     #[test]
     fn smoke_module_verifies_and_defines_function() {
-        let ir = emit_smoke_module().expect("melior should build a verifiable module");
+        let context = new_context();
+        let ir = build_smoke_module(&context)
+            .expect("melior should build a verifiable module")
+            .as_operation()
+            .to_string();
         assert!(ir.contains("func.func"), "expected a func.func op:\n{ir}");
         assert!(
             ir.contains("neuro_smoke"),

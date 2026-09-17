@@ -6,8 +6,8 @@
 // until that binding leaves scope; a borrow passed to a call or used inline ends
 // with the statement that took it. Covers both end-to-end accept+run and the
 // rejection diagnostics emitted by `neurc compile`.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 fn expect_compile_error(source: &str, needle: &str) {
     let test = CompileTest::new();

@@ -1,8 +1,8 @@
 // Integration tests for underscore digit separators in numeric literals
 // Underscores are readability-only and are stripped by the lexer before parsing,
 // so a program using them must compile and produce the same value as without.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn decimal_underscores_compile_and_run() {

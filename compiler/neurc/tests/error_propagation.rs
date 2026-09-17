@@ -7,8 +7,8 @@
 // which declare their own), so these programs exercise the shipped surface exactly as a
 // user writes it.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn try_unwraps_ok_and_propagates_err() {

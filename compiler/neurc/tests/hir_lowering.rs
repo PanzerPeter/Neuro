@@ -3,9 +3,9 @@
 //! Exercises the Phase 1.8 lowering through the same library entry points the
 //! `neurc` driver uses, on representative programs spanning the language surface.
 
-mod common;
+mod compile_harness;
 
-use common::CompileTest;
+use compile_harness::CompileTest;
 use hir_lowering::lower_program;
 use neuro_hir::{HirExpr, HirExprKind, HirItem, HirProgram, HirStmt, HirType};
 

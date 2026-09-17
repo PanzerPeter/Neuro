@@ -2,8 +2,8 @@
 // Verifies Copy structs are exempt from move-by-default, non-Copy structs move,
 // `@derive(Copy)` on a non-Copy field is rejected, and struct `.clone()` works
 // end-to-end.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 use std::fs;
 use std::process::Command;

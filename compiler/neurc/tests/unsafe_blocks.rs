@@ -2,8 +2,8 @@
 // `unsafe` is a reserved keyword and a distinct AST node, but is inert: it
 // type-checks and lowers exactly like a bare block, evaluating to its trailing
 // expression. These tests pin that behaviour through the full pipeline.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn unsafe_block_as_implicit_return() {

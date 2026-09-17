@@ -1,7 +1,7 @@
 // End-to-end tests for the `char` primitive type.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn char_literal_cast_to_int_is_code_point() {

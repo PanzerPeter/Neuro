@@ -2,8 +2,8 @@
 // the suffix default (`i32` / `f64`). Call arguments and return position are the
 // shapes where nothing coerces afterwards, so a mismatch there reaches the verifier.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn unsuffixed_float_literal_as_f32_argument() {

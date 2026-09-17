@@ -5,9 +5,9 @@
 // inner axis — `[M, K] @ [K, N]` gives `[M, N]` — so unlike `+` it neither broadcasts
 // nor accepts a scalar, and its precedence (Appendix B row 4) is tighter than `*` so
 // that `a @ b * c` scales the product rather than multiplying by a scaled operand.
-mod common;
+mod compile_harness;
 
-use common::CompileTest;
+use compile_harness::CompileTest;
 
 fn run_program(name: &str, source: &str) -> i32 {
     CompileTest::new()

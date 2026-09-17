@@ -2,8 +2,8 @@
 // introduces over arrays, ranges, and `Vec`, how that binding interacts with the
 // loop's other machinery (labels, `continue`, shadowing, closures), and the
 // diagnostics for a head whose arity disagrees with its iterable.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 use std::process::Command;
 

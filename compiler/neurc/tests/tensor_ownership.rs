@@ -1,9 +1,9 @@
 // Tensor ownership and move semantics: a tensor is not `Copy`, so it
 // moves on assignment and on being passed; `.clone()` is the explicit deep copy and
 // `.to(device)` the consuming device transfer. End to end through `neurc`.
-mod common;
+mod compile_harness;
 
-use common::CompileTest;
+use compile_harness::CompileTest;
 
 use std::fs;
 use std::process::Command;

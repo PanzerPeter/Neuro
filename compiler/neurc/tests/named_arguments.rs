@@ -6,8 +6,8 @@
 // pass that silently ignored a label would still compile, and only the answer would be
 // wrong.
 
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 /// Compile and run `source`, asserting it exits with `expected_exit`.
 fn assert_exit(name: &str, source: &str, expected_exit: i32) {

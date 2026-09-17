@@ -10,8 +10,8 @@
 // Each program below runs enough iterations to exhaust a default 8 MiB stack under the
 // old lowering (~1M slots) while still finishing in milliseconds once the slot is
 // hoisted and the loop becomes optimizable.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 #[test]
 fn regression_local_binding_in_loop_does_not_grow_the_stack() {

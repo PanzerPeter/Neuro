@@ -4,9 +4,9 @@
 // Every assertion is on a VALUE read back out of a tensor, which is what this feature
 // makes possible for the first time: before it, a tensor could only be asserted on
 // through its shape and its parameter count.
-mod common;
+mod compile_harness;
 
-use common::CompileTest;
+use compile_harness::CompileTest;
 
 /// Compile and run `source`, returning its exit code.
 fn run_program(name: &str, source: &str) -> i32 {

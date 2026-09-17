@@ -2,8 +2,8 @@
 // End-to-end coverage: a `type Name = Target` alias is transparent and resolves
 // to its target in every type position, chains collapse to the ultimate target,
 // and malformed alias sets are rejected at compile time.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 // ── Alias resolves in a local annotation and behaves as the target type ───────
 

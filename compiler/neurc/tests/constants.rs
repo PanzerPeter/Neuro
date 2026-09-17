@@ -1,8 +1,8 @@
 // Constant declaration tests
 // Covers AC1–AC5: module-level consts, function-body consts, forward references,
 // arithmetic folding, and rejection of non-const expressions.
-mod common;
-use common::CompileTest;
+mod compile_harness;
+use compile_harness::CompileTest;
 
 // ── AC1: Module-level const is visible in function body ──────────────────────
 
