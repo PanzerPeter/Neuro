@@ -35,10 +35,11 @@ use crate::types::Type;
 use super::TypeChecker;
 
 /// The method receiver. It is bound as the struct type rather than `&Struct`, so
-/// that a field read and a `&mut self` field write stay ordinary field access —
-/// but every receiver the language admits is a borrow, `SelfParam::Owned` being
-/// rejected until the by-value struct ABI exists. A field of it therefore cannot
-/// be moved out, and `self` is a keyword, so no other binding can wear the name.
+/// that a field read and a `&mut self` field write stay ordinary field access, which
+/// leaves the receiver's OWNERSHIP unrecorded in its type: `self_is_owned` carries it
+/// instead. A borrowed receiver's fields belong to the caller and may not be moved
+/// out; a consuming one's are the callee's. `self` is a keyword, so no other binding
+/// can wear the name.
 const SELF_RECEIVER: &str = "self";
 
 impl TypeChecker {
@@ -87,6 +88,28 @@ impl TypeChecker {
 
         self.reject_move_of_borrowee(&root, place.span());
         self.symbols.mark_moved(&root, place.span());
+    }
+
+    /// Record the move of the receiver of a consuming (`self`) method call, or reject
+    /// the call when the receiver is not the caller's to give away.
+    ///
+    /// Two shapes reach the callee without owning what they name: a `&T` / `&mut T`
+    /// receiver, and the `self` of a borrowing method. Both would have the callee
+    /// destroy a value its owner still holds, so both are errors rather than moves. A
+    /// temporary receiver (`Point::new(1.0, 2.0).into_tuple()`) owns its value and is
+    /// simply consumed, which is why no place root is required here.
+    pub(crate) fn record_consumed_receiver(&mut self, object: &Expr, obj_ty: &Type, span: Span) {
+        let root = Self::place_root_name(object);
+        if matches!(obj_ty, Type::Reference { .. })
+            || (root.as_deref() == Some(SELF_RECEIVER) && !self.self_is_owned)
+        {
+            self.record_error(TypeError::CannotMoveOutOfBorrow {
+                name: root.unwrap_or_else(|| "value".to_string()),
+                span,
+            });
+            return;
+        }
+        self.record_move(object);
     }
 
     /// Reject moving `name` out from under a live borrow: the borrow would be left
@@ -141,10 +164,10 @@ impl TypeChecker {
     fn place_origin(&self, place: &Expr) -> Option<(Type, bool)> {
         match place {
             Expr::Paren(inner, _) => self.place_origin(inner),
-            Expr::Identifier(ident) => self
-                .symbols
-                .lookup(&ident.name)
-                .map(|info| (info.ty.clone(), ident.name == SELF_RECEIVER)),
+            Expr::Identifier(ident) => self.symbols.lookup(&ident.name).map(|info| {
+                let borrowed_receiver = ident.name == SELF_RECEIVER && !self.self_is_owned;
+                (info.ty.clone(), borrowed_receiver)
+            }),
             Expr::Deref { operand, .. } => match self.place_origin(operand)?.0 {
                 Type::Reference { inner, .. } => Some((*inner, true)),
                 _ => None,
@@ -736,19 +759,120 @@ mod tests {
     }
 
     #[test]
-    fn consuming_self_is_still_rejected() {
+    fn a_consuming_call_moves_its_receiver() {
         let errs = errors(
             r#"
-            struct Wrapper { value: i32 }
+            struct Wrapper { label: string }
             impl Wrapper {
-                func unwrap(self) -> i32 { self.value }
+                func unwrap(self) -> string { self.label }
+            }
+            func main() -> i32 {
+                val w = Wrapper { label: "x" }
+                val a = w.unwrap()
+                val b = w.unwrap()
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("use of moved value 'w'")),
+            "a consuming call must move its receiver; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn a_copy_receiver_is_not_consumed() {
+        // `self` on a `Copy` struct duplicates rather than moves, which is what lets an
+        // operator-trait method keep its operand usable after the call.
+        let errs = errors(
+            r#"
+            @derive(Copy, Clone)
+            struct P { v: i32 }
+            impl P {
+                func into_v(self) -> i32 { self.v }
+            }
+            func main() -> i32 {
+                val p = P { v: 1 }
+                val a = p.into_v()
+                return p.into_v()
+            }
+            "#,
+        );
+        assert!(
+            errs.is_empty(),
+            "a Copy receiver is not consumed; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn a_borrowing_method_cannot_consume_its_receiver() {
+        let errs = errors(
+            r#"
+            struct Wrapper { label: string }
+            impl Wrapper {
+                func unwrap(self) -> string { self.label }
+                func leak(&self) -> string { self.unwrap() }
             }
             func main() -> i32 { 0 }
             "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("not yet supported")),
-            "consuming self must still be rejected; got {errs:?}"
+            errs.iter().any(|e| e.contains("cannot move out of 'self'")),
+            "a `&self` body owns nothing to give away; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn a_consuming_method_may_move_a_field_out_of_self() {
+        let errs = errors(
+            r#"
+            struct Wrapper { label: string }
+            impl Wrapper {
+                func unwrap(self) -> string { self.label }
+            }
+            func main() -> i32 { 0 }
+            "#,
+        );
+        assert!(
+            errs.is_empty(),
+            "a consuming receiver owns its fields; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn a_reference_receiver_cannot_be_consumed() {
+        let errs = errors(
+            r#"
+            struct Wrapper { label: string }
+            impl Wrapper {
+                func unwrap(self) -> string { self.label }
+            }
+            func take(w: &Wrapper) -> string { w.unwrap() }
+            func main() -> i32 { 0 }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("cannot move out of 'w'")),
+            "a `&Wrapper` parameter owns nothing to give away; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn a_consuming_method_may_not_return_a_reference_into_self() {
+        // The receiver is destroyed when the method returns, so a borrow of it would
+        // outlive the value it points at.
+        let errs = errors(
+            r#"
+            struct Wrapper { label: string }
+            impl Wrapper {
+                func peek(self) -> &string { &self.label }
+            }
+            func main() -> i32 { 0 }
+            "#,
+        );
+        assert!(
+            !errs.is_empty(),
+            "a reference into a consumed receiver must be rejected; got {errs:?}"
         );
     }
 

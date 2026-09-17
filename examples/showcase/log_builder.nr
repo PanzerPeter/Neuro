@@ -2,9 +2,10 @@
 //
 // Integration example combining the growable `String` with the features that
 // feed it:
-//   `Vec<T>` + `for x in v` · struct + `impl` methods (`&self`) · enum with a
-//   payload + `match` · string interpolation with the format mini-language
-//   (:>W, :.N, :+d) · `&mut String` parameters · `@derive(Copy, Clone)`.
+//   `Vec<T>` + `for x in v` · struct + `impl` methods (`&self` and a consuming
+//   `self`) · enum with a payload + `match` · string interpolation with the
+//   format mini-language (:>W, :.N, :+d) · `&mut String` parameters ·
+//   `@derive(Copy, Clone)`.
 //
 // The point of the buffer is the loop: each event appends its rendered line to
 // one allocation that grows in place. Concatenating with `+` would allocate and
@@ -62,6 +63,25 @@ func append_event(out: &mut String, event: Event) {
     out.push_str("\n")
 }
 
+// A finished transcript. `into_text` takes `self` by value, so handing the
+// transcript over is the only way to read its text out: the method owns the
+// receiver and moves the `string` field straight out of it, and the caller
+// cannot name `finished` again afterwards.
+struct Transcript {
+    text: string,
+    events: u64
+}
+
+impl Transcript {
+    func event_count(&self) -> u64 {
+        self.events
+    }
+
+    func into_text(self) -> string {
+        self.text
+    }
+}
+
 func main() -> i32 {
     mut events: Vec<Event> = Vec::new()
     events.push(Event { code: 7, load: 12.5 })
@@ -79,7 +99,13 @@ func main() -> i32 {
     val header = "events"
     transcript.push_str("{header:>8}: {counted}")
 
-    val text: string = transcript.to_string()
+    val finished = Transcript {
+        text: transcript.to_string(),
+        events: counted
+    }
+    val rendered: u64 = finished.event_count()   // borrows: `finished` survives
+    val text: string = finished.into_text()      // consumes: `finished` is gone
+    // val again = finished.event_count()        // <- rejected: use of moved value
     println(text)
 
     val expected: string = "   7 12.5 info\n 108 63.0 warn +13\n4095 91.2 fail +11\n  events: 3"
@@ -92,6 +118,10 @@ func main() -> i32 {
     transcript.clear()
     if transcript.len() != 0 {
         return 92
+    }
+
+    if rendered != counted {
+        return 93
     }
 
     val bytes = text.len() as i32

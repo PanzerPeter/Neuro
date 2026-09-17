@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.42.0] - 2026-09-17
+
+### Added
+
+- semantic: a method may take `self` by value on any struct, not just a `Copy` one.
+  A consuming call moves the receiver, so a later use of it is `use of moved value`,
+  and the method owns what it was handed: it may move a non-`Copy` field straight out
+  of `self`, and a `Drop` receiver runs its destructor once, inside the callee. This is
+  what an `into_*` conversion needs. A receiver that owns nothing to give away — a
+  `&T` / `&mut T`, or the `self` of a `&self` / `&mut self` method — is rejected with
+  `cannot move out of` naming it, and a consuming method may not return a reference into
+  its receiver, which is destroyed when it returns. Generic structs get the same
+  treatment through monomorphization.
+
+### Removed
+
+- semantic: `TypeError::UnsupportedSelfParam`. It named the restriction above, which no
+  longer exists.
+
 ## [2.41.0] - 2026-09-17
 
 ### Added

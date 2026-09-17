@@ -11,7 +11,7 @@ pub use errors::{CodegenError, CodegenResult};
 
 use inkwell::context::Context as LLVMContext;
 use inkwell::OptimizationLevel as LlvmOptimizationLevel;
-use neuro_hir::{HirItem, HirProgram};
+use neuro_hir::{HirItem, HirProgram, HirSelfParam};
 use std::collections::HashMap;
 use types::Type;
 
@@ -155,9 +155,9 @@ fn build_module<'ctx>(
             HirItem::Impl(impl_def) => {
                 let struct_name = &impl_def.type_name;
                 for method in &impl_def.methods {
-                    // An owned `self` reaches codegen only on a `Copy` receiver
-                    // (operator-trait methods); it needs a registered signature
-                    // like `&self`. Non-`Copy` owned `self` was rejected by the checker.
+                    // An owned `self` is passed by value exactly like `&self`; only
+                    // `&mut self` differs, and that difference is in the LLVM signature
+                    // rather than here.
                     let mangled = format!("{}__{}", struct_name, method.name);
                     let mut param_types: Vec<Type> = Vec::new();
 
@@ -204,6 +204,10 @@ fn build_module<'ctx>(
     // validated both shapes.
     let mut drop_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut pool_aware_types: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Alongside them, the methods that consume their receiver, so a call site clears the
+    // receiver's drop flag and hands ownership to the callee.
+    let mut consuming_self_methods: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     for item in items {
         if let HirItem::Impl(impl_def) = item {
             match impl_def.trait_name.as_deref() {
@@ -215,6 +219,12 @@ fn build_module<'ctx>(
                 }
                 _ => {}
             }
+            for method in &impl_def.methods {
+                if matches!(method.self_param, Some(HirSelfParam::Owned)) {
+                    consuming_self_methods
+                        .insert(format!("{}__{}", impl_def.type_name, method.name));
+                }
+            }
         }
     }
 
@@ -225,6 +235,7 @@ fn build_module<'ctx>(
     codegen_ctx.set_enum_variants(enum_variants);
     codegen_ctx.set_drop_types(drop_types);
     codegen_ctx.set_pool_aware_types(pool_aware_types);
+    codegen_ctx.set_consuming_self_methods(consuming_self_methods);
     codegen_ctx.set_trait_methods(trait_methods);
 
     // Supply source so panic-family builtins can render `file:line:col` in their

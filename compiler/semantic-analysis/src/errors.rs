@@ -621,13 +621,6 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("impl block for '{type_name}': '{self_param}' methods are not yet supported (ownership semantics pending)")]
-    UnsupportedSelfParam {
-        type_name: String,
-        self_param: String,
-        span: Span,
-    },
-
     #[error("unknown type '{type_name}' in path expression '{type_name}::{member}'")]
     UnknownPathType {
         type_name: String,
@@ -1126,7 +1119,6 @@ impl TypeError {
             | Self::DuplicateStructField { span, .. }
             | Self::AssignToImmutableField { span, .. }
             | Self::MethodNotFound { span, .. }
-            | Self::UnsupportedSelfParam { span, .. }
             | Self::UnknownPathType { span, .. }
             | Self::UnknownAssociatedFunction { span, .. }
             | Self::ConstAlreadyDefined { span, .. }

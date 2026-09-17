@@ -11,7 +11,7 @@ use super::{
 use crate::errors::TypeError;
 use crate::type_checkers::TypeChecker;
 use crate::types::Type;
-use ast_types::{ImplDef, SelfParam, StructDef};
+use ast_types::{ImplDef, StructDef};
 use shared_types::Span;
 use std::collections::HashMap;
 
@@ -437,9 +437,6 @@ impl TypeChecker {
                 }
             }
             for method in &imp.methods {
-                if matches!(method.self_param, Some(SelfParam::Owned)) {
-                    continue;
-                }
                 let base_key = format!("{}__{}", base, method.name.name);
                 let inst_key = format!("{}__{}", mangled, method.name.name);
                 if self.functions.contains_key(&inst_key) {
@@ -453,6 +450,9 @@ impl TypeChecker {
                 self.functions.insert(inst_key.clone(), inst_sig);
                 if self.mut_self_methods.contains(&base_key) {
                     self.mut_self_methods.insert(inst_key.clone());
+                }
+                if self.consuming_self_methods.contains(&base_key) {
+                    self.consuming_self_methods.insert(inst_key.clone());
                 }
                 self.impl_methods
                     .entry(mangled.to_string())

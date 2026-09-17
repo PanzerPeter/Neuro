@@ -18,9 +18,9 @@ impl TypeChecker {
     /// Register all method signatures from an `impl` block into the global
     /// function table under mangled names (`StructName__methodName`).
     ///
-    /// Consuming `self` is rejected here so it never reaches codegen; `&mut self`
-    /// is recorded in `mut_self_methods` so call sites can enforce its exclusive
-    /// borrow of the receiver.
+    /// `&mut self` is recorded in `mut_self_methods` so call sites can enforce its
+    /// exclusive borrow of the receiver, and a consuming `self` in
+    /// `consuming_self_methods` so they can record the move of it.
     pub(crate) fn register_impl(&mut self, def: &ImplDef) -> Option<()> {
         if !self.struct_defs.contains_key(&def.type_name.name) {
             self.record_error(TypeError::UnknownStruct {
@@ -53,24 +53,17 @@ impl TypeChecker {
         let struct_is_copy = self.copy_structs.contains(&struct_name);
 
         for method in &def.methods {
-            // Consuming `self` still needs the by-value struct ABI for non-`Copy` types,
-            // so reject it there. A `Copy` struct is duplicated by value, which is
-            // ABI-identical to `&self`, so an owned `self` is accepted: this is what lets
-            // an operator-trait method `func add(self, ...)` run on the scalar path
-            // `&mut self` is supported and recorded below.
-            if matches!(method.self_param, Some(SelfParam::Owned)) && !struct_is_copy {
-                self.errors.push(TypeError::UnsupportedSelfParam {
-                    type_name: struct_name.clone(),
-                    self_param: "self".to_string(),
-                    span: method.span,
-                });
-                continue;
-            }
-
             let mangled = format!("{}__{}", struct_name, method.name.name);
 
             if matches!(method.self_param, Some(SelfParam::RefMut)) {
                 self.mut_self_methods.insert(mangled.clone());
+            }
+
+            // A `Copy` receiver is duplicated by value, so calling one consumes
+            // nothing and the caller keeps its value; only a move-tracked receiver
+            // is handed over to the callee.
+            if matches!(method.self_param, Some(SelfParam::Owned)) && !struct_is_copy {
+                self.consuming_self_methods.insert(mangled.clone());
             }
 
             // Build the full parameter type list: implicit `self` first for instance methods.
@@ -386,9 +379,8 @@ impl TypeChecker {
         for method in &def.methods {
             let mangled = format!("{}__{}", struct_name, method.name.name);
 
-            // An owned `self` on a non-`Copy` struct was rejected during registration and
-            // never entered `functions`; skip it here. A `Copy` receiver's owned `self` is
-            // registered and checked exactly like `&self`.
+            // A method whose signature failed to register (a duplicate name, say) never
+            // entered `functions`; skip its body rather than check it against nothing.
             let func_ty = match self.functions.get(&mangled).cloned() {
                 Some(ty) => ty,
                 None => continue,
@@ -412,6 +404,7 @@ impl TypeChecker {
                     .symbols
                     .define("self".to_string(), self_ty, self_mutable);
             }
+            self.self_is_owned = matches!(method.self_param, Some(SelfParam::Owned));
 
             // Bind remaining parameters (skip param[0] which is the implicit self).
             let non_self_params = if method.self_param.is_some() && !param_types.is_empty() {
@@ -430,7 +423,9 @@ impl TypeChecker {
                 .filter(|(_, ty)| matches!(ty, Type::Reference { .. }))
                 .map(|(param, _)| param.name.name.clone())
                 .collect();
-            if method.self_param.is_some() {
+            // A consuming receiver is destroyed when the method returns, so a reference
+            // into it dangles at the call site; only a borrowed receiver outlives the call.
+            if method.self_param.is_some() && !self.self_is_owned {
                 self.current_fn_outliving.insert("self".to_string());
             }
 
@@ -476,6 +471,7 @@ impl TypeChecker {
             self.symbols.pop_scope();
             self.current_function_return_type = None;
             self.current_fn_outliving.clear();
+            self.self_is_owned = false;
         }
 
         self.self_assoc = saved_assoc;

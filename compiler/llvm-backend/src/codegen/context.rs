@@ -281,6 +281,11 @@ pub(crate) struct CodegenContext<'ctx> {
     /// with no Drop types, in which case all drop machinery below stays inert.
     pub(crate) drop_types: std::collections::HashSet<String>,
 
+    /// Mangled names (`Struct__method`) of methods taking `self` by value. Such a call
+    /// hands the receiver to the callee, which destroys it at its own exit, so the
+    /// caller must clear the receiver's drop flag or the value is released twice.
+    pub(crate) consuming_self_methods: std::collections::HashSet<String>,
+
     /// Names of structs implementing `PoolAware` (`impl PoolAware for T`). Inside a
     /// `pool` body a binding of such a type is registered with the arena instead of
     /// being dropped at its own scope exit. Empty for programs that declare no
@@ -362,6 +367,7 @@ impl<'ctx> CodegenContext<'ctx> {
             trait_methods: HashMap::new(),
             vtables: HashMap::new(),
             drop_types: std::collections::HashSet::new(),
+            consuming_self_methods: std::collections::HashSet::new(),
             pool_aware_types: std::collections::HashSet::new(),
             drop_scopes: Vec::new(),
             name_scopes: Vec::new(),
@@ -476,6 +482,13 @@ impl<'ctx> CodegenContext<'ctx> {
 
     pub(crate) fn set_drop_types(&mut self, drop_types: std::collections::HashSet<String>) {
         self.drop_types = drop_types;
+    }
+
+    pub(crate) fn set_consuming_self_methods(
+        &mut self,
+        consuming_self_methods: std::collections::HashSet<String>,
+    ) {
+        self.consuming_self_methods = consuming_self_methods;
     }
 
     pub(crate) fn set_pool_aware_types(

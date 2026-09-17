@@ -197,11 +197,10 @@ only the type checker, which is the first pass that knows the implementing type,
 `MethodDef` holds an `Option<SelfParam>` distinguishing associated functions (`None`) from
 instance methods (`Some`).
 
-All three `SelfParam` variants reach codegen, with different support:
-`Ref` (`&self`) passes the struct by value; `RefMut` (`&mut self`) passes it by pointer and
-carries an exclusive-borrow rule at the call site; `Owned` (`self`) is accepted **only on a
-`Copy` receiver** (ABI-identical to `&self`) and is otherwise rejected with
-`TypeError::UnsupportedSelfParam`: a by-value non-`Copy` struct ABI does not exist yet.
+All three `SelfParam` variants reach codegen: `Ref` (`&self`) passes the struct by value;
+`RefMut` (`&mut self`) passes it by pointer and carries an exclusive-borrow rule at the call
+site; `Owned` (`self`) also passes by value but consumes the receiver, so the call site records
+a move of it and the callee owns what it was handed.
 
 ### Interpolated strings
 `Expr::InterpString { parts, span }` with `InterpPart::{Text, Formatted}`. A `Formatted` hole

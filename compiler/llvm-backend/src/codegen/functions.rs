@@ -8,6 +8,10 @@ use crate::types::Type;
 
 use super::context::{CodegenContext, DropTarget};
 
+/// The implicit method receiver's binding name. `self` is a keyword, so nothing else
+/// in a body can be bound under it.
+const SELF_BINDING: &str = "self";
+
 impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a function call
     /// Lower a free/associated function call. Returns `None` when the callee
@@ -44,8 +48,9 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Lower a method call, prepending the receiver to the argument list. Returns
     /// `None` when the method returns unit `()`.
     ///
-    /// A `&self` method takes the struct by value (read-only, so mutations do not
-    /// escape). A `&mut self` method takes the struct by pointer (detected by its
+    /// A `&self` or consuming `self` method takes the struct by value; for `&self` the
+    /// callee's mutations do not escape, and for `self` the callee owns what it was
+    /// handed. A `&mut self` method takes the struct by pointer (detected by its
     /// first LLVM parameter being a pointer), so the receiver's storage address is
     /// passed and field writes in the body propagate back to the caller.
     pub(crate) fn codegen_method_call(
@@ -72,7 +77,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let (self_ptr, _) = self.get_struct_ptr_and_type(receiver, struct_name)?;
             self_ptr.into()
         } else {
-            // `&self`: pass the struct value, dereferencing a `&Struct` borrow.
+            // `&self` / `self`: pass the struct value, dereferencing a `&Struct` borrow.
             match self.codegen_expr(receiver)? {
                 BasicValueEnum::PointerValue(ptr) => {
                     let struct_ty = self.get_struct_llvm_type(struct_name)?;
@@ -83,13 +88,19 @@ impl<'ctx> CodegenContext<'ctx> {
                 other => other,
             }
         };
+
+        // A consuming receiver was moved into the callee, which destroys it at its own
+        // exit; leaving the caller's drop flag set would release the same value twice.
+        if self.consuming_self_methods.contains(mangled_name) {
+            self.mark_moved_for_drop(receiver);
+        }
         let mut arg_values: Vec<BasicMetadataValueEnum> =
             vec![BasicMetadataValueEnum::from(self_arg)];
 
         for arg in args {
             let val = self.codegen_expr(arg)?;
-            // The receiver is borrowed (`&self`/`&mut self`) and never moved; only the
-            // explicit by-value arguments move an owned `Drop` place into the callee.
+            // A by-value argument moves an owned `Drop` place into the callee; the
+            // receiver's own ownership was settled above.
             self.mark_moved_for_drop(arg);
             arg_values.push(BasicMetadataValueEnum::from(val));
         }
@@ -285,10 +296,18 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         }
 
-        // Open the method-body drop scope. A by-value `Drop`-typed parameter (not the
-        // borrowed `self` receiver) is moved into the method and owned by it, so it is
-        // registered for destruction at method exit.
+        // Open the method-body drop scope. A by-value `Drop`-typed parameter is moved
+        // into the method and owned by it, so it is registered for destruction at method
+        // exit — and so is a consuming `self`, which the caller handed over. A borrowed
+        // receiver is not: its value stays the caller's.
         self.push_drop_scope();
+        if matches!(method.self_param, Some(HirSelfParam::Owned)) {
+            if let Some(target) = self.drop_target(&HirType::Struct(struct_name.to_string())) {
+                if let Some(alloca) = self.variables.get(SELF_BINDING).copied() {
+                    self.register_local_drop(SELF_BINDING, alloca, target)?;
+                }
+            }
+        }
         for (i, param) in method.params.iter().enumerate() {
             let owns_heap = match param_types.get(non_self_start + i) {
                 Some(Type::Struct(name)) if self.drop_types.contains(name) => {

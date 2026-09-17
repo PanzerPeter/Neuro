@@ -1,0 +1,6 @@
+length_squared = 25.0
+coords         = 3.0 4.0
+label text     = sensor-a
+ticket value   = 7
+tickets spent  = 1
+packed code    = 33

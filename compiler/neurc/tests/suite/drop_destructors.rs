@@ -109,6 +109,36 @@ func main() -> i32 {{
 }
 
 #[test]
+fn a_consumed_receiver_is_dropped_once_by_the_callee() {
+    // `p.finish()` hands the receiver to the method, which owns it and destroys it at
+    // its own exit. The caller must not drop it again once the method returns.
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}
+impl Probe {{
+    func finish(self) -> i32 {{ 0 }}
+}}
+
+func main() -> i32 {{
+    mut count: i32 = 0
+    {{
+        val p = Probe {{ sink: &mut count }}
+        val done = p.finish()
+    }}
+    return count
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_consumed.nr", &source)
+        .expect("Drop program should compile and run");
+    assert_eq!(
+        exit_code, 1,
+        "a consumed receiver is dropped exactly once, by the callee"
+    );
+}
+
+#[test]
 fn loop_body_value_drops_each_iteration() {
     let test = CompileTest::new();
     let source = format!(

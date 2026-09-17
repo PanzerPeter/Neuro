@@ -113,8 +113,8 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   matching entry becomes the method call `a.op(b)`, a `Call` with a `FieldAccess` callee,
   identical to an ordinary method call, so the backend needs no operator awareness. A comparison
   method's `rhs: &Rhs` parameter means the argument is wrapped in a `Reference`. Owned `self`
-  methods are lowered (valid on a `Copy` receiver; the checker rejected any non-`Copy` case),
-  though generic-impl paths still skip them.
+  methods are lowered like any other receiver, on a generic impl as well as a concrete one; the
+  ownership difference is the backend's, not this stage's.
 - **Derived equality** (`@derive(PartialEq)`). A struct in `partial_eq_structs` has no `eq` to
   dispatch to, so `==` / `!=` on one stays an `HirExprKind::Binary` typed `Bool` and the backend
   expands it over the fields. Handled in the `Binary` arm *before* `binary_result_type`, which

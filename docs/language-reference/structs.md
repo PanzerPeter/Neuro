@@ -185,6 +185,50 @@ func main() -> i32 {
 - The call takes an **exclusive** borrow of the receiver for its duration, so it is
   rejected while another borrow of that receiver is live (aliasing rule).
 
+### Consuming Methods (`self`)
+
+A bare `self` receiver takes the value: the method owns it, and the caller loses it.
+This is what an `into_*` conversion needs, because the method may move a non-`Copy`
+field straight out of the receiver instead of cloning it.
+
+```neuro
+struct Label {
+    text: string
+}
+
+impl Label {
+    func peek(&self) -> u64 {
+        self.text.len()
+    }
+
+    func into_text(self) -> string {
+        self.text            // moved out: the receiver is this method's to spend
+    }
+}
+
+func main() -> i32 {
+    val label = Label { text: "sensor-a" }
+    val size = label.peek()            // borrows: `label` survives
+    val text = label.into_text()       // consumes: `label` is gone after this
+    // val again = label.peek()        // Error: use of moved value 'label'
+    return text.len() as i32
+}
+```
+
+- Calling a consuming method **moves** the receiver. A later use of it is a
+  `use of moved value` error, exactly as for a by-value argument to a free function.
+- A receiver that is a borrow has nothing to give away: calling a consuming method on a
+  `&T` / `&mut T`, or on the `self` of a `&self` / `&mut self` method, is
+  `cannot move out of`. Bind a `.clone()` first, or take the value by a binding that owns it.
+- The receiver is destroyed when the method returns, so a consuming method may not return a
+  reference into it.
+- On a **`Copy`** struct a `self` receiver duplicates rather than moves, so the caller keeps
+  its value. This is what lets an operator-trait method `func add(self, ...)` work.
+- A `Drop` type's destructor runs inside the consuming method, at its exit — once, never
+  twice.
+
+See [`examples/ownership/consuming_self.nr`](../../examples/ownership/consuming_self.nr).
+
 ### Associated Functions (no `self`)
 
 Associated functions belong to the type but do not take a receiver. They are called via `TypeName::func(args)`:
@@ -513,18 +557,7 @@ object-safe, naming the associated type and the bound form that is not implement
 
 The following are not yet implemented and will be rejected at compile time:
 
-- `self` (consuming) on a **non-`Copy`** struct (needs the by-value struct ABI). On a `Copy`
-  struct an owned `self` is accepted, because copying by value is ABI-identical to `&self`
-  (this is what lets an operator-trait method `func add(self, ...)` work)
 - Nested structs as field types
-
-```neuro
-// Consuming `self` on a non-`Copy` struct is rejected with a clear error:
-struct Wrapper { value: i32 }       // no @derive(Copy)
-impl Wrapper {
-    func unwrap(self) -> i32 { ... }   // Error: UnsupportedSelfParam
-}
-```
 
 ## Nominal Typing
 
@@ -541,7 +574,6 @@ Neuro uses nominal typing for structs: two struct types are compatible only if t
 | `DuplicateStructField` | Providing the same field twice in a literal |
 | `AssignToImmutableField` | Mutating a field on a `val` binding |
 | `MethodNotFound` | Calling a method that doesn't exist on the type |
-| `UnsupportedSelfParam` | Using consuming `self` (by value) in a method |
 | `UnknownTrait` | Implementing a trait that was never declared |
 | `MissingTraitMethod` | A trait impl omits a required method |
 | `NotATraitMethod` | A trait impl defines a method the trait does not declare |

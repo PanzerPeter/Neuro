@@ -205,9 +205,11 @@ separator must appear **exactly once**. Two rules hold that: semantic analysis r
 name containing `__` (`TypeError::ReservedNameSeparator`), and every monomorphized instance name
 uses a single-underscore `_g_` marker (`identity_g_i32`, `Pair_g_i32_f64`).
 
-- `&self` (and owned `self`, which reaches codegen only on a `Copy` receiver) take the struct
-  **by value** as `param[0]`, named `self` in the alloca map. Callers load their stack var and
-  pass the value.
+- `&self` and owned `self` take the struct **by value** as `param[0]`, named `self` in the
+  alloca map. Callers load their stack var and pass the value. The two differ only in ownership:
+  a mangled name in `consuming_self_methods` has its receiver `mark_moved_for_drop`-ed at the
+  call site and registered in the callee's own drop scope, so a consumed `Drop` receiver is
+  destroyed once, by the callee.
 - `&mut self` takes the struct **by pointer**: `codegen_method` emits `param[0]` as `ptr` and
   binds `self` directly to it (no copy) with the recorded type still the struct, so `self.field`
   reads and writes go through to the caller's storage. It also seeds `type_env["self"]` so a

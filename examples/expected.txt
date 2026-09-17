@@ -80,6 +80,7 @@ tensors/tensor_sorting.nr             21
 
 # --- ownership: moves, borrows, exclusivity, lifetimes, Drop ----------------
 ownership/borrow_exclusivity.nr  31
+ownership/consuming_self.nr      33
 ownership/copy_clone.nr          14
 ownership/drop.nr                3
 ownership/immutable_borrows.nr   0

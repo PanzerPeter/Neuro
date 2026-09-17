@@ -580,6 +580,14 @@ impl TypeChecker {
                     self.check_mut_self_receiver(object, &obj_ty, *fa_span);
                 }
 
+                // Calling a consuming (`self`) method hands the receiver to the callee,
+                // which destroys it: the caller loses the value. A borrowed receiver has
+                // nothing to hand over — the value belongs to whoever it was borrowed
+                // from — so reaching one is an error rather than a move.
+                if self.consuming_self_methods.contains(&mangled) {
+                    self.record_consumed_receiver(object, &obj_ty, *fa_span);
+                }
+
                 // The mangled function's first parameter is `self` (the struct).
                 // Callers provide only the non-self arguments, so we skip param[0]
                 // when checking arity and types.

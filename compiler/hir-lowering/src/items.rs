@@ -225,9 +225,6 @@ impl Lowerer {
         for imp in &impls {
             let impl_subst = self.build_impl_subst(imp, &base_generics, subst);
             for method in &imp.methods {
-                if matches!(method.self_param, Some(SelfParam::Owned)) {
-                    continue;
-                }
                 let inst_key = format!("{}__{}", mangled, method.name.name);
                 if self.functions.contains_key(&inst_key) {
                     continue;
@@ -320,9 +317,6 @@ impl Lowerer {
             let impl_subst = self.build_impl_subst(imp, &template.generics, &ms.subst);
             let mut methods = Vec::new();
             for method in &imp.methods {
-                if matches!(method.self_param, Some(SelfParam::Owned)) {
-                    continue;
-                }
                 let const_types = self.const_param_types(&template.generics)?;
                 let saved_ty = std::mem::replace(&mut self.type_subst, impl_subst.clone());
                 let saved_c = std::mem::replace(&mut self.const_subst, ms.const_subst.clone());

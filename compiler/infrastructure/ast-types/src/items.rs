@@ -191,9 +191,6 @@ pub struct StructDef {
 }
 
 /// The `self` parameter kind in a method signature.
-///
-/// `Owned` (consuming `self`) is parsed but rejected by semantic analysis until
-/// the by-value struct ABI lands; `&self` and `&mut self` are supported.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SelfParam {
     /// `&self`: immutable borrow; lowered to pass-by-value in codegen.
@@ -201,7 +198,8 @@ pub enum SelfParam {
     /// `&mut self`: mutable borrow; lowered to pass-by-pointer so field writes
     /// in the method body propagate to the caller's value.
     RefMut,
-    /// `self`: consuming; not yet supported (needs the by-value struct ABI).
+    /// `self`: consuming; lowered to pass-by-value like `&self`, but the call moves
+    /// the receiver and the callee owns (and destroys) what it was handed.
     Owned,
 }
 

@@ -74,6 +74,9 @@ pub(crate) struct TypeChecker {
     /// borrow of the receiver, so the receiver must be a mutable place and must not
     /// already be borrowed; checked at the call site like a `&mut place` borrow.
     mut_self_methods: HashSet<String>,
+    /// Mangled keys of consuming (`self`) methods. Calling one moves the receiver,
+    /// so the call site records the move and the callee owns the value it was handed.
+    consuming_self_methods: HashSet<String>,
     /// Generic free-function templates, keyed by name. A generic function is
     /// NOT placed in `functions`: calls to it route through generic inference, which
     /// substitutes concrete type arguments per call site (monomorphization).
@@ -143,6 +146,10 @@ pub(crate) struct TypeChecker {
     /// A returned reference is only safe when it ultimately borrows one of these:
     /// borrowing any other (function-local) place dangles.
     current_fn_outliving: HashSet<String>,
+    /// Whether the method body being checked took `self` by value. A consuming
+    /// receiver owns its value, so its fields may be moved out; every other receiver
+    /// is a borrow whose fields belong to the caller.
+    self_is_owned: bool,
     /// Currently active loops, innermost last. Stack depth doubles as the
     /// loop-nesting count used to reject `break` / `continue` outside any loop;
     /// each entry carries its label and value-break typing state.
@@ -326,6 +333,7 @@ impl TypeChecker {
             drop_structs: HashSet::new(),
             impl_methods: HashMap::new(),
             mut_self_methods: HashSet::new(),
+            consuming_self_methods: HashSet::new(),
             generic_funcs: HashMap::new(),
             generic_structs: HashMap::new(),
             generic_impls: HashMap::new(),
@@ -345,6 +353,7 @@ impl TypeChecker {
             warnings: Vec::new(),
             current_function_return_type: None,
             current_fn_outliving: HashSet::new(),
+            self_is_owned: false,
             loop_stack: Vec::new(),
             pool_stack: Vec::new(),
             in_borrow_operand: false,

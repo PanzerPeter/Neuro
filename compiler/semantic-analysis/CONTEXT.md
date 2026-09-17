@@ -181,9 +181,12 @@ at statement end. A `&T` receiver or a non-`mut` binding is `CannotBorrowMutably
 **Associated calls** (`TypeName::func(args)`) are recognised when `func` is an `Expr::Path`; the
 mangled `TypeName__funcName` is looked up directly in `functions`.
 
-**Consuming `self`** is rejected at registration with `UnsupportedSelfParam` unless the receiver
-is `Copy` (where it is ABI-identical to `&self`); a by-value non-`Copy` struct ABI does not exist
-yet.
+**Consuming `self`** on a move-tracked receiver is recorded in `consuming_self_methods` at
+registration, keyed by the mangled name (a `Copy` receiver is duplicated by value, so calling one
+consumes nothing and it is not recorded). At the call site `record_consumed_receiver` moves the
+receiver, so a later use is `UseOfMovedValue`; a `&T` / `&mut T` receiver, and the `self` of a
+borrowing method, own nothing to give away and are `CannotMoveOutOfBorrow` instead. The receiver
+is also left out of `current_fn_outliving`, since it is destroyed when the method returns.
 
 **Builtin method dispatch.** For a non-struct receiver, `resolve_builtin_method` checks a fixed
 compiler-known set before `MethodNotFound`, returning the result type (and an arity diagnostic on
@@ -336,9 +339,10 @@ place is not resolved, which is BUG-030. A field move is marked against the plac
 binding** rather than the field, because a struct with a field moved out is partially moved and
 unusable as a whole — so `l.w.t()` followed by any use of `l` reports `l`. A place reached
 through a borrow owns nothing to give away and is `CannotMoveOutOfBorrow` instead of a move;
-that covers a dereferenced borrow (`val x = *r`) and every `self.field`, since `self` is bound
-as the struct type for field access but `SelfParam::Owned` is rejected, so every receiver the
-language admits is a borrow. `..base` moves its base when it supplies any non-`Copy` field
+that covers a dereferenced borrow (`val x = *r`) and `self.field` in a **borrowing** method.
+`self` is bound as the struct type so field access reads normally, which leaves its ownership out
+of its type; `self_is_owned`, set per method body from the `SelfParam`, carries it instead, and a
+consuming receiver's fields are the callee's to move out. `..base` moves its base when it supplies any non-`Copy` field
 (`record_update_base_move`), and moves nothing when every unlisted field is `Copy`.
 
 The analysis is deliberately conservative: `if`/`while`/`for` bodies and if-expression arms

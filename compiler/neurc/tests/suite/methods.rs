@@ -245,10 +245,11 @@ func main() -> i32 {
 }
 
 #[test]
-fn consuming_self_is_rejected() {
+fn consuming_self_compiles_and_runs() {
     let test = CompileTest::new();
     let source = r#"
 struct Wrapper {
+    label: string,
     value: i32
 }
 
@@ -259,19 +260,103 @@ impl Wrapper {
 }
 
 func main() -> i32 {
-    val w = Wrapper { value: 0 }
+    val w = Wrapper { label: "unwrapping", value: 7 }
     return w.unwrap()
 }
 "#;
-    let source_path = test.write_source("consuming_self.nr", source);
-    let result = test.compile(&source_path);
-    assert!(result.is_err(), "consuming self should be rejected");
-    let err = result.unwrap_err();
+    let exit_code = test
+        .compile_and_run("consuming_self.nr", source)
+        .expect("a consuming `self` method should compile and run");
+    assert_eq!(exit_code, 7);
+}
+
+#[test]
+fn a_consumed_receiver_cannot_be_used_again() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Wrapper {
+    label: string
+}
+
+impl Wrapper {
+    func unwrap(self) -> string {
+        self.label
+    }
+}
+
+func main() -> i32 {
+    val w = Wrapper { label: "gone" }
+    val first = w.unwrap()
+    val second = w.unwrap()
+    return 0
+}
+"#;
+    let err = test
+        .check("consumed_twice.nr", source)
+        .expect_err("a consumed receiver should not be reusable");
     assert!(
-        err.contains("not yet supported") || err.contains("UnsupportedSelfParam"),
-        "error should mention unsupported self param, got: {}",
+        err.contains("moved"),
+        "error should report the move, got: {}",
         err
     );
+}
+
+#[test]
+fn consuming_self_through_a_borrow_is_rejected() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Wrapper {
+    label: string
+}
+
+impl Wrapper {
+    func unwrap(self) -> string {
+        self.label
+    }
+    func leak(&self) -> string {
+        self.unwrap()
+    }
+}
+
+func main() -> i32 {
+    val w = Wrapper { label: "kept" }
+    println(w.leak())
+    return 0
+}
+"#;
+    let err = test
+        .check("consume_borrowed_self.nr", source)
+        .expect_err("a borrowing method may not give its receiver away");
+    assert!(
+        err.contains("cannot move out of"),
+        "error should name the borrow, got: {}",
+        err
+    );
+}
+
+#[test]
+fn a_consuming_method_on_a_generic_struct_resolves() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Holder<T> {
+    item: T
+}
+
+impl<T> Holder<T> {
+    func into_item(self) -> T {
+        self.item
+    }
+}
+
+func main() -> i32 {
+    val h = Holder { item: 9 }
+    return h.into_item()
+}
+"#;
+    let exit_code = test
+        .compile_and_run("consuming_generic.nr", source)
+        .expect("a generic struct's consuming method should monomorphize");
+    assert_eq!(exit_code, 9);
 }
 
 // ── AC5: calling a non-existent method produces a clear error ────────────────

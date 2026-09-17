@@ -23,7 +23,7 @@ not what each one does.
 | `types/`        | Primitives, literal suffixes and separators, casts, overflow, half precision, arrays, tuples, destructuring, newtypes, aliases, `Option` / `Result`, collections, dispatch | [Types](../docs/language-reference/types.md) |
 | `strings/`      | `string` literals and slices, `char`, interpolation, triple-quoted blocks, codepoint iteration, the growable `String` | [Strings](../docs/language-reference/strings.md) |
 | `tensors/`      | `Tensor<T, [dims]>`: construction, element-wise operators and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, dynamic axes | [Tensors](../docs/language-reference/tensors.md) |
-| `ownership/`    | Moves, `Copy` / `.clone()`, immutable and mutable borrows, borrow exclusivity, returned references, deterministic `Drop`, `pool` arena blocks | [Types](../docs/language-reference/types.md#references-immutable-borrows-t) |
+| `ownership/`    | Moves, `Copy` / `.clone()`, consuming `self` receivers, immutable and mutable borrows, borrow exclusivity, returned references, deterministic `Drop`, `pool` arena blocks | [Types](../docs/language-reference/types.md#references-immutable-borrows-t) |
 | `operators/`    | Bitwise ops, compound assignment, integer intrinsics, operator overloading, `??` coalescing, `?` propagation | [Operators](../docs/language-reference/operators.md) |
 | `control_flow/` | `if` / `else`, `for` over ranges and adapters, the iterator protocol, `while`, `loop`, block and `unsafe` expressions, `match`, `val-else`, panics, lints | [Control Flow](../docs/language-reference/control-flow.md) |
 | `structs/`      | Struct definition, field access and mutation, `&self` and `&mut self` methods, derives | [Structs](../docs/language-reference/structs.md) |
@@ -109,7 +109,7 @@ One line each. The program's own header comment is the full description.
 - [`generic_toolkit.nr`](showcase/generic_toolkit.nr): generics, const generics, turbofish and `where` clauses together, plus a non-`Copy` type argument and `Drop` across a generic boundary
 - [`inventory_ledger.nr`](showcase/inventory_ledger.nr): the standard collections carrying an inventory ledger
 - [`job_queue.nr`](showcase/job_queue.nr): `val-else` early exit carrying a small job queue
-- [`log_builder.nr`](showcase/log_builder.nr): a run transcript assembled in one growable `String`
+- [`log_builder.nr`](showcase/log_builder.nr): a run transcript assembled in one growable `String`, finished by a consuming `self` method
 - [`model_shapes.nr`](showcase/model_shapes.nr): a network's layer stack declared with real tensor parameters
 - [`mutable_borrows.nr`](showcase/mutable_borrows.nr): mutable borrows `&mut T` and the dereference operator `*`
 - [`named_axes.nr`](showcase/named_axes.nr): a batch of token embeddings with every tensor axis named
