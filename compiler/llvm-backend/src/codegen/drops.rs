@@ -415,6 +415,28 @@ impl<'ctx> CodegenContext<'ctx> {
             .is_some_and(|entry| entry.held.iter().any(|held| held.path.starts_with(&prefix)))
     }
 
+    /// Release the buffer of a tensor receiver that no binding owns.
+    ///
+    /// A reduction or a sort READS its receiver and builds a fresh result, so a receiver
+    /// that was constructed for the call — an operator result, a value a call returned, a
+    /// constructor, another reduction — has no drop entry to release it at scope exit and
+    /// would otherwise leak once per evaluation. Only the shapes that provably allocate a
+    /// buffer of their own qualify: a place expression names a binding whose own entry
+    /// covers it, and every other shape may hand back a buffer something else still owns.
+    pub(crate) fn release_receiver_temporary(
+        &mut self,
+        receiver: &HirExpr,
+        handle: PointerValue<'ctx>,
+    ) -> CodegenResult<()> {
+        if matches!(Type::from_hir(&receiver.ty), Type::Reference { .. }) {
+            return Ok(());
+        }
+        if !builds_its_own_buffer(&receiver.kind) {
+            return Ok(());
+        }
+        self.build_dlpack_release(handle)
+    }
+
     /// Disown every owner a binding holds, without touching the binding's own flag.
     ///
     /// A `match` that binds a payload by value is the one move site with no place
@@ -893,6 +915,27 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(cont_bb);
         Ok(())
     }
+}
+
+/// Whether this expression shape allocates the tensor buffer it hands back, so that
+/// nothing else can still own it.
+///
+/// Deliberately a whitelist rather than "not a place": an `if`, a `match` or a block
+/// yields whatever its branch yields, which may be a buffer a binding still owns, and
+/// releasing that would free it twice. `TensorIndex` is out for the same reason — a
+/// sliced view reads the receiver's storage.
+fn builds_its_own_buffer(kind: &HirExprKind) -> bool {
+    matches!(
+        kind,
+        HirExprKind::Binary { .. }
+            | HirExprKind::Call { .. }
+            | HirExprKind::TensorLiteral { .. }
+            | HirExprKind::TensorFill { .. }
+            | HirExprKind::TensorIdentity
+            | HirExprKind::TensorRandomNormal { .. }
+            | HirExprKind::TensorReduce { .. }
+            | HirExprKind::TensorSort { .. }
+    )
 }
 
 #[cfg(test)]

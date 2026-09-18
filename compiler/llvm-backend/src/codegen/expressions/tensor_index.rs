@@ -72,6 +72,20 @@ impl<'ctx> CodegenContext<'ctx> {
         object: &HirExpr,
         source_ty: &Type,
     ) -> CodegenResult<PointerValue<'ctx>> {
+        let handle = self.tensor_receiver_handle(object, source_ty)?;
+        self.load_dlpack_data(handle)
+    }
+
+    /// The DLPack handle a tensor receiver lowers to, evaluated exactly once.
+    ///
+    /// Separate from [`Self::tensor_index_data`] because a caller that has to release the
+    /// receiver afterwards needs the handle, and re-lowering the expression to recover it
+    /// would emit the whole computation a second time.
+    pub(super) fn tensor_receiver_handle(
+        &mut self,
+        object: &HirExpr,
+        source_ty: &Type,
+    ) -> CodegenResult<PointerValue<'ctx>> {
         let value = self.codegen_expr(object)?;
         let BasicValueEnum::PointerValue(ptr) = value else {
             return Err(CodegenError::InternalError(
@@ -89,7 +103,7 @@ impl<'ctx> CodegenContext<'ctx> {
         } else {
             ptr
         };
-        self.load_dlpack_data(handle)
+        Ok(handle)
     }
 
     /// The flat element offset the index starts at: every position's contribution plus

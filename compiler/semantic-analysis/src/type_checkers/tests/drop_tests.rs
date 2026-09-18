@@ -87,3 +87,56 @@ func main() -> i32 { 0 }
         "an `impl Drop` block must contain only `drop`; got {errors:?}"
     );
 }
+
+/// A by-value `for` head consumes the array: codegen disowns it so each iteration's
+/// binding can destroy the element it holds, and the checker must agree or the read
+/// after the loop sees storage nothing owns.
+#[test]
+fn a_by_value_for_head_moves_the_array() {
+    let errors = semantic_errors(
+        r#"
+struct H { x: i32 }
+
+impl Drop for H {
+    func drop(&mut self) { }
+}
+
+func main() -> i32 {
+    val hs = [H { x: 1 }, H { x: 2 }]
+    for h in hs {
+        val _n = h.x
+    }
+    return hs[0].x
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UseOfMovedValue { .. })),
+        "reading the array after a by-value `for` is a use of a moved value; got {errors:?}"
+    );
+}
+
+/// The borrowing head leaves ownership where it is, so the read after it stands.
+#[test]
+fn a_borrowed_for_head_leaves_the_array_owned() {
+    let errors = semantic_errors(
+        r#"
+struct H { x: i32 }
+
+impl Drop for H {
+    func drop(&mut self) { }
+}
+
+func main() -> i32 {
+    val hs = [H { x: 1 }, H { x: 2 }]
+    for h in &hs {
+        val _n = h.x
+    }
+    return hs[0].x
+}
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}

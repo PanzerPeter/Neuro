@@ -692,6 +692,17 @@ impl TypeChecker {
                     Some(element) => Some(element),
                     None => match iterable_ty.referent() {
                         Type::Array { element, .. } | Type::Slice(element) => {
+                            // A by-value head hands the loop the array's elements: each
+                            // iteration's binding owns the one it holds and destroys it,
+                            // which is what codegen already disowns the source for. The
+                            // head is therefore a consuming position and the binding
+                            // owns nothing after the loop. `for x in &arr` borrows and
+                            // moves nothing.
+                            if !matches!(iterable_ty, Type::Reference { .. })
+                                && self.is_type_move_tracked(element)
+                            {
+                                self.record_move(iterable);
+                            }
                             Some((**element).clone())
                         }
                         Type::Unknown => None,

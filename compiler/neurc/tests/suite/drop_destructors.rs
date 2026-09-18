@@ -520,3 +520,91 @@ func main() -> i32 {
         .expect("Drop program should compile and run");
     assert_eq!(exit_code, 2, "the field's buffer is read, not double-freed");
 }
+
+/// A `match` arm that binds an enum payload takes ownership of it: the scrutinee is
+/// disowned at the match, so the arm's binding is the only thing left that can release
+/// the payload. Before this was registered, the payload was simply never destroyed.
+#[test]
+fn a_match_arm_binding_destroys_the_payload_it_takes() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}
+enum Slot {{ Full(Probe), Empty }}
+
+func main() -> i32 {{
+    mut count: i32 = 0
+    {{
+        val s = Slot::Full(Probe {{ sink: &mut count }})
+        val n = match s {{
+            Slot::Full(p) => 0,
+            Slot::Empty => 1
+        }}
+    }}
+    return count
+}}
+"#
+    );
+    let exit = test
+        .compile_and_run("match_arm_payload_drop.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 1, "the bound payload is destroyed exactly once");
+}
+
+/// Every owning variant whose arm binds is released, and exactly once: the arm that ran
+/// is the only one whose binding exists.
+#[test]
+fn each_owning_variant_is_released_by_the_arm_that_binds_it() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}
+enum Two {{ A(Probe), B(Probe) }}
+
+func main() -> i32 {{
+    mut count: i32 = 0
+    {{
+        val t = Two::B(Probe {{ sink: &mut count }})
+        val n = match t {{
+            Two::A(x) => 0,
+            Two::B(y) => 1
+        }}
+    }}
+    return count
+}}
+"#
+    );
+    let exit = test
+        .compile_and_run("match_arm_two_owners.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 1, "the taken arm releases its payload once");
+}
+
+/// An arm that MOVES the payload out hands ownership on, so the arm must not release it
+/// as well: the binding it flows into is what destroys it, once.
+#[test]
+fn a_match_arm_that_moves_the_payload_out_does_not_release_it() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}
+enum Slot {{ Full(Probe), Empty }}
+
+func main() -> i32 {{
+    mut count: i32 = 0
+    {{
+        val s = Slot::Full(Probe {{ sink: &mut count }})
+        val kept = match s {{
+            Slot::Full(p) => p,
+            Slot::Empty => Probe {{ sink: &mut count }}
+        }}
+    }}
+    return count
+}}
+"#
+    );
+    let exit = test
+        .compile_and_run("match_arm_moved_payload.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(
+        exit, 1,
+        "a moved-out payload is destroyed once, by its new owner"
+    );
+}

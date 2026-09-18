@@ -219,7 +219,11 @@ impl<'ctx> CodegenContext<'ctx> {
         merge_bb: inkwell::basic_block::BasicBlock<'ctx>,
         next_bb: inkwell::basic_block::BasicBlock<'ctx>,
     ) -> CodegenResult<()> {
-        let saved = self.bind_arm(&arm.bindings, scrut_alloca, scrut_llvm, scrut_sem)?;
+        // An arm binding takes its payload BY VALUE out of a scrutinee the match already
+        // disowned, so for the arm's duration the binding is the only owner. Its own drop
+        // scope keeps the release inside the arm, where the value is live.
+        self.push_drop_scope();
+        let saved = self.bind_arm(&arm.bindings, scrut_alloca, scrut_llvm, scrut_sem, true)?;
 
         if let Some(guard) = &arm.guard {
             let parent_fn = self
@@ -256,23 +260,30 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         if !self.current_block_terminated() {
+            self.emit_top_scope_drops()?;
             self.builder
                 .build_unconditional_branch(merge_bb)
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         }
 
+        self.pop_drop_scope();
         self.restore_bindings(saved);
         Ok(())
     }
 
     /// Create allocas for an arm's bindings and register them in the name maps,
     /// returning the prior entries so they can be restored afterwards.
+    /// `owns_payload` says the caller has opened a scope for these bindings and wants an
+    /// enum payload registered for destruction in it. A `val ... else` binding leaves it
+    /// false: that form's release belongs to the binding it introduces into the enclosing
+    /// scope, not to the pattern.
     pub(crate) fn bind_arm(
         &mut self,
         bindings: &[HirMatchBinding],
         scrut_alloca: PointerValue<'ctx>,
         scrut_llvm: BasicTypeEnum<'ctx>,
         scrut_sem: &Type,
+        owns_payload: bool,
     ) -> CodegenResult<Vec<SavedBinding<'ctx>>> {
         let mut saved = Vec::with_capacity(bindings.len());
         for b in bindings {
@@ -304,6 +315,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_store(alloca, value)
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
+            if owns_payload && matches!(b.source, HirBindingSource::EnumPayload { .. }) {
+                self.register_owned_binding(&b.name, alloca, &sem)?;
+            }
             saved.push(self.bind_name(&b.name, alloca, llvm_ty, sem));
         }
         Ok(saved)

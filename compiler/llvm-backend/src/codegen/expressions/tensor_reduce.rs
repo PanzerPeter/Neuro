@@ -52,7 +52,8 @@ impl<'ctx> CodegenContext<'ctx> {
         let layout = reduce_layout(&shape, axis)?;
         let element = (*element).clone();
         let elem_llvm = self.get_any_llvm_type(&element)?;
-        let source = self.tensor_index_data(receiver, &source_ty)?;
+        let receiver_handle = self.tensor_receiver_handle(receiver, &source_ty)?;
+        let source = self.load_dlpack_data(receiver_handle)?;
 
         // The accumulator doubles as the result of a whole-tensor reduction, which has
         // exactly one run and so leaves its finished value here.
@@ -128,6 +129,9 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.build_unconditional_branch(head)?;
 
         self.builder.position_at_end(done);
+        // Every read of the receiver is behind us, so a receiver that owns its buffer and
+        // has no binding to release it can be freed here instead of leaking.
+        self.release_receiver_temporary(receiver, receiver_handle)?;
         match target {
             Some((handle, _)) => Ok(handle.into()),
             None => self

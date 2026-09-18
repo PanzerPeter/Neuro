@@ -69,7 +69,8 @@ impl<'ctx> CodegenContext<'ctx> {
         let layout = sort_layout(&shape, axis)?;
         let element = (*element).clone();
         let elem_llvm = self.get_any_llvm_type(&element)?;
-        let source = self.tensor_index_data(receiver, &source_ty)?;
+        let receiver_handle = self.tensor_receiver_handle(receiver, &source_ty)?;
+        let source = self.load_dlpack_data(receiver_handle)?;
         let targets = self.allocate_targets(kind, &layout, result_ty)?;
 
         let i64_type = self.context.i64_type();
@@ -119,6 +120,9 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.build_unconditional_branch(head)?;
 
         self.builder.position_at_end(done);
+        // The selection has copied everything it needs into its own targets, so a
+        // receiver no binding owns can be released instead of leaking.
+        self.release_receiver_temporary(receiver, receiver_handle)?;
         self.finish(kind, &targets, result_ty)
     }
 

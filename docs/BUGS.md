@@ -5,6 +5,47 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-037 — a moved binding read through a path reports the same error twice
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`; the moved-value check in `type_checkers/moves.rs`
+- **Severity**: minor — diagnostic noise, no effect on the compiled program
+
+Reading a moved binding through a path (`hs[0].id`) emits two identical `use of moved value`
+errors for the one read: once against the index and once against the whole path. A bare read
+(`hs`) emits one. The error count the driver prints is therefore wrong, and a program with
+several such reads buries its other diagnostics.
+
+**Minimal repro**
+
+```neuro
+struct Handle { id: i32 }
+
+impl Drop for Handle {
+    func drop(&mut self) { }
+}
+
+func eat(a: [Handle; 2]) -> i32 { 0 }
+
+func main() -> i32 {
+    val hs = [Handle { id: 1 }, Handle { id: 2 }]
+    val gone = eat(hs)
+    return hs[0].id
+}
+```
+
+Expected: one `use of moved value 'hs'`. Observed: two, with identical text and the same
+`moved here` note, differing only in the width of the caret.
+
+**Root cause**: not yet confirmed in the code. The shape suggests the check runs once per
+place segment as the path is walked, with each level reporting against the same root binding
+rather than the innermost failing one.
+
+**Workaround**: none needed; the first diagnostic is correct and actionable.
+
+**Fix sketch**: report the moved-value error at the outermost place only, or record the
+`(binding, span)` pair already reported and suppress a repeat for the same use.
+
 ## BUG-036 — a mutating method on a collection held in a field writes to a copy
 
 - **Status**: open, confirmed

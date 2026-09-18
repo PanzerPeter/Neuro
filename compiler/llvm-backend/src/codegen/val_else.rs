@@ -56,7 +56,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(ok_bb);
         // Deliberately not restored: these bindings belong to the enclosing block and
         // must stay visible to every statement after this one.
-        let _ = self.bind_arm(bindings, scrut_alloca, scrut_llvm, &scrut_sem)?;
+        let _ = self.bind_arm(bindings, scrut_alloca, scrut_llvm, &scrut_sem, false)?;
         Ok(())
     }
 
@@ -75,7 +75,7 @@ impl<'ctx> CodegenContext<'ctx> {
             Some(binding) => std::slice::from_ref(binding),
             None => &[],
         };
-        let saved = self.bind_arm(bound, scrut_alloca, scrut_llvm, scrut_sem)?;
+        let saved = self.bind_arm(bound, scrut_alloca, scrut_llvm, scrut_sem, false)?;
 
         self.push_drop_scope();
         for stmt in else_block {

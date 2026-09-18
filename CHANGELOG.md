@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.45.1] - 2026-09-18
+
+### Fixed
+
+- A `match` arm that bound an enum payload never destroyed it. The match disowns the
+  scrutinee's held drop flags as soon as any arm binds, but the arm's binding was
+  registered in the name maps only, so nothing was left to release the payload. Each arm
+  now runs in its own drop scope and an owning payload binding is registered in it; an arm
+  that moves the payload out still disarms first and releases nothing.
+- `for x in aggregate` left the array fully owned in the type checker while codegen had
+  already disowned it, so a read after the loop was accepted and saw storage nothing owned.
+  A by-value `for` head over a move-tracked element type now records the move. `for x in &arr`
+  is unaffected.
+- The `pool` block's `Drop`-only rejection matched a bare struct annotation and nothing else,
+  so a `Drop` value reached through an array, a tuple, a newtype, an enum payload or another
+  struct's field entered the arena unrejected. The rule now walks the aggregate, stopping at a
+  `PoolAware` type.
+- A tensor reduction (`.sum()` / `.mean()` / `.max()` / `.min()`) and a sort (`.sort()` /
+  `.argsort()` / `.topk()`) now release a receiver that no binding owns, once they have finished
+  reading it. `(&a + &b).sum()` in a loop leaked its operand buffer on every evaluation.
+
+### Changed
+
+- `codegen/expressions/tensors.rs` split along its concern seams into `tensor_arith.rs` (the
+  binary operators, broadcasting, the `@` contraction, the in-place compound assignment) and
+  `tensor_rng.rs` (the xorshift64 generator and its float intrinsics). No behaviour change.
+
+
 ## [2.45.0] - 2026-09-18
 
 ### Added

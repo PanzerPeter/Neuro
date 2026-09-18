@@ -416,7 +416,16 @@ once as a private `.rodata` global and `memcpy` it in, so a fill of any size cos
 than an instruction per element; a literal mentioning a runtime value is written slot by slot;
 `random_normal` writes its counted loop straight into the heap buffer.
 
-`codegen_tensor_compound_assign` in the same file is the one tensor node that allocates
+`expressions/tensor_rng.rs` holds the xorshift64 generator `random_normal` draws from, and the
+float intrinsics its Box-Muller transform calls. Nothing else in the backend draws a random
+number.
+
+`expressions/tensor_arith.rs` owns the binary operators, the broadcast machinery, the `@`
+contraction and the in-place compound assignment: everything that READS buffers that already
+exist, as against `tensors.rs`, which builds and re-describes tensor values. The two share the
+allocation helpers (`tensor_layout`, `alloc_tensor`, `tensor_slot`) and nothing else.
+
+`codegen_tensor_compound_assign` there is the one tensor node that allocates
 **nothing**: `HirStmt::TensorCompoundAssign` loads the target's own handle out of its variable
 slot and runs a counted loop writing each updated element back into the buffer that handle
 already addresses, so the handle and its `data` pointer are the same values after the statement
@@ -476,8 +485,13 @@ starts at the run's FIRST element rather than at an identity, which is what give
 `.min()` a starting value without a per-dtype sentinel (the checker has already refused an
 empty run). A sum reuses `codegen_int_arith`, so an overflowing reduction panics exactly where
 an overflowing `+` would; `.mean()` divides the float accumulator by the run length. Nothing
-is moved or released here: an axis reduction allocates its own handle and a whole-tensor one
-allocates nothing, so the receiver's buffer stays its owner's.
+is moved here, and a receiver a binding owns is left to that binding's own drop. What IS
+released, once the fold has read everything, is a receiver that no binding owns:
+`release_receiver_temporary` frees the buffer of a receiver built for the call — an operator
+result, a call's return, a tensor constructor, another reduction — which otherwise has nothing
+to release it. The predicate is a whitelist of shapes that provably allocate their own buffer,
+not "anything that is not a place": an `if`, a `match` or a block yields whatever its branch
+yields, which may be a buffer a binding still owns.
 
 `expressions/tensor_sort.rs` owns `HirExprKind::TensorSort`: `.sort()`, `.argsort()` and
 `.topk()`. It walks the same `outer`/`mid`/`inner` split the reduction does, and builds, per
@@ -488,8 +502,10 @@ seeded with the identity and carried by a stable insertion sort, so equal elemen
 cross and an argsort of a tensor with ties is reproducible. The float comparator spells out
 only the two `NaN` tests: an ordered `<` / `>` is already false on a `NaN` operand, so
 "`a` is real AND (`a` beats `b` OR `b` is `NaN`)" is exactly the specification's rule that
-`NaN` sorts to the end whatever the direction. Nothing is moved or released here: every
-result is a fresh handle, so the receiver's buffer stays its owner's.
+`NaN` sorts to the end whatever the direction. Nothing is moved here and every result is a
+fresh handle, so a receiver a binding owns stays that binding's; a receiver no binding owns is
+released once the selection has copied what it needs, through the same
+`release_receiver_temporary` the reduction uses.
 
 `expressions/tensor_index.rs` owns `HirExprKind::TensorIndex`. Every stride is a compile-time
 constant (every extent is part of the type), so the index is arithmetic on the flat row-major
@@ -619,8 +635,18 @@ to the next arm on failure), then evaluates the body into a shared result slot. 
 and restored in the name maps per arm, and the fall-through block is `unreachable`, because
 exhaustiveness is a frontend guarantee.
 
+Ownership of an enum payload crosses at the arm. The match disowns every held drop flag of the
+scrutinee as soon as ANY arm binds — which arm ran is a runtime fact and the flags are static —
+so the arm's binding has to be what releases what it took. Each arm body therefore runs in a drop
+scope of its own, and `bind_arm` registers an owning payload binding in it (`owns_payload`); an
+arm that MOVES the payload out disarms the flag first, through the ordinary
+`mark_moved_for_drop` on the arm body, and the scope then releases nothing. An arm that takes an
+owning variant WITHOUT binding its payload still loses it: that is the safe direction, since the
+alternative is releasing a payload the arm moved out twice.
+
 `codegen_single_test`, `SavedBinding`, `bind_arm`, and `restore_bindings` are `pub(crate)` so
-`val_else.rs` can share them.
+`val_else.rs` can share them. `val_else` passes `owns_payload: false`: its binding belongs to the
+enclosing block, which registers it, rather than to the pattern.
 
 ## val-else Lowering
 `codegen/val_else.rs`. The scrutinee is stored once into an alloca, `codegen_single_test` picks

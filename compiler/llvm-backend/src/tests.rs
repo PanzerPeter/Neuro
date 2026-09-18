@@ -279,6 +279,48 @@ fn a_tensor_is_released_through_its_own_deleter() {
     assert!(!deleter.contains("manager"));
 }
 
+/// A reduction's receiver that no binding owns is released once the fold has read it.
+/// Without that release `(&a + &b).sum()` leaks the operator's buffer per evaluation.
+#[test]
+fn a_reduction_releases_an_unbound_receiver() {
+    let source = r#"
+        func main() -> i32 {
+            val a: Tensor<i32, [4]> = [1, 2, 3, 4]
+            val b: Tensor<i32, [4]> = [1, 2, 3, 4]
+            return (&a + &b).sum()
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    let fold = body
+        .find("tensor.reduce.done")
+        .expect("the reduction emits its exit block");
+    let release = body[fold..]
+        .find("dlpack.deleter")
+        .map(|at| at + fold)
+        .expect("the temporary is released after the fold");
+    assert!(release > fold);
+}
+
+/// A receiver that IS a binding keeps its single release at scope exit: releasing it at
+/// the reduction as well would free the buffer twice.
+#[test]
+fn a_reduction_leaves_a_bound_receiver_to_its_own_drop() {
+    let source = r#"
+        func main() -> i32 {
+            val a: Tensor<i32, [4]> = [1, 2, 3, 4]
+            return a.sum()
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert_eq!(
+        body.matches("%dlpack.deleter = load ptr").count(),
+        1,
+        "a bound receiver is released exactly once, in:\n{body}"
+    );
+}
+
 /// The arena's shape, read off the IR: a pool block is a mark and a restore, and
 /// the allocations between them take the bump path instead of libc.
 #[test]

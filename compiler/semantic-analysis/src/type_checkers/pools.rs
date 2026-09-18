@@ -17,6 +17,8 @@
 // object without giving up the single-store release it exists for. `PoolAware` is the
 // opt-in that says otherwise.
 
+use std::collections::HashSet;
+
 use ast_types::Expr;
 use shared_types::Span;
 
@@ -212,29 +214,71 @@ impl TypeChecker {
         let Some(pool) = self.pool_stack.last() else {
             return;
         };
-        let Type::Struct(name) = ty else {
+        let Some(name) = self.drop_only_within(ty, &mut HashSet::new()) else {
             return;
         };
-        if !self.drop_structs.contains(name) {
-            return;
-        }
-        if self
-            .trait_impls
-            .contains(&(POOL_AWARE_TRAIT.to_string(), name.clone()))
-        {
-            return;
-        }
         let origin = match produced_by {
             Some(func) => format!(" returned by '{func}'"),
             None => String::new(),
         };
         let pool = pool.pool.clone();
         self.record_error(TypeError::PoolDropOnlyValue {
-            type_name: name.clone(),
+            type_name: name,
             origin,
             pool,
             span,
         });
+    }
+
+    /// The first `Drop`-only type the pool would own through `ty`, if any.
+    ///
+    /// A destructor costs the arena the same whether the value wearing it is named
+    /// directly or reached through an aggregate, so the rule looks through arrays,
+    /// tuples, newtypes, enum payloads and struct fields rather than at the annotation
+    /// alone. A `PoolAware` type answers for everything it holds, so the walk stops
+    /// there. `seen` keeps a nominal cycle from recursing forever.
+    fn drop_only_within(&self, ty: &Type, seen: &mut HashSet<String>) -> Option<String> {
+        match ty {
+            Type::Struct(name) => {
+                if self
+                    .trait_impls
+                    .contains(&(POOL_AWARE_TRAIT.to_string(), name.clone()))
+                {
+                    return None;
+                }
+                if self.drop_structs.contains(name) {
+                    return Some(name.clone());
+                }
+                if !seen.insert(name.clone()) {
+                    return None;
+                }
+                self.struct_defs
+                    .get(name)?
+                    .iter()
+                    .find_map(|(_, field)| self.drop_only_within(field, seen))
+            }
+            Type::Enum(name) => {
+                if !seen.insert(name.clone()) {
+                    return None;
+                }
+                self.enum_defs
+                    .get(name)?
+                    .iter()
+                    .flat_map(|variant| variant.fields.iter())
+                    .find_map(|(_, payload)| self.drop_only_within(payload, seen))
+            }
+            Type::Newtype(name) => {
+                if !seen.insert(name.clone()) {
+                    return None;
+                }
+                self.drop_only_within(self.newtype_defs.get(name)?, seen)
+            }
+            Type::Array { element, .. } => self.drop_only_within(element, seen),
+            Type::Tuple(elements) => elements
+                .iter()
+                .find_map(|element| self.drop_only_within(element, seen)),
+            _ => None,
+        }
     }
 
     /// Reject a `return` written inside a pool block. Inert outside a pool.
@@ -389,6 +433,57 @@ impl PoolAware for Handle {{
 func main() -> i32 {{
     pool {{
         val h = Handle {{ id: 1 }}
+    }}
+    return 0
+}}"
+        ));
+        assert!(errs.is_empty(), "expected no errors, got {errs:?}");
+    }
+
+    /// The rejection reads through an aggregate: a value returned as a struct field, a
+    /// tuple element or an array element costs the arena the same per-object destructor
+    /// as a bare one.
+    #[test]
+    fn a_drop_only_value_inside_an_aggregate_is_rejected() {
+        let errs = errors(&format!(
+            "{DROP_ONLY}
+struct Wrapper {{ inner: Handle }}
+enum Slot {{ Full(Handle), Empty }}
+func make_wrapper() -> Wrapper {{ Wrapper {{ inner: Handle {{ id: 1 }} }} }}
+func make_pair() -> (Handle, i32) {{ (Handle {{ id: 2 }}, 7) }}
+func make_arr() -> [Handle; 2] {{ [Handle {{ id: 3 }}, Handle {{ id: 4 }}] }}
+func make_slot() -> Slot {{ Slot::Full(Handle {{ id: 5 }}) }}
+func main() -> i32 {{
+    pool scratch {{
+        val w = make_wrapper()
+        val p = make_pair()
+        val a = make_arr()
+        val s = make_slot()
+    }}
+    return 0
+}}"
+        ));
+        assert_eq!(
+            errs.iter()
+                .filter(|e| e.contains("'Handle' implements 'Drop'"))
+                .count(),
+            4,
+            "expected every aggregate to be rejected, got {errs:?}"
+        );
+    }
+
+    /// An aggregate of types that own nothing keeps crossing the boundary.
+    #[test]
+    fn an_aggregate_without_a_drop_type_is_untouched() {
+        let errs = errors(&format!(
+            "{DROP_ONLY}
+struct Plain {{ n: i32 }}
+func make_plain() -> Plain {{ Plain {{ n: 1 }} }}
+func make_pair() -> (i32, i32) {{ (1, 2) }}
+func main() -> i32 {{
+    pool {{
+        val p = make_plain()
+        val q = make_pair()
     }}
     return 0
 }}"

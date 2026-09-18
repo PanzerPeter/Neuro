@@ -709,7 +709,10 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   `.0` yields the inner type in the `TupleIndex` check.
 - **Arrays.** `resolve_type` resolves `[T; N]`; `check_expr` handles array literals (homogeneous,
   length vs annotation) and indexing (`NotIndexable` / `IndexNotInteger`); `array.len()` is `u64`;
-  `Stmt::ForEach` binds the element type; `Stmt::IndexAssignment` requires a mutable target.
+  `Stmt::ForEach` binds the element type, and a BY-VALUE head over a move-tracked element type
+  records a move of the iterable: the loop takes the elements over, which is what codegen already
+  disowns the array for, so the array owns nothing after the loop. `for x in &arr` borrows and
+  moves nothing. `Stmt::IndexAssignment` requires a mutable target.
   `Expr::ArrayRest { array, start, exact }` requires an array source and yields the
   `[T; N - start]` remainder, with `exact` demanding `N == start`
   (`ArrayPatternLengthMismatch`). Other errors: `ArrayLengthMismatch`, `CannotInferEmptyArray`.
@@ -937,7 +940,11 @@ writes no `pool`.
 
 One rule there is not an escape rule. `check_pool_construction` refuses a value of a `Drop`-only
 struct that the block would OWN: the arena is released in a single store and cannot run an
-arbitrary destructor per object. It hangs off the two `check_expr` arms that hand the block a
+arbitrary destructor per object. It reads THROUGH aggregates rather than at the annotation alone
+(`drop_only_within`): an array, a tuple, a newtype, an enum payload or another struct's field that
+reaches a `Drop`-only type costs the arena the same per-object destructor as a bare one, and the
+diagnostic names the inner type it found. The walk stops at a `PoolAware` type, which answers for
+everything it holds, and carries a visited set so a nominal cycle cannot recurse forever. It hangs off the two `check_expr` arms that hand the block a
 fresh owned value, `Expr::StructLiteral` and `Expr::Call`, and the call form names the callee in
 the diagnostic (`PoolDropOnlyValue`). `drop_structs` is filled by `register_drop_impl` during the
 declaration pass, so it is complete before any body is checked. The opt-out is the prelude's
