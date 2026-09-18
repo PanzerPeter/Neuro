@@ -202,14 +202,20 @@ impl<'ctx> CodegenContext<'ctx> {
                 return Ok(ptr);
             }
         }
+        // A collection read out of a value another binding holds is not a temporary that
+        // owns anything: the copy aliases the holder's buffer, which the holder's own
+        // drop releases.
+        let aliases_a_holder = self.reads_a_held_place(object);
         let value = self.codegen_expr(object)?;
         let tmp = self.entry_alloca(value.get_type(), "col.tmp")?;
         self.builder
             .build_store(tmp, value)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        // The synthetic name cannot collide with a source binding: `__` is rejected in
-        // every declared name, so no move site will ever clear this entry's drop flag.
-        self.register_local_drop(TEMPORARY_BINDING, tmp, DropTarget::Collection)?;
+        if !aliases_a_holder {
+            // The synthetic name cannot collide with a source binding: `__` is rejected in
+            // every declared name, so no move site will ever clear this entry's drop flag.
+            self.register_local_drop(TEMPORARY_BINDING, tmp, DropTarget::Collection)?;
+        }
         Ok(tmp)
     }
 

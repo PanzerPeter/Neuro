@@ -319,10 +319,29 @@ Rules:
 - Reassigning a `mut` binding runs the displaced value's destructor at the
   assignment. The new value is built first, so a reassignment may read the value it
   replaces; a value already moved out is not destroyed a second time.
+- A holder owns what it holds. When a value is destroyed, so is every owner inside
+  it: a struct field, an array or tuple element, an enum payload, and a newtype's
+  inner value. The holder's own `drop` runs first, then its fields in declaration
+  order, and each position is destroyed exactly once.
+- A position given up first is destroyed on its own path instead. Moving `p.field`
+  into another binding leaves its siblings owned by `p`, and assigning to
+  `p.field` destroys the value it displaces there.
 
-Not yet supported: a struct's `Drop`-typed fields are not dropped automatically
-(no recursive destructor glue), so reassigning a struct destroys the struct and not
-what its fields hold.
+```neuro
+struct Slot { guard: Guard }
+
+func main() -> i32 {
+    mut dropped: i32 = 0
+    {
+        val held = Slot { guard: Guard { sink: &mut dropped } }
+    }                 // the struct goes, and its field goes with it
+    return dropped    // 1
+}
+```
+
+Not yet supported: a `match` arm that binds an enum payload by value disowns the whole
+scrutinee, because which payload left depends on a tag that is only known at runtime. A
+variant the taken arm did not bind therefore leaks rather than being destroyed twice.
 
 ## Derived Traits (`@derive`)
 

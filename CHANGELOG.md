@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.45.0] - 2026-09-18
+
+### Added
+
+- codegen: a destroyed value destroys every owner it holds. A struct field, an array or
+  tuple element, an enum payload and a newtype's inner value each run their destructor when
+  the holder's does — the holder's own `drop` first, then its positions in declaration
+  order — so a `Vec`, a `String`, a `Tensor` or a user `Drop` type held inside another value
+  no longer leaks. An enum switches on its tag and destroys only the active variant's
+  payload.
+- codegen: each held position carries its own drop flag, so a position given up before the
+  holder is destroyed on its own path and never twice. Moving `p.field` out leaves its
+  siblings owned by `p`, destructuring is a sequence of ordinary moves, assigning to
+  `p.field` destroys the value it displaces there, and an index the compiler cannot evaluate
+  disowns the whole binding.
+- tests: holder cases in the `drop_destructors` suite (struct fields, array and tuple
+  elements, enum payload, newtype, nested holder, partial move, field assignment, holder
+  reassignment, a holder moved into a callee, a collection read out of a field), unit
+  coverage for the place-path resolution, and `examples/showcase/held_destruction.nr`
+  combining them with pattern matching, a `Vec` field, a `for` loop and a named constant.
+
+### Changed
+
+- codegen: `for x in arr` over an array of owners now consumes the array's elements. Each
+  iteration's binding owns the element it holds and destroys it at the iteration's end,
+  which is what keeps the array from destroying the same elements again at its own scope
+  exit. `for x in &arr` still borrows.
+- codegen: a collection read out of a value another binding holds (`bag.items.len()`) is no
+  longer registered as an owner in its own right. The copy aliases the holder's buffer,
+  which the holder's own drop releases.
+
+### Known issues
+
+- A `match` arm that binds an enum payload disowns the whole scrutinee, because which
+  position left is a runtime fact. A variant the taken arm did not bind leaks rather than
+  being destroyed twice.
+- `registry.open.push(1)` mutates a copy of the field rather than the field: see BUG-036.
+
 ## [2.44.0] - 2026-09-18
 
 ### Added

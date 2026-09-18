@@ -1,0 +1,25 @@
+struct fields:
+  closed handle 1
+  closed handle 2
+array and tuple elements:
+  closed handle 5
+  closed handle 3
+  closed handle 4
+enum payload and newtype inner value:
+  closed handle 7
+  closed handle 6
+a payload taken out of its variant:
+  closed handle 8
+one element given up first:
+  closed handle 9
+  closed handle 10
+a field displaced by an assignment:
+  closed handle 11
+  closed handle 13
+  closed handle 12
+a holder rotated through a loop:
+  closed handle 14
+  closed handle 15
+  closed handle 16
+a heap buffer held in a field:
+channels = 2, tracked = 3

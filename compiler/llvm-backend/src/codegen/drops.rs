@@ -9,13 +9,16 @@
 // emitted.
 
 use ast_types::BinaryOp;
-use inkwell::values::{BasicValueEnum, PointerValue};
+use inkwell::basic_block::BasicBlock;
+use inkwell::types::BasicTypeEnum;
+use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirExprKind, HirType};
+use shared_types::Literal;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
-use super::context::{CodegenContext, DropEntry, DropTarget};
+use super::context::{CodegenContext, DropEntry, DropTarget, HeldDrop};
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Open a new lexical scope. Paired with [`pop_drop_scope`].
@@ -44,18 +47,156 @@ impl<'ctx> CodegenContext<'ctx> {
     /// when it owns nothing that needs releasing. The HIR carries the binding's
     /// resolved type, so this reads it directly.
     pub(crate) fn drop_target(&self, binding_ty: &HirType) -> Option<DropTarget> {
-        match Type::from_hir(binding_ty) {
+        self.drop_target_of(&Type::from_hir(binding_ty))
+    }
+
+    /// The same resolution over an already-lowered type, for the call sites that reach
+    /// codegen with a [`Type`] rather than the HIR it came from.
+    ///
+    /// A newtype needs no arm: `Type::from_hir` erases it to its inner type, so a
+    /// newtype wrapping an owner resolves to whatever the inner type resolves to.
+    pub(crate) fn drop_target_of(&self, binding_ty: &Type) -> Option<DropTarget> {
+        match binding_ty {
             // A collection always owns a heap buffer, independently of whether the
             // program declares any user `Drop` type.
             Type::Collection { .. } => Some(DropTarget::Collection),
             // So does a tensor: every construction allocates its buffer, and the type
             // says so, and there is no borrowed value of tensor type to confuse it with.
             Type::Tensor { .. } => Some(DropTarget::TensorBuffer),
-            Type::Struct(name) if self.drop_types.contains(&name) => {
-                Some(DropTarget::UserDrop(name))
+            Type::Struct(name) if self.drop_types.contains(name) => {
+                Some(DropTarget::UserDrop(name.clone()))
             }
+            Type::Enum(name) if self.enum_holds_owner(name) => {
+                Some(DropTarget::EnumPayload(name.clone()))
+            }
+            // Owns nothing itself, but something inside it does: the work is in the
+            // held entries the registration plans alongside this target.
+            other if self.holds_owner(other) => Some(DropTarget::Aggregate),
             _ => None,
         }
+    }
+
+    /// Whether a value of `ty` owns anything that must be released, directly or through
+    /// a position inside it.
+    ///
+    /// A `string` answers `false` on purpose: a string binding owns its buffer only when
+    /// its initializer allocated one ([`produces_owned_string`]), which is a property of
+    /// the expression and not of the type, so no position reached through a type can be
+    /// proven to own one.
+    fn holds_owner(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Collection { .. } | Type::Tensor { .. } => true,
+            Type::Struct(name) => {
+                self.drop_types.contains(name)
+                    || self
+                        .struct_defs
+                        .get(name)
+                        .is_some_and(|fields| fields.iter().any(|(_, f)| self.holds_owner(f)))
+            }
+            Type::Enum(name) => self.enum_holds_owner(name),
+            Type::Array { element, size } => *size > 0 && self.holds_owner(element),
+            Type::Tuple(elements) => elements.iter().any(|e| self.holds_owner(e)),
+            _ => false,
+        }
+    }
+
+    /// Whether any variant of the named enum carries a payload field that owns something.
+    fn enum_holds_owner(&self, name: &str) -> bool {
+        self.type_mapper
+            .enum_payload_types(name)
+            .is_some_and(|variants| {
+                variants
+                    .iter()
+                    .flatten()
+                    .any(|field| self.holds_owner(field))
+            })
+    }
+
+    /// Plan the drops for every owner held inside a binding of `ty`, flattening the
+    /// field and element paths under `storage_ptr` into one entry each.
+    ///
+    /// The address of each position is GEP'd here, at the binding site, rather than at
+    /// the drop sites: the offsets are constant, and the binding site dominates every
+    /// scope exit, reassignment and move that can later reach the value.
+    ///
+    /// The recursion terminates because a position's type is strictly smaller than its
+    /// holder's; a type containing itself by value has no finite layout and is rejected
+    /// long before codegen.
+    fn plan_held_drops(
+        &mut self,
+        storage_ptr: PointerValue<'ctx>,
+        ty: &Type,
+        path: &mut Vec<String>,
+        out: &mut Vec<HeldDrop<'ctx>>,
+    ) -> CodegenResult<()> {
+        let positions = self.held_positions(ty);
+        if positions.is_empty() {
+            return Ok(());
+        }
+
+        let holder_llvm = self.get_any_llvm_type(ty)?;
+        for (index, (segment, position_ty)) in positions.into_iter().enumerate() {
+            if !self.holds_owner(&position_ty) {
+                continue;
+            }
+            let position_ptr = self.aggregate_position_ptr(
+                holder_llvm,
+                storage_ptr,
+                index as u32,
+                &format!("held.{}.ptr", segment),
+            )?;
+            path.push(segment);
+            if let Some(target) = self.drop_target_of(&position_ty) {
+                if !matches!(target, DropTarget::Aggregate) {
+                    let flag_ptr = self.arm_drop_flag()?;
+                    out.push(HeldDrop {
+                        path: path.clone(),
+                        storage_ptr: position_ptr,
+                        flag_ptr,
+                        target,
+                    });
+                }
+            }
+            self.plan_held_drops(position_ptr, &position_ty, path, out)?;
+            let _ = path.pop();
+        }
+        Ok(())
+    }
+
+    /// Register a binding that owns something, or holds something that does, for
+    /// destruction at scope exit. A binding of `ty` that owns nothing registers nothing.
+    pub(crate) fn register_owned_binding(
+        &mut self,
+        name: &str,
+        storage_ptr: PointerValue<'ctx>,
+        ty: &Type,
+    ) -> CodegenResult<()> {
+        let Some(target) = self.drop_target_of(ty) else {
+            return Ok(());
+        };
+        let mut held = Vec::new();
+        self.plan_held_drops(storage_ptr, ty, &mut Vec::new(), &mut held)?;
+        let flag_ptr = self.arm_drop_flag()?;
+        if let Some(scope) = self.drop_scopes.last_mut() {
+            scope.push(DropEntry {
+                name: name.to_string(),
+                storage_ptr,
+                flag_ptr,
+                target,
+                held,
+            });
+        }
+        Ok(())
+    }
+
+    /// A fresh `i1` drop-flag slot in the entry block, initialized to `true`.
+    fn arm_drop_flag(&mut self) -> CodegenResult<PointerValue<'ctx>> {
+        let bool_ty = self.context.bool_type();
+        let flag_ptr = self.entry_alloca(bool_ty, "drop.flag")?;
+        self.builder
+            .build_store(flag_ptr, bool_ty.const_int(1, false))
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        Ok(flag_ptr)
     }
 
     /// Whether evaluating `expr` always yields a freshly `malloc`'d string buffer
@@ -139,18 +280,14 @@ impl<'ctx> CodegenContext<'ctx> {
         storage_ptr: PointerValue<'ctx>,
         target: DropTarget,
     ) -> CodegenResult<PointerValue<'ctx>> {
-        let bool_ty = self.context.bool_type();
-        let flag_ptr = self.entry_alloca(bool_ty, "drop.flag")?;
-        self.builder
-            .build_store(flag_ptr, bool_ty.const_int(1, false))
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-
+        let flag_ptr = self.arm_drop_flag()?;
         if let Some(scope) = self.drop_scopes.last_mut() {
             scope.push(DropEntry {
                 name: name.to_string(),
                 storage_ptr,
                 flag_ptr,
                 target,
+                held: Vec::new(),
             });
         }
         Ok(flag_ptr)
@@ -170,29 +307,140 @@ impl<'ctx> CodegenContext<'ctx> {
             .is_some_and(|entry| matches!(entry.target, DropTarget::PoolRegistered))
     }
 
-    /// Clear the drop flag of the place named by `expr` if it is a tracked `Drop`
-    /// binding being moved out of. A non-identifier, or a binding that is not
-    /// Drop-tracked, is a no-op. Mirrors the move sites the type checker validates.
+    /// Resolve the place `expr` names as a binding plus the field and element path
+    /// taken through it, or `None` when it is not rooted at a plain binding.
+    ///
+    /// A non-constant index yields `None` rather than a path: `a[i]` names no
+    /// particular element, so the language makes a move through it a move of the whole
+    /// binding, which is what a `None` path spells at the one caller below.
+    fn moved_place(expr: &HirExpr) -> Option<(&str, Option<Vec<String>>)> {
+        match &expr.kind {
+            HirExprKind::Variable(name) => Some((name, Some(Vec::new()))),
+            HirExprKind::FieldAccess { object, field } => Self::extend_place(object, field),
+            HirExprKind::TupleIndex { object, index } => {
+                Self::extend_place(object, &index.to_string())
+            }
+            HirExprKind::Index { object, index } => match &index.kind {
+                HirExprKind::Literal(Literal::Integer(value, _)) if *value >= 0 => {
+                    Self::extend_place(object, &value.to_string())
+                }
+                _ => {
+                    let (root, _) = Self::moved_place(object)?;
+                    Some((root, None))
+                }
+            },
+            _ => None,
+        }
+    }
+
+    /// Append one accessor segment to the place `object` names, keeping the collapse to
+    /// the whole binding that an unevaluable index already forced.
+    fn extend_place<'e>(
+        object: &'e HirExpr,
+        segment: &str,
+    ) -> Option<(&'e str, Option<Vec<String>>)> {
+        let (root, path) = Self::moved_place(object)?;
+        Some((
+            root,
+            path.map(|mut path| {
+                path.push(segment.to_string());
+                path
+            }),
+        ))
+    }
+
+    /// Clear the drop flag of the place `expr` names, if it is a tracked owner being
+    /// moved out of. Mirrors the move sites the type checker validates.
+    ///
+    /// A path into a holder disowns that position and everything beneath it, leaving the
+    /// holder's siblings armed — that is what makes destructuring a sequence of ordinary
+    /// moves. Naming the binding itself, or naming a place through an index the compiler
+    /// cannot evaluate, disowns the whole binding.
     pub(crate) fn mark_moved_for_drop(&mut self, expr: &HirExpr) {
         if self.drop_scopes.is_empty() {
             return;
         }
-        let HirExprKind::Variable(name) = &expr.kind else {
+        let Some((name, path)) = Self::moved_place(expr) else {
             return;
         };
 
-        let flag_ptr = self
+        let mut flags: Vec<PointerValue<'ctx>> = Vec::new();
+        let entry = self
             .drop_scopes
             .iter()
             .rev()
             .flat_map(|scope| scope.iter().rev())
-            .find(|entry| &entry.name == name)
-            .map(|entry| entry.flag_ptr);
+            .find(|entry| entry.name == name);
+        let Some(entry) = entry else {
+            return;
+        };
+        let prefix = path.unwrap_or_default();
+        if prefix.is_empty() {
+            flags.push(entry.flag_ptr);
+        }
+        flags.extend(
+            entry
+                .held
+                .iter()
+                .filter(|held| held.path.starts_with(&prefix))
+                .map(|held| held.flag_ptr),
+        );
 
-        if let Some(flag_ptr) = flag_ptr {
-            let _ = self
-                .builder
-                .build_store(flag_ptr, self.context.bool_type().const_zero());
+        let zero = self.context.bool_type().const_zero();
+        for flag_ptr in flags {
+            let _ = self.builder.build_store(flag_ptr, zero);
+        }
+    }
+
+    /// Whether `expr` reads a value out of a position another binding already owns, so
+    /// that the holder's own drop is what releases it.
+    ///
+    /// The distinction matters where an owned value is copied into a temporary to be
+    /// read: the copy aliases the holder's buffer, so registering it as an owner in its
+    /// own right would release that buffer twice.
+    pub(crate) fn reads_a_held_place(&self, expr: &HirExpr) -> bool {
+        let Some((name, path)) = Self::moved_place(expr) else {
+            return false;
+        };
+        // A bare binding is not a held place: its own entry is what releases it.
+        if path.as_ref().is_some_and(|segments| segments.is_empty()) {
+            return false;
+        }
+        let prefix = path.unwrap_or_default();
+        self.drop_scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.iter().rev())
+            .find(|entry| entry.name == name)
+            .is_some_and(|entry| entry.held.iter().any(|held| held.path.starts_with(&prefix)))
+    }
+
+    /// Disown every owner a binding holds, without touching the binding's own flag.
+    ///
+    /// A `match` that binds a payload by value is the one move site with no place
+    /// expression to name: which position left depends on the tag. Clearing all of them
+    /// is the conservative answer — a variant whose payload the arm did not bind leaks
+    /// rather than being released twice.
+    pub(crate) fn mark_held_moved_for_drop(&mut self, name: &str) {
+        let flags: Vec<PointerValue<'ctx>> = self
+            .drop_scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.iter().rev())
+            .find(|entry| entry.name == name)
+            .map(|entry| {
+                let mut flags: Vec<PointerValue<'ctx>> =
+                    entry.held.iter().map(|held| held.flag_ptr).collect();
+                if matches!(entry.target, DropTarget::EnumPayload(_)) {
+                    flags.push(entry.flag_ptr);
+                }
+                flags
+            })
+            .unwrap_or_default();
+
+        let zero = self.context.bool_type().const_zero();
+        for flag_ptr in flags {
+            let _ = self.builder.build_store(flag_ptr, zero);
         }
     }
 
@@ -218,17 +466,73 @@ impl<'ctx> CodegenContext<'ctx> {
             .rev()
             .flat_map(|scope| scope.iter().rev())
             .find(|entry| entry.name == name)
-            .map(|entry| (entry.storage_ptr, entry.flag_ptr, entry.target.clone()));
+            .map(Self::snapshot_entry);
 
-        let Some((storage_ptr, flag_ptr, target)) = entry else {
+        let Some(pending) = entry else {
             return Ok(None);
         };
+        let (_, flag_ptr, target) = pending[0].clone();
         if matches!(target, DropTarget::PoolRegistered) {
             return Ok(None);
         }
 
-        self.emit_one_drop(storage_ptr, flag_ptr, &target)?;
+        for (storage_ptr, flag_ptr, target) in pending {
+            self.emit_one_drop(storage_ptr, flag_ptr, &target)?;
+        }
         Ok(Some((flag_ptr, target)))
+    }
+
+    /// Release what `name`'s held position at `path` is about to lose to a field
+    /// assignment, then re-arm that position for the value replacing it.
+    ///
+    /// Ordered like [`drop_reassigned_value`] and for the same reason: the caller has
+    /// already evaluated the new value, so the field may be read on the way to
+    /// replacing itself. The storage the position addresses does not move, so re-arming
+    /// is a flag store and needs no second plan.
+    pub(crate) fn drop_displaced_held_value(
+        &mut self,
+        name: &str,
+        path: &[String],
+    ) -> CodegenResult<()> {
+        let pending: Vec<(PointerValue<'ctx>, PointerValue<'ctx>, DropTarget)> = self
+            .drop_scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.iter().rev())
+            .find(|entry| entry.name == name)
+            .map(|entry| {
+                entry
+                    .held
+                    .iter()
+                    .filter(|held| held.path.starts_with(path))
+                    .map(|held| (held.storage_ptr, held.flag_ptr, held.target.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let armed = self.context.bool_type().const_int(1, false);
+        for (storage_ptr, flag_ptr, target) in pending {
+            self.emit_one_drop(storage_ptr, flag_ptr, &target)?;
+            self.builder
+                .build_store(flag_ptr, armed)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// The drop work one entry stands for, innermost-holder first: the binding's own
+    /// release, then each owner it holds in declaration order.
+    fn snapshot_entry(
+        entry: &DropEntry<'ctx>,
+    ) -> Vec<(PointerValue<'ctx>, PointerValue<'ctx>, DropTarget)> {
+        let mut pending = vec![(entry.storage_ptr, entry.flag_ptr, entry.target.clone())];
+        pending.extend(
+            entry
+                .held
+                .iter()
+                .map(|held| (held.storage_ptr, held.flag_ptr, held.target.clone())),
+        );
+        pending
     }
 
     /// Arm `flag_ptr` for the value a reassignment has just stored, so scope exit
@@ -252,6 +556,233 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder
             .build_store(flag_ptr, bool_ty.const_int(owns_new_value as u64, false))
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Re-arm every held position of a reassigned binding, so scope exit releases what
+    /// the incoming holder holds rather than what the released one held.
+    ///
+    /// Unconditional, unlike [`rearm_drop_flag`]: a held position exists only where the
+    /// position's own type proves it owns something, which no assignment can change.
+    pub(crate) fn rearm_held_drop_flags(&mut self, name: &str) -> CodegenResult<()> {
+        let flags: Vec<PointerValue<'ctx>> = self
+            .drop_scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.iter().rev())
+            .find(|entry| entry.name == name)
+            .map(|entry| entry.held.iter().map(|held| held.flag_ptr).collect())
+            .unwrap_or_default();
+
+        let armed = self.context.bool_type().const_int(1, false);
+        for flag_ptr in flags {
+            self.builder
+                .build_store(flag_ptr, armed)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Address of an aggregate's `index`-th position, for a struct, tuple, or array
+    /// holder alike.
+    ///
+    /// `build_struct_gep` refuses an array pointee, so an array indexes through a
+    /// two-step GEP instead. Every index reaching here is a constant read off the
+    /// holder's own layout.
+    fn aggregate_position_ptr(
+        &self,
+        holder_llvm: BasicTypeEnum<'ctx>,
+        base_ptr: PointerValue<'ctx>,
+        index: u32,
+        name: &str,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        if !holder_llvm.is_array_type() {
+            return self
+                .builder
+                .build_struct_gep(holder_llvm, base_ptr, index, name)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()));
+        }
+        let i64_ty = self.context.i64_type();
+        // SAFETY: `index` is a position of `holder_llvm`'s own layout, so it is within
+        // the array's length by construction and the GEP stays inside the object.
+        unsafe {
+            self.builder
+                .build_in_bounds_gep(
+                    holder_llvm,
+                    base_ptr,
+                    &[i64_ty.const_zero(), i64_ty.const_int(index as u64, false)],
+                    name,
+                )
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))
+        }
+    }
+
+    /// The positions a value of `ty` holds, in declaration order, as `(accessor
+    /// segment, type)`. The position of a pair in the list is its LLVM aggregate index,
+    /// so it names both the path segment and the GEP.
+    ///
+    /// Empty for every type with no statically indexable inside, an enum included: which
+    /// of an enum's payload slots is live depends on its tag, so it is walked by
+    /// [`emit_enum_payload_drop`] under a switch instead of by a static path.
+    fn held_positions(&self, ty: &Type) -> Vec<(String, Type)> {
+        match ty {
+            Type::Struct(name) => self.struct_defs.get(name).cloned().unwrap_or_default(),
+            Type::Tuple(elements) => elements
+                .iter()
+                .enumerate()
+                .map(|(i, e)| (i.to_string(), e.clone()))
+                .collect(),
+            Type::Array { element, size } => (0..*size)
+                .map(|i| (i.to_string(), (**element).clone()))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Release whatever the active variant of an enum value holds, by switching on its
+    /// tag and destroying that variant's owning payload slots.
+    ///
+    /// A payload field was written into its slot through memory, bit-exactly, so the
+    /// slot's address is the field's address and each destructor reads it in place. The
+    /// builder is left on the join block, which is what lets the flag-guarded caller
+    /// finish its own branch around this.
+    fn emit_enum_payload_drop(
+        &mut self,
+        storage_ptr: PointerValue<'ctx>,
+        enum_name: &str,
+    ) -> CodegenResult<()> {
+        let variants = self
+            .type_mapper
+            .enum_payload_types(enum_name)
+            .cloned()
+            .unwrap_or_default();
+        let parent_fn = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("enum payload drop emitted outside function".to_string())
+        })?;
+
+        let enum_llvm = self.type_mapper.enum_struct_type(enum_name)?;
+        let payload_array_ty = enum_llvm
+            .get_field_type_at_index(1)
+            .ok_or_else(|| {
+                CodegenError::InternalError(format!("enum '{}' has no payload field", enum_name))
+            })?
+            .into_array_type();
+        let tag_ptr = self
+            .builder
+            .build_struct_gep(enum_llvm, storage_ptr, 0, "enum.drop.tag.ptr")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let tag = self
+            .builder
+            .build_load(self.context.i32_type(), tag_ptr, "enum.drop.tag")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .into_int_value();
+        let payload_ptr = self
+            .builder
+            .build_struct_gep(enum_llvm, storage_ptr, 1, "enum.drop.payload")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+        let join_bb = self.context.append_basic_block(parent_fn, "enum.drop.cont");
+        let owning: Vec<usize> = variants
+            .iter()
+            .enumerate()
+            .filter(|(_, fields)| fields.iter().any(|field| self.holds_owner(field)))
+            .map(|(tag_value, _)| tag_value)
+            .collect();
+        let cases: Vec<(IntValue<'ctx>, BasicBlock<'ctx>)> = owning
+            .iter()
+            .map(|tag_value| {
+                (
+                    self.context.i32_type().const_int(*tag_value as u64, false),
+                    self.context
+                        .append_basic_block(parent_fn, &format!("enum.drop.v{}", tag_value)),
+                )
+            })
+            .collect();
+        self.builder
+            .build_switch(tag, join_bb, &cases)
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+
+        for (tag_value, (_, case_bb)) in owning.iter().zip(cases.iter()) {
+            self.builder.position_at_end(*case_bb);
+            for (slot, field_ty) in variants[*tag_value].iter().enumerate() {
+                if !self.holds_owner(field_ty) {
+                    continue;
+                }
+                let slot_ptr = self.aggregate_position_ptr(
+                    payload_array_ty.into(),
+                    payload_ptr,
+                    slot as u32,
+                    "enum.drop.slot",
+                )?;
+                self.emit_value_destructor(slot_ptr, field_ty)?;
+            }
+            self.builder
+                .build_unconditional_branch(join_bb)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        }
+
+        self.builder.position_at_end(join_bb);
+        Ok(())
+    }
+
+    /// Destroy the value at `storage_ptr`, and everything it holds, unconditionally.
+    ///
+    /// The flagged path is the one bindings take; this is for a position no flag can
+    /// guard, namely an enum payload slot, where the tag the caller switched on has
+    /// already established that the value is live.
+    fn emit_value_destructor(
+        &mut self,
+        storage_ptr: PointerValue<'ctx>,
+        ty: &Type,
+    ) -> CodegenResult<()> {
+        match self.drop_target_of(ty) {
+            Some(DropTarget::UserDrop(struct_name)) => {
+                self.emit_user_drop_call(storage_ptr, &struct_name)?
+            }
+            Some(DropTarget::Collection) => self.emit_collection_free(storage_ptr)?,
+            Some(DropTarget::TensorBuffer) => self.emit_tensor_buffer_free(storage_ptr)?,
+            Some(DropTarget::EnumPayload(enum_name)) => {
+                self.emit_enum_payload_drop(storage_ptr, &enum_name)?
+            }
+            _ => {}
+        }
+
+        let positions = self.held_positions(ty);
+        if positions.is_empty() {
+            return Ok(());
+        }
+        let holder_llvm = self.get_any_llvm_type(ty)?;
+        for (index, (segment, position_ty)) in positions.into_iter().enumerate() {
+            if !self.holds_owner(&position_ty) {
+                continue;
+            }
+            let position_ptr = self.aggregate_position_ptr(
+                holder_llvm,
+                storage_ptr,
+                index as u32,
+                &format!("held.{}.ptr", segment),
+            )?;
+            self.emit_value_destructor(position_ptr, &position_ty)?;
+        }
+        Ok(())
+    }
+
+    /// Call a type's `impl Drop` destructor against the value at `storage_ptr`, which
+    /// is the `&mut self` receiver this backend passes by address.
+    fn emit_user_drop_call(
+        &mut self,
+        storage_ptr: PointerValue<'ctx>,
+        struct_name: &str,
+    ) -> CodegenResult<()> {
+        let mangled = format!("{}__drop", struct_name);
+        let drop_fn = *self
+            .functions
+            .get(&mangled)
+            .ok_or_else(|| CodegenError::UndefinedFunction(mangled.clone()))?;
+        let receiver: BasicValueEnum<'ctx> = storage_ptr.into();
+        self.builder
+            .build_call(drop_fn, &[receiver.into()], "")
+            .map_err(|e| CodegenError::LlvmError(format!("failed to build drop call: {}", e)))?;
         Ok(())
     }
 
@@ -285,7 +816,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 if matches!(entry.target, DropTarget::PoolRegistered) {
                     continue;
                 }
-                pending.push((entry.storage_ptr, entry.flag_ptr, entry.target.clone()));
+                pending.extend(Self::snapshot_entry(entry));
             }
         }
         for (storage_ptr, flag_ptr, target) in pending {
@@ -303,6 +834,11 @@ impl<'ctx> CodegenContext<'ctx> {
         target: &DropTarget,
     ) -> CodegenResult<()> {
         if self.current_block_terminated() {
+            return Ok(());
+        }
+        // A holder that only holds has no release of its own; its held entries carry
+        // the work and are emitted beside this call, not through it.
+        if matches!(target, DropTarget::Aggregate) {
             return Ok(());
         }
         let parent_fn = self.current_function.ok_or_else(|| {
@@ -325,21 +861,21 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(run_bb);
         match target {
             DropTarget::UserDrop(struct_name) => {
-                let mangled = format!("{}__drop", struct_name);
-                let drop_fn = *self
-                    .functions
-                    .get(&mangled)
-                    .ok_or_else(|| CodegenError::UndefinedFunction(mangled.clone()))?;
-                let receiver: BasicValueEnum<'ctx> = storage_ptr.into();
-                self.builder
-                    .build_call(drop_fn, &[receiver.into()], "")
-                    .map_err(|e| {
-                        CodegenError::LlvmError(format!("failed to build drop call: {}", e))
-                    })?;
+                let struct_name = struct_name.clone();
+                self.emit_user_drop_call(storage_ptr, &struct_name)?
             }
             DropTarget::Collection => self.emit_collection_free(storage_ptr)?,
             DropTarget::HeapString => self.emit_heap_string_free(storage_ptr)?,
             DropTarget::TensorBuffer => self.emit_tensor_buffer_free(storage_ptr)?,
+            DropTarget::EnumPayload(enum_name) => {
+                let enum_name = enum_name.clone();
+                self.emit_enum_payload_drop(storage_ptr, &enum_name)?
+            }
+            DropTarget::Aggregate => {
+                return Err(CodegenError::InternalError(
+                    "a holder with no release of its own reached the destructor path".to_string(),
+                ))
+            }
             DropTarget::PoolRegistered => {
                 return Err(CodegenError::InternalError(
                     "a pool-registered value reached the per-scope drop path".to_string(),
@@ -356,5 +892,83 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(cont_bb);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CodegenContext;
+    use neuro_hir::{HirExpr, HirExprKind, HirType};
+    use shared_types::{Literal, Span};
+
+    fn expr(kind: HirExprKind) -> HirExpr {
+        HirExpr::new(kind, HirType::I32, Span::new(0, 0))
+    }
+
+    fn variable(name: &str) -> HirExpr {
+        expr(HirExprKind::Variable(name.to_string()))
+    }
+
+    fn integer(value: i128) -> HirExpr {
+        expr(HirExprKind::Literal(Literal::Integer(value, None)))
+    }
+
+    #[test]
+    fn a_bare_binding_is_the_whole_place() {
+        let place = variable("h");
+        assert_eq!(
+            CodegenContext::moved_place(&place),
+            Some(("h", Some(Vec::new())))
+        );
+    }
+
+    #[test]
+    fn field_tuple_and_constant_index_segments_build_a_path() {
+        let place = expr(HirExprKind::TupleIndex {
+            object: Box::new(expr(HirExprKind::Index {
+                object: Box::new(expr(HirExprKind::FieldAccess {
+                    object: Box::new(variable("h")),
+                    field: "inner".to_string(),
+                })),
+                index: Box::new(integer(2)),
+            })),
+            index: 1,
+        });
+        assert_eq!(
+            CodegenContext::moved_place(&place),
+            Some((
+                "h",
+                Some(vec!["inner".to_string(), "2".to_string(), "1".to_string()])
+            ))
+        );
+    }
+
+    /// `a[i]` names no particular element, so a move through it takes the whole
+    /// binding. A `None` path is how that is spelled, and it survives further segments.
+    #[test]
+    fn a_runtime_index_collapses_to_the_whole_binding() {
+        let element = expr(HirExprKind::Index {
+            object: Box::new(variable("a")),
+            index: Box::new(variable("i")),
+        });
+        assert_eq!(CodegenContext::moved_place(&element), Some(("a", None)));
+
+        let field_of_element = expr(HirExprKind::FieldAccess {
+            object: Box::new(element),
+            field: "w".to_string(),
+        });
+        assert_eq!(
+            CodegenContext::moved_place(&field_of_element),
+            Some(("a", None))
+        );
+    }
+
+    #[test]
+    fn an_expression_that_is_not_a_place_names_nothing() {
+        let call = expr(HirExprKind::FieldAccess {
+            object: Box::new(integer(3)),
+            field: "a".to_string(),
+        });
+        assert_eq!(CodegenContext::moved_place(&call), None);
     }
 }

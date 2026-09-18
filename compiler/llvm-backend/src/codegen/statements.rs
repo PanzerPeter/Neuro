@@ -74,7 +74,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let pool_registered = self.pool_registered_type(&target_sem);
             let moves_a_registration =
                 init.is_some_and(|expr| self.moves_a_pool_registration(expr));
-            let shadowed = self.bind_name(name, alloca, alloca_ty, target_sem);
+            let shadowed = self.bind_name(name, alloca, alloca_ty, target_sem.clone());
             if let Some(scope) = self.name_scopes.last_mut() {
                 scope.push(shadowed);
             }
@@ -93,8 +93,11 @@ impl<'ctx> CodegenContext<'ctx> {
                 } else {
                     self.register_pool_aware(name, &struct_name, alloca)?;
                 }
-            } else if let Some(target) = drop_target {
-                self.register_local_drop(name, alloca, target)?;
+            } else if matches!(drop_target, Some(DropTarget::HeapString)) {
+                // The one target no type proves: it came from the initializer above.
+                self.register_local_drop(name, alloca, DropTarget::HeapString)?;
+            } else {
+                self.register_owned_binding(name, alloca, &target_sem)?;
             }
         }
 
@@ -222,6 +225,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         if let Some((flag_ptr, target)) = rearm {
             self.rearm_drop_flag(flag_ptr, &target, value)?;
+            self.rearm_held_drop_flags(name)?;
         }
 
         Ok(())

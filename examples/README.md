@@ -108,6 +108,7 @@ One line each. The program's own header comment is the full description.
 - [`enum_records.nr`](showcase/enum_records.nr): pattern matching over enums, structs, methods and arrays
 - [`field_report.nr`](showcase/field_report.nr): standard I/O driving a field report
 - [`generic_toolkit.nr`](showcase/generic_toolkit.nr): generics, const generics, turbofish and `where` clauses together, plus a non-`Copy` type argument and `Drop` across a generic boundary
+- [`held_destruction.nr`](showcase/held_destruction.nr): a value held in a struct field, an array or tuple element, an enum payload or a newtype, destroyed with its holder and exactly once when one element is given up first
 - [`inventory_ledger.nr`](showcase/inventory_ledger.nr): the standard collections carrying an inventory ledger
 - [`job_queue.nr`](showcase/job_queue.nr): `val-else` early exit carrying a small job queue
 - [`log_builder.nr`](showcase/log_builder.nr): a run transcript assembled in one growable `String`, finished by a consuming `self` method

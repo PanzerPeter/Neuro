@@ -82,7 +82,7 @@ tensors/tensor_sorting.nr             21
 ownership/borrow_exclusivity.nr  31
 ownership/consuming_self.nr      33
 ownership/copy_clone.nr          14
-ownership/drop.nr                3
+ownership/drop.nr                5
 ownership/immutable_borrows.nr   0
 ownership/move_semantics.nr      0
 ownership/pool_arena.nr          3
@@ -147,6 +147,7 @@ showcase/displaced_owners.nr         8
 showcase/enum_records.nr             46
 showcase/field_report.nr             63
 showcase/generic_toolkit.nr          87
+showcase/held_destruction.nr         5
 showcase/inventory_ledger.nr         181
 showcase/job_queue.nr                139
 showcase/log_builder.nr              64

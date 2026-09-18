@@ -5,6 +5,50 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-036 — a mutating method on a collection held in a field writes to a copy
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend` (codegen); `collection_place_ptr` in `codegen/collections/mod.rs`
+- **Severity**: major — a silent wrong answer. The call compiles, runs, and changes nothing.
+
+A method call on a collection reaches its receiver through `collection_place_ptr`, which has a
+fast path for a bare binding (`v.push(1)` gets `v`'s own stack slot) and falls back to copying
+the receiver's value into a temporary for everything else. A field, a tuple element, and an array
+element all take the fallback, so the header the mutation updates belongs to the copy and the
+holder's collection is untouched.
+
+**Minimal repro**
+
+```neuro
+struct Registry { open: Vec<i32> }
+
+func main() -> i32 {
+    mut registry = Registry { open: Vec::new() }
+    registry.open.push(1)
+    registry.open.push(2)
+    return registry.open.len() as i32
+}
+```
+
+Expected: `2`. Observed: `0`, with no diagnostic. A read through the same path is correct
+(`registry.open.len()` reads the copy, which carries the right header), so only mutation is
+affected, which is what makes it quiet.
+
+**Root cause**: confirmed in the code. The fallback exists because a collection-valued
+*expression* (`m.keys()`) genuinely has no place to point at, and a place expression rooted at a
+binding was folded into the same branch rather than resolved to an address.
+
+**Workaround**: build the collection in a local binding and move it into the field once
+(`mut open: Vec<i32> = Vec::new(); open.push(1); Registry { open: open }`). There is no
+workaround that mutates the field in place.
+
+**Fix sketch**: resolve a place-expression receiver to its address instead of its value —
+identifier, field access, constant index — which is the same place resolution
+`codegen_field_assignment` already does one level deep, generalized to a path. That is the work
+the place-expression roadmap item has to do anyway, so the fix belongs with it rather than as a
+second resolver. Regression tests want the repro above, the same shape through a tuple element
+and an array element, and a read after the mutation to pin that both halves see one buffer.
+
 ## BUG-035 — a borrow reaching a binding through a call return is not tracked
 
 - **Status**: open, confirmed

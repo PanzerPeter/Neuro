@@ -925,6 +925,32 @@ each `DropEntry` records the binding name, storage `alloca`, an `i1` drop flag, 
 `PoolRegistered` is the one target `emit_drops_through` skips: its release belongs to the pool
 sweep below, and the entry exists only so the flag tracks moves like any other.
 
+A holder owns what it holds, so `DropEntry` also carries `held: Vec<HeldDrop>`, one entry per
+owning position reachable from the binding by a statically known field or element path.
+`register_owned_binding` plans them at the binding site: `holds_owner` decides whether a type
+owns anything transitively, `held_positions` enumerates a struct's fields, a tuple's elements or
+an array's elements, and each position gets its own `i1` flag and a GEP taken once at the
+declaration, which dominates every later drop site. `Aggregate` is the target of a holder that
+releases nothing itself; `EnumPayload(enum)` is the target of an enum, whose live positions
+depend on the tag, so it switches on the tag and destroys the active variant's owning payload
+slots through `emit_value_destructor` rather than through a static path.
+
+Per-position flags are what make a partial move sound. `mark_moved_for_drop` resolves the place
+an expression names (`moved_place`) into a binding plus a path, and clears that path's flag and
+every flag beneath it, leaving the siblings armed; a bare binding, or a place through an index
+the compiler cannot evaluate, clears everything. That is also what makes destructuring work, since
+the parser desugars it to a temporary plus one projection per leaf. `codegen_field_assignment`
+releases the displaced position (`drop_displaced_held_value`) and re-arms it, and a reassignment
+re-arms the whole plan (`rearm_held_drop_flags`), which is unconditional because a held position
+exists only where its own type proves ownership.
+
+Two conservative edges keep it sound rather than complete. A `match` whose arms bind disowns the
+scrutinee's entire plan (`mark_held_moved_for_drop`), because which payload left depends on a
+runtime tag, so an unbound variant leaks instead of being released twice. And
+`collection_place_ptr` copies a collection read out of a place into a temporary; that copy
+aliases the holder's buffer, so `reads_a_held_place` keeps it from being registered as an owner
+in its own right.
+
 `codegen_function` / `codegen_method` open the body scope and register by-value `Drop`,
 collection, or tensor parameters for destruction at function exit; `codegen_var_decl` registers a local and
 allocates its flag (initialised `true`). Branch, loop, and block bodies (`codegen_if`,
@@ -947,8 +973,8 @@ LIFO sweep as its only release, because a per-assignment free would return a poi
 still holds. A self-assignment (`p = p`) skips both the release and the move-marking, since the
 storage keeps the value it already had.
 
-**Known limits**: a struct's `Drop` fields are not auto-dropped (no recursive glue), so a
-reassignment releases the holder and not what the holder holds.
+**Known limits**: an anonymous heap `string` belongs to no binding and so is reached by no
+drop site at all.
 
 ## Pool Arena ABI
 `arena.rs` carries the allocator behind `pool { }`: two internal globals,
@@ -1053,7 +1079,9 @@ A collection binding is registered in the drop scope with `DropTarget::Collectio
 `free`s field 0 under the same runtime drop flag that user `Drop` types use: a moved-out
 collection is not freed twice. An unnamed collection *temporary* (`for k in m.keys()`) is
 registered the same way under a synthetic `__`-containing name that no source binding can collide
-with; without that, the only route to map iteration would leak. This is also what frees a `String`
+with; without that, the only route to map iteration would leak. A collection read out of a place
+another binding holds (`b.items.len()`) is not such a temporary: the copy aliases the holder's
+buffer, which the holder's own drop releases, so `reads_a_held_place` suppresses the registration. This is also what frees a `String`
 builder's buffer, since it is registered as an ordinary collection. **A `string` inside a
 collection is not freed**, and neither is the heap `string` that `+`, interpolation, or
 `String::to_string` produces; both ride with the heap-string work.

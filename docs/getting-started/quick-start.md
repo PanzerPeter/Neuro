@@ -336,7 +336,9 @@ current compiler supports:
 - Move-by-default with use-after-move detection; `@derive(Copy, Clone)`; `.clone()`
 - Immutable `&T` and mutable `&mut T` borrows with `*` deref; flow-sensitive borrow exclusivity
 - Explicit lifetime annotations `<'a>`; returned-reference lifetime elision
-- Deterministic `Drop` running at scope exit in reverse declaration order
+- Deterministic `Drop` running at scope exit in reverse declaration order, at the assignment
+  that displaces a value, and for every owner a destroyed value holds — a struct field, an
+  array or tuple element, an enum payload, a newtype's inner value
 
 ### Control Flow
 - `if` / `else if` / `else` chains; `if` and blocks as value expressions

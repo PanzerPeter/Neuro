@@ -287,3 +287,236 @@ func main() -> i32 { 0 }
         "expected the Copy/Drop conflict diagnostic, got: {stderr}"
     );
 }
+
+/// Holder types over [`PROBE`], one per position a value can be held in. Each field
+/// takes its own sink because a `&mut` borrow is exclusive: two probes counting into
+/// one binding would be two live mutable borrows of it.
+const HOLDERS: &str = r#"
+struct Pair { a: Probe, b: Probe }
+struct One { a: Probe }
+struct Nest { inner: One }
+newtype Boxed = One
+enum Slot { Filled(One), Empty }
+"#;
+
+#[test]
+fn struct_fields_are_dropped_with_their_holder() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}{HOLDERS}
+func main() -> i32 {{
+    mut a: i32 = 0
+    mut b: i32 = 0
+    {{
+        val h = Pair {{ a: Probe {{ sink: &mut a }}, b: Probe {{ sink: &mut b }} }}
+    }}
+    return a + b
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_struct_fields.nr", &source)
+        .expect("Drop program should compile and run");
+    assert_eq!(exit_code, 2, "both fields are destroyed with the struct");
+}
+
+#[test]
+fn array_and_tuple_elements_are_dropped_with_their_holder() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}{HOLDERS}
+func main() -> i32 {{
+    mut a: i32 = 0
+    mut b: i32 = 0
+    mut t: i32 = 0
+    {{
+        val arr = [Probe {{ sink: &mut a }}, Probe {{ sink: &mut b }}]
+        val pair = (Probe {{ sink: &mut t }}, 7)
+    }}
+    return a + b + t
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_array_tuple.nr", &source)
+        .expect("Drop program should compile and run");
+    assert_eq!(
+        exit_code, 3,
+        "every element of both aggregates is destroyed"
+    );
+}
+
+#[test]
+fn an_enum_payload_is_dropped_with_the_active_variant() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}{HOLDERS}
+func main() -> i32 {{
+    mut filled: i32 = 0
+    {{
+        val held = Slot::Filled(One {{ a: Probe {{ sink: &mut filled }} }})
+        val empty = Slot::Empty
+    }}
+    return filled
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_enum_payload.nr", &source)
+        .expect("Drop program should compile and run");
+    assert_eq!(
+        exit_code, 1,
+        "the filled variant's payload is destroyed and the empty one has none"
+    );
+}
+
+#[test]
+fn a_newtype_inner_value_and_a_nested_holder_are_dropped() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}{HOLDERS}
+func main() -> i32 {{
+    mut boxed: i32 = 0
+    mut nested: i32 = 0
+    {{
+        val b = Boxed(One {{ a: Probe {{ sink: &mut boxed }} }})
+        val n = Nest {{ inner: One {{ a: Probe {{ sink: &mut nested }} }} }}
+    }}
+    return boxed + nested
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_newtype_nested.nr", &source)
+        .expect("Drop program should compile and run");
+    assert_eq!(
+        exit_code, 2,
+        "a newtype is transparent and a holder's holder is reached too"
+    );
+}
+
+#[test]
+fn a_field_moved_out_is_dropped_once_and_its_sibling_still_dropped() {
+    // The partial-move case: giving up `h.a` disowns that position alone, so the
+    // binding it moved into destroys it and the holder destroys what it still owns.
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}{HOLDERS}
+func main() -> i32 {{
+    mut moved: i32 = 0
+    mut kept: i32 = 0
+    {{
+        val h = Pair {{ a: Probe {{ sink: &mut moved }}, b: Probe {{ sink: &mut kept }} }}
+        val taken = h.a
+    }}
+    return moved + kept
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_partial_move.nr", &source)
+        .expect("Drop program should compile and run");
+    assert_eq!(exit_code, 2, "each value is destroyed exactly once");
+}
+
+#[test]
+fn a_displaced_field_value_is_dropped_at_the_field_assignment() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}{HOLDERS}
+func main() -> i32 {{
+    mut first: i32 = 0
+    mut second: i32 = 0
+    {{
+        mut h = One {{ a: Probe {{ sink: &mut first }} }}
+        h.a = Probe {{ sink: &mut second }}
+    }}
+    return first + second
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_field_assign.nr", &source)
+        .expect("Drop program should compile and run");
+    assert_eq!(
+        exit_code, 2,
+        "the displaced field goes at the assignment and its replacement at scope exit"
+    );
+}
+
+#[test]
+fn reassigning_a_holder_releases_what_it_held() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}{HOLDERS}
+func main() -> i32 {{
+    mut first: i32 = 0
+    mut second: i32 = 0
+    {{
+        mut h = One {{ a: Probe {{ sink: &mut first }} }}
+        h = One {{ a: Probe {{ sink: &mut second }} }}
+    }}
+    return first + second
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_holder_reassign.nr", &source)
+        .expect("Drop program should compile and run");
+    assert_eq!(
+        exit_code, 2,
+        "the displaced holder's field goes at the assignment, the new one at scope exit"
+    );
+}
+
+#[test]
+fn a_holder_moved_into_a_callee_is_dropped_once() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}{HOLDERS}
+func swallow(h: One) -> i32 {{ return 0 }}
+
+func main() -> i32 {{
+    mut count: i32 = 0
+    {{
+        val h = One {{ a: Probe {{ sink: &mut count }} }}
+        val ignored = swallow(h)
+    }}
+    return count
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_holder_moved.nr", &source)
+        .expect("Drop program should compile and run");
+    assert_eq!(
+        exit_code, 1,
+        "the callee owns the holder, so the caller must not release its field too"
+    );
+}
+
+#[test]
+fn a_collection_read_out_of_a_field_is_released_once() {
+    // A collection copied out of a field to be read aliases the holder's buffer, so
+    // only the holder's drop may free it.
+    let test = CompileTest::new();
+    let source = r#"
+struct Bag { items: Vec<i32> }
+
+func build() -> Bag {
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    v.push(2)
+    return Bag { items: v }
+}
+
+func main() -> i32 {
+    val b = build()
+    return b.items.len() as i32
+}
+"#;
+    let exit_code = test
+        .compile_and_run("drop_field_collection.nr", source)
+        .expect("Drop program should compile and run");
+    assert_eq!(exit_code, 2, "the field's buffer is read, not double-freed");
+}

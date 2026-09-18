@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
-use super::context::{CodegenContext, DropTarget};
+use super::context::CodegenContext;
 
 /// The implicit method receiver's binding name. `self` is a keyword, so nothing else
 /// in a body can be bound under it.
@@ -302,25 +302,17 @@ impl<'ctx> CodegenContext<'ctx> {
         // receiver is not: its value stays the caller's.
         self.push_drop_scope();
         if matches!(method.self_param, Some(HirSelfParam::Owned)) {
-            if let Some(target) = self.drop_target(&HirType::Struct(struct_name.to_string())) {
-                if let Some(alloca) = self.variables.get(SELF_BINDING).copied() {
-                    self.register_local_drop(SELF_BINDING, alloca, target)?;
-                }
+            if let Some(alloca) = self.variables.get(SELF_BINDING).copied() {
+                let self_ty = Type::Struct(struct_name.to_string());
+                self.register_owned_binding(SELF_BINDING, alloca, &self_ty)?;
             }
         }
         for (i, param) in method.params.iter().enumerate() {
-            let owns_heap = match param_types.get(non_self_start + i) {
-                Some(Type::Struct(name)) if self.drop_types.contains(name) => {
-                    Some(DropTarget::UserDrop(name.clone()))
-                }
-                Some(Type::Collection { .. }) => Some(DropTarget::Collection),
-                Some(Type::Tensor { .. }) => Some(DropTarget::TensorBuffer),
-                _ => None,
-            };
-            if let Some(target) = owns_heap {
-                if let Some(alloca) = self.variables.get(&param.name).copied() {
-                    self.register_local_drop(&param.name, alloca, target)?;
-                }
+            if let (Some(param_ty), Some(alloca)) = (
+                param_types.get(non_self_start + i).cloned(),
+                self.variables.get(&param.name).copied(),
+            ) {
+                self.register_owned_binding(&param.name, alloca, &param_ty)?;
             }
         }
         self.codegen_body(&method.body, return_type)
@@ -438,18 +430,11 @@ impl<'ctx> CodegenContext<'ctx> {
         // registered as their declarations are lowered.
         self.push_drop_scope();
         for (i, param) in func_def.params.iter().enumerate() {
-            let owns_heap = match param_types.get(i) {
-                Some(Type::Struct(name)) if self.drop_types.contains(name) => {
-                    Some(DropTarget::UserDrop(name.clone()))
-                }
-                Some(Type::Collection { .. }) => Some(DropTarget::Collection),
-                Some(Type::Tensor { .. }) => Some(DropTarget::TensorBuffer),
-                _ => None,
-            };
-            if let Some(target) = owns_heap {
-                if let Some(alloca) = self.variables.get(&param.name).copied() {
-                    self.register_local_drop(&param.name, alloca, target)?;
-                }
+            if let (Some(param_ty), Some(alloca)) = (
+                param_types.get(i).cloned(),
+                self.variables.get(&param.name).copied(),
+            ) {
+                self.register_owned_binding(&param.name, alloca, &param_ty)?;
             }
         }
         self.codegen_body(&func_def.body, return_type)

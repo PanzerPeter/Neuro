@@ -176,6 +176,15 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
 
         let obj_ty = Type::from_hir(&iterable.ty);
+        // `for x in arr` binds each element BY VALUE, so the loop takes over the array's
+        // elements: each iteration's binding owns the one it holds and destroys it at the
+        // iteration's end. Disowning the source first is what keeps the array from
+        // destroying the same elements again at its own scope exit. `for x in &arr`
+        // borrows instead and leaves ownership where it is.
+        let consumes_elements = !matches!(obj_ty, Type::Reference { .. });
+        if consumes_elements {
+            self.mark_moved_for_drop(iterable);
+        }
         let (base_ptr, element_ty, size) = self.array_place_ptr(iterable, &obj_ty)?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let arr_llvm = elem_llvm.array_type(size as u32);
@@ -248,6 +257,9 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let body_scope_index = self.drop_scopes.len();
         self.push_drop_scope();
+        if consumes_elements {
+            self.register_owned_binding(&iter_name, elem_alloca, &element_ty)?;
+        }
         self.loop_targets.push(LoopTargets {
             label: label.map(str::to_string),
             continue_bb: step_bb,

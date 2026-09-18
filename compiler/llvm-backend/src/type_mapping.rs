@@ -112,6 +112,12 @@ impl<'ctx> TypeMapper<'ctx> {
         Ok((slots, words))
     }
 
+    /// The declared payload field types of a named enum, by variant in discriminant
+    /// order. `None` when the name is not a declared enum.
+    pub(crate) fn enum_payload_types(&self, name: &str) -> Option<&Vec<Vec<Type>>> {
+        self.enum_payloads.get(name)
+    }
+
     /// The payload slot type of a named enum: `[K x i64]`, one variant field's storage.
     pub(crate) fn enum_slot_type(
         &self,

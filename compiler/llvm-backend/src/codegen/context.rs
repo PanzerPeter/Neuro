@@ -197,6 +197,29 @@ pub(crate) struct DropEntry<'ctx> {
     pub(crate) flag_ptr: PointerValue<'ctx>,
     /// What running the destructor means for this binding.
     pub(crate) target: DropTarget,
+    /// The owners this binding HOLDS, flattened to one entry per droppable position
+    /// inside it, in declaration order. Empty for a binding that holds nothing, which
+    /// is every binding of a scalar, a string, a collection or a tensor.
+    pub(crate) held: Vec<HeldDrop<'ctx>>,
+}
+
+/// One owner reachable from a binding by a statically known field or element path.
+///
+/// Its own `i1` flag is what makes a partial move sound: giving up `h.a` clears that
+/// path's flag and leaves its siblings armed, so the holder's scope exit destroys the
+/// elements it still owns and nothing else.
+pub(crate) struct HeldDrop<'ctx> {
+    /// Accessor segments from the binding, as they are written: a struct field name,
+    /// or the decimal position of a tuple element or array element. A move site
+    /// matches by prefix, so disowning `h.a` also disowns `h.a.inner`.
+    pub(crate) path: Vec<String>,
+    /// Address of this position inside the binding's storage, GEP'd once at the
+    /// binding site so every later drop site is a plain load away.
+    pub(crate) storage_ptr: PointerValue<'ctx>,
+    /// The `i1` drop-flag slot guarding this position alone.
+    pub(crate) flag_ptr: PointerValue<'ctx>,
+    /// What running the destructor means for the value at this position.
+    pub(crate) target: DropTarget,
 }
 
 /// How a scope-exit destructor is emitted for an owned binding.
@@ -219,6 +242,13 @@ pub(crate) enum DropTarget {
     /// move out of it is tracked like any other, but its release is the arena's LIFO
     /// sweep at the block's closing brace, not this binding's scope exit.
     PoolRegistered,
+    /// An enum value whose active variant may carry an owner. Which payload slots are
+    /// live depends on the tag, so the release switches on it rather than following a
+    /// static path the way every other held position does.
+    EnumPayload(String),
+    /// A value that releases nothing itself and only holds owners, such as a plain
+    /// struct of tensors. `DropEntry::held` carries the work; this target emits none.
+    Aggregate,
 }
 
 /// Central state container for LLVM IR code generation.

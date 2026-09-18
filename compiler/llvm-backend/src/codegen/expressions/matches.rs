@@ -50,6 +50,17 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_store(scrut_alloca, scrut_val)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
+        // A binding an arm takes by value carries whatever the scrutinee held out of it.
+        // Which position leaves depends on the tag, which is not knowable here, so every
+        // owner the scrutinee holds is disowned at once: a payload the taken arm did not
+        // bind leaks rather than being released twice.
+        if let HirExprKind::Variable(name) = &scrutinee.kind {
+            if arms.iter().any(|arm| !arm.bindings.is_empty()) {
+                let name = name.clone();
+                self.mark_held_moved_for_drop(&name);
+            }
+        }
+
         let is_void = matches!(result_ty, Type::Void);
         let result_slot = if is_void {
             None

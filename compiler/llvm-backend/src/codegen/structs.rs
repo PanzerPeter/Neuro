@@ -214,6 +214,10 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
         let val = self.codegen_expr(value)?;
+        // Ordered as a binding's reassignment is: the field may be read on the way to
+        // replacing itself, so its prior value loses its owner only once the new one
+        // has been built.
+        self.drop_displaced_held_value(object_name, &[field_name.to_string()])?;
         self.builder
             .build_store(field_ptr, val)
             .map_err(|e| CodegenError::LlvmError(format!("failed to store field: {}", e)))?;
