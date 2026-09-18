@@ -506,6 +506,10 @@ impl<'ctx> CodegenContext<'ctx> {
             let lhs_str = self.load_string_fatptr(lhs)?;
             let rhs_str = self.load_string_fatptr(rhs)?;
             let eq = self.codegen_string_eq(lhs_str, rhs_str)?;
+            // The compare reads both byte runs and keeps neither, so an operand built
+            // for this comparison alone is dead the moment it answers.
+            self.release_string_temporary(left, lhs_str)?;
+            self.release_string_temporary(right, rhs_str)?;
             return match op {
                 BinaryOp::Equal => Ok(eq.into()),
                 _ => Ok(self
@@ -541,7 +545,14 @@ impl<'ctx> CodegenContext<'ctx> {
         if matches!(op, BinaryOp::Add) && matches!(left_ty.referent(), Type::String) {
             let lhs_str = self.load_string_fatptr(lhs)?;
             let rhs_str = self.load_string_fatptr(rhs)?;
-            return self.codegen_string_concat(lhs_str, rhs_str);
+            let joined = self.codegen_string_concat(lhs_str, rhs_str)?;
+            // Both operands' bytes are already copied into the fresh buffer, so an
+            // operand that allocated one of its own (the left of `a + b + c`) has no
+            // reader left. Releasing it here is what keeps a chain of concatenations
+            // from leaking every intermediate result.
+            self.release_string_temporary(left, lhs_str)?;
+            self.release_string_temporary(right, rhs_str)?;
+            return Ok(joined);
         }
 
         // Coerce both operands to the left-operand semantic type.  Literals always

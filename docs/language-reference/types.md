@@ -1507,8 +1507,11 @@ equally; the map only needs that much.
 ### Current limits
 
 - A `string` stored in a collection is not freed when the collection is dropped;
-  only the collection's own buffer is. This matches the existing string-concat
-  limitation and resolves with the heap-string work.
+  only the collection's own buffer is. An owned `string` is released at the consumer
+  that reads and discards it ([strings](strings.md#storage-and-the-len-guarantee)),
+  and a collection element is the opposite case: the element outlives the expression
+  that stored it, so releasing there would leave the collection holding a dangling
+  pointer.
 - `Vec<T>` does not go through the `IntoIterator` / `Iterator` protocol
   ([control flow](control-flow.md#the-iteration-protocol)): `for x in v` lowers to
   a counted loop, exactly as `for x in arr` does, and so does

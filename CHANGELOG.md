@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.46.0] - 2026-09-18
+
+### Added
+
+- Release for anonymous heap strings. The owned `string` a `+`, an interpolation or
+  `String::to_string` produces belongs to no binding, so no scope exit could reach it. It
+  is now released at the consumer that reads and discards it: both `+` operands, both
+  `==` / `!=` operands, a `.len()` receiver, a `push_str` argument, and a statement whose
+  value nothing reads, alongside the `print` / `println` argument and the interpolation
+  hole that already were. `a + b + c` in a loop, `(a + b).len()`, `b.push_str(a + b)` and
+  `a + b == c` hold a flat heap instead of growing one buffer per iteration.
+- `String::to_string` counts as a provable allocation, so a binding initialized or
+  reassigned from a builder's copy-out owns that buffer and releases it at scope exit.
+  A program that shadows `String` with its own type is unaffected.
+
+### Notes
+
+- The release goes through `__neuro_release`, so a temporary a `pool` block allocated from
+  the arena is left to the arena's own sweep rather than handed to `free`.
+- A `string` that reaches a position able to store it (a collection element, a struct
+  field, a by-value call argument, a return value) is still released by nobody. Releasing
+  where the buffer outlives the expression would dangle rather than free.
+
 ## [2.45.1] - 2026-09-18
 
 ### Fixed

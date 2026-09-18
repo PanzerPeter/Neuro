@@ -16,9 +16,13 @@ use neuro_hir::{HirExpr, HirExprKind, HirType};
 use shared_types::Literal;
 
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::Type;
+use crate::types::{CollectionKind, Type};
 
 use super::context::{CodegenContext, DropEntry, DropTarget, HeldDrop};
+
+/// The `String` builder method that copies its bytes out into an owned `string`.
+/// Matched by name here the way the builder type itself is matched by name.
+const TO_OWNED_METHOD: &str = "to_string";
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Open a new lexical scope. Paired with [`pop_drop_scope`].
@@ -202,9 +206,9 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Whether evaluating `expr` always yields a freshly `malloc`'d string buffer
     /// that nothing else aliases, making its consumer responsible for releasing it.
     ///
-    /// Deliberately conservative: it answers `true` only for the two producers that
+    /// Deliberately conservative: it answers `true` only for the producers that
     /// allocate unconditionally. A `.rodata` literal, a variable, a `slice` borrowing
-    /// its source, and a value returned by a function (which may have returned
+    /// its source, and a value returned by a user function (which may have returned
     /// either a literal or a heap buffer, indistinguishably) all answer `false` and are never
     /// freed. The asymmetry is the point: a missed `true` leaks a buffer, while a wrong
     /// `true` frees `.rodata` or double-frees, so only provable ownership counts.
@@ -219,8 +223,63 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::Binary {
                 op: BinaryOp::Add, ..
             } => matches!(Type::from_hir(&expr.ty), Type::String),
+            // `String::to_string` is `codegen_string_to_owned`, which copies the
+            // builder's live bytes into a buffer of their own on every call. It reaches
+            // here as the `FieldAccess` callee a method call lowers to; a program that
+            // declares its own `String` shadows the builder, and its receiver is then a
+            // `Type::Struct` that this arm does not match.
+            HirExprKind::Call { callee, args } if args.is_empty() => match &callee.kind {
+                HirExprKind::FieldAccess { object, field } => {
+                    field == TO_OWNED_METHOD
+                        && matches!(
+                            Type::from_hir(&object.ty).referent(),
+                            Type::Collection {
+                                kind: CollectionKind::String,
+                                ..
+                            }
+                        )
+                }
+                _ => false,
+            },
             _ => false,
         }
+    }
+
+    /// Release the buffer behind an owned `string` that a consumer has finished reading
+    /// and that no binding will ever name.
+    ///
+    /// Emitted at the consumers that provably copy the bytes out and retain none of
+    /// them: a `+` operand, an `==` operand, a `.len()` receiver, a `push_str` argument,
+    /// and a statement whose value is discarded. A consumer that may STORE the fat
+    /// pointer instead (a by-value call argument, a collection element, a struct field)
+    /// is deliberately not one of them: the buffer outlives the expression there, so
+    /// releasing it would hand out a dangling pointer. It leaks instead, which is the
+    /// direction [`produces_owned_string`] already errs in.
+    pub(crate) fn release_string_temporary(
+        &self,
+        expr: &HirExpr,
+        fat_ptr: BasicValueEnum<'ctx>,
+    ) -> CodegenResult<()> {
+        if !Self::produces_owned_string(expr) {
+            return Ok(());
+        }
+        let BasicValueEnum::StructValue(fat_ptr) = fat_ptr else {
+            return Err(CodegenError::InternalError(
+                "an owned string temporary reached its release as something other than a fat pointer"
+                    .to_string(),
+            ));
+        };
+        let buffer = self
+            .builder
+            .build_extract_value(fat_ptr, 0, "str.tmp.buf")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let free_fn = self.release_fn()?;
+        self.builder
+            .build_call(free_fn, &[buffer.into()], "")
+            .map_err(|e| {
+                CodegenError::LlvmError(format!("failed to free a string temporary: {}", e))
+            })?;
+        Ok(())
     }
 
     /// Release the heap buffer behind a `string` fat pointer held in `storage_ptr`.

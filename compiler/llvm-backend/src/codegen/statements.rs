@@ -989,10 +989,16 @@ impl<'ctx> CodegenContext<'ctx> {
             HirStmt::Expr(expr) => {
                 // A call in statement position may return unit `()`; dispatch directly so
                 // a void result is discarded rather than treated as a missing value.
-                if let HirExprKind::Call { callee, args } = &expr.kind {
-                    self.codegen_call_dispatch(callee, args, &expr.span)?;
+                //
+                // Nothing reads a statement's value, so an owned `string` it produced has
+                // no consumer at all and is released here rather than at one.
+                let value = if let HirExprKind::Call { callee, args } = &expr.kind {
+                    self.codegen_call_dispatch(callee, args, &expr.span)?
                 } else {
-                    self.codegen_expr(expr)?;
+                    Some(self.codegen_expr(expr)?)
+                };
+                if let Some(value) = value {
+                    self.release_string_temporary(expr, value)?;
                 }
                 Ok(())
             }

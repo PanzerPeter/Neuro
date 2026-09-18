@@ -1249,3 +1249,98 @@ fn random_normal_fills_the_buffer_through_the_module_generator() {
         "the fill is a counted loop over the buffer:\n{body}"
     );
 }
+
+/// A chain of concatenations allocates one buffer per `+`, and every buffer but the
+/// last is read by the next `+` and then unreachable. Without a release at the operand
+/// the chain leaks every intermediate result, which is what `a + b + c` in a loop shows
+/// up as. The count is what is asserted: one release for the intermediate, one for the
+/// binding that owns the final buffer.
+#[test]
+fn a_concatenation_chain_releases_its_intermediate_buffers() {
+    let source = r#"
+        func main() -> i32 {
+            val a = "one"
+            val s = a + a + a
+            return s.len() as i32
+        }
+    "#;
+    let body = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&body, "main");
+    assert_eq!(
+        body.matches("call void @__neuro_release(").count(),
+        2,
+        "the intermediate and the bound result are each released once:\n{body}"
+    );
+}
+
+/// An operand built for a comparison, a `.len()` receiver built for its call, and a
+/// concatenation in statement position all hand their buffer to a consumer that copies
+/// nothing out of it, so each is released where it is consumed rather than leaking.
+#[test]
+fn a_string_temporary_is_released_at_the_consumer_that_discards_it() {
+    let cases = [
+        r#"if a + a == a { return 1 }"#,
+        r#"return (a + a).len() as i32"#,
+        r#"a + a"#,
+    ];
+    for case in cases {
+        let source = format!(
+            r#"
+        func main() -> i32 {{
+            val a = "one"
+            {case}
+            return 0
+        }}
+    "#
+        );
+        let ir = module_ir(&source, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        assert!(
+            body.contains("call void @__neuro_release("),
+            "`{case}` leaves its operand unreleased:\n{body}"
+        );
+    }
+}
+
+/// `String::to_string` copies the builder's bytes into a buffer of their own on every
+/// call, so a binding initialized from it owns that buffer and releases it at scope
+/// exit, exactly as one initialized from `+` does. A user `to_string` on a struct is
+/// not the builder's and must not be mistaken for it.
+#[test]
+fn the_builder_copy_out_is_an_owned_string_and_a_user_method_is_not() {
+    let owned = r#"
+        func main() -> i32 {
+            mut b = String::new()
+            b.push_str("text")
+            val s = b.to_string()
+            return s.len() as i32
+        }
+    "#;
+    let ir = module_ir(owned, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert_eq!(
+        body.matches("call void @__neuro_release(").count(),
+        2,
+        "the copy and the builder's own buffer are each released:\n{body}"
+    );
+
+    let shadowed = r#"
+        struct Tag { id: i32 }
+
+        impl Tag {
+            func to_string(&self) -> string { "tag" }
+        }
+
+        func main() -> i32 {
+            val t = Tag { id: 1 }
+            val s = t.to_string()
+            return s.len() as i32
+        }
+    "#;
+    let ir = module_ir(shadowed, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert!(
+        !body.contains("call void @__neuro_release("),
+        "a user `to_string` returns a literal and owns nothing:\n{body}"
+    );
+}

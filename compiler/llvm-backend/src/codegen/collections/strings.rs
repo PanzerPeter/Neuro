@@ -57,6 +57,11 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_call(memcpy, &[dst.into(), src.into(), extra.into()], "")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
+        // The append copies the argument's bytes into the builder's own buffer and
+        // stores nothing of the argument itself, so one built for this call (the
+        // `b.push_str(a + b)` shape) has no reader left.
+        self.release_string_temporary(text_expr, text)?;
+
         let grown = self
             .builder
             .build_int_add(len, extra, "str.len.new")

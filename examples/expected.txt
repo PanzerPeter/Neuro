@@ -175,6 +175,7 @@ showcase/telemetry/main.nr           75
 showcase/telemetry/report/format.nr  module
 showcase/telemetry/report/mod.nr     module
 showcase/telemetry/stats.nr          module
+showcase/transient_text.nr           86
 showcase/typed_channels.nr           108
 showcase/unit_types.nr               94
 showcase/vector_physics.nr           35

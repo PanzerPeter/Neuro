@@ -29,11 +29,16 @@ impl<'ctx> CodegenContext<'ctx> {
             // A `&string` receiver is auto-dereferenced first.
             BuiltinMethod::StringLen => {
                 let struct_val = self.string_receiver_struct(receiver)?;
-                self.builder
+                let len = self
+                    .builder
                     .build_extract_value(struct_val, 1, "str.len")
                     .map_err(|e| {
                         CodegenError::LlvmError(format!("failed to extract string length: {}", e))
-                    })
+                    })?;
+                // Only the length word leaves the call, so a receiver built for it (the
+                // `(a + b).len()` shape) is dead once that word is in hand.
+                self.release_string_temporary(receiver, struct_val.into())?;
+                Ok(len)
             }
             // `string.clone()`, an explicit deep copy of an owned string.
             // String literals live in immutable `.rodata` and no heap-backed string type

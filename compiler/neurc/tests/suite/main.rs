@@ -94,6 +94,7 @@ mod string_builder;
 mod string_concat;
 mod string_interpolation;
 mod string_slice;
+mod string_temporaries;
 mod string_type;
 mod struct_by_value;
 mod struct_shorthand_update;

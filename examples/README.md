@@ -133,6 +133,7 @@ One line each. The program's own header comment is the full description.
 - [`status_report.nr`](showcase/status_report.nr): a formatted status report built from live readings
 - [`stream_pipeline.nr`](showcase/stream_pipeline.nr): the iteration protocol carrying a small stream pipeline
 - [`telemetry/main.nr`](showcase/telemetry/main.nr): multi-file compilation and `import` over prior features
+- [`transient_text.nr`](showcase/transient_text.nr): headings, rows and comparisons built from strings nothing ever binds, released where they are read
 - [`typed_channels.nr`](showcase/typed_channels.nr): associated types, one trait with three implementors
 - [`unit_types.nr`](showcase/unit_types.nr): newtype units of measure over structs, enums and methods
 - [`vector_physics.nr`](showcase/vector_physics.nr): operator traits driving a vector physics step

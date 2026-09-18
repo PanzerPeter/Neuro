@@ -156,25 +156,33 @@ the `len` contract). The frontend types the result as owned `String` even when a
 The fat pointer describes a `.rodata` literal and a `malloc`'d buffer identically, so ownership
 cannot be read off a value at runtime. It is decided at compile time instead, by
 `produces_owned_string` (`drops.rs`): an expression owns its buffer only if it is an
-`InterpString` or a `+` yielding `string`: the two producers that allocate unconditionally.
-Everything else (a literal, a variable, a `slice`, a value returned by a function that could have
-returned either) answers `false` and is never freed. The asymmetry is deliberate: a missed `true`
-leaks a buffer, a wrong `true` hands `.rodata` to `free`.
+`InterpString`, a `+` yielding `string`, or `String::to_string`: the producers that allocate
+unconditionally. Everything else (a literal, a variable, a `slice`, a value returned by a user
+function that could have returned either) answers `false` and is never freed. The asymmetry is
+deliberate: a missed `true` leaks a buffer, a wrong `true` hands `.rodata` to `free`.
 
-Two consumers act on that answer. `codegen_var_decl` registers a `string` binding whose initializer
-owns its buffer as `DropTarget::HeapString`, so the scope-exit machinery releases it exactly as it
-releases a collection's storage, flag-guarded against a move. `codegen_io_builtin` releases an
-argument it can prove the caller built, since `write` retains none of the bytes it copies out.
+Consumers act on that answer in one of two ways. A consumer that keeps the value registers an
+owner for it: `codegen_var_decl` registers a `string` binding whose initializer owns its buffer as
+`DropTarget::HeapString`, so the scope-exit machinery releases it exactly as it releases a
+collection's storage, flag-guarded against a move. A consumer that copies the bytes out and keeps
+none of them calls `release_string_temporary` instead, which frees the buffer on the spot when the
+operand produced one. This is what makes an *anonymous* heap string, one no binding ever names,
+reachable by a release at all. Those consumers are `print` / `println`'s argument, an interpolation
+hole, both `+` operands, both `==` / `!=` operands, a `.len()` receiver, a `push_str` argument, and
+a statement whose value nothing reads. The release goes through `__neuro_release`, so a temporary a
+`pool` block allocated from the arena is left to the arena's own sweep.
 
-Reassigning such a binding releases the buffer it displaces and then re-derives ownership from
+Reassigning a registered binding releases the buffer it displaces and then re-derives ownership from
 the assigned expression, so `s = s + "!"` frees the old buffer and keeps the new one while
 `s = "literal"` frees the old buffer and leaves the binding owning nothing.
 
-**Known limits**: a heap string that escapes into a collection, a struct field, or a function's
-return value is still owned by nothing and leaks (the conservative answer, not a regression). A
-binding reassigned from another `string` binding is the same case: the source's flag is cleared
-by the move and the destination re-arms only for a producer that provably allocates, so the
-buffer outlives both.
+**Known limits**: a heap string that escapes into a collection, a struct field, a by-value call
+argument, or a function's return value is still owned by nothing and leaks (the conservative
+answer, not a regression). Those are exactly the positions that may STORE the fat pointer, so
+releasing at them would hand out a dangling pointer instead of leaking one buffer. A binding
+reassigned from another `string` binding is the same case: the source's flag is cleared by the move
+and the destination re-arms only for a producer that provably allocates, so the buffer outlives
+both.
 
 ## Struct ABI
 User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding:
@@ -999,8 +1007,9 @@ LIFO sweep as its only release, because a per-assignment free would return a poi
 still holds. A self-assignment (`p = p`) skips both the release and the move-marking, since the
 storage keeps the value it already had.
 
-**Known limits**: an anonymous heap `string` belongs to no binding and so is reached by no
-drop site at all.
+**Known limits**: an anonymous heap `string` reaches no drop site, because it belongs to no
+binding; it is released at its consumer instead (see Heap-string ownership above), and one that
+escapes into a position able to store it is released by nobody.
 
 ## Pool Arena ABI
 `arena.rs` carries the allocator behind `pool { }`: two internal globals,

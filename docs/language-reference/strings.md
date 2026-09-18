@@ -16,9 +16,13 @@ program; they are **not** heap-allocated, so a program that only reads literals 
 **Concatenation** (`a + b`) is the first runtime heap-backed string: it `malloc`s a fresh buffer
 and copies both operands' bytes in, yielding a new owned `string`. Both literal and heap-backed
 forms share the same `{ ptr, i64 }` ABI, so consumers cannot tell them apart. An anonymous heap
-`string` (the result of `+`, of interpolation, or of `String::to_string`) is owned by no
-binding the drop machinery tracks, so it still leaks; see the alpha memory warning in the README.
-A [`String`](#growable-strings-string) builder is different: it *is* a tracked binding, so its
+`string` (the result of `+`, of interpolation, or of `String::to_string`) is owned by no binding
+the drop machinery tracks, so it is released at the consumer that reads it instead: a `+` or `==`
+operand, a `.len()` receiver, a `push_str` argument, a `println` argument, an interpolation hole,
+or a statement whose value nothing reads. One that escapes into a position able to store it (a
+collection element, a struct field, a by-value argument, a return value) is still released by
+nobody and leaks; see the alpha memory warning in the README. A
+[`String`](#growable-strings-string) builder is different: it *is* a tracked binding, so its
 buffer is freed at scope exit.
 
 The pointer addresses a NUL-terminated byte sequence so it doubles as a valid C string for
