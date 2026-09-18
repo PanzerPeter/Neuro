@@ -166,9 +166,15 @@ owns its buffer as `DropTarget::HeapString`, so the scope-exit machinery release
 releases a collection's storage, flag-guarded against a move. `codegen_io_builtin` releases an
 argument it can prove the caller built, since `write` retains none of the bytes it copies out.
 
+Reassigning such a binding releases the buffer it displaces and then re-derives ownership from
+the assigned expression, so `s = s + "!"` frees the old buffer and keeps the new one while
+`s = "literal"` frees the old buffer and leaves the binding owning nothing.
+
 **Known limits**: a heap string that escapes into a collection, a struct field, or a function's
-return value is still owned by nothing and leaks (the conservative answer, not a regression). So
-does the prior value of a reassigned binding, matching the same limit the Drop ABI carries.
+return value is still owned by nothing and leaks (the conservative answer, not a regression). A
+binding reassigned from another `string` binding is the same case: the source's flag is cleared
+by the move and the destination re-arms only for a producer that provably allocates, so the
+buffer outlives both.
 
 ## Struct ABI
 User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding:
@@ -932,8 +938,17 @@ Each drop is flag-guarded (`if flag { drop(); flag = false }`), and `mark_moved_
 binding's flag at every move site (bind / assign / return / break value / call arg / struct-field
 store), so a moved value is dropped exactly once.
 
-**Known limits**: reassigning a `Drop` binding does not drop its prior value, and a struct's `Drop`
-fields are not auto-dropped (no recursive glue).
+Reassignment is the second drop site. `codegen_assignment` evaluates the new value, calls
+`drop_reassigned_value` to run the same flag-guarded release against the binding's storage, stores,
+and then calls `rearm_drop_flag` for the incoming value. The order is load-bearing: a reassignment
+may read the value it displaces (`s = s + "!"`), so releasing before the new value is built would
+hand the producer freed memory. Two bindings are exempt. A pool-registered one keeps the arena's
+LIFO sweep as its only release, because a per-assignment free would return a pointer the arena
+still holds. A self-assignment (`p = p`) skips both the release and the move-marking, since the
+storage keeps the value it already had.
+
+**Known limits**: a struct's `Drop` fields are not auto-dropped (no recursive glue), so a
+reassignment releases the holder and not what the holder holds.
 
 ## Pool Arena ABI
 `arena.rs` carries the allocator behind `pool { }`: two internal globals,

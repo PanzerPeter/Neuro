@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.44.0] - 2026-09-18
+
+### Added
+
+- codegen: reassigning a `mut` binding destroys the value it displaces. The destructor of a
+  user `Drop` type, a collection's buffer, a tensor's DLPack handle and a heap `string`'s
+  buffer are all released at the assignment instead of only at scope exit, so a binding
+  rotated through a loop no longer leaks one value per iteration.
+- codegen: the new value is built before the old one is released, so an assignment may read
+  the value it replaces — `s = s + "!"` and the `s += "!"` it desugars from both concatenate
+  out of the buffer the release then frees.
+- tests: reassignment cases in the `drop_destructors` suite (displaced value, value already
+  moved out, a loop rotating one binding, self-assignment), IR-level coverage for the heap
+  `string` and collection targets, and `examples/showcase/displaced_owners.nr` combining the
+  three with `Drop` destructors, a `&mut` sink, a range loop and interpolation.
+
+### Changed
+
+- codegen: a reassigned `string` binding's drop flag is re-derived from the assigned
+  expression rather than set, so replacing an owned buffer with a `.rodata` literal releases
+  the buffer and leaves the binding owning nothing. A pool-registered binding keeps the
+  arena's LIFO sweep as its only release, and `p = p` releases nothing.
+
 ## [2.43.0] - 2026-09-18
 
 ### Added

@@ -162,6 +162,113 @@ func main() -> i32 {{
 }
 
 #[test]
+fn reassignment_drops_the_prior_value() {
+    // The binding's first value loses its owner at the assignment, so its destructor
+    // runs there rather than being skipped; the replacement is still dropped at exit.
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}
+func main() -> i32 {{
+    mut count: i32 = 0
+    {{
+        mut p = Probe {{ sink: &mut count }}
+        p = Probe {{ sink: &mut count }}
+    }}
+    return count
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_reassign.nr", &source)
+        .expect("Drop program should compile and run");
+    assert_eq!(
+        exit_code, 2,
+        "the displaced value is dropped, and so is the one that replaced it"
+    );
+}
+
+#[test]
+fn reassignment_after_a_move_drops_only_the_new_value() {
+    // `val q = p` already handed the first value away, so the reassignment has nothing
+    // to release. The runtime drop flag is what tells the two cases apart.
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}
+func main() -> i32 {{
+    mut count: i32 = 0
+    {{
+        mut p = Probe {{ sink: &mut count }}
+        val q = p
+        p = Probe {{ sink: &mut count }}
+    }}
+    return count
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_reassign_moved.nr", &source)
+        .expect("Drop program should compile and run");
+    assert_eq!(
+        exit_code, 2,
+        "a value moved out before the reassignment must not be dropped twice"
+    );
+}
+
+#[test]
+fn reassignment_in_a_loop_drops_each_prior_value() {
+    // Four reassignments displace four values, and the fifth leaves at scope exit.
+    // Without the per-assignment release this is an unbounded leak in a loop.
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}
+func main() -> i32 {{
+    mut count: i32 = 0
+    {{
+        mut p = Probe {{ sink: &mut count }}
+        for i in 0..4 {{
+            p = Probe {{ sink: &mut count }}
+        }}
+    }}
+    return count
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_reassign_loop.nr", &source)
+        .expect("Drop program should compile and run");
+    assert_eq!(
+        exit_code, 5,
+        "every displaced value is dropped, plus the last one at scope exit"
+    );
+}
+
+#[test]
+fn a_binding_assigned_from_itself_is_dropped_once() {
+    // `p = p` leaves the storage holding what it already held, so releasing the "prior"
+    // value would leave the binding pointing at freed memory.
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}
+func main() -> i32 {{
+    mut count: i32 = 0
+    {{
+        mut p = Probe {{ sink: &mut count }}
+        p = p
+    }}
+    return count
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_reassign_self.nr", &source)
+        .expect("Drop program should compile and run");
+    assert_eq!(
+        exit_code, 1,
+        "a self-assignment drops the value exactly once"
+    );
+}
+
+#[test]
 fn copy_and_drop_conflict_is_rejected() {
     let source = r#"
 @derive(Copy)

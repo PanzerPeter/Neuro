@@ -316,9 +316,13 @@ Rules:
 - The `drop` method must be exactly `drop(&mut self)`: no extra parameters and
   no return type, and an `impl Drop` block may contain no other methods.
 
-Not yet supported: reassigning a `Drop` binding does not run the prior value's
-destructor, and a struct's `Drop`-typed fields are not dropped automatically
-(no recursive destructor glue).
+- Reassigning a `mut` binding runs the displaced value's destructor at the
+  assignment. The new value is built first, so a reassignment may read the value it
+  replaces; a value already moved out is not destroyed a second time.
+
+Not yet supported: a struct's `Drop`-typed fields are not dropped automatically
+(no recursive destructor glue), so reassigning a struct destroys the struct and not
+what its fields hold.
 
 ## Derived Traits (`@derive`)
 

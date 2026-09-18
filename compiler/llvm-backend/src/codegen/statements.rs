@@ -186,24 +186,43 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// Generate code for an assignment statement
+    /// Generate code for an assignment statement.
+    ///
+    /// Order is load-bearing: the new value is evaluated first, because a reassignment
+    /// may read the binding it overwrites; only then does the prior value lose its owner
+    /// and get released.
     pub(crate) fn codegen_assignment(&mut self, name: &str, value: &HirExpr) -> CodegenResult<()> {
         let val = self.codegen_expr(value)?;
 
+        // `p = p` changes no owner: the storage keeps the value it already held. Both
+        // the release below and the move-marking would disown a value that is still
+        // there, leaving the binding pointing at freed memory.
+        let assigns_from_itself =
+            matches!(&value.kind, HirExprKind::Variable(source) if source == name);
+        let rearm = if assigns_from_itself {
+            None
+        } else {
+            self.drop_reassigned_value(name)?
+        };
+
         // The variable's alloca must already exist from its declaration.
-        let var_ptr = self
+        let var_ptr = *self
             .variables
             .get(name)
             .ok_or_else(|| CodegenError::UndefinedVariable(name.to_string()))?;
 
-        self.builder.build_store(*var_ptr, val).map_err(|e| {
+        self.builder.build_store(var_ptr, val).map_err(|e| {
             CodegenError::LlvmError(format!("failed to store value in assignment: {}", e))
         })?;
 
-        // Assigning a place moves it into the target. The prior value held by a
-        // reassigned `Drop` binding is not dropped here (a known limitation); the target
-        // is still dropped once at scope exit.
-        self.mark_moved_for_drop(value);
+        // Assigning a place moves it into the target, so the source stops being an owner
+        // and the target starts being one.
+        if !assigns_from_itself {
+            self.mark_moved_for_drop(value);
+        }
+        if let Some((flag_ptr, target)) = rearm {
+            self.rearm_drop_flag(flag_ptr, &target, value)?;
+        }
 
         Ok(())
     }

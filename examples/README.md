@@ -104,6 +104,7 @@ One line each. The program's own header comment is the full description.
 - [`closures.nr`](showcase/closures.nr): closures and higher-order functions
 - [`config_manifest.nr`](showcase/config_manifest.nr): a config manifest rendered from typed records
 - [`derived_records.nr`](showcase/derived_records.nr): derived `Debug` and `PartialEq` over earlier features
+- [`displaced_owners.nr`](showcase/displaced_owners.nr): a reassigned binding releasing the value it displaces, across a `Drop` type, a heap `string` and a `Vec`
 - [`enum_records.nr`](showcase/enum_records.nr): pattern matching over enums, structs, methods and arrays
 - [`field_report.nr`](showcase/field_report.nr): standard I/O driving a field report
 - [`generic_toolkit.nr`](showcase/generic_toolkit.nr): generics, const generics, turbofish and `where` clauses together, plus a non-`Copy` type argument and `Drop` across a generic boundary

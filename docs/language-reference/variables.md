@@ -312,7 +312,8 @@ val n: u64 = msg.len()          // OK, the move above was conditional
 > tuple, enum, newtype or generic instance holding one of those. Scalars, aggregates
 > built only out of `Copy` parts, references, and `@derive(Copy)` structs are
 > freely duplicable. A type with a `Drop` impl cannot be `Copy`. `mut` bindings that
-> were moved can be revived by reassigning them a fresh value.
+> were moved can be revived by reassigning them a fresh value; a `mut` binding that
+> still holds one has that value destroyed by the assignment that replaces it.
 
 ## Type Annotations
 

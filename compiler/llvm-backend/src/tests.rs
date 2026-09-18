@@ -673,6 +673,82 @@ fn a_heap_initialized_string_binding_is_freed_at_scope_exit() {
 }
 
 #[test]
+fn a_reassigned_string_binding_frees_its_prior_buffer() {
+    // Two owners pass through one binding, so two buffers are released: the first at
+    // the reassignment that displaces it, the second at scope exit.
+    let source = r#"
+        func main() -> i32 {
+            mut s = "a" + "b"
+            s = s + "!"
+            println(s)
+            return 0
+        }
+    "#;
+
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+
+    assert_eq!(
+        free_calls(&ir, "main"),
+        2,
+        "the displaced buffer is released as well as the final one:\n{body}"
+    );
+    assert_eq!(
+        body.matches("store i1 true, ptr %drop.flag,").count(),
+        2,
+        "the declaration arms the flag and the reassignment re-arms it:\n{body}"
+    );
+}
+
+#[test]
+fn a_string_reassigned_from_a_literal_disowns_its_buffer() {
+    // The prior buffer is still released, but the literal that replaces it points at
+    // `.rodata`, so the binding must be left un-armed rather than freed again at exit.
+    let source = r#"
+        func main() -> i32 {
+            mut s = "a" + "b"
+            s = "plain"
+            println(s)
+            return 0
+        }
+    "#;
+
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+
+    // The scope-exit release is still emitted; what disowns the binding is the flag
+    // the reassignment leaves clear, so the guard at that site never takes its branch.
+    assert_eq!(
+        body.matches("store i1 true, ptr %drop.flag,").count(),
+        1,
+        "only the declaration arms the flag; the literal must not re-arm it:\n{body}"
+    );
+}
+
+#[test]
+fn a_reassigned_collection_binding_frees_its_prior_buffer() {
+    // A collection owns its buffer by type, so the re-armed flag is unconditional and
+    // both the displaced and the final vector are released.
+    let source = r#"
+        func main() -> i32 {
+            mut v: Vec<i32> = Vec::new()
+            v.push(1)
+            v = Vec::new()
+            return v.len() as i32
+        }
+    "#;
+
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+
+    assert_eq!(
+        free_calls(&ir, "main"),
+        2,
+        "the displaced vector's buffer is released as well as the final one:\n{}",
+        function_body(&ir, "main")
+    );
+}
+
+#[test]
 fn a_borrowed_string_binding_is_not_freed() {
     // Same shape, but the initializer is a literal: nothing was allocated, so nothing
     // may be released.

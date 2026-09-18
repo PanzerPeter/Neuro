@@ -196,6 +196,65 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
+    /// Release the value a reassigned binding is about to lose, and hand back its drop
+    /// flag and target so the caller can re-arm them for the incoming value.
+    ///
+    /// The caller must have evaluated the new value BEFORE calling this: a reassignment
+    /// is allowed to read the binding it overwrites (`s = s + "!"` concatenates out of
+    /// the very buffer this then frees), so releasing first would hand the concatenation
+    /// freed memory.
+    ///
+    /// Two bindings answer `None` and keep their prior value. One the drop pass never
+    /// tracked owns nothing to release. A pool-registered one is released by the arena's
+    /// LIFO sweep at the block's closing brace and by nothing else, so a per-assignment
+    /// release would free a pointer the arena still holds.
+    pub(crate) fn drop_reassigned_value(
+        &mut self,
+        name: &str,
+    ) -> CodegenResult<Option<(PointerValue<'ctx>, DropTarget)>> {
+        let entry = self
+            .drop_scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.iter().rev())
+            .find(|entry| entry.name == name)
+            .map(|entry| (entry.storage_ptr, entry.flag_ptr, entry.target.clone()));
+
+        let Some((storage_ptr, flag_ptr, target)) = entry else {
+            return Ok(None);
+        };
+        if matches!(target, DropTarget::PoolRegistered) {
+            return Ok(None);
+        }
+
+        self.emit_one_drop(storage_ptr, flag_ptr, &target)?;
+        Ok(Some((flag_ptr, target)))
+    }
+
+    /// Arm `flag_ptr` for the value a reassignment has just stored, so scope exit
+    /// releases the incoming value rather than the one already released.
+    ///
+    /// Ownership is re-derived from the assigned expression, not assumed: a `string`
+    /// binding owns a buffer only when the expression that produced it allocated one, so
+    /// reassigning a heap string from a `.rodata` literal must leave the flag clear.
+    /// Every other target's type proves the ownership on its own.
+    pub(crate) fn rearm_drop_flag(
+        &mut self,
+        flag_ptr: PointerValue<'ctx>,
+        target: &DropTarget,
+        value: &HirExpr,
+    ) -> CodegenResult<()> {
+        let owns_new_value = match target {
+            DropTarget::HeapString => Self::produces_owned_string(value),
+            _ => true,
+        };
+        let bool_ty = self.context.bool_type();
+        self.builder
+            .build_store(flag_ptr, bool_ty.const_int(owns_new_value as u64, false))
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        Ok(())
+    }
+
     /// Emit the destructor calls for the innermost scope, in reverse declaration
     /// order, then leave the scope in place (the caller pops it). Used at the normal
     /// fall-through end of a lexical block.

@@ -143,6 +143,7 @@ showcase/buffered_report.nr          40
 showcase/closures.nr                 90
 showcase/config_manifest.nr          80
 showcase/derived_records.nr          122
+showcase/displaced_owners.nr         8
 showcase/enum_records.nr             46
 showcase/field_report.nr             63
 showcase/generic_toolkit.nr          87
