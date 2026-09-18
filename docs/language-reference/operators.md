@@ -34,7 +34,7 @@ val joined: string = a + &b                   // "abcd"; a and b still valid
 > old one is released. One that escapes the analysis still leaks, notably a heap `string`
 > stored into a collection or a struct field, passed by value to a function, returned from one,
 > or handed to a binding by a plain move rather than by a producer that allocates. See the
-> alpha memory warning in the README.
+> [memory model](memory-model.md).
 
 ### Subtraction (`-`)
 

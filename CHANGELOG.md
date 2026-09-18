@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.46.1] - 2026-09-18
+
+### Changed
+
+- README restructured around what a first-time reader needs, in order: why the language
+  exists, a runnable example, installation and a first command, then capabilities,
+  benchmarks and the roadmap. "Why Neuro" moved from second-to-last to first, and the
+  manual table of contents was dropped in favour of a Documentation section that points at
+  the pages that own each topic.
+- The capability table is one line per row again, fourteen rows, with generics merged into
+  traits and structs into enums and newtypes. The per-feature detail it used to carry lives
+  in the language reference pages it links to.
+- The Language Syntax section (variables, functions, control flow, structs, closures) was
+  removed. Every construct it showed is documented in `docs/language-reference/`, and the
+  runnable versions are in `examples/`.
+
+### Added
+
+- `docs/language-reference/memory-model.md`: what is reclaimed and when, what still leaks in
+  alpha, and why the ownership test answers conservatively. The README keeps a four-line
+  note pointing here; `strings.md` and `operators.md`, which used to cite "the alpha memory
+  warning in the README", now cite this page.
+- `docs/guides/editor-support.md`: VS Code packaging steps, the symlink shortcut for grammar
+  work, the lexer-sync test, and loading the TextMate grammar in other editors. Moved out of
+  the README.
+- File extension table moved from the README to `docs/README.md`, with the three unshipped
+  extensions marked as planned.
+
 ## [2.46.0] - 2026-09-18
 
 ### Added

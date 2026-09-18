@@ -21,7 +21,7 @@ the drop machinery tracks, so it is released at the consumer that reads it inste
 operand, a `.len()` receiver, a `push_str` argument, a `println` argument, an interpolation hole,
 or a statement whose value nothing reads. One that escapes into a position able to store it (a
 collection element, a struct field, a by-value argument, a return value) is still released by
-nobody and leaks; see the alpha memory warning in the README. A
+nobody and leaks; see the [memory model](memory-model.md). A
 [`String`](#growable-strings-string) builder is different: it *is* a tracked binding, so its
 buffer is freed at scope exit.
 

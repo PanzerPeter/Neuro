@@ -11,46 +11,36 @@
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
 [![CI](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml)
 
-**Status:** Alpha. Phase 1 (Core Language) is complete: the full general-purpose language surface compiles and runs. Phase 2 (Tensors and MLIR) is now open. Per-phase status lives in one place: the [Quick Roadmap](#quick-roadmap).
+**Status: alpha.** Phase 1 (Core Language) is complete and the general-purpose language surface
+compiles and runs. Phase 2 (Tensors and MLIR) is open. Breaking changes are expected. Per-phase
+status lives in one place, the [Quick Roadmap](#quick-roadmap).
 
 ---
 
-## Table of Contents
+## Why Neuro
 
-- [Overview](#overview)
-- [Quick Example](#quick-example)
-- [Current Capabilities](#current-capabilities)
-- [Performance](#performance)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Language Syntax](#language-syntax)
-- [Architecture](#architecture)
-- [Quick Roadmap](#quick-roadmap)
-- [Development](#development)
-- [VSCode Extension](#vscode-extension)
-- [File Extensions](#file-extensions)
-- [Contributing](#contributing)
-- [License](#license)
-- [Acknowledgments](#acknowledgments)
-- [Security](SECURITY.md)
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Design Rationale](DESIGN.md)
+AI development runs on two languages: an interpreted one to write in, and C++ or CUDA underneath
+for anything that has to be fast. Crossing that boundary is where performance and type safety are
+lost. Neuro is one language on both sides of it.
 
----
+- **Native code, no interpreter.** Compiled ahead of time through LLVM 20, with no bytecode VM and
+  no global interpreter lock. On compute-bound programs it lands in the same range as
+  `clang -O2`; see [Performance](#performance).
+- **Shapes checked by the compiler.** `Tensor<T, [d0, d1]>` carries its dimensions in the type, so
+  a dimension mismatch is a compile error rather than an exception thrown ninety minutes into a
+  training run.
+- **Ownership without a garbage collector.** Move-by-default with `val`/`mut`, borrows, and
+  deterministic destruction, so there is no collector pause in the middle of a training step and
+  no shared mutable state to make parallel tensor code unsafe.
 
-## Overview
-
-Neuro is an Ahead-of-Time (AOT) compiled language for AI workloads. Python is interpreted and leans on C libraries for anything fast; Neuro compiles to native code through an LLVM 20 backend instead. Planned on top of that backend:
-
-- MLIR-based tensor operations, for static shape-verified tensor types
-- IR-level automatic differentiation via Enzyme
-- GPU acceleration via MLIR GPU dialects (nvgpu, rocdl)
+The full reasoning, including what Neuro deliberately is not, is in [DESIGN.md](DESIGN.md).
 
 ---
 
 ## Quick Example
 
-A single perceptron with ReLU activation; uses structs, `impl` blocks, associated functions, instance methods, if-expressions, implicit returns, and `println`. [This file compiles and runs today.](examples/structs/neuron.nr)
+A single perceptron with ReLU activation, using structs, `impl` blocks, instance methods,
+if-expressions and implicit returns. [This file compiles and runs today.](examples/structs/neuron.nr)
 
 ```neuro
 struct Neuron {
@@ -78,11 +68,11 @@ impl Neuron {
 func main() -> i32 {
     val neuron = Neuron::new(0.5, -0.1)
 
-    val dead = neuron.activate(0.0)         // 0.0 * 0.5 − 0.1 = −0.1 → clamped to 0.0
+    val dead = neuron.activate(0.0)         // 0.0 * 0.5 - 0.1 = -0.1 -> clamped to 0.0
     val dead_fires = neuron.is_active(0.0)
     println("input 0.0 -> {dead:.2}  fires: {dead_fires}")
 
-    val active = neuron.activate(1.0)       // 1.0 * 0.5 − 0.1 =  0.4 → passes through
+    val active = neuron.activate(1.0)       // 1.0 * 0.5 - 0.1 =  0.4 -> passes through
     val active_fires = neuron.is_active(1.0)
     println("input 1.0 -> {active:.2}  fires: {active_fires}")
 
@@ -97,110 +87,47 @@ input 0.0 -> 0.00  fires: false
 input 1.0 -> 0.40  fires: true
 ```
 
----
-
-## Current Capabilities
-
-Every row below is implemented, tested, and usable today. Depth lives elsewhere: the [documentation site](https://neuro-lang.netlify.app/) and [docs/](docs/) for reference material, [CHANGELOG.md](CHANGELOG.md) for the per-release detail, and the [Quick Roadmap](#quick-roadmap) for what is still ahead.
-
-| Feature | Summary |
-|---|---|
-| **Types & inference** | `i8` through `u64`, `f16`/`bf16`/`f32`/`f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, type aliases, `.is_nan()` |
-| **Functions & control flow** | Recursion, forward refs, implicit returns, named arguments with external labels (`clamp(x, min: 0.0)`); `if`/`elif`/`else`, `while`, `loop`, range-`for`, `for i in (0..n).rev()`, `for (i, x) in xs.enumerate()`, labelled `break`/`continue`, block-as-value; `for` over any type implementing the prelude's `IntoIterator` / `Iterator` protocol, plus `.map(f)` / `.filter(p)` head adapters |
-| **Generics** | Generic functions, structs, and impls plus const generics, `where` clauses, and turbofish, all fully monomorphized at zero runtime cost; a type argument may be any type, and an instance holding a non-`Copy` one moves with it |
-| **Traits & dispatch** | Required and default methods, associated types (`type Item` / `Self::Item`) and `Trait<Assoc = T>` bounds, operator traits, `impl Trait` (static) and `dyn Trait` (vtable) dispatch with object-safety checks |
-| **Closures & lambdas** | `\|x: i32\| x * x`, `move` closures, `(T) -> R` function types, higher-order functions; compiled to `{ fn_ptr, env_ptr }`, no heap |
-| **Structs & methods** | Fields, shorthand init, functional update `..base`, `impl` blocks with `&self` / `&mut self` / consuming `self` methods and associated functions; `@derive(Copy, Clone, Debug, PartialEq)` for copying, `{p:?}` rendering, and structural equality |
-| **Enums & newtypes** | Unit, tuple, and struct-field variants carrying any sized payload, `Copy` or owning; generic enums monomorphized per type argument; `newtype` for distinct nominal wrappers |
-| **Arrays, tuples & collections** | Fixed-size `[T; N]` and anonymous tuples, holding owners as well as `Copy` values and giving them up one element at a time; zero-copy slices `&[T]` / `&mut [T]`; heap-backed `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` / `String` that move on assignment and free at scope exit ([reference](docs/language-reference/types.md)) |
-| **Tensors** | `Tensor<T, [d0, ...]>` owning its buffer, with shapes checked at compile time: broadcasting element-wise math, `a @ b` matmul, `t[1..3, 2..5]` slicing, shape generics, named and dynamic axes, reductions, `.sort()` / `.argsort()` / `.topk()` ([reference](docs/language-reference/tensors.md)) |
-| **Pattern matching** | Exhaustive `match` expressions over variant / literal / or / range / wildcard patterns with `if` guards, plus `val Point { x, y } = p` and `val [a, ..rest] = arr` destructuring |
-| **`Option` / `Result`** | `Option<T>` and `Result<T, E>` from the implicit prelude. They are ordinary generic enums, available with no declaration and no import, variants included; `??` unwraps either with a lazy fallback; `?` propagates the failure to the caller; `val-else` unwraps or exits the scope; `checked_add` / `checked_sub` / `checked_mul` report integer overflow as `Option::None` |
-| **Ownership & borrows** | Move-by-default, `Copy`, deterministic `Drop` at scope exit, at the assignment that displaces a value, and for every owner held inside a destroyed value, `&T` / `&mut T` with flow-sensitive exclusivity and a borrowed place that may not be read, moved, or reassigned through its own name, lifetime elision and annotations; `pool { }` / `pool label { }` arena blocks, where what the block allocates comes from one bump region and goes back in a single store at its closing brace, a type with a destructor implements `PoolAware` to live in one and is released by the arena's reverse-order sweep, and a value the compiler can trace to the heap may be kept past the block |
-| **Strings** | Immutable fat-pointer `string` with escapes, `&string` slices, `==`, `+` concatenation, `.len()` / `.clone()` / `.slice(a..b)` / `.char_slice(a..b)`, codepoint iteration with `.chars()` and `.char_indices()`, interpolation `"{x:.2}"`, triple-quoted `"""` blocks with dedent; growable `String` buffer for building text: `push_str` / `clear` / `to_string` |
-| **Modules & visibility** | Multi-file programs: every `.nr` file is a module and `mod.nr` directories nest; inline `module { }` blocks group within one file; `import math::{sqrt}`, `import ./utils`, `as` renames, module aliases, variant imports, and `export import` re-export facades; declarations and struct fields are private until `export` opts them in; an implicit prelude puts `Option` / `Result` and `Some` / `None` / `Ok` / `Err` in every module, with `@no_prelude` to opt out |
-| **Toolchain** | Native binaries via inkwell 0.10 / LLVM 20; `neurc check`, `neurc run` and `neurc compile`, with `--emit obj` for an object a C toolchain can link into a shared library that NumPy imports zero-copy; buffered `print` / `println` to stdout, line-buffered on a terminal and drained on every exit path; `panic` / `assert` / `unreachable` runtime with located diagnostics, covering array bounds, string slices, a zero divisor, and debug-build integer overflow, all outlined off the hot path |
-
-### Current Memory Model
-
-> **Alpha memory warning.** Stack values are reclaimed on return and string literals live in `.rodata`, so neither leaks. Move semantics, borrows, deterministic `Drop`, and the owning collections have landed, so a `Vec`, `HashMap`, `BTreeMap`, or `String` frees its buffer at scope exit. A heap `string` (the one `+` concatenation, interpolation and `String::to_string` produce) is freed too when the compiler can prove who owns it: a binding whose initializer allocated it, or an anonymous one a consumer reads and discards: a `+` or `==` operand, a `.len()` receiver, a `push_str` argument, a `println` argument, an interpolation hole, a statement whose value nothing reads. A loop that formats output therefore holds steady rather than growing.
->
-> What still leaks is a heap `string` that escapes into a position able to store it: a collection element, a struct field, a by-value call argument, or a function's return value. Those are exactly the positions where releasing would hand out a dangling pointer instead, so the ownership test answers conservatively by design: freeing a `.rodata` literal, or a buffer something else still holds, would be far worse than holding one.
->
-> Reassigning a `mut` binding destroys the value it displaces, and a destroyed value now takes down every owner it holds — a struct field, an array or tuple element, an enum payload, a newtype's inner value — so a `Vec`, a `String` or a `Tensor` in a field goes back with the value that holds it. A position given up first is destroyed on its own path instead, never twice. What is left is the escaping heap `string` above, and a `match` arm that binds an enum payload, which disowns the whole scrutinee and so leaks a variant the arm did not take.
->
-> All of it is scheduled: sub-phase 2E in the [Quick Roadmap](#quick-roadmap) is where drop coverage is completed. This block is removed when it lands. Until then, do not assume memory-safety semantics beyond what the table above claims.
->
-> If memory-safety semantics and compiler backend design are your thing, **[this is exactly where contributors are needed](CONTRIBUTING.md)**.
-
----
-
-## Performance
-
-`neurc compile -O 3` hands the module to the same LLVM 20 optimization pipeline `clang -O2` uses, so compute-bound code lands in the same range as C++ rather than somewhere between C++ and Python.
-
-Best of nine runs on one machine, lower is better. Reproduce with `python benchmarks/run.py`, which builds all three implementations of each program and refuses to report timings if they disagree on output:
-
-| Benchmark | What it stresses | Neuro `-O 3` | `clang -O2` | Python 3.14 |
-|---|---|---|---|---|
-| `mandelbrot` | scalar `f64` in a tight loop | 166 ms | 166 ms | 5791 ms |
-| `vector_sum` | `Vec` push, indexed sweep | 25 ms | 26 ms | 10068 ms |
-| `call_overhead` | recursion, call and inline cost | 45 ms | 51 ms | 1389 ms |
-| `print_lines` | integer holes to standard output | 13 ms | 22 ms | 110 ms |
-| `format_floats` | `f64` holes at a fixed precision | 118 ms | 109 ms | 214 ms |
-| `int_divide` | guarded `/` and `%`, opaque divisor | 96 ms | 89 ms | 1318 ms |
-
-Absolute times belong to the machine rather than to the language, and the Python column to whichever `python3` is on your PATH, which is why the version is named. Two rows are worth a word. `print_lines` beats C because an integer hole renders through a digit loop instead of `snprintf`; `int_divide` is the one place the compiler spends rather than saves, since `/` and `%` guard the operand pairs the hardware instruction leaves undefined and an opaque divisor keeps those guards in the loop.
-
-The default is `-O 0`: checked arithmetic, no optimization pipeline. Pass `-O 3` before drawing any conclusion about speed.
+More programs, each pinned to its exact exit code and printed output, are in
+[examples/](examples/); [examples/showcase/](examples/showcase/) holds the ones that combine
+several features at once.
 
 ---
 
 ## Installation
 
-### Prerequisites
-
 | Requirement | Version | Notes |
 |---|---|---|
 | **Rust** | 1.85+ | Install via [rustup](https://rustup.rs/) |
-| **LLVM 20** | 20.x with dev libs | Platform instructions below |
-| **C linker** | any | `gcc`/`clang` on Linux/macOS; MSVC on Windows |
+| **LLVM 20** | 20.x with dev libraries | Per-platform commands below |
+| **C linker** | any | `gcc` / `clang` on Linux and macOS, MSVC on Windows |
 
----
+### 1. LLVM 20
 
-### Step 1: LLVM 20
-
-This is the only step that differs between systems. Add the `export` to your shell
-profile (`~/.bashrc`, `~/.zshrc`) so it survives a new terminal.
-
-**Arch Linux / CachyOS**
+This is the only step that differs between systems. Put the `export` in your shell profile
+(`~/.bashrc`, `~/.zshrc`) so it survives a new terminal.
 
 ```bash
+# Arch Linux / CachyOS
 sudo pacman -S llvm20
 export LLVM_SYS_201_PREFIX=/usr/lib/llvm20
-```
 
-**Ubuntu / Debian**
-
-```bash
+# Ubuntu / Debian
 wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 20
-# or the full dev package set:
-# sudo apt-get install llvm-20 llvm-20-dev llvm-20-tools libpolly-20-dev
 export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20
-```
 
-**macOS (Homebrew)**
-
-```bash
+# macOS (Homebrew)
 brew install llvm@20
 export LLVM_SYS_201_PREFIX="$(brew --prefix llvm@20)"
 ```
 
-**Windows 10 / 11 (x64)** needs a different LLVM package; see [below](#windows-10--11-x64).
+Windows needs the MSVC toolchain and a **full LLVM 20 development build**: the official installer
+ships Clang and `LLVM-C.dll` but no `llvm-config.exe`, no headers and no static libraries, so
+`llvm-sys` cannot build against it. The PowerShell walkthrough is in the
+[installation guide](docs/getting-started/installation.md#windows-msvc), and
+[troubleshooting](docs/guides/troubleshooting.md) covers the errors that follow from getting it
+wrong.
 
-### Step 2: Build
-
-With LLVM in place and Rust installed from [rustup.rs](https://rustup.rs/):
+### 2. Build
 
 ```bash
 git clone https://github.com/PanzerPeter/Neuro.git
@@ -211,193 +138,104 @@ cargo test --workspace
 cargo install --path compiler/neurc   # optional, puts neurc on your PATH
 ```
 
-On Windows the same four commands run unchanged in PowerShell, and
-`cargo install` places `neurc.exe` in `%USERPROFILE%\.cargo\bin`, which rustup
-has already added to `PATH`.
+The same four commands run unchanged in PowerShell on Windows.
 
----
-
-### Windows 10 / 11 (x64)
-
-Windows needs the MSVC toolchain and a **full LLVM 20 development build**: the
-official LLVM installer ships Clang and `LLVM-C.dll` but no `llvm-config.exe`,
-no headers and no static libraries, so `llvm-sys` cannot build against it. The
-PowerShell walkthrough, including the packaged dev build CI uses and the CRT
-variant to pick, is in
-[the installation guide](https://neuro-lang.netlify.app/getting-started/installation/#windows-msvc)
-([docs/getting-started/installation.md](docs/getting-started/installation.md)).
-[Troubleshooting](docs/guides/troubleshooting.md) covers the build errors that
-follow from getting it wrong.
-
----
-
-## Usage
+### 3. Run something
 
 ```bash
-# Type-check a source file (no binary produced)
-cargo run -p neurc -- check examples/basics/hello.nr
-
-# Compile and run in one step, leaving no binary behind
-cargo run -p neurc -- run examples/basics/factorial.nr
-
-# Or compile to a native executable, emitted next to the source file
-cargo run -p neurc -- compile examples/basics/factorial.nr
-./examples/basics/factorial
-
-# After cargo install --path compiler/neurc:
-neurc run examples/basics/factorial.nr
+neurc check examples/basics/hello.nr        # type-check only, no binary
+neurc run   examples/basics/factorial.nr    # compile and run, leaving no binary behind
+neurc compile examples/basics/factorial.nr  # native executable next to the source
 ```
+
+Without `cargo install`, prefix each command with `cargo run -p neurc --`. Flags, `--emit obj` and
+the zero-copy NumPy recipe are in the [CLI guide](docs/guides/cli-usage.md).
 
 ---
 
-## Language Syntax
+## Current Capabilities
 
-### Variables and Types
+Every row is implemented, tested and usable today. Depth lives in the
+[documentation site](https://neuro-lang.netlify.app/) and [docs/](docs/); per-release detail is in
+[CHANGELOG.md](CHANGELOG.md).
 
-```neuro
-func main() -> i32 {
-    // Immutable by default
-    val x: i32 = 42
-    val name: string = "Neuro"
+| Feature | Summary |
+|---|---|
+| **Types and inference** | `i8` through `u64`, `f16` / `bf16` / `f32` / `f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, type aliases |
+| **Control flow** | `if` / `elif` / `else`, `while`, `loop`, range-`for`, labelled `break` / `continue`, block-as-value, `for` over any type implementing the prelude's iterator protocol |
+| **Functions** | Recursion, forward references, implicit returns, named arguments with external labels, higher-order functions |
+| **Generics and traits** | Generic functions, structs and impls, const generics, `where` clauses, turbofish; required and default methods, associated types, operator traits, `impl Trait` and `dyn Trait` dispatch. Fully monomorphized |
+| **Closures** | `\|x: i32\| x * x`, `move` closures, `(T) -> R` function types, compiled to `{ fn_ptr, env_ptr }` with no heap allocation |
+| **Structs, enums, newtypes** | Fields, functional update `..base`, `impl` blocks with `&self` / `&mut self` / consuming receivers; unit, tuple and struct-field variants carrying any sized payload; `@derive(Copy, Clone, Debug, PartialEq)` |
+| **Pattern matching** | Exhaustive `match` over variant, literal, or, range and wildcard patterns with `if` guards, plus `val`-binding destructuring of structs and arrays |
+| **Arrays, tuples, collections** | `[T; N]`, tuples, zero-copy slices `&[T]` / `&mut [T]`, and heap-backed `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` / `String` ([reference](docs/language-reference/types.md)) |
+| **Tensors** | `Tensor<T, [d0, ...]>` with shapes checked at compile time: broadcasting, `a @ b` matmul, slicing, shape generics, named and dynamic axes, reductions, sorting ([reference](docs/language-reference/tensors.md)) |
+| **Strings** | Immutable fat-pointer `string` with slices, concatenation, codepoint iteration, interpolation `"{x:.2}"` and triple-quoted blocks; growable `String` buffer ([reference](docs/language-reference/strings.md)) |
+| **Errors** | `Option<T>` and `Result<T, E>` in the implicit prelude as ordinary generic enums; `??` unwraps with a lazy fallback, `?` propagates, `val-else` exits the scope, `checked_*` arithmetic reports overflow |
+| **Ownership** | Move-by-default, `Copy`, borrows with flow-sensitive exclusivity, lifetime elision, deterministic `Drop`, and `pool { }` arena blocks ([reference](docs/language-reference/memory-model.md)) |
+| **Modules** | Every `.nr` file is a module, `mod.nr` directories nest, inline `module { }` blocks group; `import` with renames and re-export facades, private-by-default visibility, implicit prelude ([reference](docs/language-reference/modules.md)) |
+| **Toolchain** | `neurc check` / `run` / `compile` on inkwell 0.10 and LLVM 20, `--emit obj` for C and NumPy interop, buffered `print` / `println`, and a `panic` / `assert` runtime with located diagnostics |
 
-    // Mutable with reassignment
-    mut counter: i32 = 0
-    counter = counter + 1
+> **Alpha memory note.** Stack values, literals, the owning collections and reassigned bindings
+> are all reclaimed. What still leaks is a heap `string` that escapes into a position able to
+> store it: a collection element, a struct field, a by-value argument or a return value. Full
+> detail, and the reason the analysis answers conservatively, is in the
+> [memory model](docs/language-reference/memory-model.md). Completing it is sub-phase 2E below.
 
-    // Type inference works for both val and mut
-    val pi = 3.14159   // inferred f64
-    val n  = 100       // inferred i32
-    mut count = 0      // inferred i32; type annotation optional
-    count = n
+---
 
-    println("{name}: x={x} counter={counter} pi={pi:.5} count={count}")
-    return x
-}
-```
+## Performance
 
-### Functions
+`neurc compile -O 3` hands the module to the same LLVM 20 pipeline `clang -O2` uses. The default
+is `-O 0`, checked arithmetic with no optimization, so pass `-O 3` before drawing any conclusion
+about speed.
 
-```neuro
-// Explicit return
-func add(a: i32, b: i32) -> i32 {
-    return a + b
-}
+Best of nine runs on one machine, lower is better. Reproduce with `python benchmarks/run.py`,
+which builds all three implementations of each program and refuses to report timings if they
+disagree on output.
 
-// Expression-based implicit return (trailing expression)
-func multiply(a: i32, b: i32) -> i32 {
-    a * b
-}
-```
+| Benchmark | What it stresses | Neuro `-O 3` | `clang -O2` | Python 3.14 |
+|---|---|---|---|---|
+| `mandelbrot` | scalar `f64` in a tight loop | 166 ms | 166 ms | 5791 ms |
+| `vector_sum` | `Vec` push, indexed sweep | 25 ms | 26 ms | 10068 ms |
+| `call_overhead` | recursion, call and inline cost | 45 ms | 51 ms | 1389 ms |
+| `print_lines` | integer holes to standard output | 13 ms | 22 ms | 110 ms |
+| `format_floats` | `f64` holes at a fixed precision | 118 ms | 109 ms | 214 ms |
+| `int_divide` | guarded `/` and `%`, opaque divisor | 96 ms | 89 ms | 1318 ms |
 
-### Control Flow
+Absolute times belong to the machine, and the Python column to whichever `python3` is on your
+PATH. Two rows are worth a word: `print_lines` beats C because an integer hole renders through a
+digit loop instead of `snprintf`, and `int_divide` is the one place the compiler spends rather
+than saves, since `/` and `%` guard the operand pairs the hardware leaves undefined.
 
-```neuro
-func fizzbuzz(n: i32) -> i32 {
-    mut i: i32 = 1
-    while i <= n {
-        i = i + 1
-    }
-    i
-}
+---
 
-func sum(n: i32) -> i32 {
-    mut total: i32 = 0
-    for i in 0..n {
-        total = total + i
-    }
-    total
-}
-```
+## Quick Roadmap
 
-### Structs
+Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships **v(N+1).0.0**.
 
-```neuro
-struct Point {
-    x: f64,
-    y: f64
-}
+| Phase | Goal | Status |
+|:---:|---|:---:|
+| **1** | **Core Language**: types, control flow, LLVM backend, ownership and borrow checking, generics, traits, closures, enums and pattern matching, error handling, modules | Complete |
+| **2** | **Tensors and MLIR**: first-class tensor types lowered through MLIR Linalg, the pool allocator, and the value model they need | In progress |
+| **3** | **Automatic differentiation**: Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | Planned |
+| **4** | **GPU acceleration**: MLIR GPU dialects (nvgpu / rocdl), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | Planned |
+| **5** | **Neural network standard library**: `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | Planned |
+| **6** | **Async runtime**: `async func`, `Future<T>`, `spawn`, `join` / `race`, an executor for data-loader and I/O overlap | Planned |
+| **7** | **Interop**: Python FFI via DLPack, spread operator, advanced pattern matching, custom attributes, `defer` | Planned |
+| **8** | **Developer experience**: debug info, incremental compilation, Language Server Protocol, formatter, `@test` runner | Planned |
+| **9** | **Distribution**: the `neurpm` package manager, cross-OS installer and self-updater, signed binaries, CPU parallelism, further optimization passes | Planned |
 
-func distance(p: Point) -> f64 {
-    // field read
-    val dx = p.x
-    val dy = p.y
-    dx * dx + dy * dy   // placeholder (no sqrt yet)
-}
-
-func main() -> i32 {
-    val origin = Point { x: 0.0, y: 0.0 }
-
-    // field mutation requires mut binding
-    mut cursor = Point { x: 3.0, y: 4.0 }
-    cursor.x = 1.0
-
-    return 0
-}
-```
-
-### Closures and Higher-Order Functions
-
-Verbatim from [examples/showcase/closures.nr](examples/showcase/closures.nr). It compiles, links, prints the three results below, and exits with code 90.
-
-```neuro
-// Apply `f` to each element of a 4-element array and sum the results.
-func map_sum(xs: [i32; 4], f: (i32) -> i32) -> i32 {
-    mut total: i32 = 0
-    mut i: i32 = 0
-    while i < 4 {
-        total += f(xs[i])
-        i += 1
-    }
-    return total
-}
-
-struct Scaler {
-    factor: i32
-}
-
-impl Scaler {
-    func apply(&self, x: i32) -> i32 {
-        x * self.factor
-    }
-}
-
-func main() -> i32 {
-    val data: [i32; 4] = [1, 2, 3, 4]
-
-    // A closure capturing a Copy local (`bias`) by value.
-    val bias = 10
-    val biased = map_sum(data, |x: i32| x + bias)   // 11+12+13+14 = 50
-
-    // A `move` closure with a block body and early return.
-    val scale = 3
-    val scaled = map_sum(data, move |x: i32| -> i32 {
-        val y = x * scale
-        return y
-    })                                              // 3+6+9+12 = 30
-
-    // A struct method still resolves alongside closures.
-    val s = Scaler { factor: 2 }
-    val doubled = s.apply(5)                         // 10
-
-    println("capture by value  |x| x + bias      = {biased}")
-    println("move closure      move |x| x * scale = {scaled}")
-    println("struct method     s.apply(5)         = {doubled}")
-
-    val total = biased + scaled + doubled
-    println("total                                = {total}")
-    total                                            // 50 + 30 + 10 = 90
-}
-```
-
-Every runnable program in [examples/showcase/](examples/showcase/) combines several features at once and is pinned twice: to an expected exit code in [examples/expected.txt](examples/expected.txt), and to the exact text it prints in a sibling `.out` file. `@grad` and GPU kernels are not shown here because they do not exist yet; tensor *construction* does, in [`showcase/model_shapes.nr`](examples/showcase/model_shapes.nr), and the element-wise operators alongside the in-place update and the matrix product `@` in [`showcase/optimizer_step.nr`](examples/showcase/optimizer_step.nr). See the [Quick Roadmap](#quick-roadmap).
+Phase 2 in detail: **2A** standard I/O and spec stragglers, **2B** tensor core, **2C** MLIR
+lowering and **2D** the pool allocator are complete; **2E** the value model is in progress;
+**2F** functional sugar (`|>`, `>>`, einstein notation) is next.
 
 ---
 
 ## Architecture
 
-Neuro follows Vertical Slice Architecture (VSA): the code is organized by language feature, not by technical layer.
-
-### Workspace Layout
+Neuro follows [Vertical Slice Architecture](VSA.md): code is organized by language feature, not by
+technical layer.
 
 ```
 compiler/
@@ -405,160 +243,68 @@ compiler/
 │   ├── ast-types/           #   AST node definitions
 │   ├── shared-types/        #   Primitives shared across slices
 │   ├── source-location/     #   Spans, positions, source files
-│   └── neuro-hir/           #   Typed High-Level IR (frontend ↔ backend contract)
+│   └── neuro-hir/           #   Typed High-Level IR (frontend <-> backend contract)
 ├── lexical-analysis/        # Tokenizer (logos, Unicode XID)
-├── syntax-parsing/          # Pratt + statement parser → AST
-├── semantic-analysis/       # Type checker, scope analysis
-├── hir-lowering/            # Type-checked AST → typed HIR
-├── llvm-backend/            # HIR → object code (inkwell 0.10 / LLVM 20)
-├── mlir-backend/            # HIR → MLIR linalg (off-by-default `mlir` feature)
-└── neurc/                   # CLI compiler driver (pipeline orchestration)
+├── syntax-parsing/          # Pratt + statement parser -> AST
+├── semantic-analysis/       # Type checker, scope and borrow analysis
+├── hir-lowering/            # Type-checked AST -> typed HIR
+├── llvm-backend/            # HIR -> object code (inkwell 0.10 / LLVM 20)
+├── mlir-backend/            # HIR -> MLIR linalg (off-by-default `mlir` feature)
+└── neurc/                   # CLI compiler driver
 ```
 
-### Compilation Pipeline
-
-**Today:**
-```
-Source (.nr)
-  → Lexical Analysis   (tokens)
-  → Syntax Parsing     (AST)
-  → Semantic Analysis  (type-checked AST)
-  → HIR Lowering       (typed High-Level IR, neuro-hir)
-  → LLVM Backend       (object code via inkwell / LLVM 20)
-  → System Linker      (native executable)
-```
-
-**Planned extension (Phase 2+):**
-```
-Tensor/AI path: typed High-Level IR (neuro-hir)
-  → MLIR (linalg/tensor/func/arith, LLVM 20 / MLIR 20)
-  → Enzyme MLIR AD pass (@grad)
-  → GPU dialects (nvgpu/rocdl) or llvm dialect
-  → inkwell → native code
-```
+Today a `.nr` file travels: **tokens → AST → type-checked AST → typed HIR → LLVM object code →
+system linker**. The tensor path forks after HIR into MLIR (linalg, tensor, func, arith) and will
+carry the Enzyme AD pass and the GPU dialects as Phases 3 and 4 land. Stage by stage:
+[docs/compiler/compilation.md](docs/compiler/compilation.md).
 
 ---
 
-## Quick Roadmap
+## Documentation
 
-Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships **v(N+1).0.0**. Phase 1 is complete and we are now in **Phase 2**. A phase is divided into lettered sub-phases.
-
-| Phase | Goal | Status |
-|:---:|---|:---:|
-| **1** | **Core Language**: types, control flow, LLVM backend, ownership and borrow checking, generics, traits and dispatch, closures, enums and pattern matching, error handling, modules and prelude, string interpolation | Complete |
-| **2** | **Tensors and MLIR**: first-class tensor types lowered through MLIR Linalg, the pool allocator, and the value-model work the phases above it need. Finishing it ships **v3.0.0** | In progress |
-| 2A | Standard I/O and spec stragglers: `print` / `println`, `.is_nan()`, codepoint string APIs, `.enumerate()`, borrowed slices `&[T]`, the iterator protocol, `@derive(Debug, PartialEq)` | Complete |
-| 2B | Tensor core: `Tensor<T, [...]>`, literal coercion, move semantics, DLPack, slicing, shape generics, named dims, shape manipulation, dynamic shapes, reductions, sorting and selection | Complete |
-| 2C | MLIR lowering: tensor arithmetic to Linalg, broadcasting, matmul behind `@`, end-to-end HIR → MLIR → LLVM, results checked against NumPy through the DLPack handle | Complete |
-| 2D | Pool allocator: `pool` blocks, `PoolAware`, LIFO release at scope exit, heap fallback wherever an allocation's owner cannot be proven | Complete |
-| 2E | Value model: borrowee tracking for reads, moves and reassignment, by-value passing for non-`Copy` types, drop coverage for reassigned bindings and for values held inside other values, assignment through an index or a field | In progress |
-| 2F | Functional sugar: pipeline `\|>`, composition `>>`, einstein notation, functional tensor ops | Planned |
-| **3** | Automatic differentiation: Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | Planned |
-| **4** | GPU acceleration: MLIR GPU dialects (nvgpu / rocdl), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | Planned |
-| **5** | Neural network standard library: hierarchical module namespaces, `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | Planned |
-| **6** | Async runtime: `async func`, `Future<T>`, `spawn`, `JoinHandle`, `join` / `race`, executor for data-loader / I/O overlap | Planned |
-| **7** | Interop and advanced features: Python FFI via DLPack, spread operator, advanced pattern matching, custom attributes, `defer` | Planned |
-| **8** | Developer experience: debug info, incremental compilation, Language Server Protocol, diagnostics polish, formatter, `@test` runner | Planned |
-| **9** | Package manager and distribution: `neurpm`, cross-OS installer / uninstaller / self-updater, signed release binaries, matmul throughput, CPU parallelism, optimization passes (loop unrolling, AD-aware inlining, LTO) | Planned |
-
----
-
-## Development
-
-Set `LLVM_SYS_201_PREFIX` for your platform before running any Cargo command
-(see [Installation](#installation) for the correct path per OS).
-
-```bash
-# Build the full workspace
-cargo build --workspace
-
-# Run all tests
-cargo test --workspace
-
-# Lint
-cargo clippy --workspace --all-targets -- -D warnings
-
-# Format check
-cargo fmt --all -- --check
-
-# Apply formatting
-cargo fmt --all
-```
-
-On Windows, use PowerShell or a Developer Command Prompt. The env var must be
-set in the current session; prefix it inline if needed:
-
-```powershell
-$env:LLVM_SYS_201_PREFIX = "C:\LLVM"
-cargo build --workspace
-```
-
----
-
-## VSCode Extension
-
-Syntax highlighting for `.nr` files is included in `neuro-language-support/`.
-
-```bash
-cd neuro-language-support
-npm install -g @vscode/vsce      # once
-vsce package                     # -> neuro-language-support-<version>.vsix
-code --install-extension neuro-language-support-*.vsix --force
-```
-
-Reload the VS Code window afterwards (`Developer: Reload Window`). A grammar change
-does not apply to already-open editors. During grammar work, symlinking the folder into
-`~/.vscode/extensions/` avoids repackaging: a window reload then picks up every edit.
-
----
-
-## File Extensions
-
-| Extension | Purpose |
+| | |
 |---|---|
-| `.nr` | Neuro source files |
-| `.nrl` | Compiled library modules |
-| `.nrm` | Serialized model data |
-| `.nrp` | Package definitions |
+| [Getting started](docs/getting-started/quick-start.md) | Installation, first program, workflow |
+| [Language reference](docs/README.md#language-reference) | One page per feature area, from types to modules |
+| [CLI guide](docs/guides/cli-usage.md) | Commands, flags, environment variables, interop |
+| [Compiler internals](docs/README.md#compiler-architecture) | Pipeline and one page per slice |
+| [Editor support](docs/guides/editor-support.md) | Syntax highlighting for `.nr` files |
+| [DESIGN.md](DESIGN.md) | Why the language is shaped this way, and its non-goals |
+| [CHANGELOG.md](CHANGELOG.md) | What each release changed |
+
+Everything is published at [neuro-lang.netlify.app](https://neuro-lang.netlify.app).
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture guidelines, coding standards, and the pull request process. Confirmed open defects live in [docs/BUGS.md](docs/BUGS.md). Fixing one is the best way to start.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the architecture rules, coding standards, quality gates and
+pull request process. Open defects are in [docs/BUGS.md](docs/BUGS.md), and fixing one is the best
+way to start. Work is most useful in **Phase 2 (Tensors and MLIR)**, particularly the memory-safety
+and backend work in sub-phase 2E.
 
-The project is in early alpha, so breaking changes are expected. Contributions should focus on **Phase 2 (Tensors and MLIR)**; the [Quick Roadmap](#quick-roadmap) marks which phase is currently open.
-
----
-
-## Why Neuro?
-
-AI development is stuck in a fragmented paradigm: developers iterate in an interpreted glue language (Python), while underlying libraries are written in unmanaged, safety-critical systems languages (C++/CUDA). 
-
-Neuro is built to unify this stack:
-1. **True native performance.** Compiled AOT via LLVM 20, with no heavy runtime interpreter and no global interpreter lock (GIL). [Measured against C++ and Python](#performance) on compute-bound programs.
-2. **AI-First Type System:** Native compile-time shape verification for tensors using MLIR (Phase 2), preventing runtime dimension mismatches before a single line of training executes.
-3. **Immutability by Default:** A modern `val`/`mut` paradigm to ensure highly parallelized tensor computations are thread-safe by design.
+See also [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ---
 
 ## License
 
-Licensed under the [Neuro Shared Source License v2.1](LICENSE).
+[Neuro Shared Source License v2.1](LICENSE). The license covers the compiler, not what you build
+with it.
 
-**Why not MIT/Apache 2.0 right now?** Neuro is in a critical pre-stabilization phase. The license protects against three specific risks: commercial re-packaging of the compiler before the language spec is stable, AI-assisted reproduction of the compiler for a competing product, and misleading forks that fragment the early ecosystem. None of these restrictions affect normal use.
+You may freely use, study and modify the compiler for any personal or internal purpose, write
+Neuro programs and distribute or sell the compiled output under any terms you choose, build tools
+and editor integrations that call into the compiler, and contribute code back. Only redistributing
+the compiler itself, or a fork of it, as part of a commercial product requires a commercial
+license.
 
-**What you can do freely:**
-- Use, study, and modify the compiler for any personal or internal purpose
-- Write Neuro programs and distribute or sell the compiled output under **any** terms you choose. programs you compile are wholly exempt from this license
-- Build tools, plugins, and editor integrations that call into the compiler
-- Contribute code back to the project
-
-**What requires a commercial license:**
-- Redistributing the Neuro compiler itself (or a fork of it) as part of a commercial product
-
-See [LICENSE](LICENSE) for full terms.
+Neuro is pre-stabilization, and the license guards three risks specific to that: commercial
+re-packaging before the spec is stable, AI-assisted reproduction of the compiler for a competing
+product, and misleading forks that fragment an early ecosystem. A permissive license becomes
+possible once the language stabilizes.
 
 ## Acknowledgments
 
-Inspired by Rust (ownership, type system), Python (AI ecosystem simplicity), Swift (language ergonomics), and Mojo (AI-first design). Built with [inkwell](https://github.com/TheDan64/inkwell), [logos](https://github.com/maciejhirsz/logos), and the [LLVM](https://llvm.org/) infrastructure.
+Inspired by Rust (ownership, type system), Python (AI ecosystem simplicity), Swift (ergonomics)
+and Mojo (AI-first design). Built with [inkwell](https://github.com/TheDan64/inkwell),
+[logos](https://github.com/maciejhirsz/logos) and [LLVM](https://llvm.org/).

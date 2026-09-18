@@ -41,11 +41,13 @@ Design goals:
 | [Control Flow](language-reference/control-flow.md) | `if`/`else`, `while`, `loop`, `for`, `break`/`continue`, `match`, `val-else`, `pool` arena blocks |
 | [Operators](language-reference/operators.md) | Arithmetic, comparison, logical, bitwise, cast, overloading, `??`, `?` |
 | [Structs](language-reference/structs.md) | User-defined types, `impl` methods, associated functions, derives, enums |
+| [Memory Model](language-reference/memory-model.md) | What is reclaimed and when: stack values, collections, reassigned bindings, `pool` blocks, and what still leaks in alpha |
 | [Modules](language-reference/modules.md) | Multi-file programs, `mod.nr` directories, qualified paths, `import`, inline `module` blocks, `export import` re-exports, visibility |
 
 ## User Guides
 
 - [CLI Usage](guides/cli-usage.md): `neurc check`, `neurc run`, `neurc compile`, flags, `--emit obj` and the NumPy interop recipe
+- [Editor Support](guides/editor-support.md): syntax highlighting for `.nr` files, and keeping the grammar in step with the lexer
 - [Troubleshooting](guides/troubleshooting.md): common problems and solutions
 - [Known Bugs](BUGS.md): the open defect register
 
@@ -75,6 +77,15 @@ current entry points when this directory disagrees.
 | GPU | MLIR nvgpu / rocdl / Triton | Phase 4+ |
 
 Exact dependency versions live in the workspace `Cargo.toml` files, not here.
+
+## File Extensions
+
+| Extension | Purpose |
+|---|---|
+| `.nr` | Neuro source files |
+| `.nrl` | Compiled library modules (planned) |
+| `.nrm` | Serialized model data (planned) |
+| `.nrp` | Package definitions (planned) |
 
 ## Project Resources
 
