@@ -60,10 +60,20 @@ impl TypeChecker {
         let element_ty = self
             .check_expr(&elements[0], expected_element.as_ref())
             .unwrap_or(Type::Unknown);
+        // The array takes ownership of a non-`Copy` element, so `[s, s]` is a double
+        // move of `s` rather than two copies of one buffer. Recorded as each element
+        // is checked, so the second read of a moved binding is the one reported.
+        let moves_elements = self.is_type_move_tracked(&element_ty);
+        if moves_elements {
+            self.record_move(&elements[0]);
+        }
         for el in &elements[1..] {
             let el_ty = self
                 .check_expr(el, Some(&element_ty))
                 .unwrap_or(Type::Unknown);
+            if moves_elements {
+                self.record_move(el);
+            }
             if !matches!(element_ty, Type::Unknown)
                 && !matches!(el_ty, Type::Unknown)
                 && !el_ty.is_compatible_with(&element_ty)
@@ -77,14 +87,6 @@ impl TypeChecker {
         }
 
         if matches!(element_ty, Type::Unknown) {
-            return Some(Type::Unknown);
-        }
-
-        if !self.is_type_copy(&element_ty) {
-            self.record_error(TypeError::NonCopyArrayElement {
-                ty: element_ty,
-                span: *span,
-            });
             return Some(Type::Unknown);
         }
 
@@ -120,7 +122,11 @@ impl TypeChecker {
         exact: bool,
         span: &Span,
     ) -> Option<Type> {
-        let arr_ty = self.check_expr(array, None).unwrap_or(Type::Unknown);
+        // The leading elements are bound by their own `arr[i]` projections, which
+        // move them one path at a time; this node reads what they left, so it is not
+        // the whole-binding read a partial move rules out.
+        let arr_ty = self.with_sub_place_read(|this| this.check_expr(array, None));
+        let arr_ty = arr_ty.unwrap_or(Type::Unknown);
         if matches!(arr_ty, Type::Unknown) {
             return Some(Type::Unknown);
         }
@@ -173,11 +179,10 @@ impl TypeChecker {
         for (i, el) in elements.iter().enumerate() {
             let hint = expected_elems.as_ref().map(|es| &es[i]);
             let el_ty = self.check_expr(el, hint).unwrap_or(Type::Unknown);
-            if !self.is_type_copy(&el_ty) && !matches!(el_ty, Type::Unknown) {
-                self.record_error(TypeError::NonCopyTupleElement {
-                    ty: el_ty.clone(),
-                    span: el.span(),
-                });
+            // The tuple takes ownership of a non-`Copy` element, exactly as a struct
+            // field does.
+            if self.is_type_move_tracked(&el_ty) {
+                self.record_move(el);
             }
             tys.push(el_ty);
         }

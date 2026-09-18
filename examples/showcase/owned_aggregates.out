@@ -1,0 +1,10 @@
+headers: name, shape, owner
+field weight total = 23
+pair fields      = left / right
+annotated        = annotated (9)
+array pattern    = one two
+into_parts       = front -> back
+generic cell     = held by a generic
+label            = ledger-2026
+popped           = third
+words remaining  = 2

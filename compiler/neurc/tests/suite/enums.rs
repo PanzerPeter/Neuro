@@ -120,10 +120,42 @@ func main() -> i32 {
 }
 
 #[test]
-fn rejects_non_scalar_payload() {
+fn non_copy_payload_round_trips_through_a_match() {
     let test = CompileTest::new();
     let source = r#"
-enum Bad { Holds(string) }
+struct Point { x: i32, y: i32 }
+
+enum Holds {
+    Text(string),
+    At(Point),
+    Nothing,
+}
+
+func weigh(h: Holds) -> i32 {
+    match h {
+        Holds::Text(t) => t.len() as i32
+        Holds::At(p) => p.x + p.y
+        Holds::Nothing => 0
+    }
+}
+
+func main() -> i32 {
+    weigh(Holds::Text("abcd")) + weigh(Holds::At(Point { x: 3, y: 4 })) + weigh(Holds::Nothing)
+}
+"#;
+    let exit = test
+        .compile_and_run("enum_noncopy_payload.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 11);
+}
+
+#[test]
+fn rejects_unsized_payload() {
+    let test = CompileTest::new();
+    let source = r#"
+trait Speak { func say(&self) -> i32 }
+
+enum Bad { Holds(dyn Speak) }
 
 func main() -> i32 {
     0
@@ -132,7 +164,7 @@ func main() -> i32 {
     let path = test.write_source("enum_bad_payload.nr", source);
     let err = test.compile(&path).expect_err("expected a type error");
     assert!(
-        err.contains("payload") || err.contains("scalar"),
-        "diagnostic should reject the non-scalar payload: {err}"
+        err.contains("payload"),
+        "diagnostic should reject the unsized payload: {err}"
     );
 }

@@ -19,6 +19,9 @@ impl TypeChecker {
             Expr::Paren(inner, _) => Self::place_root_name(inner),
             Expr::FieldAccess { object, .. } => Self::place_root_name(object),
             Expr::Deref { operand, .. } => Self::place_root_name(operand),
+            Expr::Index { object, .. } | Expr::TupleIndex { object, .. } => {
+                Self::place_root_name(object)
+            }
             _ => None,
         }
     }

@@ -145,8 +145,8 @@ error list grew while the initializer was checked.
   struct/string/bool operands.
 - A comparison whose LHS is itself a comparison is `ComparisonChain` (all six operators).
 - Arrays (`Type::Array { element, size }`) and tuples (`Type::Tuple`) are compatible on equal
-  shape with matching elements, and are `Copy` exactly when every element is. A non-Copy element
-  is `NonCopyArrayElement` / `NonCopyTupleElement`.
+  shape with matching elements, and are `Copy` exactly when every element is. An element that is
+  not `Copy` makes the aggregate move-tracked instead of rejecting it: see Sub-place moves.
 - Unsuffixed integer literals over the `i32` range error (`IntegerLiteralOutOfRange`) rather than
   silently promoting to `i64`; suffixed literals infer through `infer_suffixed_integer_type` /
   `infer_suffixed_float_type`. `check_integer_range` takes an `i128` and compares against the
@@ -304,9 +304,8 @@ nor a slice falls through to `iteration_item`, which answers what one step binds
 `char_indices_receiver` (same module) recognises the `text.char_indices()` head form ahead of
 the ordinary `check_expr` on the iterable, and `check_char_indices_head` types it as the same
 `Chars` iterator `.chars()` yields: the position it binds is a byte offset the lowering reads
-off that iterator, not a payload it could yield, since an `Option` payload is restricted to
-scalars and a pair is not one. A non-`string` receiver is `MethodNotFound`, matching what the
-call gets anywhere but a `for` head.
+off that iterator rather than a payload it yields. A non-`string` receiver is `MethodNotFound`,
+matching what the call gets anywhere but a `for` head.
 
 `instantiate_impls_for` copies each generic impl's `trait_impls` entry and its `impl_assoc`
 bindings onto every monomorphized instance, substituted. Without that a generic iterator
@@ -322,9 +321,10 @@ binding when placed into a new owner: a `val`/`mut` initializer, an assignment R
 struct-literal or struct-field assignment value, or a by-value call argument. `record_move` marks
 the source moved when the consumed expression is a place of a move-tracked type
 (`is_type_move_tracked` is true for `Type::String`, every collection, every tensor, any
-`Type::Struct` not deriving `Copy`, and every `Type::Generic`). Reading a moved binding is `UseOfMovedValue`, carrying the
-original move span; `SymbolInfo.moved_at` holds the per-binding state and reassigning a `mut`
-clears it. `.clone()` borrows rather than moving: the canonical opt-out.
+`Type::Struct` not deriving `Copy`, every `Type::Generic`, and an array, tuple or newtype holding
+any of those). Reading a moved binding is `UseOfMovedValue`, carrying the original move span;
+`SymbolInfo.moves` holds the per-binding state and reassigning a `mut` clears it. `.clone()`
+borrows rather than moving: the canonical opt-out.
 
 A consuming position checked *after* another one in the same expression has to see the
 earlier move. `place_moved_at` answers where a place's root binding was moved, and the by-value
@@ -334,16 +334,31 @@ owners to one buffer. It reports `UseOfMovedValue` only when *this* expression i
 invalidated the operand; a move that predates it is already reported where the operand is read.
 
 A place is more than a bare identifier. `place_origin` resolves a field path (`l.w`,
-`o.inner.w`) to the type it denotes and to whether reaching it crossed a reference; an index
-place is not resolved, which is BUG-030. A field move is marked against the place's **ROOT
-binding** rather than the field, because a struct with a field moved out is partially moved and
-unusable as a whole — so `l.w.t()` followed by any use of `l` reports `l`. A place reached
+`o.inner.w`), an array index (`a[0]`) and a tuple element (`t.1`) to the type it denotes and to
+whether reaching it crossed a reference. A place reached
 through a borrow owns nothing to give away and is `CannotMoveOutOfBorrow` instead of a move;
 that covers a dereferenced borrow (`val x = *r`) and `self.field` in a **borrowing** method.
 `self` is bound as the struct type so field access reads normally, which leaves its ownership out
 of its type; `self_is_owned`, set per method body from the `SelfParam`, carries it instead, and a
 consuming receiver's fields are the callee's to move out. `..base` moves its base when it supplies any non-`Copy` field
 (`record_update_base_move`), and moves nothing when every unlisted field is `Copy`.
+
+**Sub-place moves.** A move out of a sub-place is recorded against the PATH below its root
+binding — `"label"`, `"0"`, `"1.name"` — not against the root alone. `MoveState` on `SymbolInfo`
+holds the whole-binding span plus a map of moved paths, and `MoveState::conflict` rejects a read
+whose path either contains, or is contained by, a moved one. That is what makes
+`val (a, b) = pair` work: the destructure desugar binds `tmp.0` then `tmp.1`, which under a
+collapse-to-root rule was a use of a moved value on the second leaf, for every struct, tuple and
+array alike. Reading the aggregate as a WHOLE still conflicts with any outstanding part, so a
+partially moved value cannot be passed on.
+
+Three consequences shape the code. `place_path` returns `None` for an index the compiler cannot
+name statically (a runtime `a[i]`), and the move is then recorded against the whole binding,
+because it cannot say which element left. `TypeChecker::in_sub_place` marks the inner links of a
+place chain so `t` in `t.a` is not judged as a whole-binding read; `with_sub_place_read` is the
+same suppression for `Expr::ArrayRest`, whose `exact` node is an arity assertion over elements
+the leading projections have already taken. And a loop body's `moves_since` compares part maps,
+not just the whole span, so a partial move a second iteration would repeat is still reported.
 
 The analysis is deliberately conservative: `if`/`while`/`for` bodies and if-expression arms
 snapshot and restore move state, so a conditional move never leaks onto a non-executing path. It
@@ -467,19 +482,18 @@ bodies check abstractly; the bare name is `GenericStructNeedsArgs`. A generic `i
 from `check_generic_struct_literal` after inferring the arguments from field values) materializes
 a distinct nominal `Type::Struct("Base<args>")` with concrete fields (`substitute_generic`) and
 per-instance methods (`remap_method_type`) registered on demand, so downstream field access and
-method dispatch reuse the ordinary struct machinery. Type arguments are `Copy`-restricted here
-and in `register_generic_enum`, unlike a generic *function*'s: a struct or enum instance would
-hold the value, and holding a non-`Copy` value in an aggregate is not built yet. Errors:
-`GenericArgCountMismatch`, `NotAGenericType`, `GenericArgumentNotCopy`, `NestedGenericTypeArg`
+method dispatch reuse the ordinary struct machinery. A type argument carries no `Copy`
+requirement: the instance holds the value and is move-tracked when what it holds is. Errors:
+`GenericArgCountMismatch`, `NotAGenericType`, `NestedGenericTypeArg`
 (a generic instantiated with an enclosing type parameter is deferred).
 
 **Enums.** `generic_enums` (base → template) and `enum_instances` (instance → base + arguments).
-Pass 0 routes an `EnumDef` with generics to `register_generic_enum`, which resolves the template's
-variants with the parameters in scope (a `Type::Generic` payload placeholder is exempt from the
-scalar-payload rule) and keeps them in `enum_defs` under the base name so construction sites can
+Pass 0 predeclares every enum NAME; pass 1a resolves the variants, with a generic template's
+parameters in scope, and keeps them in `enum_defs` under the base name so construction sites can
 infer the arguments. `instantiate_generic_enum` monomorphizes per argument set, re-checking the
-scalar restriction per instance (`Option<string>` is rejected) and registering the instance under
-the mangled nominal name `Base<Arg, ...>`. `resolve_type` instantiates a `Type::Generic`
+sizedness rule per instance and registering the instance under the mangled nominal name
+`Base<Arg, ...>`. It resolves the template's own variants first, because a struct field naming
+an instance (`Option<i32>`) is resolved in pass 1, before pass 1a has run. `resolve_type` instantiates a `Type::Generic`
 application naming a generic enum and rejects the bare name (`GenericEnumNeedsArgs`).
 
 The three construction checkers (`check_enum_unit_path`, `check_enum_tuple_call`,
@@ -680,17 +694,19 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
 `VariantPatternFormMismatch`, `OrPatternBinding`, `RefutablePayloadPattern`.
 
 ### Enums, newtypes, arrays, tuples
-- **Enums.** `enum_defs` (name → variants with `VariantForm` and resolved fields) is registered in
-  a pre-pass before structs. `register_enum` rejects duplicates and non-scalar payloads
-  (`UnsupportedEnumPayload`: payloads are limited to scalar Copy primitives this phase).
-  Construction: `E::V` (Path) → unit, `E::V(..)` (Call→Path) → tuple, `E::V { .. }`
-  (`EnumStructLiteral`) → struct, with arity/field/form diagnostics.
+- **Enums.** `enum_defs` (name → variants with `VariantForm` and resolved fields) is filled in
+  two passes: `predeclare_enum` (pass 0) reserves the name and rejects duplicates,
+  `resolve_enum_variants` (pass 1a) resolves the payloads. They are split because a payload may
+  name a struct and a struct field may name the enum, so neither table can be complete before the
+  other's names exist. A payload may be any SIZED type, `Copy` or not; `void` and the unsized
+  types are `UnsupportedEnumPayload`. Construction: `E::V` (Path) → unit, `E::V(..)` (Call→Path)
+  → tuple, `E::V { .. }` (`EnumStructLiteral`) → struct, with arity/field/form diagnostics.
 - **Newtypes.** `predeclare_newtype` reserves each name (rejecting builtin/struct/enum/newtype
   collisions via `NewtypeAlreadyDefined`), then `resolve_newtype_inners` resolves inner types once
-  all nominal names are known, rejecting cyclic (`CyclicNewtype`) and non-Copy
-  (`NewtypeInnerNotCopy`) inners: the inner is restricted to Copy types this phase, so a newtype
-  forwards Copy. Construction `Name(value)` is handled in `check_plain_call`; `.0` yields the
-  inner type in the `TupleIndex` check.
+  all nominal names are known and rejects cycles (`CyclicNewtype`), which is what makes every
+  predicate that recurses through an inner type terminate. A newtype forwards both `Copy` and
+  move-tracking from its inner type. Construction `Name(value)` is handled in `check_plain_call`;
+  `.0` yields the inner type in the `TupleIndex` check.
 - **Arrays.** `resolve_type` resolves `[T; N]`; `check_expr` handles array literals (homogeneous,
   length vs annotation) and indexing (`NotIndexable` / `IndexNotInteger`); `array.len()` is `u64`;
   `Stmt::ForEach` binds the element type; `Stmt::IndexAssignment` requires a mutable target.
@@ -931,8 +947,8 @@ here the way `Drop` and `Hashable` are. Only its name is known, and its shape is
 `check_trait_conformance` against the prelude declaration like any user trait.
 
 What may cross the boundary is decided by the place's TYPE and by the value's PROVENANCE, in that
-order. A type carrying no pointer at all (the scalars, `void`, an enum, a newtype, and arrays and
-tuples of those) crosses unconditionally, which is why `total = total + 1` compiles inside a pool.
+order. A type carrying no pointer at all (the scalars, `void`, and an enum, a newtype, an array or
+a tuple built only out of those) crosses unconditionally, which is why `total = total + 1` compiles inside a pool.
 Everything else has to pass `off_arena`, which returns true only where the source PROVES the value
 holds no arena memory:
 

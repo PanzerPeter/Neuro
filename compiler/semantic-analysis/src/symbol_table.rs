@@ -1,6 +1,6 @@
 // Symbol table with lexical scoping support
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use shared_types::Span;
 
@@ -15,14 +15,75 @@ struct BorrowProvenance {
     exclusive: bool,
 }
 
+/// What a binding has given away: the whole value, or individual sub-places of it.
+///
+/// A sub-place is keyed by its path below the binding — `"label"`, `"0"`, `"0.name"` —
+/// so that `val (a, b) = pair` moves two different elements rather than the same root
+/// twice. Only a statically nameable step joins a path; a runtime array index cannot be
+/// one, so a move through it takes the whole binding instead.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct MoveState {
+    /// The span at which the whole value was moved out, or `None` while the binding
+    /// still owns it.
+    pub(crate) whole: Option<Span>,
+    parts: BTreeMap<String, Span>,
+}
+
+impl MoveState {
+    /// The span of the move that makes reading the sub-place `path` invalid: the whole
+    /// binding, an ancestor of `path`, or a descendant (which leaves `path` itself
+    /// partially moved). `path` is empty for the binding read as a whole.
+    fn conflict(&self, path: &str) -> Option<Span> {
+        if let Some(span) = self.whole {
+            return Some(span);
+        }
+        self.parts
+            .iter()
+            .find(|(moved, _)| is_path_related(moved, path))
+            .map(|(_, span)| *span)
+    }
+
+    /// The span of any outstanding move, whole or partial: reading the binding as a
+    /// whole conflicts with every one of them.
+    pub(crate) fn conflict_with_whole(&self) -> Option<Span> {
+        self.conflict("")
+    }
+
+    fn clear(&mut self) {
+        self.whole = None;
+        self.parts.clear();
+    }
+
+    /// The span of a move this state has and `before` did not, if any. A loop body
+    /// uses it to report a move its next iteration would perform again.
+    fn introduced_since(&self, before: &MoveState) -> Option<Span> {
+        if let (None, Some(span)) = (before.whole, self.whole) {
+            return Some(span);
+        }
+        self.parts
+            .iter()
+            .find(|(path, _)| !before.parts.contains_key(*path))
+            .map(|(_, span)| *span)
+    }
+}
+
+/// Whether reading `path` touches storage that a move of `moved` already gave away:
+/// either path contains the other. The empty path is the whole binding, and contains
+/// every sub-place.
+fn is_path_related(moved: &str, path: &str) -> bool {
+    let contains = |outer: &str, inner: &str| {
+        outer.is_empty() || inner == outer || inner.starts_with(&format!("{}.", outer))
+    };
+    contains(moved, path) || contains(path, moved)
+}
+
 /// Information about a symbol (variable)
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SymbolInfo {
     pub(crate) ty: Type,
     pub(crate) mutable: bool,
-    /// The span at which this binding's value was moved out, or `None` while the
-    /// binding still owns its value. Drives use-after-move detection.
-    pub(crate) moved_at: Option<Span>,
+    /// What this binding has given away. Drives use-after-move detection.
+    pub(crate) moves: MoveState,
     /// Borrows taken against this binding's place that outlive a single statement:
     /// each one held by a reference binding (`val r = &x`) until it leaves scope.
     shared_persistent: u32,
@@ -42,7 +103,7 @@ impl SymbolInfo {
         Self {
             ty,
             mutable,
-            moved_at: None,
+            moves: MoveState::default(),
             shared_persistent: 0,
             exclusive_persistent: 0,
             shared_transient: 0,
@@ -245,23 +306,36 @@ impl SymbolTable {
     /// No-op when the name is not bound (e.g. a constant, which is a value, not
     /// a moveable owner).
     pub(crate) fn mark_moved(&mut self, name: &str, span: Span) {
-        for scope in self.scopes.iter_mut().rev() {
-            if let Some(info) = scope.get_mut(name) {
-                info.moved_at = Some(span);
-                return;
-            }
+        if let Some(info) = self.lookup_mut(name) {
+            info.moves.whole = Some(span);
+        }
+    }
+
+    /// Mark the sub-place `path` of `name` as moved-out at `span`, leaving the
+    /// binding's other sub-places owned. An empty `path` is the whole binding.
+    pub(crate) fn mark_place_moved(&mut self, name: &str, path: &str, span: Span) {
+        if path.is_empty() {
+            self.mark_moved(name, span);
+            return;
+        }
+        if let Some(info) = self.lookup_mut(name) {
+            info.moves.parts.insert(path.to_string(), span);
         }
     }
 
     /// Clear the moved state of `name`: the binding owns a fresh value again
     /// (e.g. after reassigning a `mut`).
     pub(crate) fn clear_moved(&mut self, name: &str) {
-        for scope in self.scopes.iter_mut().rev() {
-            if let Some(info) = scope.get_mut(name) {
-                info.moved_at = None;
-                return;
-            }
+        if let Some(info) = self.lookup_mut(name) {
+            info.moves.clear();
         }
+    }
+
+    /// The span of the move that makes reading sub-place `path` of `name` invalid,
+    /// or `None` when that storage is still owned. An empty `path` reads the whole
+    /// binding, which any outstanding move conflicts with.
+    pub(crate) fn place_moved_at(&self, name: &str, path: &str) -> Option<Span> {
+        self.lookup(name)?.moves.conflict(path)
     }
 
     /// Capture the moved-state of every currently-visible binding, in a stable
@@ -271,11 +345,11 @@ impl SymbolTable {
     /// matching `restore_moves` call so the flat order lines up.
     ///
     /// [`restore_moves`]: SymbolTable::restore_moves
-    pub(crate) fn snapshot_moves(&self) -> Vec<Option<Span>> {
+    pub(crate) fn snapshot_moves(&self) -> Vec<MoveState> {
         let mut snapshot = Vec::new();
         for scope in &self.scopes {
             for info in scope.values() {
-                snapshot.push(info.moved_at);
+                snapshot.push(info.moves.clone());
             }
         }
         snapshot
@@ -290,13 +364,15 @@ impl SymbolTable {
     /// the body re-established before the iteration ended.
     ///
     /// [`snapshot_moves`]: SymbolTable::snapshot_moves
-    pub(crate) fn moves_since(&self, snapshot: &[Option<Span>]) -> Vec<(String, Span)> {
+    pub(crate) fn moves_since(&self, snapshot: &[MoveState]) -> Vec<(String, Span)> {
         let mut introduced = Vec::new();
         let mut idx = 0;
         for scope in &self.scopes {
             for (name, info) in scope {
-                if let (Some(None), Some(span)) = (snapshot.get(idx), info.moved_at) {
-                    introduced.push((name.clone(), span));
+                if let Some(before) = snapshot.get(idx) {
+                    if let Some(span) = info.moves.introduced_since(before) {
+                        introduced.push((name.clone(), span));
+                    }
                 }
                 idx += 1;
             }
@@ -308,12 +384,12 @@ impl SymbolTable {
     /// snapshot length (bindings introduced after the snapshot) are left as-is.
     ///
     /// [`snapshot_moves`]: SymbolTable::snapshot_moves
-    pub(crate) fn restore_moves(&mut self, snapshot: &[Option<Span>]) {
+    pub(crate) fn restore_moves(&mut self, snapshot: &[MoveState]) {
         let mut idx = 0;
         for scope in &mut self.scopes {
             for info in scope.values_mut() {
                 if let Some(state) = snapshot.get(idx) {
-                    info.moved_at = *state;
+                    info.moves = state.clone();
                 }
                 idx += 1;
             }

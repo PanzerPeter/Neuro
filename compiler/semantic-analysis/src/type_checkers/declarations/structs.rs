@@ -350,8 +350,7 @@ impl TypeChecker {
             let mut subst: HashMap<String, Type> = HashMap::new();
             for (gp, arg) in template.generics.iter().zip(args.iter()) {
                 // Validate each argument's kind: a const parameter takes a `ConstValue`,
-                // a type parameter takes a type. A type argument must be Copy (the
-                // abstract-body soundness condition); a const value is exempt.
+                // a type parameter takes a type.
                 let is_const = matches!(gp.kind, ast_types::GenericParamKind::Const(_));
                 match arg {
                     Type::ConstValue(_) if is_const => {}
@@ -365,13 +364,6 @@ impl TypeChecker {
                         expected: "const".to_string(),
                         span,
                     }),
-                    _ if !self.is_type_copy(arg) => {
-                        self.record_error(TypeError::GenericArgumentNotCopy {
-                            param: gp.name.name.clone(),
-                            ty: arg.clone(),
-                            span,
-                        })
-                    }
                     _ => {}
                 }
                 subst.insert(gp.name.name.clone(), arg.clone());

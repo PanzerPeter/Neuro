@@ -1,14 +1,14 @@
 // Codegen for enum construction: every surface form (unit `E::V`, tuple
 // `E::V(..)`, struct `E::V { .. }`) reaches here as a single `EnumConstruct` node.
 //
-// An enum value is a tagged union `{ i32 tag, [W x i64] payload }`. The tag is the
-// variant discriminant; each scalar payload field is packed losslessly into its own
-// 64-bit slot: integers/`char`/`bool` zero-extend, floats bitcast to their integer
-// width then zero-extend. Packing into fixed `i64` slots gives every value of an enum
-// one identical LLVM type without computing a target-specific union size, and the
-// encoding round-trips bit-exactly for the eventual `match` extraction.
+// An enum value is a tagged union `{ i32 tag, [W x [K x i64]] payload }`. The tag is
+// the variant discriminant; each payload field is written into its own slot as raw
+// 64-bit words, through a zeroed stack cell that the field's own type is stored into
+// and the slot type loaded back out of. Going through memory is what makes the slot
+// type-agnostic: a `string` fat pointer, a struct, or a tuple round-trips bit-exactly
+// for the eventual `match` extraction, exactly as a scalar does.
 
-use inkwell::values::{BasicValue, BasicValueEnum};
+use inkwell::values::{BasicValueEnum, PointerValue};
 use neuro_hir::HirExpr;
 
 use crate::codegen::context::CodegenContext;
@@ -53,9 +53,17 @@ impl<'ctx> CodegenContext<'ctx> {
             })?
             .into_array_type();
 
+        let slot_ty = self.type_mapper.enum_slot_type(enum_name)?;
         let mut payload_val = payload_array_ty.get_undef();
-        for (slot, (value, field_ty)) in payload.iter().enumerate() {
-            let encoded = self.encode_enum_payload_field(*value, field_ty)?;
+        for (slot, (value, _)) in payload.iter().enumerate() {
+            let cell = self.enum_payload_cell(slot_ty)?;
+            self.builder
+                .build_store(cell, *value)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let encoded = self
+                .builder
+                .build_load(slot_ty, cell, "enum.words")
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
             payload_val = self
                 .builder
                 .build_insert_value(payload_val, encoded, slot as u32, "enum.slot")
@@ -79,41 +87,22 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(agg.into())
     }
 
-    /// Encode one scalar payload field into its 64-bit slot. A float is first
-    /// bitcast to the integer of its own width to preserve the exact bit pattern,
-    /// then every value zero-extends to `i64`; the low bits recover the original on
-    /// extraction. Payloads are restricted to scalar primitives by semantic analysis,
-    /// so no other shape reaches here.
-    fn encode_enum_payload_field(
+    /// A zeroed stack cell of an enum's payload slot type, used to reinterpret one
+    /// payload field as raw words and back.
+    ///
+    /// The cell is zeroed because a field narrower than the slot leaves the remaining
+    /// words unwritten, and the slot is loaded whole: without this, those words would
+    /// be undef and the enum value would carry poison through every copy of it.
+    pub(super) fn enum_payload_cell(
         &self,
-        value: BasicValueEnum<'ctx>,
-        field_ty: &Type,
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let i64_ty = self.context.i64_type();
-
-        let int_value = if field_ty.is_float() {
-            let int_width = match field_ty {
-                Type::F16 | Type::BF16 => self.context.i16_type(),
-                Type::F32 => self.context.i32_type(),
-                Type::F64 => i64_ty,
-                _ => {
-                    return Err(CodegenError::InternalError(
-                        "non-float type took the float encoding path".to_string(),
-                    ))
-                }
-            };
-            self.builder
-                .build_bit_cast(value, int_width, "enum.fbits")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                .into_int_value()
-        } else {
-            value.into_int_value()
-        };
-
-        let widened = self
-            .builder
-            .build_int_z_extend(int_value, i64_ty, "enum.slot64")
+        slot_ty: inkwell::types::ArrayType<'ctx>,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        // In the entry block, not at the builder's position: a cell built inside a
+        // loop body would otherwise grow the stack by one slot per iteration.
+        let cell = self.entry_alloca(slot_ty, "enum.cell")?;
+        self.builder
+            .build_store(cell, slot_ty.const_zero())
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        Ok(widened.as_basic_value_enum())
+        Ok(cell)
     }
 }

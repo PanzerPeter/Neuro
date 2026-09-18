@@ -48,7 +48,7 @@ bounds, slice boundaries).
 | user struct | anonymous LLVM struct `{ T0, T1, ... }`, fields in declaration order |
 | tuple | anonymous LLVM struct, elements in position order |
 | `[T; N]` | `[N x T]` |
-| enum | tagged union `{ i32 tag, [W x i64] payload }`, `W` sized to the widest variant |
+| enum | tagged union `{ i32 tag, [W x [K x i64]] payload }`, `W` slots for the widest variant, `K` words for the widest payload field |
 | closure | `{ fn_ptr, env_ptr }` fat pointer, no heap allocation |
 | `void` | `void` |
 

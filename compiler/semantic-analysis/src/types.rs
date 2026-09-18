@@ -493,8 +493,8 @@ impl Type {
 
     /// Whether an abstract type parameter appears anywhere in this type.
     ///
-    /// A position that is re-validated once per instantiation — an array or tuple
-    /// annotation in a generic signature, a `@derive(Copy)` field — cannot ask
+    /// A position that is re-validated once per instantiation — a `@derive(Copy)`
+    /// field of a generic struct — cannot ask
     /// [`TypeChecker::is_type_copy`] about a type still carrying a `T`, because that
     /// answers `false` for every instantiation at once. Such a site defers on this
     /// predicate and lets the construction site's concrete argument answer instead.

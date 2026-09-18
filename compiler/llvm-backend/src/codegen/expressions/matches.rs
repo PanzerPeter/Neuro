@@ -274,10 +274,16 @@ impl<'ctx> CodegenContext<'ctx> {
                     (val, scrut_sem.clone(), scrut_llvm)
                 }
                 HirBindingSource::EnumPayload { slot } => {
+                    let Type::Enum(enum_name) = scrut_sem.referent() else {
+                        return Err(CodegenError::InternalError(
+                            "an enum-payload binding needs an enum scrutinee".to_string(),
+                        ));
+                    };
+                    let enum_name = enum_name.clone();
                     let field_sem = Type::from_hir(&b.ty);
                     let field_llvm = self.get_any_llvm_type(&field_sem)?;
                     let raw = self.load_enum_payload_slot(scrut_alloca, scrut_llvm, *slot)?;
-                    let decoded = self.decode_enum_payload_field(raw, &field_sem)?;
+                    let decoded = self.decode_enum_payload_field(raw, &field_sem, &enum_name)?;
                     (decoded, field_sem, field_llvm)
                 }
             };
@@ -348,13 +354,14 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(tag.into_int_value())
     }
 
-    /// Load enum payload slot `slot` (a packed `i64`) of an enum scrutinee.
+    /// Load payload slot `slot` of an enum scrutinee: the raw `[K x i64]` words the
+    /// construction site wrote the field into.
     fn load_enum_payload_slot(
         &self,
         scrut_alloca: PointerValue<'ctx>,
         scrut_llvm: BasicTypeEnum<'ctx>,
         slot: usize,
-    ) -> CodegenResult<IntValue<'ctx>> {
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let agg = self
             .builder
             .build_load(scrut_llvm, scrut_alloca, "match.enum")
@@ -363,11 +370,9 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_extract_value(agg.into_struct_value(), 1, "match.payload")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let word = self
-            .builder
+        self.builder
             .build_extract_value(payload.into_array_value(), slot as u32, "match.slot")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        Ok(word.into_int_value())
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))
     }
 
     /// Load a scalar scrutinee (integer / `char` / `bool`) as an integer value.
@@ -383,40 +388,22 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(val.into_int_value())
     }
 
-    /// Decode one packed `i64` payload slot back to a field of `field_ty`, the inverse
-    /// of the enum construction encoding: truncate to the field's width, then
-    /// bitcast back to a float when the field is a float.
+    /// Decode a raw payload slot back to a field of `field_ty`: the inverse of the
+    /// construction encoding, reinterpreting the slot's words through a stack cell.
     fn decode_enum_payload_field(
         &self,
-        raw: IntValue<'ctx>,
+        raw: BasicValueEnum<'ctx>,
         field_ty: &Type,
+        enum_name: &str,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        if field_ty.is_float() || matches!(field_ty, Type::F16 | Type::BF16) {
-            let int_width = match field_ty {
-                Type::F16 | Type::BF16 => self.context.i16_type(),
-                Type::F32 => self.context.i32_type(),
-                Type::F64 => self.context.i64_type(),
-                _ => unreachable!("guarded by the float check above"),
-            };
-            let narrowed = self
-                .builder
-                .build_int_truncate(raw, int_width, "match.fbits")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            let float_ty = self.type_mapper.map_type(field_ty)?;
-            return self
-                .builder
-                .build_bit_cast(narrowed, float_ty, "match.fdecode")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()));
-        }
-
-        let target = self.type_mapper.map_type(field_ty)?.into_int_type();
-        if target.get_bit_width() == 64 {
-            return Ok(raw.into());
-        }
-        let narrowed = self
-            .builder
-            .build_int_truncate(raw, target, "match.idecode")
+        let slot_ty = self.type_mapper.enum_slot_type(enum_name)?;
+        let cell = self.enum_payload_cell(slot_ty)?;
+        self.builder
+            .build_store(cell, raw)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        Ok(narrowed.into())
+        let field_llvm = self.type_mapper.map_type(field_ty)?;
+        self.builder
+            .build_load(field_llvm, cell, "match.field")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))
     }
 }

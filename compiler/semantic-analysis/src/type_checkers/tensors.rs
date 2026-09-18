@@ -406,7 +406,7 @@ impl TypeChecker {
         }
         // The target is read as well as written, so a right-hand side that moved it out
         // (`w += w`) leaves nothing to update in place.
-        if let Some(moved_at) = symbol_info.moved_at {
+        if let Some(moved_at) = symbol_info.moves.conflict_with_whole() {
             self.record_error(TypeError::UseOfMovedValue {
                 name: target.name.clone(),
                 span: target.span,

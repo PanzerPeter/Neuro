@@ -498,10 +498,13 @@ impl<'ctx> CodegenContext<'ctx> {
         self.pool_aware_types = pool_aware_types;
     }
 
-    /// Record each enum's payload word count so enum types map to the
-    /// `{ i32, [W x i64] }` tagged union before code generation begins.
-    pub(crate) fn set_enum_words(&mut self, enum_words: std::collections::HashMap<String, u32>) {
-        self.type_mapper.set_enum_words(enum_words);
+    /// Record each enum's variant payload types so enum types map to their tagged
+    /// union before code generation begins.
+    pub(crate) fn set_enum_payloads(
+        &mut self,
+        enum_payloads: std::collections::HashMap<String, Vec<Vec<Type>>>,
+    ) {
+        self.type_mapper.set_enum_payloads(enum_payloads);
     }
 
     /// Enable or disable debug-build integer overflow trapping.

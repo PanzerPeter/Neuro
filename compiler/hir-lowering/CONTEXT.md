@@ -341,7 +341,9 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
 - **Tuples**: `resolve_type` gives `HirType::Tuple`; a literal is typed by lowering each element
   (hinted by the expected tuple's element type when annotated) and `t.N` reads the N-th element
   type off the auto-derefed tuple type. Destructuring is parser-desugared.
-- **Enums**: a pre-pass records each enum's variants and resolved payload fields. All three
+- **Enums**: registration is split in two, because a payload may name a struct and a struct field
+  may name the enum: `register_items` reserves every enum NAME, registers the structs, then
+  resolves the payloads. All three
   construction forms normalize to one `HirExprKind::EnumConstruct`: a unit `E::V` carries an empty
   payload, a tuple `E::V(..)` the positional args, and a struct `E::V { .. }` **reorders its
   provided fields into declared order** so codegen sees a single positional layout. `tag` is the

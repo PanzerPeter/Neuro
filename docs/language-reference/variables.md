@@ -308,8 +308,9 @@ val n: u64 = msg.len()          // OK, the move above was conditional
 ```
 
 > Move tracking covers every non-`Copy` type: `string`, the collections
-> (`Vec`, `HashMap`, `BTreeMap`), and any struct without `@derive(Copy)`. Scalars,
-> arrays and tuples of `Copy` elements, references, and `@derive(Copy)` structs are
+> (`Vec`, `HashMap`, `BTreeMap`), any struct without `@derive(Copy)`, and any array,
+> tuple, enum, newtype or generic instance holding one of those. Scalars, aggregates
+> built only out of `Copy` parts, references, and `@derive(Copy)` structs are
 > freely duplicable. A type with a `Drop` impl cannot be `Copy`. `mut` bindings that
 > were moved can be revived by reassigning them a fresh value.
 

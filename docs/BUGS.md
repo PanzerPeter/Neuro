@@ -263,20 +263,21 @@ It exits 4 rather than crashing because an owned string built by `+` is never fr
 untracked leak Phase 1 left behind — so the double free has nothing to fire on yet. A
 collection of a type with a real destructor would abort.
 
-**Root cause**: `record_move` resolves a place through `place_origin`, which handles an
-identifier, a field access, and a dereference. It returns `None` for `Expr::Index`, so no
-move is recorded and no error is raised.
+**Root cause**: `record_move` resolves a place through `place_origin`, which now handles an
+index place over a fixed ARRAY but still returns `None` for one over a `Type::Collection`,
+so no move is recorded and no error is raised.
 
 **Workaround**: read the element through a method or a loop over the collection rather
 than binding it, or `.clone()` it.
 
-**Fix sketch**: not purely mechanical, which is why it is filed rather than fixed. The
-conservative rule that works for a field — mark the ROOT binding moved — would make a
-`Vec` of a non-`Copy` element readable exactly once, since `&v[0]` is not a borrowable
-place either. What a partial move of a collection means is a language decision the spec
-does not make: fixed arrays and tuples sidestep it by rejecting non-`Copy` elements
-outright, and a `Vec` does not. Decide the rule first (reject the move outright, as Rust
-does; require `.clone()`; or add a borrowing index form), then implement it.
+**Fix sketch**: not purely mechanical, which is why it is filed rather than fixed. An array
+and a tuple now answer this per ELEMENT PATH — `a[0]` moves the path `"0"`, a runtime `a[i]`
+moves the whole binding, because the compiler cannot say which element left. A `Vec`'s
+length is not static, so every index into one is the runtime case, and applying the array
+rule unchanged would make a `Vec` of a non-`Copy` element readable exactly once — `&v[0]`
+is not a borrowable place either. What a partial move of a collection means is still a
+language decision the spec does not make. Decide the rule first (reject the move outright,
+as Rust does; require `.clone()`; or add a borrowing index form), then implement it.
 
 ## BUG-027 — a const generic parameter cannot be passed to another generic call
 

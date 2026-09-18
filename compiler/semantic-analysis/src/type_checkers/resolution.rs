@@ -195,25 +195,14 @@ impl TypeChecker {
                     mutable: *mutable,
                 })
             }
-            // Fixed-size array `[T; N]`. The element must be a `Copy` scalar
-            // primitive in this phase: non-Copy element arrays (strings, structs)
-            // need per-element move/Drop tracking, which is a documented follow-on.
+            // Fixed-size array `[T; N]`. A non-`Copy` element is admissible: the
+            // array binding owns the elements, so reading one out moves the array.
             ast_types::Type::Array {
                 element,
                 size,
                 span,
             } => {
                 let element_ty = self.resolve_type(element)?;
-                // A `[T; N]` in a generic signature defers: the caller's own annotation
-                // for the argument it passes is resolved here too, so `[Guard; 3]` is
-                // rejected where it is written rather than where `T` stands in for it.
-                if !element_ty.mentions_generic() && !self.is_type_copy(&element_ty) {
-                    self.record_error(TypeError::NonCopyArrayElement {
-                        ty: element_ty,
-                        span: *span,
-                    });
-                    return None;
-                }
                 let len = self.resolve_array_size(size, *span)?;
                 Some(Type::Array {
                     element: Box::new(element_ty),
@@ -235,23 +224,12 @@ impl TypeChecker {
                 }
                 Some(Type::Slice(Box::new(element_ty)))
             }
-            // Tuple `(T1, T2, ...)`. Each element must be `Copy` in this phase:
-            // non-Copy element tuples (e.g. holding a `string` or a non-Copy struct)
-            // need per-element move/Drop tracking, a documented follow-on (mirrors the
-            // array element rule).
-            ast_types::Type::Tuple { elements, span } => {
+            // Tuple `(T1, T2, ...)`. A non-`Copy` element is admissible on the same
+            // terms as an array's: the tuple binding owns it.
+            ast_types::Type::Tuple { elements, .. } => {
                 let mut resolved = Vec::with_capacity(elements.len());
                 for element in elements {
-                    let element_ty = self.resolve_type(element)?;
-                    // Defers per instance for the same reason the array arm above does.
-                    if !element_ty.mentions_generic() && !self.is_type_copy(&element_ty) {
-                        self.record_error(TypeError::NonCopyTupleElement {
-                            ty: element_ty,
-                            span: *span,
-                        });
-                        return None;
-                    }
-                    resolved.push(element_ty);
+                    resolved.push(self.resolve_type(element)?);
                 }
                 Some(Type::Tuple(resolved))
             }

@@ -39,6 +39,58 @@ impl TypeChecker {
     /// - `expected`: Optional expected type for contextual type inference
     pub(crate) fn check_expr(&mut self, expr: &Expr, expected: Option<&Type>) -> Option<Type> {
         match expr {
+            // A name or a grouping is the same read as whatever encloses it, so it
+            // inherits the chain state rather than opening or closing one.
+            Expr::Identifier(_) | Expr::Paren(_, _) => self.check_expr_kind(expr, expected),
+            Expr::FieldAccess { .. } | Expr::Index { .. } | Expr::TupleIndex { .. } => {
+                let outermost = !self.in_sub_place;
+                self.in_sub_place = true;
+                let ty = self.check_expr_kind(expr, expected);
+                self.in_sub_place = !outermost;
+                if outermost {
+                    self.report_place_move(expr);
+                }
+                ty
+            }
+            // The chain ends here: anything nested below is read on its own terms.
+            _ => {
+                let outer = std::mem::replace(&mut self.in_sub_place, false);
+                let ty = self.check_expr_kind(expr, expected);
+                self.in_sub_place = outer;
+                ty
+            }
+        }
+    }
+
+    /// Run `f` with the place-chain flag set, so a read inside it is judged against
+    /// the sub-place it names rather than against the binding as a whole.
+    pub(crate) fn with_sub_place_read<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let outer = std::mem::replace(&mut self.in_sub_place, true);
+        let value = f(self);
+        self.in_sub_place = outer;
+        value
+    }
+
+    /// Report reading a place whose storage an earlier move gave away, naming the
+    /// binding it is rooted in. A bare identifier is reported in its own arm, which
+    /// has the symbol in hand already.
+    fn report_place_move(&mut self, expr: &Expr) {
+        let Some(root) = Self::place_root_name(expr) else {
+            return;
+        };
+        let path = Self::place_path(expr).unwrap_or_default();
+        let Some(moved_at) = self.symbols.place_moved_at(&root, &path) else {
+            return;
+        };
+        self.record_error(TypeError::UseOfMovedValue {
+            name: root,
+            span: expr.span(),
+            moved_at,
+        });
+    }
+
+    fn check_expr_kind(&mut self, expr: &Expr, expected: Option<&Type>) -> Option<Type> {
+        match expr {
             Expr::Literal(lit, span) => match lit {
                 Literal::Integer(value, suffix_opt) => {
                     if let Some(suffix) = suffix_opt {
@@ -65,7 +117,14 @@ impl TypeChecker {
                 // Variables take priority; constants are a fallback so locals can shadow consts.
                 if let Some(symbol_info) = self.symbols.lookup(&ident.name) {
                     let ty = symbol_info.ty.clone();
-                    if let Some(moved_at) = symbol_info.moved_at {
+                    // As the base of a longer place, the name is not read as a whole:
+                    // the outermost link checks its own path instead.
+                    let moved_at = if self.in_sub_place {
+                        symbol_info.moves.whole
+                    } else {
+                        symbol_info.moves.conflict_with_whole()
+                    };
+                    if let Some(moved_at) = moved_at {
                         self.record_error(TypeError::UseOfMovedValue {
                             name: ident.name.clone(),
                             span: ident.span,

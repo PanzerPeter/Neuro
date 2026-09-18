@@ -11,9 +11,9 @@ expression already carries the type the checker resolved for it.
 - Implemented: extended integer types (`i8`-`i64`, `u8`-`u64`)
 - Implemented: function types, void type, type aliases, newtypes
 - Implemented: contextual inference for numeric literals
-- Implemented: fixed-size arrays `[T; N]` of `Copy` elements, and borrowed slices
-  `&[T]` / `&mut [T]` over an array, a `Vec<T>`, or a sub-range
-- Implemented: tuples `(T1, T2, ...)` of `Copy` elements, with destructuring
+- Implemented: fixed-size arrays `[T; N]`, including of non-`Copy` elements, and borrowed
+  slices `&[T]` / `&mut [T]` over an array, a `Vec<T>`, or a sub-range
+- Implemented: tuples `(T1, T2, ...)`, including of non-`Copy` elements, with destructuring
 - Implemented: structs, enums, generic enums, `Option<T>` / `Result<T, E>`, and the
   standard collections
 - Implemented: generic functions, structs, and impls, monomorphized
@@ -499,7 +499,7 @@ val m = Message::Move(1, 2)              // tuple variant
 val s = Shape::Circle { radius: 5.0 }    // struct variant
 ```
 
-An enum value can be bound to a `val`/`mut`, passed to and returned from functions, and stored in a struct field. Enums are **`Copy`** (their payloads are scalar `Copy` primitives, see below), so binding or passing one duplicates it rather than moving it.
+An enum value can be bound to a `val`/`mut`, passed to and returned from functions, and stored in a struct field. An enum is **`Copy`** exactly when every payload it can carry is, so an enum over scalars duplicates on a bind while one carrying a `string` moves.
 
 ### Memory Layout
 
@@ -571,10 +571,9 @@ Variants may be written qualified (`Option::Some`, `Result::Err`) or, because th
 
 ### Phase 1 Limitations
 
-- **Payloads are scalar `Copy` primitives only**, integers, floats, `bool`, `char`. A payload of `string`, a struct, an array, a tuple, or a reference is rejected (`UnsupportedEnumPayload`); broader payloads arrive with heap support. The rule is enforced **per instance**, so `Option<i32>` is available while `Option<string>` is not yet.
-- **Type arguments are `Copy`**, the same restriction generic structs carry this phase (a generic *function*'s type argument does not: see [Functions](functions.md#ownership-through-a-type-parameter)).
+- **Payloads must be sized.** Any sized type is admissible, `Copy` or not: a `string`, a struct, an array, a tuple, another enum. `void` and the unsized types (`dyn Trait`, `[T]`) are rejected (`UnsupportedEnumPayload`), because a payload slot has to have a width.
 - **No `impl` blocks on enums**, methods (and therefore `Option`/`Result` helpers such as `.map_err`) need impls over enums, which are struct-only today.
-- **No lifetime parameters on an enum**, with scalar-only payloads there is nothing to annotate; `enum E<'a, T>` is a parse error.
+- **No lifetime parameters on an enum**; `enum E<'a, T>` is a parse error.
 
 ### Type Errors
 
@@ -585,7 +584,7 @@ Variants may be written qualified (`Option::Some`, `Result::Err`) or, because th
 | `EnumVariantFormMismatch` | A variant built with the wrong syntax (e.g. a struct variant called like a function) |
 | `EnumVariantArityMismatch` | A tuple variant built with the wrong number of arguments |
 | `UnknownEnumField` / `MissingEnumField` / `DuplicateEnumField` | Struct-variant field set is wrong |
-| `UnsupportedEnumPayload` | A variant payload is not a scalar `Copy` primitive |
+| `UnsupportedEnumPayload` | A variant payload is `void` or an unsized type |
 | `GenericEnumNeedsArgs` | A generic enum's bare name used as a type |
 | `GenericEnumNotInferable` | A construction whose type arguments no context determines |
 | `GenericArgCountMismatch` | `Option<i32, bool>`, wrong number of type arguments |
@@ -619,11 +618,10 @@ val bad: i32 = m               // ERROR: expected i32, found Meters
 val also_bad = Meters(1) + Seconds(2)  // ERROR: arithmetic is not defined on newtypes
 ```
 
-A newtype forwards `Copy`/`Clone` from its inner type, so a `Copy`-inner newtype is itself `Copy`. It can be a `val`/`mut` binding, a function parameter or return type, and a struct field.
+A newtype forwards `Copy`/`Clone` from its inner type, so a `Copy`-inner newtype is itself `Copy` and a `newtype Name = string` moves like the `string` it wraps. It can be a `val`/`mut` binding, a function parameter or return type, and a struct field.
 
 ### Phase 1E Limitations
 
-- **Inner type must be `Copy`**, integers, floats, `bool`, `char`, and other `Copy` aggregates. A non-Copy inner such as `string` is rejected (`NewtypeInnerNotCopy`); non-Copy wrappers arrive with broader move/heap support.
 - **No inherent methods or operator traits yet**, arithmetic and other operators on a newtype await the trait system (1F). Use `.0` to compute on the inner value.
 
 ### Type Errors
@@ -631,7 +629,6 @@ A newtype forwards `Copy`/`Clone` from its inner type, so a `Copy`-inner newtype
 | Error | Cause |
 |---|---|
 | `NewtypeAlreadyDefined` | A newtype reuses a builtin, struct, enum, or newtype name |
-| `NewtypeInnerNotCopy` | The wrapped inner type is not `Copy` |
 | `CyclicNewtype` | A newtype wraps itself directly or transitively |
 
 ## References, Immutable Borrows (`&T`)
@@ -1263,10 +1260,10 @@ for x in a {  }                      // iterate by value
 for x in &a {  }                     // iterate over a borrow
 ```
 
-- **Element type**: currently restricted to `Copy` scalar primitives (the
-  integer types, `f16`/`bf16`/`f32`/`f64`, `bool`, `char`). An array of `Copy`
-  elements is itself `Copy`. Arrays of non-`Copy` elements (strings, structs)
-  are not yet supported.
+- **Element type**: any sized type. An array of `Copy` elements is itself `Copy`;
+  an array holding an owner (a `string`, a non-`Copy` struct) is itself an owner
+  and moves rather than copies. Reading one element out is a move of that element:
+  see [Ownership of an element](#ownership-of-an-element) below.
 - **Literals** must be homogeneous; the length is the element count and, when a
   `[T; N]` annotation is present, must equal `N`.
 - **Bounds**: an out-of-range index panics with a located diagnostic in debug
@@ -1343,9 +1340,9 @@ val (_, keep, _) = mixed            // `_` discards an element
 val ((p, q), r) = ((1, 2), 3)       // nested destructuring
 ```
 
-- **Element type**: currently restricted to `Copy` types, so a tuple is itself
-  `Copy`. Tuples holding a `string` or another non-`Copy` value are not yet
-  supported (the same restriction as array elements).
+- **Element type**: any sized type. A tuple is `Copy` exactly when every element
+  is, and otherwise moves, on the same terms as an array element: see
+  [Ownership of an element](#ownership-of-an-element).
 - **Grouping vs. tuple**: a single parenthesized expression `(x)` is grouping,
   not a one-element tuple. A tuple literal needs at least two elements.
 - **Index access**: `t.0`, `t.1`, … read by a constant index; an out-of-range
@@ -1362,6 +1359,46 @@ binds each named field, and `val [first, second, ..rest] = arr` binds array elem
 positionally with an optional trailing `..rest` (a fresh `[T; N - k]` remainder) or
 bare `..` to ignore it. A rest-less array pattern must match the array's length
 exactly. See [Variables → Destructuring](variables.md#destructuring).
+
+## Ownership of an element
+
+An aggregate that holds an owner IS an owner. An array, a tuple, a struct, an enum
+payload, a newtype and a generic instance all follow the same three rules when what they
+hold is not `Copy`.
+
+**The aggregate moves.** Passing or binding it hands over everything inside it, so the
+source binding is spent:
+
+```neuro
+val pair: (string, string) = ("left", "right")
+val taken = pair        // moves both elements
+// println(pair.0)      // ERROR: use of moved value 'pair'
+```
+
+**One element at a time.** Reading an element out moves that element and leaves its
+siblings alone, which is what makes destructuring work:
+
+```neuro
+struct Two { a: string, b: string }
+
+val t = Two { a: "x", b: "y" }
+val first = t.a         // moves `t.a`
+val second = t.b        // `t.b` is untouched and still owned
+val Two { a, b } = Two { a: "p", b: "q" }   // the same thing, spelled as a pattern
+```
+
+**A partially moved value cannot be read whole.** Once any element has left, the
+aggregate is no longer complete, so naming it as a whole is an error:
+
+```neuro
+val t = Two { a: "x", b: "y" }
+val first = t.a
+// consume(t)           // ERROR: use of moved value 't'
+```
+
+An index the compiler cannot evaluate names no particular element, so a move through one
+takes the whole binding — `a[0]` moves element `0`, while `a[i]` moves `a`. Use
+`.clone()` on the element when the aggregate has to stay intact.
 
 ## Tensor Types
 
@@ -1469,9 +1506,6 @@ equally; the map only needs that much.
 
 ### Current limits
 
-- `pop()` and `get()` build an `Option<T>`, so they are available only for
-  element types `Option` can carry, scalar `Copy` primitives in this phase.
-  Index a `Vec` of structs or strings with `v[i]` instead.
 - A `string` stored in a collection is not freed when the collection is dropped;
   only the collection's own buffer is. This matches the existing string-concat
   limitation and resolves with the heap-string work.

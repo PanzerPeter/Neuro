@@ -173,7 +173,7 @@ does the prior value of a reassigned binding, matching the same limit the Drop A
 ## Struct ABI
 User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding:
 LLVM handles alignment). `TypeMapper` holds the layout table (`set_struct_fields`, fed by
-`CodegenContext::set_struct_defs`) beside `enum_words`, and `struct_written_names` (fed by
+`CodegenContext::set_struct_defs`) beside `enum_payloads`, and `struct_written_names` (fed by
 `set_struct_written_names`) maps each key to the name the programmer wrote: they differ only for
 a monomorphized generic instance, and only the derived debug rendering reads it. `map_type` builds a named struct's
 aggregate: a struct works as a free function's **parameter and return type** and as a field of
@@ -325,12 +325,22 @@ than inkwell's const-arithmetic API (inconsistent across versions): all arithmet
 always wraps, regardless of `overflow_checks`.
 
 ## Enum ABI
-`compile` builds an `enum_words` table (each enum's widest-variant field count) and hands it to
-the `TypeMapper`, which maps an enum to the tagged union `{ i32 tag, [W x i64] payload }`, usable
-as a parameter, return, or field via `map_type`. `codegen_enum_construct`
-(`expressions/enums.rs`) packs the discriminant tag plus each scalar payload field into its own
-64-bit slot (floats bitcast to int width, then zero-extended), a lossless round-trip for `match`.
-Payloads are scalar Copy primitives only, enforced by semantic analysis. `codegen_enum_value` is
+`compile` builds an `enum_payloads` table (each enum's variant payload types) and hands it to the
+`TypeMapper`. `enum_payload_shape` derives the layout from it as `(slots, words)`: `slots` is the
+widest variant's field count, `words` the widest single payload field rounded up to whole 64-bit
+words (`llvm_words`, a deliberate over-estimate — every field is rounded up before it is summed,
+which cannot under-count a layout whose maximum alignment is 8). An enum is therefore the tagged
+union `{ i32 tag, [W x [K x i64]] payload }`, usable as a parameter, return, or field via
+`map_type`.
+
+`codegen_enum_construct` (`expressions/enums.rs`) writes each payload field into its slot through
+`enum_payload_cell`: a zeroed `[K x i64]` stack slot the field's own type is stored into and the
+slot type loaded back out of. Going through memory is what makes a slot type-agnostic — a
+`string` fat pointer, a struct, an array or a tuple round-trips bit-exactly, exactly as a scalar
+does — and zeroing it is what keeps a field narrower than the slot from leaving poison in the
+words the load reads anyway. The cell is an `entry_alloca`, not a local one: a cell built at the
+builder's position inside a loop body grows the stack by one slot per iteration. A payload may be
+any sized type; semantic analysis rejects the unsized ones. `codegen_enum_value` is
 the split-out half that builds an enum from already-evaluated values, and the context's
 `enum_variants` table (name → declaration order) resolves `Some` / `None` tags **by name** rather
 than assuming the prelude's declaration order.
@@ -597,7 +607,8 @@ identical IR.
 builds a per-arm test-block chain: each arm ORs its `HirMatchTest`s (tag compare / scalar `==` /
 range `lo<=x<=hi`, signed vs unsigned by scrutinee type) and branches to the arm body or the next
 test. An arm body materializes its bindings (the whole scrutinee, or an enum payload slot decoded
-by `decode_enum_payload_field`, the inverse of the payload pack), evaluates the guard (branching
+by `decode_enum_payload_field`, the inverse of the construction encoding through the same cell),
+evaluates the guard (branching
 to the next arm on failure), then evaluates the body into a shared result slot. Bindings are saved
 and restored in the name maps per arm, and the fall-through block is `unreachable`, because
 exhaustiveness is a frontend guarantee.

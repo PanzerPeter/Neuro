@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.43.0] - 2026-09-18
+
+### Added
+
+- semantic: an aggregate may hold a non-`Copy` value. An array element, a tuple element,
+  an enum or `Option` / `Result` payload, a newtype's inner type, and a generic struct or
+  enum type argument all take an owner now, and the holder owns what it holds: it moves
+  rather than copies, it gives up one element at a time, and once an element has left it
+  may not be read as a whole. `[string; 3]`, `(string, i32)`, `Option<string>`,
+  `newtype Name = string` and `Cell<string>` all compile and run, and `Vec<string>::pop()`
+  works with them.
+- semantic: move state is tracked per sub-place rather than per binding, so
+  `val (a, b) = pair`, `val Point { x, y } = p` and `val [i, j] = arr` each bind every leaf
+  instead of reporting the second as a use of a moved value. The same rule lets a consuming
+  method hand back two owned fields at once. A move through an index the compiler cannot
+  evaluate still takes the whole binding, because it cannot say which element left.
+- codegen: an enum payload slot is sized to the widest payload field instead of one 64-bit
+  word, and a field is written into it through a zeroed stack cell, so any sized type
+  round-trips bit-exactly through construction and `match`.
+- tests: `aggregate_ownership` end-to-end suite, and `examples/showcase/owned_aggregates.nr`
+  combining owning aggregates with destructuring, pattern matching, generics and collections.
+
+### Changed
+
+- semantic: enum registration runs in two passes, names then payloads, so an enum payload
+  may name a struct declared after it and a struct field may name that enum.
+
+### Removed
+
+- semantic: `TypeError::NonCopyArrayElement`, `NonCopyTupleElement`, `NewtypeInnerNotCopy`
+  and `GenericArgumentNotCopy`. Each named a restriction that no longer exists.
+
 ## [2.42.0] - 2026-09-17
 
 ### Added

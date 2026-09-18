@@ -31,11 +31,10 @@ pub(crate) struct DlpackDataType {
 /// Maps Neuro semantic types to LLVM types
 pub(crate) struct TypeMapper<'ctx> {
     context: &'ctx LLVMContext,
-    /// Enum name → payload word count `W`: the number of 64-bit slots a value of
-    /// that enum reserves for variant data, sized to its largest variant.
-    /// Populated before code generation so every enum type maps to a single,
-    /// consistent `{ i32, [W x i64] }` aggregate.
-    enum_words: HashMap<String, u32>,
+    /// Enum name → each variant's payload field types, in declaration order.
+    /// Populated before code generation, and the only input to the tagged-union
+    /// layout: see [`TypeMapper::enum_payload_shape`].
+    enum_payloads: HashMap<String, Vec<Vec<Type>>>,
     /// Struct name → its field types in declaration order. A struct's layout is not
     /// carried by [`Type::Struct`] (which holds only the name), so the mapper needs
     /// this table to build the LLVM aggregate for one, as a function parameter, a
@@ -47,14 +46,14 @@ impl<'ctx> TypeMapper<'ctx> {
     pub(crate) fn new(context: &'ctx LLVMContext) -> Self {
         Self {
             context,
-            enum_words: HashMap::new(),
+            enum_payloads: HashMap::new(),
             struct_fields: HashMap::new(),
         }
     }
 
-    /// Record each enum's payload word count before code generation begins.
-    pub(crate) fn set_enum_words(&mut self, enum_words: HashMap<String, u32>) {
-        self.enum_words = enum_words;
+    /// Record each enum's variant payload types before code generation begins.
+    pub(crate) fn set_enum_payloads(&mut self, enum_payloads: HashMap<String, Vec<Vec<Type>>>) {
+        self.enum_payloads = enum_payloads;
     }
 
     /// Record every struct's field types before code generation begins.
@@ -94,19 +93,67 @@ impl<'ctx> TypeMapper<'ctx> {
         Ok(self.context.struct_type(&field_llvm_types, false))
     }
 
-    /// The LLVM tagged-union type for a named enum: `{ i32 tag, [W x i64] payload }`
-    /// The tag is the variant discriminant; the payload reserves `W` 64-bit
-    /// slots, one per field of the widest variant, into which scalar payload
-    /// values are packed. `W == 0` (an all-unit enum) yields a zero-length array.
+    /// The tagged-union payload shape of a named enum, as `(slots, words per slot)`.
+    ///
+    /// `slots` is the field count of the widest variant, so every variant's fields
+    /// have somewhere to sit. `words` is the widest single field rounded up to whole
+    /// 64-bit words, which makes one slot large enough for any payload the enum can
+    /// hold and 8-byte aligned, as every representable value needs. An all-unit enum
+    /// yields `(0, 1)`, a zero-length payload.
+    pub(crate) fn enum_payload_shape(&self, name: &str) -> CodegenResult<(u32, u32)> {
+        let variants = self.enum_payloads.get(name).ok_or_else(|| {
+            CodegenError::UnsupportedType(format!("unknown enum type '{}'", name))
+        })?;
+        let slots = variants.iter().map(|v| v.len()).max().unwrap_or(0) as u32;
+        let mut words = 1;
+        for field in variants.iter().flatten() {
+            words = words.max(Self::llvm_words(self.map_type(field)?));
+        }
+        Ok((slots, words))
+    }
+
+    /// The payload slot type of a named enum: `[K x i64]`, one variant field's storage.
+    pub(crate) fn enum_slot_type(
+        &self,
+        name: &str,
+    ) -> CodegenResult<inkwell::types::ArrayType<'ctx>> {
+        let (_, words) = self.enum_payload_shape(name)?;
+        Ok(self.context.i64_type().array_type(words))
+    }
+
+    /// An upper bound on an LLVM type's storage, in whole 64-bit words.
+    ///
+    /// Every field and element is rounded up to a word before it is summed, which
+    /// overshoots a real layout rather than under-counting it: the maximum alignment
+    /// any type here carries is 8, so padding can never push a value past the rounded
+    /// total. An enum slot only has to be big enough, so an upper bound is the answer.
+    fn llvm_words(ty: BasicTypeEnum<'ctx>) -> u32 {
+        const BITS_PER_WORD: u32 = 64;
+        match ty {
+            BasicTypeEnum::IntType(int_ty) => int_ty.get_bit_width().div_ceil(BITS_PER_WORD),
+            BasicTypeEnum::FloatType(_) | BasicTypeEnum::PointerType(_) => 1,
+            BasicTypeEnum::ArrayType(arr) => arr.len() * Self::llvm_words(arr.get_element_type()),
+            BasicTypeEnum::StructType(st) => st
+                .get_field_types()
+                .into_iter()
+                .map(Self::llvm_words)
+                .sum::<u32>()
+                .max(1),
+            BasicTypeEnum::VectorType(_) | BasicTypeEnum::ScalableVectorType(_) => 1,
+        }
+    }
+
+    /// The LLVM tagged-union type for a named enum: `{ i32 tag, [W x [K x i64]] payload }`.
+    /// The tag is the variant discriminant; the payload reserves `W` slots of `K`
+    /// 64-bit words each, one slot per field of the widest variant, and a payload
+    /// field is stored into its slot as raw words.
     pub(crate) fn enum_struct_type(
         &self,
         name: &str,
     ) -> CodegenResult<inkwell::types::StructType<'ctx>> {
-        let words = *self.enum_words.get(name).ok_or_else(|| {
-            CodegenError::UnsupportedType(format!("unknown enum type '{}'", name))
-        })?;
+        let (slots, _) = self.enum_payload_shape(name)?;
         let tag_ty = self.context.i32_type();
-        let payload_ty = self.context.i64_type().array_type(words);
+        let payload_ty = self.enum_slot_type(name)?.array_type(slots);
         Ok(self
             .context
             .struct_type(&[tag_ty.into(), payload_ty.into()], false))
@@ -423,9 +470,9 @@ impl<'ctx> TypeMapper<'ctx> {
             // Every standard collection is a `{ buffer, len, cap, used }` header
             // held by value; the elements live in the heap buffer it points at.
             Type::Collection { .. } => Ok(self.collection_header_type().into()),
-            // Enum `{ i32 tag, [W x i64] payload }`. Unlike structs, the enum
-            // layout is self-contained (the word count comes from `enum_words`), so an
-            // enum maps directly here and works as a parameter, return, or field type.
+            // Enum `{ i32 tag, [W x [K x i64]] payload }`. Unlike structs, the enum
+            // layout is self-contained (it comes from `enum_payloads`), so an enum maps
+            // directly here and works as a parameter, return, or field type.
             Type::Enum(name) => Ok(self.enum_struct_type(name)?.into()),
         }
     }

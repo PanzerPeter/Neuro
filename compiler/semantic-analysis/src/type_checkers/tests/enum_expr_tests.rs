@@ -107,11 +107,26 @@ func main() -> i32 {
 }
 
 #[test]
-fn non_scalar_enum_payload_is_rejected() {
-    // Phase 1E: payloads are scalar Copy primitives; a string payload is rejected.
+fn non_copy_enum_payload_is_accepted() {
     let errors = semantic_errors(
         r#"
-enum Bad { Holds(string) }
+enum Holds { Text(string), Nothing }
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "an enum payload may be non-Copy; got {errors:?}"
+    );
+}
+
+#[test]
+fn unsized_enum_payload_is_rejected() {
+    // A payload slot has to have a width, so a type with no value representation still
+    // has no place in one.
+    let errors = semantic_errors(
+        r#"
+enum Bad { Holds(void) }
 func main() -> i32 { 0 }
 "#,
     );
@@ -119,6 +134,6 @@ func main() -> i32 { 0 }
         errors
             .iter()
             .any(|e| matches!(e, TypeError::UnsupportedEnumPayload { .. })),
-        "a non-scalar payload must be rejected; got {errors:?}"
+        "an unsized payload must be rejected; got {errors:?}"
     );
 }

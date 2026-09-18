@@ -116,8 +116,8 @@ func main() -> i32 { return 0 }
 
 #[test]
 fn array_literal_of_an_abstract_element_is_rejected() {
-    // `[v, v]` duplicates the owner the same way a capture does, and the aggregate
-    // element rule is what says so; an abstract element type may not dodge it.
+    // `[v, v]` duplicates the owner the same way a capture does; an abstract element
+    // type is conservatively non-`Copy`, so the second slot is a move of a moved value.
     let errors = semantic_errors(
         r#"
 func dup<T>(v: T) -> i32 { val a = [v, v]
@@ -128,7 +128,7 @@ func main() -> i32 { return 0 }
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e, TypeError::NonCopyArrayElement { .. })),
+            .any(|e| matches!(e, TypeError::UseOfMovedValue { .. })),
         "an array literal over an abstract element type must be reported; got {errors:?}"
     );
 }
@@ -213,7 +213,7 @@ func main() -> i32 { 0 }
 }
 
 #[test]
-fn non_copy_generic_struct_argument_is_rejected() {
+fn non_copy_generic_struct_argument_is_accepted() {
     let errors = semantic_errors(
         r#"
 struct Box<T> { v: T }
@@ -224,10 +224,8 @@ func main() -> i32 {
 "#,
     );
     assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, TypeError::GenericArgumentNotCopy { .. })),
-        "a non-Copy struct type argument must be rejected; got {errors:?}"
+        errors.is_empty(),
+        "a generic struct may be instantiated over a non-Copy type; got {errors:?}"
     );
 }
 

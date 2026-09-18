@@ -103,21 +103,36 @@ func main() -> i32 {
 }
 
 #[test]
-fn array_of_non_copy_element_is_rejected() {
-    // String elements need per-element move tracking, not yet supported.
+fn array_of_non_copy_element_moves_per_element() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
     val a: [string; 2] = ["a", "b"]
+    val first = a[0]
+    val second = a[1]
     return 0
 }
 "#,
     );
     assert!(
-        errors
+        errors.is_empty(),
+        "an array may hold non-Copy elements and give them up one at a time; got {errors:?}"
+    );
+
+    let reused = semantic_errors(
+        r#"
+func main() -> i32 {
+    val s = "a" + "b"
+    val a: [string; 2] = [s, s]
+    return 0
+}
+"#,
+    );
+    assert!(
+        reused
             .iter()
-            .any(|e| matches!(e, TypeError::NonCopyArrayElement { .. })),
-        "a non-Copy element array must be rejected; got {errors:?}"
+            .any(|e| matches!(e, TypeError::UseOfMovedValue { .. })),
+        "the same binding in two element slots is a double move; got {reused:?}"
     );
 }
 

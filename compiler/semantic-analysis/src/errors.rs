@@ -57,9 +57,6 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("type argument '{ty}' for generic parameter '{param}' is not Copy; generic type arguments are restricted to Copy types in this phase")]
-    GenericArgumentNotCopy { param: String, ty: Type, span: Span },
-
     #[error("generic struct '{name}' requires type arguments, e.g. `{name}<...>`")]
     GenericStructNeedsArgs { name: String, span: Span },
 
@@ -717,9 +714,6 @@ pub enum TypeError {
     #[error("`.slice()` / `.char_slice()` expects a range argument `a..b` or `a..=b`")]
     SliceExpectsRange { span: Span },
 
-    #[error("array element type {ty} is not Copy: arrays of non-Copy element types (strings, non-Copy structs) are not yet supported")]
-    NonCopyArrayElement { ty: Type, span: Span },
-
     #[error("cannot index a value of type {found}: indexing applies only to arrays `[T; N]` and `Vec<T>`")]
     NotIndexable { found: Type, span: Span },
 
@@ -787,9 +781,6 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("tuple element type {ty} is not Copy: tuples of non-Copy element types (strings, non-Copy structs) are not yet supported")]
-    NonCopyTupleElement { ty: Type, span: Span },
-
     #[error("cannot index a value of type {found}: `.N` tuple indexing applies only to tuples `(T1, T2, ...)`")]
     NotATuple { found: Type, span: Span },
 
@@ -815,13 +806,6 @@ pub enum TypeError {
 
     #[error("type name '{name}' is already defined: a newtype may not reuse the name of an existing type")]
     NewtypeAlreadyDefined { name: String, span: Span },
-
-    #[error("newtype '{name}' wraps non-Copy inner type {inner}: newtype inner types are restricted to Copy types in this phase")]
-    NewtypeInnerNotCopy {
-        name: String,
-        inner: Type,
-        span: Span,
-    },
 
     #[error("newtype '{name}' is cyclic: a newtype may not wrap itself directly or transitively")]
     CyclicNewtype { name: String, span: Span },
@@ -1011,7 +995,6 @@ impl TypeError {
             | Self::ConstPredicateViolated { span, .. }
             | Self::TurbofishCountMismatch { span, .. }
             | Self::TurbofishKindMismatch { span, .. }
-            | Self::GenericArgumentNotCopy { span, .. }
             | Self::GenericStructNeedsArgs { span, .. }
             | Self::GenericEnumNeedsArgs { span, .. }
             | Self::GenericEnumNotInferable { span, .. }
@@ -1144,7 +1127,6 @@ impl TypeError {
             | Self::ReturnsReferenceToLocal { span, .. }
             | Self::RangeNotAllowed { span, .. }
             | Self::SliceExpectsRange { span, .. }
-            | Self::NonCopyArrayElement { span, .. }
             | Self::NotIndexable { span, .. }
             | Self::NotIterable { span, .. }
             | Self::BorrowedIterableHead { span, .. }
@@ -1157,14 +1139,12 @@ impl TypeError {
             | Self::InvalidHashableImpl { span, .. }
             | Self::IndexNotInteger { span, .. }
             | Self::ArrayLengthMismatch { span, .. }
-            | Self::NonCopyTupleElement { span, .. }
             | Self::NotATuple { span, .. }
             | Self::TupleIndexOutOfBounds { span, .. }
             | Self::CannotInferEmptyArray { span, .. }
             | Self::ArrayPatternLengthMismatch { span, .. }
             | Self::EnumAlreadyDefined { span, .. }
             | Self::NewtypeAlreadyDefined { span, .. }
-            | Self::NewtypeInnerNotCopy { span, .. }
             | Self::CyclicNewtype { span, .. }
             | Self::UnsupportedEnumPayload { span, .. }
             | Self::UnknownEnumVariant { span, .. }

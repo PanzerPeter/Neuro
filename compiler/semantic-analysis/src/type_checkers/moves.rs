@@ -27,12 +27,13 @@
 //! twice.
 
 use ast_types::{Expr, Stmt};
-use shared_types::Span;
+use shared_types::{Literal, Span};
 
 use crate::errors::TypeError;
 use crate::types::Type;
 
 use super::TypeChecker;
+use crate::symbol_table::MoveState;
 
 /// The method receiver. It is bound as the struct type rather than `&Struct`, so
 /// that a field read and a `&mut self` field write stay ordinary field access, which
@@ -87,7 +88,46 @@ impl TypeChecker {
         }
 
         self.reject_move_of_borrowee(&root, place.span());
-        self.symbols.mark_moved(&root, place.span());
+        let path = Self::place_path(place).unwrap_or_default();
+        self.symbols.mark_place_moved(&root, &path, place.span());
+    }
+
+    /// The path of a sub-place below its root binding, as the move state keys it:
+    /// `"label"` for `t.label`, `"0"` for `t.0`, `"1.name"` for `t.1.name`.
+    ///
+    /// `None` means the place has no statically nameable path — a runtime array index
+    /// is the case that matters — and a move through it is recorded against the whole
+    /// binding, because the compiler cannot say which element left.
+    pub(crate) fn place_path(place: &Expr) -> Option<String> {
+        match place {
+            Expr::Paren(inner, _) => Self::place_path(inner),
+            Expr::Identifier(_) => Some(String::new()),
+            Expr::FieldAccess { object, field, .. } => {
+                Some(Self::join_path(&Self::place_path(object)?, &field.name))
+            }
+            Expr::TupleIndex { object, index, .. } => Some(Self::join_path(
+                &Self::place_path(object)?,
+                &index.to_string(),
+            )),
+            Expr::Index { object, index, .. } => {
+                let Expr::Literal(Literal::Integer(value, _), _) = index.as_ref() else {
+                    return None;
+                };
+                Some(Self::join_path(
+                    &Self::place_path(object)?,
+                    &value.to_string(),
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    fn join_path(prefix: &str, segment: &str) -> String {
+        if prefix.is_empty() {
+            segment.to_string()
+        } else {
+            format!("{}.{}", prefix, segment)
+        }
     }
 
     /// Record the move of the receiver of a consuming (`self`) method call, or reject
@@ -152,7 +192,8 @@ impl TypeChecker {
             place = inner;
         }
         let root = Self::place_root_name(place)?;
-        let moved_at = self.symbols.lookup(&root)?.moved_at?;
+        let path = Self::place_path(place).unwrap_or_default();
+        let moved_at = self.symbols.place_moved_at(&root, &path)?;
         Some((root, moved_at))
     }
 
@@ -186,6 +227,29 @@ impl TypeChecker {
                     .map(|(_, ty)| ty.clone())?;
                 Some((field_ty, behind_borrow))
             }
+            // An array element and a tuple element are places in their own right. The
+            // move is still recorded against the ROOT binding, because an aggregate
+            // with an element moved out is partially moved and unusable as a whole —
+            // the same rule a struct field follows, and the reason a runtime index
+            // needs no per-element state here.
+            Expr::Index { object, .. } => {
+                let (object_ty, behind_borrow) = self.place_origin(object)?;
+                let behind_borrow = behind_borrow || matches!(object_ty, Type::Reference { .. });
+                match object_ty.referent() {
+                    Type::Array { element, .. } => Some(((**element).clone(), behind_borrow)),
+                    _ => None,
+                }
+            }
+            Expr::TupleIndex { object, index, .. } => {
+                let (object_ty, behind_borrow) = self.place_origin(object)?;
+                let behind_borrow = behind_borrow || matches!(object_ty, Type::Reference { .. });
+                match object_ty.referent() {
+                    Type::Tuple(elements) => {
+                        elements.get(*index).map(|ty| (ty.clone(), behind_borrow))
+                    }
+                    _ => None,
+                }
+            }
             _ => None,
         }
     }
@@ -199,7 +263,7 @@ impl TypeChecker {
     /// a double free at run time rather than a diagnostic. Call this with the scope
     /// stack the snapshot was taken on: bindings declared inside the body have gone
     /// with its scope, which is what leaves only the outer ones.
-    pub(crate) fn report_loop_body_moves(&mut self, snapshot: &[Option<Span>], body: &[Stmt]) {
+    pub(crate) fn report_loop_body_moves(&mut self, snapshot: &[MoveState], body: &[Stmt]) {
         // A body that always leaves the loop runs its move once, so there is no
         // second iteration to catch.
         if stmts_exit_loop(body) {
@@ -1109,6 +1173,68 @@ mod tests {
         assert!(
             errs.is_empty(),
             "reassignment should clear the moved state; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn sibling_sub_places_are_moved_independently() {
+        let errs = errors(
+            r#"
+            struct Two { a: string, b: string }
+            func main() -> i32 {
+                val t: Two = Two { a: "x", b: "y" }
+                val first: string = t.a
+                val second: string = t.b
+                val pair: (string, string) = ("p", "q")
+                val left: string = pair.0
+                val right: string = pair.1
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.is_empty(),
+            "two different elements are two different moves; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn a_partially_moved_aggregate_may_not_be_read_whole() {
+        let errs = errors(
+            r#"
+            struct Two { a: string, b: string }
+            func take(t: Two) -> i32 { 0 }
+            func main() -> i32 {
+                val t: Two = Two { a: "x", b: "y" }
+                val first: string = t.a
+                return take(t)
+            }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("use of moved value 't'")),
+            "the whole value is gone once a part of it is; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn a_runtime_index_move_takes_the_whole_array() {
+        // No static path names the element that left, so the binding as a whole goes.
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                val names: [string; 2] = ["a", "b"]
+                mut i: i32 = 0
+                val taken: string = names[i]
+                val other: string = names[1]
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("use of moved value 'names'")),
+            "a move through a runtime index must be conservative; got {errs:?}"
         );
     }
 }

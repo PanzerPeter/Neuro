@@ -53,8 +53,8 @@ impl TypeChecker {
             }
         }
 
-        // Phase 2: with all inners resolved, reject cycles (which would otherwise make
-        // the Copy check below recurse forever) and non-Copy inner types.
+        // Phase 2: with all inners resolved, reject cycles, which would otherwise make
+        // every predicate that recurses through the inner type run forever.
         for (name, inner_span) in &spans {
             let mut seen = HashSet::new();
             if self.newtype_cycles(name, &mut seen) {
@@ -62,21 +62,7 @@ impl TypeChecker {
                     name: name.clone(),
                     span: *inner_span,
                 });
-                // Break the cycle so downstream Copy checks terminate.
                 self.newtype_defs.insert(name.clone(), Type::Unknown);
-                continue;
-            }
-            let inner = self
-                .newtype_defs
-                .get(name)
-                .cloned()
-                .unwrap_or(Type::Unknown);
-            if !matches!(inner, Type::Unknown) && !self.is_type_copy(&inner) {
-                self.record_error(TypeError::NewtypeInnerNotCopy {
-                    name: name.clone(),
-                    inner,
-                    span: *inner_span,
-                });
             }
         }
     }

@@ -9,6 +9,7 @@
 
 mod compile_harness;
 
+mod aggregate_ownership;
 mod arrays;
 mod assignments;
 mod associated_type_bounds;

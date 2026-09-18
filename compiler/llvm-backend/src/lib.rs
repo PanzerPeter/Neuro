@@ -110,22 +110,22 @@ fn build_module<'ctx>(
         }
     }
 
-    // Collect each enum's payload word count `W`: the widest variant's field
-    // count, so every value of the enum maps to one `{ i32, [W x i64] }` aggregate.
-    let mut enum_words: HashMap<String, u32> = HashMap::new();
+    // Collect each enum's variant payload types: the tagged-union layout is derived
+    // from them, so every value of the enum maps to one aggregate.
+    let mut enum_payloads: HashMap<String, Vec<Vec<Type>>> = HashMap::new();
     // Variant names in declaration (discriminant) order, so a compiler-generated
     // construction (the `Option<T>` a collection reader returns) can look a tag up
     // by name instead of assuming the prelude's declaration order.
     let mut enum_variants: HashMap<String, Vec<String>> = HashMap::new();
     for item in items {
         if let HirItem::Enum(def) = item {
-            let words = def
-                .variants
-                .iter()
-                .map(|v| v.fields.len())
-                .max()
-                .unwrap_or(0) as u32;
-            enum_words.insert(def.name.clone(), words);
+            enum_payloads.insert(
+                def.name.clone(),
+                def.variants
+                    .iter()
+                    .map(|v| v.fields.iter().map(|f| Type::from_hir(&f.ty)).collect())
+                    .collect(),
+            );
             enum_variants.insert(
                 def.name.clone(),
                 def.variants.iter().map(|v| v.name.clone()).collect(),
@@ -231,7 +231,7 @@ fn build_module<'ctx>(
     let mut codegen_ctx = CodegenContext::new(context, "neuro_module");
     codegen_ctx.set_struct_defs(struct_defs);
     codegen_ctx.set_struct_written_names(struct_written_names);
-    codegen_ctx.set_enum_words(enum_words);
+    codegen_ctx.set_enum_payloads(enum_payloads);
     codegen_ctx.set_enum_variants(enum_variants);
     codegen_ctx.set_drop_types(drop_types);
     codegen_ctx.set_pool_aware_types(pool_aware_types);

@@ -161,6 +161,11 @@ pub(crate) struct TypeChecker {
     /// order to borrow it is not an access to it, so the borrowee-access rule is
     /// suppressed there and the borrow-site exclusivity rules apply instead.
     in_borrow_operand: bool,
+    /// Set while an inner link of a place chain (`t.a` inside `t.a.b`) is being typed.
+    /// A partially moved binding is still readable through its intact sub-places, so
+    /// the whole-binding rule is checked once, at the outermost link, against that
+    /// link's own path.
+    in_sub_place: bool,
 }
 
 /// The construction form of an enum variant, determining how it is built:
@@ -357,6 +362,7 @@ impl TypeChecker {
             loop_stack: Vec::new(),
             pool_stack: Vec::new(),
             in_borrow_operand: false,
+            in_sub_place: false,
         }
     }
 
@@ -480,9 +486,9 @@ impl TypeChecker {
             Type::String | Type::Void | Type::Function { .. } | Type::Unknown => false,
             // An abstract type parameter answers for every instantiation at once, and a
             // generic body is checked exactly once, so the only sound answer is the
-            // conservative one. Callers whose position IS re-validated per instance —
-            // an array or tuple annotation in a signature, a `@derive(Copy)` field —
-            // defer explicitly at their own site instead, as `is_debug_renderable` does.
+            // conservative one. A caller whose position IS re-validated per instance —
+            // a `@derive(Copy)` field scan — defers explicitly at its own site instead,
+            // as `is_debug_renderable` does.
             Type::Generic(_) => false,
             Type::Struct(name) => self.copy_structs.contains(name),
             // A newtype forwards `Copy` from its inner type. Cycles are
@@ -530,6 +536,18 @@ impl TypeChecker {
             Type::Struct(name) => !self.copy_structs.contains(name),
             Type::Collection { .. } => true,
             Type::Tensor { .. } => true,
+            // An aggregate is tracked exactly when it holds something tracked: the
+            // owner of a `[string; 3]` is the array binding, and duplicating it would
+            // duplicate every buffer inside it.
+            Type::Array { element, .. } => self.is_type_move_tracked(element),
+            Type::Tuple(elements) => elements.iter().any(|e| self.is_type_move_tracked(e)),
+            // A newtype is its inner value wearing another name.
+            Type::Newtype(name) => self
+                .newtype_defs
+                .get(name)
+                .cloned()
+                .map(|inner| self.is_type_move_tracked(&inner))
+                .unwrap_or(false),
             _ => false,
         }
     }
@@ -695,15 +713,12 @@ impl TypeChecker {
             }
         }
 
-        // Pass 0: register enum definitions before structs, so an enum used as a
-        // struct field type (or vice versa) resolves regardless of source order.
+        // Pass 0: pre-register enum NAMES. Like a newtype, only the name is needed for
+        // a struct field to resolve to it; the payloads are resolved in pass 1a, once
+        // the structs an enum payload may name are registered too.
         for item in items {
             if let Item::Enum(def) = item {
-                if def.generics.is_empty() {
-                    self.register_enum(def);
-                } else {
-                    self.register_generic_enum(def);
-                }
+                self.predeclare_enum(def);
             }
         }
 
@@ -716,6 +731,13 @@ impl TypeChecker {
                 } else {
                     self.register_generic_struct(def);
                 }
+            }
+        }
+
+        // Pass 1a: resolve enum variant payloads, now that every nominal name exists.
+        for item in items {
+            if let Item::Enum(def) = item {
+                self.resolve_enum_variants(def);
             }
         }
 

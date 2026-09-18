@@ -29,10 +29,13 @@ impl Lowerer {
                     .insert(def.name.name.clone(), def.inner.clone());
             }
         }
+        // Enum NAMES before struct fields resolve, and enum PAYLOADS after: a payload
+        // may name a struct and a struct field may name the enum, so neither table can
+        // be complete before the other's names exist.
         for item in items {
             if let Item::Enum(def) = item {
                 if def.generics.is_empty() {
-                    self.register_enum(def)?;
+                    self.enums.insert(def.name.name.clone(), Vec::new());
                 } else {
                     self.generic_enums
                         .insert(def.name.name.clone(), def.clone());
@@ -45,6 +48,13 @@ impl Lowerer {
                     self.register_struct(def)?;
                 } else {
                     self.register_generic_struct(def);
+                }
+            }
+        }
+        for item in items {
+            if let Item::Enum(def) = item {
+                if def.generics.is_empty() {
+                    self.register_enum(def)?;
                 }
             }
         }

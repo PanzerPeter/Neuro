@@ -235,24 +235,24 @@ func main() -> i32 {
 }
 
 #[test]
-fn non_scalar_option_payload_is_rejected() {
+fn option_carries_a_non_copy_payload() {
     let test = CompileTest::new();
-    // The scalar-payload restriction applies per instance: `Option<string>` awaits
-    // broader payload support.
     let source = r#"
+func label(present: bool) -> Option<string> {
+    if present { Option::Some("named") } else { Option::None }
+}
+
 func main() -> i32 {
-    val text: Option<string> = Option::None
-    0
+    match label(true) {
+        Option::Some(s) => s.len() as i32
+        Option::None => 0
+    }
 }
 "#;
-    let path = test.write_source("option_string.nr", source);
-    let err = test
-        .compile(&path)
-        .expect_err("a non-scalar payload must not compile");
-    assert!(
-        err.contains("enum variant payload type"),
-        "expected a payload diagnostic, got: {err}"
-    );
+    let exit = test
+        .compile_and_run("option_string.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 5);
 }
 
 #[test]

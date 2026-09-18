@@ -117,22 +117,43 @@ func main() -> i32 {
 }
 
 #[test]
-fn non_copy_struct_type_argument_is_rejected() {
+fn non_copy_struct_type_argument_is_held_and_moved() {
     let test = CompileTest::new();
-    // Struct type arguments are restricted to Copy types this phase; `string` is not.
     let source = r#"
 struct Box<T> {
     v: T
 }
 
+func unwrap(b: Box<string>) -> string {
+    b.v
+}
+
 func main() -> i32 {
     val b = Box { v: "hi" }
-    return 0
+    unwrap(b).len() as i32
 }
 "#;
-    let path = test.write_source("gstruct_non_copy.nr", source);
+    let exit = test
+        .compile_and_run("gstruct_non_copy.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 2);
+
+    let moved = r#"
+struct Box<T> {
+    v: T
+}
+
+func take(b: Box<string>) -> i32 { 0 }
+
+func main() -> i32 {
+    val b = Box { v: "hi" }
+    val first = take(b)
+    take(b)
+}
+"#;
+    let path = test.write_source("gstruct_non_copy_move.nr", moved);
     assert!(
         test.compile(&path).is_err(),
-        "a non-Copy struct type argument must be rejected"
+        "a non-Copy type argument must make the instance move, not copy"
     );
 }

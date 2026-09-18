@@ -82,18 +82,34 @@ func main() -> i32 {
 }
 
 #[test]
-fn newtype_over_non_copy_inner_is_rejected() {
+fn newtype_over_non_copy_inner_moves() {
     let errors = semantic_errors(
         r#"
 newtype Name = string
-func main() -> i32 { return 0 }
+func take(n: Name) -> i32 { return 0 }
+func main() -> i32 { val n = Name("ada")
+    return take(n) }
 "#,
     );
     assert!(
-        errors
+        errors.is_empty(),
+        "a newtype may wrap a non-Copy inner type; got {errors:?}"
+    );
+
+    let moved = semantic_errors(
+        r#"
+newtype Name = string
+func take(n: Name) -> i32 { return 0 }
+func main() -> i32 { val n = Name("ada")
+    val first = take(n)
+    return take(n) }
+"#,
+    );
+    assert!(
+        moved
             .iter()
-            .any(|e| matches!(e, TypeError::NewtypeInnerNotCopy { .. })),
-        "a newtype over a non-Copy inner type must be rejected; got {errors:?}"
+            .any(|e| matches!(e, TypeError::UseOfMovedValue { .. })),
+        "a newtype over a non-Copy inner moves rather than copies; got {moved:?}"
     );
 }
 

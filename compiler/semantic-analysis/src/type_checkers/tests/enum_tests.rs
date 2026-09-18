@@ -96,23 +96,19 @@ func main() -> i32 { 0 }
 }
 
 #[test]
-fn non_scalar_generic_enum_payload_is_rejected() {
-    // The phase-wide scalar-payload restriction is re-checked per instance, so
-    // `Opt<string>` is rejected even though the template itself is fine.
+fn non_copy_generic_enum_payload_is_accepted() {
     let errors = semantic_errors(
         r#"
 enum Opt<T> { Some(T), None }
 func main() -> i32 {
-    val s: Opt<string> = Opt::None
+    val s: Opt<string> = Opt::Some("held")
     return 0
 }
 "#,
     );
     assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, TypeError::UnsupportedEnumPayload { .. })),
-        "a non-scalar payload instance must be rejected; got {errors:?}"
+        errors.is_empty(),
+        "a monomorphized payload may be non-Copy; got {errors:?}"
     );
 }
 

@@ -119,18 +119,30 @@ func main() -> i32 {
 }
 
 #[test]
-fn non_copy_tuple_element_is_rejected() {
+fn non_copy_tuple_element_is_moved_not_copied() {
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {
-    val t: (i32, string) = (1, "x")
+    val s = "a" + "b"
+    val t: (i32, string) = (1, s)
+    println(t.1)
     0
 }
 "#;
-    let result = test.compile(&test.write_source("tuple_noncopy.nr", source));
+    test.compile(&test.write_source("tuple_noncopy.nr", source))
+        .expect("a tuple holding a `string` compiles");
+
+    let moved = r#"
+func main() -> i32 {
+    val s = "a" + "b"
+    val t: (string, string) = (s, s)
+    0
+}
+"#;
+    let result = test.compile(&test.write_source("tuple_double_move.nr", moved));
     assert!(
         result.is_err(),
-        "expected a non-Copy tuple element to be rejected"
+        "expected the same binding in two tuple slots to be a double move"
     );
 }
 

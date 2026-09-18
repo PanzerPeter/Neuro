@@ -900,11 +900,10 @@ destructor runs exactly once per value, whether the callee consumes it or hands 
 
 **Restrictions (this phase).** The same conservatism bars a `T` from the positions restricted to
 `Copy` types: a closure may not capture a `T`-typed binding, and `[v, v]` or `(v, v)` over a `T`
-is rejected as a non-`Copy` aggregate element. A `[T; N]` or `(T, U)` written in a *signature* is
-unaffected, since that position is re-checked against the concrete type at each call. Generic
-**struct** and **enum** type arguments are still restricted to `Copy` types, because an instance
-holds the value (see [Structs](structs.md#generic-structs-and-impls)); generic `impl` blocks are
-supported.
+duplicates one owner, so the second slot is a use of a moved value. Generic **struct** and
+**enum** type arguments carry no `Copy` requirement either — the instance holds the value and
+moves with it (see [Types → Ownership of an element](types.md#ownership-of-an-element)). Generic
+`impl` blocks are supported.
 
 ### Const (value) parameters
 
