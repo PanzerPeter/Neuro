@@ -158,6 +158,7 @@ showcase/named_axes.nr               70
 showcase/num_algorithms.nr           33
 showcase/optimizer_step.nr           32
 showcase/owned_aggregates.nr         34
+showcase/owned_catalog.nr            15
 showcase/perceptron.nr               8
 showcase/ranked_batch.nr             130
 showcase/ranked_finish.nr            176

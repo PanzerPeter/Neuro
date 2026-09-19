@@ -63,10 +63,13 @@ impl TypeChecker {
     /// Whether a value of `ty` can live inside a collection's buffer.
     ///
     /// A `Copy` type is bit-copied in and out with no ownership consequences. `string`
-    /// is the one non-`Copy` exception: its fat pointer is duplicated exactly as
-    /// `.clone()` does, which is faithful while string data is immutable. A reference
-    /// is excluded because the borrow checker cannot see through a heap buffer to
-    /// verify the referent outlives the collection.
+    /// is the one non-`Copy` exception, and it is admitted because the collection takes
+    /// a copy of the bytes rather than the operand's fat pointer: the slot owns what it
+    /// holds, an element read copies back out, and the collection releases its slots when
+    /// it is destroyed. That is why an insertion is not a move: the argument is
+    /// read, exactly as a `==` operand is. A reference is excluded because the borrow
+    /// checker cannot see through a heap buffer to verify the referent outlives the
+    /// collection.
     fn check_storable(&mut self, kind: CollectionKind, ty: &Type, span: Span) -> Option<()> {
         let storable = matches!(ty, Type::String)
             || (self.is_type_copy(ty)
@@ -247,11 +250,6 @@ impl TypeChecker {
                     });
                 }
             }
-            // Only the storing methods take ownership; a lookup key is read like a
-            // `==` operand and leaves the caller's binding usable.
-            if spec.stores_args {
-                self.record_move(arg);
-            }
         }
 
         Some(spec.result.resolve_result(self, &params, span))
@@ -352,9 +350,6 @@ struct MethodSpec {
     result: ResultShape,
     /// Whether the call needs an exclusive borrow of the receiver.
     mutating: bool,
-    /// Whether the call takes ownership of its arguments (an insertion does; a
-    /// lookup does not).
-    stores_args: bool,
 }
 
 /// Look up `method` in the surface of `kind`, or `None` if it has no such method.
@@ -364,73 +359,61 @@ fn collection_method(kind: CollectionKind, method: &str) -> Option<MethodSpec> {
             params: &[],
             result: ResultShape::Len,
             mutating: false,
-            stores_args: false,
         },
         (_, "clear") => MethodSpec {
             params: &[],
             result: ResultShape::Unit,
             mutating: true,
-            stores_args: false,
         },
         (CollectionKind::Vec, "push") => MethodSpec {
             params: &[ParamSlot::Value],
             result: ResultShape::Unit,
             mutating: true,
-            stores_args: true,
         },
         (CollectionKind::Vec, "pop") => MethodSpec {
             params: &[],
             result: ResultShape::OptionValue,
             mutating: true,
-            stores_args: false,
         },
         (CollectionKind::Vec, "get") => MethodSpec {
             params: &[ParamSlot::Index],
             result: ResultShape::OptionValue,
             mutating: false,
-            stores_args: false,
         },
         (CollectionKind::HashMap | CollectionKind::BTreeMap, "insert") => MethodSpec {
             params: &[ParamSlot::Key, ParamSlot::Value],
             result: ResultShape::Unit,
             mutating: true,
-            stores_args: true,
         },
         (CollectionKind::HashMap | CollectionKind::BTreeMap, "get") => MethodSpec {
             params: &[ParamSlot::Key],
             result: ResultShape::OptionValue,
             mutating: false,
-            stores_args: false,
         },
         (CollectionKind::HashMap | CollectionKind::BTreeMap, "contains_key") => MethodSpec {
             params: &[ParamSlot::Key],
             result: ResultShape::Bool,
             mutating: false,
-            stores_args: false,
         },
         (CollectionKind::HashMap | CollectionKind::BTreeMap, "remove") => MethodSpec {
             params: &[ParamSlot::Key],
             result: ResultShape::Bool,
             mutating: true,
-            stores_args: false,
         },
         (CollectionKind::String, "push_str") => MethodSpec {
             params: &[ParamSlot::Text],
             result: ResultShape::Unit,
             mutating: true,
-            stores_args: false,
         },
         (CollectionKind::String, "to_string") => MethodSpec {
             params: &[],
             result: ResultShape::OwnedString,
             mutating: false,
-            stores_args: false,
         },
         (CollectionKind::HashMap | CollectionKind::BTreeMap, "keys") => MethodSpec {
             params: &[],
             result: ResultShape::KeyVec,
             mutating: false,
-            stores_args: false,
         },
         _ => return None,
     };

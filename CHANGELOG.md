@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.49.0] - 2026-09-19
+
+### Added
+
+- A collection owns its `string` elements. A `Vec` element, a `HashMap` / `BTreeMap` key
+  and a map value are now buffers the collection itself owns, released when it is
+  destroyed, and a slot that is overwritten, removed or cleared releases what it held.
+  This closes the last storing position an owned `string` could reach without an owner,
+  and with it the incomplete-destruction root that produced most of sub-phase 2E.
+- `collections/elements.rs` and `collections/maps/release.rs` in `llvm-backend`: the
+  value helpers for the collection boundary, plus one per-instantiation release walk per
+  collection shape. A collection with no `string` slot emits nothing, so a `Vec<i32>`
+  costs exactly what it did before.
+
+### Changed
+
+- **An insertion reads its argument instead of moving it.** `v.push(s)` and
+  `m.insert(k, v)` copy the bytes into the slot, so the binding the argument came from
+  is still usable afterwards and is still released by its own scope. An operand the
+  expression itself allocated (`v.push("item {i}")`) is adopted rather than copied, so
+  the common case still allocates once. This is a relaxation: no program that compiled
+  before stops compiling.
+- **An element read copies out.** `v[i]`, `for x in v`, `m.get(k)` and `m.keys()` each
+  hand back a buffer of the reader's own, so a value read from a collection stays valid
+  after the collection is gone (`return v[0]` is now sound). `v.pop()` transfers the
+  slot's buffer instead of copying it, because the slot goes with the read.
+- A `match` arm that binds a `string` payload out of `v.pop()`, `v.get(i)` or `m.get(k)`
+  releases it at the end of the arm, and a `for`-in binding over a collection releases
+  its copy at the end of each pass.
+
+### Documentation
+
+- The memory model, the strings page and the types page state the collection boundary
+  rule, and the alpha memory note no longer lists a collection element as leaking.
+- `examples/showcase/owned_catalog.nr`: the sub-phase closer, combining the collection
+  slots with the rest of 2E (a consuming `self` receiver, place expressions on fields and
+  slots, non-`Copy` values in aggregates, reassignment drops and stored strings).
+
 ## [2.48.0] - 2026-09-19
 
 ### Added

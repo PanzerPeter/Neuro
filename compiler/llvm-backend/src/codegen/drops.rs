@@ -24,6 +24,10 @@ use super::context::{CodegenContext, DropEntry, DropTarget, HeldDrop};
 /// Matched by name here the way the builder type itself is matched by name.
 const TO_OWNED_METHOD: &str = "to_string";
 
+/// The collection readers that hand their result out inside an `Option`. Matched by
+/// name against a collection receiver, the way the builder's `to_string` is.
+const FALLIBLE_READERS: [&str; 2] = ["get", "pop"];
+
 /// The drop flag of a `string` position inside a holder. It is the one flag that
 /// starts `false`, so its name is what tells an armed position from a planned one.
 pub(crate) const STRING_POSITION_FLAG: &str = "str.owned.flag";
@@ -67,7 +71,7 @@ impl<'ctx> CodegenContext<'ctx> {
         match binding_ty {
             // A collection always owns a heap buffer, independently of whether the
             // program declares any user `Drop` type.
-            Type::Collection { .. } => Some(DropTarget::Collection),
+            Type::Collection { .. } => Some(DropTarget::Collection(binding_ty.clone())),
             // So does a tensor: every construction allocates its buffer, and the type
             // says so, and there is no borrowed value of tensor type to confuse it with.
             Type::Tensor { .. } => Some(DropTarget::TensorBuffer),
@@ -273,6 +277,18 @@ impl<'ctx> CodegenContext<'ctx> {
     /// body in the program to say which functions allocate on every return path.
     pub(crate) fn produces_owned_string(&self, expr: &HirExpr) -> bool {
         match &expr.kind {
+            // A `string` read out of a collection slot is copied out of it
+            // ([`value_from_collection_slot`](CodegenContext::value_from_collection_slot)),
+            // so the reader owns the copy and the collection keeps its own. An ARRAY index
+            // is deliberately not this shape: an array's `string` position is owned by the
+            // holder's own drop entry and a read of it aliases that buffer.
+            HirExprKind::Index { object, .. } => {
+                matches!(Type::from_hir(&expr.ty), Type::String)
+                    && matches!(
+                        Type::from_hir(&object.ty).referent(),
+                        Type::Collection { .. }
+                    )
+            }
             // `codegen_interp_string` concatenates every piece into one fresh buffer,
             // and does so unconditionally: even a hole-free interpolation allocates.
             HirExprKind::InterpString { .. } => true,
@@ -308,6 +324,29 @@ impl<'ctx> CodegenContext<'ctx> {
             },
             _ => false,
         }
+    }
+
+    /// Whether `expr` yields an `Option` whose `string` payload the binding that takes it
+    /// out owns.
+    ///
+    /// A collection's fallible readers are the shapes that qualify, and for the two
+    /// reasons the boundary rule gives: `get` copies the slot's bytes into a buffer of
+    /// their own, and `pop` takes the slot's buffer with it by shrinking past the slot.
+    /// Either way the collection no longer reaches what the payload holds.
+    pub(crate) fn produces_owned_option_payload(&self, expr: &HirExpr) -> bool {
+        let HirExprKind::Call { callee, .. } = &expr.kind else {
+            return false;
+        };
+        let HirExprKind::FieldAccess { object, field } = &callee.kind else {
+            return false;
+        };
+        if !FALLIBLE_READERS.contains(&field.as_str()) {
+            return false;
+        }
+        matches!(
+            Type::from_hir(&object.ty).referent(),
+            Type::Collection { kind, .. } if !matches!(kind, CollectionKind::String)
+        )
     }
 
     /// Release the buffer behind an owned `string` that a consumer has finished reading
@@ -1016,7 +1055,9 @@ impl<'ctx> CodegenContext<'ctx> {
             Some(DropTarget::UserDrop(struct_name)) => {
                 self.emit_user_drop_call(storage_ptr, &struct_name)?
             }
-            Some(DropTarget::Collection) => self.emit_collection_free(storage_ptr)?,
+            Some(DropTarget::Collection(collection_ty)) => {
+                self.emit_collection_free(storage_ptr, &collection_ty)?
+            }
             Some(DropTarget::TensorBuffer) => self.emit_tensor_buffer_free(storage_ptr)?,
             Some(DropTarget::EnumPayload(enum_name)) => {
                 self.emit_enum_payload_drop(storage_ptr, &enum_name)?
@@ -1141,7 +1182,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 let struct_name = struct_name.clone();
                 self.emit_user_drop_call(storage_ptr, &struct_name)?
             }
-            DropTarget::Collection => self.emit_collection_free(storage_ptr)?,
+            DropTarget::Collection(collection_ty) => {
+                let collection_ty = collection_ty.clone();
+                self.emit_collection_free(storage_ptr, &collection_ty)?
+            }
             DropTarget::HeapString => self.emit_heap_string_free(storage_ptr)?,
             DropTarget::TensorBuffer => self.emit_tensor_buffer_free(storage_ptr)?,
             DropTarget::EnumPayload(enum_name) => {

@@ -7,7 +7,7 @@ use inkwell::values::FunctionValue;
 use inkwell::IntPredicate;
 
 use super::probing::{helper_params, ProbeCursor};
-use super::{STATE_EMPTY, STATE_FULL};
+use super::{SlotField, STATE_EMPTY, STATE_FULL};
 use crate::codegen::collections::{FIELD_CAP, FIELD_LEN, FIELD_USED};
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -83,8 +83,13 @@ impl<'ctx> CodegenContext<'ctx> {
             key_ty,
             value_ty,
             existing,
-            false,
+            SlotField::Value,
         )?;
+        // The entry keeps its key and gives up its value, so only the value is released;
+        // the caller's key copy is never stored on this path.
+        if matches!(value_ty, Type::String) {
+            self.release_slot_string(value_ptr)?;
+        }
         self.builder
             .build_store(value_ptr, value)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -133,6 +138,9 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
         self.builder.position_at_end(place_bb);
+        // A new entry is where the map takes ownership of the key, so this is where the
+        // bytes are copied; the caller still holds the operand it was handed.
+        let key = self.key_for_new_slot(key_ty, key)?;
         // Only an EMPTY slot consumes new capacity; reusing a tombstone does not.
         let was_empty = self
             .builder
@@ -164,6 +172,22 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_return(None)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         Ok(())
+    }
+
+    /// The key value a brand-new slot stores: the map's own copy of a `string` key, and
+    /// the operand unchanged for every `Copy` key.
+    ///
+    /// Only the fresh paths call it. An existing entry keeps the key it already owns, so
+    /// copying there would allocate a buffer nothing ever stores.
+    fn key_for_new_slot(
+        &mut self,
+        key_ty: &Type,
+        key: inkwell::values::BasicValueEnum<'ctx>,
+    ) -> CodegenResult<inkwell::values::BasicValueEnum<'ctx>> {
+        if !matches!(key_ty, Type::String) {
+            return Ok(key);
+        }
+        self.copy_string_bytes(key)
     }
 
     /// Body of the ordered insert: overwrite in place, or memmove the tail up and place
@@ -207,8 +231,11 @@ impl<'ctx> CodegenContext<'ctx> {
             key_ty,
             value_ty,
             existing,
-            false,
+            SlotField::Value,
         )?;
+        if matches!(value_ty, Type::String) {
+            self.release_slot_string(value_ptr)?;
+        }
         self.builder
             .build_store(value_ptr, value)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -241,8 +268,15 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_call(memmove, &[dst.into(), src.into(), bytes.into()], "")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
-        let key_ptr =
-            self.map_slot_field_ptr(CollectionKind::BTreeMap, header, key_ty, value_ty, at, true)?;
+        let key_ptr = self.map_slot_field_ptr(
+            CollectionKind::BTreeMap,
+            header,
+            key_ty,
+            value_ty,
+            at,
+            SlotField::Key,
+        )?;
+        let key = self.key_for_new_slot(key_ty, key)?;
         self.builder
             .build_store(key_ptr, key)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -252,7 +286,7 @@ impl<'ctx> CodegenContext<'ctx> {
             key_ty,
             value_ty,
             at,
-            false,
+            SlotField::Value,
         )?;
         self.builder
             .build_store(value_ptr, value)

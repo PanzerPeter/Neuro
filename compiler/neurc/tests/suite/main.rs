@@ -24,6 +24,7 @@ mod cli_contract;
 mod closures;
 mod codepoint_iterators;
 mod cold_outlining;
+mod collection_string_ownership;
 mod collections;
 mod comparison_chains;
 mod compound_assignment;

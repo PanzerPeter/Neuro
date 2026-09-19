@@ -197,13 +197,33 @@ then belongs to the storage, and is tracked one of three ways:
   occurrence is a retention. `release_owned_arguments` then frees the buffer right after the call,
   where the callee's frame is already gone.
 
-**Known limits**: a collection element (`v.push(a + b)`, a map value) is still released by nobody,
-because a collection copies a `string` in and out as a plain fat pointer and an element read hands
-out an alias that releasing would dangle. Among the covered positions, three shapes stay unproven
+- **A collection slot** (a `Vec` element, a map key or value). A slot's fat pointer says no more
+  about ownership than any other, so the boundary decides it instead: every `string` that enters a
+  slot is copied into a buffer the collection owns (`value_for_collection_slot`, which adopts
+  rather than copies when `produces_owned_string` proves the operand was built for this store),
+  and every `string` read out of one is copied back out (`value_from_collection_slot`). The
+  collection then releases its live slots before freeing its buffer, through one
+  per-instantiation `__neuro_<kind>_drop_elems_<args>` helper that `emit_collection_free` and
+  `clear()` both call; `remove` and an overwriting `insert` or `v[i] =` release just the slot they
+  give up. `pop` is the one read that transfers instead of copying, because the slot is gone by
+  the time the reader sees it. `collections/elements.rs` owns the value helpers and the `Vec`
+  walk, `collections/maps/release.rs` the two map walks.
+
+  Reads then re-enter the machinery above: `produces_owned_string` answers `true` for a collection
+  index, so `val s = v[0]` is a `DropTarget::HeapString` binding and `println(v[0])` is released
+  at the consumer. A `for`-in binding is registered inside the loop body's own scope, so each
+  pass releases its copy. A payload the fallible readers hand out inside an `Option` is registered
+  by the `match` arm that binds it (`produces_owned_option_payload`), which is the only arm shape
+  where a `string` payload can be proven owned.
+
+**Known limits**: among the covered positions, three shapes stay unproven
 and leak: a holder a call built (the call proves nothing about its positions), a function with one
 literal-returning path, and a parameter the callee may store. A binding reassigned from another
 `string` binding is the same case: the source's flag is cleared by the move and the destination
-re-arms only for a producer that provably allocates.
+re-arms only for a producer that provably allocates. A collection read carried into a
+view-producing method (`v[0].slice(...)`, `.chars()`, `.clone()`) leaks its copy, as any other
+anonymous string does there, and a `val ... else` pattern over a fallible reader registers no
+owner for the payload it binds.
 
 ## Struct ABI
 User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding:

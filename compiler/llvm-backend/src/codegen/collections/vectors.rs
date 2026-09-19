@@ -8,8 +8,9 @@ use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
 use neuro_hir::{HirExpr, HirStmt};
 
+use super::elements::SlotTransfer;
 use super::{collection_arg, initial_capacity, FIELD_CAP, FIELD_LEN};
-use crate::codegen::context::{CodegenContext, LoopTargets};
+use crate::codegen::context::{CodegenContext, DropTarget, LoopTargets};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
@@ -30,6 +31,9 @@ impl<'ctx> CodegenContext<'ctx> {
         let value = self.codegen_expr(value_expr)?;
         let elem_llvm = self.collection_value_type(element_ty)?;
         let value = self.coerce_if_needed(value, elem_llvm, element_ty)?;
+        // Before the reserve: the copy may allocate, and a `pool` body's bump allocator
+        // hands out addresses in call order, not in a way the buffer's growth depends on.
+        let value = self.value_for_collection_slot(value_expr, value, element_ty)?;
 
         self.emit_vec_reserve(header, element_ty)?;
 
@@ -44,9 +48,6 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_int_add(len, self.context.i64_type().const_int(1, false), "vec.len1")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         self.store_header_field(header, FIELD_LEN, next)?;
-        // Pushing a `string` transfers it into the buffer, so the source binding must
-        // not also be dropped by its own scope.
-        self.mark_moved_for_drop(value_expr);
         Ok(())
     }
 
@@ -76,7 +77,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_select(present, last, i64_ty.const_zero(), "vec.pop.idx")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?
             .into_int_value();
-        let value = self.load_vec_element_or_zero(header, element_ty, index, present)?;
+        let value =
+            self.load_vec_element_or_zero(header, element_ty, index, present, SlotTransfer::Moved)?;
 
         let shrunk = self
             .builder
@@ -119,7 +121,13 @@ impl<'ctx> CodegenContext<'ctx> {
             )
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?
             .into_int_value();
-        let value = self.load_vec_element_or_zero(header, element_ty, clamped, present)?;
+        let value = self.load_vec_element_or_zero(
+            header,
+            element_ty,
+            clamped,
+            present,
+            SlotTransfer::Copied,
+        )?;
         self.build_option_value(result_ty, present, value, element_ty)
     }
 
@@ -138,9 +146,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let header = self.collection_place_ptr(object, obj_ty)?;
         let slot = self.checked_vec_slot(header, &element_ty, index, offset)?;
         let elem_llvm = self.collection_value_type(&element_ty)?;
-        self.builder
+        let value = self
+            .builder
             .build_load(elem_llvm, slot, "vec.idx")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.value_from_collection_slot(value, &element_ty, SlotTransfer::Copied)
     }
 
     /// `v[i] = x`, a bounds-checked element store into a `Vec` place.
@@ -157,10 +167,16 @@ impl<'ctx> CodegenContext<'ctx> {
         let elem_llvm = self.collection_value_type(&element_ty)?;
         let val = self.codegen_expr(value)?;
         let val = self.coerce_if_needed(val, elem_llvm, &element_ty)?;
+        let val = self.value_for_collection_slot(value, val, &element_ty)?;
+        // The slot gives up what it held, and it is read on the way there: `v[i] = v[i]`
+        // would otherwise release the buffer the new value is, so the release follows the
+        // incoming value's own copy.
+        if matches!(element_ty, Type::String) {
+            self.release_slot_string(slot)?;
+        }
         self.builder
             .build_store(slot, val)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.mark_moved_for_drop(value);
         Ok(())
     }
 
@@ -229,6 +245,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_load(elem_llvm, slot, "veach.elem")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let elem_val =
+            self.value_from_collection_slot(elem_val, &element_ty, SlotTransfer::Copied)?;
         self.builder
             .build_store(elem_alloca, elem_val)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -236,6 +254,12 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let body_scope_index = self.drop_scopes.len();
         self.push_drop_scope();
+        // The binding holds a copy of the element, not a view into the buffer, so it is
+        // the iteration that owns it: registered inside the body scope, its flag re-armed
+        // by every pass, and released before the next element is read.
+        if matches!(element_ty, Type::String) {
+            self.register_local_drop(iterator, elem_alloca, DropTarget::HeapString)?;
+        }
         self.loop_targets.push(LoopTargets {
             label: label.map(str::to_string),
             continue_bb: step_bb,
@@ -377,6 +401,7 @@ impl<'ctx> CodegenContext<'ctx> {
         element_ty: &Type,
         index: IntValue<'ctx>,
         present: IntValue<'ctx>,
+        transfer: SlotTransfer,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let parent_fn = self
             .current_function
@@ -399,6 +424,9 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_load(elem_llvm, slot, "vec.elem")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        // Inside the guarded block: an absent element is the zero fat pointer, whose null
+        // buffer a copy must never read.
+        let value = self.value_from_collection_slot(value, element_ty, transfer)?;
         self.builder
             .build_store(slot_alloca, value)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;

@@ -22,6 +22,7 @@ for moves and reassignment, [Control Flow](control-flow.md#pool-blocks) for `poo
 | A heap `string` stored into a struct field, array element or tuple element | With the holder, when the store into that position provably allocated |
 | A heap `string` a function returns | By the caller, when every one of the function's return paths allocates |
 | A heap `string` passed by value to a parameter the callee only reads | At the call it was built for |
+| A `string` in a collection slot | By the collection, which owns a copy of the bytes rather than the operand's buffer |
 
 An anonymous heap `string` (what `+`, interpolation and `String::to_string` produce) belongs to
 no binding, so it is released at the consumer that reads and discards it: a `+` or `==` operand,
@@ -29,11 +30,14 @@ a `.len()` receiver, a `push_str` argument, a `println` argument, an interpolati
 statement whose value nothing reads. A loop that formats output holds a flat heap rather than a
 growing one.
 
-## What still leaks
+A collection never shares a buffer across its own boundary. `v.push(s)` and `m.insert(k, v)`
+copy the bytes into slots of their own, which is why they read their arguments rather than moving
+them and why the binding they came from is still usable afterwards; `v[i]`, `for x in v`,
+`m.get(k)` and `m.keys()` copy back out, so a value read from a collection outlives it. `v.pop()`
+is the one read that hands over the slot's own buffer, because the slot is gone with it. A slot
+that is overwritten, removed, or cleared releases what it held.
 
-A heap `string` stored as a **collection element**: `v.push(a + b)`, or a map value. A
-collection copies a `string` in and out as a plain fat pointer, so an element read hands out an
-alias, and releasing the element would leave that alias dangling.
+## What still leaks
 
 The storing positions above are covered only where the compiler can *prove* who owns the buffer.
 Three shapes it cannot prove, each leaking one buffer rather than dangling one:
@@ -46,6 +50,10 @@ Three shapes it cannot prove, each leaking one buffer rather than dangling one:
 
 Freeing a `.rodata` literal, or a buffer something else still holds, is a worse failure than
 holding one, so every unproven case answers the same way.
+
+A `string` a collection read hands into a view-producing method (`v[0].slice(...)`, `.chars()`,
+`.clone()`) leaks its copy, as any other anonymous string does there, and a
+`val PATTERN = m.get(k) else ...` binds a payload nothing releases.
 
 A `match` arm that binds an enum payload also disowns the whole scrutinee, so a variant the arm
 did not take is not destroyed.

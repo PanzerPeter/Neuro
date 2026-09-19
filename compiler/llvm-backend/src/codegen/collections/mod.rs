@@ -11,6 +11,7 @@
 // concrete instantiation as a private helper function rather than inlined at every call
 // site, so a program with many `map.get(k)` calls emits one probe loop, not one per call.
 
+mod elements;
 mod keys;
 mod maps;
 mod strings;
@@ -76,7 +77,11 @@ impl<'ctx> CodegenContext<'ctx> {
             )),
             (_, "clear") => {
                 let stride = self.collection_slot_stride(kind, &params)?;
-                self.codegen_collection_clear(header, stride)?;
+                let collection_ty = Type::Collection {
+                    kind,
+                    args: params.clone(),
+                };
+                self.codegen_collection_clear(header, stride, &collection_ty)?;
                 Ok(None)
             }
             (CollectionKind::Vec, "push") => {
@@ -112,9 +117,18 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// Release a collection's heap buffer. Emitted at the owner's scope exit; a
-    /// never-allocated collection holds a null buffer, which `free` accepts.
-    pub(crate) fn emit_collection_free(&mut self, header: PointerValue<'ctx>) -> CodegenResult<()> {
+    /// Release a collection's heap buffer, and first whatever its live slots own.
+    /// Emitted at the owner's scope exit; a never-allocated collection holds a null
+    /// buffer, which `free` accepts.
+    ///
+    /// `ty` is the collection's own type, which is what says whether a slot holds a
+    /// `string` the collection owns; every other element type is `Copy` and owns nothing.
+    pub(crate) fn emit_collection_free(
+        &mut self,
+        header: PointerValue<'ctx>,
+        ty: &Type,
+    ) -> CodegenResult<()> {
+        self.emit_collection_string_release(header, ty)?;
         let buffer = self.load_header_buffer(header)?;
         let free_fn = self.release_fn()?;
         self.builder
@@ -123,9 +137,12 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// `collection.clear()`, which resets the counts and wipe the allocated slots. The buffer
-    /// is retained so refilling does not reallocate, and the elements themselves are
-    /// `Copy`-or-`string`-or-byte values with nothing of their own to release.
+    /// `collection.clear()`, which releases whatever the live slots own, then resets the
+    /// counts and wipes the allocated slots. The buffer is retained so refilling does not
+    /// reallocate.
+    ///
+    /// The slot release runs FIRST, while the counts still say which slots are live: the
+    /// wipe below is what makes them unreachable.
     ///
     /// The wipe matters for the hash map: a stale `FULL` slot state would still answer
     /// lookups after the length reached zero. `EMPTY` is state zero, so zeroing the
@@ -134,7 +151,9 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         header: PointerValue<'ctx>,
         slot_stride: IntValue<'ctx>,
+        ty: &Type,
     ) -> CodegenResult<()> {
+        self.emit_collection_string_release(header, ty)?;
         let zero = self.context.i64_type().const_zero();
         self.store_header_field(header, FIELD_LEN, zero)?;
         self.store_header_field(header, FIELD_USED, zero)?;
@@ -212,7 +231,11 @@ impl<'ctx> CodegenContext<'ctx> {
         if !aliases_a_holder {
             // The synthetic name cannot collide with a source binding: `__` is rejected in
             // every declared name, so no move site will ever clear this entry's drop flag.
-            self.register_local_drop(TEMPORARY_BINDING, tmp, DropTarget::Collection)?;
+            self.register_local_drop(
+                TEMPORARY_BINDING,
+                tmp,
+                DropTarget::Collection(obj_ty.referent().clone()),
+            )?;
         }
         Ok(tmp)
     }

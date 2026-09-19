@@ -879,12 +879,15 @@ compiler-known nominal type, never `Copy` and always move-tracked.
 
 - `resolve_collection` resolves the generic application from `resolve_type`, validating storable
   elements (`Copy` or `string`) and map keys; a program declaring its own generic type of that
-  name shadows the builtin.
+  name shadows the builtin. `string` is storable because the collection takes a copy of the bytes
+  rather than the operand's fat pointer: the slot owns what it holds, an element read copies back
+  out, and the collection releases its slots when it is destroyed.
 - `check_collection_new` types `Vec::new()` from the expected type, else
   `CollectionTypeNotInferable`.
 - `resolve_collection_method` types the method surface, requiring a mutable receiver for the
-  mutating half and taking ownership only of *stored* arguments: a lookup key is read, like a
-  `==` operand. Fallible readers instantiate the prelude `Option<T>`.
+  mutating half. No collection method moves its arguments: every one of them is read, like a
+  `==` operand, because an insertion copies the bytes rather than taking the operand's buffer.
+  Fallible readers instantiate the prelude `Option<T>`.
 - Raw float keys are rejected toward `OrderedF32` / `OrderedF64` (IEEE-754 `<` is a partial
   order); a struct key requires `impl PartialEq` plus `impl Hashable` (hashed) or `impl
   Comparable` (ordered).

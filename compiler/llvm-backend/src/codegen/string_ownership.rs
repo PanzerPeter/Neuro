@@ -210,6 +210,10 @@ fn collect_returns<'a>(stmts: &'a [HirStmt], out: &mut Vec<&'a HirExpr>) {
 fn allocates(expr: &HirExpr, producers: &HashSet<String>) -> bool {
     match &expr.kind {
         HirExprKind::InterpString { .. } => true,
+        // A collection copies a `string` out of its slot, so the read owns the copy.
+        HirExprKind::Index { object, .. } => {
+            matches!(expr.ty, HirType::String) && indexes_a_collection(&object.ty)
+        }
         HirExprKind::Binary {
             op: ast_types::BinaryOp::Add,
             ..
@@ -225,6 +229,15 @@ fn allocates(expr: &HirExpr, producers: &HashSet<String>) -> bool {
             }
             _ => false,
         },
+        _ => false,
+    }
+}
+
+/// Whether `ty` is one of the standard collections, through a borrow of it or directly.
+fn indexes_a_collection(ty: &HirType) -> bool {
+    match ty {
+        HirType::Reference { inner, .. } => indexes_a_collection(inner),
+        HirType::Collection { .. } => true,
         _ => false,
     }
 }

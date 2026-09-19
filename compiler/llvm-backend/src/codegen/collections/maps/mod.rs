@@ -16,6 +16,7 @@ use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
 use neuro_hir::HirExpr;
 
+use super::elements::SlotTransfer;
 use super::{collection_arg, FIELD_LEN};
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -43,11 +44,19 @@ const LOAD_DENOMINATOR: u64 = 3;
 /// The sentinel a lookup returns when the key is absent.
 const NOT_FOUND: i64 = -1;
 
+/// Which half of a slot record an address is wanted for.
+#[derive(Clone, Copy)]
+enum SlotField {
+    Key,
+    Value,
+}
+
 mod growth;
 mod insertion;
 mod iteration;
 mod lookup;
 mod probing;
+mod release;
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Dispatch a `HashMap` / `BTreeMap` method.
@@ -67,14 +76,21 @@ impl<'ctx> CodegenContext<'ctx> {
             "insert" => {
                 let key = self.lower_map_argument(args, 0, &key_ty)?;
                 let value = self.lower_map_argument(args, 1, &value_ty)?;
+                // The value reaches exactly one store on either path, so the slot's copy
+                // is made here. The KEY is stored only when the entry is new, so its copy
+                // is made inside the helper, where that is known.
+                let value = match args.get(1) {
+                    Some(expr) => self.value_for_collection_slot(expr, value, &value_ty)?,
+                    None => value,
+                };
                 let insert = self.build_map_insert_helper(kind, &key_ty, &value_ty)?;
                 self.builder
                     .build_call(insert, &[header.into(), key.into(), value.into()], "")
                     .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-                for index in 0..args.len() {
-                    if let Some(arg) = args.get(index) {
-                        self.mark_moved_for_drop(arg);
-                    }
+                // The helper has copied whatever bytes it kept by the time it returns, so
+                // a key built for this call has no reader left.
+                if let Some(expr) = args.first() {
+                    self.release_string_temporary(expr, key)?;
                 }
                 Ok(None)
             }
@@ -200,11 +216,15 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
         self.builder.position_at_end(read_bb);
-        let value_ptr = self.map_slot_field_ptr(kind, header, key_ty, value_ty, slot, false)?;
+        let value_ptr =
+            self.map_slot_field_ptr(kind, header, key_ty, value_ty, slot, SlotField::Value)?;
         let value = self
             .builder
             .build_load(value_llvm, value_ptr, "map.val")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        // Inside the guarded block: a miss reads no slot at all, so a copy is only ever
+        // made of bytes that exist.
+        let value = self.value_from_collection_slot(value, value_ty, SlotTransfer::Copied)?;
         self.builder
             .build_store(out, value)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -240,6 +260,9 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
         self.builder.position_at_end(do_bb);
+        // The slot's own buffers go with the entry: after the tombstone or the shift,
+        // nothing can name them again.
+        self.release_slot_strings(kind, header, key_ty, value_ty, slot)?;
         match kind {
             CollectionKind::HashMap => {
                 let state_ptr = self.hashed_slot_state_ptr(header, key_ty, value_ty, slot)?;
@@ -306,15 +329,15 @@ impl<'ctx> CodegenContext<'ctx> {
         key_ty: &Type,
         value_ty: &Type,
         slot: IntValue<'ctx>,
-        key: bool,
+        field: SlotField,
     ) -> CodegenResult<PointerValue<'ctx>> {
         let slot_ptr = self.map_slot_ptr(kind, header, key_ty, value_ty, slot)?;
         let slot_ty = self.map_slot_type(kind, key_ty, value_ty)?;
-        let field = match (kind, key) {
-            (CollectionKind::HashMap, true) => SLOT_KEY_HASHED,
-            (CollectionKind::HashMap, false) => SLOT_VALUE_HASHED,
-            (_, true) => SLOT_KEY_ORDERED,
-            (_, false) => SLOT_VALUE_ORDERED,
+        let field = match (kind, field) {
+            (CollectionKind::HashMap, SlotField::Key) => SLOT_KEY_HASHED,
+            (CollectionKind::HashMap, SlotField::Value) => SLOT_VALUE_HASHED,
+            (_, SlotField::Key) => SLOT_KEY_ORDERED,
+            (_, SlotField::Value) => SLOT_VALUE_ORDERED,
         };
         self.builder
             .build_struct_gep(slot_ty, slot_ptr, field, "map.slot.field")

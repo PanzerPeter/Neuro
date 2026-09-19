@@ -10,6 +10,7 @@
 use neuro_hir::{HirExpr, HirMatchBinding, HirMatchTest, HirStmt};
 
 use crate::codegen::context::CodegenContext;
+use crate::codegen::expressions::matches::ArmOwnership;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
@@ -56,7 +57,13 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(ok_bb);
         // Deliberately not restored: these bindings belong to the enclosing block and
         // must stay visible to every statement after this one.
-        let _ = self.bind_arm(bindings, scrut_alloca, scrut_llvm, &scrut_sem, false)?;
+        let _ = self.bind_arm(
+            bindings,
+            scrut_alloca,
+            scrut_llvm,
+            &scrut_sem,
+            ArmOwnership::Enclosing,
+        )?;
         Ok(())
     }
 
@@ -75,7 +82,13 @@ impl<'ctx> CodegenContext<'ctx> {
             Some(binding) => std::slice::from_ref(binding),
             None => &[],
         };
-        let saved = self.bind_arm(bound, scrut_alloca, scrut_llvm, scrut_sem, false)?;
+        let saved = self.bind_arm(
+            bound,
+            scrut_alloca,
+            scrut_llvm,
+            scrut_sem,
+            ArmOwnership::Enclosing,
+        )?;
 
         self.push_drop_scope();
         for stmt in else_block {

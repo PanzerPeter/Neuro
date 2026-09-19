@@ -178,10 +178,10 @@ Every row is implemented, tested and usable today. Depth lives in the
 
 > **Alpha memory note.** Stack values, literals, the owning collections and reassigned bindings
 > are all reclaimed, and so is a heap `string` stored into a struct field, an array or tuple
-> element, a call's argument or a call's return value. What still leaks is a heap `string` stored
-> as a collection element, and the storing positions whose owner the compiler cannot prove. Full
-> detail, and the reason the analysis answers conservatively, is in the
-> [memory model](docs/language-reference/memory-model.md). Completing it is sub-phase 2E below.
+> element, a call's argument, a call's return value, or a collection slot. What still leaks is the
+> handful of storing positions whose owner the compiler cannot prove, each of which holds one
+> buffer rather than handing out a dangling one. Full detail, and the reason the analysis answers
+> conservatively, is in the [memory model](docs/language-reference/memory-model.md).
 
 ---
 
@@ -228,8 +228,8 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | **9** | **Distribution**: the `neurpm` package manager, cross-OS installer and self-updater, signed binaries, CPU parallelism, further optimization passes | Planned |
 
 Phase 2 in detail: **2A** standard I/O and spec stragglers, **2B** tensor core, **2C** MLIR
-lowering and **2D** the pool allocator are complete; **2E** the value model is in progress;
-**2F** functional sugar (`|>`, `>>`, einstein notation) is next.
+lowering, **2D** the pool allocator and **2E** the value model are complete; **2F** functional
+sugar (`|>`, `>>`, einstein notation) is next.
 
 ---
 
@@ -281,8 +281,8 @@ Everything is published at [neuro-lang.netlify.app](https://neuro-lang.netlify.a
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the architecture rules, coding standards, quality gates and
 pull request process. Open defects are in [docs/BUGS.md](docs/BUGS.md), and fixing one is the best
-way to start. Work is most useful in **Phase 2 (Tensors and MLIR)**, particularly the memory-safety
-and backend work in sub-phase 2E.
+way to start. Work is most useful in **Phase 2 (Tensors and MLIR)**, particularly the functional
+sugar in sub-phase 2F.
 
 See also [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 

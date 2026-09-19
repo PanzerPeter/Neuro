@@ -1579,3 +1579,112 @@ fn an_owned_argument_to_a_reading_parameter_is_released_after_the_call() {
          call, which proves nothing about who owns it:\n{body}"
     );
 }
+
+/// A collection of `string` elements copies the bytes into slots of its own and walks
+/// those slots when it is destroyed, so no element it holds outlives it unreleased.
+#[test]
+fn a_string_collection_releases_the_elements_it_owns() {
+    let source = r#"
+        func main() -> i32 {
+            mut v: Vec<string> = Vec::new()
+            v.push("one")
+            return v.len() as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    assert!(
+        ir.contains("define private void @__neuro_vec_drop_elems_string("),
+        "the instantiation's element-release helper is emitted:\n{ir}"
+    );
+    let body = function_body(&ir, "main");
+    assert!(
+        body.contains("call void @__neuro_vec_drop_elems_string("),
+        "and called before the buffer is freed:\n{body}"
+    );
+}
+
+/// A collection whose elements are `Copy` owns nothing beyond its buffer, so it emits
+/// no element walk at all.
+#[test]
+fn a_copy_element_collection_emits_no_element_release() {
+    let source = r#"
+        func main() -> i32 {
+            mut v: Vec<i32> = Vec::new()
+            v.push(1)
+            return v.len() as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    assert!(
+        !ir.contains("drop_elems"),
+        "a `Vec<i32>` costs exactly what it did before:\n{ir}"
+    );
+}
+
+/// An element read hands back a copy, which makes the reader its owner: the binding is
+/// registered for release the same way a concatenation's result is, and the collection
+/// keeps the slot it still holds.
+#[test]
+fn an_element_read_is_owned_by_the_reader() {
+    let source = r#"
+        func main() -> i32 {
+            mut v: Vec<string> = Vec::new()
+            v.push("one")
+            val s = v[0]
+            return s.len() as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert!(
+        body.contains("str.dup"),
+        "the read copies the bytes out of the slot:\n{body}"
+    );
+    assert_eq!(
+        body.matches("call void @__neuro_release(").count(),
+        2,
+        "the copy and the collection's buffer are each released once, and the element \
+         walk releases the slot through its own helper:\n{body}"
+    );
+}
+
+/// An insertion of a binding copies rather than taking the binding's buffer, which is
+/// what leaves the source usable afterwards and keeps a `.rodata` literal out of the
+/// release path.
+#[test]
+fn an_insertion_copies_instead_of_taking_the_operand() {
+    let source = r#"
+        func main() -> i32 {
+            val a = "one"
+            mut v: Vec<string> = Vec::new()
+            v.push(a)
+            return a.len() as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert!(
+        body.contains("str.dup"),
+        "the slot takes a copy of the operand's bytes:\n{body}"
+    );
+}
+
+/// An operand the expression itself allocated is adopted instead of copied: there is no
+/// second owner to keep it alive, so a copy would allocate twice and free once.
+#[test]
+fn an_insertion_adopts_a_buffer_built_for_it() {
+    let source = r#"
+        func main() -> i32 {
+            val a = "one"
+            mut v: Vec<string> = Vec::new()
+            v.push(a + a)
+            return v.len() as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert!(
+        !body.contains("str.dup"),
+        "a concatenation built for the push is stored as it is:\n{body}"
+    );
+}

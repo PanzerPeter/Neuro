@@ -228,8 +228,10 @@ pub(crate) struct HeldDrop<'ctx> {
 pub(crate) enum DropTarget {
     /// A user `impl Drop for T`: call `{T}__drop(&mut self)`.
     UserDrop(String),
-    /// A standard collection: release the heap buffer its header points at.
-    Collection,
+    /// A standard collection: release whatever its live slots own, then the heap buffer
+    /// its header points at. Carries the collection's own type, which is what says
+    /// whether a slot holds a `string` the collection owns.
+    Collection(Type),
     /// A `string` binding initialized from a producer that always allocates
     /// (interpolation or `+`): release the buffer its fat pointer points at.
     /// Only a binding whose initializer was proven to allocate carries this, so

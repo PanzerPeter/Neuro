@@ -1434,6 +1434,20 @@ mut a: Vec<i32> = Vec::new()
 val b: Vec<i32> = a       // moves; `a` is invalid from here
 ```
 
+A collection owns what its slots hold, not what its arguments named. A `string`
+handed to `push` or `insert` is copied into the slot, so the argument is *read*
+rather than moved and the binding it came from stays usable; a `string` read back
+out of a slot is copied too, so it outlives the collection it came from. The one
+exception is `pop`, which hands over the slot's own buffer because the slot goes
+with it.
+
+```neuro
+val name: string = "ada" + "!"
+mut names: Vec<string> = Vec::new()
+names.push(name)          // copies; `name` is still usable
+val first = names[0]      // a copy of its own, valid after `names` is gone
+```
+
 ### `Vec<T>`
 
 | Operation | Result | Notes |
@@ -1506,12 +1520,10 @@ equally; the map only needs that much.
 
 ### Current limits
 
-- A `string` stored in a collection is not freed when the collection is dropped;
-  only the collection's own buffer is. An owned `string` is released at the consumer
-  that reads and discards it ([strings](strings.md#storage-and-the-len-guarantee)),
-  and a collection element is the opposite case: the element outlives the expression
-  that stored it, so releasing there would leave the collection holding a dangling
-  pointer.
+- A collection element must be `Copy` or `string`, so a `Vec` of `String` builders
+  or of non-`Copy` structs is rejected where an array of them is accepted. There is no
+  capacity control (`with_capacity`, `shrink_to_fit`), `insert` does not return the
+  displaced value, and `keys()` builds a `Vec` rather than an iterator.
 - `Vec<T>` does not go through the `IntoIterator` / `Iterator` protocol
   ([control flow](control-flow.md#the-iteration-protocol)): `for x in v` lowers to
   a counted loop, exactly as `for x in arr` does, and so does

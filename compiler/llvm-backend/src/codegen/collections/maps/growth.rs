@@ -7,7 +7,7 @@ use inkwell::values::{FunctionValue, IntValue, PointerValue};
 use inkwell::IntPredicate;
 
 use super::probing::ProbeCursor;
-use super::{LOAD_DENOMINATOR, LOAD_NUMERATOR, STATE_FULL};
+use super::{SlotField, LOAD_DENOMINATOR, LOAD_NUMERATOR, STATE_FULL};
 use crate::codegen::collections::{initial_capacity, FIELD_CAP, FIELD_LEN, FIELD_USED};
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -190,7 +190,7 @@ impl<'ctx> CodegenContext<'ctx> {
             key_ty,
             value_ty,
             index,
-            false,
+            SlotField::Value,
         )?;
         let value_llvm = self.collection_value_type(value_ty)?;
         let value = self

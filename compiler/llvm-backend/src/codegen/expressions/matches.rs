@@ -15,7 +15,7 @@ use neuro_hir::{
     HirBindingSource, HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest,
 };
 
-use crate::codegen::context::CodegenContext;
+use crate::codegen::context::{CodegenContext, DropTarget};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::type_mapping::TypeMapper;
 use crate::types::Type;
@@ -27,6 +27,18 @@ pub(crate) struct SavedBinding<'ctx> {
     ptr: Option<PointerValue<'ctx>>,
     ty: Option<BasicTypeEnum<'ctx>>,
     sem: Option<Type>,
+}
+
+/// Who releases what an arm's bindings take out of the scrutinee.
+#[derive(Clone, Copy)]
+pub(crate) enum ArmOwnership<'e> {
+    /// A `match` arm: the caller has opened a scope for these bindings, and the payload
+    /// they take is theirs for the arm's duration. `scrutinee` is the expression it came
+    /// out of, which is what says whether a `string` payload is a buffer of its own.
+    Arm { scrutinee: &'e HirExpr },
+    /// A `val ... else` binding, whose release belongs to the binding it introduces into
+    /// the enclosing scope rather than to the pattern.
+    Enclosing,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -102,6 +114,7 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.position_at_end(body_bb);
             self.codegen_arm_body(
                 arm,
+                scrutinee,
                 scrut_alloca,
                 scrut_llvm,
                 &scrut_sem,
@@ -212,6 +225,7 @@ impl<'ctx> CodegenContext<'ctx> {
     fn codegen_arm_body(
         &mut self,
         arm: &HirMatchArm,
+        scrutinee: &HirExpr,
         scrut_alloca: PointerValue<'ctx>,
         scrut_llvm: BasicTypeEnum<'ctx>,
         scrut_sem: &Type,
@@ -223,7 +237,13 @@ impl<'ctx> CodegenContext<'ctx> {
         // disowned, so for the arm's duration the binding is the only owner. Its own drop
         // scope keeps the release inside the arm, where the value is live.
         self.push_drop_scope();
-        let saved = self.bind_arm(&arm.bindings, scrut_alloca, scrut_llvm, scrut_sem, true)?;
+        let saved = self.bind_arm(
+            &arm.bindings,
+            scrut_alloca,
+            scrut_llvm,
+            scrut_sem,
+            ArmOwnership::Arm { scrutinee },
+        )?;
 
         if let Some(guard) = &arm.guard {
             let parent_fn = self
@@ -273,17 +293,13 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Create allocas for an arm's bindings and register them in the name maps,
     /// returning the prior entries so they can be restored afterwards.
-    /// `owns_payload` says the caller has opened a scope for these bindings and wants an
-    /// enum payload registered for destruction in it. A `val ... else` binding leaves it
-    /// false: that form's release belongs to the binding it introduces into the enclosing
-    /// scope, not to the pattern.
     pub(crate) fn bind_arm(
         &mut self,
         bindings: &[HirMatchBinding],
         scrut_alloca: PointerValue<'ctx>,
         scrut_llvm: BasicTypeEnum<'ctx>,
         scrut_sem: &Type,
-        owns_payload: bool,
+        ownership: ArmOwnership<'_>,
     ) -> CodegenResult<Vec<SavedBinding<'ctx>>> {
         let mut saved = Vec::with_capacity(bindings.len());
         for b in bindings {
@@ -315,12 +331,36 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_store(alloca, value)
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
-            if owns_payload && matches!(b.source, HirBindingSource::EnumPayload { .. }) {
-                self.register_owned_binding(&b.name, alloca, &sem)?;
+            let payload = matches!(b.source, HirBindingSource::EnumPayload { .. });
+            if let (ArmOwnership::Arm { scrutinee }, true) = (ownership, payload) {
+                self.register_arm_payload(&b.name, alloca, &sem, scrutinee)?;
             }
             saved.push(self.bind_name(&b.name, alloca, llvm_ty, sem));
         }
         Ok(saved)
+    }
+
+    /// Register an arm's payload binding for release when the arm ends.
+    ///
+    /// A `string` payload is the one whose type proves nothing, exactly as a `string`
+    /// binding's does: it is released only where the scrutinee provably handed out a
+    /// buffer of its own, which a collection's fallible reader does and nothing else yet
+    /// does. Every other payload type carries its own proof.
+    fn register_arm_payload(
+        &mut self,
+        name: &str,
+        alloca: PointerValue<'ctx>,
+        sem: &Type,
+        scrutinee: &HirExpr,
+    ) -> CodegenResult<()> {
+        if !matches!(sem, Type::String) {
+            return self.register_owned_binding(name, alloca, sem);
+        }
+        if !self.produces_owned_option_payload(scrutinee) {
+            return Ok(());
+        }
+        let _ = self.register_local_drop(name, alloca, DropTarget::HeapString)?;
+        Ok(())
     }
 
     /// Register `name` in the three name maps, returning whatever the name meant

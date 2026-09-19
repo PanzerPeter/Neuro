@@ -5,7 +5,7 @@
 
 use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 
-use super::STATE_FULL;
+use super::{SlotField, STATE_FULL};
 use crate::codegen::collections::FIELD_LEN;
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -106,7 +106,8 @@ impl<'ctx> CodegenContext<'ctx> {
         value_ty: &Type,
         slot: IntValue<'ctx>,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let key_ptr = self.map_slot_field_ptr(kind, header, key_ty, value_ty, slot, true)?;
+        let key_ptr =
+            self.map_slot_field_ptr(kind, header, key_ty, value_ty, slot, SlotField::Key)?;
         let key_llvm = self.collection_value_type(key_ty)?;
         self.builder
             .build_load(key_llvm, key_ptr, "slot.key")
@@ -136,7 +137,7 @@ impl<'ctx> CodegenContext<'ctx> {
             key_ty,
             value_ty,
             slot,
-            true,
+            SlotField::Key,
         )?;
         self.builder
             .build_store(key_ptr, key)
@@ -147,7 +148,7 @@ impl<'ctx> CodegenContext<'ctx> {
             key_ty,
             value_ty,
             slot,
-            false,
+            SlotField::Value,
         )?;
         self.builder
             .build_store(value_ptr, value)

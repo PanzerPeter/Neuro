@@ -1,45 +1,47 @@
-// Generated `keys(header) -> Vec<K>` helper: a snapshot of the live keys in order.
+// Generated `drop_elems(header)` helper for both map shapes: release the `string`
+// buffers the live slots own.
 //
 // One of the map-codegen modules under `maps`; each adds methods to the same
 // `impl CodegenContext` block.
 
-use inkwell::values::FunctionValue;
+use inkwell::values::PointerValue;
 use inkwell::IntPredicate;
 
-use super::STATE_FULL;
-use crate::codegen::collections::elements::SlotTransfer;
-use crate::codegen::collections::{FIELD_CAP, FIELD_LEN};
+use super::{SlotField, STATE_FULL};
+use crate::codegen::collections::elements::element_release_helper_name;
+use crate::codegen::collections::{collection_arg, FIELD_CAP, FIELD_LEN};
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CollectionKind, Type};
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// Emit `keys(header, out_buffer)`: copy every live key into `out_buffer`, in slot
-    /// order.
-    pub(super) fn build_map_keys_helper(
+    /// Call the instantiation's slot-release helper, building it on first use.
+    pub(in crate::codegen::collections) fn emit_map_string_release(
         &mut self,
         kind: CollectionKind,
-        key_ty: &Type,
-        value_ty: &Type,
-    ) -> CodegenResult<FunctionValue<'ctx>> {
-        let name = self.map_helper_name(kind, "keys", key_ty, value_ty);
+        header: PointerValue<'ctx>,
+        args: &[Type],
+    ) -> CodegenResult<()> {
+        let key_ty = collection_arg(args, 0)?;
+        let value_ty = collection_arg(args, 1)?;
+        let name = element_release_helper_name(kind, args);
         let ptr_ty = self.context.ptr_type(inkwell::AddressSpace::default());
-        let fn_type = self
-            .context
-            .void_type()
-            .fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
-        let key_ty = key_ty.clone();
-        let value_ty = value_ty.clone();
+        let fn_type = self.context.void_type().fn_type(&[ptr_ty.into()], false);
 
-        self.get_or_build_helper(&name, fn_type, move |ctx, func| {
-            ctx.emit_map_keys_body(func, kind, &key_ty, &value_ty)
-        })
+        let helper = self.get_or_build_helper(&name, fn_type, move |ctx, func| {
+            ctx.emit_map_release_body(func, kind, &key_ty, &value_ty)
+        })?;
+        self.builder
+            .build_call(helper, &[header.into()], "")
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        Ok(())
     }
 
-    /// Body of the `keys` helper.
-    pub(super) fn emit_map_keys_body(
+    /// Body of the slot-release helper: walk the slots this shape can hold live entries
+    /// in and release each one's `string` fields.
+    fn emit_map_release_body(
         &mut self,
-        func: FunctionValue<'ctx>,
+        func: inkwell::values::FunctionValue<'ctx>,
         kind: CollectionKind,
         key_ty: &Type,
         value_ty: &Type,
@@ -55,26 +57,19 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let header = func
             .get_nth_param(0)
-            .ok_or_else(|| CodegenError::InternalError("map keys arity".into()))?
-            .into_pointer_value();
-        let out = func
-            .get_nth_param(1)
-            .ok_or_else(|| CodegenError::InternalError("map keys arity".into()))?
+            .ok_or_else(|| CodegenError::InternalError("map release arity".into()))?
             .into_pointer_value();
 
-        // A hashed table must scan every slot (live ones are scattered); the ordered
-        // one only has to walk its dense prefix.
+        // A hashed table scatters its live slots across the whole buffer; the ordered
+        // one keeps them in a dense prefix, exactly as `keys()` walks them.
         let limit = match kind {
             CollectionKind::HashMap => self.load_header_field(header, FIELD_CAP, "cap")?,
             _ => self.load_header_field(header, FIELD_LEN, "len")?,
         };
-        let slot_slot = self.entry_alloca(i64_ty, "slot")?;
-        let out_slot = self.entry_alloca(i64_ty, "out.i")?;
-        for target in [slot_slot, out_slot] {
-            self.builder
-                .build_store(target, i64_ty.const_zero())
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        }
+        let cursor = self.entry_alloca(i64_ty, "rel.slot")?;
+        self.builder
+            .build_store(cursor, i64_ty.const_zero())
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         self.builder
             .build_unconditional_branch(cond_bb)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -82,12 +77,12 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(cond_bb);
         let slot = self
             .builder
-            .build_load(i64_ty, slot_slot, "slot.val")
+            .build_load(i64_ty, cursor, "rel.slot.val")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?
             .into_int_value();
         let more = self
             .builder
-            .build_int_compare(IntPredicate::ULT, slot, limit, "more")
+            .build_int_compare(IntPredicate::ULT, slot, limit, "rel.more")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         self.builder
             .build_conditional_branch(more, body_bb, exit_bb)
@@ -102,7 +97,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         IntPredicate::EQ,
                         state,
                         self.context.i8_type().const_int(STATE_FULL, false),
-                        "live",
+                        "rel.live",
                     )
                     .map_err(|e| CodegenError::LlvmError(e.to_string()))?
             }
@@ -113,33 +108,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
         self.builder.position_at_end(take_bb);
-        let key = self.load_slot_key(kind, header, key_ty, value_ty, slot)?;
-        // The snapshot is a `Vec<K>` of its own, released by whoever binds it, so a
-        // `string` key is copied rather than aliased out of the map's slot.
-        let key = self.value_from_collection_slot(key, key_ty, SlotTransfer::Copied)?;
-        let out_index = self
-            .builder
-            .build_load(i64_ty, out_slot, "out.val")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-            .into_int_value();
-        let key_llvm = self.collection_value_type(key_ty)?;
-        // SAFETY: `out` was allocated with the map's `used` count and `out_index` is
-        // incremented once per live slot taken, so it never reaches that count.
-        let dst = unsafe {
-            self.builder
-                .build_in_bounds_gep(key_llvm, out, &[out_index], "out.slot")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-        };
-        self.builder
-            .build_store(dst, key)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let out_next = self
-            .builder
-            .build_int_add(out_index, i64_ty.const_int(1, false), "out.next")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_store(out_slot, out_next)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.release_slot_strings(kind, header, key_ty, value_ty, slot)?;
         self.builder
             .build_unconditional_branch(step_bb)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -147,10 +116,10 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(step_bb);
         let next = self
             .builder
-            .build_int_add(slot, i64_ty.const_int(1, false), "slot.next")
+            .build_int_add(slot, i64_ty.const_int(1, false), "rel.next")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         self.builder
-            .build_store(slot_slot, next)
+            .build_store(cursor, next)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         self.builder
             .build_unconditional_branch(cond_bb)
@@ -160,6 +129,26 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder
             .build_return(None)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Release whichever of a live slot's key and value is a `string`. Shared with
+    /// `remove`, which gives up one slot rather than all of them.
+    pub(super) fn release_slot_strings(
+        &mut self,
+        kind: CollectionKind,
+        header: PointerValue<'ctx>,
+        key_ty: &Type,
+        value_ty: &Type,
+        slot: inkwell::values::IntValue<'ctx>,
+    ) -> CodegenResult<()> {
+        for (field_ty, field) in [(key_ty, SlotField::Key), (value_ty, SlotField::Value)] {
+            if !matches!(field_ty, Type::String) {
+                continue;
+            }
+            let field_ptr = self.map_slot_field_ptr(kind, header, key_ty, value_ty, slot, field)?;
+            self.release_slot_string(field_ptr)?;
+        }
         Ok(())
     }
 }
