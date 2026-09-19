@@ -13,7 +13,7 @@ Provide the canonical Abstract Syntax Tree node definitions shared by every stag
     `NewtypeDef`, `ModuleDef`, `ModuleId`, `PRELUDE_MODULE`, `ImportDef`, `ImportName`,
     `ImportSelection`, `Parameter`, `ParamLabel`, `GenericParam`, `GenericParamKind`,
     `TraitBound`, `Attribute`
-  - `statements`: `Stmt`, `LoopAdapter`, `LoopAdapterKind`
+  - `statements`: `Stmt`, `Place`, `LoopAdapter`, `LoopAdapterKind`
   - `types`: `Type`, `ArraySize`, `TensorDim`, `TensorExtent`, `GenericArg`
 
 ## Shared Kernel
@@ -50,11 +50,11 @@ Most sugar never reaches this crate: tuple / struct / array destructuring,
 type aliases, trait default-method injection, struct field-init shorthand, and
 argument-position `impl Trait` are all expanded at parse time. Three exceptions earn a node, and
 the reason is the same each time: the information is not available yet:
-- `Stmt::CompoundAssignment { target, op, value, span }` survives because whether `x OP= v`
+- `Stmt::Assign { place, op, value, span }` keeps its `op` because whether `x OP= v`
   becomes `x = x OP v` or an in-place update is **type-directed**: a type implementing the
   matching `*Assign` trait takes the in-place path and every other type takes the desugaring.
   The parser has no types. Tensors are the only type on the in-place path today, and the
-  difference is observable there: the desugaring would move the tensor out of its own binding
+  difference is observable there: the desugaring would move the tensor out of its own place
   and reallocate its buffer. Both the type checker and `hir-lowering` re-form the desugared
   `Expr::Binary` themselves for the types that take it, which is what keeps a user operator-trait
   impl reachable through `+=`.
@@ -65,6 +65,26 @@ the reason is the same each time: the information is not available yet:
 - `Expr::ArrayRest { array, start, exact, span }` survives because the trailing `..rest`
   sub-slice's size (`[T; N - start]`) is known only after type checking. `exact` records a
   rest-less pattern, whose length must match exactly.
+
+### `Place`: one node for every assignment target
+`Stmt::Assign` is the only assignment statement. Its `place` is a `Place`, and the BASE of each
+projecting form is an `Expr` rather than a nested `Place`:
+
+```rust
+Place::Field { object: Box<Expr>, field: Identifier, span: Span }
+```
+
+`self.inner.data[i] = v` reads `self`, projects `inner`, projects `data`, and only the last step
+writes, so everything up to that step is an ordinary expression every stage already lowers. A
+recursive `Place` would have required a second resolver, parallel to the read path, for shapes
+the read path handles. The consequence to know: `Place` is flat, and the only write it can
+express is the outermost step.
+
+`Place::root()` is the binding the place bottoms out at, or `None` when the root is a temporary.
+Mutability, borrow tracking, move state and pool residency are all keyed by binding, so every
+consumer asks for it. `Place::to_expr()` rebuilds the read form, which is how a compound
+assignment desugars and how a stage that wants the place's type gets one without a second
+traversal.
 
 `Pattern::binding_names()` is a pure structural query shared by both closure free-variable
 walkers.

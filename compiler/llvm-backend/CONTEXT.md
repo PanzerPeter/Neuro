@@ -579,7 +579,8 @@ direct free, so the release a scope exit performs is provably the one a foreign 
 of a block it had already freed would be a use-after-free.
 
 `codegen_reference` returns the borrowed place's storage pointer: mutability is compile-time
-only. `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer.
+only. `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer, and
+is what `HirPlace::Deref` lowers to.
 **Auto-deref is value-driven**: a borrowed receiver lowers to a `PointerValue`, so
 `string_receiver_struct`, `StructClone`, `codegen_method_call`, and `get_struct_ptr_and_type` load
 through the pointer when they see one; an owned receiver is already a value. There is no context
@@ -981,9 +982,9 @@ exists only where its own type proves ownership.
 Two conservative edges keep it sound rather than complete. A `match` whose arms bind disowns the
 scrutinee's entire plan (`mark_held_moved_for_drop`), because which payload left depends on a
 runtime tag, so an unbound variant leaks instead of being released twice. And
-`collection_place_ptr` copies a collection read out of a place into a temporary; that copy
-aliases the holder's buffer, so `reads_a_held_place` keeps it from being registered as an owner
-in its own right.
+`collection_place_ptr` still copies a collection read out of something that is NOT a place (a
+`m.keys()` result, say) into a temporary; that copy aliases the holder's buffer, so
+`reads_a_held_place` keeps it from being registered as an owner in its own right.
 
 `codegen_function` / `codegen_method` open the body scope and register by-value `Drop`,
 collection, or tensor parameters for destruction at function exit; `codegen_var_decl` registers a local and
@@ -1010,6 +1011,27 @@ storage keeps the value it already had.
 **Known limits**: an anonymous heap `string` reaches no drop site, because it belongs to no
 binding; it is released at its consumer instead (see Heap-string ownership above), and one that
 escapes into a position able to store it is released by nobody.
+
+### Places: resolving the holder, addressing per form
+`codegen_place_store` has one arm per `HirPlace` form rather than one address computation,
+because the indexable types do not share one: a `Vec` slot sits behind a header, a slice slot
+behind a fat pointer, a tensor element behind a DLPack handle, an array element behind a
+bounds-guarded GEP.
+
+What IS shared is resolving the HOLDER, and that is `held_place_ptr` (`codegen/structs.rs`): a
+binding, a struct field at any depth, an array element, a tuple element, or a dereference,
+returning `None` for anything that is a temporary rather than storage. It loads through a
+binding's slot when that slot holds an address, which covers a borrow of an aggregate and the
+`self` of a `&mut self` method; a borrowed slice is excluded because its slot holds the fat
+pointer by value, which is why the LLVM representation and not the semantic type alone decides.
+
+**The trap this closed, and why it is worth remembering.** `array_place_ptr` and
+`collection_place_ptr` both fall back to materializing a temporary for a receiver they cannot
+resolve. That is the correct answer for a READ and a silently lost write: `grid[0][1] = 9`
+compiled and changed nothing, and the same fallback under a method receiver was
+`docs/BUGS.md` BUG-036 (`registry.open.push(1)` mutated a copy). Both now route through
+`held_place_ptr` first, and `codegen_index_assignment` refuses the fallback outright with a
+diagnostic naming why. A resolver shared between reads and writes has to be told which it is.
 
 ## Pool Arena ABI
 `arena.rs` carries the allocator behind `pool { }`: two internal globals,

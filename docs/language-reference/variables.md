@@ -105,6 +105,8 @@ flag = true
 - Can be reassigned after initialization
 - Reassigned value must match original type
 - Type annotation optional when type can be inferred from a numeric literal
+- A binding is one kind of assignment target. Fields, elements and tensor coordinates are
+  targets too: see [places](operators.md#places-what-may-sit-on-the-left)
 
 ## Syntax
 

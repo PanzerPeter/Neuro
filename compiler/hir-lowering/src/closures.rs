@@ -143,8 +143,10 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             }
             fv.bound.insert(name.name.clone());
         }
-        Stmt::Assignment { target, value, .. } | Stmt::CompoundAssignment { target, value, .. } => {
-            fv.reads.push(target.name.clone());
+        Stmt::Assign { place, value, .. } => {
+            if let Some(root) = place.root() {
+                fv.reads.push(root.name.clone());
+            }
             collect_expr(value, fv);
         }
         Stmt::Return { value, .. } => {
@@ -219,24 +221,6 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             }
         }
         Stmt::Continue { .. } => {}
-        Stmt::FieldAssignment { object, value, .. } => {
-            fv.reads.push(object.name.clone());
-            collect_expr(value, fv);
-        }
-        Stmt::DerefAssignment { pointer, value, .. } => {
-            collect_expr(pointer, fv);
-            collect_expr(value, fv);
-        }
-        Stmt::IndexAssignment {
-            target,
-            index,
-            value,
-            ..
-        } => {
-            fv.reads.push(target.name.clone());
-            collect_expr(index, fv);
-            collect_expr(value, fv);
-        }
         Stmt::ValElse {
             pattern,
             value,

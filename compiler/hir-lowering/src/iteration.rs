@@ -18,6 +18,7 @@
 //! the spec's implementation note permits and what keeps their generated code unchanged.
 
 use ast_types::{LoopAdapter, Stmt};
+use neuro_hir::HirPlace;
 use neuro_hir::{
     HirBindingSource, HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest, HirStmt,
     HirType,
@@ -159,8 +160,8 @@ impl Lowerer {
                 // A byte cursor belongs to the iterator and is advanced by its own
                 // `next`; only the step counter is the loop's to raise.
                 if position == LoopPosition::Step {
-                    stmts.push(HirStmt::Assignment {
-                        target: cursor.clone(),
+                    stmts.push(HirStmt::Assign {
+                        place: cursor_place(cursor),
                         value: HirExpr::new(
                             HirExprKind::Binary {
                                 op: ast_types::BinaryOp::Add,
@@ -225,8 +226,8 @@ impl Lowerer {
         // one. A `continue` cannot skip it: it is the first statement of the body.
         let mut loop_body = Vec::new();
         if let (LoopPosition::ByteOffset, Some(cursor)) = (position, &cursor_binding) {
-            loop_body.push(HirStmt::Assignment {
-                target: cursor.clone(),
+            loop_body.push(HirStmt::Assign {
+                place: cursor_place(cursor),
                 value: HirExpr::new(
                     HirExprKind::FieldAccess {
                         object: Box::new(variable(&iter_binding, iter_ty.clone(), span)),
@@ -383,6 +384,15 @@ fn nominal_name(ty: &HirType) -> Option<String> {
         HirType::Struct(name) | HirType::Enum(name) => Some(name.clone()),
         HirType::Newtype { name, .. } => Some(name.clone()),
         _ => None,
+    }
+}
+
+/// The place a synthesized loop cursor is stored in. Its type is fixed by the
+/// lowering that created the binding.
+fn cursor_place(name: &str) -> HirPlace {
+    HirPlace::Var {
+        name: name.to_string(),
+        ty: LOOP_INDEX_TYPE,
     }
 }
 

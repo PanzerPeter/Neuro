@@ -3,8 +3,93 @@
 use ast_types::BinaryOp;
 use shared_types::Span;
 
-use crate::expressions::{HirExpr, HirMatchBinding, HirMatchTest};
+use crate::expressions::{HirExpr, HirExprKind, HirMatchBinding, HirMatchTest, HirTensorAxis};
 use crate::types::HirType;
+
+/// The storage a lowered assignment writes into.
+///
+/// Mirrors [`ast_types::Place`]. Each form carries the type of the location itself,
+/// which is what a backend stores through; the base stays an [`HirExpr`] because
+/// reaching the location is an ordinary read of everything up to the last step.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HirPlace {
+    /// A binding: `x`.
+    Var { name: String, ty: HirType },
+    /// A struct field: `object.field`.
+    Field {
+        object: Box<HirExpr>,
+        field: String,
+        ty: HirType,
+    },
+    /// One element of an array, slice, `Vec`, or rank-1 tensor: `object[index]`.
+    Index {
+        object: Box<HirExpr>,
+        index: Box<HirExpr>,
+        ty: HirType,
+    },
+    /// One element of a tensor named by every axis: `object[i, j]`.
+    TensorIndex {
+        object: Box<HirExpr>,
+        axes: Vec<HirTensorAxis>,
+        ty: HirType,
+    },
+    /// The referent of a mutable reference: `*pointer`.
+    Deref { pointer: Box<HirExpr>, ty: HirType },
+}
+
+impl HirPlace {
+    /// The expression that reads the place. A backend that already lowers a read of
+    /// this shape reaches the same storage through it.
+    pub fn to_expr(&self, span: Span) -> HirExpr {
+        match self {
+            HirPlace::Var { name, ty } => {
+                HirExpr::new(HirExprKind::Variable(name.clone()), ty.clone(), span)
+            }
+            HirPlace::Field { object, field, ty } => HirExpr::new(
+                HirExprKind::FieldAccess {
+                    object: object.clone(),
+                    field: field.clone(),
+                },
+                ty.clone(),
+                span,
+            ),
+            HirPlace::Index { object, index, ty } => HirExpr::new(
+                HirExprKind::Index {
+                    object: object.clone(),
+                    index: index.clone(),
+                },
+                ty.clone(),
+                span,
+            ),
+            HirPlace::TensorIndex { object, axes, ty } => HirExpr::new(
+                HirExprKind::TensorIndex {
+                    object: object.clone(),
+                    axes: axes.clone(),
+                },
+                ty.clone(),
+                span,
+            ),
+            HirPlace::Deref { pointer, ty } => HirExpr::new(
+                HirExprKind::Deref {
+                    operand: pointer.clone(),
+                },
+                ty.clone(),
+                span,
+            ),
+        }
+    }
+
+    /// The type of the location, which is the type a stored value must have.
+    pub fn ty(&self) -> &HirType {
+        match self {
+            HirPlace::Var { ty, .. }
+            | HirPlace::Field { ty, .. }
+            | HirPlace::Index { ty, .. }
+            | HirPlace::TensorIndex { ty, .. }
+            | HirPlace::Deref { ty, .. } => ty,
+        }
+    }
+}
 
 /// A typed HIR statement.
 ///
@@ -20,23 +105,23 @@ pub enum HirStmt {
         mutable: bool,
         span: Span,
     },
-    Assignment {
-        target: String,
+    Assign {
+        place: HirPlace,
         value: HirExpr,
         span: Span,
     },
-    /// `target OP= value` on a tensor: an in-place element-wise update of the buffer
-    /// `target`'s DLPack handle already addresses.
+    /// `place OP= value` on a tensor: an in-place element-wise update of the buffer
+    /// the place's DLPack handle already addresses.
     ///
     /// Only the types that update in place reach this node; every other compound
-    /// assignment is desugared to [`HirStmt::Assignment`] over a binary expression
+    /// assignment is desugared to [`HirStmt::Assign`] over a binary expression
     /// during lowering, so a backend that ignores this variant loses tensors and
     /// nothing else. `ty` is the target's tensor type, carrying the element type and
     /// the extents the update loops over. `value` is either that same tensor type or a
     /// reference to it: an owned operand is consumed by the update, a borrowed one is
     /// only read.
     TensorCompoundAssign {
-        target: String,
+        place: HirPlace,
         op: BinaryOp,
         value: HirExpr,
         ty: HirType,
@@ -91,26 +176,6 @@ pub enum HirStmt {
     },
     Continue {
         label: Option<String>,
-        span: Span,
-    },
-    /// Struct field assignment `object.field = value`.
-    FieldAssignment {
-        object: String,
-        field: String,
-        value: HirExpr,
-        span: Span,
-    },
-    /// Assignment through a mutable reference `*pointer = value`.
-    DerefAssignment {
-        pointer: HirExpr,
-        value: HirExpr,
-        span: Span,
-    },
-    /// Array element assignment `target[index] = value`.
-    IndexAssignment {
-        target: String,
-        index: HirExpr,
-        value: HirExpr,
         span: Span,
     },
     /// `val PATTERN = scrutinee else |binding| { ... }`, fully resolved.

@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.47.0] - 2026-09-19
+
+### Added
+
+- Place expressions. The left of an assignment is now a place rather than a bare name:
+  a binding, a struct field at any depth, an element of an array, slice, `Vec` or nested
+  array, a field of an element, a tensor coordinate naming every axis, or the referent of
+  a `&mut`. Both `=` and the compound operators take all of them, so `self.x += dx`,
+  `arr[i] += 5`, `grid[r][c] = v`, `cells[i].load *= 2`, `layer.weights -= grad` and
+  `t[i, j] = v` are written as they read.
+- `Place` in `ast-types` and `HirPlace` in `neuro-hir`, replacing the five assignment
+  statement nodes each stage carried (`Assignment`, `CompoundAssignment`,
+  `FieldAssignment`, `IndexAssignment`, `DerefAssignment`) with one `Assign` node over a
+  resolved place.
+- A tensor compound assignment now takes a place, so a weight held in a struct field is
+  updated in its own buffer: `net.w -= g` allocates nothing and replaces no DLPack handle.
+- `examples/showcase/grid_update.nr`: a heat grid whose every mutation names its storage,
+  combining places with structs and `&mut self` methods, nested arrays, `Vec`, static
+  tensors, ranges and string interpolation.
+
+### Fixed
+
+- A compound assignment whose target was not a bare identifier was a parse error naming
+  the operator token. Fixed; the shapes now compile, and a target that genuinely is not a
+  place (a call result, a literal) reports what a place is instead.
+- A mutating method on a collection held in a place wrote to a copy and changed nothing:
+  `registry.open.push(1)` left the field empty. The receiver now resolves to the holder's
+  storage, for a struct field at any depth, a tuple element and an array element.
+
+### Changed
+
+- A tensor index that leaves an axis standing is rejected as an assignment target with a
+  diagnostic saying so, because a slice is a fresh tensor and not storage.
+- An array element assignment whose array is a temporary is now a compile error rather
+  than a write into a copy that is then discarded.
+
+### Known issues
+
+- A `match` arm that binds an enum payload disowns the whole scrutinee, because which
+  position left is a runtime fact. A variant the taken arm did not bind leaks rather than
+  being destroyed twice.
+- A tuple element is not yet an assignment target: `pair.0 = v` does not parse.
+- `&p.field` and `&arr[i]` are still rejected as borrow operands: see BUG-033.
+
 ## [2.46.1] - 2026-09-18
 
 ### Changed
@@ -124,7 +168,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `match` arm that binds an enum payload disowns the whole scrutinee, because which
   position left is a runtime fact. A variant the taken arm did not bind leaks rather than
   being destroyed twice.
-- `registry.open.push(1)` mutates a copy of the field rather than the field: see BUG-036.
 
 ## [2.44.0] - 2026-09-18
 

@@ -3,7 +3,7 @@
 //! the `VarDecl` + `While` + `Match` the desugar builds out of existing ones.
 
 use super::{function_body, lower};
-use neuro_hir::{HirBindingSource, HirExprKind, HirMatchTest, HirStmt, HirType};
+use neuro_hir::{HirBindingSource, HirExprKind, HirMatchTest, HirPlace, HirStmt, HirType};
 
 /// The protocol traits and a source iterator, declared exactly as the prelude declares
 /// them. The lowering slice sees no prelude, so each program brings its own.
@@ -249,7 +249,7 @@ fn an_enumerated_head_declares_and_advances_a_cursor() {
     };
     assert_eq!(bound, "i");
     assert!(
-        matches!(arm[1], HirStmt::Assignment { .. }),
+        matches!(arm[1], HirStmt::Assign { .. }),
         "the cursor advances before the user's statements, got {:?}",
         arm[1]
     );
@@ -339,8 +339,11 @@ fn char_indices_samples_the_iterator_cursor_before_each_step() {
         panic!("the desugar ends in a while, got {:?}", stmts.last());
     };
 
-    let HirStmt::Assignment { target, value, .. } = &body[0] else {
+    let HirStmt::Assign { place, value, .. } = &body[0] else {
         panic!("the cursor is sampled first, got {:?}", body[0]);
+    };
+    let HirPlace::Var { name: target, .. } = place else {
+        panic!("the cursor is a binding, got {place:?}");
     };
     assert!(target.starts_with("__iter_pos_"), "got {target}");
     let HirExprKind::FieldAccess { field, .. } = &value.kind else {
@@ -358,7 +361,7 @@ fn char_indices_samples_the_iterator_cursor_before_each_step() {
         panic!("the yielding arm is a block");
     };
     assert!(
-        !arm.iter().any(|s| matches!(s, HirStmt::Assignment { .. })),
+        !arm.iter().any(|s| matches!(s, HirStmt::Assign { .. })),
         "a byte cursor is advanced by `next`, not by the loop, got {arm:?}"
     );
 }

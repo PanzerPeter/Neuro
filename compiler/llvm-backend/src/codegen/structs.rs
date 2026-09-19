@@ -157,51 +157,32 @@ impl<'ctx> CodegenContext<'ctx> {
             })
     }
 
-    /// Store a value into a field of a named struct variable.
+    /// Store a value into a field of a struct place.
+    ///
+    /// `object` is the struct the field belongs to, already a place: a binding, or a
+    /// field of one. Reaching it by GEP rather than as a value is what makes the write
+    /// stick, since a loaded struct is a copy.
     pub(crate) fn codegen_field_assignment(
         &mut self,
-        object_name: &str,
+        object: &HirExpr,
         field_name: &str,
         value: &HirExpr,
     ) -> CodegenResult<()> {
-        let ptr = self
-            .variables
-            .get(object_name)
-            .copied()
-            .ok_or_else(|| CodegenError::UndefinedVariable(object_name.to_string()))?;
-
-        let struct_ty = self
-            .type_env
-            .get(object_name)
-            .ok_or_else(|| {
-                CodegenError::InternalError(format!("no type for variable '{}'", object_name))
-            })?
-            .clone();
-
-        let struct_name = match struct_ty {
-            Type::Struct(ref n) => n.clone(),
-            _ => {
-                return Err(CodegenError::UnsupportedType(format!(
-                    "'{}' is not a struct",
-                    object_name
-                )))
-            }
+        let Type::Struct(struct_name) = Type::from_hir(&object.ty).referent().clone() else {
+            return Err(CodegenError::UnsupportedType(format!(
+                "field '{}' is not reached through a struct",
+                field_name
+            )));
         };
 
+        let Some(ptr) = self.held_place_ptr(object)? else {
+            return Err(CodegenError::UnsupportedType(format!(
+                "the holder of field '{}' is not a place",
+                field_name
+            )));
+        };
         let llvm_struct_ty = self.get_struct_llvm_type(&struct_name)?;
-        let def = self.struct_defs.get(&struct_name).ok_or_else(|| {
-            CodegenError::UnsupportedType(format!("unknown struct '{}'", struct_name))
-        })?;
-
-        let idx = def
-            .iter()
-            .position(|(n, _)| n == field_name)
-            .ok_or_else(|| {
-                CodegenError::InternalError(format!(
-                    "struct '{}' has no field '{}'",
-                    struct_name, field_name
-                ))
-            })?;
+        let idx = self.struct_field_index(&struct_name, field_name)?;
 
         let field_ptr = self
             .builder
@@ -216,13 +197,133 @@ impl<'ctx> CodegenContext<'ctx> {
         let val = self.codegen_expr(value)?;
         // Ordered as a binding's reassignment is: the field may be read on the way to
         // replacing itself, so its prior value loses its owner only once the new one
-        // has been built.
-        self.drop_displaced_held_value(object_name, &[field_name.to_string()])?;
+        // has been built. Drop tracking is keyed by binding, so only a field of a named
+        // holder has a prior value it can find.
+        if let HirExprKind::Variable(object_name) = &object.kind {
+            let object_name = object_name.clone();
+            self.drop_displaced_held_value(&object_name, &[field_name.to_string()])?;
+        }
         self.builder
             .build_store(field_ptr, val)
             .map_err(|e| CodegenError::LlvmError(format!("failed to store field: {}", e)))?;
         self.mark_moved_for_drop(value);
         Ok(())
+    }
+
+    /// The storage address of a place expression, when it has one.
+    ///
+    /// A binding uses its alloca; a field of a struct that itself has storage is a GEP
+    /// into the parent. Anything else is a temporary, which has no storage a write
+    /// could reach, and the caller decides what to do about that.
+    pub(crate) fn held_place_ptr(
+        &mut self,
+        expr: &HirExpr,
+    ) -> CodegenResult<Option<PointerValue<'ctx>>> {
+        match &expr.kind {
+            HirExprKind::Variable(name) => {
+                let Some(ptr) = self.variables.get(name).copied() else {
+                    return Ok(None);
+                };
+                // A binding that reaches its value indirectly stores the value's
+                // address, not the value, so one load reaches the place it names. Two
+                // shapes do: a borrow of an aggregate, and the `self` of a `&mut self`
+                // method, whose type is the struct itself. A borrowed slice is neither
+                // — its slot holds the fat pointer by value — which is why the LLVM
+                // representation, not the semantic type alone, decides.
+                let ty = Type::from_hir(&expr.ty);
+                let indirect_shape = matches!(ty, Type::Reference { .. })
+                    || matches!(ty.referent(), Type::Struct(_));
+                let is_indirect = self
+                    .variable_types
+                    .get(name)
+                    .is_some_and(|ty| ty.is_pointer_type());
+                if indirect_shape && is_indirect {
+                    let loaded = self
+                        .builder
+                        .build_load(
+                            self.context.ptr_type(inkwell::AddressSpace::default()),
+                            ptr,
+                            "place.deref",
+                        )
+                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .into_pointer_value();
+                    return Ok(Some(loaded));
+                }
+                Ok(Some(ptr))
+            }
+
+            HirExprKind::FieldAccess { object, field } => {
+                let Type::Struct(parent_name) = Type::from_hir(&object.ty).referent().clone()
+                else {
+                    return Ok(None);
+                };
+                let Some(parent_ptr) = self.held_place_ptr(object)? else {
+                    return Ok(None);
+                };
+                let parent_llvm = self.get_struct_llvm_type(&parent_name)?;
+                let idx = self.struct_field_index(&parent_name, field)?;
+                let field_ptr = self
+                    .builder
+                    .build_struct_gep(
+                        parent_llvm,
+                        parent_ptr,
+                        idx as u32,
+                        &format!("{}.ptr", field),
+                    )
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                Ok(Some(field_ptr))
+            }
+
+            // An element of an array that itself has storage. Only the array is
+            // resolved here: a `Vec` slot lives behind a header and a slice slot behind
+            // a fat pointer, and neither is reached by this GEP.
+            HirExprKind::Index { object, index } => {
+                let obj_ty = Type::from_hir(&object.ty);
+                let Type::Array { element, size } = obj_ty.referent().clone() else {
+                    return Ok(None);
+                };
+                let base = if matches!(obj_ty, Type::Reference { .. }) {
+                    self.codegen_expr(object)?.into_pointer_value()
+                } else {
+                    match self.held_place_ptr(object)? {
+                        Some(ptr) => ptr,
+                        None => return Ok(None),
+                    }
+                };
+                let elem_llvm = self.get_any_llvm_type(&element)?;
+                let slot =
+                    self.array_element_ptr(base, elem_llvm, size, index, index.span.start)?;
+                Ok(Some(slot))
+            }
+
+            // A tuple element, reached the same way a struct field is: a tuple lowers
+            // to an anonymous LLVM struct, so the position IS the field index.
+            HirExprKind::TupleIndex { object, index } => {
+                let Some(base) = self.held_place_ptr(object)? else {
+                    return Ok(None);
+                };
+                let tuple_llvm = self.get_any_llvm_type(&Type::from_hir(object.ty.referent()))?;
+                if !tuple_llvm.is_struct_type() {
+                    return Ok(None);
+                }
+                let slot = self
+                    .builder
+                    .build_struct_gep(
+                        tuple_llvm.into_struct_type(),
+                        base,
+                        *index as u32,
+                        "tup.ptr",
+                    )
+                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                Ok(Some(slot))
+            }
+
+            HirExprKind::Deref { operand } => {
+                Ok(Some(self.codegen_expr(operand)?.into_pointer_value()))
+            }
+
+            _ => Ok(None),
+        }
     }
 
     /// Get the alloca pointer and LLVM struct type for a struct object expression.

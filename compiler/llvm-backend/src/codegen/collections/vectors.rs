@@ -143,20 +143,16 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(e.to_string()))
     }
 
-    /// `v[i] = x`, a bounds-checked element store into an owned `Vec` binding.
+    /// `v[i] = x`, a bounds-checked element store into a `Vec` place.
     pub(crate) fn codegen_vec_index_assignment(
         &mut self,
-        target: &str,
+        object: &HirExpr,
         target_ty: &Type,
         index: &HirExpr,
         value: &HirExpr,
     ) -> CodegenResult<()> {
         let element_ty = collection_arg(collection_args(target_ty)?, 0)?;
-        let header = self
-            .variables
-            .get(target)
-            .copied()
-            .ok_or_else(|| CodegenError::UndefinedVariable(target.to_string()))?;
+        let header = self.collection_place_ptr(object, target_ty)?;
         let slot = self.checked_vec_slot(header, &element_ty, index, index.span.start)?;
         let elem_llvm = self.collection_value_type(&element_ty)?;
         let val = self.codegen_expr(value)?;
@@ -164,6 +160,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder
             .build_store(slot, val)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.mark_moved_for_drop(value);
         Ok(())
     }
 

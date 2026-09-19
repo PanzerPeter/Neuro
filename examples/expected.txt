@@ -147,6 +147,7 @@ showcase/displaced_owners.nr         8
 showcase/enum_records.nr             46
 showcase/field_report.nr             63
 showcase/generic_toolkit.nr          87
+showcase/grid_update.nr              50
 showcase/held_destruction.nr         5
 showcase/inventory_ledger.nr         181
 showcase/job_queue.nr                139

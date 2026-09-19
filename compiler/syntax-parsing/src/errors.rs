@@ -81,6 +81,11 @@ pub enum ParseError {
     #[error("`Tensor` takes exactly two arguments: an element type and a `[...]` shape, as in `Tensor<f32, [3, 3]>`")]
     TensorTypeArity { span: Span },
 
+    #[error(
+        "the left of `{op}` must be a place: a variable, a field, an element, or `*reference`"
+    )]
+    NotAPlace { op: String, span: Span },
+
     #[error("lexical error: {0}")]
     LexError(#[from] LexError),
 }

@@ -17,5 +17,5 @@ pub use items::{
     ModuleId, NewtypeDef, ParamLabel, Parameter, SelfParam, StructDef, TraitBound, TraitDef,
     TraitMethod, VariantPayload, PRELUDE_MODULE,
 };
-pub use statements::{LoopAdapter, LoopAdapterKind, Stmt};
+pub use statements::{LoopAdapter, LoopAdapterKind, Place, Stmt};
 pub use types::{ArraySize, GenericArg, TensorDim, TensorExtent, Type};

@@ -341,7 +341,7 @@ val x: i32 = 10
 
 ## Compound Assignment Operators
 
-Shorthand for updating a mutable variable. For every type except a tensor each form is
+Shorthand for updating a place. For every type except a tensor each form is
 equivalent to a plain assignment with the corresponding binary operator on the right-hand
 side; a tensor updates its buffer in place instead (see below).
 
@@ -371,9 +371,48 @@ while i <= 10 {
 }
 ```
 
-**Requirement**: Left-hand side must be a `mut` variable
+**Requirement**: Left-hand side must be a writable place (see below)
 **Type checking**: Same rules as the underlying binary operator apply
-**Note**: Compound assignment on struct fields (`point.x += 1.0`) is not yet supported
+
+### Places: what may sit on the left
+
+Plain and compound assignment take the same left-hand side, a **place**: the storage a
+value is written into, rather than a value. A place is rooted at a binding and reached
+through any number of projections.
+
+| Form | Example |
+|------|---------|
+| A binding | `x = 1` |
+| A struct field, at any depth | `p.x += 1`, `self.inner.count = 0` |
+| An array, slice, or `Vec` element | `arr[i] -= 5`, `xs[0] = 9` |
+| An element of a nested array | `grid[row][column] += 1` |
+| A field of an element | `cells[i].load *= 2` |
+| A tensor coordinate | `t[row, column] = v` |
+| The referent of a mutable reference | `*r += 1` |
+
+```neuro
+struct Point { x: i32, y: i32 }
+
+impl Point {
+    func translate(&mut self, dx: i32, dy: i32) {
+        self.x += dx
+        self.y += dy
+    }
+}
+```
+
+The rules:
+
+- The binding the place is rooted at must be `mut`, except where the place is reached
+  through a `&mut` borrow, which carries the permission itself: `xs: &mut [T]` is an
+  immutable binding you may write elements through, and a `&[T]` binding declared `mut`
+  is one you may not.
+- Anything that is not one of the forms above is not a place. A call result, a literal,
+  or an operator result is a value with no storage, and assigning to one is a parse
+  error naming what a place is.
+- A tensor index that leaves an axis standing (`t[0, ..]`) produces a *fresh* tensor
+  rather than naming storage, so it cannot be assigned to. Name every axis.
+- A tuple element (`pair.0 = v`) is not yet a place.
 
 ### On tensors: in place, no reallocation
 
@@ -397,7 +436,7 @@ statement.
 
 The rules:
 
-- The target must be a `mut` tensor binding.
+- The target must be a writable tensor place: a `mut` binding, or a field of one.
 - The operand is a tensor of the **same** element type, either owned or borrowed.
   `w += g` consumes `g`; `w += &g` reads it, so one gradient can serve every iteration of
   a loop. Shapes broadcast exactly as they do for the by-value operators, with one

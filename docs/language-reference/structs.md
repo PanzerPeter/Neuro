@@ -84,12 +84,14 @@ val py = p.y   // 4.0
 
 ## Field Mutation
 
-Fields on a `mut` binding can be reassigned:
+Fields on a `mut` binding can be reassigned, at any depth, with or without a compound
+operator. A field is a [place](operators.md#places-what-may-sit-on-the-left), the same as
+a binding is:
 
 ```neuro
 mut cursor = Point { x: 0.0, y: 0.0 }
 cursor.x = 5.0
-cursor.y = 3.0
+cursor.y += 3.0
 ```
 
 Mutating a field of a `val` binding is a compile error:

@@ -7,7 +7,8 @@ Provide the typed High-Level IR node definitions: the stable, backend-agnostic c
 - Type: Library (no entry function: pure data)
 - Public types: `HirProgram`, `HirItem`, `HirFunction`, `HirParam`, `HirStruct`, `HirField`,
   `HirEnum`, `HirEnumVariant`, `HirEnumField`, `HirImpl`, `HirMethod`, `HirSelfParam`, `HirConst`,
-  `HirTrait`, `HirClosure`, `HirCapture`, `HirStmt`, `HirExpr`, `HirExprKind`, `HirFieldInit`,
+  `HirTrait`, `HirClosure`, `HirCapture`, `HirStmt`, `HirPlace`, `HirExpr`, `HirExprKind`,
+  `HirFieldInit`,
   `HirType`, `HirCollectionKind`, `HirReduceOp`
 
 ## Shared Kernel
@@ -69,12 +70,20 @@ it the *typed* contract:
    for `Indices`, and the `Tuple` of both at a `k`-long selected axis for `TopK`. It READS the
    receiver like the reduction does: the result is freshly allocated. The three are one node
    because they compute the same per-axis ordering and differ only in what they write.
-   `HirStmt::TensorCompoundAssign { target, op, value, ty, span }` is the in-place update
+   `HirStmt::TensorCompoundAssign { place, op, value, ty, span }` is the in-place update
    beside them: `ty` is the target's tensor type and `value` is either that same type or a
    reference to it, an owned operand being consumed by the update and a borrowed one only
-   read. Every other compound assignment is desugared to `HirStmt::Assignment` over a binary
+   read. Every other compound assignment is desugared to `HirStmt::Assign` over a binary
    expression during lowering, so a backend that ignores this variant loses tensors and
    nothing else.
+**One assignment statement, over a place.** `HirStmt::Assign { place, value, span }` is the only
+store, and `HirPlace` mirrors `ast_types::Place`: a binding, a struct field, an element, a tensor
+coordinate, or a referent. Each variant carries the type of the LOCATION, which is the type a
+stored value must have, and the base of each projecting form is an `HirExpr` rather than a nested
+`HirPlace`, for the reason `ast-types/CONTEXT.md` records. `HirPlace::to_expr(span)` rebuilds the
+read expression, which is how a backend that already lowers a read of that shape reaches the same
+storage without a second resolver.
+
 2. **Syntactic noise is normalized away.** The AST's `Expr::Paren` is dropped (tree structure
    already encodes grouping) and identifiers are resolved to their `String` name, with the source
    span on the enclosing node.

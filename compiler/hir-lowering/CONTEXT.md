@@ -255,11 +255,22 @@ type-parameter substitution already is, so annotations resolve through the one p
 declaration has no implementor, so `resolve_trait_sig_type` gives such a position `Void` in the
 `traits` table; nothing reads it, because a trait declaring an associated type is not object-safe.
 
+### Places
+`lower_place` resolves `ast_types::Place` to `HirPlace`, giving each form the type of the
+LOCATION: a binding's own type, a struct field's declared type, the element an indexable yields,
+a tensor's element type, or a reference's referent. The base of each projecting form is lowered
+as an ordinary expression, because reaching a location is a read of everything up to its last
+step. A one-argument index over a tensor receiver becomes `HirPlace::TensorIndex` with a single
+position axis, mirroring what `lower_tensor_index` does for the read.
+
+A place the checker accepted but this cannot resolve is `LoweringError::Malformed`: it is a
+compiler bug, not a diagnostic.
+
 ### Per-construct lowering notes
 - **Slices**: `.slice(range)` is routed to `lower_sequence_slice` *ahead of* the collection
   method surface, because a `Vec` receiver's `.slice` borrows its buffer rather than acting on the
   header; `sliceable_element` names the three receivers that permit it (`[T; N]`, `Vec<T>`,
-  `[T]`). Indexing, `for x in xs`, and `IndexAssignment` each read a slice's element type
+  `[T]`). Indexing, `for x in xs`, and an index place each read a slice's element type
   alongside the array's, and `slice.len()` is `u64`.
 - **Tensors**: `resolve_type` maps `ast_types::Type::Tensor` to
   `HirType::Tensor { element, shape, names }`, resolving each extent through `resolve_tensor_dim`
@@ -285,11 +296,11 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   takes the referent's tensor type (so a `&Tensor` receiver yields an owned tensor), and
   `.to(device)` lowers its one argument at `HirType::Enum("Device")` and yields the receiver's
   own type. `.to` is matched on `recv` rather than the referent, so a borrow does not resolve:
-  the same verdict the type checker reaches. `Stmt::CompoundAssignment` is the one statement
-  whose lowering is type-directed: a tensor target becomes `HirStmt::TensorCompoundAssign`
-  carrying the target's tensor type, and every other target has its `x = x OP rhs` desugar
-  re-formed as an `Expr::Binary` and lowered through `lower_expr`, which is what keeps a user
-  operator-trait impl reachable through `+=`. A by-value tensor operator stays an ordinary
+  the same verdict the type checker reaches. A compound `Stmt::Assign` is the one statement
+  whose lowering is type-directed: a tensor place becomes `HirStmt::TensorCompoundAssign`
+  carrying the place's tensor type, and every other place has its `place = place OP rhs` desugar
+  re-formed as an `Expr::Binary` over `Place::to_expr()` and lowered through `lower_expr`, which
+  is what keeps a user operator-trait impl reachable through `+=`. A by-value tensor operator stays an ordinary
   `HirExprKind::Binary`; `binary_result_type` (`expressions/coercion.rs`) re-derives the
   broadcast join over `Vec<Option<usize>>` and `AxisNames` so the node carries the fresh
   result's shape, which is what tells the backend how big a buffer to allocate. A pair that
@@ -371,7 +382,7 @@ declaration has no implementor, so `resolve_trait_sig_type` gives such a positio
   ordinary generic-enum path so backends see a real `HirItem::Enum`. `resolve_type` maps the
   `Vec` / `HashMap` / `BTreeMap` generic application to `HirType::Collection` rather than
   monomorphizing a nominal instance (a user-declared type of that name still shadows it), and
-  indexing, index assignment, and `for`-in resolve a `Vec` element alongside an array's.
+  indexing, an index place, and `for`-in resolve a `Vec` element alongside an array's.
 - **`String`**: `collection_kind` recognizes the name and the `nullary_collection` helper lets
   `resolve_type` accept it as a complete type, checked **after** the struct/enum/newtype arms so a
   user declaration shadows it. `lower_collection_new` builds a nullary kind's type itself instead

@@ -68,7 +68,7 @@ both of which are already desugared to a `match` in HIR.
 ### Statements
 
 - Bindings (`val`, `mut`), `alloca` in the **entry block**, never inside a loop
-- Assignment, field / index / dereference assignment
+- Assignment to a place: a binding, a field, an element, a tensor coordinate, or a referent
 - `return`, explicit and as a block's trailing expression
 - `if` / `else`, basic blocks with a merge block; a branch that returns contributes no
   edge to the merge

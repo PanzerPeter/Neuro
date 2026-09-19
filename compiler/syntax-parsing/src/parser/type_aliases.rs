@@ -14,7 +14,7 @@ use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
 use crate::errors::{ParseError, ParseResult};
-use ast_types::{Expr, InterpPart, Item, Stmt, TensorIndexArg, Type};
+use ast_types::{Expr, InterpPart, Item, Place, Stmt, TensorIndexArg, Type};
 
 use super::Parser;
 
@@ -276,8 +276,9 @@ fn rewrite_stmt(stmt: &mut Stmt, resolved: &HashMap<String, Type>) {
                 rewrite_expr(init, resolved);
             }
         }
-        Stmt::Assignment { value, .. } | Stmt::CompoundAssignment { value, .. } => {
-            rewrite_expr(value, resolved)
+        Stmt::Assign { place, value, .. } => {
+            rewrite_place(place, resolved);
+            rewrite_expr(value, resolved);
         }
         Stmt::Return { value, .. } => {
             if let Some(value) = value {
@@ -317,15 +318,6 @@ fn rewrite_stmt(stmt: &mut Stmt, resolved: &HashMap<String, Type>) {
         Stmt::ForEach { iterable, body, .. } => {
             rewrite_expr(iterable, resolved);
             rewrite_block(body, resolved);
-        }
-        Stmt::IndexAssignment { index, value, .. } => {
-            rewrite_expr(index, resolved);
-            rewrite_expr(value, resolved);
-        }
-        Stmt::FieldAssignment { value, .. } => rewrite_expr(value, resolved),
-        Stmt::DerefAssignment { pointer, value, .. } => {
-            rewrite_expr(pointer, resolved);
-            rewrite_expr(value, resolved);
         }
         Stmt::ValElse {
             value, else_block, ..
@@ -467,6 +459,30 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
             rewrite_expr(body, resolved);
         }
         Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } => {}
+    }
+}
+
+/// Rewrite the aliased types inside the expressions an assignment place reaches
+/// through.
+fn rewrite_place(place: &mut Place, resolved: &HashMap<String, Type>) {
+    match place {
+        Place::Var(_) => {}
+        Place::Field { object, .. }
+        | Place::Deref {
+            pointer: object, ..
+        } => rewrite_expr(object, resolved),
+        Place::Index { object, index, .. } => {
+            rewrite_expr(object, resolved);
+            rewrite_expr(index, resolved);
+        }
+        Place::TensorIndex {
+            object, indices, ..
+        } => {
+            rewrite_expr(object, resolved);
+            for index in indices {
+                rewrite_index_arg(index, resolved);
+            }
+        }
     }
 }
 

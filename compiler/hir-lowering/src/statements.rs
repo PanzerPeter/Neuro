@@ -1,7 +1,7 @@
 //! Statement lowering.
 
-use ast_types::{Expr, Stmt};
-use neuro_hir::{HirStmt, HirType};
+use ast_types::{Expr, Place, Stmt};
+use neuro_hir::{HirPlace, HirStmt, HirType};
 
 use crate::iteration::{char_indices_receiver, LoopPosition};
 use crate::{LoopCtx, Lowerer, LoweringError};
@@ -54,58 +54,58 @@ impl Lowerer {
                 })
             }
 
-            Stmt::Assignment {
-                target,
-                value,
-                span,
-            } => {
-                let expected = self.lookup(&target.name);
-                let value = self.lower_expr(value, expected.as_ref())?;
-                Ok(HirStmt::Assignment {
-                    target: target.name.clone(),
-                    value,
-                    span: *span,
-                })
-            }
-
-            Stmt::CompoundAssignment {
-                target,
+            Stmt::Assign {
+                place,
                 op,
                 value,
                 span,
             } => {
-                // The type-directed half of the operator-trait dispatch rule. A tensor updates the
-                // buffer it already owns; every other target takes the desugaring, which
-                // is re-formed as an AST node here rather than as HIR so that a user
-                // type's operator-trait impl is still found by the ordinary binary-
-                // expression lowering.
-                let target_ty = self.lookup(&target.name);
-                if let Some(ty @ HirType::Tensor { .. }) = target_ty {
-                    // The right-hand side is typed by the ELEMENT, not by the target:
-                    // `w *= 2.0` is the scalar broadcast, and a tensor operand ignores
-                    // the expectation anyway.
-                    let element = crate::expressions::coercion::tensor_element(&ty).cloned();
-                    let value = self.lower_expr(value, element.as_ref())?;
-                    return Ok(HirStmt::TensorCompoundAssign {
-                        target: target.name.clone(),
-                        op: *op,
-                        value,
-                        ty,
-                        span: *span,
-                    });
+                let lowered = self.lower_place(place)?;
+                let place_ty = lowered.ty().clone();
+                match op {
+                    // The type-directed half of the operator-trait dispatch rule. A
+                    // tensor updates the buffer it already owns; every other place takes
+                    // the desugaring, which is re-formed as an AST node here rather than
+                    // as HIR so that a user type's operator-trait impl is still found by
+                    // the ordinary binary-expression lowering.
+                    Some(op) if matches!(place_ty, HirType::Tensor { .. }) => {
+                        // The right-hand side is typed by the ELEMENT, not by the target:
+                        // `w *= 2.0` is the scalar broadcast, and a tensor operand ignores
+                        // the expectation anyway.
+                        let element =
+                            crate::expressions::coercion::tensor_element(&place_ty).cloned();
+                        let value = self.lower_expr(value, element.as_ref())?;
+                        Ok(HirStmt::TensorCompoundAssign {
+                            place: lowered,
+                            op: *op,
+                            value,
+                            ty: place_ty,
+                            span: *span,
+                        })
+                    }
+                    Some(op) => {
+                        let desugared = Expr::Binary {
+                            left: Box::new(place.to_expr()),
+                            op: *op,
+                            right: Box::new(value.clone()),
+                            span: *span,
+                        };
+                        let value = self.lower_expr(&desugared, Some(&place_ty))?;
+                        Ok(HirStmt::Assign {
+                            place: lowered,
+                            value,
+                            span: *span,
+                        })
+                    }
+                    None => {
+                        let value = self.lower_expr(value, Some(&place_ty))?;
+                        Ok(HirStmt::Assign {
+                            place: lowered,
+                            value,
+                            span: *span,
+                        })
+                    }
                 }
-                let desugared = Expr::Binary {
-                    left: Box::new(Expr::Identifier(target.clone())),
-                    op: *op,
-                    right: Box::new(value.clone()),
-                    span: *span,
-                };
-                let value = self.lower_expr(&desugared, target_ty.as_ref())?;
-                Ok(HirStmt::Assignment {
-                    target: target.name.clone(),
-                    value,
-                    span: *span,
-                })
             }
 
             Stmt::Return { value, span } => {
@@ -303,69 +303,6 @@ impl Lowerer {
                 span: *span,
             }),
 
-            Stmt::FieldAssignment {
-                object,
-                field,
-                value,
-                span,
-            } => {
-                let field_ty = self.struct_field_type_of_binding(&object.name, &field.name);
-                let value = self.lower_expr(value, field_ty.as_ref())?;
-                Ok(HirStmt::FieldAssignment {
-                    object: object.name.clone(),
-                    field: field.name.clone(),
-                    value,
-                    span: *span,
-                })
-            }
-
-            Stmt::DerefAssignment {
-                pointer,
-                value,
-                span,
-            } => {
-                let pointer = self.lower_expr(pointer, None)?;
-                let inner = match &pointer.ty {
-                    HirType::Reference { inner, .. } => Some((**inner).clone()),
-                    _ => None,
-                };
-                let value = self.lower_expr(value, inner.as_ref())?;
-                Ok(HirStmt::DerefAssignment {
-                    pointer,
-                    value,
-                    span: *span,
-                })
-            }
-
-            Stmt::IndexAssignment {
-                target,
-                index,
-                value,
-                span,
-            } => {
-                let element_ty = match self.lookup(&target.name) {
-                    Some(HirType::Array { element, .. }) => Some(*element),
-                    // A `&mut [T]` target writes through the borrow into the buffer the
-                    // slice points at, so the value is typed by the slice's element.
-                    Some(HirType::Reference { inner, .. }) => match *inner {
-                        HirType::Slice(element) => Some(*element),
-                        _ => None,
-                    },
-                    Some(ref collection @ HirType::Collection { .. }) => {
-                        Self::collection_element(collection)
-                    }
-                    _ => None,
-                };
-                let index = self.lower_expr(index, None)?;
-                let value = self.lower_expr(value, element_ty.as_ref())?;
-                Ok(HirStmt::IndexAssignment {
-                    target: target.name.clone(),
-                    index,
-                    value,
-                    span: *span,
-                })
-            }
-
             Stmt::ValElse {
                 pattern,
                 value,
@@ -490,15 +427,117 @@ impl Lowerer {
         }
     }
 
-    /// The declared type of `field` on the struct bound to `binding`, if resolvable.
-    fn struct_field_type_of_binding(&self, binding: &str, field: &str) -> Option<HirType> {
-        let HirType::Struct(name) = self.lookup(binding)? else {
-            return None;
-        };
-        self.structs
-            .get(&name)?
-            .iter()
-            .find(|(n, _)| n == field)
-            .map(|(_, t)| t.clone())
+    /// Lower an assignment place, resolving the type of the location itself.
+    fn lower_place(&mut self, place: &Place) -> Result<HirPlace, LoweringError> {
+        match place {
+            Place::Var(ident) => {
+                let ty = self
+                    .lookup(&ident.name)
+                    .ok_or_else(|| LoweringError::Malformed {
+                        detail: format!("assignment to unbound name '{}'", ident.name),
+                    })?;
+                Ok(HirPlace::Var {
+                    name: ident.name.clone(),
+                    ty,
+                })
+            }
+
+            Place::Field { object, field, .. } => {
+                let object = self.lower_expr(object, None)?;
+                let HirType::Struct(struct_name) = object.ty.referent().clone() else {
+                    return Err(LoweringError::Malformed {
+                        detail: format!("field assignment into non-struct '{}'", object.ty),
+                    });
+                };
+                let ty = self.struct_field_type(&struct_name, &field.name)?;
+                Ok(HirPlace::Field {
+                    object: Box::new(object),
+                    field: field.name.clone(),
+                    ty,
+                })
+            }
+
+            Place::Index { object, index, .. } => {
+                let object = self.lower_expr(object, None)?;
+                // A rank-1 tensor is indexed with one argument, which parses as the
+                // ordinary index form; the axis rules are the tensor's either way.
+                if let HirType::Tensor { element, .. } = object.ty.referent() {
+                    let ty = (**element).clone();
+                    let axes = vec![neuro_hir::HirTensorAxis::Position(
+                        self.lower_expr(index, None)?,
+                    )];
+                    return Ok(HirPlace::TensorIndex {
+                        object: Box::new(object),
+                        axes,
+                        ty,
+                    });
+                }
+                let ty =
+                    Self::indexed_element(&object.ty).ok_or_else(|| LoweringError::Malformed {
+                        detail: format!("index assignment into non-indexable '{}'", object.ty),
+                    })?;
+                let index = self.lower_expr(index, None)?;
+                Ok(HirPlace::Index {
+                    object: Box::new(object),
+                    index: Box::new(index),
+                    ty,
+                })
+            }
+
+            Place::TensorIndex {
+                object, indices, ..
+            } => {
+                let object = self.lower_expr(object, None)?;
+                let HirType::Tensor { element, shape, .. } = object.ty.referent() else {
+                    return Err(LoweringError::Malformed {
+                        detail: format!("tensor index assignment into '{}'", object.ty),
+                    });
+                };
+                let ty = (**element).clone();
+                let extents = crate::static_extents(shape)?;
+                if indices.len() != extents.len() {
+                    return Err(LoweringError::Malformed {
+                        detail: format!(
+                            "tensor index names {} axes for a rank-{} tensor",
+                            indices.len(),
+                            extents.len()
+                        ),
+                    });
+                }
+                let mut axes = Vec::with_capacity(indices.len());
+                for (index, extent) in indices.iter().zip(extents.iter()) {
+                    axes.push(self.lower_tensor_axis(index, *extent)?);
+                }
+                Ok(HirPlace::TensorIndex {
+                    object: Box::new(object),
+                    axes,
+                    ty,
+                })
+            }
+
+            Place::Deref { pointer, .. } => {
+                let pointer = self.lower_expr(pointer, None)?;
+                let HirType::Reference { inner, .. } = &pointer.ty else {
+                    return Err(LoweringError::Malformed {
+                        detail: format!("assignment through non-reference '{}'", pointer.ty),
+                    });
+                };
+                let ty = (**inner).clone();
+                Ok(HirPlace::Deref {
+                    pointer: Box::new(pointer),
+                    ty,
+                })
+            }
+        }
+    }
+
+    /// The element type an indexable place yields. A `&mut [T]` place writes through
+    /// the borrow into the buffer the slice points at, so it is typed by the element.
+    fn indexed_element(ty: &HirType) -> Option<HirType> {
+        match ty.referent() {
+            HirType::Array { element, .. } | HirType::Slice(element) => Some((**element).clone()),
+            collection @ HirType::Collection { .. } => Self::collection_element(collection),
+            _ => None,
+        }
     }
 }

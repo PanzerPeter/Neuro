@@ -370,6 +370,34 @@ how a borrowed weight is inspected.
 Range indexing is a tensor form. An array or a `Vec` takes one integer index and offers
 `.slice(a..b)` for a sub-range; writing `xs[0..2]` on one reports that.
 
+### Writing one element
+
+An index that names every axis with a position is a **place**, so it may be assigned to:
+
+```neuro
+mut t: Tensor<i32, [3, 4]> = [
+    [0, 0, 0, 0],
+    [0, 0, 0, 0],
+    [0, 0, 0, 0]
+]
+
+for row in 0..3 {
+    for column in 0..4 {
+        t[row, column] = row * 4 + column
+    }
+}
+
+t[1, 1] += 100
+```
+
+The write goes into the buffer the tensor's DLPack handle already addresses: no handle is
+replaced and nothing is allocated, exactly as for the in-place compound operators above.
+The same bounds guard a read carries applies to the write.
+
+An index that leaves an axis standing produces a fresh tensor rather than naming storage,
+so `t[0, ..] = 5` is a compile error. Name every axis. The target must be a writable
+place: a `mut` tensor binding, or a tensor reached through one, such as a struct field.
+
 ## Shape generics
 
 A tensor extent may be a **generic parameter** rather than a literal, so one function
@@ -710,10 +738,11 @@ in-place compound assignment. Build such a tensor at a static shape and pass it 
 
 A tensor can be built, bound, moved, cloned, passed, returned, transferred with
 `.to(device)`, combined element-wise with `+` / `-` / `*` / `/` / `%` and their broadcast
-rules, multiplied as a matrix with `@`, updated in place, stored in a struct, indexed, sliced, reshaped with
+rules, multiplied as a matrix with `@`, updated in place, stored in a struct, indexed, written
+through an index (`t[i, j] = v`), sliced, reshaped with
 `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`, and reduced with
 `.sum()` / `.mean()` / `.max()` / `.min()`. What is still
-later work is writing through an index (`t[i, j] = v`), the functional
+later work is the functional
 `.reduce(init, |acc, x| ...)`, and the step index form
 (`t[(0..n).step(2)]`), which waits on `.step(n)` existing on ranges at all. The reverse
 form `t[(0..n).rev()]` is implemented. A dynamic `?` axis is accepted, but only as a widening: nothing that needs

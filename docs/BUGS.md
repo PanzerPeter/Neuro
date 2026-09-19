@@ -46,50 +46,6 @@ rather than the innermost failing one.
 **Fix sketch**: report the moved-value error at the outermost place only, or record the
 `(binding, span)` pair already reported and suppress a repeat for the same use.
 
-## BUG-036 — a mutating method on a collection held in a field writes to a copy
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend` (codegen); `collection_place_ptr` in `codegen/collections/mod.rs`
-- **Severity**: major — a silent wrong answer. The call compiles, runs, and changes nothing.
-
-A method call on a collection reaches its receiver through `collection_place_ptr`, which has a
-fast path for a bare binding (`v.push(1)` gets `v`'s own stack slot) and falls back to copying
-the receiver's value into a temporary for everything else. A field, a tuple element, and an array
-element all take the fallback, so the header the mutation updates belongs to the copy and the
-holder's collection is untouched.
-
-**Minimal repro**
-
-```neuro
-struct Registry { open: Vec<i32> }
-
-func main() -> i32 {
-    mut registry = Registry { open: Vec::new() }
-    registry.open.push(1)
-    registry.open.push(2)
-    return registry.open.len() as i32
-}
-```
-
-Expected: `2`. Observed: `0`, with no diagnostic. A read through the same path is correct
-(`registry.open.len()` reads the copy, which carries the right header), so only mutation is
-affected, which is what makes it quiet.
-
-**Root cause**: confirmed in the code. The fallback exists because a collection-valued
-*expression* (`m.keys()`) genuinely has no place to point at, and a place expression rooted at a
-binding was folded into the same branch rather than resolved to an address.
-
-**Workaround**: build the collection in a local binding and move it into the field once
-(`mut open: Vec<i32> = Vec::new(); open.push(1); Registry { open: open }`). There is no
-workaround that mutates the field in place.
-
-**Fix sketch**: resolve a place-expression receiver to its address instead of its value —
-identifier, field access, constant index — which is the same place resolution
-`codegen_field_assignment` already does one level deep, generalized to a path. That is the work
-the place-expression roadmap item has to do anyway, so the fix belongs with it rather than as a
-second resolver. Regression tests want the repro above, the same shape through a tuple element
-and an array element, and a read after the mutation to pin that both halves see one buffer.
-
 ## BUG-035 — a borrow reaching a binding through a call return is not tracked
 
 - **Status**: open, confirmed
@@ -202,8 +158,8 @@ which must still reach the function.
 ## BUG-033 — `&` does not accept a field or an element, only a bare variable
 
 - **Status**: open, confirmed
-- **Area**: `semantic-analysis` (borrow checking); the same missing place-expression
-  machinery BUG-025 describes for assignment targets, on the rvalue side
+- **Area**: `semantic-analysis` (borrow checking); the rvalue side of the place-expression
+  machinery the assignment target already resolves
 - **Severity**: major. It is what a layer type is written with, and the only escape
   copies the buffer that move-by-default exists to avoid copying.
 
@@ -255,17 +211,18 @@ reaches it.
 and produce the right answer. It allocates a second buffer of the same shape on every
 call, so it is a workaround for correctness and not for a training loop.
 
-**Why this is filed rather than left to the sub-phase that covers it**: the value model
-sub-phase carries "place expressions" as an item, written against assignment targets
-(`t[i, j] = v`, `self.x += dx`), which is BUG-025's half. The rvalue borrow is not named
-there and is the half a layer type needs first. Whoever takes the place expression on
-should take both; this entry is here so the second half is not lost.
+**Why this is still open**: the value-model sub-phase's "place expressions" item shipped
+the ASSIGNMENT half, so `t[i, j] = v` and `self.x += dx` now compile and `ast_types::Place`
+names the storage they write to. The rvalue borrow was not part of that item and is the
+half a layer type needs first.
 
-**Fix sketch**: give the borrow check the same notion of a place that plain assignment
-already resolves — identifier, field access, index — and carry the resolved place through
-to codegen, which must produce the address of the field or element rather than of a named
-slot. Worth confirming against BUG-025 before starting: the two share the representation
-and are cheaper together than apart.
+**Fix sketch**: give the borrow check the same notion of a place the assignment target
+already resolves (`TypeChecker::resolve_place`), and reach the address in codegen through
+`CodegenContext::held_place_ptr`, which already resolves a binding, a field at any depth,
+an array element and a tuple element to storage. Both halves of the machinery now exist;
+what is missing is the borrow check accepting a sub-place as the operand of `&` and
+`&mut`, and the exclusivity bookkeeping for a borrow of part of a binding rather than the
+whole of it.
 
 ## BUG-031 — `.step(n)` on a range is specified but has no implementation and no checkbox
 
@@ -486,67 +443,6 @@ released when the block ends. And the borrow and move checkers key on the name, 
 binding that is then shadowed must not report a use-after-move against the new one. A
 regression test needs all three: the type change above, a shadowed `Vec` (both buffers
 freed, exactly once), and a shadow of a moved binding.
-
-## BUG-025 — compound assignment only accepts a plain variable as its target
-
-- **Status**: open, confirmed
-- **Area**: `syntax-parsing` (statement parser)
-- **Severity**: major — a construct the language reference uses in its own canonical
-  example does not parse
-
-`x += 1` parses only when `x` is a bare identifier. A field, an element, or anything else
-assignable is a parse error, even though plain assignment accepts all of them.
-
-**Minimal repro**
-
-```neuro
-struct Point { x: i32, y: i32 }
-
-impl Point {
-    func translate(&mut self, dx: i32, dy: i32) {
-        self.x += dx
-        self.y += dy
-    }
-}
-
-func main() -> i32 {
-    mut q = Point { x: 3, y: 4 }
-    q.translate(1, 2)
-    return q.x * 10 + q.y
-}
-```
-
-Expected: compiles and returns 46. Observed:
-
-```
-failed to parse module: unexpected token PlusEqual, expected expression
-```
-
-The same error covers `arr[i] += 5` and, on the tensor side, `layer.weights -= grad`. Plain
-assignment to either place (`self.x = ...`, `arr[i] = ...`) parses and runs correctly, so the
-gap is specific to the compound forms. The message is also unhelpful: it names the operator
-token rather than saying that a compound assignment needs a variable on the left.
-
-**Root cause**: not yet confirmed in the code. The statement parser commits to a compound
-assignment only after reading a bare identifier, so a target that begins as a field or index
-expression falls through to the expression parser, which then meets `+=` with nothing to do.
-
-**Workaround**: write the desugaring by hand, `self.x = self.x + dx`. It is exactly
-equivalent for scalars. It is *not* equivalent for a tensor, where the whole point of the
-compound operator is that it updates the existing buffer instead of allocating a new one, so
-there is no workaround for a tensor held in a struct field.
-
-**Fix sketch**: parse the target as a place expression (identifier, field access, or index)
-the way plain assignment already does, and carry it on the compound-assignment statement.
-Both consumers re-form the by-value desugaring themselves for the types that take it, so each
-has to handle a place target rather than a name; the tensor path in the checker and in
-codegen resolves the target's storage instead of looking a name up. Worth splitting: making
-the parse error actionable is small and independent, and is worth doing even if the parser
-keeps refusing the form.
-
-**Note for whoever takes this on**: field-target compound assignment on tensors is also
-listed as out of scope for the sub-phase that shipped in-place tensor assignment, so confirm
-the intended scope on the issue before writing the tensor half.
 
 ## Taking one of these on
 

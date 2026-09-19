@@ -36,7 +36,7 @@ pub use items::{
     HirCapture, HirClosure, HirConst, HirEnum, HirEnumField, HirEnumVariant, HirField, HirFunction,
     HirImpl, HirItem, HirMethod, HirParam, HirProgram, HirSelfParam, HirStruct, HirTrait,
 };
-pub use statements::HirStmt;
+pub use statements::{HirPlace, HirStmt};
 pub use types::{extent_display, static_shape, AxisNames, HirCollectionKind, HirType};
 
 #[cfg(test)]

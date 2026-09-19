@@ -79,7 +79,7 @@ impl Lowerer {
         ))
     }
 
-    fn lower_tensor_axis(
+    pub(crate) fn lower_tensor_axis(
         &mut self,
         index: &TensorIndexArg,
         extent: usize,

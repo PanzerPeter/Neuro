@@ -3,7 +3,7 @@ use super::super::TypeChecker;
 use super::{make_function, make_ident, make_type, semantic_errors};
 use crate::errors::TypeError;
 use crate::types::Type;
-use ast_types::{BinaryOp, Expr, Stmt, UnaryOp};
+use ast_types::{BinaryOp, Expr, Place, Stmt, UnaryOp};
 use shared_types::{Literal, Span};
 
 #[test]
@@ -265,8 +265,9 @@ fn test_literal_inference_in_assignment() {
     checker.check_stmt(&decl);
     assert!(!checker.has_errors());
 
-    let assign = Stmt::Assignment {
-        target: make_ident("x"),
+    let assign = Stmt::Assign {
+        place: Place::Var(make_ident("x")),
+        op: None,
         value: Expr::Literal(Literal::Integer(200, None), Span::new(0, 3)),
         span: Span::new(0, 7),
     };

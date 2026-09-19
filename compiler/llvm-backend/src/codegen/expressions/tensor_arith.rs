@@ -122,7 +122,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// shape and no further, because the result goes back into the target's own buffer.
     pub(crate) fn codegen_tensor_compound_assign(
         &mut self,
-        target: &str,
+        receiver: &HirExpr,
         op: BinaryOp,
         value: &HirExpr,
         ty: &neuro_hir::HirType,
@@ -139,18 +139,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let rhs = self.codegen_operand_source(value, &result_shape)?;
 
-        let target_ptr = *self
-            .variables
-            .get(target)
-            .ok_or_else(|| CodegenError::UndefinedVariable(target.to_string()))?;
-        let lhs_handle = self
-            .builder
-            .build_load(
-                self.context.ptr_type(inkwell::AddressSpace::default()),
-                target_ptr,
-                "tensor.op.lhs",
-            )?
-            .into_pointer_value();
+        let lhs_handle = self.tensor_receiver_handle(receiver, &Type::from_hir(&receiver.ty))?;
         let lhs_data = self.load_dlpack_data(lhs_handle)?;
         // The target is both the left operand and the destination, so it is walked slot
         // for slot: it is the shape everything else broadcasts to.

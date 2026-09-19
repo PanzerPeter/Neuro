@@ -150,7 +150,7 @@ fn an_enumerated_adapted_head_counts_yielded_elements() {
         body[1]
     );
     assert!(
-        matches!(body[2], HirStmt::Assignment { .. }),
+        matches!(body[2], HirStmt::Assign { .. }),
         "the cursor advances before the user's statements, got {:?}",
         body[2]
     );

@@ -34,12 +34,24 @@ has three homes, and missing one fails silently rather than loudly:
 3. the alias-substitution walker in `parser/type_aliases.rs`, or an aliased type inside the new
    node never expands.
 
+### An assignment target is classified, not predicted
+`parse_stmt` does **not** look ahead over raw tokens to decide whether a statement is an
+assignment. It parses an expression, and if an assignment operator follows, `place_from_expr`
+classifies that expression as a `Place`. This works because the shapes that can be written to
+are a subset of the shapes that can be read, so the classification is a match over nodes the
+parser has already built.
+
+The consequence worth knowing: adding a new assignable form means adding an arm to
+`place_from_expr` and nothing else. There is no lookahead table to keep in sync, and a form the
+classifier does not know reports `ParseError::NotAPlace` naming what a place is, rather than
+falling through to an expression statement that leaves `=` unconsumed.
+
 ### Parse-time desugars: what never reaches ast-types
 These run before any other slice sees the tree, so downstream passes never learn the sugar
-existed. **Compound assignment is not among them**: `target OP= rhs` is detected by one-token
-lookahead in `parse_statement` and emitted as `Stmt::CompoundAssignment { target, op, value }`
-unchanged, because the choice between `target = target OP rhs` and an in-place `*Assign`
-update is type-directed and the parser has no types.
+existed. **Compound assignment is not among them**: `place OP= rhs` is emitted as
+`Stmt::Assign { place, op: Some(op), value }` unchanged, because the choice between
+`place = place OP rhs` and an in-place `*Assign` update is type-directed and the parser has
+no types.
 - **Type aliases**: collected separately from `items`, then `expand_type_aliases`
   (`parser/type_aliases.rs`) resolves alias chains (rejecting cycles, duplicates, and built-in
   shadows) and substitutes every aliased annotation across items/statements/expressions,
@@ -161,7 +173,7 @@ the tuple-index parse, so it needs no expression grammar of its own.
 - **Prefix vs. infix `&` and `*`.** Purely parser position: prefix `&` is a borrow
   (`Expr::Reference`, operand at `Precedence::Unary`), infix `&` is `BinaryOp::BitAnd`; prefix
   `*` is `Expr::Deref`, infix `*` is multiply. A leading `*` in statement position is a deref
-  expression statement, or a `Stmt::DerefAssignment` when followed by `=`.
+  expression statement, or a `Place::Deref` when an assignment operator follows.
 - **`as` is both a cast and an import rename.** An import reads it as a rename marker only when
   an identifier follows; a cast keeps its meaning.
 - **`val-else` vs. a plain binding or a destructure.** `starts_val_else` fires on an `Identifier`

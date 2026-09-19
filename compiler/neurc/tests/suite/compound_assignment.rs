@@ -1,7 +1,8 @@
-// Integration tests for compound assignment operators (+=, -=, *=, /=, %=).
-// Each operator is desugared to a plain assignment at parse time, so these tests
-// also validate that the desugaring path reaches semantic analysis and codegen
-// correctly for both integer and float types.
+// Integration tests for compound assignment operators (+=, -=, *=, /=, %=) on a
+// plain binding. The operator survives parsing and is resolved by the target's type,
+// so these tests also validate that the desugaring path reaches semantic analysis
+// and codegen correctly for both integer and float types. The same operators over a
+// field, an element, or a referent are in `place_expressions`.
 use crate::compile_harness::CompileTest;
 
 #[test]

@@ -159,7 +159,7 @@ impl Lowerer {
     }
 
     /// The declared type of `field` on `struct_name`.
-    pub(super) fn struct_field_type(
+    pub(crate) fn struct_field_type(
         &self,
         struct_name: &str,
         field: &str,

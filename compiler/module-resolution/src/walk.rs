@@ -6,7 +6,7 @@
 
 use ast_types::{
     ClosureParam, EnumPatternPayload, Expr, GenericArg, GenericParamKind, InterpPart, Item,
-    MatchArm, MethodDef, Pattern, Stmt, TensorIndexArg, Type, VariantPayload,
+    MatchArm, MethodDef, Pattern, Place, Stmt, TensorIndexArg, Type, VariantPayload,
 };
 use shared_types::Identifier;
 
@@ -200,7 +200,8 @@ fn walk_stmt(stmt: &mut Stmt, f: SiteFn) -> Result<(), ModuleError> {
             }
             Ok(())
         }
-        Stmt::Assignment { value, .. } | Stmt::CompoundAssignment { value, .. } => {
+        Stmt::Assign { place, value, .. } => {
+            walk_place(place, f)?;
             walk_expr(value, f)
         }
         Stmt::Return { value, .. } => {
@@ -266,15 +267,6 @@ fn walk_stmt(stmt: &mut Stmt, f: SiteFn) -> Result<(), ModuleError> {
             Ok(())
         }
         Stmt::Continue { .. } => Ok(()),
-        Stmt::FieldAssignment { value, .. } => walk_expr(value, f),
-        Stmt::DerefAssignment { pointer, value, .. } => {
-            walk_expr(pointer, f)?;
-            walk_expr(value, f)
-        }
-        Stmt::IndexAssignment { index, value, .. } => {
-            walk_expr(index, f)?;
-            walk_expr(value, f)
-        }
         Stmt::ValElse {
             pattern,
             value,
@@ -290,6 +282,38 @@ fn walk_stmt(stmt: &mut Stmt, f: SiteFn) -> Result<(), ModuleError> {
             walk_expr(value, f)
         }
         Stmt::Expr(expr) => walk_expr(expr, f),
+    }
+}
+
+/// Walk the expressions a place reaches through. The root binding is not a site:
+/// a module qualifier cannot open an assignment target.
+fn walk_place(place: &mut Place, f: SiteFn) -> Result<(), ModuleError> {
+    match place {
+        Place::Var(_) => Ok(()),
+        Place::Field { object, .. }
+        | Place::Deref {
+            pointer: object, ..
+        } => walk_expr(object, f),
+        Place::Index { object, index, .. } => {
+            walk_expr(object, f)?;
+            walk_expr(index, f)
+        }
+        Place::TensorIndex {
+            object, indices, ..
+        } => {
+            walk_expr(object, f)?;
+            for index in indices {
+                match index {
+                    TensorIndexArg::Position(expr) => walk_expr(expr, f)?,
+                    TensorIndexArg::Range { start, end, .. } => {
+                        walk_expr(start, f)?;
+                        walk_expr(end, f)?;
+                    }
+                    TensorIndexArg::FullAxis(_) => {}
+                }
+            }
+            Ok(())
+        }
     }
 }
 

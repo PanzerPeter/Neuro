@@ -1,8 +1,8 @@
 use super::{LoopContext, TypeChecker};
 use crate::errors::TypeError;
 use crate::types::Type;
-use ast_types::{Expr, Stmt};
-use shared_types::Identifier;
+use ast_types::{BinaryOp, Expr, Place, Stmt, TensorIndexArg};
+use shared_types::{Identifier, Span};
 
 /// How a checked loop body is left: the agreed type of its value-carrying
 /// `break`s (`None` when it has none), and whether any `break` targeted it at all.
@@ -428,39 +428,12 @@ impl TypeChecker {
                 Some(())
             }
 
-            Stmt::Assignment {
-                target,
-                value,
-                span,
-            } => self.check_assignment(target, value, *span),
-
-            Stmt::CompoundAssignment {
-                target,
+            Stmt::Assign {
+                place,
                 op,
                 value,
                 span,
-            } => {
-                // The operator-trait dispatch rule: a type implementing the matching `*Assign`
-                // trait updates in place; everything else desugars to
-                // `target = target OP value` and allocates a fresh value. Tensors are
-                // the one type on the first path today, and the one where the
-                // difference is observable: the desugaring would move the tensor out
-                // of its own binding and reallocate its buffer.
-                let target_ty = self
-                    .symbols
-                    .lookup(&target.name)
-                    .map(|info| info.ty.clone());
-                if matches!(target_ty, Some(Type::Tensor { .. })) {
-                    return self.check_tensor_compound_assign(target, *op, value, *span);
-                }
-                let desugared = Expr::Binary {
-                    left: Box::new(Expr::Identifier(target.clone())),
-                    op: *op,
-                    right: Box::new(value.clone()),
-                    span: *span,
-                };
-                self.check_assignment(target, &desugared, *span)
-            }
+            } => self.check_assign(place, *op, value, *span),
 
             Stmt::Return { value, span } => {
                 self.check_pool_return(*span);
@@ -776,90 +749,6 @@ impl TypeChecker {
                 Some(())
             }
 
-            // Array element assignment `arr[i] = v`. The target must be a mutable
-            // array binding; the index an integer; the value the element type.
-            Stmt::IndexAssignment {
-                target,
-                index,
-                value,
-                span,
-            } => {
-                let symbol = if let Some(s) = self.symbols.lookup(&target.name) {
-                    s.clone()
-                } else {
-                    self.record_error(TypeError::UndefinedVariable {
-                        name: target.name.clone(),
-                        span: target.span,
-                    });
-                    return None;
-                };
-
-                // Write permission through a slice comes from the borrow, not the
-                // binding: `xs: &mut [T]` is an immutable binding holding a mutable
-                // view, and a `&[T]` binding declared `mut` still may not write.
-                let element_ty = match &symbol.ty {
-                    Type::Reference { inner, mutable } if matches!(**inner, Type::Slice(_)) => {
-                        if !mutable {
-                            self.record_error(TypeError::AssignToImmutable {
-                                name: target.name.clone(),
-                                span: target.span,
-                            });
-                            return None;
-                        }
-                        let Type::Slice(element) = inner.as_ref() else {
-                            return None;
-                        };
-                        (**element).clone()
-                    }
-                    _ => {
-                        if !symbol.mutable {
-                            self.record_error(TypeError::AssignToImmutable {
-                                name: target.name.clone(),
-                                span: target.span,
-                            });
-                            return None;
-                        }
-                        match self.collection_element(&symbol.ty) {
-                            Some(element) => element,
-                            None => match &symbol.ty {
-                                Type::Array { element, .. } => (**element).clone(),
-                                other => {
-                                    self.record_error(TypeError::NotIndexable {
-                                        found: other.clone(),
-                                        span: *span,
-                                    });
-                                    return None;
-                                }
-                            },
-                        }
-                    }
-                };
-
-                self.check_pool_store(&target.name, &element_ty, value, *span);
-
-                let idx_ty = self.check_expr(index, None).unwrap_or(Type::Unknown);
-                if !matches!(idx_ty, Type::Unknown) && !idx_ty.is_integer() {
-                    self.record_error(TypeError::IndexNotInteger {
-                        found: idx_ty,
-                        span: index.span(),
-                    });
-                }
-
-                let value_ty = self
-                    .check_expr(value, Some(&element_ty))
-                    .unwrap_or(Type::Unknown);
-                if !matches!(value_ty, Type::Unknown) && !value_ty.is_compatible_with(&element_ty) {
-                    self.record_error(TypeError::Mismatch {
-                        expected: element_ty,
-                        found: value_ty,
-                        span: *span,
-                    });
-                }
-                self.record_move(value);
-
-                Some(())
-            }
-
             Stmt::Break { label, value, span } => {
                 self.check_loop_control_label(label.as_ref(), *span, true);
                 self.check_pool_loop_jump("break", label.as_ref().map(|l| l.name.as_str()), *span);
@@ -883,132 +772,6 @@ impl TypeChecker {
                     label.as_ref().map(|l| l.name.as_str()),
                     *span,
                 );
-                Some(())
-            }
-
-            Stmt::FieldAssignment {
-                object,
-                field,
-                value,
-                span,
-            } => {
-                let symbol = if let Some(s) = self.symbols.lookup(&object.name) {
-                    s.clone()
-                } else {
-                    self.record_error(TypeError::UndefinedVariable {
-                        name: object.name.clone(),
-                        span: object.span,
-                    });
-                    return None;
-                };
-
-                if !symbol.mutable {
-                    self.record_error(TypeError::AssignToImmutableField {
-                        var_name: object.name.clone(),
-                        field_name: field.name.clone(),
-                        span: *span,
-                    });
-                    return None;
-                }
-
-                let struct_name = match &symbol.ty {
-                    Type::Struct(n) => n.clone(),
-                    other => {
-                        self.record_error(TypeError::UnknownField {
-                            struct_name: other.to_string(),
-                            field_name: field.name.clone(),
-                            span: field.span,
-                        });
-                        return None;
-                    }
-                };
-
-                let field_ty = {
-                    let def = self.struct_defs.get(&struct_name).cloned();
-                    if let Some(def) = def {
-                        def.iter()
-                            .find(|(n, _)| n == &field.name)
-                            .map(|(_, t)| t.clone())
-                    } else {
-                        None
-                    }
-                };
-
-                if let Some(expected_ty) = field_ty {
-                    self.reject_private_field(&struct_name, &field.name, field.span);
-                    self.check_pool_store(&object.name, &expected_ty, value, *span);
-                    if let Some(actual_ty) = self.check_expr(value, Some(&expected_ty)) {
-                        if !actual_ty.is_compatible_with(&expected_ty) {
-                            self.record_error(TypeError::Mismatch {
-                                expected: expected_ty,
-                                found: actual_ty,
-                                span: *span,
-                            });
-                        }
-                    }
-                } else {
-                    self.record_error(TypeError::UnknownField {
-                        struct_name,
-                        field_name: field.name.clone(),
-                        span: field.span,
-                    });
-                    return None;
-                }
-
-                // Storing the value into a field moves it out of its source.
-                self.record_move(value);
-
-                Some(())
-            }
-
-            // Assignment through a mutable reference `*pointer = value`. The
-            // pointer must have a `&mut T` type; the value is checked against `T`.
-            Stmt::DerefAssignment {
-                pointer,
-                value,
-                span,
-            } => {
-                let pointer_ty = self.check_expr(pointer, None).unwrap_or(Type::Unknown);
-                let inner_ty = match &pointer_ty {
-                    Type::Unknown => return Some(()),
-                    Type::Reference {
-                        inner,
-                        mutable: true,
-                    } => (**inner).clone(),
-                    Type::Reference {
-                        inner,
-                        mutable: false,
-                    } => {
-                        self.record_error(TypeError::CannotAssignThroughRef {
-                            inner: (**inner).clone(),
-                            span: *span,
-                        });
-                        return None;
-                    }
-                    other => {
-                        self.record_error(TypeError::CannotDereference {
-                            found: other.clone(),
-                            span: pointer.span(),
-                        });
-                        return None;
-                    }
-                };
-
-                self.check_pool_ref_store(&inner_ty, value, *span);
-                let value_ty = self
-                    .check_expr(value, Some(&inner_ty))
-                    .unwrap_or(Type::Unknown);
-                // The stored value is moved into the location the reference points at.
-                self.record_move(value);
-
-                if !matches!(value_ty, Type::Unknown) && !value_ty.is_compatible_with(&inner_ty) {
-                    self.record_error(TypeError::Mismatch {
-                        expected: inner_ty,
-                        found: value_ty,
-                        span: *span,
-                    });
-                }
-
                 Some(())
             }
 
@@ -1064,15 +827,290 @@ impl TypeChecker {
         }
     }
 
-    /// Check `target = value`: the plain assignment, and the form a compound
-    /// assignment desugars to when its target is not updated in place.
-    fn check_assignment(
+    /// Check `place = value` and `place OP= value`.
+    ///
+    /// The place is resolved first: its type decides between the in-place update a
+    /// tensor takes and the `place = place OP value` desugaring everything else
+    /// takes, and its root binding is what mutability, borrow and pool residency are
+    /// all keyed by.
+    fn check_assign(
+        &mut self,
+        place: &Place,
+        op: Option<BinaryOp>,
+        value: &Expr,
+        span: Span,
+    ) -> Option<()> {
+        let place_ty = self.resolve_place(place, span)?;
+        match op {
+            // The operator-trait dispatch rule: a type implementing the matching
+            // `*Assign` trait updates in place; everything else desugars and allocates
+            // a fresh value. Tensors are the one type on the first path today, and the
+            // one where the difference is observable: the desugaring would move the
+            // tensor out of its own place and reallocate its buffer.
+            Some(op) if matches!(place_ty, Type::Tensor { .. }) => {
+                self.check_tensor_compound_assign(place, &place_ty, op, value, span)
+            }
+            Some(op) => {
+                let desugared = Expr::Binary {
+                    left: Box::new(place.to_expr()),
+                    op,
+                    right: Box::new(value.clone()),
+                    span,
+                };
+                self.check_place_store(place, &place_ty, &desugared, span)
+            }
+            None => self.check_place_store(place, &place_ty, value, span),
+        }
+    }
+
+    /// The type of the storage an assignment writes to, reporting the place's own
+    /// errors: an undefined root, an immutable one, a field that does not exist, a
+    /// non-indexable base.
+    fn resolve_place(&mut self, place: &Place, span: Span) -> Option<Type> {
+        match place {
+            Place::Var(target) => {
+                let Some(symbol) = self.symbols.lookup(&target.name) else {
+                    self.record_error(TypeError::UndefinedVariable {
+                        name: target.name.clone(),
+                        span: target.span,
+                    });
+                    return None;
+                };
+                let ty = symbol.ty.clone();
+                let mutable = symbol.mutable;
+                if !mutable {
+                    self.record_error(TypeError::AssignToImmutable {
+                        name: target.name.clone(),
+                        span: target.span,
+                    });
+                    return None;
+                }
+                Some(ty)
+            }
+
+            Place::Field {
+                object,
+                field,
+                span: field_span,
+            } => {
+                let obj_ty = self.check_expr(object, None)?;
+                let Type::Struct(struct_name) = obj_ty.referent().clone() else {
+                    self.record_error(TypeError::UnknownField {
+                        struct_name: obj_ty.to_string(),
+                        field_name: field.name.clone(),
+                        span: field.span,
+                    });
+                    return None;
+                };
+                if !self.place_is_writable(&obj_ty, place) {
+                    let root = place.root().map(|r| r.name.clone()).unwrap_or_default();
+                    self.record_error(TypeError::AssignToImmutableField {
+                        var_name: root,
+                        field_name: field.name.clone(),
+                        span: *field_span,
+                    });
+                    return None;
+                }
+                let field_ty = self
+                    .struct_defs
+                    .get(&struct_name)
+                    .and_then(|def| def.iter().find(|(n, _)| n == &field.name))
+                    .map(|(_, t)| t.clone());
+                let Some(field_ty) = field_ty else {
+                    self.record_error(TypeError::UnknownField {
+                        struct_name,
+                        field_name: field.name.clone(),
+                        span: field.span,
+                    });
+                    return None;
+                };
+                self.reject_private_field(&struct_name, &field.name, field.span);
+                Some(field_ty)
+            }
+
+            Place::Index {
+                object,
+                index,
+                span: index_span,
+            } => {
+                let obj_ty = self.check_expr(object, None)?;
+                if !self.place_is_writable(&obj_ty, place) {
+                    self.report_immutable_place(place);
+                    return None;
+                }
+                // A rank-1 tensor is indexed with one argument, which parses as the
+                // ordinary index form; the axis rules are the tensor's either way.
+                if let Type::Tensor { element, shape } = obj_ty.referent().clone() {
+                    let axes = [TensorIndexArg::Position((**index).clone())];
+                    return self.resolve_tensor_element(&element, &shape, &axes, *index_span);
+                }
+                let idx_ty = self.check_expr(index, None).unwrap_or(Type::Unknown);
+                if !matches!(idx_ty, Type::Unknown) && !idx_ty.is_integer() {
+                    self.record_error(TypeError::IndexNotInteger {
+                        found: idx_ty,
+                        span: index.span(),
+                    });
+                }
+                if let Some(element) = self.collection_element(&obj_ty) {
+                    return Some(element);
+                }
+                match obj_ty.referent() {
+                    Type::Array { element, .. } | Type::Slice(element) => Some((**element).clone()),
+                    other => {
+                        self.record_error(TypeError::NotIndexable {
+                            found: other.clone(),
+                            span,
+                        });
+                        None
+                    }
+                }
+            }
+
+            Place::TensorIndex {
+                object,
+                indices,
+                span: index_span,
+            } => {
+                let obj_ty = self.check_expr(object, None)?;
+                if !self.place_is_writable(&obj_ty, place) {
+                    self.report_immutable_place(place);
+                    return None;
+                }
+                let Type::Tensor { element, shape } = obj_ty.referent().clone() else {
+                    self.record_error(TypeError::TensorIndexOnNonTensor {
+                        found: obj_ty,
+                        span: *index_span,
+                    });
+                    return None;
+                };
+                self.resolve_tensor_element(&element, &shape, indices, *index_span)
+            }
+
+            Place::Deref {
+                pointer,
+                span: deref_span,
+            } => {
+                let pointer_ty = self.check_expr(pointer, None).unwrap_or(Type::Unknown);
+                match &pointer_ty {
+                    Type::Unknown => None,
+                    Type::Reference {
+                        inner,
+                        mutable: true,
+                    } => Some((**inner).clone()),
+                    Type::Reference {
+                        inner,
+                        mutable: false,
+                    } => {
+                        self.record_error(TypeError::CannotAssignThroughRef {
+                            inner: (**inner).clone(),
+                            span: *deref_span,
+                        });
+                        None
+                    }
+                    other => {
+                        self.record_error(TypeError::CannotDereference {
+                            found: other.clone(),
+                            span: pointer.span(),
+                        });
+                        None
+                    }
+                }
+            }
+        }
+    }
+
+    /// The element a tensor index names, rejecting an index that leaves an axis
+    /// standing: a slice is a fresh tensor, so there is no storage to write into.
+    fn resolve_tensor_element(
+        &mut self,
+        element: &Type,
+        shape: &[crate::types::TensorAxis],
+        indices: &[TensorIndexArg],
+        span: Span,
+    ) -> Option<Type> {
+        let indexed = self.check_tensor_index(element, shape, indices, span);
+        if matches!(indexed, Type::Tensor { .. }) {
+            self.record_error(TypeError::AssignToTensorSlice { span });
+            return None;
+        }
+        Some(indexed)
+    }
+
+    /// Whether a sub-place may be written through.
+    ///
+    /// Write permission through a borrow comes from the borrow, not the binding:
+    /// `xs: &mut [T]` is an immutable binding holding a mutable view, and a `&[T]`
+    /// binding declared `mut` still may not write. Everything else inherits the
+    /// mutability of the binding the place is rooted at.
+    fn place_is_writable(&self, object_ty: &Type, place: &Place) -> bool {
+        if let Type::Reference { mutable, .. } = object_ty {
+            return *mutable;
+        }
+        match place.root() {
+            Some(root) => self
+                .symbols
+                .lookup(&root.name)
+                .map(|info| info.mutable)
+                .unwrap_or(false),
+            None => false,
+        }
+    }
+
+    fn report_immutable_place(&mut self, place: &Place) {
+        let (name, span) = match place.root() {
+            Some(root) => (root.name.clone(), root.span),
+            None => (String::new(), place.span()),
+        };
+        self.record_error(TypeError::AssignToImmutable { name, span });
+    }
+
+    /// Store `value` into an already-resolved place.
+    fn check_place_store(
+        &mut self,
+        place: &Place,
+        place_ty: &Type,
+        value: &Expr,
+        span: Span,
+    ) -> Option<()> {
+        if let Place::Var(target) = place {
+            return self.check_binding_store(target, place_ty, value, span);
+        }
+
+        match place {
+            Place::Deref { .. } => self.check_pool_ref_store(place_ty, value, span),
+            _ => {
+                if let Some(root) = place.root() {
+                    let root = root.name.clone();
+                    self.check_pool_store(&root, place_ty, value, span);
+                }
+            }
+        }
+
+        let value_ty = self
+            .check_expr(value, Some(place_ty))
+            .unwrap_or(Type::Unknown);
+        // Storing the value into the place moves it out of its source.
+        self.record_move(value);
+        if !matches!(value_ty, Type::Unknown) && !value_ty.is_compatible_with(place_ty) {
+            self.record_error(TypeError::Mismatch {
+                expected: place_ty.clone(),
+                found: value_ty,
+                span,
+            });
+        }
+        Some(())
+    }
+
+    /// Store into a whole binding: the one place form that also replaces what the
+    /// binding held, so borrow, move and mutability state on the name itself change.
+    fn check_binding_store(
         &mut self,
         target: &Identifier,
+        expected_ty: &Type,
         value: &Expr,
-        span: shared_types::Span,
+        span: Span,
     ) -> Option<()> {
-        let expected_ty = self.symbols.lookup(&target.name).map(|s| s.ty.clone());
+        let expected_ty = Some(expected_ty.clone());
 
         // Replacing the value destroys what every live borrow of the target points at,
         // so the borrowee rules apply to the write as much as to a read or a move.
@@ -1110,23 +1148,7 @@ impl TypeChecker {
             self.symbols.attach_borrow(&target.name, &place, exclusive);
         }
 
-        // Lookup the target variable again for validation
-        let Some(symbol_info) = self.symbols.lookup(&target.name) else {
-            self.record_error(TypeError::UndefinedVariable {
-                name: target.name.clone(),
-                span: target.span,
-            });
-            return None;
-        };
-        if !symbol_info.mutable {
-            self.record_error(TypeError::AssignToImmutable {
-                name: target.name.clone(),
-                span: target.span,
-            });
-            return None;
-        }
-
-        // Check type compatibility (skip if value type is unknown)
+        let symbol_info = self.symbols.lookup(&target.name)?;
         if !matches!(value_ty, Type::Unknown) && !value_ty.is_compatible_with(&symbol_info.ty) {
             self.record_error(TypeError::Mismatch {
                 expected: symbol_info.ty.clone(),

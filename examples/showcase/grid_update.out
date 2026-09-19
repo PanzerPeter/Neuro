@@ -1,0 +1,10 @@
+grid rows
+  row 0 total 14
+  row 1 total 8
+  row 2 total 19
+  row 1 corrected to 108
+heat corners
+  [0, 0] = 0
+  [1, 1] = 105
+  [2, 3] = 99
+tally total 36 peak 9

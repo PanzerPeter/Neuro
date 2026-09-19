@@ -25,7 +25,7 @@
 //! loop's index, which counts source steps and would leave gaps.
 
 use ast_types::{LoopAdapter, LoopAdapterKind, Stmt, UnaryOp};
-use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirPlace, HirStmt, HirType};
 use shared_types::{Identifier, Literal, Span};
 
 use crate::{Lowerer, LoweringError};
@@ -182,8 +182,8 @@ impl Lowerer {
                 mutable: false,
                 span,
             });
-            stmts.push(HirStmt::Assignment {
-                target: cursor.clone(),
+            stmts.push(HirStmt::Assign {
+                place: cursor_place(cursor),
                 value: HirExpr::new(
                     HirExprKind::Binary {
                         op: ast_types::BinaryOp::Add,
@@ -328,6 +328,15 @@ fn adapter_name(kind: LoopAdapterKind) -> &'static str {
     match kind {
         LoopAdapterKind::Map => "map",
         LoopAdapterKind::Filter => "filter",
+    }
+}
+
+/// The place a synthesized loop cursor is stored in. Its type is fixed by the
+/// lowering that created the binding.
+fn cursor_place(name: &str) -> HirPlace {
+    HirPlace::Var {
+        name: name.to_string(),
+        ty: LOOP_INDEX_TYPE,
     }
 }
 

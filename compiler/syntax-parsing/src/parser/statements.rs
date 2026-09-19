@@ -3,7 +3,7 @@ use shared_types::{Identifier, Span};
 
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
-use ast_types::{Expr, Stmt};
+use ast_types::Stmt;
 
 use super::Parser;
 
@@ -225,116 +225,21 @@ impl Parser {
                 if let Some(stmt) = self.try_parse_labeled_loop()? {
                     return Ok(stmt);
                 }
-
-                // Lookahead to distinguish:
-                //   ident = expr          → assignment
-                //   ident OP= expr        → compound assignment (desugared)
-                //   ident.field = expr    → field assignment
-                //   anything else         → expression statement
-                if self.current + 1 < self.tokens.len() {
-                    if let Some(next_token) = self.tokens.get(self.current + 1) {
-                        if matches!(next_token.kind, TokenKind::Equal) {
-                            return self.parse_assignment_stmt();
-                        }
-                        if matches!(
-                            next_token.kind,
-                            TokenKind::PlusEqual
-                                | TokenKind::MinusEqual
-                                | TokenKind::StarEqual
-                                | TokenKind::SlashEqual
-                                | TokenKind::PercentEqual
-                        ) {
-                            return self.parse_compound_assignment_stmt();
-                        }
-                        if matches!(next_token.kind, TokenKind::Dot) {
-                            if let (Some(field_tok), Some(eq_tok)) = (
-                                self.tokens.get(self.current + 2),
-                                self.tokens.get(self.current + 3),
-                            ) {
-                                if matches!(field_tok.kind, TokenKind::Identifier(_))
-                                    && matches!(eq_tok.kind, TokenKind::Equal)
-                                {
-                                    return self.parse_field_assignment_stmt();
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let expr = self.parse_expr(Precedence::Lowest)?;
-                // Array element assignment `arr[i] = v`: the parsed expression
-                // is an index whose object is a bare binding, followed by `=`.
-                if let Expr::Index { object, index, .. } = &expr {
-                    if matches!(object.as_ref(), Expr::Identifier(_))
-                        && self.check(&TokenKind::Equal)
-                    {
-                        let Expr::Identifier(target) = object.as_ref().clone() else {
-                            unreachable!("guarded by the matches! above")
-                        };
-                        let index = (**index).clone();
-                        self.advance(); // consume '='
-                        self.skip_newlines();
-                        let value = self.parse_expr(Precedence::Lowest)?;
-                        let span = target.span.merge(value.span());
-                        return Ok(Stmt::IndexAssignment {
-                            target,
-                            index,
-                            value,
-                            span,
-                        });
-                    }
-                }
-                Ok(Stmt::Expr(expr))
+                self.parse_expr_stmt()
             }
-            // `self` keyword as statement: detect `self.field = expr` field assignments
-            TokenKind::SelfLower => {
-                if self.current + 1 < self.tokens.len() {
-                    if let Some(next_token) = self.tokens.get(self.current + 1) {
-                        if matches!(next_token.kind, TokenKind::Dot) {
-                            if let (Some(field_tok), Some(eq_tok)) = (
-                                self.tokens.get(self.current + 2),
-                                self.tokens.get(self.current + 3),
-                            ) {
-                                if matches!(field_tok.kind, TokenKind::Identifier(_))
-                                    && matches!(eq_tok.kind, TokenKind::Equal)
-                                {
-                                    return self.parse_self_field_assignment_stmt();
-                                }
-                            }
-                        }
-                    }
-                }
-                let expr = self.parse_expr(Precedence::Lowest)?;
-                Ok(Stmt::Expr(expr))
-            }
-            // A leading `*` is a dereference: either an assignment through a
-            // mutable reference (`*r = value`) or a deref expression statement.
-            TokenKind::Star => {
-                let start_span = token.span;
-                let expr = self.parse_expr(Precedence::Lowest)?;
-                if self.check(&TokenKind::Equal) {
-                    self.advance(); // consume '='
-                    let value = self.parse_expr(Precedence::Lowest)?;
-                    let span = start_span.merge(value.span());
-                    let pointer = match expr {
-                        Expr::Deref { operand, .. } => *operand,
-                        // The `*` prefix always parses to a Deref, so this is unreachable
-                        // in practice; fall back to the parsed expression defensively.
-                        other => other,
-                    };
-                    return Ok(Stmt::DerefAssignment {
-                        pointer,
-                        value,
-                        span,
-                    });
-                }
-                Ok(Stmt::Expr(expr))
-            }
-            _ => {
-                let expr = self.parse_expr(Precedence::Lowest)?;
-                Ok(Stmt::Expr(expr))
-            }
+            _ => self.parse_expr_stmt(),
         }
+    }
+
+    /// Parse a statement that begins with an expression: an assignment when an
+    /// assignment operator follows the expression, and an expression statement
+    /// otherwise.
+    fn parse_expr_stmt(&mut self) -> ParseResult<Stmt> {
+        let expr = self.parse_expr(Precedence::Lowest)?;
+        if self.at_assignment_operator() {
+            return self.parse_assign_tail(expr);
+        }
+        Ok(Stmt::Expr(expr))
     }
 
     /// Parse one source statement and append the resulting AST statement(s) to
@@ -386,8 +291,7 @@ pub(crate) fn stmt_span(stmt: &Stmt) -> shared_types::Span {
         Stmt::VarDecl { span, .. } => *span,
         Stmt::ValElse { span, .. } => *span,
         Stmt::Const { span, .. } => *span,
-        Stmt::Assignment { span, .. } => *span,
-        Stmt::CompoundAssignment { span, .. } => *span,
+        Stmt::Assign { span, .. } => *span,
         Stmt::Return { span, .. } => *span,
         Stmt::If { span, .. } => *span,
         Stmt::While { span, .. } => *span,
@@ -395,9 +299,6 @@ pub(crate) fn stmt_span(stmt: &Stmt) -> shared_types::Span {
         Stmt::ForEach { span, .. } => *span,
         Stmt::Break { span, .. } => *span,
         Stmt::Continue { span, .. } => *span,
-        Stmt::FieldAssignment { span, .. } => *span,
-        Stmt::IndexAssignment { span, .. } => *span,
-        Stmt::DerefAssignment { span, .. } => *span,
         Stmt::Expr(e) => e.span(),
     }
 }

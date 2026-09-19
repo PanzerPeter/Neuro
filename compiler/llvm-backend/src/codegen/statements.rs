@@ -1,7 +1,8 @@
 use crate::codegen::context::{DropTarget, LoopTargets};
 use inkwell::values::BasicValueEnum;
 use inkwell::IntPredicate;
-use neuro_hir::{HirConst, HirExpr, HirExprKind, HirStmt, HirType};
+use neuro_hir::{HirConst, HirExpr, HirExprKind, HirPlace, HirStmt, HirType};
+use shared_types::Span;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::type_mapping::TypeMapper;
@@ -229,6 +230,41 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         Ok(())
+    }
+
+    /// Store `value` into the storage `place` names.
+    ///
+    /// One arm per place form rather than one address computation, because the
+    /// indexable types do not share one: a `Vec` slot is behind a header, a slice slot
+    /// behind a fat pointer, and a tensor slot behind a DLPack handle.
+    pub(crate) fn codegen_place_store(
+        &mut self,
+        place: &HirPlace,
+        value: &HirExpr,
+        span: Span,
+    ) -> CodegenResult<()> {
+        match place {
+            HirPlace::Var { name, .. } => self.codegen_assignment(name, value),
+            HirPlace::Field { object, field, .. } => {
+                self.codegen_field_assignment(object, field, value)
+            }
+            HirPlace::Deref { pointer, .. } => self.codegen_deref_assignment(pointer, value),
+            HirPlace::TensorIndex { object, axes, .. } => {
+                self.codegen_tensor_index_assignment(object, axes, value, span.start)
+            }
+            HirPlace::Index { object, index, .. } => {
+                let obj_ty = Type::from_hir(&object.ty);
+                match obj_ty.referent() {
+                    Type::Collection { .. } => {
+                        self.codegen_vec_index_assignment(object, &obj_ty, index, value)
+                    }
+                    Type::Slice(_) => {
+                        self.codegen_slice_index_assignment(object, &obj_ty, index, value)
+                    }
+                    _ => self.codegen_index_assignment(object, index, value),
+                }
+            }
+        }
     }
 
     /// Generate code for `*pointer = value`, a store through a mutable reference.
@@ -800,14 +836,17 @@ impl<'ctx> CodegenContext<'ctx> {
             HirStmt::VarDecl { name, ty, init, .. } => {
                 self.codegen_var_decl(name, ty, init.as_ref())
             }
-            HirStmt::Assignment { target, value, .. } => self.codegen_assignment(target, value),
+            HirStmt::Assign { place, value, span } => self.codegen_place_store(place, value, *span),
             HirStmt::TensorCompoundAssign {
-                target,
+                place,
                 op,
                 value,
                 ty,
                 span,
-            } => self.codegen_tensor_compound_assign(target, *op, value, ty, span.start),
+            } => {
+                let receiver = place.to_expr(*span);
+                self.codegen_tensor_compound_assign(&receiver, *op, value, ty, span.start)
+            }
             HirStmt::Return { value, .. } => self.codegen_return(value.as_ref()),
             HirStmt::If {
                 condition,
@@ -875,21 +914,6 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
                 self.codegen_for_each(label.as_deref(), index.as_deref(), iterator, iterable, body)
             }
-            HirStmt::IndexAssignment {
-                target,
-                index,
-                value,
-                ..
-            } => {
-                let target_ty = self.type_env.get(target).cloned();
-                if let Some(ty @ Type::Collection { .. }) = target_ty {
-                    return self.codegen_vec_index_assignment(target, &ty, index, value);
-                }
-                if let Some(ty) = target_ty.filter(|t| matches!(t.referent(), Type::Slice(_))) {
-                    return self.codegen_slice_index_assignment(target, &ty, index, value);
-                }
-                self.codegen_index_assignment(target, index, value)
-            }
             HirStmt::Break { label, value, .. } => {
                 let target = self.lookup_loop_target(label.as_deref())?;
                 let break_bb = target.break_bb;
@@ -954,17 +978,6 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 Ok(())
             }
-            HirStmt::FieldAssignment {
-                object,
-                field,
-                value,
-                ..
-            } => self.codegen_field_assignment(object, field, value),
-
-            HirStmt::DerefAssignment { pointer, value, .. } => {
-                self.codegen_deref_assignment(pointer, value)
-            }
-
             HirStmt::ValElse {
                 scrutinee,
                 test,

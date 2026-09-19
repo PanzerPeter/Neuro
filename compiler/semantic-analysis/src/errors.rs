@@ -240,6 +240,9 @@ pub enum TypeError {
     #[error("{found} is not a tensor, so it takes one index and no range: index an array or a `Vec` with `xs[i]`, and take a sub-range of one with `xs.slice(a..b)`")]
     TensorIndexOnNonTensor { found: Type, span: Span },
 
+    #[error("cannot assign to a tensor slice: an index that leaves an axis standing produces a fresh tensor, not storage; name every axis to write one element")]
+    AssignToTensorSlice { span: Span },
+
     #[error("tensor dimension '{name}' is not a known extent; use a non-negative integer, or declare it as a shape parameter of the enclosing function, e.g. `func f<{name}>(t: Tensor<f32, [{name}]>)`")]
     UnknownTensorDimension { name: String, span: Span },
 
@@ -1032,6 +1035,7 @@ impl TypeError {
             | Self::TensorSliceBoundNotConstant { span, .. }
             | Self::TensorSliceOutOfRange { span, .. }
             | Self::TensorIndexOnNonTensor { span, .. }
+            | Self::AssignToTensorSlice { span }
             | Self::UnknownTensorDimension { span, .. }
             | Self::TensorShapeParamConflict { span, .. }
             | Self::DuplicateTensorAxisName { span, .. }

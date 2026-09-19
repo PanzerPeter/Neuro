@@ -9,7 +9,7 @@
 use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, TensorAxis, Type};
-use ast_types::{BinaryOp, Expr, GenericArg};
+use ast_types::{BinaryOp, Expr, GenericArg, Place};
 use shared_types::{Identifier, Span};
 
 /// The prelude name a tensor constructor is qualified by. A module may shadow it with
@@ -340,29 +340,19 @@ impl TypeChecker {
     /// before the exclusive update begins, so the checks below run in that order too.
     pub(crate) fn check_tensor_compound_assign(
         &mut self,
-        target: &Identifier,
+        place: &Place,
+        tensor_ty: &Type,
         op: BinaryOp,
         value: &Expr,
         span: Span,
     ) -> Option<()> {
-        let Some(tensor_ty) = self
-            .symbols
-            .lookup(&target.name)
-            .map(|info| info.ty.clone())
-        else {
-            self.record_error(TypeError::UndefinedVariable {
-                name: target.name.clone(),
-                span: target.span,
-            });
-            return None;
-        };
-        let Type::Tensor { element, shape } = &tensor_ty else {
+        let Type::Tensor { element, shape } = tensor_ty else {
             return None;
         };
 
         // The update walks the buffer element by element, so it needs the element count.
         let (element_ty, shape) = ((**element).clone(), shape.clone());
-        if self.reject_dynamic_extent(&shape, &format!("`{op}=`"), &tensor_ty, span) {
+        if self.reject_dynamic_extent(&shape, &format!("`{op}=`"), tensor_ty, span) {
             return None;
         }
         let element = &element_ty;
@@ -388,7 +378,7 @@ impl TypeChecker {
         // be updated from a tensor the caller still owns.
         let borrowed = matches!(value_ty, Type::Reference { .. });
         if !matches!(value_ty, Type::Unknown)
-            && !self.compound_assign_operand_fits(&value_ty, &tensor_ty, op, span)
+            && !self.compound_assign_operand_fits(&value_ty, tensor_ty, op, span)
         {
             return None;
         }
@@ -396,20 +386,14 @@ impl TypeChecker {
             self.record_move(value);
         }
 
-        let symbol_info = self.symbols.lookup(&target.name)?;
-        if !symbol_info.mutable {
-            self.record_error(TypeError::AssignToImmutable {
-                name: target.name.clone(),
-                span: target.span,
-            });
-            return None;
-        }
-        // The target is read as well as written, so a right-hand side that moved it out
-        // (`w += w`) leaves nothing to update in place.
+        // The place is read as well as written, so a right-hand side that moved its
+        // root out (`w += w`) leaves nothing to update in place.
+        let root = place.root()?;
+        let symbol_info = self.symbols.lookup(&root.name)?;
         if let Some(moved_at) = symbol_info.moves.conflict_with_whole() {
             self.record_error(TypeError::UseOfMovedValue {
-                name: target.name.clone(),
-                span: target.span,
+                name: root.name.clone(),
+                span: root.span,
                 moved_at,
             });
             return None;

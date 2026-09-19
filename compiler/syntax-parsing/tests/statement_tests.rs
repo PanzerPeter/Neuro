@@ -1,6 +1,6 @@
 // Statement parsing tests
 
-use syntax_parsing::{parse, Item, Stmt};
+use syntax_parsing::{parse, BinaryOp, Item, Place, Stmt};
 
 /// Count the statements the first function body desugars to.
 fn first_fn_body_len(source: &str) -> usize {
@@ -604,4 +604,75 @@ fn test_break_value_is_not_parsed_as_label() {
             ..
         })
     ));
+}
+
+/// The place forms an assignment target may take. Each one is classified from the
+/// expression the statement parser already read, so a shape that parses as an
+/// expression and is not listed here is a diagnostic, not a silent expression
+/// statement.
+fn first_stmt(source: &str) -> Stmt {
+    let items = parse(source).expect("parse failed");
+    for item in &items {
+        if let Item::Function(func) = item {
+            return func.body.first().expect("empty body").clone();
+        }
+    }
+    panic!("no function found");
+}
+
+#[test]
+fn test_assignment_targets_parse_as_places() {
+    let cases = [
+        ("x = 1", "Var"),
+        ("x += 1", "Var"),
+        ("p.x = 1", "Field"),
+        ("p.inner.x -= 1", "Field"),
+        ("arr[0] = 1", "Index"),
+        ("arr[0] *= 2", "Index"),
+        ("t[0, 1] = 1", "TensorIndex"),
+        ("*r = 1", "Deref"),
+        ("*r /= 2", "Deref"),
+    ];
+    for (line, expected) in cases {
+        let source = format!("func test() {{\n    {line}\n}}");
+        let Stmt::Assign { place, .. } = first_stmt(&source) else {
+            panic!("`{line}` did not parse as an assignment");
+        };
+        let actual = match place {
+            Place::Var(_) => "Var",
+            Place::Field { .. } => "Field",
+            Place::Index { .. } => "Index",
+            Place::TensorIndex { .. } => "TensorIndex",
+            Place::Deref { .. } => "Deref",
+        };
+        assert_eq!(actual, expected, "`{line}` resolved to the wrong place");
+    }
+}
+
+#[test]
+fn test_compound_assignment_keeps_its_operator() {
+    let Stmt::Assign { op, .. } = first_stmt("func test() {\n    p.x += 1\n}") else {
+        panic!("not an assignment");
+    };
+    assert_eq!(op, Some(BinaryOp::Add));
+
+    let Stmt::Assign { op, .. } = first_stmt("func test() {\n    p.x = 1\n}") else {
+        panic!("not an assignment");
+    };
+    assert_eq!(op, None);
+}
+
+#[test]
+fn test_a_call_result_is_not_an_assignment_target() {
+    let error = parse("func test() {\n    f() = 1\n}").expect_err("a call result is not a place");
+    assert!(
+        matches!(error, syntax_parsing::ParseError::NotAPlace { .. }),
+        "got {error:?}"
+    );
+}
+
+#[test]
+fn test_a_method_call_statement_is_still_an_expression() {
+    let stmt = first_stmt("func test() {\n    q.translate(1, 2)\n}");
+    assert!(matches!(stmt, Stmt::Expr(_)), "got {stmt:?}");
 }

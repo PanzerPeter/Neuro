@@ -6,7 +6,7 @@
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
-use neuro_hir::{HirExpr, HirExprKind, HirStmt};
+use neuro_hir::{HirExpr, HirStmt};
 
 use crate::codegen::context::{CodegenContext, LoopTargets};
 use crate::errors::{CodegenError, CodegenResult};
@@ -117,35 +117,34 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(format!("failed to load array element: {}", e)))
     }
 
-    /// Lower an array element assignment `target[index] = value`: bounds-check
+    /// Lower an array element assignment `place[index] = value`: bounds-check
     /// (debug), then `getelementptr` + store.
     pub(crate) fn codegen_index_assignment(
         &mut self,
-        target: &str,
+        object: &HirExpr,
         index: &HirExpr,
         value: &HirExpr,
     ) -> CodegenResult<()> {
-        // The target is an owned array binding; recover its array type from the
-        // codegen-time local environment and its storage from `variables`.
-        let obj_ty = self.type_env.get(target).cloned().ok_or_else(|| {
-            CodegenError::InternalError(
-                "missing array type for index assignment target".to_string(),
-            )
-        })?;
-        let (element_ty, size) = match obj_ty.referent() {
-            Type::Array { element, size } => ((**element).clone(), *size),
-            other => {
-                return Err(CodegenError::InternalError(format!(
-                    "index assignment target is not an array: {:?}",
-                    other
-                )))
-            }
+        let obj_ty = Type::from_hir(&object.ty);
+        let Type::Array { element, size } = obj_ty.referent().clone() else {
+            return Err(CodegenError::InternalError(format!(
+                "index assignment target is not an array: {:?}",
+                obj_ty
+            )));
         };
-        let base_ptr = self
-            .variables
-            .get(target)
-            .copied()
-            .ok_or_else(|| CodegenError::UndefinedVariable(target.to_string()))?;
+        let element_ty = (*element).clone();
+        // Deliberately NOT `array_place_ptr`: its fallback materialises a temporary,
+        // which is the right answer for a read and a lost write here.
+        let base_ptr = if matches!(obj_ty, Type::Reference { .. }) {
+            self.codegen_expr(object)?.into_pointer_value()
+        } else {
+            self.held_place_ptr(object)?.ok_or_else(|| {
+                CodegenError::UnsupportedType(
+                    "an array element assignment needs an array that has storage, not a temporary"
+                        .to_string(),
+                )
+            })?
+        };
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let elem_ptr =
             self.array_element_ptr(base_ptr, elem_llvm, size, index, index.span.start)?;
@@ -154,6 +153,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.build_store(elem_ptr, val).map_err(|e| {
             CodegenError::LlvmError(format!("failed to store array element: {}", e))
         })?;
+        self.mark_moved_for_drop(value);
         Ok(())
     }
 
@@ -355,10 +355,8 @@ impl<'ctx> CodegenContext<'ctx> {
             return Ok((ptr, element_ty, size));
         }
 
-        if let HirExprKind::Variable(name) = &object.kind {
-            if let Some(ptr) = self.variables.get(name).copied() {
-                return Ok((ptr, element_ty, size));
-            }
+        if let Some(ptr) = self.held_place_ptr(object)? {
+            return Ok((ptr, element_ty, size));
         }
 
         let val = self.codegen_expr(object)?;
@@ -372,7 +370,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Compute the address of element `index` within an array at `base_ptr`, emitting
     /// a debug-build bounds guard (`index < size`, unsigned) that panics on violation
     /// `offset` keys the panic diagnostic's source location.
-    fn array_element_ptr(
+    pub(crate) fn array_element_ptr(
         &mut self,
         base_ptr: PointerValue<'ctx>,
         elem_llvm: BasicTypeEnum<'ctx>,

@@ -5,7 +5,7 @@
 // named argument could bind to the wrong parameter instead of failing loudly. So the
 // walk visits every expression position, not only the ones a call is usually written in.
 
-use ast_types::{Expr, Item, MatchArm, Stmt, TensorIndexArg};
+use ast_types::{Expr, Item, MatchArm, Place, Stmt, TensorIndexArg};
 
 use crate::binding::Bound;
 use crate::errors::ArgumentError;
@@ -68,10 +68,11 @@ fn walk_stmt(stmt: &mut Stmt, f: CallFn, errors: &mut Vec<ArgumentError>) {
                 walk_expr(init, f, errors);
             }
         }
-        Stmt::Assignment { value, .. }
-        | Stmt::CompoundAssignment { value, .. }
-        | Stmt::FieldAssignment { value, .. }
-        | Stmt::Const { value, .. } => walk_expr(value, f, errors),
+        Stmt::Assign { place, value, .. } => {
+            walk_place(place, f, errors);
+            walk_expr(value, f, errors);
+        }
+        Stmt::Const { value, .. } => walk_expr(value, f, errors),
         Stmt::Return { value, .. } | Stmt::Break { value, .. } => {
             if let Some(value) = value {
                 walk_expr(value, f, errors);
@@ -126,14 +127,6 @@ fn walk_stmt(stmt: &mut Stmt, f: CallFn, errors: &mut Vec<ArgumentError>) {
             }
             walk_stmts(body, f, errors);
         }
-        Stmt::DerefAssignment { pointer, value, .. } => {
-            walk_expr(pointer, f, errors);
-            walk_expr(value, f, errors);
-        }
-        Stmt::IndexAssignment { index, value, .. } => {
-            walk_expr(index, f, errors);
-            walk_expr(value, f, errors);
-        }
         Stmt::ValElse {
             value, else_block, ..
         } => {
@@ -142,6 +135,35 @@ fn walk_stmt(stmt: &mut Stmt, f: CallFn, errors: &mut Vec<ArgumentError>) {
         }
         Stmt::Continue { .. } => {}
         Stmt::Expr(expr) => walk_expr(expr, f, errors),
+    }
+}
+
+fn walk_place(place: &mut Place, f: CallFn, errors: &mut Vec<ArgumentError>) {
+    match place {
+        Place::Var(_) => {}
+        Place::Field { object, .. }
+        | Place::Deref {
+            pointer: object, ..
+        } => walk_expr(object, f, errors),
+        Place::Index { object, index, .. } => {
+            walk_expr(object, f, errors);
+            walk_expr(index, f, errors);
+        }
+        Place::TensorIndex {
+            object, indices, ..
+        } => {
+            walk_expr(object, f, errors);
+            for index in indices {
+                match index {
+                    TensorIndexArg::Position(expr) => walk_expr(expr, f, errors),
+                    TensorIndexArg::Range { start, end, .. } => {
+                        walk_expr(start, f, errors);
+                        walk_expr(end, f, errors);
+                    }
+                    TensorIndexArg::FullAxis(_) => {}
+                }
+            }
+        }
     }
 }
 

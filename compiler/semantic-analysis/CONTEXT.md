@@ -396,10 +396,24 @@ it has no display form, so `{x:?}` renders it and `{x}` does not (`UnrenderableS
 (`is_place_expr`: an identifier or a parenthesised identifier, else `CannotBorrowValue`) and
 yields `&T` **without** moving the operand: borrowing never consumes. `&mut` of a non-`mut`
 binding is `CannotBorrowMutably`. `Expr::Deref` types `*r` to the referent, else
-`CannotDereference`. `Stmt::DerefAssignment` requires `pointer: &mut T` (an immutable reference is
+`CannotDereference`. `Place::Deref` requires `pointer: &mut T` (an immutable reference is
 `CannotAssignThroughRef` and a non-reference is `CannotDereference`), and the stored value is
 checked against the referent and move-recorded. Flow-sensitive aliasing exclusivity is deferred to
 lifetime inference.
+
+Note the asymmetry, which is `docs/BUGS.md` BUG-033: an assignment TARGET is a full `Place`
+(a field, an element, a tensor coordinate), while the operand of `&` is still only a bare
+binding. The two notions of place are not yet the same one.
+
+**Assignment targets** (`check_assign` / `resolve_place` in `type_checkers/statements.rs`).
+`resolve_place` returns the type of the LOCATION and reports the place's own errors; a single
+store path then checks the value against it and records the move. The forms keep per-form rules
+rather than collapsing into one, because they genuinely differ: a slice takes its write
+permission from the borrow rather than the binding (`&mut [T]` is writable through an immutable
+binding, and a `mut` `&[T]` binding is not), a private field is rejected, and a tensor index that
+leaves an axis standing is `AssignToTensorSlice` because a slice is a fresh tensor and not
+storage. Everything else inherits the mutability of `Place::root()`, the binding the place bottoms
+out at.
 
 **Borrow exclusivity** (`symbol_table.rs` plus the `Expr::Reference` arm). Each binding tracks
 borrows taken against its place: persistent counts (a borrow held by a reference binding via
@@ -413,7 +427,7 @@ its old borrow first. Transient borrows are dropped at the end of every statemen
 (`clear_transient_borrows`), so a borrow never outlives the statement that took it.
 
 **Borrowee access** (`check_borrowee_read` in `expressions/places.rs`, `reject_move_of_borrowee`
-in `moves.rs`, the target check in `check_assignment`). The rules above govern borrows against
+in `moves.rs`, the target check in `check_binding_store`). The rules above govern borrows against
 each other; these three govern the borrowed place itself. A read of a binding is
 `CannotUseWhileMutablyBorrowed` while an exclusive borrow is held by a live binding; a move out
 of it (or out of a field of it) is `CannotMoveWhileBorrowed` while ANY borrow is live; assigning
@@ -616,11 +630,12 @@ same check for return-position `impl Trait<Assoc = U>`.
   contracted axis bounds the loop even though it appears in neither operand's result. Everything
   after the join — the element-arithmetic check, the move recording — is shared with the
   element-wise operators. A user type reaches `@` through the `MatMul` operator trait instead.
-- **Compound assignment** (`Stmt::CompoundAssignment`) implements the operator-trait dispatch rule in
-  `type_checkers/statements.rs`. A tensor target routes to `check_tensor_compound_assign`
-  (`type_checkers/tensors.rs`), the compiler-known `*Assign` implementation; every other target
-  re-forms the `Expr::Binary` desugar and checks it as an ordinary assignment through
-  `check_assignment`, which is what keeps a user operator-trait impl reachable through `+=`. The
+- **Compound assignment** (`Stmt::Assign` with `op: Some(_)`) implements the operator-trait
+  dispatch rule in `type_checkers/statements.rs`. A tensor place routes to
+  `check_tensor_compound_assign` (`type_checkers/tensors.rs`), the compiler-known `*Assign`
+  implementation; every other place re-forms the `Expr::Binary` desugar over `Place::to_expr()`
+  and checks it as an ordinary store, which is what keeps a user operator-trait impl reachable
+  through `+=`. The
   tensor path checks the operand **before** the target's mutability, which is the evaluation
   order the language specifies; requires the element to have arithmetic
   (`TensorElementNotArithmetic` rejects `bool` and the half-precision types, matching their

@@ -2,7 +2,7 @@
 
 use shared_types::{Identifier, Span};
 
-use super::expressions::{BinaryOp, Expr, Pattern};
+use super::expressions::{BinaryOp, Expr, Pattern, TensorIndexArg};
 use super::types::Type;
 
 /// Which transformation a `for`-head adapter applies to the element stream.
@@ -28,6 +28,122 @@ pub struct LoopAdapter {
     pub span: Span,
 }
 
+/// The storage an assignment writes into.
+///
+/// A place is rooted at a binding and reached through any number of field
+/// accesses, one index, or a dereference. The base of each form is kept as an
+/// [`Expr`] rather than a nested `Place` because the base is *read* on the way to
+/// the location — `self.inner.data[i] = v` loads `self`, projects `inner`, and only
+/// the last step is a write — so every stage already has the machinery for it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Place {
+    /// A binding: `x`.
+    Var(Identifier),
+    /// A struct field: `object.field`.
+    Field {
+        object: Box<Expr>,
+        field: Identifier,
+        span: Span,
+    },
+    /// One element of an array, slice, `Vec`, or rank-1 tensor: `object[index]`.
+    Index {
+        object: Box<Expr>,
+        index: Box<Expr>,
+        span: Span,
+    },
+    /// One element of a tensor named by every axis: `object[i, j]`.
+    TensorIndex {
+        object: Box<Expr>,
+        indices: Vec<TensorIndexArg>,
+        span: Span,
+    },
+    /// The referent of a mutable reference: `*pointer`.
+    Deref { pointer: Box<Expr>, span: Span },
+}
+
+impl Place {
+    pub fn span(&self) -> Span {
+        match self {
+            Place::Var(ident) => ident.span,
+            Place::Field { span, .. }
+            | Place::Index { span, .. }
+            | Place::TensorIndex { span, .. }
+            | Place::Deref { span, .. } => *span,
+        }
+    }
+
+    /// The binding the place is rooted at, or `None` when the root is a temporary
+    /// or a dereference of one. Mutability, borrow tracking, move state and pool
+    /// residency are all keyed by binding, so every stage asks for this.
+    pub fn root(&self) -> Option<&Identifier> {
+        match self {
+            Place::Var(ident) => Some(ident),
+            Place::Field { object, .. }
+            | Place::Index { object, .. }
+            | Place::TensorIndex { object, .. }
+            | Place::Deref {
+                pointer: object, ..
+            } => expr_root(object),
+        }
+    }
+
+    /// The expression that reads the place. A compound assignment desugars through
+    /// it, and any stage that needs the place's type types this instead.
+    pub fn to_expr(&self) -> Expr {
+        match self {
+            Place::Var(ident) => Expr::Identifier(ident.clone()),
+            Place::Field {
+                object,
+                field,
+                span,
+            } => Expr::FieldAccess {
+                object: object.clone(),
+                field: field.clone(),
+                span: *span,
+            },
+            Place::Index {
+                object,
+                index,
+                span,
+            } => Expr::Index {
+                object: object.clone(),
+                index: index.clone(),
+                span: *span,
+            },
+            Place::TensorIndex {
+                object,
+                indices,
+                span,
+            } => Expr::TensorIndex {
+                object: object.clone(),
+                indices: indices.clone(),
+                span: *span,
+            },
+            Place::Deref { pointer, span } => Expr::Deref {
+                operand: pointer.clone(),
+                span: *span,
+            },
+        }
+    }
+}
+
+/// The binding an expression bottoms out at, peeling the projections that keep a
+/// place rooted where it started.
+fn expr_root(expr: &Expr) -> Option<&Identifier> {
+    match expr {
+        Expr::Identifier(ident) => Some(ident),
+        Expr::Paren(inner, _) => expr_root(inner),
+        Expr::FieldAccess { object, .. }
+        | Expr::Index { object, .. }
+        | Expr::TensorIndex { object, .. }
+        | Expr::TupleIndex { object, .. }
+        | Expr::Deref {
+            operand: object, ..
+        } => expr_root(object),
+        _ => None,
+    }
+}
+
 /// Statement AST nodes
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
@@ -38,20 +154,15 @@ pub enum Stmt {
         mutable: bool,
         span: Span,
     },
-    Assignment {
-        target: Identifier,
-        value: Expr,
-        span: Span,
-    },
-    /// `target OP= value`, kept distinct from the plain assignment it usually
-    /// desugars to.
+    /// `place = value`, or `place OP= value` when `op` is `Some`.
     ///
-    /// The choice between the desugaring and an in-place update is type-directed
-    /// (a type implementing the matching `*Assign` trait takes the in-place path),
-    /// and the parser has no types, so the node survives into the checker.
-    CompoundAssignment {
-        target: Identifier,
-        op: BinaryOp,
+    /// The compound form is kept as written rather than desugared in the parser:
+    /// the choice between `place = place OP value` and an in-place update is
+    /// type-directed (a type implementing the matching `*Assign` trait takes the
+    /// in-place path), and the parser has no types.
+    Assign {
+        place: Place,
+        op: Option<BinaryOp>,
         value: Expr,
         span: Span,
     },
@@ -144,32 +255,6 @@ pub enum Stmt {
     /// present (`continue outer`).
     Continue {
         label: Option<Identifier>,
-        span: Span,
-    },
-    /// Field assignment on a struct binding: `object.field = value`
-    FieldAssignment {
-        object: Identifier,
-        field: Identifier,
-        value: Expr,
-        span: Span,
-    },
-    /// Assignment through a mutable reference: `*pointer = value`.
-    ///
-    /// `pointer` is the reference expression being dereferenced (the `r` in
-    /// `*r = value`); the value is stored at the location it points at. Requires
-    /// `pointer` to have a `&mut T` type; enforced in semantic analysis.
-    DerefAssignment {
-        pointer: Expr,
-        value: Expr,
-        span: Span,
-    },
-    /// Array element assignment `target[index] = value`. `target` is a
-    /// mutable array binding; `index` is an integer. Out-of-bounds access panics
-    /// in debug builds.
-    IndexAssignment {
-        target: Identifier,
-        index: Expr,
-        value: Expr,
         span: Span,
     },
     /// `val PATTERN = value else |binding| { ... }`: bind a refutable pattern or

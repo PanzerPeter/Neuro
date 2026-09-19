@@ -150,26 +150,12 @@ impl<'ctx> CodegenContext<'ctx> {
     /// reaches the borrowed buffer, so the owning array or `Vec` sees it.
     pub(crate) fn codegen_slice_index_assignment(
         &mut self,
-        target: &str,
+        object: &HirExpr,
         target_ty: &Type,
         index: &HirExpr,
         value: &HirExpr,
     ) -> CodegenResult<()> {
-        let fat = self
-            .variables
-            .get(target)
-            .copied()
-            .ok_or_else(|| CodegenError::UndefinedVariable(target.to_string()))?;
-        let element_ty = match target_ty.referent() {
-            Type::Slice(element) => (**element).clone(),
-            other => {
-                return Err(CodegenError::InternalError(format!(
-                    "slice index assignment target is not a slice: {:?}",
-                    other
-                )))
-            }
-        };
-        let (base, len) = self.load_slice_parts(fat)?;
+        let (base, element_ty, len) = self.slice_source(object, target_ty)?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let slot = self.slice_element_ptr(base, &element_ty, len, index, index.span.start)?;
         let val = self.codegen_expr(value)?;
@@ -177,6 +163,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder
             .build_store(slot, val)
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.mark_moved_for_drop(value);
         Ok(())
     }
 
@@ -373,31 +360,6 @@ impl<'ctx> CodegenContext<'ctx> {
                 other
             ))),
         }
-    }
-
-    /// Split a slice value held in a stack slot back into its pointer and length.
-    /// Used by element assignment, whose target is a named `&mut [T]` binding.
-    fn load_slice_parts(
-        &mut self,
-        slot: PointerValue<'ctx>,
-    ) -> CodegenResult<(PointerValue<'ctx>, IntValue<'ctx>)> {
-        let fat_ty = self.slice_ref_type();
-        let fat = self
-            .builder
-            .build_load(fat_ty, slot, "sl.load")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-            .into_struct_value();
-        let base = self
-            .builder
-            .build_extract_value(fat, FIELD_PTR, "sl.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-            .into_pointer_value();
-        let len = self
-            .builder
-            .build_extract_value(fat, FIELD_LEN, "sl.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-            .into_int_value();
-        Ok((base, len))
     }
 
     /// Address of element `index` in a borrowed run, emitting the same debug-build

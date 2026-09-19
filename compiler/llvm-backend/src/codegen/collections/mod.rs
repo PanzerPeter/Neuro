@@ -197,10 +197,8 @@ impl<'ctx> CodegenContext<'ctx> {
         if matches!(obj_ty, Type::Reference { .. }) {
             return Ok(self.codegen_expr(object)?.into_pointer_value());
         }
-        if let neuro_hir::HirExprKind::Variable(name) = &object.kind {
-            if let Some(ptr) = self.variables.get(name).copied() {
-                return Ok(ptr);
-            }
+        if let Some(ptr) = self.held_place_ptr(object)? {
+            return Ok(ptr);
         }
         // A collection read out of a value another binding holds is not a temporary that
         // owns anything: the copy aliases the holder's buffer, which the holder's own

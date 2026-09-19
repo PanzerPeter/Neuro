@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 
 use ast_types::{
-    ClosureParam, EnumPatternPayload, Expr, InterpPart, Pattern, Stmt, TensorIndexArg,
+    ClosureParam, EnumPatternPayload, Expr, InterpPart, Pattern, Place, Stmt, TensorIndexArg,
 };
 use shared_types::Span;
 
@@ -198,18 +198,13 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             }
             fv.bound.insert(name.name.clone());
         }
-        Stmt::Assignment {
-            target,
-            value,
-            span,
-        }
-        | Stmt::CompoundAssignment {
-            target,
-            value,
-            span,
-            ..
+        Stmt::Assign {
+            place, value, span, ..
         } => {
-            fv.assigns.push((target.name.clone(), *span));
+            if let Some(root) = place.root() {
+                fv.assigns.push((root.name.clone(), *span));
+            }
+            collect_place(place, fv);
             collect_expr(value, fv);
         }
         Stmt::Return { value, .. } => {
@@ -284,29 +279,6 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             }
         }
         Stmt::Continue { .. } => {}
-        Stmt::FieldAssignment {
-            object,
-            value,
-            span,
-            ..
-        } => {
-            fv.assigns.push((object.name.clone(), *span));
-            collect_expr(value, fv);
-        }
-        Stmt::DerefAssignment { pointer, value, .. } => {
-            collect_expr(pointer, fv);
-            collect_expr(value, fv);
-        }
-        Stmt::IndexAssignment {
-            target,
-            index,
-            value,
-            span,
-        } => {
-            fv.assigns.push((target.name.clone(), *span));
-            collect_expr(index, fv);
-            collect_expr(value, fv);
-        }
         Stmt::ValElse {
             pattern,
             value,
@@ -450,6 +422,37 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
                 fv.bound.insert(p.name.name.clone());
             }
             collect_expr(body, fv);
+        }
+    }
+}
+
+/// Record the free variables the expressions inside an assignment place reach. The
+/// root binding is recorded as an assignment by the caller, not as a read.
+fn collect_place(place: &Place, fv: &mut FreeVars) {
+    match place {
+        Place::Var(_) => {}
+        Place::Field { object, .. }
+        | Place::Deref {
+            pointer: object, ..
+        } => collect_expr(object, fv),
+        Place::Index { object, index, .. } => {
+            collect_expr(object, fv);
+            collect_expr(index, fv);
+        }
+        Place::TensorIndex {
+            object, indices, ..
+        } => {
+            collect_expr(object, fv);
+            for index in indices {
+                match index {
+                    TensorIndexArg::Position(expr) => collect_expr(expr, fv),
+                    TensorIndexArg::Range { start, end, .. } => {
+                        collect_expr(start, fv);
+                        collect_expr(end, fv);
+                    }
+                    TensorIndexArg::FullAxis(_) => {}
+                }
+            }
         }
     }
 }

@@ -106,6 +106,40 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(handle)
     }
 
+    /// Lower `place[i, j] = value`, a store into one element of a tensor's buffer.
+    ///
+    /// The checker has already refused an index that leaves an axis standing, so every
+    /// axis here names a position and the address is the same `getelementptr` a read
+    /// computes. The DLPack handle is untouched: the write goes into the buffer it
+    /// already addresses, which is what keeps a raw pointer held elsewhere valid.
+    pub(crate) fn codegen_tensor_index_assignment(
+        &mut self,
+        object: &HirExpr,
+        axes: &[HirTensorAxis],
+        value: &HirExpr,
+        offset: usize,
+    ) -> CodegenResult<()> {
+        let source_ty = Type::from_hir(&object.ty);
+        let Type::Tensor { element, shape } = source_ty.referent().clone() else {
+            return Err(CodegenError::InternalError(
+                "a tensor index assignment does not carry a tensor receiver".to_string(),
+            ));
+        };
+        let shape = crate::types::static_extents(&shape)?;
+        let data = self.tensor_index_data(object, &source_ty)?;
+        let strides = row_major_strides(&shape);
+        let base = self.tensor_index_base(axes, &shape, &strides, offset)?;
+        let elem_llvm = self.get_any_llvm_type(&element)?;
+        let slot = self.tensor_element_ptr(elem_llvm, data, base)?;
+        let val = self.codegen_expr(value)?;
+        let val = self.coerce_if_needed(val, elem_llvm, &element)?;
+        self.builder
+            .build_store(slot, val)
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.mark_moved_for_drop(value);
+        Ok(())
+    }
+
     /// The flat element offset the index starts at: every position's contribution plus
     /// the first element of every surviving range.
     fn tensor_index_base(
