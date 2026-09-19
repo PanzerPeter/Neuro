@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-09-19
+
+Audit pass after the v3.0.0 milestone. No language surface changed.
+
+### Fixed
+
+- A `?` axis in a tensor's type reached `.map`, `.zip` and `.reduce` as though it were a
+  shape parameter, so the diagnostic called it one and told the reader to wait for an
+  instantiation that a dynamic extent never gets. The three traversals were the only tensor
+  methods that skipped the guard `.sum()`, `.sort()`, `.t()` and the rest all open with, and
+  `.sum()` and `.reduce(seed, f)` are the same fold under two spellings, so the two disagreed
+  on one receiver. All of them now report the dynamic extent and name the workable remedy,
+  while a genuine shape parameter still reports as a shape parameter.
+
+### Changed
+
+- `examples/showcase/attention_head.nr` reads the rescale's effect back per score with
+  `.zip`, which had shipped without appearing in any showcase program. The head's output
+  gains one line and its exit code is unchanged.
+- The tensor reference no longer offers a boolean mask as an available alternative to
+  `.filter` without saying what is missing. A `Tensor<bool, S>` is an ordinary tensor and
+  already selects as a `.zip` operand, but nothing produces a mask: a traversal may not
+  answer `bool`, and `a > b` is not defined on two tensors.
+
 ## [3.0.0] - 2026-09-19
 
 Phase 2 (Tensor Foundation & MLIR) is complete: every sub-phase 2A–2F has shipped. Phase 3

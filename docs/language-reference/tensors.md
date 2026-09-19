@@ -796,8 +796,11 @@ built from it.
 
 There is deliberately **no `.filter`**. A filter's output length depends on the values in
 the buffer, so its result would have no shape the type system can name, which is the whole
-point of a shape being part of the type. Use a boolean mask where the shape must survive,
-or a `Vec<T>` where a data-dependent length is genuinely what you want.
+point of a shape being part of the type. Use a `Vec<T>` where a data-dependent length is
+genuinely what you want. The shape-preserving alternative is a boolean mask, and while a
+`Tensor<bool, S>` is a tensor like any other and already selects as the second operand of a
+`.zip`, nothing yet produces one: a traversal may not answer `bool`, and `a > b` is not
+defined on two tensors, so a mask has to be written out by hand today.
 
 ## Dynamic shapes
 

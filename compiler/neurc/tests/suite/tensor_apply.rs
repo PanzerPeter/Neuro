@@ -348,3 +348,59 @@ func main() -> i32 {
         "unexpected diagnostics: {diagnostics}"
     );
 }
+
+/// A `?` axis is not a shape parameter: nothing later instantiates it to a number, so
+/// the traversals must name it the way every other extent-consuming method does rather
+/// than pointing at an instantiation that cannot happen. `.sum()` and `.reduce(seed, f)`
+/// are the same fold under two spellings, so a receiver one of them rejects must be
+/// rejected by the other with the same reason.
+#[test]
+fn a_traversal_over_a_dynamic_axis_reports_the_dynamic_extent() {
+    let source = r#"
+func fold(t: &Tensor<i32, [?, 3]>) -> i32 {
+    return t.reduce(0, |acc: i32, x: i32| -> i32 { acc + x })
+}
+
+func main() -> i32 {
+    val t: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+    return fold(&t)
+}
+"#;
+    let diagnostics = rejection("apply_dynamic_reduce.nr", source);
+    assert!(
+        diagnostics.contains("but an axis is `?`"),
+        "unexpected diagnostics: {diagnostics}"
+    );
+    assert!(
+        !diagnostics.contains("is a shape parameter"),
+        "a `?` axis must not be reported as a shape parameter: {diagnostics}"
+    );
+}
+
+#[test]
+fn map_and_zip_over_a_dynamic_axis_report_the_dynamic_extent() {
+    let source = r#"
+func scale(t: &Tensor<i32, [?, 3]>) -> i32 {
+    val doubled = t.map(|x: i32| -> i32 { x * 2 })
+    return 0
+}
+
+func pair(t: &Tensor<i32, [?, 3]>, o: &Tensor<i32, [?, 3]>) -> i32 {
+    val summed = t.zip(o, |a: i32, b: i32| -> i32 { a + b })
+    return 0
+}
+
+func main() -> i32 {
+    return 0
+}
+"#;
+    let diagnostics = rejection("apply_dynamic_map_zip.nr", source);
+    assert!(
+        diagnostics.contains("`.map` needs every extent of `Tensor<i32, [?, 3]>`"),
+        "unexpected diagnostics: {diagnostics}"
+    );
+    assert!(
+        diagnostics.contains("`.zip` needs every extent of `Tensor<i32, [?, 3]>`"),
+        "unexpected diagnostics: {diagnostics}"
+    );
+}

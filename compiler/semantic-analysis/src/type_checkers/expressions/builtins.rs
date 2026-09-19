@@ -247,6 +247,10 @@ impl TypeChecker {
             // is recorded. Unlike a reduction's axis, every argument here is a value.
             (Type::Tensor { element, shape }, m) if is_apply_method(m) => {
                 let (element, shape) = (element.clone(), shape.clone());
+                let referent = recv.referent().clone();
+                if self.reject_dynamic_extent(&shape, &format!("`.{m}`"), &referent, call_span) {
+                    return Some(Type::Unknown);
+                }
                 Some(self.check_tensor_apply(&element, &shape, m, args, call_span))
             }
             // The order-based selections read the receiver for the same reason the

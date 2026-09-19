@@ -3,6 +3,7 @@ scores 1   = 0.0, 2.0, 0.0
 scores 2   = 1.0, 2.0, 0.0
 peak score  = 1.00
 probe       = 0.50
+mass cut    = 4.00 of 8.00
 context 0  = 2.50, 2.00
 context 1  = 0.00, 1.00
 context 2  = 0.50, 1.00

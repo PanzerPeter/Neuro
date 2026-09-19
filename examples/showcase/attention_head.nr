@@ -4,9 +4,9 @@
 // rather than in isolation:
 //   Einstein notation (`einsum`) for both contractions · the pipeline operator
 //   `|>` and the composition operator `>>` chaining the scaling stages · the
-//   functional traversals `.map` and `.reduce` applying that composition over a whole
-//   tensor · a struct holding tensor fields, moved into it at construction · named
-//   tensor dimensions on the annotations · reductions (`.sum()`, `.max()`) over a
+//   functional traversals `.map`, `.zip` and `.reduce` applying that composition over a
+//   whole tensor and reading its effect back per element · a struct holding tensor
+//   fields, moved into it at construction · named tensor dimensions on the annotations · reductions (`.sum()`, `.max()`) over a
 //   borrowed tensor · a borrowed receiver a method reads without moving · `for`-in
 //   over a range · string interpolation with the format mini-language.
 //
@@ -86,6 +86,14 @@ func main() -> i32 {
     // the pair: `|>` feeds a value through, `>>` builds the stage both of them use.
     val probe = raw[0, 0] |> rescale
     println("probe       = {probe:.2}")
+
+    // `.zip` walks two buffers at one index, which is how the rescale's effect is read
+    // back per score rather than in aggregate. The two operands are the same shape but
+    // need not be the same tensor's history: this one pairs a result with its input.
+    val removed: Tensor<f32, [3, 3]> = raw.zip(scaled, |before: f32, after: f32| -> f32 {
+        before - after
+    })
+    println("mass cut    = {removed.sum():.2} of {raw.sum():.2}")
 
     // Contraction two: the source-token axis is summed away, the output feature axis
     // arrives from the values.
