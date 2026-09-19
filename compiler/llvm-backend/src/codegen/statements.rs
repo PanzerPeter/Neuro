@@ -46,7 +46,8 @@ impl<'ctx> CodegenContext<'ctx> {
         // a binding initialized by a producer that always allocates owns that buffer and
         // frees it at scope exit, exactly as a collection binding frees its own.
         let drop_target = self.drop_target(ty).or_else(|| {
-            let initialized_from_allocation = init.is_some_and(Self::produces_owned_string);
+            let initialized_from_allocation =
+                init.is_some_and(|expr| self.produces_owned_string(expr));
             (initialized_from_allocation && matches!(Type::from_hir(ty), Type::String))
                 .then_some(DropTarget::HeapString)
         });
@@ -99,6 +100,11 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.register_local_drop(name, alloca, DropTarget::HeapString)?;
             } else {
                 self.register_owned_binding(name, alloca, &target_sem)?;
+                // A `string` position the holder just took a fresh buffer into is armed
+                // from the initializer for the same reason: its type proves nothing.
+                if let Some(expr) = init {
+                    self.arm_stored_string_positions(name, &[], expr)?;
+                }
             }
         }
 
@@ -227,6 +233,7 @@ impl<'ctx> CodegenContext<'ctx> {
         if let Some((flag_ptr, target)) = rearm {
             self.rearm_drop_flag(flag_ptr, &target, value)?;
             self.rearm_held_drop_flags(name)?;
+            self.arm_stored_string_positions(name, &[], value)?;
         }
 
         Ok(())

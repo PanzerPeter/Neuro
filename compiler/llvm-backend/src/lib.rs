@@ -236,6 +236,11 @@ fn build_module<'ctx>(
     codegen_ctx.set_drop_types(drop_types);
     codegen_ctx.set_pool_aware_types(pool_aware_types);
     codegen_ctx.set_consuming_self_methods(consuming_self_methods);
+    // Read the two call-boundary facts about owned `string` buffers off the whole
+    // program: they cannot be derived at a call site, where the callee's body is out of
+    // view. Cheap and unconditional, because the analysis is a single walk and answers
+    // `false` for a program that never calls anything returning or taking a `string`.
+    codegen_ctx.set_string_ownership(codegen::string_ownership::analyze(items));
     codegen_ctx.set_trait_methods(trait_methods);
 
     // Supply source so panic-family builtins can render `file:line:col` in their

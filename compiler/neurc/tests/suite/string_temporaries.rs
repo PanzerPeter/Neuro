@@ -221,3 +221,144 @@ func main() -> i32 {
         .expect("compile/run failed");
     assert_eq!(exit, 12);
 }
+
+/// The holder rule, over a loop: a struct field takes ownership of the buffer stored
+/// into it, and the holder's destruction at the end of each iteration releases it. Held
+/// by nobody, this is one leaked buffer per round.
+#[test]
+fn a_struct_field_releases_the_buffer_it_was_given() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"
+struct Line {{ text: string, n: u64 }}
+
+func main() -> i32 {{
+    val a = "{PAYLOAD}"
+    mut i: u32 = 0
+    mut n: u64 = 0
+    while i < {LEAK_ROUNDS} {{
+        val line = Line {{ text: a + a, n: 2 }}
+        n = n + line.text.len()
+        i = i + 1
+    }}
+    if n != {} {{
+        return 91
+    }}
+    0
+}}
+"#,
+        u64::from(LEAK_ROUNDS) * WIDTH * 2
+    );
+    let exit = test
+        .compile_and_run("field_release.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 0);
+}
+
+/// A field that is reassigned releases what it displaces, and takes on the replacement
+/// only when the replacement allocated. The literal round must leave the field pointing
+/// at `.rodata` with nothing armed, or the next round frees `.rodata`.
+#[test]
+fn a_reassigned_field_releases_the_buffer_it_displaces() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"
+struct Line {{ text: string }}
+
+func main() -> i32 {{
+    val a = "{PAYLOAD}"
+    mut line = Line {{ text: a + a }}
+    mut i: u32 = 0
+    mut n: u64 = 0
+    while i < {LEAK_ROUNDS} {{
+        line.text = a + a
+        n = n + line.text.len()
+        line.text = "short"
+        n = n + line.text.len()
+        i = i + 1
+    }}
+    if n != {} {{
+        return 91
+    }}
+    0
+}}
+"#,
+        u64::from(LEAK_ROUNDS) * (WIDTH * 2 + 5)
+    );
+    let exit = test
+        .compile_and_run("field_reassign_release.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 0);
+}
+
+/// A function that allocates on every return path hands the buffer to its caller, which
+/// is the only place that can release it. The literal-returning sibling in the same
+/// program must stay borrowed: releasing its result would hand `.rodata` to `free`.
+#[test]
+fn a_returned_buffer_is_released_by_its_caller() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"
+func doubled(s: &string) -> string {{
+    return s + s
+}}
+
+func fixed() -> string {{
+    return "borrowed"
+}}
+
+func main() -> i32 {{
+    val a = "{PAYLOAD}"
+    mut i: u32 = 0
+    mut n: u64 = 0
+    while i < {LEAK_ROUNDS} {{
+        val built = doubled(&a)
+        n = n + built.len() + fixed().len()
+        i = i + 1
+    }}
+    if n != {} {{
+        return 91
+    }}
+    0
+}}
+"#,
+        u64::from(LEAK_ROUNDS) * (WIDTH * 2 + 8)
+    );
+    let exit = test
+        .compile_and_run("returned_release.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 0);
+}
+
+/// A buffer handed to a parameter the callee only reads is dead the moment the call
+/// returns, so the caller releases it there.
+#[test]
+fn an_argument_a_callee_only_reads_is_released_at_the_call() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"
+func width(s: string) -> u64 {{
+    return s.len()
+}}
+
+func main() -> i32 {{
+    val a = "{PAYLOAD}"
+    mut i: u32 = 0
+    mut n: u64 = 0
+    while i < {LEAK_ROUNDS} {{
+        n = n + width(a + a)
+        i = i + 1
+    }}
+    if n != {} {{
+        return 91
+    }}
+    0
+}}
+"#,
+        u64::from(LEAK_ROUNDS) * WIDTH * 2
+    );
+    let exit = test
+        .compile_and_run("argument_release.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 0);
+}

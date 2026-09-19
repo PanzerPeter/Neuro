@@ -19,9 +19,11 @@ forms share the same `{ ptr, i64 }` ABI, so consumers cannot tell them apart. An
 `string` (the result of `+`, of interpolation, or of `String::to_string`) is owned by no binding
 the drop machinery tracks, so it is released at the consumer that reads it instead: a `+` or `==`
 operand, a `.len()` receiver, a `push_str` argument, a `println` argument, an interpolation hole,
-or a statement whose value nothing reads. One that escapes into a position able to store it (a
-collection element, a struct field, a by-value argument, a return value) is still released by
-nobody and leaks; see the [memory model](memory-model.md). A
+or a statement whose value nothing reads. One STORED into a position that outlives the
+expression is released by the holder instead: a struct field, an array or tuple element, a
+function's return value, and an argument to a parameter the callee only reads. A collection
+element is the one storing position still released by nobody, because an element read hands out
+an alias into the collection; see the [memory model](memory-model.md). A
 [`String`](#growable-strings-string) builder is different: it *is* a tracked binding, so its
 buffer is freed at scope exit.
 

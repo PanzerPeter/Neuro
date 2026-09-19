@@ -19,6 +19,9 @@ for moves and reassignment, [Control Flow](control-flow.md#pool-blocks) for `poo
 | Owners held inside a destroyed value | A struct field, array or tuple element, enum payload or newtype inner value goes back with the value that holds it |
 | A value moved out of a position | Destroyed on the path it moved to, never twice |
 | Allocations inside a `pool` block | One bump region, released in reverse order at the closing brace. A type with a destructor implements `PoolAware` to live in one |
+| A heap `string` stored into a struct field, array element or tuple element | With the holder, when the store into that position provably allocated |
+| A heap `string` a function returns | By the caller, when every one of the function's return paths allocates |
+| A heap `string` passed by value to a parameter the callee only reads | At the call it was built for |
 
 An anonymous heap `string` (what `+`, interpolation and `String::to_string` produce) belongs to
 no binding, so it is released at the consumer that reads and discards it: a `+` or `==` operand,
@@ -28,12 +31,21 @@ growing one.
 
 ## What still leaks
 
-A heap `string` that escapes into a position able to store it: a collection element, a struct
-field, a by-value call argument, or a function's return value.
+A heap `string` stored as a **collection element**: `v.push(a + b)`, or a map value. A
+collection copies a `string` in and out as a plain fat pointer, so an element read hands out an
+alias, and releasing the element would leave that alias dangling.
 
-Those are the positions where releasing would hand out a dangling pointer instead, so the
-ownership test answers conservatively. Freeing a `.rodata` literal, or a buffer something else
-still holds, is a worse failure than holding one.
+The storing positions above are covered only where the compiler can *prove* who owns the buffer.
+Three shapes it cannot prove, each leaking one buffer rather than dangling one:
+
+- a holder a call built (`val e = wrap(a + b)`), because the call says nothing about which of
+  its positions own what;
+- a function with one return path that hands back a literal, which disqualifies the whole
+  function;
+- a parameter the callee may store, return, or write through a reference.
+
+Freeing a `.rodata` literal, or a buffer something else still holds, is a worse failure than
+holding one, so every unproven case answers the same way.
 
 A `match` arm that binds an enum payload also disowns the whole scrutinee, so a variant the arm
 did not take is not destroyed.

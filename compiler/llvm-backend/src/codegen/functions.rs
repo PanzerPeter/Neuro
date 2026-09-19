@@ -28,12 +28,14 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or_else(|| CodegenError::UndefinedFunction(func_name.to_string()))?;
 
         let mut arg_values = Vec::new();
+        let mut passed = Vec::new();
         for arg in args {
             let val = self.codegen_expr(arg)?;
             // A by-value argument moves an owned `Drop` place into the callee, which
             // now owns it; clearing the flag prevents a double drop here. A
             // borrow (`&x`) is not an identifier place, so it is left untouched.
             self.mark_moved_for_drop(arg);
+            passed.push(val);
             arg_values.push(BasicMetadataValueEnum::from(val));
         }
 
@@ -41,6 +43,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_call(function, &arg_values, "calltmp")
             .map_err(|e| CodegenError::LlvmError(format!("failed to build call: {}", e)))?;
+
+        self.release_owned_arguments(func_name, args, &passed)?;
 
         Ok(call_result.try_as_basic_value().basic())
     }
@@ -97,11 +101,13 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut arg_values: Vec<BasicMetadataValueEnum> =
             vec![BasicMetadataValueEnum::from(self_arg)];
 
+        let mut passed = Vec::new();
         for arg in args {
             let val = self.codegen_expr(arg)?;
             // A by-value argument moves an owned `Drop` place into the callee; the
             // receiver's own ownership was settled above.
             self.mark_moved_for_drop(arg);
+            passed.push(val);
             arg_values.push(BasicMetadataValueEnum::from(val));
         }
 
@@ -109,6 +115,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_call(function, &arg_values, "calltmp")
             .map_err(|e| CodegenError::LlvmError(format!("failed to build method call: {}", e)))?;
+
+        self.release_owned_arguments(mangled_name, args, &passed)?;
 
         Ok(call_result.try_as_basic_value().basic())
     }

@@ -9,6 +9,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.48.0] - 2026-09-19
+
+### Added
+
+- Release for an owned `string` a holder stores. A buffer that reaches a position
+  outliving the expression that built it is now released by whoever stored it, in three
+  of the four positions that can:
+  - a **struct field, array element or tuple element**, at any nesting depth, when the
+    store into that position provably allocated. `Entry { label: a + b }` releases the
+    concatenation with the holder; `Entry { label: "lit" }` owns nothing. A field
+    assignment releases what it displaces and takes on the replacement on the same rule.
+  - a **function's return value**, when every one of the function's return paths
+    allocates. `val s = joined(a, b)` now owns the buffer and releases it at scope exit.
+  - a **by-value argument**, when the callee provably only reads the parameter.
+    `show(a + b)` releases the buffer at the call it was built for.
+- `codegen/string_ownership.rs` in `llvm-backend`: a whole-program pass, run once before
+  any body is generated, that answers the two ownership questions a call site cannot.
+  The return summary is a fixpoint over functions whose every exit allocates; the
+  parameter summary is a whitelist of the positions that copy a `string`'s bytes out.
+- `examples/showcase/stored_text.nr`: text stored into a field, an array and tuple
+  element, a call's argument and a call's return value, combined with structs and
+  `impl` methods, arrays and `for x in &a`, tuples, place expressions, the `String`
+  builder and interpolation.
+
+### Changed
+
+- A `string` position inside a holder now carries its own drop flag, named
+  `str.owned.flag` in the emitted IR and initialized `false`: the type of a `string`
+  proves nothing about ownership, so only a store that provably allocated arms it.
+
+### Fixed
+
+- `s = build()` re-arms a reassigned `string` binding when `build`'s every return path
+  allocates. It previously left the binding owning nothing, so the buffer was freed by
+  nobody.
+
+### Known limits
+
+- A `string` stored as a **collection element** (`v.push(a + b)`, a map value) is still
+  released by nobody. A collection copies a `string` in and out as a plain fat pointer,
+  so an element read hands out an alias and releasing the element would leave it
+  dangling; closing it means element reads copy, which is a separate change to the
+  collection surface.
+- Among the covered positions, three shapes stay unproven and leak rather than dangle: a
+  holder a call built, a function with one literal-returning path, and a parameter the
+  callee may store.
+
 ## [2.47.0] - 2026-09-19
 
 ### Added

@@ -201,7 +201,12 @@ impl<'ctx> CodegenContext<'ctx> {
         // holder has a prior value it can find.
         if let HirExprKind::Variable(object_name) = &object.kind {
             let object_name = object_name.clone();
-            self.drop_displaced_held_value(&object_name, &[field_name.to_string()])?;
+            let path = [field_name.to_string()];
+            self.drop_displaced_held_value(&object_name, &path)?;
+            // A `string` position the assignment hands a fresh buffer takes ownership
+            // of it here: the release above left every such position disarmed, because
+            // the type says nothing about what the incoming value owns.
+            self.arm_stored_string_positions(&object_name, &path, value)?;
         }
         self.builder
             .build_store(field_ptr, val)

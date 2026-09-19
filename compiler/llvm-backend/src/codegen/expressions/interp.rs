@@ -75,7 +75,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     let value = self.codegen_expr(expr)?;
                     // A hole holding a nested producer, `"{a + b}"`, hands us a buffer
                     // of our own, which a `string` rendering passes straight through.
-                    let incoming = if Self::produces_owned_string(expr) {
+                    let incoming = if self.produces_owned_string(expr) {
                         PieceOwner::Owned
                     } else {
                         PieceOwner::Borrowed

@@ -11,6 +11,7 @@ use source_location::SourceFile;
 use std::collections::HashMap;
 
 use crate::codegen::expressions::matches::SavedBinding;
+use crate::codegen::string_ownership::StringOwnership;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::type_mapping::TypeMapper;
 use crate::types::{CollectionKind, Type};
@@ -316,6 +317,13 @@ pub(crate) struct CodegenContext<'ctx> {
     /// caller must clear the receiver's drop flag or the value is released twice.
     pub(crate) consuming_self_methods: std::collections::HashSet<String>,
 
+    /// What crosses a call boundary about owned `string` buffers: which functions hand
+    /// one back, and which `string` parameters a callee only reads. Both are properties
+    /// of the whole program rather than of an expression, so they are read once before
+    /// any body is generated. Empty for a program with no `string`-typed calls, in which
+    /// case every query answers `false` and nothing is emitted.
+    pub(crate) string_ownership: StringOwnership,
+
     /// Names of structs implementing `PoolAware` (`impl PoolAware for T`). Inside a
     /// `pool` body a binding of such a type is registered with the arena instead of
     /// being dropped at its own scope exit. Empty for programs that declare no
@@ -391,6 +399,7 @@ impl<'ctx> CodegenContext<'ctx> {
             loop_targets: Vec::new(),
             struct_defs: HashMap::new(),
             struct_written_names: HashMap::new(),
+            string_ownership: StringOwnership::default(),
             const_values: HashMap::new(),
             overflow_checks: false,
             source: None,
@@ -519,6 +528,10 @@ impl<'ctx> CodegenContext<'ctx> {
         consuming_self_methods: std::collections::HashSet<String>,
     ) {
         self.consuming_self_methods = consuming_self_methods;
+    }
+
+    pub(crate) fn set_string_ownership(&mut self, string_ownership: StringOwnership) {
+        self.string_ownership = string_ownership;
     }
 
     pub(crate) fn set_pool_aware_types(

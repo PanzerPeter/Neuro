@@ -177,8 +177,9 @@ Every row is implemented, tested and usable today. Depth lives in the
 | **Toolchain** | `neurc check` / `run` / `compile` on inkwell 0.10 and LLVM 20, `--emit obj` for C and NumPy interop, buffered `print` / `println`, and a `panic` / `assert` runtime with located diagnostics |
 
 > **Alpha memory note.** Stack values, literals, the owning collections and reassigned bindings
-> are all reclaimed. What still leaks is a heap `string` that escapes into a position able to
-> store it: a collection element, a struct field, a by-value argument or a return value. Full
+> are all reclaimed, and so is a heap `string` stored into a struct field, an array or tuple
+> element, a call's argument or a call's return value. What still leaks is a heap `string` stored
+> as a collection element, and the storing positions whose owner the compiler cannot prove. Full
 > detail, and the reason the analysis answers conservatively, is in the
 > [memory model](docs/language-reference/memory-model.md). Completing it is sub-phase 2E below.
 

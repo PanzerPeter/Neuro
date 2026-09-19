@@ -120,7 +120,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // the allocation and the free sit in the same block with nothing between them
         // that could escape it. A borrowed argument (a literal, a variable, a slice)
         // answers `false` here and is left alone.
-        let owns_argument = Self::produces_owned_string(text);
+        let owns_argument = self.produces_owned_string(text);
 
         let emit = self.get_or_build_emit()?;
         let text_args: [BasicMetadataValueEnum; 2] = [ptr.into(), len.into()];

@@ -171,6 +171,7 @@ showcase/sensor_windows.nr           85
 showcase/shape_traits.nr             161
 showcase/simulation.nr               2
 showcase/status_report.nr            34
+showcase/stored_text.nr              95
 showcase/stream_pipeline.nr          189
 showcase/telemetry/main.nr           75
 showcase/telemetry/report/format.nr  module

@@ -156,10 +156,10 @@ the `len` contract). The frontend types the result as owned `String` even when a
 The fat pointer describes a `.rodata` literal and a `malloc`'d buffer identically, so ownership
 cannot be read off a value at runtime. It is decided at compile time instead, by
 `produces_owned_string` (`drops.rs`): an expression owns its buffer only if it is an
-`InterpString`, a `+` yielding `string`, or `String::to_string`: the producers that allocate
-unconditionally. Everything else (a literal, a variable, a `slice`, a value returned by a user
-function that could have returned either) answers `false` and is never freed. The asymmetry is
-deliberate: a missed `true` leaks a buffer, a wrong `true` hands `.rodata` to `free`.
+`InterpString`, a `+` yielding `string`, `String::to_string`, or a call to a function
+`codegen/string_ownership.rs` proved allocates on every return path. Everything else (a literal,
+a variable, a `slice`) answers `false` and is never freed. The asymmetry is deliberate: a missed
+`true` leaks a buffer, a wrong `true` hands `.rodata` to `free`.
 
 Consumers act on that answer in one of two ways. A consumer that keeps the value registers an
 owner for it: `codegen_var_decl` registers a `string` binding whose initializer owns its buffer as
@@ -176,13 +176,34 @@ Reassigning a registered binding releases the buffer it displaces and then re-de
 the assigned expression, so `s = s + "!"` frees the old buffer and keeps the new one while
 `s = "literal"` frees the old buffer and leaves the binding owning nothing.
 
-**Known limits**: a heap string that escapes into a collection, a struct field, a by-value call
-argument, or a function's return value is still owned by nothing and leaks (the conservative
-answer, not a regression). Those are exactly the positions that may STORE the fat pointer, so
-releasing at them would hand out a dangling pointer instead of leaking one buffer. A binding
-reassigned from another `string` binding is the same case: the source's flag is cleared by the move
-and the destination re-arms only for a producer that provably allocates, so the buffer outlives
-both.
+A third kind of consumer STORES the fat pointer somewhere that outlives the expression. Ownership
+then belongs to the storage, and is tracked one of three ways:
+
+- **A position inside a holder** (a struct field, an array or tuple element, one of those nested).
+  `plan_held_drops` plans a `DropTarget::HeapString` held entry for every `string` position, with
+  its flag DISARMED — the type proves nothing. `arm_stored_string_positions` arms the positions the
+  initializer or field assignment stored a provable allocation into, walking the aggregate literal
+  in step with the held paths. A holder's move or its field's move clears those flags exactly as it
+  clears any other. An enum payload gets no such entry: its slot is destroyed under a tag switch
+  with no flag to guard it.
+- **A function's return value.** `codegen/string_ownership.rs` reads every body once, before any is
+  generated, and collects the functions whose every exit (each `return`, plus an expression tail)
+  allocates. The set is a fixpoint, because one producer can be another's only return path; it
+  starts empty and grows, so a recursive cycle never enters it. A name a local binding shadows is
+  excluded, since `codegen_call_dispatch` may send that call through the indirect path.
+- **A by-value argument.** The same pass records the `string` parameters whose callee provably only
+  READS them, by a whitelist of positions that copy the bytes out (a `print`/`println` argument, an
+  interpolation hole, a binary operand, a `.len()` receiver, a `push_str` argument). Every other
+  occurrence is a retention. `release_owned_arguments` then frees the buffer right after the call,
+  where the callee's frame is already gone.
+
+**Known limits**: a collection element (`v.push(a + b)`, a map value) is still released by nobody,
+because a collection copies a `string` in and out as a plain fat pointer and an element read hands
+out an alias that releasing would dangle. Among the covered positions, three shapes stay unproven
+and leak: a holder a call built (the call proves nothing about its positions), a function with one
+literal-returning path, and a parameter the callee may store. A binding reassigned from another
+`string` binding is the same case: the source's flag is cleared by the move and the destination
+re-arms only for a producer that provably allocates.
 
 ## Struct ABI
 User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding:

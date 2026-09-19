@@ -632,6 +632,19 @@ fn guard_and_overflow_branches_are_weighted() {
     );
 }
 
+/// The `string` positions of `name` that a store actually armed.
+///
+/// A position is PLANNED for every `string` a holder has, and its release is emitted
+/// under a flag that starts `false`, so counting releases would count the ones that can
+/// never run. What a program owns is what it armed.
+fn armed_string_positions(ir: &str, name: &str) -> usize {
+    let armed = format!(
+        "store i1 true, ptr %{}",
+        crate::codegen::drops::STRING_POSITION_FLAG
+    );
+    function_body(ir, name).matches(&armed).count()
+}
+
 /// Calls to `free` in the body of the function named `name`.
 /// Releases emitted in `name`. Every release goes through the arena wrapper,
 /// which forwards to libc for anything the pool arena does not own.
@@ -1342,5 +1355,227 @@ fn the_builder_copy_out_is_an_owned_string_and_a_user_method_is_not() {
     assert!(
         !body.contains("call void @__neuro_release("),
         "a user `to_string` returns a literal and owns nothing:\n{body}"
+    );
+}
+
+/// A holder owns what it holds, and a `string` position is a position like any
+/// other once the store into it proved it allocated. The type cannot prove it, so the
+/// literal in the same field must arm nothing.
+#[test]
+fn a_struct_field_releases_the_buffer_stored_into_it() {
+    let owned = r#"
+        struct Label { text: string, id: i32 }
+
+        func main() -> i32 {
+            val a = "left"
+            val b = "right"
+            val l = Label { text: a + b, id: 1 }
+            return l.text.len() as i32
+        }
+    "#;
+    let ir = module_ir(owned, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert_eq!(
+        free_calls(&ir, "main"),
+        1,
+        "the field's buffer is released once, when the holder is destroyed:\n{body}"
+    );
+    assert_eq!(
+        armed_string_positions(&ir, "main"),
+        1,
+        "the field's position is armed by the store that allocated into it:\n{body}"
+    );
+
+    // A disarmed position still emits its flag-guarded release, so the literal case is
+    // read off the flag rather than off the call: the position is planned and never
+    // armed, and the release under it can therefore never run.
+    let borrowed = r#"
+        struct Label { text: string, id: i32 }
+
+        func main() -> i32 {
+            val l = Label { text: "static", id: 1 }
+            return l.text.len() as i32
+        }
+    "#;
+    assert_eq!(
+        armed_string_positions(&module_ir(borrowed, OptimizationLevelSetting::O0), "main"),
+        0,
+        "a `.rodata` literal in the same field is owned by nobody and freed by nobody"
+    );
+}
+
+/// The positions an aggregate exposes are uniform, so an array element and a
+/// tuple element take the same treatment as a field, at any depth.
+#[test]
+fn an_element_and_a_nested_field_release_their_buffers() {
+    let source = r#"
+        struct Inner { text: string }
+        struct Outer { inner: Inner }
+
+        func main() -> i32 {
+            val a = "x"
+            val pair = (a + a, 7)
+            val cells = [a + a, a + a]
+            val nested = Outer { inner: Inner { text: a + a } }
+            return (pair.0.len() + cells[0].len() + nested.inner.text.len()) as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    assert_eq!(
+        free_calls(&ir, "main"),
+        4,
+        "one release per stored buffer: a tuple element, two array elements, and a \
+         field one level down:\n{}",
+        function_body(&ir, "main")
+    );
+}
+
+/// A field assignment is a drop site: the displaced buffer goes, and the
+/// incoming one is owned only if it was allocated.
+#[test]
+fn a_field_assignment_releases_what_it_displaces() {
+    let source = r#"
+        struct Label { text: string }
+
+        func main() -> i32 {
+            val a = "x"
+            mut l = Label { text: a + a }
+            l.text = a + a + a
+            return l.text.len() as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    // The displaced buffer, the intermediate the second concatenation built, and the
+    // final value the holder carries to its scope exit.
+    assert_eq!(
+        free_calls(&ir, "main"),
+        3,
+        "the displaced buffer and the replacement are both released:\n{body}"
+    );
+
+    let to_literal = r#"
+        struct Label { text: string }
+
+        func main() -> i32 {
+            val a = "x"
+            mut l = Label { text: a + a }
+            l.text = "static"
+            return l.text.len() as i32
+        }
+    "#;
+    let ir = module_ir(to_literal, OptimizationLevelSetting::O0);
+    assert_eq!(
+        armed_string_positions(&ir, "main"),
+        1,
+        "only the first store arms the field; the literal replacing it owns nothing:\n{}",
+        function_body(&ir, "main")
+    );
+}
+
+/// The caller of a function that allocates on every return path owns what it gets
+/// back, which is the one ownership question no expression at the call site can answer.
+#[test]
+fn a_call_that_allocates_on_every_path_hands_the_buffer_to_its_caller() {
+    let source = r#"
+        func joined(a: string, b: string) -> string {
+            return a + b
+        }
+
+        func main() -> i32 {
+            val s = joined("l", "r")
+            return s.len() as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    assert_eq!(
+        free_calls(&ir, "main"),
+        1,
+        "the caller releases the buffer at its own scope exit:\n{}",
+        function_body(&ir, "main")
+    );
+    assert_eq!(
+        free_calls(&ir, "joined"),
+        0,
+        "the callee released nothing: it handed the buffer over"
+    );
+
+    let one_borrowed_path = r#"
+        func maybe(a: string, flag: bool) -> string {
+            if flag {
+                return "static"
+            }
+            return a + a
+        }
+
+        func main() -> i32 {
+            val s = maybe("l", true)
+            return s.len() as i32
+        }
+    "#;
+    assert_eq!(
+        free_calls(
+            &module_ir(one_borrowed_path, OptimizationLevelSetting::O0),
+            "main"
+        ),
+        0,
+        "one path returning `.rodata` disqualifies the function: freeing it would abort"
+    );
+}
+
+/// A buffer handed to a parameter the callee only reads is dead when the call returns,
+/// so the caller releases it there.
+#[test]
+fn an_owned_argument_to_a_reading_parameter_is_released_after_the_call() {
+    let reads = r#"
+        func show(s: string) {
+            println(s)
+        }
+
+        func main() -> i32 {
+            val a = "x"
+            show(a + a)
+            return 0
+        }
+    "#;
+    let ir = module_ir(reads, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    let call = body.find("call void @show").expect("the call is emitted");
+    let release = body[call..]
+        .find("call void @__neuro_release(")
+        .expect("the argument is released after the call");
+    assert_eq!(
+        free_calls(&ir, "main"),
+        1,
+        "exactly one release, and it is the argument's:\n{body}"
+    );
+    assert!(release > 0, "the release follows the call:\n{body}");
+
+    let retains = r#"
+        struct Label { text: string }
+
+        func keep(s: string) -> Label {
+            return Label { text: s }
+        }
+
+        func main() -> i32 {
+            val a = "x"
+            val l = keep(a + a)
+            return l.text.len() as i32
+        }
+    "#;
+    let ir = module_ir(retains, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    let entry = &body[..body.find("\ndrop.run:").unwrap_or(body.len())];
+    assert!(
+        !entry.contains("call void @__neuro_release("),
+        "a callee that stores the parameter keeps the buffer alive past the call, so \
+         the caller must not release it there:\n{body}"
+    );
+    assert_eq!(
+        armed_string_positions(&ir, "main"),
+        0,
+        "nor at the holder it was stored into: the buffer reached the field through a \
+         call, which proves nothing about who owns it:\n{body}"
     );
 }

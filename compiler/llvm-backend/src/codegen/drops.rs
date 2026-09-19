@@ -24,6 +24,10 @@ use super::context::{CodegenContext, DropEntry, DropTarget, HeldDrop};
 /// Matched by name here the way the builder type itself is matched by name.
 const TO_OWNED_METHOD: &str = "to_string";
 
+/// The drop flag of a `string` position inside a holder. It is the one flag that
+/// starts `false`, so its name is what tells an armed position from a planned one.
+pub(crate) const STRING_POSITION_FLAG: &str = "str.owned.flag";
+
 impl<'ctx> CodegenContext<'ctx> {
     /// Open a new lexical scope. Paired with [`pop_drop_scope`].
     ///
@@ -74,8 +78,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 Some(DropTarget::EnumPayload(name.clone()))
             }
             // Owns nothing itself, but something inside it does: the work is in the
-            // held entries the registration plans alongside this target.
-            other if self.holds_owner(other) => Some(DropTarget::Aggregate),
+            // held entries the registration plans alongside this target. A `string`
+            // position counts here even though a `string` binding does not, because a
+            // position has storage of its own that the store into it can arm.
+            other if self.holds_owner(other) || self.holds_string_position(other) => {
+                Some(DropTarget::Aggregate)
+            }
             _ => None,
         }
     }
@@ -102,6 +110,20 @@ impl<'ctx> CodegenContext<'ctx> {
             Type::Tuple(elements) => elements.iter().any(|e| self.holds_owner(e)),
             _ => false,
         }
+    }
+
+    /// Whether a value of `ty` has a `string` position inside it: a struct field, an
+    /// array or tuple element, or one reached through those.
+    ///
+    /// Separate from [`holds_owner`] because the two answer different questions. A
+    /// typed owner is destroyed wherever the type appears, an enum payload slot
+    /// included, where no flag exists to guard it. A `string` position is destroyed only
+    /// when the store into it provably allocated, which needs the flag, so it is planned
+    /// where a flag can be planned and nowhere else.
+    fn holds_string_position(&self, ty: &Type) -> bool {
+        self.held_positions(ty).iter().any(|(_, position_ty)| {
+            matches!(position_ty, Type::String) || self.holds_string_position(position_ty)
+        })
     }
 
     /// Whether any variant of the named enum carries a payload field that owns something.
@@ -140,7 +162,11 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let holder_llvm = self.get_any_llvm_type(ty)?;
         for (index, (segment, position_ty)) in positions.into_iter().enumerate() {
-            if !self.holds_owner(&position_ty) {
+            let is_string = matches!(position_ty, Type::String);
+            if !is_string
+                && !self.holds_owner(&position_ty)
+                && !self.holds_string_position(&position_ty)
+            {
                 continue;
             }
             let position_ptr = self.aggregate_position_ptr(
@@ -150,6 +176,20 @@ impl<'ctx> CodegenContext<'ctx> {
                 &format!("held.{}.ptr", segment),
             )?;
             path.push(segment);
+            // A `string` position starts DISARMED: the type proves nothing, so the
+            // position owns a buffer only once a store that provably allocated has
+            // armed it. Every other target's type is the proof, so it starts armed.
+            if is_string {
+                let flag_ptr = self.disarmed_drop_flag()?;
+                out.push(HeldDrop {
+                    path: path.clone(),
+                    storage_ptr: position_ptr,
+                    flag_ptr,
+                    target: DropTarget::HeapString,
+                });
+                let _ = path.pop();
+                continue;
+            }
             if let Some(target) = self.drop_target_of(&position_ty) {
                 if !matches!(target, DropTarget::Aggregate) {
                     let flag_ptr = self.arm_drop_flag()?;
@@ -203,16 +243,35 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(flag_ptr)
     }
 
+    /// The same slot, initialized to `false`, for a position that owns nothing until a
+    /// store proves it does. The initializing store is in the entry block so a position
+    /// a conditional never writes still reads a definite `false` at scope exit.
+    ///
+    /// Named apart from [`arm_drop_flag`]'s slot because the two carry different claims:
+    /// this one says "not yet", and a `store i1 true` against it is the whole record of
+    /// which `string` positions a program actually owns.
+    fn disarmed_drop_flag(&mut self) -> CodegenResult<PointerValue<'ctx>> {
+        let bool_ty = self.context.bool_type();
+        let flag_ptr = self.entry_alloca(bool_ty, STRING_POSITION_FLAG)?;
+        self.builder
+            .build_store(flag_ptr, bool_ty.const_zero())
+            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        Ok(flag_ptr)
+    }
+
     /// Whether evaluating `expr` always yields a freshly `malloc`'d string buffer
     /// that nothing else aliases, making its consumer responsible for releasing it.
     ///
     /// Deliberately conservative: it answers `true` only for the producers that
-    /// allocate unconditionally. A `.rodata` literal, a variable, a `slice` borrowing
-    /// its source, and a value returned by a user function (which may have returned
-    /// either a literal or a heap buffer, indistinguishably) all answer `false` and are never
-    /// freed. The asymmetry is the point: a missed `true` leaks a buffer, while a wrong
-    /// `true` frees `.rodata` or double-frees, so only provable ownership counts.
-    pub(crate) fn produces_owned_string(expr: &HirExpr) -> bool {
+    /// allocate unconditionally. A `.rodata` literal, a variable and a `slice` borrowing
+    /// its source all answer `false` and are never freed. The asymmetry is the point: a
+    /// missed `true` leaks a buffer, while a wrong `true` frees `.rodata` or
+    /// double-frees, so only provable ownership counts.
+    ///
+    /// A call to a user function is the one answer that is not read off the expression:
+    /// the body decides, and [`crate::codegen::string_ownership`] has already read every
+    /// body in the program to say which functions allocate on every return path.
+    pub(crate) fn produces_owned_string(&self, expr: &HirExpr) -> bool {
         match &expr.kind {
             // `codegen_interp_string` concatenates every piece into one fresh buffer,
             // and does so unconditionally: even a hole-free interpolation allocates.
@@ -228,9 +287,10 @@ impl<'ctx> CodegenContext<'ctx> {
             // here as the `FieldAccess` callee a method call lowers to; a program that
             // declares its own `String` shadows the builder, and its receiver is then a
             // `Type::Struct` that this arm does not match.
-            HirExprKind::Call { callee, args } if args.is_empty() => match &callee.kind {
+            HirExprKind::Call { callee, args } => match &callee.kind {
                 HirExprKind::FieldAccess { object, field } => {
-                    field == TO_OWNED_METHOD
+                    args.is_empty()
+                        && field == TO_OWNED_METHOD
                         && matches!(
                             Type::from_hir(&object.ty).referent(),
                             Type::Collection {
@@ -239,6 +299,11 @@ impl<'ctx> CodegenContext<'ctx> {
                             }
                         )
                 }
+                // A function whose every return path allocates hands the buffer to its
+                // caller, which is the one storing position that no expression shape
+                // can settle. The summary excludes a name a local binding shadows, so a
+                // closure called through the indirect path is not mistaken for it.
+                HirExprKind::Variable(name) => self.string_ownership.returns_owned(name),
                 _ => false,
             },
             _ => false,
@@ -260,7 +325,7 @@ impl<'ctx> CodegenContext<'ctx> {
         expr: &HirExpr,
         fat_ptr: BasicValueEnum<'ctx>,
     ) -> CodegenResult<()> {
-        if !Self::produces_owned_string(expr) {
+        if !self.produces_owned_string(expr) {
             return Ok(());
         }
         let BasicValueEnum::StructValue(fat_ptr) = fat_ptr else {
@@ -279,6 +344,36 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| {
                 CodegenError::LlvmError(format!("failed to free a string temporary: {}", e))
             })?;
+        Ok(())
+    }
+
+    /// Release the buffer an owned `string` argument handed to `callee` once the call
+    /// has returned.
+    ///
+    /// The callee's frame dies before this point, so the only way the buffer can still
+    /// be reachable is if the callee put it somewhere that outlives the call: its return
+    /// value, or a place behind one of its reference parameters.
+    /// [`crate::codegen::string_ownership`] has read the body to rule both out, and
+    /// answers `false` for every shape it does not recognise, so an unanalysable callee
+    /// leaks the buffer rather than being handed a dangling one.
+    pub(crate) fn release_owned_arguments(
+        &mut self,
+        callee: &str,
+        args: &[HirExpr],
+        values: &[BasicValueEnum<'ctx>],
+    ) -> CodegenResult<()> {
+        for (index, arg) in args.iter().enumerate() {
+            if !self.string_ownership.param_is_read_only(callee, index) {
+                continue;
+            }
+            if !self.produces_owned_string(arg) {
+                continue;
+            }
+            let Some(value) = values.get(index) else {
+                continue;
+            };
+            self.release_string_temporary(arg, *value)?;
+        }
         Ok(())
     }
 
@@ -570,6 +665,10 @@ impl<'ctx> CodegenContext<'ctx> {
     /// already evaluated the new value, so the field may be read on the way to
     /// replacing itself. The storage the position addresses does not move, so re-arming
     /// is a flag store and needs no second plan.
+    ///
+    /// A `string` position is released here but left disarmed: `p.name = "lit"`
+    /// displaces an owner and takes on none, so what re-arms it is the incoming value's
+    /// own shape, through [`arm_stored_string_positions`].
     pub(crate) fn drop_displaced_held_value(
         &mut self,
         name: &str,
@@ -594,6 +693,9 @@ impl<'ctx> CodegenContext<'ctx> {
         let armed = self.context.bool_type().const_int(1, false);
         for (storage_ptr, flag_ptr, target) in pending {
             self.emit_one_drop(storage_ptr, flag_ptr, &target)?;
+            if matches!(target, DropTarget::HeapString) {
+                continue;
+            }
             self.builder
                 .build_store(flag_ptr, armed)
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
@@ -630,7 +732,7 @@ impl<'ctx> CodegenContext<'ctx> {
         value: &HirExpr,
     ) -> CodegenResult<()> {
         let owns_new_value = match target {
-            DropTarget::HeapString => Self::produces_owned_string(value),
+            DropTarget::HeapString => self.produces_owned_string(value),
             _ => true,
         };
         let bool_ty = self.context.bool_type();
@@ -643,8 +745,10 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Re-arm every held position of a reassigned binding, so scope exit releases what
     /// the incoming holder holds rather than what the released one held.
     ///
-    /// Unconditional, unlike [`rearm_drop_flag`]: a held position exists only where the
-    /// position's own type proves it owns something, which no assignment can change.
+    /// Unconditional for a position whose own type proves it owns something, which no
+    /// assignment can change. A `string` position is skipped and left disarmed: its
+    /// ownership comes from the expression stored into it, so
+    /// [`arm_stored_string_positions`] arms it from the incoming value instead.
     pub(crate) fn rearm_held_drop_flags(&mut self, name: &str) -> CodegenResult<()> {
         let flags: Vec<PointerValue<'ctx>> = self
             .drop_scopes
@@ -652,7 +756,14 @@ impl<'ctx> CodegenContext<'ctx> {
             .rev()
             .flat_map(|scope| scope.iter().rev())
             .find(|entry| entry.name == name)
-            .map(|entry| entry.held.iter().map(|held| held.flag_ptr).collect())
+            .map(|entry| {
+                entry
+                    .held
+                    .iter()
+                    .filter(|held| !matches!(held.target, DropTarget::HeapString))
+                    .map(|held| held.flag_ptr)
+                    .collect()
+            })
             .unwrap_or_default();
 
         let armed = self.context.bool_type().const_int(1, false);
@@ -662,6 +773,91 @@ impl<'ctx> CodegenContext<'ctx> {
                 .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         }
         Ok(())
+    }
+
+    /// Arm the `string` positions of `name` that `value` stored a freshly allocated
+    /// buffer into, so the holder's destruction releases them.
+    ///
+    /// Reads the holder's literal shape rather than its type: `P { name: a + b }` owns
+    /// the concatenation and `P { name: "lit" }` owns nothing, and only the expression
+    /// tells the two apart. A holder built any other way — returned by a call, read out
+    /// of another value, selected by an `if` — arms nothing, because the buffer behind
+    /// its positions may be one something else still owns.
+    pub(crate) fn arm_stored_string_positions(
+        &mut self,
+        name: &str,
+        prefix: &[String],
+        value: &HirExpr,
+    ) -> CodegenResult<()> {
+        let mut armed: Vec<Vec<String>> = Vec::new();
+        self.collect_armed_positions(value, &mut prefix.to_vec(), &mut armed);
+        if armed.is_empty() {
+            return Ok(());
+        }
+
+        let flags: Vec<PointerValue<'ctx>> = self
+            .drop_scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.iter().rev())
+            .find(|entry| entry.name == name)
+            .map(|entry| {
+                entry
+                    .held
+                    .iter()
+                    .filter(|held| matches!(held.target, DropTarget::HeapString))
+                    .filter(|held| armed.iter().any(|path| path == &held.path))
+                    .map(|held| held.flag_ptr)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let armed_flag = self.context.bool_type().const_int(1, false);
+        for flag_ptr in flags {
+            self.builder
+                .build_store(flag_ptr, armed_flag)
+                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// The paths under `value` that a provable allocation was stored into, walking the
+    /// aggregate literals in step with the path segments [`plan_held_drops`] assigned.
+    ///
+    /// A newtype contributes no segment: it is erased to its inner type at every other
+    /// point in the drop pass, so its positions are its inner type's.
+    fn collect_armed_positions(
+        &self,
+        value: &HirExpr,
+        path: &mut Vec<String>,
+        out: &mut Vec<Vec<String>>,
+    ) {
+        if matches!(Type::from_hir(&value.ty), Type::String) {
+            if self.produces_owned_string(value) {
+                out.push(path.clone());
+            }
+            return;
+        }
+        match &value.kind {
+            HirExprKind::StructLiteral { fields, .. } => {
+                for field in fields {
+                    path.push(field.name.clone());
+                    self.collect_armed_positions(&field.value, path, out);
+                    let _ = path.pop();
+                }
+            }
+            HirExprKind::ArrayLiteral { elements } | HirExprKind::TupleLiteral { elements } => {
+                for (index, element) in elements.iter().enumerate() {
+                    path.push(index.to_string());
+                    self.collect_armed_positions(element, path, out);
+                    let _ = path.pop();
+                }
+            }
+            HirExprKind::NewtypeConstruct { value: inner, .. } => {
+                self.collect_armed_positions(inner, path, out)
+            }
+            _ => {}
+        }
     }
 
     /// Address of an aggregate's `index`-th position, for a struct, tuple, or array

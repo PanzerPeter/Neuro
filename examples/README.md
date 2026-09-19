@@ -132,6 +132,7 @@ One line each. The program's own header comment is the full description.
 - [`shape_traits.nr`](showcase/shape_traits.nr): trait declarations and both dispatch forms together
 - [`simulation.nr`](showcase/simulation.nr): a tiny bit-flag state machine
 - [`status_report.nr`](showcase/status_report.nr): a formatted status report built from live readings
+- [`stored_text.nr`](showcase/stored_text.nr): text stored into a struct field, an array or tuple element, a call's argument and a call's return value, each released by whoever stored it
 - [`stream_pipeline.nr`](showcase/stream_pipeline.nr): the iteration protocol carrying a small stream pipeline
 - [`telemetry/main.nr`](showcase/telemetry/main.nr): multi-file compilation and `import` over prior features
 - [`transient_text.nr`](showcase/transient_text.nr): headings, rows and comparisons built from strings nothing ever binds, released where they are read
