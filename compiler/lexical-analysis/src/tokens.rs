@@ -288,6 +288,9 @@ pub enum TokenKind {
     Amp,
     #[token("||")]
     PipePipe,
+    // PipeGreater must precede Pipe so logos longest-match picks `|>` over `|`
+    #[token("|>")]
+    PipeGreater,
     #[token("|")]
     Pipe,
     #[token("^")]
@@ -441,6 +444,7 @@ impl Token {
             TokenKind::AmpAmp => "&&",
             TokenKind::Amp => "&",
             TokenKind::PipePipe => "||",
+            TokenKind::PipeGreater => "|>",
             TokenKind::Pipe => "|",
             TokenKind::Caret => "^",
             TokenKind::Tilde => "~",

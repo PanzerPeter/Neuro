@@ -568,6 +568,11 @@
           "match": "==|!=|<=|>="
         },
         {
+          "comment": "Pipeline `x |> f`. Listed ahead of the logical and bitwise rules so `|>` is claimed whole rather than as a bitwise `|` followed by a comparison `>`.",
+          "name": "keyword.operator.pipeline.neuro",
+          "match": "\\|>"
+        },
+        {
           "name": "keyword.operator.logical.neuro",
           "match": "&&|\\|\\|"
         },

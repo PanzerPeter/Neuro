@@ -82,6 +82,7 @@ mod operators;
 mod option_result;
 mod panic_runtime;
 mod pattern_matching;
+mod pipeline_operator;
 mod place_expressions;
 mod pool_blocks;
 mod print_builtins;

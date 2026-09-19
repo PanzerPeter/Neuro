@@ -782,6 +782,18 @@ impl Parser {
                 })
             }
 
+            // Pipeline `left |> target`: the left value becomes the target's first
+            // argument. Desugared here, so no later stage learns the
+            // operator exists. The right operand is parsed at `Pipeline` precedence,
+            // which makes the operator left-associative: a following `|>` ends the
+            // target and re-enters the loop with the call as its new left.
+            TokenKind::PipeGreater => {
+                self.advance(); // consume '|>'
+                self.skip_newlines();
+                let target = self.parse_expr(Precedence::Pipeline)?;
+                self.pipe_into(left, target)
+            }
+
             // Type casts
             TokenKind::As => {
                 self.advance(); // consume 'as'
@@ -883,9 +895,71 @@ impl Parser {
         }
     }
 
+    /// Build the call a `value |> target` pipeline stands for.
+    ///
+    /// The language admits exactly three spellings of `target`, and each is already a
+    /// callee shape the rest of the pipeline understands: a function name or
+    /// associated path becomes a plain call, a bound method `receiver.method`
+    /// becomes the ordinary method call `receiver.method(value)`, and a closure
+    /// literal is bound to a temporary first, because a call whose callee is a
+    /// closure *literal* is not a form any later stage accepts. Rejecting anything
+    /// else here is what keeps `x |> f(a)` a diagnostic about `|>` rather than a
+    /// type error about calling a non-callable.
+    fn pipe_into(&mut self, value: Expr, target: Expr) -> ParseResult<Expr> {
+        let span = value.span().merge(target.span());
+        match target {
+            Expr::Paren(inner, _) => self.pipe_into(value, *inner),
+
+            Expr::Identifier(_) | Expr::Path { .. } | Expr::FieldAccess { .. } => Ok(Expr::Call {
+                func: Box::new(target),
+                type_args: Vec::new(),
+                args: vec![value],
+                arg_labels: Vec::new(),
+                span,
+            }),
+
+            Expr::Closure { .. } => {
+                let tmp = Identifier {
+                    name: format!("__pipe_{}", self.next_pipe_id()),
+                    span: target.span(),
+                };
+                let call = Expr::Call {
+                    func: Box::new(Expr::Identifier(tmp.clone())),
+                    type_args: Vec::new(),
+                    args: vec![value],
+                    arg_labels: Vec::new(),
+                    span,
+                };
+                Ok(Expr::Block {
+                    stmts: vec![
+                        Stmt::VarDecl {
+                            name: tmp,
+                            ty: None,
+                            init: Some(target),
+                            mutable: false,
+                            span,
+                        },
+                        Stmt::Expr(call),
+                    ],
+                    span,
+                })
+            }
+
+            other => Err(ParseError::NotAPipelineTarget { span: other.span() }),
+        }
+    }
+
+    /// Allocate a unique id for a pipeline temporary.
+    fn next_pipe_id(&mut self) -> usize {
+        let id = self.pipe_counter;
+        self.pipe_counter += 1;
+        id
+    }
+
     /// Get the precedence of an operator token
     pub(super) fn get_precedence(&self, kind: &TokenKind) -> Precedence {
         match kind {
+            TokenKind::PipeGreater => Precedence::Pipeline,
             TokenKind::PipePipe => Precedence::LogicalOr,
             TokenKind::AmpAmp => Precedence::LogicalAnd,
             TokenKind::Pipe => Precedence::BitwiseOr,

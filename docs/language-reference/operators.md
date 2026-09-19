@@ -524,29 +524,69 @@ Runnable program: [`examples/operators/error_propagation.nr`](../../examples/ope
 
 When the reason for a failure should be handled rather than forwarded, use [`match`](control-flow.md), `??` for a fallback, or [`val-else`](control-flow.md#val-else-unwrap-or-leave-the-scope) to unwrap or leave the scope.
 
+## Pipeline Operator (`|>`)
+
+`x |> f` is `f(x)`. It exists so a chain of transformations reads top to bottom in the order the stages run, rather than inside out:
+
+```neuro
+val result = clamp_low(normalize(reading))      // read from the inside out
+
+val result = reading                            // the same thing, read downwards
+    |> normalize
+    |> clamp_low
+```
+
+The piped value becomes the **first** argument of the function on the right, so a stage taking further arguments needs one of the spellings below rather than a partially applied call.
+
+**The right-hand side is a function value, never a call.** Three spellings produce one:
+
+```neuro
+val a = reading |> normalize                       // a function name
+val b = reading |> scaler.apply                    // a bound method: scaler.apply(reading)
+val c = reading |> (|v: i32| -> i32 { v * v })     // a parenthesized closure literal
+```
+
+A binding of function type is a name like any other, so `val halve = |v: i32| -> i32 { v / 2 }` then `x |> halve` works too. Anything else is rejected where it is written:
+
+```
+error: the right of `|>` must be a function value: a function name, a bound method
+       `receiver.method`, or a parenthesized closure `(|x: T| ...)`
+```
+
+**Associativity**: left to right. `x |> f |> g` is `g(f(x))`, so each stage sees what the previous one produced.
+
+**Precedence**: the loosest binary operator in the language, so the whole expression on its left is what gets piped. `100 + 45 |> normalize` normalizes 145. Parenthesize when only part of the expression should flow: `100 + (45 |> normalize)`.
+
+**Line breaks**: a chain may put each `|>` at the start of its own line, as above. The operator continues the previous line, so no trailing marker is needed.
+
+**Ownership**: a stage takes its argument by value, so an owned `string`, a `Vec` or a tensor flows through a chain as readily as a scalar does; each intermediate is released once the stage after it has consumed it.
+
+Runnable program: [`examples/operators/pipeline.nr`](../../examples/operators/pipeline.nr).
+
 ## Operator Precedence
 
 From highest to lowest, matching the parser's Pratt ladder:
 
 | Level | Operators | Associativity | Example |
 |-------|-----------|---------------|---------|
-| 17 (highest) | `.` | L-to-R | `p.x` |
-| 16 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | L-to-R | `f(x)?`, `arr[i]` |
-| 15 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
-| 14 | `as` | L-to-R | `n as f64` |
-| 13 | `@` | L-to-R | `w @ x` |
-| 12 | `*`, `/`, `%` | L-to-R | `a * b`, `n % 2` |
-| 11 | `+`, `-` | L-to-R | `a + b`, `x - y` |
-| 10 | `<<` | L-to-R | `a << 4` |
-| 9 | `<`, `>`, `<=`, `>=` | L-to-R | `x < y` |
-| 8 | `==`, `!=` | L-to-R | `x == y` |
-| 7 | `&` | L-to-R | `a & mask` |
-| 6 | `^` | L-to-R | `a ^ b` |
-| 5 | `\|` | L-to-R | `a \| b` |
-| 4 | `&&` | L-to-R | `a && b` |
-| 3 | `\|\|` | L-to-R | `a \|\| b` |
-| 2 | `??` | R-to-L | `a ?? b ?? c` parses as `a ?? (b ?? c)` |
-| 1 (lowest) | `..`, `..=` | L-to-R | `1..=n` |
+| 18 (highest) | `.` | L-to-R | `p.x` |
+| 17 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | L-to-R | `f(x)?`, `arr[i]` |
+| 16 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
+| 15 | `as` | L-to-R | `n as f64` |
+| 14 | `@` | L-to-R | `w @ x` |
+| 13 | `*`, `/`, `%` | L-to-R | `a * b`, `n % 2` |
+| 12 | `+`, `-` | L-to-R | `a + b`, `x - y` |
+| 11 | `<<` | L-to-R | `a << 4` |
+| 10 | `<`, `>`, `<=`, `>=` | L-to-R | `x < y` |
+| 9 | `==`, `!=` | L-to-R | `x == y` |
+| 8 | `&` | L-to-R | `a & mask` |
+| 7 | `^` | L-to-R | `a ^ b` |
+| 6 | `\|` | L-to-R | `a \| b` |
+| 5 | `&&` | L-to-R | `a && b` |
+| 4 | `\|\|` | L-to-R | `a \|\| b` |
+| 3 | `??` | R-to-L | `a ?? b ?? c` parses as `a ?? (b ?? c)` |
+| 2 | `..`, `..=` | L-to-R | `1..=n` |
+| 1 (lowest) | `\|>` | L-to-R | `x \|> f \|> g` parses as `g(f(x))` |
 
 Comparison binds tighter than equality: `x < y == z` parses as `(x < y) == z`. There is no
 `>>` operator; right shift is the `.shr(n)` method because `>>` is reserved for function

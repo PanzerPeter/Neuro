@@ -86,6 +86,9 @@ pub enum ParseError {
     )]
     NotAPlace { op: String, span: Span },
 
+    #[error("the right of `|>` must be a function value: a function name, a bound method `receiver.method`, or a parenthesized closure `(|x: T| ...)`")]
+    NotAPipelineTarget { span: Span },
+
     #[error("lexical error: {0}")]
     LexError(#[from] LexError),
 }

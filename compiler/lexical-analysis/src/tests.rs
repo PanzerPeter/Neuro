@@ -540,6 +540,23 @@ fn tokenize_logical_operators() {
 }
 
 #[test]
+fn tokenize_pipeline_operator() {
+    // Longest match must claim `|>` ahead of `|`, and must not claim it across a
+    // space: `a | > b` is a bitwise-or followed by a comparison, whatever it means.
+    let result = tokenize("a |> f | > g").unwrap();
+    assert!(matches!(result[1].kind, TokenKind::PipeGreater));
+    assert!(matches!(result[3].kind, TokenKind::Pipe));
+    assert!(matches!(result[4].kind, TokenKind::Greater));
+}
+
+#[test]
+fn tokenize_zero_parameter_closure_is_not_a_pipeline() {
+    // `||` still wins over `|`, and neither is disturbed by the new token.
+    let result = tokenize("|| 1").unwrap();
+    assert!(matches!(result[0].kind, TokenKind::PipePipe));
+}
+
+#[test]
 fn tokenize_move_keyword() {
     // `move` is a keyword (closure capture), distinct from an identifier.
     let result = tokenize("move |x|").unwrap();

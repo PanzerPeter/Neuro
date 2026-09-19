@@ -34,6 +34,9 @@ Several tokens depend on that and will silently regress if reordered:
 - `+=` / `-=` / `*=` / `/=` / `%=` are single tokens, never operator-then-`=`.
 - `<<` is declared before `<`; `=>` is distinct from `=` then `>`; `??` stays one coalescing
   token, so `a ?? b` never lexes as two `?` propagations.
+- `|>` (pipeline) is declared before `|`, and does not collide with `||`: the three are
+  distinguished by length alone, so `a |> f`, `a | b` and `|| 1` each lex as written. The
+  pairing is only ever whole: `a | > b` stays a bitwise or and a comparison.
 - `TokenKind::Integer(u64)` and `IntegerSuffixToken::value` carry a literal's **magnitude**,
   not a signed value. No integer regex admits a sign, so `-1` is a `Minus` token followed by
   `Integer(1)` and the lexer never produces a negative payload. A `u64` is what makes both

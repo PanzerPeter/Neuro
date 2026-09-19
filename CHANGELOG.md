@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.50.0] - 2026-09-19
+
+### Added
+
+- **Pipeline operator `|>`.** `x |> f` is `f(x)`, so a chain of transformations reads
+  top to bottom in the order its stages run instead of inside out. The operator is
+  left-associative and binds looser than every other binary operator, so the whole
+  expression on its left is what gets piped, and a chain may put each `|>` at the
+  start of its own line.
+- The right of `|>` is a function value in any of its three spellings: a function
+  name, a bound method `receiver.method` (which becomes the ordinary method call),
+  or a parenthesized closure literal. A binding of function type works like a name.
+  A stage takes its argument by value, so an owned `string`, a `Vec` or a tensor
+  flows through a chain as readily as a scalar.
+- `examples/operators/pipeline.nr`, and a `|>` finale in
+  `examples/showcase/stream_pipeline.nr` combining the operator with the iterator
+  protocol, a bound method, a closure and string interpolation.
+
+### Changed
+
+- The operator costs nothing at runtime and nothing downstream: `|>` is desugared in
+  the parser into the call its target already stands for, so no AST node, type-checker
+  arm, HIR node or backend arm exists for it. A closure-literal target is the one
+  exception and is bound to a temporary first, because a call whose callee is a
+  closure literal is not a shape later stages accept.
+- A target that is not a function value (`x |> f(a)`, `x |> a + b`) is reported at the
+  operator, naming the three legal spellings, rather than surfacing later as a type
+  error about calling a non-callable.
+
+
 ## [2.49.0] - 2026-09-19
 
 ### Added

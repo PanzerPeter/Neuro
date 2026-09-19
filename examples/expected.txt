@@ -96,6 +96,7 @@ operators/error_propagation.nr     129
 operators/integer_methods.nr       0
 operators/null_coalesce.nr         75
 operators/operator_overloading.nr  24
+operators/pipeline.nr              195
 
 # --- control_flow: if, for, while, loop, match, iterators, panics, lints ----
 control_flow/control_flow.nr          31

@@ -6,7 +6,8 @@
 //   (`S: Iterator<Item = i32>`) · generic structs monomorphized per instance ·
 //   closures stored in a struct field · `@derive(Copy)` structs with `&mut self`
 //   methods · `Option` + `match` · `Vec<i32>` + `for`-in · string interpolation
-//   with the format mini-language.
+//   with the format mini-language · the pipeline operator `|>` over all three of
+//   its function-value spellings.
 //
 // The point is composition: a source, a transform, and a filter are three separate
 // types, each implementing `Iterator`, and a single `for` head drives the whole chain
@@ -36,6 +37,20 @@ impl Iterator for ReadingsIter {
         val sample = self.samples[self.position]
         self.position = self.position + 1
         Option::Some(sample)
+    }
+}
+
+impl Readings {
+    // A whole-container reduction, so it reads naturally as a pipeline stage taking
+    // the floor as its argument.
+    func total_above(&self, floor: i32) -> i32 {
+        mut sum = 0
+        for sample in self.samples {
+            if sample > floor {
+                sum = sum + sample
+            }
+        }
+        sum
     }
 }
 
@@ -113,6 +128,16 @@ impl<S: Iterator<Item = i32>> Iterator for Shaped<S> {
     }
 }
 
+// Two ordinary functions, used below as pipeline stages. Nothing marks them as such:
+// a function name is already a function value.
+func widen(total: i32) -> i32 {
+    total * 2
+}
+
+func describe(total: i32) -> string {
+    "piped total {total}"
+}
+
 func main() -> i32 {
     val readings = Readings { samples: [3, 8, 1, 12, 5, 9] }
 
@@ -182,6 +207,18 @@ func main() -> i32 {
         flagged = flagged + value
     }
     println("flagged {flagged} across the run")
+
+    // The same container driven by the pipeline operator instead of a `for` head.
+    // `value |> f` is `f(value)`: the chain reads top to bottom in the order the
+    // stages run, where the nested spelling `describe(widen(readings.total_above(4)))`
+    // has to be read inside out. All three spellings of a function value appear:
+    // a bound method, a free function, and a parenthesized closure literal.
+    val report = 4
+        |> readings.total_above
+        |> widen
+        |> (|total: i32| -> i32 { total - flagged })
+        |> describe
+    println("{report}")
 
     return raw_total + counted + kept_total + remainders + flagged
 }

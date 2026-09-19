@@ -312,22 +312,23 @@ Pratt parser's ladder exactly:
 
 | Level | Operators | Associativity | Description |
 |-------|-----------|---------------|-------------|
-| 16 (highest) | `.` | Left | Field / method access |
-| 15 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | Left | Postfix forms |
-| 14 | `-` (unary), `!`, `~` | Right | Negation, logical NOT, bitwise NOT |
-| 13 | `as` | Left | Type cast |
-| 12 | `*`, `/`, `%` | Left | Multiply, divide, modulo |
-| 11 | `+`, `-` | Left | Addition, subtraction |
-| 10 | `<<` | Left | Left shift |
-| 9 | `<`, `>`, `<=`, `>=` | Left | Comparison |
-| 8 | `==`, `!=` | Left | Equality |
-| 7 | `&` | Left | Bitwise AND |
-| 6 | `^` | Left | Bitwise XOR |
-| 5 | `\|` | Left | Bitwise OR |
-| 4 | `&&` | Left | Logical AND |
-| 3 | `\|\|` | Left | Logical OR |
-| 2 | `??` | Right | Null/error coalescing |
-| 1 (lowest) | `..`, `..=` | Left | Ranges |
+| 17 (highest) | `.` | Left | Field / method access |
+| 16 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | Left | Postfix forms |
+| 15 | `-` (unary), `!`, `~` | Right | Negation, logical NOT, bitwise NOT |
+| 14 | `as` | Left | Type cast |
+| 13 | `*`, `/`, `%` | Left | Multiply, divide, modulo |
+| 12 | `+`, `-` | Left | Addition, subtraction |
+| 11 | `<<` | Left | Left shift |
+| 10 | `<`, `>`, `<=`, `>=` | Left | Comparison |
+| 9 | `==`, `!=` | Left | Equality |
+| 8 | `&` | Left | Bitwise AND |
+| 7 | `^` | Left | Bitwise XOR |
+| 6 | `\|` | Left | Bitwise OR |
+| 5 | `&&` | Left | Logical AND |
+| 4 | `\|\|` | Left | Logical OR |
+| 3 | `??` | Right | Null/error coalescing |
+| 2 | `..`, `..=` | Left | Ranges |
+| 1 (lowest) | `\|>` | Left | Pipeline: `x \|> f` is `f(x)` |
 
 Comparison binds tighter than equality: `x < y == z` parses as `(x < y) == z`. There is no
 `>>` operator; right shift is the `.shr(n)` method because `>>` is reserved for function

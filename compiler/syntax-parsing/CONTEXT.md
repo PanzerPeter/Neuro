@@ -78,6 +78,16 @@ no types.
   `ArrayRest { exact: true }` as an arity assertion.
 - **Struct literal shorthand and functional update**: a field with no `: value` desugars to
   `field: field`; a trailing `..expr` sets `StructLiteral.base` and ends the field list.
+- **The pipeline operator**: `value |> target` becomes the call `target` already
+  stands for, so `|>` reaches no other stage and needs no AST node. `pipe_into`
+  (`parser/expressions.rs`) matches the target: an `Identifier` or `Path` becomes a plain
+  `Expr::Call`, a `FieldAccess` becomes the ordinary method call `receiver.method(value)`,
+  and a `Paren` is peeled and retried. A **closure literal** is the one target that cannot
+  be a callee directly: a call whose `func` is an `Expr::Closure` is a shape no later stage
+  accepts, so it is bound to a `__pipe_N` temporary in an `Expr::Block` and the binding is
+  called instead. Any other target is `ParseError::NotAPipelineTarget`, which is what keeps
+  `x |> f(a)` a diagnostic about `|>` rather than a type error about calling a non-callable
+  further down the pipeline.
 
 `newtype` is the deliberate counter-example: unlike a `type` alias it is a distinct nominal type,
 so it stays an `Item::Newtype`. Construction `Name(value)` reuses the call parse and `.0` reuses
@@ -329,7 +339,12 @@ adds to the unwrapped payload and `parse(s)?.field` reads a field of it. No new 
 right-to-left associativity by recursing on the right operand at `Precedence::Lowest`. `..` /
 `..=` sit at `Precedence::Range`, below `??`; `parse_for` parses its range start bound at
 `Precedence::Range` so the loop's own separator is not swallowed. Indexing `a[i]` is at call
-precedence.
+precedence. `|>` sits at `Precedence::Pipeline`, below `Range` and so below every other
+binary operator (Appendix B row 17): the whole expression on its left is what gets piped.
+Its target is parsed at `Precedence::Pipeline` too, which is where left-associativity comes
+from: a following `|>` ends the target and re-enters the loop with the call as its new left.
+The multi-line chain form puts the newline *before* the operator, and needs nothing
+extra: `|>` is not one of the four tokens the statement-boundary rule breaks on.
 
 ### Generics
 `parse_generic_params` returns `(Vec<GenericParam>, Vec<Identifier>)`: a leading `Lifetime`

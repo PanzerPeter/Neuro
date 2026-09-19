@@ -40,6 +40,10 @@ pub(crate) struct Parser {
     /// (`val (a, b) = e`) desugars to. Each `__destructure_N` name is unique
     /// within a parse so nested or repeated destructures never collide.
     pub(super) destructure_counter: usize,
+    /// Monotonic counter for the synthetic temporaries a pipeline into a closure
+    /// literal (`x |> (|y: T| ...)`) desugars to. Unique within a parse for the
+    /// same reason `destructure_counter` is.
+    pub(super) pipe_counter: usize,
 }
 
 impl Parser {
@@ -52,6 +56,7 @@ impl Parser {
             no_struct_lit: false,
             active_labels: Vec::new(),
             destructure_counter: 0,
+            pipe_counter: 0,
         }
     }
 
