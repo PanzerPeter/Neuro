@@ -342,6 +342,14 @@ compiler bug, not a diagnostic.
   constant. `.topk` lowers to `HirSortKind::TopK(k)` at `descending: true`, top-k being the
   head of the descending order, and its type is the `HirType::Tuple` of the values tensor and
   the `i32` index tensor. The receiver is read, not moved, so a borrowed one lowers here too.
+  Einstein notation lives in `tensor_einsum.rs`: `einsum("bij,bjk->bik", a, b)` is intercepted
+  in `lower_plain_call` AFTER the user-declared functions, so a program's own `einsum` shadows
+  it the way it shadows the panic and standard-output builtins. `lower_tensor_einsum` re-reads
+  the subscript literal (`split_subscripts`) rather than carrying anything over from the
+  checker, as this slice re-derives every resolved fact, and interns each letter to an index
+  into one extent table. What it emits is `HirExprKind::TensorEinsum` carrying only those
+  indices, so the notation stops existing here and no backend parses a string. The operands
+  are left alone rather than moved: a contraction reads them, so borrowed ones lower here too.
   Slicing and indexing live in `tensor_index.rs`: `lower_tensor_index` folds each range bound to
   the constant the checker already proved it to be (`HirTensorAxis::Range { start, end, reversed }`, with
   a `..` full axis becoming the whole extent and an inclusive range stopping one further on),

@@ -1,4 +1,4 @@
-//! Type-checking for the composition operator `f >> g` (§4.11).
+//! Type-checking for the composition operator `f >> g`.
 //!
 //! The chain's type is `(the first stage's parameter) -> (the last stage's return)`,
 //! and each stage's return type must be what the next one takes.

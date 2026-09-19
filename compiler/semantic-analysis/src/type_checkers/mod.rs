@@ -308,6 +308,7 @@ mod pools;
 mod resolution;
 mod statements;
 mod tensor_broadcast;
+mod tensor_einsum;
 mod tensor_index;
 mod tensor_reduce;
 mod tensor_shape;

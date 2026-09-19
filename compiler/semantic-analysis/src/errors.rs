@@ -385,6 +385,71 @@ pub enum TypeError {
     #[error("`.topk(k: {k})` selects more elements than the sorted axis holds, which is {extent}; ask for between 1 and {extent}")]
     TensorTopKOutOfRange { k: usize, extent: usize, span: Span },
 
+    #[error("`einsum` reads its subscripts at compile time, so they have to be a string literal, e.g. `einsum(\"ij,jk->ik\", a, b)`; a value computed at run time cannot decide the result's shape")]
+    EinsumSubscriptNotLiteral { span: Span },
+
+    #[error("`einsum(\"{subscripts}\", ...)` is not a subscript string: {reason}")]
+    EinsumMalformedSubscripts {
+        subscripts: String,
+        reason: String,
+        span: Span,
+    },
+
+    #[error("`einsum` was given {found} operands for {expected} comma-separated subscripts; write one subscript per operand")]
+    EinsumOperandCount {
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    #[error("`einsum` operand {position} is {ty}, not a tensor; every operand of a contraction is a tensor whose rank its subscript names")]
+    EinsumOperandNotTensor {
+        position: usize,
+        ty: Type,
+        span: Span,
+    },
+
+    #[error("subscript '{subscript}' names {expected} axes but `einsum` operand {position} has rank {found}; a subscript carries one letter per axis")]
+    EinsumOperandRank {
+        position: usize,
+        subscript: String,
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    #[error("`einsum` operand {position} holds {found} elements but the first holds {expected}; every operand of one contraction shares an element type")]
+    EinsumElementMismatch {
+        position: usize,
+        expected: Type,
+        found: Type,
+        span: Span,
+    },
+
+    #[error("`einsum` contracts a tensor's elements, which requires an integer or `f32`/`f64` element type; this tensor holds {element}")]
+    EinsumElementType { element: Type, span: Span },
+
+    #[error("`einsum` binds '{letter}' to extent {first} and then to {second}; a repeated letter names one axis length, which is what makes the contraction well defined")]
+    EinsumExtentConflict {
+        letter: char,
+        first: usize,
+        second: usize,
+        span: Span,
+    },
+
+    #[error("`einsum` writes '{letter}' on the right of `->` but no operand's subscript binds it; an output letter takes its extent from an input")]
+    EinsumOutputLetterUnbound { letter: char, span: Span },
+
+    #[error("`einsum` writes '{letter}' twice on the right of `->`; each result axis is a distinct letter, because a repeated one would name two extents at once")]
+    EinsumOutputLetterRepeated { letter: char, span: Span },
+
+    #[error("`einsum` needs every extent of operand {position} at compile time, but '{name}' is not a number here; contract tensors whose shapes are known where the call is written")]
+    EinsumSymbolicExtent {
+        position: usize,
+        name: String,
+        span: Span,
+    },
+
     #[error("`Tensor::{ctor}` does not apply to {ty}: {reason}")]
     TensorConstructorNotApplicable {
         ctor: String,
@@ -1092,6 +1157,17 @@ impl TypeError {
             | Self::TensorSortEmpty { span, .. }
             | Self::TensorSortArgNotConstant { span, .. }
             | Self::TensorTopKOutOfRange { span, .. }
+            | Self::EinsumSubscriptNotLiteral { span, .. }
+            | Self::EinsumMalformedSubscripts { span, .. }
+            | Self::EinsumOperandCount { span, .. }
+            | Self::EinsumOperandNotTensor { span, .. }
+            | Self::EinsumOperandRank { span, .. }
+            | Self::EinsumElementMismatch { span, .. }
+            | Self::EinsumElementType { span, .. }
+            | Self::EinsumExtentConflict { span, .. }
+            | Self::EinsumOutputLetterUnbound { span, .. }
+            | Self::EinsumOutputLetterRepeated { span, .. }
+            | Self::EinsumSymbolicExtent { span, .. }
             | Self::TensorConstructorNotApplicable { span, .. }
             | Self::TraitNotObjectSafe { span, .. }
             | Self::ImplTraitNotAllowedHere { span, .. }

@@ -230,6 +230,28 @@ pub enum HirExprKind {
         axis: usize,
         descending: bool,
     },
+    /// An Einstein-notation contraction `einsum("bij,bjk->bik", a, b)`.
+    ///
+    /// The subscript string is gone by this point: each letter has been interned to an
+    /// index into `extents`, which holds the one extent that letter is bound to. So
+    /// `inputs[n][d]` is the letter of operand `n`'s axis `d`, and `output[k]` the letter
+    /// of result axis `k`. A backend needs no knowledge of the notation, only the three
+    /// index tables.
+    ///
+    /// A letter absent from `output` is contracted over. A letter repeated WITHIN one
+    /// operand walks that operand's diagonal, which is what makes `"ii->"` a trace.
+    ///
+    /// The expression's own `ty` is the element type when `output` is empty, and an
+    /// [`HirType::Tensor`] of the output letters' extents otherwise.
+    ///
+    /// Every operand is READ, not consumed: the result is freshly allocated, so the
+    /// tensors being contracted stay alive and usable.
+    TensorEinsum {
+        operands: Vec<HirExpr>,
+        inputs: Vec<Vec<usize>>,
+        output: Vec<usize>,
+        extents: Vec<usize>,
+    },
     /// Tuple literal `(e0, e1, ...)`. The element types live on the elements;
     /// this expression's `ty` is the [`HirType::Tuple`] of them.
     TupleLiteral {

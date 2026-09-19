@@ -18,6 +18,7 @@ mod methods;
 mod slices;
 mod struct_eq;
 mod tensor_arith;
+mod tensor_einsum;
 mod tensor_index;
 mod tensor_reduce;
 mod tensor_rng;
@@ -217,6 +218,23 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::TensorReduce { receiver, op, axis } => {
                 let result_ty = Type::from_hir(&expr.ty);
                 self.codegen_tensor_reduce(receiver, *op, *axis, &result_ty, expr.span.start)
+            }
+            // `einsum("bij,bjk->bik", a, b)`, an Einstein-notation contraction.
+            HirExprKind::TensorEinsum {
+                operands,
+                inputs,
+                output,
+                extents,
+            } => {
+                let result_ty = Type::from_hir(&expr.ty);
+                self.codegen_tensor_einsum(
+                    operands,
+                    inputs,
+                    output,
+                    extents,
+                    &result_ty,
+                    expr.span.start,
+                )
             }
             // `.sort()` / `.argsort()` / `.topk()`, along one axis.
             HirExprKind::TensorSort {

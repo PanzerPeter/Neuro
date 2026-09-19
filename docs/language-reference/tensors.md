@@ -686,6 +686,75 @@ both settled before any element is read; `k` must lie between `1` and the sorted
 extent. The element type must be an integer or `f32`/`f64`, the receiver must have at least
 one axis, and its shape must be numbers rather than shape parameters or `?`.
 
+## Einstein notation
+
+`einsum` writes a contraction as subscripts: one per operand on the left of `->`, one
+letter per axis, and the result's axes on the right. A letter that appears in an input but
+not in the output is **summed over**; a letter that appears in the output takes its extent
+from wherever an input bound it. That one rule covers matrix products, traces, outer
+products, transposes, axis sums and batched contractions.
+
+```neuro
+val a: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
+val b: Tensor<i32, [3, 2]> = [[1, 0], [0, 1], [1, 1]]
+
+val product: Tensor<i32, [2, 2]> = einsum("ij,jk->ik", a, b)   // `j` is contracted
+val rows: Tensor<i32, [2]> = einsum("ij->i", a)                // `j` is summed away
+val transposed: Tensor<i32, [3, 2]> = einsum("ij->ji", a)      // both letters survive
+
+val u: Tensor<i32, [2]> = [3, 4]
+val v: Tensor<i32, [3]> = [1, 2, 5]
+val outer: Tensor<i32, [2, 3]> = einsum("i,j->ij", u, v)       // nothing is contracted
+```
+
+A letter repeated **within one operand** walks that operand's diagonal, which is what makes
+a trace a subscript rather than a loop. An empty output subscript contracts everything
+away, and the call then produces one number of the element type, exactly as a whole-tensor
+`.sum()` does:
+
+```neuro
+val square: Tensor<i32, [3, 3]> = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+
+val trace: i32 = einsum("ii->", square)          // 15
+val dot: i32 = einsum("i,i->", u, u)             // 25
+```
+
+A letter shared by both operands *and* the output batches the contraction: it indexes all
+three at once instead of being summed.
+
+```neuro
+val batch: Tensor<f32, [8, 4, 16]> = Tensor::<f32, [8, 4, 16]>::zeros()
+val heads: Tensor<f32, [8, 16, 2]> = Tensor::<f32, [8, 16, 2]>::zeros()
+
+val attended: Tensor<f32, [8, 4, 2]> = einsum("bij,bjk->bik", batch, heads)
+```
+
+**The subscripts are a string literal, never a value.** The compiler reads them while it
+type-checks, matches each letter against the operands' shapes, and derives the result type
+from the letters after `->`, so a string a program computes could not decide a shape the
+rest of type checking depends on. `einsum` is the one variadic call in the language, and
+only because the literal fixes its arity.
+
+Like a reduction, `einsum` **reads** its operands: it allocates its own result and leaves
+the buffers it contracted where they were, so it is offered on `&Tensor<T, S>` too.
+
+```neuro
+func project(w: &Tensor<f32, [2, 3]>, x: &Tensor<f32, [3]>) -> Tensor<f32, [2]> {
+    einsum("ij,j->i", w, x)
+}
+```
+
+A subscript that disagrees with its operands is a compile error **naming the letter**: a
+letter bound to two different extents, an output letter no input binds, or an output letter
+written twice. The rest are checked the same way: one comma-separated subscript per
+operand, one letter per axis, every operand a tensor, and every operand sharing one integer
+or `f32`/`f64` element type. Every extent must be a number here, so a shape parameter or a
+`?` axis is rejected: the result's shape and the strides behind it are both built from it.
+
+A result axis carries no dimension name. A subscript letter is a local label for the
+contraction, not a name the type is meant to keep, so the result's axes are unnamed and an
+annotation may name them itself.
+
 ## Dynamic shapes
 
 An axis written `?` has no compile-time extent. It opts that one axis out of
@@ -741,7 +810,7 @@ A tensor can be built, bound, moved, cloned, passed, returned, transferred with
 rules, multiplied as a matrix with `@`, updated in place, stored in a struct, indexed, written
 through an index (`t[i, j] = v`), sliced, reshaped with
 `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`, and reduced with
-`.sum()` / `.mean()` / `.max()` / `.min()`. What is still
+`.sum()` / `.mean()` / `.max()` / `.min()`, and contracted with `einsum`. What is still
 later work is the functional
 `.reduce(init, |acc, x| ...)`, and the step index form
 (`t[(0..n).step(2)]`), which waits on `.step(n)` existing on ranges at all. The reverse

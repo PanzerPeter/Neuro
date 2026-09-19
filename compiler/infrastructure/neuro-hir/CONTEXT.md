@@ -70,6 +70,16 @@ it the *typed* contract:
    for `Indices`, and the `Tuple` of both at a `k`-long selected axis for `TopK`. It READS the
    receiver like the reduction does: the result is freshly allocated. The three are one node
    because they compute the same per-axis ordering and differ only in what they write.
+   `HirExprKind::TensorEinsum { operands, inputs, output, extents }` is the Einstein-notation
+   contraction beside them, and the one tensor node with no single receiver. The subscript
+   string does not survive lowering: each letter is interned to an index into `extents`, which
+   holds the extent that letter is bound to, so `inputs[n][d]` is the letter of operand `n`'s
+   axis `d` and `output[k]` the letter of result axis `k`. A letter absent from `output` is
+   contracted over, and a letter repeated WITHIN one operand walks that operand's diagonal,
+   which is what makes `"ii->"` a trace. Its `ty` is the element type when `output` is empty
+   and the tensor of the output letters' extents otherwise (unnamed axes: a subscript letter
+   is not a dimension name). It READS every operand like the reduction does, so a backend
+   needs the three index tables and no knowledge of the notation.
    `HirStmt::TensorCompoundAssign { place, op, value, ty, span }` is the in-place update
    beside them: `ty` is the target's tensor type and `value` is either that same type or a
    reference to it, an owned operand being consumed by the update and a borrowed one only

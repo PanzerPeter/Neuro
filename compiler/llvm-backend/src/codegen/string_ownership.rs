@@ -554,6 +554,11 @@ fn walk(expr: &HirExpr, visit: &mut impl FnMut(&HirExpr)) {
         HirExprKind::TensorShapeCast { receiver, .. }
         | HirExprKind::TensorReduce { receiver, .. }
         | HirExprKind::TensorSort { receiver, .. } => walk(receiver, visit),
+        HirExprKind::TensorEinsum { operands, .. } => {
+            for operand in operands {
+                walk(operand, visit);
+            }
+        }
         HirExprKind::EnumConstruct { payload, .. } => {
             for field in payload {
                 walk(field, visit);

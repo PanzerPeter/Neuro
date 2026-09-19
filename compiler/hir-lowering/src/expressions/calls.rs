@@ -226,6 +226,10 @@ impl Lowerer {
             ));
         }
 
+        if name == crate::tensor_einsum::EINSUM_FUNC {
+            return self.lower_tensor_einsum(args, span);
+        }
+
         Err(LoweringError::UnresolvedCall {
             target: name.to_string(),
         })

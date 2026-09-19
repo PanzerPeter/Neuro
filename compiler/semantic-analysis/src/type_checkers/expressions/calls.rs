@@ -53,6 +53,9 @@ impl TypeChecker {
             if let Some(ret) = self.resolve_io_builtin(func_name, args, span) {
                 return Some(ret);
             }
+            if let Some(ret) = self.resolve_einsum_builtin(func_name, args, span) {
+                return Some(ret);
+            }
         }
 
         // A local binding of function type (a closure or a function-typed

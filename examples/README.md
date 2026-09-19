@@ -22,7 +22,7 @@ not what each one does.
 | `basics/`       | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` | [Functions](../docs/language-reference/functions.md) |
 | `types/`        | Primitives, literal suffixes and separators, casts, overflow, half precision, arrays, tuples, destructuring, newtypes, aliases, `Option` / `Result`, collections, dispatch | [Types](../docs/language-reference/types.md) |
 | `strings/`      | `string` literals and slices, `char`, interpolation, triple-quoted blocks, codepoint iteration, the growable `String` | [Strings](../docs/language-reference/strings.md) |
-| `tensors/`      | `Tensor<T, [dims]>`: construction, element-wise operators and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, dynamic axes | [Tensors](../docs/language-reference/tensors.md) |
+| `tensors/`      | `Tensor<T, [dims]>`: construction, element-wise operators and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, dynamic axes | [Tensors](../docs/language-reference/tensors.md) |
 | `ownership/`    | Moves, `Copy` / `.clone()`, consuming `self` receivers, immutable and mutable borrows, borrow exclusivity, returned references, deterministic `Drop`, `pool` arena blocks | [Types](../docs/language-reference/types.md#references-immutable-borrows-t) |
 | `operators/`    | Bitwise ops, compound assignment, integer intrinsics, operator overloading, `??` coalescing, `?` propagation, `\|>` pipelines, `>>` composition | [Operators](../docs/language-reference/operators.md) |
 | `control_flow/` | `if` / `else`, `for` over ranges and adapters, the iterator protocol, `while`, `loop`, block and `unsafe` expressions, `match`, `val-else`, panics, lints | [Control Flow](../docs/language-reference/control-flow.md) |
@@ -97,6 +97,7 @@ No Rust edits are needed: discovery is automatic.
 
 One line each. The program's own header comment is the full description.
 
+- [`attention_head.nr`](showcase/attention_head.nr): one attention head written as two `einsum` contractions, with `|>` and `>>` rescaling the scores between them
 - [`batch_arena.nr`](showcase/batch_arena.nr): a batched forward pass run inside nested `pool` arenas, with a `PoolAware` scratch type the arena sweeps in reverse construction order, and a summary line a declared function builds so it may be kept past the block
 - [`borrow_discipline.nr`](showcase/borrow_discipline.nr): `&mut self` methods, arrays and interpolation written around a live borrow, which freezes the borrowee's own name and forbids moving out from under it
 - [`borrowed_text.nr`](showcase/borrowed_text.nr): explicit lifetime annotations over borrowed text

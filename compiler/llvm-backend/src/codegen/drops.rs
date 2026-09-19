@@ -1233,6 +1233,7 @@ fn builds_its_own_buffer(kind: &HirExprKind) -> bool {
             | HirExprKind::TensorIdentity
             | HirExprKind::TensorRandomNormal { .. }
             | HirExprKind::TensorReduce { .. }
+            | HirExprKind::TensorEinsum { .. }
             | HirExprKind::TensorSort { .. }
     )
 }

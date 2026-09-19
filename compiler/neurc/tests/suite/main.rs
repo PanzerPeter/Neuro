@@ -106,6 +106,7 @@ mod structs;
 mod tail_if_return;
 mod tensor_compound_assign;
 mod tensor_dynamic_shapes;
+mod tensor_einsum;
 mod tensor_indexing;
 mod tensor_matmul;
 mod tensor_named_dimensions;

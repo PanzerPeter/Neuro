@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.52.0] - 2026-09-19
+
+### Added
+
+- **Einstein notation, `einsum`.** `einsum("bij,bjk->bik", a, b)` writes a tensor
+  contraction as subscripts: one per operand on the left of `->`, one letter per axis, and
+  the result's axes on the right. A letter that appears in an input but not in the output
+  is summed over; a letter that appears in the output takes its extent from wherever an
+  input bound it. That one rule covers matrix products, traces, outer products,
+  transposes, axis sums, diagonals and batched contractions.
+- A letter repeated within one operand walks that operand's diagonal, so `einsum("ii->", m)`
+  is the trace and `einsum("ii->i", m)` extracts the diagonal.
+- An empty output subscript contracts everything away and yields one number of the element
+  type, matching the whole-tensor `.sum()` rather than producing a rank-0 tensor.
+- The subscripts are a string literal, read while the call is type-checked. The result
+  type comes from the letters after `->`, and `einsum` is the one variadic call in the
+  language because the literal fixes its arity.
+- Like a reduction, `einsum` reads its operands rather than consuming them, so it accepts
+  `&Tensor<T, S>` and leaves each operand usable afterwards. An operand built for the call
+  is released once the contraction has read it.
+- A subscript that disagrees with its operands is a compile error naming the letter: one
+  bound to two different extents, an output letter no input binds, or an output letter
+  written twice. Operand count, per-operand rank, a non-tensor operand, a mixed or
+  non-numeric element type, and a non-literal subscript each have their own diagnostic.
+- `examples/tensors/tensor_einsum.nr` covers the notation on its own, and
+  `examples/showcase/attention_head.nr` combines it with `|>`, `>>`, tensor struct fields,
+  named dimensions and reductions in one attention head.
+
+### Known limits
+
+- A result axis carries no dimension name: a subscript letter is a label for one
+  contraction, not a name the type keeps.
+- No ellipsis (`"...ij,...jk->...ik"`) and no implicit output subscript: the `->` is
+  required.
+- Every extent must be a compile-time number, so an operand with a shape parameter or a
+  `?` axis is rejected. A contraction inside a shape-generic function template therefore
+  has to wait for the instantiation that makes its extents concrete.
+- The contraction is a flat two-loop scan with no tiling or blocking, the same
+  correctness-first lowering `@` has, and it does not go through MLIR `linalg.generic`.
+
 ## [2.51.0] - 2026-09-19
 
 ### Added

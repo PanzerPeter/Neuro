@@ -861,6 +861,26 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   in `1..=extent` (`TensorTopKOutOfRange`). Every extent must be a number here
   (`TensorShapeCastSymbolicExtent`, `TensorDynamicExtent`), because the result's shape and
   the backend's strides are both built from it.
+- **Einstein notation, in `type_checkers/tensor_einsum.rs`.** `einsum("bij,bjk->bik", a, b)`
+  reaches `resolve_einsum_builtin` from the free-function arm of `check_plain_call`, beside
+  `resolve_panic_builtin` and `resolve_io_builtin` and inside the same
+  `!self.functions.contains_key` guard, so a program's own `einsum` shadows it. It is the one
+  variadic call in the language, and only because the subscript literal fixes its arity: the
+  comma-separated pieces left of `->` say how many operands there are and what rank each one
+  has. The subscripts are read as SYNTAX (`parse_subscripts`), never as a value — a string a
+  program computes cannot decide a result shape the rest of checking depends on
+  (`EinsumSubscriptNotLiteral`), and anything that is not ASCII letters separated by `,`
+  around one `->` is `EinsumMalformedSubscripts`. Each operand is matched on the REFERENT for
+  the reason the reductions are: the call allocates its own result, records no move, and
+  accepts `&Tensor<T, S>`. One pass binds every letter to an extent and fixes the element
+  type, reporting `EinsumOperandCount`, `EinsumOperandNotTensor`, `EinsumOperandRank`,
+  `EinsumElementType`, `EinsumElementMismatch`, `EinsumSymbolicExtent` and
+  `EinsumExtentConflict`; the output letters then have to be distinct
+  (`EinsumOutputLetterRepeated`) and each bound by some input
+  (`EinsumOutputLetterUnbound`). The three letter diagnostics name the letter, as the
+  language requires: the letter is the only thing in the call that says which axes were meant to
+  agree. An empty output subscript yields the ELEMENT type rather than `Tensor<T, []>`,
+  matching the whole-tensor `.sum()`.
 - **Tensor slicing and indexing, in `type_checkers/tensor_index.rs`.** `check_tensor_index`
   takes one argument per axis and answers one of two types: an axis given a `Position` is
   DROPPED and one given a `Range` (a `..` full axis is the range over the whole extent)

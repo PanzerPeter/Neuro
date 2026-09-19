@@ -1,0 +1,11 @@
+product    = [4, 5] [10, 11]
+trace      = 15
+outer      = [3, 6, 15] [4, 8, 20]
+transposed = [1, 4] [2, 5] [3, 6]
+row sums   = 6, 15
+col sums   = 5, 7, 9
+batch 0    = [4, 5] [10, 11]
+batch 1    = [23, 25] [3, 3]
+dot        = 25
+projected  = 8.0, 7.0
+weights    = 1.0, still readable

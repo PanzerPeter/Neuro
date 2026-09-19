@@ -560,6 +560,25 @@ fresh handle, so a receiver a binding owns stays that binding's; a receiver no b
 released once the selection has copied what it needs, through the same
 `release_receiver_temporary` the reduction uses.
 
+`expressions/tensor_einsum.rs` owns `HirExprKind::TensorEinsum`, the Einstein-notation
+contraction. The notation is gone by this point: HIR supplies one extent per subscript letter
+and, per operand, which letter each of its axes carries, which reduces the whole construct to
+flat index arithmetic over row-major buffers with every factor a compile-time constant. Two
+counted loops for the reason the reduction gives — the outer walks the result's elements, the
+inner the contracted letters' product — so the IR is the same size whatever the ranks are. A
+letter's index is recovered from a counter by dividing out the letters below it and taking the
+remainder (`decode_counter`), and an operand's offset is that index times a per-letter
+COEFFICIENT: the row-major strides of every axis the letter sits on, ADDED together
+(`coefficients`). Summing them is what makes a letter repeated within one operand walk its
+diagonal, which is the whole of `"ii->"`. The accumulator starts at the additive identity
+rather than at a first element, unlike the reduction's: the loop sums products, so there is no
+element to seed it with and an empty contraction is genuinely zero. Both the product and the
+accumulation reuse `codegen_int_arith`, so an overflowing contraction panics exactly where an
+overflowing `*` or `+` would, which is also why the inner counter is reloaded before its
+increment — a checked operation may have split the body around its guard. Nothing is moved
+here; each operand that no binding owns is freed through the same
+`release_receiver_temporary` the reduction uses, once every read is behind the loops.
+
 `expressions/tensor_index.rs` owns `HirExprKind::TensorIndex`. Every stride is a compile-time
 constant (every extent is part of the type), so the index is arithmetic on the flat row-major
 run behind `data`: each `Position` axis contributes `position * stride[k]` and each `Range` axis
