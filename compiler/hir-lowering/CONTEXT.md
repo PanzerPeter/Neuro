@@ -231,6 +231,12 @@ value site emits `HirExprKind::Closure { name, captures }` typed as `HirType::Fu
 `lower_ident_call` dispatches a call on a local function-typed binding indirectly (the callee is
 a `HirExprKind::Variable` of `HirType::Function`).
 
+`lower_compose` (same file) lowers `Expr::Compose` to a capture-free closure item of the same
+shape: its parameter is the first stage's, named `__compose_arg`, and its body is the nested call
+the chain stands for, built as AST and lowered through the ordinary call path. So composition adds
+no HIR node, no backend arm, and nothing the closure machinery did not already do; it captures
+nothing because every stage is a named function the backend references directly.
+
 ### Dynamic dispatch
 A `traits` table (name → methods in declaration order, with their visible parameter and return
 types) is registered before impls, and each `Item::Trait` lowers to a `HirItem::Trait` carrying

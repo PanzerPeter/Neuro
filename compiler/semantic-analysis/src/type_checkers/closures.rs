@@ -311,7 +311,8 @@ fn collect_block(stmts: &[Stmt], fv: &mut FreeVars) {
 
 fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
     match expr {
-        Expr::Literal(_, _) | Expr::Path { .. } => {}
+        // A composition names functions, and a function is not a capturable binding.
+        Expr::Literal(_, _) | Expr::Path { .. } | Expr::Compose { .. } => {}
         Expr::Identifier(ident) => fv.reads.push((ident.name.clone(), ident.span)),
         Expr::Binary { left, right, .. } => {
             collect_expr(left, fv);

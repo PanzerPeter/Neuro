@@ -190,7 +190,7 @@ fn walk_expr(expr: &mut Expr, f: CallFn, errors: &mut Vec<ArgumentError>) {
     }
 
     match expr {
-        Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } => {}
+        Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } | Expr::Compose { .. } => {}
         Expr::Binary { left, right, .. } => {
             walk_expr(left, f, errors);
             walk_expr(right, f, errors);

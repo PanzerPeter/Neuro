@@ -564,6 +564,11 @@
           "match": "<<"
         },
         {
+          "comment": "Function composition `f >> g`. Ahead of the comparison rule so a pair of adjacent `>` is claimed whole, matching the parser, which reads the pair as one operator. A `>>` closing a nested generic type is highlighted this way too: the grammar has no type context to tell them apart, and only the parser does.",
+          "name": "keyword.operator.composition.neuro",
+          "match": ">>"
+        },
+        {
           "name": "keyword.operator.comparison.neuro",
           "match": "==|!=|<=|>="
         },

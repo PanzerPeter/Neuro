@@ -105,6 +105,12 @@ walkers.
 - `BinaryOp::MatMul` is the matrix product `a @ b`. It is a `BinaryOp` like any other, but it is
   the one that is not element-wise on tensors — it contracts the operands' inner axis — so each
   stage separates it from the arithmetic family rather than sharing an arm with it.
+- `Expr::Compose { functions, span }` is the composition chain `f >> g >> h`. It carries
+  `Vec<Identifier>`, not operand expressions: composition takes named functions, and a name is
+  not a value in this language. The chain is flattened by the parser, so the node holds two or
+  more names and no sub-expression, and an expression walker has nothing here to descend into.
+  Module resolution is the one pass that must still reach the names, because an import may
+  rename them; it hands each one to its visitor as the identifier expression it stands for.
 - `Expr::Try { operand, span }` (postfix `?`) is a node of its own rather than a `BinaryOp`: it
   has one operand, and its type comes from that operand's success payload while its *failure*
   path is typed by the enclosing function's return type.

@@ -14,9 +14,13 @@ use ast_types::{
 use neuro_hir::{
     HirCapture, HirClosure, HirExpr, HirExprKind, HirItem, HirParam, HirStmt, HirType,
 };
-use shared_types::Span;
+use shared_types::{Identifier, Span};
 
 use crate::{Lowerer, LoweringError};
+
+/// The name of the parameter the composed closure binds its argument to. Not
+/// spellable in source, so it can never collide with a name the body reads.
+const COMPOSE_PARAM: &str = "__compose_arg";
 
 impl Lowerer {
     /// Lower a closure literal to its fat-pointer value, lifting the body to a
@@ -96,6 +100,79 @@ impl Lowerer {
         Ok(HirExpr::new(
             HirExprKind::Closure { name, captures },
             fn_ty,
+            span,
+        ))
+    }
+
+    /// Lower `f >> g >> h` to the capture-free closure that applies each stage in turn.
+    ///
+    /// The chain is a function *value*, so it becomes a lifted closure item exactly as
+    /// a closure literal does. Its body is the nested call the chain stands for, built
+    /// as AST and lowered through the ordinary call path so composition needs no
+    /// lowering rules of its own. It captures nothing: every stage is a named function,
+    /// which the backend references directly.
+    pub(crate) fn lower_compose(
+        &mut self,
+        functions: &[Identifier],
+        span: Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let first = functions.first().ok_or_else(|| LoweringError::Malformed {
+            detail: "a composition reached lowering with no functions".to_string(),
+        })?;
+        let param_ty = self
+            .functions
+            .get(&first.name)
+            .and_then(|(params, _)| params.first())
+            .cloned()
+            .ok_or_else(|| LoweringError::UnresolvedType {
+                name: format!("the parameter of '{}'", first.name),
+            })?;
+
+        let argument = Expr::Identifier(Identifier {
+            name: COMPOSE_PARAM.to_string(),
+            span,
+        });
+        let body = functions
+            .iter()
+            .fold(argument, |value, function| Expr::Call {
+                func: Box::new(Expr::Identifier(function.clone())),
+                type_args: Vec::new(),
+                args: vec![value],
+                arg_labels: Vec::new(),
+                span,
+            });
+
+        self.push_scope();
+        self.define(COMPOSE_PARAM.to_string(), param_ty.clone());
+        let body = self.lower_expr(&body, None);
+        self.pop_scope();
+        let body = body?;
+
+        let return_type = body.ty.clone();
+        let name = format!("__closure_{}", self.closure_counter);
+        self.closure_counter += 1;
+        self.closure_items.push(HirItem::Closure(HirClosure {
+            name: name.clone(),
+            captures: Vec::new(),
+            params: vec![HirParam {
+                name: COMPOSE_PARAM.to_string(),
+                ty: param_ty.clone(),
+                span,
+            }],
+            return_type: return_type.clone(),
+            body: vec![HirStmt::Expr(body)],
+            span,
+        }));
+
+        Ok(HirExpr::new(
+            HirExprKind::Closure {
+                name,
+                captures: Vec::new(),
+            },
+            HirType::Function {
+                params: vec![param_ty],
+                ret: Box::new(return_type),
+            },
             span,
         ))
     }
@@ -253,7 +330,9 @@ fn collect_block(stmts: &[Stmt], fv: &mut FreeVars) {
 
 fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
     match expr {
-        Expr::Literal(_, _) | Expr::Path { .. } => {}
+        // A composition names functions, and a function is referenced directly rather
+        // than captured.
+        Expr::Literal(_, _) | Expr::Path { .. } | Expr::Compose { .. } => {}
         Expr::Identifier(ident) => fv.reads.push(ident.name.clone()),
         Expr::Binary { left, right, .. } => {
             collect_expr(left, fv);

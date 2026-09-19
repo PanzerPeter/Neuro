@@ -329,6 +329,20 @@ fn walk_expr(expr: &mut Expr, f: SiteFn) -> Result<(), ModuleError> {
 
     match expr {
         Expr::Literal(_, _) | Expr::Identifier(_) => Ok(()),
+        // A composition holds bare names rather than expressions, so there is no
+        // `Expr` to hand over as a site. Resolving them still matters: `use m::f as g`
+        // makes `g >> h` name an item the flat namespace calls something else, so each
+        // name is offered to the visitor as the identifier expression it stands for.
+        Expr::Compose { functions, .. } => {
+            for name in functions.iter_mut() {
+                let mut site = Expr::Identifier(name.clone());
+                f(Site::Expr(&mut site))?;
+                if let Expr::Identifier(resolved) = site {
+                    *name = resolved;
+                }
+            }
+            Ok(())
+        }
         Expr::Binary { left, right, .. } => {
             walk_expr(left, f)?;
             walk_expr(right, f)

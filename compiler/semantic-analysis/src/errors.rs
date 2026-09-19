@@ -538,6 +538,35 @@ pub enum TypeError {
     #[error("cannot call non-function type {ty}")]
     NotCallable { ty: Type, span: Span },
 
+    #[error("`>>` composes named functions: '{name}' names no function in this program")]
+    ComposeUndefined { name: String, span: Span },
+
+    #[error(
+        "`>>` composes named functions: '{name}' is a binding, so name the `func` it holds instead"
+    )]
+    ComposeNotANamedFunction { name: String, span: Span },
+
+    #[error(
+        "`>>` cannot compose the generic function '{name}': a composition fixes no type arguments"
+    )]
+    ComposeGenericFunction { name: String, span: Span },
+
+    #[error("`>>` composes functions of one parameter: '{name}' takes {found}")]
+    ComposeArity {
+        name: String,
+        found: usize,
+        span: Span,
+    },
+
+    #[error("'{left}' returns {found}, which '{right}' cannot take: it expects {expected}")]
+    ComposeStageMismatch {
+        left: String,
+        right: String,
+        found: Type,
+        expected: Type,
+        span: Span,
+    },
+
     #[error("variable '{name}' used without initialization")]
     UninitializedVariable { name: String, span: Span },
 
@@ -1087,6 +1116,11 @@ impl TypeError {
             | Self::MissingReturn { span, .. }
             | Self::UnknownTypeName { span, .. }
             | Self::NotCallable { span, .. }
+            | Self::ComposeUndefined { span, .. }
+            | Self::ComposeNotANamedFunction { span, .. }
+            | Self::ComposeGenericFunction { span, .. }
+            | Self::ComposeArity { span, .. }
+            | Self::ComposeStageMismatch { span, .. }
             | Self::UninitializedVariable { span, .. }
             | Self::VoidBinding { span, .. }
             | Self::AssignToImmutable { span, .. }

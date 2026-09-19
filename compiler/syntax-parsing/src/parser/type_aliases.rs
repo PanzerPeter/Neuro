@@ -458,7 +458,7 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
             }
             rewrite_expr(body, resolved);
         }
-        Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } => {}
+        Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } | Expr::Compose { .. } => {}
     }
 }
 

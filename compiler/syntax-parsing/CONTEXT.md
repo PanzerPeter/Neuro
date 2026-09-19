@@ -89,6 +89,14 @@ no types.
   `x |> f(a)` a diagnostic about `|>` rather than a type error about calling a non-callable
   further down the pipeline.
 
+- **The composition operator**: `f >> g >> h` becomes one flat `Expr::Compose` node holding the
+  names, built by `compose_operand` (`parser/expressions.rs`), which peels a `Paren`, accepts an
+  `Identifier`, and splices a nested `Compose` into its parent so a chain never nests. Any other
+  operand is `ParseError::NotAComposeOperand`, which is what makes `1 >> 2` a diagnostic about
+  composition rather than a stray comparison. A composition that is *applied* where it is written
+  never becomes a node at all: `apply_compose` folds it into the nested calls it stands for, both
+  for `(f >> g)(x)` (in the call arm, via `finish_call`) and for `x |> f >> g` (in `pipe_into`).
+
 `newtype` is the deliberate counter-example: unlike a `type` alias it is a distinct nominal type,
 so it stays an `Item::Newtype`. Construction `Name(value)` reuses the call parse and `.0` reuses
 the tuple-index parse, so it needs no expression grammar of its own.
@@ -345,6 +353,13 @@ Its target is parsed at `Precedence::Pipeline` too, which is where left-associat
 from: a following `|>` ends the target and re-enters the loop with the call as its new left.
 The multi-line chain form puts the newline *before* the operator, and needs nothing
 extra: `|>` is not one of the four tokens the statement-boundary rule breaks on.
+`>>` sits one level tighter at `Precedence::Compose` (Appendix B row 16), which is what makes
+`x |> f >> g` apply the composition to `x` rather than compose `x |> f` with `g`. It is **not a
+token**: `at_compose` recognizes two `>` whose spans touch, and `infix_precedence` exists solely
+to offer that pair's precedence where only a single token's kind is in hand. Lexing `>>` would
+have made `Vec<Vec<i32>>` end in one token every generic-closing site had to split, and two
+adjacent `>` cost nothing, because right shift is the `.shr(n)` method and no comparison has `>`
+as the first token of its right operand.
 
 ### Generics
 `parse_generic_params` returns `(Vec<GenericParam>, Vec<Identifier>)`: a leading `Lifetime`

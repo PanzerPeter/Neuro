@@ -563,34 +563,69 @@ error: the right of `|>` must be a function value: a function name, a bound meth
 
 Runnable program: [`examples/operators/pipeline.nr`](../../examples/operators/pipeline.nr).
 
+## Function Composition (`>>`)
+
+`f >> g` is the function `|x| g(f(x))`. Where `|>` pushes a value through a chain, `>>` names the chain itself, so one preparation pipeline can be written once and applied wherever it is needed:
+
+```neuro
+val prepare = normalize >> clamp_low          // a value of type (i32) -> i32
+
+val ready = prepare(reading)                  // applied here
+val batch = other |> prepare                  // and here
+```
+
+**Both operands are function names.** A composition calls each stage directly, so the operand is a `func` in scope, not a value holding one:
+
+```
+error: `>>` composes named functions: 'held' is a binding, so name the `func` it holds instead
+```
+
+A closure literal, a bound method `receiver.method`, an associated path `Type::member` and a generic function are all rejected the same way. Each stage takes exactly one parameter, and each stage's result type must be what the next one accepts:
+
+```
+error: 'label' returns string, which 'double' cannot take: it expects i32
+```
+
+The types need not stay the same along the chain: `label >> width` composes `(i32) -> string` with `(string) -> i32` into `(i32) -> i32`.
+
+**The result is an ordinary function value.** It binds to a `val`, passes to a `(T) -> U` parameter, and is called as many times as needed.
+
+**Associativity**: left to right. `f >> g >> h` applies `f` first and `h` last.
+
+**Precedence**: tighter than `|>`, looser than everything else. That is what makes `x |> f >> g` apply the composed function to `x` rather than compose `x |> f` with `g`. A composition called where it is written needs no name: `(f >> g)(x)`.
+
+**`>>` is not right shift.** Shifting right is the `.shr(n)` integer method, which leaves the token for the operator an AI-first language reaches for far more often. It is not a token of its own either: the parser reads two adjacent `>`, so the closing brackets of `Vec<Vec<i32>>` are unaffected.
+
+Runnable program: [`examples/operators/compose.nr`](../../examples/operators/compose.nr).
+
 ## Operator Precedence
 
 From highest to lowest, matching the parser's Pratt ladder:
 
 | Level | Operators | Associativity | Example |
 |-------|-----------|---------------|---------|
-| 18 (highest) | `.` | L-to-R | `p.x` |
-| 17 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | L-to-R | `f(x)?`, `arr[i]` |
-| 16 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
-| 15 | `as` | L-to-R | `n as f64` |
-| 14 | `@` | L-to-R | `w @ x` |
-| 13 | `*`, `/`, `%` | L-to-R | `a * b`, `n % 2` |
-| 12 | `+`, `-` | L-to-R | `a + b`, `x - y` |
-| 11 | `<<` | L-to-R | `a << 4` |
-| 10 | `<`, `>`, `<=`, `>=` | L-to-R | `x < y` |
-| 9 | `==`, `!=` | L-to-R | `x == y` |
-| 8 | `&` | L-to-R | `a & mask` |
-| 7 | `^` | L-to-R | `a ^ b` |
-| 6 | `\|` | L-to-R | `a \| b` |
-| 5 | `&&` | L-to-R | `a && b` |
-| 4 | `\|\|` | L-to-R | `a \|\| b` |
-| 3 | `??` | R-to-L | `a ?? b ?? c` parses as `a ?? (b ?? c)` |
-| 2 | `..`, `..=` | L-to-R | `1..=n` |
+| 19 (highest) | `.` | L-to-R | `p.x` |
+| 18 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | L-to-R | `f(x)?`, `arr[i]` |
+| 17 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
+| 16 | `as` | L-to-R | `n as f64` |
+| 15 | `@` | L-to-R | `w @ x` |
+| 14 | `*`, `/`, `%` | L-to-R | `a * b`, `n % 2` |
+| 13 | `+`, `-` | L-to-R | `a + b`, `x - y` |
+| 12 | `<<` | L-to-R | `a << 4` |
+| 11 | `<`, `>`, `<=`, `>=` | L-to-R | `x < y` |
+| 10 | `==`, `!=` | L-to-R | `x == y` |
+| 9 | `&` | L-to-R | `a & mask` |
+| 8 | `^` | L-to-R | `a ^ b` |
+| 7 | `\|` | L-to-R | `a \| b` |
+| 6 | `&&` | L-to-R | `a && b` |
+| 5 | `\|\|` | L-to-R | `a \|\| b` |
+| 4 | `??` | R-to-L | `a ?? b ?? c` parses as `a ?? (b ?? c)` |
+| 3 | `..`, `..=` | L-to-R | `1..=n` |
+| 2 | `>>` | L-to-R | `f >> g >> h` applies `f` first |
 | 1 (lowest) | `\|>` | L-to-R | `x \|> f \|> g` parses as `g(f(x))` |
 
-Comparison binds tighter than equality: `x < y == z` parses as `(x < y) == z`. There is no
-`>>` operator; right shift is the `.shr(n)` method because `>>` is reserved for function
-composition. |
+Comparison binds tighter than equality: `x < y == z` parses as `(x < y) == z`. `>>` composes
+functions rather than shifting bits; right shift is the `.shr(n)` method.
 
 ### Precedence Examples
 

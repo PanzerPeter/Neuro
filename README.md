@@ -163,7 +163,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 |---|---|
 | **Types and inference** | `i8` through `u64`, `f16` / `bf16` / `f32` / `f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, type aliases |
 | **Control flow** | `if` / `elif` / `else`, `while`, `loop`, range-`for`, labelled `break` / `continue`, block-as-value, `for` over any type implementing the prelude's iterator protocol |
-| **Functions** | Recursion, forward references, implicit returns, named arguments with external labels, higher-order functions, `\|>` pipelines |
+| **Functions** | Recursion, forward references, implicit returns, named arguments with external labels, higher-order functions, `\|>` pipelines, `>>` composition |
 | **Generics and traits** | Generic functions, structs and impls, const generics, `where` clauses, turbofish; required and default methods, associated types, operator traits, `impl Trait` and `dyn Trait` dispatch. Fully monomorphized |
 | **Closures** | `\|x: i32\| x * x`, `move` closures, `(T) -> R` function types, compiled to `{ fn_ptr, env_ptr }` with no heap allocation |
 | **Structs, enums, newtypes** | Fields, functional update `..base`, `impl` blocks with `&self` / `&mut self` / consuming receivers; unit, tuple and struct-field variants carrying any sized payload; `@derive(Copy, Clone, Debug, PartialEq)` |
@@ -229,7 +229,8 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 
 Phase 2 in detail: **2A** standard I/O and spec stragglers, **2B** tensor core, **2C** MLIR
 lowering, **2D** the pool allocator and **2E** the value model are complete; **2F** functional
-sugar (`|>`, `>>`, einstein notation) is next.
+sugar (einstein notation and the functional tensor operations, after the `|>` and `>>`
+operators) is what remains.
 
 ---
 

@@ -7,7 +7,8 @@
 //   closures stored in a struct field · `@derive(Copy)` structs with `&mut self`
 //   methods · `Option` + `match` · `Vec<i32>` + `for`-in · string interpolation
 //   with the format mini-language · the pipeline operator `|>` over all three of
-//   its function-value spellings.
+//   its function-value spellings · the composition operator `>>` building a reusable
+//   stage out of two of those same functions.
 //
 // The point is composition: a source, a transform, and a filter are three separate
 // types, each implementing `Iterator`, and a single `for` head drives the whole chain
@@ -138,6 +139,12 @@ func describe(total: i32) -> string {
     "piped total {total}"
 }
 
+// A higher-order function taking the composed stage as an ordinary `(i32) -> string`
+// value: nothing in the signature knows the argument was built with `>>`.
+func describe_widest(readings: Readings, summarize: (i32) -> string) -> string {
+    summarize(readings.total_above(8))
+}
+
 func main() -> i32 {
     val readings = Readings { samples: [3, 8, 1, 12, 5, 9] }
 
@@ -219,6 +226,15 @@ func main() -> i32 {
         |> (|total: i32| -> i32 { total - flagged })
         |> describe
     println("{report}")
+
+    // `>>` names the chain instead of pushing a value through it. The composed
+    // value is an ordinary function, so it is applied twice here and handed to a
+    // higher-order function the third time, over the very same free functions the
+    // pipeline above used as stages.
+    val summarize = widen >> describe
+    println("{summarize(raw_total)}")
+    println("{summarize(kept_total)}")
+    println("{describe_widest(readings, summarize)}")
 
     return raw_total + counted + kept_total + remainders + flagged
 }

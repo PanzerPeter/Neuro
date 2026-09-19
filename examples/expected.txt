@@ -91,6 +91,7 @@ ownership/slices.nr              43
 
 # --- operators: bitwise, compound assignment, overloading, `??`, `?` --------
 operators/bitwise_ops.nr           1
+operators/compose.nr               150
 operators/compound_assignment.nr   21
 operators/error_propagation.nr     129
 operators/integer_methods.nr       0

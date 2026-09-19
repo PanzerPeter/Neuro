@@ -50,26 +50,29 @@ The parser is a **Pratt parser** (precedence climbing). The ladder, loosest firs
 
 | Precedence | Operators | Associativity |
 |------------|-----------|---------------|
-| 1 (loosest) | `..`, `..=` (range) | Left |
-| 2 | `??` (null-coalescing) | Right |
-| 3 | `\|\|` | Left |
-| 4 | `&&` | Left |
-| 5 | `\|` (bitwise or) | Left |
-| 6 | `^` | Left |
-| 7 | `&` (bitwise and) | Left |
-| 8 | `==`, `!=` | Left |
-| 9 | `<`, `>`, `<=`, `>=` | Left |
-| 10 | `<<` | Left |
-| 11 | `+`, `-` | Left |
-| 12 | `*`, `/`, `%` | Left |
-| 13 | `@` (matrix multiplication) | Left |
-| 14 | `as` (cast) | Left |
-| 15 | `-`, `!`, `~` (unary) | Right |
-| 16 | call `f(...)`, index `a[i]`, `?`, turbofish `::<...>` | Left |
-| 17 (tightest) | `.` (field / method access) | Left |
+| 1 (loosest) | `\|>` (pipeline) | Left |
+| 2 | `>>` (function composition) | Left |
+| 3 | `..`, `..=` (range) | Left |
+| 4 | `??` (null-coalescing) | Right |
+| 5 | `\|\|` | Left |
+| 6 | `&&` | Left |
+| 7 | `\|` (bitwise or) | Left |
+| 8 | `^` | Left |
+| 9 | `&` (bitwise and) | Left |
+| 10 | `==`, `!=` | Left |
+| 11 | `<`, `>`, `<=`, `>=` | Left |
+| 12 | `<<` | Left |
+| 13 | `+`, `-` | Left |
+| 14 | `*`, `/`, `%` | Left |
+| 15 | `@` (matrix multiplication) | Left |
+| 16 | `as` (cast) | Left |
+| 17 | `-`, `!`, `~` (unary) | Right |
+| 18 | call `f(...)`, index `a[i]`, `?`, turbofish `::<...>` | Left |
+| 19 (tightest) | `.` (field / method access) | Left |
 
-There is no `>>` operator: right shift is the `.shr(n)` method, because `>>` is reserved for
-function composition. `??` associates right-to-left so `a ?? b ?? c` evaluates each fallback
+`>>` composes functions rather than shifting bits: right shift is the `.shr(n)` method. It is
+not a token, but two adjacent `>`, so a nested generic type still closes with two ordinary
+`>` and only the expression parser reads the pair as one operator. `??` associates right-to-left so `a ?? b ?? c` evaluates each fallback
 only when every left-hand side before it was absent.
 
 `@` spells both the matmul operator and the opening of an attribute. Attributes are read at

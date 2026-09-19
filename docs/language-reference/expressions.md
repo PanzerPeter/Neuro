@@ -312,27 +312,27 @@ Pratt parser's ladder exactly:
 
 | Level | Operators | Associativity | Description |
 |-------|-----------|---------------|-------------|
-| 17 (highest) | `.` | Left | Field / method access |
-| 16 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | Left | Postfix forms |
-| 15 | `-` (unary), `!`, `~` | Right | Negation, logical NOT, bitwise NOT |
-| 14 | `as` | Left | Type cast |
-| 13 | `*`, `/`, `%` | Left | Multiply, divide, modulo |
-| 12 | `+`, `-` | Left | Addition, subtraction |
-| 11 | `<<` | Left | Left shift |
-| 10 | `<`, `>`, `<=`, `>=` | Left | Comparison |
-| 9 | `==`, `!=` | Left | Equality |
-| 8 | `&` | Left | Bitwise AND |
-| 7 | `^` | Left | Bitwise XOR |
-| 6 | `\|` | Left | Bitwise OR |
-| 5 | `&&` | Left | Logical AND |
-| 4 | `\|\|` | Left | Logical OR |
-| 3 | `??` | Right | Null/error coalescing |
-| 2 | `..`, `..=` | Left | Ranges |
+| 18 (highest) | `.` | Left | Field / method access |
+| 17 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | Left | Postfix forms |
+| 16 | `-` (unary), `!`, `~` | Right | Negation, logical NOT, bitwise NOT |
+| 15 | `as` | Left | Type cast |
+| 14 | `*`, `/`, `%` | Left | Multiply, divide, modulo |
+| 13 | `+`, `-` | Left | Addition, subtraction |
+| 12 | `<<` | Left | Left shift |
+| 11 | `<`, `>`, `<=`, `>=` | Left | Comparison |
+| 10 | `==`, `!=` | Left | Equality |
+| 9 | `&` | Left | Bitwise AND |
+| 8 | `^` | Left | Bitwise XOR |
+| 7 | `\|` | Left | Bitwise OR |
+| 6 | `&&` | Left | Logical AND |
+| 5 | `\|\|` | Left | Logical OR |
+| 4 | `??` | Right | Null/error coalescing |
+| 3 | `..`, `..=` | Left | Ranges |
+| 2 | `>>` | Left | Composition: `f >> g` is `\|x\| g(f(x))` |
 | 1 (lowest) | `\|>` | Left | Pipeline: `x \|> f` is `f(x)` |
 
-Comparison binds tighter than equality: `x < y == z` parses as `(x < y) == z`. There is no
-`>>` operator; right shift is the `.shr(n)` method because `>>` is reserved for function
-composition.
+Comparison binds tighter than equality: `x < y == z` parses as `(x < y) == z`. `>>` composes
+functions rather than shifting bits; right shift is the `.shr(n)` method.
 
 **Examples**:
 

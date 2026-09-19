@@ -1,0 +1,8 @@
+prepare(140) 40
+prepare(80)  0
+prepare(220) 120
+full(160)    120
+measure(45)  10
+applied      50
+piped        60
+direct       40

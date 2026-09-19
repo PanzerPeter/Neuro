@@ -66,7 +66,7 @@ impl Parser {
             self.skip_newlines();
 
             if let Some(token) = self.peek() {
-                let token_precedence = self.get_precedence(&token.kind);
+                let token_precedence = self.infix_precedence(&token.kind);
                 if precedence >= token_precedence {
                     break;
                 }
@@ -654,13 +654,7 @@ impl Parser {
                 let close = self.consume(TokenKind::RightParen, "')'")?;
                 let span = left.span().merge(close.span);
 
-                Ok(Expr::Call {
-                    func: Box::new(left),
-                    type_args: Vec::new(),
-                    args,
-                    arg_labels,
-                    span,
-                })
+                Ok(finish_call(left, args, arg_labels, span))
             }
 
             // Turbofish `callee::<T, N>(args)`: explicit generic arguments before a
@@ -794,6 +788,21 @@ impl Parser {
                 self.pipe_into(left, target)
             }
 
+            // Composition `left >> right`, lexed as two adjacent `>`: see
+            // `at_compose`. The right operand is parsed at `Compose` precedence, which
+            // makes the operator left-associative the way `|>` is, and the chain is
+            // flattened as it is built so `f >> g >> h` is one node.
+            TokenKind::Greater if self.at_compose() => {
+                self.advance(); // consume the first '>'
+                self.advance(); // consume the second '>'
+                self.skip_newlines();
+                let right = self.parse_expr(Precedence::Compose)?;
+                let span = left.span().merge(right.span());
+                let mut functions = compose_operand(left)?;
+                functions.extend(compose_operand(right)?);
+                Ok(Expr::Compose { functions, span })
+            }
+
             // Type casts
             TokenKind::As => {
                 self.advance(); // consume 'as'
@@ -910,6 +919,12 @@ impl Parser {
         match target {
             Expr::Paren(inner, _) => self.pipe_into(value, *inner),
 
+            // `x |> f >> g` applies the composition rather than binding it, and
+            // applying it is the nested call it stands for. `>>` binds tighter than
+            // `|>` (Appendix B rows 16 and 17), which is what puts the whole chain
+            // here as one target.
+            Expr::Compose { functions, .. } => Ok(apply_compose(&functions, value, span)),
+
             Expr::Identifier(_) | Expr::Path { .. } | Expr::FieldAccess { .. } => Ok(Expr::Call {
                 func: Box::new(target),
                 type_args: Vec::new(),
@@ -954,6 +969,36 @@ impl Parser {
         let id = self.pipe_counter;
         self.pipe_counter += 1;
         id
+    }
+
+    /// Whether the cursor sits on `>>`, the composition operator.
+    ///
+    /// `>>` is not a token. Lexing it as one would make `Vec<Vec<i32>>` end in a
+    /// single token the type parser has to split, the cost every C-family grammar
+    /// pays for nested generics; two adjacent `>` cost nothing and are unambiguous,
+    /// because right shift is the `.shr(n)` method here (Appendix B) and a comparison
+    /// never has `>` as the first token of its right operand.
+    fn at_compose(&self) -> bool {
+        let (Some(first), Some(second)) = (
+            self.tokens.get(self.current),
+            self.tokens.get(self.current + 1),
+        ) else {
+            return false;
+        };
+        matches!(first.kind, TokenKind::Greater)
+            && matches!(second.kind, TokenKind::Greater)
+            && first.span.end == second.span.start
+    }
+
+    /// The precedence of the operator at the cursor.
+    ///
+    /// Separate from [`Parser::get_precedence`] because `>>` is a token *pair*: only
+    /// the cursor can see it, and a lone `>` is a comparison.
+    fn infix_precedence(&self, kind: &TokenKind) -> Precedence {
+        if self.at_compose() {
+            return Precedence::Compose;
+        }
+        self.get_precedence(kind)
     }
 
     /// Get the precedence of an operator token
@@ -1087,5 +1132,67 @@ impl Parser {
         }
         self.consume(TokenKind::Greater, "'>' to close turbofish arguments")?;
         Ok(args)
+    }
+}
+
+/// The function names one operand of `>>` contributes to the chain.
+///
+/// Composition takes *named* functions: a bare name is not a value in this language,
+/// so the operand is validated here rather than left to produce a type error about a
+/// callee that is not callable. An operand that is already a `Compose` is the left of
+/// `f >> g >> h`, and flattening it there is what keeps the chain one node.
+fn compose_operand(operand: Expr) -> ParseResult<Vec<Identifier>> {
+    match operand {
+        Expr::Paren(inner, _) => compose_operand(*inner),
+        Expr::Identifier(name) => Ok(vec![name]),
+        Expr::Compose { functions, .. } => Ok(functions),
+        other => Err(ParseError::NotAComposeOperand { span: other.span() }),
+    }
+}
+
+/// The composed function chain `functions`, applied to `arg`: `h(g(f(arg)))`.
+fn apply_compose(functions: &[Identifier], arg: Expr, span: Span) -> Expr {
+    functions.iter().fold(arg, |value, function| Expr::Call {
+        func: Box::new(Expr::Identifier(function.clone())),
+        type_args: Vec::new(),
+        args: vec![value],
+        arg_labels: Vec::new(),
+        span,
+    })
+}
+
+/// The composition chain `callee` names, seen through any parentheses around it.
+fn as_compose(callee: &Expr) -> Option<&[Identifier]> {
+    match callee {
+        Expr::Paren(inner, _) => as_compose(inner),
+        Expr::Compose { functions, .. } => Some(functions),
+        _ => None,
+    }
+}
+
+/// Build the call expression for `callee(args)`.
+///
+/// A composition called where it is written, `(f >> g)(x)`, is the nested call it
+/// stands for: no function value need exist for a chain that is never bound. Every
+/// other callee keeps its `Expr::Call`.
+fn finish_call(
+    callee: Expr,
+    mut args: Vec<Expr>,
+    arg_labels: Vec<Option<Identifier>>,
+    span: Span,
+) -> Expr {
+    let applied = arg_labels.is_empty() && args.len() == 1;
+    match as_compose(&callee) {
+        Some(functions) if applied => {
+            let functions = functions.to_vec();
+            apply_compose(&functions, args.remove(0), span)
+        }
+        _ => Expr::Call {
+            func: Box::new(callee),
+            type_args: Vec::new(),
+            args,
+            arg_labels,
+            span,
+        },
     }
 }

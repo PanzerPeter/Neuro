@@ -250,6 +250,18 @@ pub enum Expr {
         is_move: bool,
         span: Span,
     },
+    /// Function composition `f >> g >> h`: the function value that applies its
+    /// argument to `f`, that result to `g`, and so on left to right.
+    ///
+    /// The chain is flattened by the parser, so `functions` is never shorter than two
+    /// and the node holds no sub-expressions: composition takes *named* functions, and
+    /// a name is not a value in this language. That is also why the operands are
+    /// [`Identifier`]s rather than boxed [`Expr`]s — a walker over expressions has
+    /// nothing here to descend into.
+    Compose {
+        functions: Vec<Identifier>,
+        span: Span,
+    },
     /// Error propagation `operand?`: unwraps an `Option<T>` / `Result<T, E>` to its
     /// success payload, or leaves the enclosing function carrying the failure variant
     /// on (`None` / `Err(e)`) unchanged: the error is never converted.
@@ -448,6 +460,7 @@ impl Expr {
             Expr::ArrayRest { span, .. } => *span,
             Expr::Match { span, .. } => *span,
             Expr::Closure { span, .. } => *span,
+            Expr::Compose { span, .. } => *span,
             Expr::Try { span, .. } => *span,
             Expr::InterpString { span, .. } => *span,
         }

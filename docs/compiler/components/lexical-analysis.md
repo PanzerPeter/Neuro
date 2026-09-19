@@ -58,8 +58,11 @@ the dedent rules and their errors.
 - **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`
 - **Comparison**: `==`, `!=`, `<`, `>`, `<=`, `>=`
 - **Logical**: `&&`, `||`, `!`
-- **Bitwise**: `&`, `|`, `^`, `~`, `<<` (there is no `>>` token; right shift is the
-  `.shr(n)` method, because `>>` is reserved for function composition)
+- **Bitwise**: `&`, `|`, `^`, `~`, `<<` (right shift is the `.shr(n)` method, because
+  `>>` spells function composition)
+- **Composition**: `>>` is not a token of its own. It reaches the parser as two adjacent
+  `>`, which is what keeps the closing brackets of `Vec<Vec<i32>>` two tokens the type
+  parser can consume one at a time.
 - **Fallible**: `??` (coalesce), `?` (propagate)
 - **Assignment**: `=`
 - **Other**: `@` (attributes), `->` (return type), `=>` (match arm), `::` (path and

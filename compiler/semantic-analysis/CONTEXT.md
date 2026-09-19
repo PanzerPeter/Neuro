@@ -672,6 +672,18 @@ to the closure, and with `loop_stack` emptied for the same reason: an enclosing 
 `break` target from inside a closure, so one written there is `BreakOutsideLoop`. Both are restored
 afterwards. `check_plain_call` dispatches a call on a local binding of function type.
 
+### Composition
+`expressions/compose.rs`. `check_compose` types an `Expr::Compose` as
+`Type::Function { params: [first stage's parameter], ret: last stage's return }`, after resolving
+every name in the chain and checking that each stage's result is assignable to the next stage's
+parameter (`ComposeStageMismatch`). A stage must be a non-generic free function of exactly one
+parameter: `ComposeGenericFunction`, `ComposeArity`, `ComposeUndefined`, and
+`ComposeNotANamedFunction` for a name that resolves to a *binding* instead. That last one is the
+capture rule reaching a new surface rather than a rule of its own: the composed closure calls each
+stage directly, and a stage held in a binding would have to be captured, which the Copy-only
+capture model forbids. Every stage is resolved before any mismatch is reported, so one chain
+reports each bad name it holds.
+
 ### Fallible types
 `fallible_kind` (`expressions/operators.rs`) is the shared resolver, so `?` and `??` accept exactly
 the same set of types. It resolves a type to an `Option` / `Result` instance through

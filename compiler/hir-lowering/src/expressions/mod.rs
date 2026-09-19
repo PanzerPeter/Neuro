@@ -268,6 +268,8 @@ impl Lowerer {
                 ..
             } => self.lower_closure(params, ret.as_ref(), body, *span),
 
+            Expr::Compose { functions, span } => self.lower_compose(functions, *span),
+
             // A bare path is a unit-variant enum construction `E::V` when the
             // type names an enum, else an associated-function reference.
             Expr::Path {

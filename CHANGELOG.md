@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.51.0] - 2026-09-19
+
+### Added
+
+- **Function composition operator `>>`.** `f >> g` is the function `|x| g(f(x))`, so a
+  preparation pipeline can be named once and applied wherever it is needed instead of
+  being rewritten at each call site. The result is an ordinary function value: it binds
+  to a `val`, passes to a `(T) -> U` parameter, returns from a function, and sits in a
+  struct field. Composition is left to right, so `f >> g >> h` applies `f` first.
+- `>>` binds tighter than `|>` and looser than every other operator, which makes
+  `x |> f >> g` apply the composed function to `x`. A composition called where it is
+  written, `(f >> g)(x)`, needs no name at all.
+- The stages need not share a type: only each stage's result and the next stage's
+  parameter have to agree, so `label >> width` composes `(i32) -> string` with
+  `(string) -> i32`.
+- `>>` is not right shift, which stays the `.shr(n)` integer method. It is not a token
+  either: the parser reads two adjacent `>`, so the closing brackets of a nested generic
+  type are unaffected.
+
+### Known limits
+
+- Both operands of `>>` must be plain function names of one parameter. A closure literal,
+  a bound method `receiver.method`, an associated function `Type::member`, a binding of
+  function type and a generic function are each rejected where they are written, with a
+  diagnostic naming the operator. `|>` accepts all of those, because it applies a value
+  rather than building one.
+
 ## [2.50.1] - 2026-09-19
 
 ### Fixed

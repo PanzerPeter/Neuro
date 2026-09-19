@@ -89,6 +89,9 @@ pub enum ParseError {
     #[error("the right of `|>` must be a function value: a function name, a bound method `receiver.method`, or a parenthesized closure `(|x: T| ...)`")]
     NotAPipelineTarget { span: Span },
 
+    #[error("the operands of `>>` must be function names: `f >> g` composes them into the function `|x| g(f(x))`")]
+    NotAComposeOperand { span: Span },
+
     #[error("lexical error: {0}")]
     LexError(#[from] LexError),
 }

@@ -129,7 +129,10 @@ Reads `.nr` files from disk; writes nothing.
   imports made significant), and the holes of an interpolated string literal, whose
   expressions are ordinary code and may name imported items; discovery and rewriting are
   the same traversal with different callbacks, so a new position cannot be handled by one
-  and forgotten by the other.
+  and forgotten by the other. The composition operator's names are the one position that
+  is not an `Expr`: `Expr::Compose` holds bare `Identifier`s, so the walk offers each as the
+  identifier expression it stands for and writes back what the visitor leaves. Without that,
+  `use m::f as g` would rename the item everywhere except inside `g >> h`.
 - **Rewriting does not track locals.** A bare name is replaced when an import bound it,
   whether or not a local of the same name is in scope. Shadowing an imported name is
   therefore not supported: rename the import with `as`.

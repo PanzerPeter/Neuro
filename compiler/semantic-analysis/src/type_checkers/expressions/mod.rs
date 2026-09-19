@@ -5,6 +5,7 @@
 mod blocks;
 mod builtins;
 mod calls;
+mod compose;
 pub(crate) mod const_predicates;
 mod enum_exprs;
 mod interpolation;
@@ -356,6 +357,8 @@ impl TypeChecker {
                 is_move,
                 span,
             } => Some(self.check_closure(params, ret.as_ref(), body, *is_move, *span)),
+
+            Expr::Compose { functions, span } => Some(self.check_compose(functions, *span)),
         }
     }
 }

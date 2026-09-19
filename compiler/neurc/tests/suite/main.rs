@@ -27,6 +27,7 @@ mod cold_outlining;
 mod collection_string_ownership;
 mod collections;
 mod comparison_chains;
+mod compose_operator;
 mod compound_assignment;
 mod const_generics;
 mod constants;

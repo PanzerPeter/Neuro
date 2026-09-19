@@ -5,7 +5,8 @@
 pub(crate) enum Precedence {
     Lowest,
     Pipeline,     // |> (Appendix B row 17: looser than every other binary operator)
-    Range,        // .. ..= (Appendix B row 15: looser than ??, tighter than |>)
+    Compose,      // >> (Appendix B row 16: looser than range, tighter than |>)
+    Range,        // .. ..= (Appendix B row 15: looser than ??, tighter than >>)
     NullCoalesce, // ?? (Appendix B row 14: looser than ||, tighter than range)
     LogicalOr,    // ||
     LogicalAnd,   // &&
