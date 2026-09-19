@@ -8,7 +8,7 @@
 //! dispatches indirectly.
 
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
-use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum};
+use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, PointerValue};
 use inkwell::AddressSpace;
 use neuro_hir::{HirCapture, HirClosure, HirExpr};
 
@@ -184,8 +184,29 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         };
 
-        let fat = self.codegen_expr(callee)?;
-        let BasicValueEnum::StructValue(fat) = fat else {
+        let value = self.codegen_expr(callee)?;
+        let target = self.split_function_value(value)?;
+        let mut values = Vec::with_capacity(args.len());
+        for arg in args {
+            let value = self.codegen_expr(arg)?;
+            // A closure argument is passed by copy (captures are Copy), so a by-value
+            // `Drop` place is still moved into the callee here.
+            self.mark_moved_for_drop(arg);
+            values.push(value);
+        }
+        self.call_function_value(&target, &values, &ret_ty)
+    }
+
+    /// Split an already-lowered function value into the halves a call needs.
+    ///
+    /// Separate from [`Self::call_function_value`] so a caller that calls the same
+    /// function repeatedly — a tensor traversal, one call per element — evaluates the
+    /// value once, outside its loop, the way the surface says it is evaluated once.
+    pub(crate) fn split_function_value(
+        &self,
+        value: BasicValueEnum<'ctx>,
+    ) -> CodegenResult<FunctionValueHalves<'ctx>> {
+        let BasicValueEnum::StructValue(fat) = value else {
             return Err(CodegenError::InternalError(
                 "closure callee did not lower to a fat pointer".into(),
             ));
@@ -200,30 +221,41 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_extract_value(fat, 1, "closure.env")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?
             .into_pointer_value();
+        Ok(FunctionValueHalves { fn_ptr, env_ptr })
+    }
 
+    /// Dispatch through a split function value, passing the environment as the hidden
+    /// first argument. Returns `None` when the callee returns unit `()`.
+    pub(crate) fn call_function_value(
+        &self,
+        target: &FunctionValueHalves<'ctx>,
+        args: &[BasicValueEnum<'ctx>],
+        ret_ty: &Type,
+    ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
         let ptr_ty = self.context.ptr_type(AddressSpace::default());
-        let mut call_args: Vec<BasicMetadataValueEnum<'ctx>> = vec![env_ptr.into()];
+        let mut call_args: Vec<BasicMetadataValueEnum<'ctx>> = vec![target.env_ptr.into()];
         let mut param_types: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
-        for arg in args {
-            let value = self.codegen_expr(arg)?;
-            // A closure argument is passed by copy (captures are Copy), so a by-value
-            // `Drop` place is still moved into the callee here.
-            self.mark_moved_for_drop(arg);
+        for value in args {
             param_types.push(value.get_type().into());
-            call_args.push(value.into());
+            call_args.push((*value).into());
         }
 
         let fn_type = if matches!(ret_ty, Type::Void) {
             self.context.void_type().fn_type(&param_types, false)
         } else {
-            self.get_any_llvm_type(&ret_ty)?
-                .fn_type(&param_types, false)
+            self.get_any_llvm_type(ret_ty)?.fn_type(&param_types, false)
         };
 
         let call = self
             .builder
-            .build_indirect_call(fn_type, fn_ptr, &call_args, "closure.call")
+            .build_indirect_call(fn_type, target.fn_ptr, &call_args, "closure.call")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
         Ok(call.try_as_basic_value().basic())
     }
+}
+
+/// The two halves of a `{ fn_ptr, env_ptr }` function value, extracted once.
+pub(crate) struct FunctionValueHalves<'ctx> {
+    fn_ptr: PointerValue<'ctx>,
+    env_ptr: PointerValue<'ctx>,
 }

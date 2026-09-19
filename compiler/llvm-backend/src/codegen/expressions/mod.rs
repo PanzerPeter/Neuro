@@ -17,6 +17,7 @@ pub(crate) mod matches;
 mod methods;
 mod slices;
 mod struct_eq;
+mod tensor_apply;
 mod tensor_arith;
 mod tensor_einsum;
 mod tensor_index;
@@ -235,6 +236,16 @@ impl<'ctx> CodegenContext<'ctx> {
                     &result_ty,
                     expr.span.start,
                 )
+            }
+            // `.map(f)` / `.zip(other, f)` / `.reduce(init, f)` over the elements.
+            HirExprKind::TensorApply {
+                kind,
+                receiver,
+                operand,
+                callee,
+            } => {
+                let result_ty = Type::from_hir(&expr.ty);
+                self.codegen_tensor_apply(*kind, receiver, operand.as_deref(), callee, &result_ty)
             }
             // `.sort()` / `.argsort()` / `.topk()`, along one axis.
             HirExprKind::TensorSort {

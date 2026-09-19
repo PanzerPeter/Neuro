@@ -554,6 +554,18 @@ fn walk(expr: &HirExpr, visit: &mut impl FnMut(&HirExpr)) {
         HirExprKind::TensorShapeCast { receiver, .. }
         | HirExprKind::TensorReduce { receiver, .. }
         | HirExprKind::TensorSort { receiver, .. } => walk(receiver, visit),
+        HirExprKind::TensorApply {
+            receiver,
+            operand,
+            callee,
+            ..
+        } => {
+            walk(receiver, visit);
+            if let Some(operand) = operand {
+                walk(operand, visit);
+            }
+            walk(callee, visit);
+        }
         HirExprKind::TensorEinsum { operands, .. } => {
             for operand in operands {
                 walk(operand, visit);

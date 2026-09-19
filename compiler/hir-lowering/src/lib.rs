@@ -36,6 +36,7 @@ mod iteration;
 mod loop_adapters;
 mod operator_traits;
 mod statements;
+mod tensor_apply;
 mod tensor_einsum;
 mod tensor_index;
 mod tensor_reduce;

@@ -307,6 +307,7 @@ pub(crate) mod operator_traits;
 mod pools;
 mod resolution;
 mod statements;
+mod tensor_apply;
 mod tensor_broadcast;
 mod tensor_einsum;
 mod tensor_index;

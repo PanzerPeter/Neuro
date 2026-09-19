@@ -3,11 +3,12 @@
 // This is an integration example: it exercises several features *together*
 // rather than in isolation:
 //   Einstein notation (`einsum`) for both contractions · the pipeline operator
-//   `|>` and the composition operator `>>` chaining the scaling stages · a struct
-//   holding tensor fields, moved into it at construction · named tensor dimensions
-//   on the annotations · reductions (`.sum()`, `.max()`) over a borrowed tensor ·
-//   a borrowed receiver a method reads without moving · `for`-in over a range ·
-//   string interpolation with the format mini-language.
+//   `|>` and the composition operator `>>` chaining the scaling stages · the
+//   functional traversals `.map` and `.reduce` applying that composition over a whole
+//   tensor · a struct holding tensor fields, moved into it at construction · named
+//   tensor dimensions on the annotations · reductions (`.sum()`, `.max()`) over a
+//   borrowed tensor · a borrowed receiver a method reads without moving · `for`-in
+//   over a range · string interpolation with the format mini-language.
 //
 // An attention head is two contractions with a rescale between them. The scores are
 // every query row against every key row, which is `einsum("td,sd->ts", ...)`: the
@@ -73,20 +74,18 @@ func main() -> i32 {
         println("scores {row}   = {raw[row, 0]:.1}, {raw[row, 1]:.1}, {raw[row, 2]:.1}")
     }
 
-    // `>>` builds the rescale once, as a value; `|>` applies it to each element read
-    // back out. The composed function is a name the chain calls, not a closure it holds.
+    // `>>` builds the rescale once, as a value, and `.map` applies it to every score in
+    // one pass: a composed function is an ordinary function value, so it is a traversal
+    // stage like any closure. Written elementwise this was two nested loops over a
+    // pre-zeroed buffer.
     val rescale = by_sqrt_dim >> clamp_low
-    mut scaled: Tensor<f32, [3, 3]> = [
-        [0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0]
-    ]
-    for row in 0..3 {
-        for col in 0..3 {
-            scaled[row, col] = raw[row, col] |> rescale
-        }
-    }
+    val scaled: Tensor<f32, [3, 3]> = raw.map(rescale)
     println("peak score  = {scaled.max():.2}")
+
+    // `|>` applies the same composition to a single number, which is the other half of
+    // the pair: `|>` feeds a value through, `>>` builds the stage both of them use.
+    val probe = raw[0, 0] |> rescale
+    println("probe       = {probe:.2}")
 
     // Contraction two: the source-token axis is summed away, the output feature axis
     // arrives from the values.
@@ -99,7 +98,10 @@ func main() -> i32 {
     val budget: Tensor<f32, [3, 4]> = head.queries.clone()
     println("query mass  = {budget.sum():.1}")
 
-    val total = context.sum()
+    // A fold over the context: `.reduce` carries whatever the accumulator needs, here the
+    // running mass rather than a running element, and answers one number of the seed's
+    // type the way `.sum()` does.
+    val total: f32 = context.reduce(0.0, |acc: f32, x: f32| -> f32 { acc + x })
     println("context sum = {total:.2}")
     return total as i32
 }

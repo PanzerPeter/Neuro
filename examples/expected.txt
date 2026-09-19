@@ -78,6 +78,7 @@ tensors/tensor_shape_generics.nr      41
 tensors/tensor_shape_manipulation.nr  44
 tensors/tensor_sorting.nr             21
 tensors/tensor_einsum.nr              40
+tensors/tensor_functional.nr          24
 
 # --- ownership: moves, borrows, exclusivity, lifetimes, Drop ----------------
 ownership/borrow_exclusivity.nr  31

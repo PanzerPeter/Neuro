@@ -4,9 +4,10 @@ Thank you for your interest in contributing to the Neuro programming language co
 
 ## Project Status
 
-Phase 1 (Core Language) is complete: the full general-purpose language surface shipped as
-**v2.0.0**. Neuro is now in Phase 2 (Tensors, v2.x). A phase is divided into lettered
-sub-phases implemented strictly in dependency order; finishing all of Phase 2 ships v3.0.0.
+Phase 2 (Tensors and MLIR) is complete: first-class tensors, the MLIR lowering path, the
+pool allocator, the value model and the functional sugar shipped as **v3.0.0**. Neuro is now
+in Phase 3 (Automatic Differentiation, v3.x). A phase is divided into lettered sub-phases
+implemented strictly in dependency order; finishing all of Phase 3 ships v4.0.0.
 
 Per-phase status lives in exactly one place: the
 [Quick Roadmap](README.md#quick-roadmap). What each release changed is in

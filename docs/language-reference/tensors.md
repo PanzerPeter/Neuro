@@ -755,6 +755,50 @@ A result axis carries no dimension name. A subscript letter is a local label for
 contraction, not a name the type is meant to keep, so the result's axes are unnamed and an
 annotation may name them itself.
 
+## Functional traversals
+
+`.map`, `.zip`, and `.reduce` walk a tensor's elements once, in row-major order, calling a
+function per element. They differ only in what that function is handed and what becomes of
+its answer.
+
+```neuro
+val doubled = tensor.map(|x: f32| -> f32 { x * 2.0 })              // same shape, elementwise
+val paired  = tensor.zip(other, |a: f32, b: f32| -> f32 { a * b }) // same shape, two inputs
+val total   = tensor.reduce(0.0, |acc: f32, x: f32| -> f32 { acc + x })
+```
+
+`.map` is the one construct that changes what a tensor's buffer holds: the result's element
+type is the **function's return type**, not the receiver's, so `t.map(|x: i32| -> f64 { ... })`
+is how a tensor changes dtype elementwise. That type has to be an integer or `f32`/`f64`,
+since the answers go into a buffer.
+
+`.zip` walks two buffers at one index, so its operand carries the receiver's extents; the
+two need not hold the same element type, the function's parameters saying what each holds.
+
+`.reduce` answers **one value of the seed's type**, not a rank-0 tensor, the way a
+whole-tensor `.sum()` does — a reader should not need a second call to get the number out.
+The accumulator is the **first** parameter, which is what `|acc, x|` means, and an untyped
+seed takes its type from that parameter: `0.0` folded over an `f32` tensor is an `f32`.
+
+The function is an ordinary function value, so anything that produces one is a stage: a
+closure literal, a closure binding, or a `>>` composition.
+
+```neuro
+val rescale = halve >> clamp_low
+val clean = raw.map(rescale)
+```
+
+Like a reduction, all three **read** their operands: each allocates its own result and
+leaves the buffers it walked where they were, so all three are offered on `&Tensor<T, S>`
+and a chain like `t.map(f).map(g)` releases its intermediate. Every extent must be a number
+here, for the reason a contraction's must: the walk's length and the result buffer are both
+built from it.
+
+There is deliberately **no `.filter`**. A filter's output length depends on the values in
+the buffer, so its result would have no shape the type system can name, which is the whole
+point of a shape being part of the type. Use a boolean mask where the shape must survive,
+or a `Vec<T>` where a data-dependent length is genuinely what you want.
+
 ## Dynamic shapes
 
 An axis written `?` has no compile-time extent. It opts that one axis out of
@@ -810,9 +854,9 @@ A tensor can be built, bound, moved, cloned, passed, returned, transferred with
 rules, multiplied as a matrix with `@`, updated in place, stored in a struct, indexed, written
 through an index (`t[i, j] = v`), sliced, reshaped with
 `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`, and reduced with
-`.sum()` / `.mean()` / `.max()` / `.min()`, and contracted with `einsum`. What is still
-later work is the functional
-`.reduce(init, |acc, x| ...)`, and the step index form
+`.sum()` / `.mean()` / `.max()` / `.min()`, contracted with `einsum`, and traversed
+elementwise with `.map(f)` / `.zip(other, f)` / `.reduce(init, f)`. What is still later work
+is the step index form
 (`t[(0..n).step(2)]`), which waits on `.step(n)` existing on ranges at all. The reverse
 form `t[(0..n).rev()]` is implemented. A dynamic `?` axis is accepted, but only as a widening: nothing that needs
 an extent works on one, and there is no run-time shape check that would let a `?` be

@@ -861,6 +861,24 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   in `1..=extent` (`TensorTopKOutOfRange`). Every extent must be a number here
   (`TensorShapeCastSymbolicExtent`, `TensorDynamicExtent`), because the result's shape and
   the backend's strides are both built from it.
+- **Functional traversals, in `type_checkers/tensor_apply.rs`.** `.map(f)`,
+  `.zip(other, f)`, and `.reduce(init, f)` reach `check_tensor_apply` from
+  `resolve_builtin_method`, matched on the REFERENT for the reason the reductions are: the
+  first two allocate their own result and the third allocates nothing, so none records a
+  move and `&Tensor<T, S>` is an acceptable receiver. Every argument here IS a value,
+  unlike a reduction's `axis:`, so each is checked in the ordinary way. The function's
+  parameters are checked against what it will be handed — the element type for `.map`, both
+  element types for `.zip`, and the SEED FIRST then the element for `.reduce`, which is the
+  order `|acc, x|` is written in (`TensorApplyNotCallable`, `TensorApplyArity`,
+  `TensorApplyParamType`). `.map` and `.zip` answer the receiver's shape over the function's
+  RETURN type, which is the one place a tensor's element type changes, so that type has to
+  be a number a buffer can hold (`TensorApplyResultElement`); `.reduce` answers the seed's
+  own type and so requires the function to answer it too (`TensorReduceAccumulator`). A
+  `.zip`'s operand is a tensor of the receiver's extents (`TensorZipOperandNotTensor`,
+  `TensorZipShapeMismatch`), because one index walks both buffers. Every extent must be a
+  number here (`TensorShapeCastSymbolicExtent`), the result buffer being built from it.
+  There is deliberately no `.filter`: its output length depends on the values in the buffer,
+  so its result would have no shape to name.
 - **Einstein notation, in `type_checkers/tensor_einsum.rs`.** `einsum("bij,bjk->bik", a, b)`
   reaches `resolve_einsum_builtin` from the free-function arm of `check_plain_call`, beside
   `resolve_panic_builtin` and `resolve_io_builtin` and inside the same

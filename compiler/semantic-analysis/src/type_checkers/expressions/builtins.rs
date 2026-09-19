@@ -5,6 +5,7 @@
 
 use super::{TypeChecker, CLONE_METHOD};
 use crate::errors::TypeError;
+use crate::type_checkers::tensor_apply::is_apply_method;
 use crate::type_checkers::tensor_reduce::is_reduce_method;
 use crate::type_checkers::tensor_shape::is_shape_method;
 use crate::type_checkers::tensor_sort::is_sort_method;
@@ -239,6 +240,14 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
                 Some(self.check_tensor_reduce(&element, &shape, m, args, call_span))
+            }
+            // The functional traversals read the receiver for the same reason the
+            // reductions do: `.map` and `.zip` allocate their own result and `.reduce`
+            // allocates nothing, so `&Tensor<T, S>` is an acceptable receiver and no move
+            // is recorded. Unlike a reduction's axis, every argument here is a value.
+            (Type::Tensor { element, shape }, m) if is_apply_method(m) => {
+                let (element, shape) = (element.clone(), shape.clone());
+                Some(self.check_tensor_apply(&element, &shape, m, args, call_span))
             }
             // The order-based selections read the receiver for the same reason the
             // reductions do: each allocates its own result and leaves the buffer it

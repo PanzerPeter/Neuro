@@ -252,6 +252,29 @@ pub enum HirExprKind {
         output: Vec<usize>,
         extents: Vec<usize>,
     },
+    /// A functional traversal of a tensor's elements: `.map(f)`, `.zip(other, f)`,
+    /// `.reduce(init, f)`.
+    ///
+    /// The three are one node because they are one walk: a single counted pass over the
+    /// flat, row-major buffer, calling `callee` once per element. They differ only in
+    /// what the call is given and where its answer goes, which `kind` selects.
+    ///
+    /// `operand` carries the second tensor of a `.zip` and the seed of a `.reduce`, and
+    /// is `None` for a `.map`. A `.zip`'s operand has the receiver's shape, checked
+    /// before lowering, so one index walks both buffers.
+    ///
+    /// The expression's own `ty` is an [`HirType::Tensor`] of the receiver's shape for
+    /// `.map` and `.zip`, and the seed's type for `.reduce`, which is a scalar: a fold
+    /// over a whole buffer yields one number, the way the whole-tensor reductions do.
+    ///
+    /// The receiver is READ, not consumed: `.map` and `.zip` allocate their own result
+    /// and `.reduce` allocates nothing, so the source tensors stay alive and usable.
+    TensorApply {
+        kind: HirTensorApply,
+        receiver: Box<HirExpr>,
+        operand: Option<Box<HirExpr>>,
+        callee: Box<HirExpr>,
+    },
     /// Tuple literal `(e0, e1, ...)`. The element types live on the elements;
     /// this expression's `ty` is the [`HirType::Tuple`] of them.
     TupleLiteral {
@@ -413,6 +436,18 @@ pub enum HirReduceOp {
     Mean,
     Max,
     Min,
+}
+
+/// Which functional traversal a [`HirExprKind::TensorApply`] performs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HirTensorApply {
+    /// `.map(f)`: one argument per call, one result element written per call.
+    Map,
+    /// `.zip(other, f)`: two arguments per call, read at the same index of each buffer.
+    Zip,
+    /// `.reduce(init, f)`: the carried accumulator and the element, answering the next
+    /// accumulator. Nothing is written to a buffer.
+    Reduce,
 }
 
 /// What a [`HirExprKind::TensorSort`] writes out of the ordering it computes.

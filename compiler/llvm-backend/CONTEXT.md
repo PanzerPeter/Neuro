@@ -560,6 +560,21 @@ fresh handle, so a receiver a binding owns stays that binding's; a receiver no b
 released once the selection has copied what it needs, through the same
 `release_receiver_temporary` the reduction uses.
 
+`expressions/tensor_apply.rs` owns `HirExprKind::TensorApply`, the functional traversals
+`.map` / `.zip` / `.reduce`. One counted loop over the flat buffer whatever the receiver's
+rank: the traversals are elementwise, so the element count is a single compile-time product
+and there is no axis arithmetic at all — the simplest of the tensor walks. The function value
+is lowered ONCE, before the loop, and `split_function_value` keeps its `{ fn_ptr, env_ptr }`
+halves so `call_function_value` can dispatch per element without rebuilding them; that split
+is what `codegen_indirect_call` in `closures.rs` now also calls, so an ordinary `f(x)` and a
+traversal's per-element call go through one path. `t.map(make_rule())` must not rebuild its
+rule per element, the same rule an adapter chain in a `for` head follows. `.map` and `.zip`
+write each answer into a freshly allocated buffer at the index they read from, and `.reduce`
+carries its answer in an `alloca` seeded from `init` and loads it out at the end, which is
+also why a fold produces a scalar rather than a handle. Nothing is moved here; the receiver
+and a `.zip`'s operand are each freed through the same `release_receiver_temporary` the
+reduction uses, so a chained `t.map(..).map(..)` releases its intermediate.
+
 `expressions/tensor_einsum.rs` owns `HirExprKind::TensorEinsum`, the Einstein-notation
 contraction. The notation is gone by this point: HIR supplies one extent per subscript letter
 and, per operand, which letter each of its axes carries, which reduces the whole construct to

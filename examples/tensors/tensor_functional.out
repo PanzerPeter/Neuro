@@ -1,0 +1,9 @@
+doubled    = [2, 4, 6] [8, 10, 12]
+halves     = 0.5, 3.0
+weighted   = 1.0, 1.0, 6.0
+total      = 21
+even count = 3
+chained    = 139
+rescaled   = 2.0, 0.0, 4.0, 3.0
+scaled     = 10, 60
+source     = 1, still readable

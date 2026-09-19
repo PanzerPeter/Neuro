@@ -9,6 +9,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-19
+
+Phase 2 (Tensor Foundation & MLIR) is complete: every sub-phase 2A–2F has shipped. Phase 3
+(Automatic Differentiation) is now the open phase.
+
+### Added
+
+- **Functional tensor operations.** `.map(f)`, `.zip(other, f)` and `.reduce(init, f)` walk
+  a tensor's elements once, in row-major order, calling a function per element. They differ
+  only in what that function is handed and what becomes of its answer.
+- `.map(f)` answers a tensor of the receiver's shape whose element type is the FUNCTION's
+  return type, so it is also how a tensor changes dtype elementwise.
+- `.zip(other, f)` walks two buffers at one index. The operand carries the receiver's
+  extents, but the two need not hold the same element type: the function's parameters say
+  what each one holds.
+- `.reduce(init, f)` folds left over the whole buffer and answers one value of the seed's
+  type, matching the whole-tensor `.sum()` rather than producing a rank-0 tensor. The
+  accumulator is the first parameter, which is what `|acc, x|` means, and an untyped seed
+  takes its type from that parameter: `0.0` folded over an `f32` tensor is an `f32`.
+- The function is an ordinary function value, so a `>>` composition is a traversal stage
+  alongside a closure literal and a closure binding: `raw.map(halve >> clamp_low)`.
+- Like a reduction, all three read their operands rather than consuming them, so all three
+  accept `&Tensor<T, S>` and a chain like `t.map(f).map(g)` releases its intermediate.
+- Misuse is diagnosed: a non-function argument, a function of the wrong arity, a parameter
+  the receiver's elements do not fit, a `.map` answering something a buffer cannot hold, a
+  `.zip` over a second shape or a non-tensor, and a `.reduce` whose function does not answer
+  the seed's type each have their own error.
+- `examples/tensors/tensor_functional.nr` covers the three on their own, and
+  `examples/showcase/attention_head.nr` now applies a `>>` composition over a whole score
+  tensor with `.map` and folds the context with `.reduce`, in place of the nested
+  element-by-element loop it used before.
+
+### Known limits
+
+- There is deliberately no `.filter` on a tensor: its output length depends on the buffer's
+  values, so the result would have no shape the type system can name. The `.where(mask, a, b)`
+  select named in its place is not implemented either — it needs a boolean element type
+  first.
+- An inline closure still needs annotated parameters and an explicit return type, so the
+  stage is spelled `(|x: f32| -> f32 { x * 2.0 })`.
+- Every extent must be a compile-time number, so a traversal inside a shape-generic function
+  template has to wait for the instantiation that makes its extents concrete.
+- The function is called indirectly once per element, so the loop is neither inlined through
+  nor vectorized.
+
 ## [2.52.0] - 2026-09-19
 
 ### Added

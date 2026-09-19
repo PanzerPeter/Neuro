@@ -1,6 +1,7 @@
 # Neuro Documentation
 
-**Status**: Alpha. Phase 1 (Core Language) is complete; Phase 2 (Tensors and MLIR) is open.
+**Status**: Alpha. Phases 1 (Core Language) and 2 (Tensors and MLIR) are complete; Phase 3
+(Automatic Differentiation) is open.
 Per-phase status lives in one place, the [Quick Roadmap](../README.md#quick-roadmap); what each
 release changed is in [CHANGELOG.md](../CHANGELOG.md).
 
@@ -34,7 +35,7 @@ Design goals:
 |---|---|
 | [Types](language-reference/types.md) | Primitives, literals and suffixes, casts, arrays, slices, tuples, newtypes, aliases, borrows, type inference |
 | [Strings](language-reference/strings.md) | The `string` slice type, the growable `String` buffer, interpolation, triple-quoted literals, codepoint iteration |
-| [Tensors](language-reference/tensors.md) | `Tensor<T, [dims]>`, construction, element-wise arithmetic and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, dynamic shapes, devices |
+| [Tensors](language-reference/tensors.md) | `Tensor<T, [dims]>`, construction, element-wise arithmetic and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, dynamic shapes, devices |
 | [Variables](language-reference/variables.md) | `val`, `mut`, reassignment, scoping |
 | [Functions](language-reference/functions.md) | Declarations, parameters, named arguments, returns, generics, dispatch, closures |
 | [Expressions](language-reference/expressions.md) | Expression syntax and evaluation order |

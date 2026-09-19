@@ -11,9 +11,10 @@
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
 [![CI](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml)
 
-**Status: alpha.** Phase 1 (Core Language) is complete and the general-purpose language surface
-compiles and runs. Phase 2 (Tensors and MLIR) is open. Breaking changes are expected. Per-phase
-status lives in one place, the [Quick Roadmap](#quick-roadmap).
+**Status: alpha.** Phases 1 (Core Language) and 2 (Tensors and MLIR) are complete: the
+general-purpose language surface and the tensor stack compile and run. Phase 3 (Automatic
+Differentiation) is open. Breaking changes are expected. Per-phase status lives in one place,
+the [Quick Roadmap](#quick-roadmap).
 
 ---
 
@@ -169,7 +170,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 | **Structs, enums, newtypes** | Fields, functional update `..base`, `impl` blocks with `&self` / `&mut self` / consuming receivers; unit, tuple and struct-field variants carrying any sized payload; `@derive(Copy, Clone, Debug, PartialEq)` |
 | **Pattern matching** | Exhaustive `match` over variant, literal, or, range and wildcard patterns with `if` guards, plus `val`-binding destructuring of structs and arrays |
 | **Arrays, tuples, collections** | `[T; N]`, tuples, zero-copy slices `&[T]` / `&mut [T]`, and heap-backed `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` / `String` ([reference](docs/language-reference/types.md)) |
-| **Tensors** | `Tensor<T, [d0, ...]>` with shapes checked at compile time: broadcasting, `a @ b` matmul, slicing, shape generics, named and dynamic axes, reductions, sorting, `einsum` ([reference](docs/language-reference/tensors.md)) |
+| **Tensors** | `Tensor<T, [d0, ...]>` with shapes checked at compile time: broadcasting, `a @ b` matmul, slicing, shape generics, named and dynamic axes, reductions, sorting, `einsum`, `.map` / `.zip` / `.reduce` ([reference](docs/language-reference/tensors.md)) |
 | **Strings** | Immutable fat-pointer `string` with slices, concatenation, codepoint iteration, interpolation `"{x:.2}"` and triple-quoted blocks; growable `String` buffer ([reference](docs/language-reference/strings.md)) |
 | **Errors** | `Option<T>` and `Result<T, E>` in the implicit prelude as ordinary generic enums; `??` unwraps with a lazy fallback, `?` propagates, `val-else` exits the scope, `checked_*` arithmetic reports overflow |
 | **Ownership** | Move-by-default, `Copy`, borrows with flow-sensitive exclusivity, lifetime elision, deterministic `Drop`, and `pool { }` arena blocks ([reference](docs/language-reference/memory-model.md)) |
@@ -218,8 +219,8 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | Phase | Goal | Status |
 |:---:|---|:---:|
 | **1** | **Core Language**: types, control flow, LLVM backend, ownership and borrow checking, generics, traits, closures, enums and pattern matching, error handling, modules | Complete |
-| **2** | **Tensors and MLIR**: first-class tensor types lowered through MLIR Linalg, the pool allocator, and the value model they need | In progress |
-| **3** | **Automatic differentiation**: Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | Planned |
+| **2** | **Tensors and MLIR**: first-class tensor types lowered through MLIR Linalg, the pool allocator, and the value model they need | Complete |
+| **3** | **Automatic differentiation**: Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | In progress |
 | **4** | **GPU acceleration**: MLIR GPU dialects (nvgpu / rocdl), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | Planned |
 | **5** | **Neural network standard library**: `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | Planned |
 | **6** | **Async runtime**: `async func`, `Future<T>`, `spawn`, `join` / `race`, an executor for data-loader and I/O overlap | Planned |
@@ -227,10 +228,11 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | **8** | **Developer experience**: debug info, incremental compilation, Language Server Protocol, formatter, `@test` runner | Planned |
 | **9** | **Distribution**: the `neurpm` package manager, cross-OS installer and self-updater, signed binaries, CPU parallelism, further optimization passes | Planned |
 
-Phase 2 in detail: **2A** standard I/O and spec stragglers, **2B** tensor core, **2C** MLIR
-lowering, **2D** the pool allocator and **2E** the value model are complete; **2F** functional
-sugar is nearly there: the `|>` and `>>` operators and Einstein notation have landed, and
-the functional tensor operations are what remains.
+Phase 2 is complete: **2A** standard I/O and spec stragglers, **2B** tensor core, **2C** MLIR
+lowering, **2D** the pool allocator, **2E** the value model and **2F** functional sugar — the
+`|>` and `>>` operators, Einstein notation, and the `.map` / `.zip` / `.reduce` traversals —
+all shipped. Phase 3 opens on the binding question its first item names: whether a Rust
+process can reach Enzyme's MLIR dialect at all.
 
 ---
 
@@ -282,8 +284,8 @@ Everything is published at [neuro-lang.netlify.app](https://neuro-lang.netlify.a
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the architecture rules, coding standards, quality gates and
 pull request process. Open defects are in [docs/BUGS.md](docs/BUGS.md), and fixing one is the best
-way to start. Work is most useful in **Phase 2 (Tensors and MLIR)**, particularly the functional
-tensor operations that close sub-phase 2F.
+way to start. Work is most useful in **Phase 3 (Automatic Differentiation)**, which opens on
+proving that Enzyme's MLIR dialect is reachable from Rust before any `@grad` surface is designed.
 
 See also [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 

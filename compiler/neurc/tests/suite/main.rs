@@ -104,6 +104,7 @@ mod struct_by_value;
 mod struct_shorthand_update;
 mod structs;
 mod tail_if_return;
+mod tensor_apply;
 mod tensor_compound_assign;
 mod tensor_dynamic_shapes;
 mod tensor_einsum;

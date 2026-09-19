@@ -80,6 +80,14 @@ it the *typed* contract:
    and the tensor of the output letters' extents otherwise (unnamed axes: a subscript letter
    is not a dimension name). It READS every operand like the reduction does, so a backend
    needs the three index tables and no knowledge of the notation.
+   `HirExprKind::TensorApply { kind, receiver, operand, callee }` is the functional traversal
+   family `.map` / `.zip` / `.reduce`, one node because they are one walk: a single counted
+   pass over the flat buffer calling `callee` once per element. `operand` carries `.zip`'s
+   second tensor or `.reduce`'s seed and is `None` for `.map`; a `.zip`'s operand has the
+   receiver's extents, checked before lowering, so one index walks both buffers. Its `ty` is
+   the receiver's shape over the callee's return type for the first two and the seed's type
+   for `.reduce` — a scalar, the way the whole-tensor reductions answer one. It READS every
+   operand like the reduction does.
    `HirStmt::TensorCompoundAssign { place, op, value, ty, span }` is the in-place update
    beside them: `ty` is the target's tensor type and `value` is either that same type or a
    reference to it, an owned operand being consumed by the update and a borrowed one only

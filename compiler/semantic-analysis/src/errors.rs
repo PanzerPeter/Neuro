@@ -450,6 +450,56 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("`.{method}` takes a function, but this argument is {found}; write a closure with annotated parameters, e.g. `|x: f32| -> f32 {{ x * 2.0 }}`")]
+    TensorApplyNotCallable {
+        method: String,
+        found: Type,
+        span: Span,
+    },
+
+    #[error("`.{method}` calls its function with {expected} argument(s) per element, but this one takes {found}")]
+    TensorApplyArity {
+        method: String,
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    #[error(
+        "`.{method}` hands {expected} to parameter {position} of its function, which takes {found}"
+    )]
+    TensorApplyParamType {
+        method: String,
+        position: usize,
+        expected: Type,
+        found: Type,
+        span: Span,
+    },
+
+    #[error("`.{method}` builds a tensor out of what its function returns, which requires an integer or `f32`/`f64`; this one returns {found}")]
+    TensorApplyResultElement {
+        method: String,
+        found: Type,
+        span: Span,
+    },
+
+    #[error("`.zip` walks two tensors at the same index, so both carry one shape; the receiver is {receiver} and the argument is {other}")]
+    TensorZipShapeMismatch {
+        receiver: Type,
+        other: Type,
+        span: Span,
+    },
+
+    #[error("`.zip` takes a tensor to walk alongside the receiver, not {found}")]
+    TensorZipOperandNotTensor { found: Type, span: Span },
+
+    #[error("`.reduce` carries its seed from one element to the next, so the function must answer the seed's type {expected}; this one answers {found}")]
+    TensorReduceAccumulator {
+        expected: Type,
+        found: Type,
+        span: Span,
+    },
+
     #[error("`Tensor::{ctor}` does not apply to {ty}: {reason}")]
     TensorConstructorNotApplicable {
         ctor: String,
@@ -1157,6 +1207,13 @@ impl TypeError {
             | Self::TensorSortEmpty { span, .. }
             | Self::TensorSortArgNotConstant { span, .. }
             | Self::TensorTopKOutOfRange { span, .. }
+            | Self::TensorApplyNotCallable { span, .. }
+            | Self::TensorApplyArity { span, .. }
+            | Self::TensorApplyParamType { span, .. }
+            | Self::TensorApplyResultElement { span, .. }
+            | Self::TensorZipShapeMismatch { span, .. }
+            | Self::TensorZipOperandNotTensor { span, .. }
+            | Self::TensorReduceAccumulator { span, .. }
             | Self::EinsumSubscriptNotLiteral { span, .. }
             | Self::EinsumMalformedSubscripts { span, .. }
             | Self::EinsumOperandCount { span, .. }

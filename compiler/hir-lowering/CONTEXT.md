@@ -342,6 +342,14 @@ compiler bug, not a diagnostic.
   constant. `.topk` lowers to `HirSortKind::TopK(k)` at `descending: true`, top-k being the
   head of the descending order, and its type is the `HirType::Tuple` of the values tensor and
   the `i32` index tensor. The receiver is read, not moved, so a borrowed one lowers here too.
+  The functional traversals live in `tensor_apply.rs`: `.map(f)`, `.zip(other, f)` and
+  `.reduce(init, f)` become one `HirExprKind::TensorApply` whose `kind` says which. Every
+  argument is lowered as a VALUE here, unlike a reduction's axis, and the function is always
+  the last of them. The result type is rebuilt rather than carried over from the checker, as
+  this slice re-derives every resolved fact: the receiver's shape and axis names over the
+  callee's return type for the first two (neither changes which axis is which), and the
+  seed's own type for `.reduce`. The receiver is read, not moved, so a borrowed one lowers
+  here too.
   Einstein notation lives in `tensor_einsum.rs`: `einsum("bij,bjk->bik", a, b)` is intercepted
   in `lower_plain_call` AFTER the user-declared functions, so a program's own `einsum` shadows
   it the way it shadows the panic and standard-output builtins. `lower_tensor_einsum` re-reads
