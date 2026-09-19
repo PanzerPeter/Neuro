@@ -5,6 +5,123 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-039 — a function that hands back its own `string` parameter leaks the buffer
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend`; the return summary in `codegen/string_ownership.rs`
+- **Severity**: major. An unbounded leak, one buffer per call, in a shape as ordinary as an
+  identity or a passthrough wrapper
+
+A call is treated as handing its caller an owned buffer only when every one of the callee's
+exits is an *allocating expression* (`+`, an interpolation, `String::to_string`, or another
+such call). An exit that returns a `string` **parameter** is none of those, so the caller does
+not register the binding it initializes as an owner. The argument was moved into the callee at
+the call, which clears the caller's own flag for it, so both ends stand down.
+
+**Minimal repro**
+
+```neuro
+func keep(s: string) -> string { s }
+
+func main() -> i32 {
+    mut i: u32 = 0
+    mut n: u64 = 0
+    while i < 200000 {
+        val s = "one" + "two"
+        val r = keep(s)
+        n = n + r.len()
+        i = i + 1
+    }
+    if n != 1200000 { return 91 }
+    0
+}
+```
+
+Expected: the heap stays flat. The language makes a function's return value a storing
+position, so
+`r` owns the buffer and releases it at scope exit. Observed: the arithmetic is right and the
+process's resident set climbs linearly, about one 6-byte buffer plus its allocator header per
+iteration: the loop above peaks near 6 MB resident, against under 2 MB for the same loop with
+the workaround below. Raising the round count raises the peak in step.
+
+**Root cause**: confirmed in the code. `allocates` recognises the expression shapes that build
+a buffer and nothing else; a bare `Variable` exit is not one, so `keep` never enters
+`returns_owned`. The pass documents this direction as deliberate ("an unprovable case is
+`false` and leaks one buffer, because the other direction frees `.rodata` or dangles"), and
+for an opaque exit that is the right call. A parameter is not opaque: which buffer it names is
+exactly what the caller knows.
+
+**Workaround**: rebuild rather than forward the value (`func keep(s: string) -> string { s + "" }`),
+which makes the exit an allocating shape and re-arms the caller's binding.
+
+**Fix sketch**: the summary needs a third answer beside "allocates" and "unknown": *forwards
+parameter i*. An exit that is a bare parameter read gives the caller a buffer whose ownership
+it can settle itself: the argument it passed at that index. The call site then keeps its
+own flag for that argument instead of transferring it, the way the read-only-parameter case
+now does, rather than arming a fresh owner on the result. Both halves are a fixpoint over the
+same body walk the pass already runs. Regression tests want the identity above, a conditional
+forward (one exit a parameter, one an allocation, which must stay conservative), and a forward
+through two calls, so a wrong transfer would double-free rather than merely leak.
+
+## BUG-038 — a `string` passed by value to a closure is released by nobody
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend`; `codegen/closures.rs` and the call-boundary summary in
+  `codegen/string_ownership.rs`
+- **Severity**: major. An unbounded leak, one buffer per call, on the indirect call path.
+
+The whole-program summary that decides who releases a `string` argument is keyed by the name a
+call site resolves to, and it deliberately excludes any name a local binding has taken over,
+because such a call goes through the indirect path where the callee is a value rather than a
+declaration. A closure is always that shape. So no closure parameter is ever recorded as
+read-only, every by-value argument to one is treated as retained, the caller clears its own
+drop flag at the move, and the closure's frame, which has no drop entry for its parameters,
+takes nothing with it.
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val size = |z: string| -> u64 { z.len() }
+    mut i: u32 = 0
+    mut n: u64 = 0
+    while i < 200000 {
+        val s = "one" + "two"
+        n = n + size(s)
+        i = i + 1
+    }
+    if n != 1200000 { return 91 }
+    0
+}
+```
+
+Expected: the heap stays flat, as it does for the identical program written with a top-level
+`func size(s: string) -> u64`, whose argument the caller now releases. Observed: the arithmetic
+is right and the resident set climbs linearly: the loop above peaks near 7 MB resident,
+against under 2 MB for the `func` spelling. The pipeline spelling of the same call,
+`s |> (|z: string| -> u64 { z.len() })`, leaks identically: `|>` desugars to this call
+and adds nothing of its own.
+
+**Root cause**: confirmed in the code. `analyze` walks `HirItem` function bodies and keys both
+summaries by function name; `shadowed_names` then removes every name a local binding holds.
+A closure has no entry to begin with, so `param_is_read_only` answers `false` for it, which is
+the answer that means "the callee may have retained this".
+
+**Workaround**: give the stage a top-level `func` instead of a closure where it takes an owned
+`string`, or pass a borrow (`&string`), which is not a move and leaves the caller's flag alone.
+
+**Fix sketch**: the summary has to be keyed by something a closure has. Lowering gives each
+closure literal a generated name for its lifted body, so the cheap version is to record that
+body in the same walk under that name and have the indirect call path look it up when the
+callee is a binding whose initializer is a closure literal in scope. That covers the common
+case above and leaves a closure reached through a parameter or a struct field unprovable, which
+is the correct conservative answer for those. The reason this is filed rather than fixed: it
+widens the summary from "top-level functions" to "every lowered body", and the indirect call
+path in `codegen_call_dispatch` has to carry enough of the callee's identity to key on, which
+is a change to what that path passes rather than a new arm in it. Regression tests want the
+repro above, the `|>` spelling, a closure stored in a struct field (must stay conservative),
+and a closure that DOES retain its argument, which must keep the current transfer.
+
 ## BUG-037 — a moved binding read through a path reports the same error twice
 
 - **Status**: open, confirmed

@@ -29,12 +29,18 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let mut arg_values = Vec::new();
         let mut passed = Vec::new();
-        for arg in args {
+        for (index, arg) in args.iter().enumerate() {
             let val = self.codegen_expr(arg)?;
             // A by-value argument moves an owned `Drop` place into the callee, which
             // now owns it; clearing the flag prevents a double drop here. A
             // borrow (`&x`) is not an identifier place, so it is left untouched.
-            self.mark_moved_for_drop(arg);
+            // A parameter the callee provably only reads keeps its flag instead: the
+            // callee retains nothing past the call, `release_owned_arguments` below
+            // reaches only an argument that allocated in place, and a place that
+            // loses its flag here is then released by nobody.
+            if !self.string_ownership.param_is_read_only(func_name, index) {
+                self.mark_moved_for_drop(arg);
+            }
             passed.push(val);
             arg_values.push(BasicMetadataValueEnum::from(val));
         }
@@ -102,11 +108,18 @@ impl<'ctx> CodegenContext<'ctx> {
             vec![BasicMetadataValueEnum::from(self_arg)];
 
         let mut passed = Vec::new();
-        for arg in args {
+        for (index, arg) in args.iter().enumerate() {
             let val = self.codegen_expr(arg)?;
             // A by-value argument moves an owned `Drop` place into the callee; the
-            // receiver's own ownership was settled above.
-            self.mark_moved_for_drop(arg);
+            // receiver's own ownership was settled above. A parameter the callee
+            // provably only reads keeps its flag, for the reason the plain-call path
+            // gives: nothing outlives the call, so its own scope is its releaser.
+            if !self
+                .string_ownership
+                .param_is_read_only(mangled_name, index)
+            {
+                self.mark_moved_for_drop(arg);
+            }
             passed.push(val);
             arg_values.push(BasicMetadataValueEnum::from(val));
         }

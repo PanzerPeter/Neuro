@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.50.1] - 2026-09-19
+
+### Fixed
+
+- An owned `string` passed by value to a parameter the callee only reads is released
+  again. The argument loop cleared the caller's drop flag for every by-value argument,
+  while the release after the call reached only an argument that ALLOCATED in place, so
+  a named binding (`val s = a + b; show(s)`) and a field read through one
+  (`show(doc.title)`) arrived at the call owned and left it owned by nobody. One buffer
+  leaked per call, at every optimization level and invisibly to the exit code. A place
+  now keeps its flag across such a call and its own scope is what releases it, which is
+  the rule `v.push(s)` already followed.
+
+### Known limits
+
+- The same leak survives on two paths the call-boundary summary cannot see, each filed
+  in `docs/BUGS.md`: a `string` argument to a **closure**, which has no entry in the
+  summary because it is reached through the indirect call path, and a callee that
+  **returns its own `string` parameter**, whose exit is not an allocating shape so the
+  caller registers no owner for the result.
+
 ## [2.50.0] - 2026-09-19
 
 ### Added

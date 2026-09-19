@@ -194,8 +194,12 @@ then belongs to the storage, and is tracked one of three ways:
 - **A by-value argument.** The same pass records the `string` parameters whose callee provably only
   READS them, by a whitelist of positions that copy the bytes out (a `print`/`println` argument, an
   interpolation hole, a binary operand, a `.len()` receiver, a `push_str` argument). Every other
-  occurrence is a retention. `release_owned_arguments` then frees the buffer right after the call,
-  where the callee's frame is already gone.
+  occurrence is a retention. Which side then releases depends on where the argument came from. An
+  argument that ALLOCATED in place owns no flag, so `release_owned_arguments` frees it right after
+  the call, where the callee's frame is already gone. An argument that names a PLACE keeps the flag
+  it already had and is released by that place's own scope: the argument loop skips the move's
+  disarm for a read-only parameter, because the callee retains nothing past the call and a place
+  disarmed there would reach no release at all.
 
 - **A collection slot** (a `Vec` element, a map key or value). A slot's fat pointer says no more
   about ownership than any other, so the boundary decides it instead: every `string` that enters a

@@ -1315,6 +1315,60 @@ fn a_string_temporary_is_released_at_the_consumer_that_discards_it() {
     }
 }
 
+/// An owned `string` handed to a parameter the callee only reads is released exactly
+/// once, by the place that owns it. The argument loop cleared the caller's drop flag for every by-value
+/// argument, while the release after the call reached only an argument that ALLOCATED
+/// in place, so a named binding, and a field read through one, arrived at the call owned
+/// and left it owned by nobody: one buffer leaked per call.
+#[test]
+fn regression_a_read_only_argument_releases_the_place_it_came_from() {
+    let cases = [
+        // A named binding: its own scope is the releaser the move used to disarm.
+        r#"
+        func size(s: string) -> u64 { s.len() }
+        func main() -> i32 {
+            val s = "one" + "two"
+            return size(s) as i32
+        }
+        "#,
+        // A field read through a binding: the holder releases the position.
+        r#"
+        struct Doc { title: string }
+        func size(s: string) -> u64 { s.len() }
+        func main() -> i32 {
+            val d = Doc { title: "one" + "two" }
+            return size(d.title) as i32
+        }
+        "#,
+        // An argument that allocates in place is released at the call, as before: the
+        // flag it never had cannot be the thing that releases it.
+        r#"
+        func size(s: string) -> u64 { s.len() }
+        func main() -> i32 {
+            return size("one" + "two") as i32
+        }
+        "#,
+    ];
+    for case in cases {
+        let ir = module_ir(case, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        // Every release is emitted under a flag, so counting releases counts the ones
+        // that can never run: the leak is a place that is DISARMED without its release
+        // having run. One disarm per arming is what a place released exactly once
+        // looks like; the extra disarm the move used to emit is the defect.
+        assert_eq!(
+            body.matches("store i1 true").count(),
+            body.matches("store i1 false").count(),
+            "an armed `string` place is disarmed only by the drop that releases it, in:\n{body}"
+        );
+        assert_eq!(
+            free_calls(&ir, "main"),
+            1,
+            "the buffer reaches exactly one release, in:\n{body}"
+        );
+    }
+}
+
 /// `String::to_string` copies the builder's bytes into a buffer of their own on every
 /// call, so a binding initialized from it owns that buffer and releases it at scope
 /// exit, exactly as one initialized from `+` does. A user `to_string` on a struct is
