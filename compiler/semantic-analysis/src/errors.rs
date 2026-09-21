@@ -1103,6 +1103,14 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("{callee} can store what it is given into {place}, which outlives {pool}; a value the block allocated would leave that store pointing into the arena released at the closing brace. Build the value outside the pool, or move the call out of it")]
+    PoolValueRetainedByCallee {
+        callee: String,
+        place: String,
+        pool: String,
+        span: Span,
+    },
+
     #[error("'{keyword}' may not leave {pool}; the arena is released at the block's closing brace and jumping past it would skip that release")]
     PoolControlFlowEscapes {
         keyword: String,
@@ -1343,6 +1351,7 @@ impl TypeError {
             | Self::FormatWidthTooLarge { span, .. }
             | Self::FormatPrecisionTooLarge { span, .. }
             | Self::PoolStoreEscapes { span, .. }
+            | Self::PoolValueRetainedByCallee { span, .. }
             | Self::PoolControlFlowEscapes { span, .. }
             | Self::PoolDropOnlyValue { span, .. } => *span,
         }

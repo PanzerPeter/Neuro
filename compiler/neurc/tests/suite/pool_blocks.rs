@@ -582,3 +582,107 @@ func main() -> i32 {{
     let printed = stdout_of(&test, "pool_sweep_moved.nr", &source);
     assert_eq!(printed, "register 4\nmoved 4\nrelease 4\n");
 }
+
+/// A `&mut self` method is a channel into memory the caller holds. When the receiver
+/// was declared before the block, handing it something the arena allocated leaves that
+/// store dangling at the closing brace, and no rule reading the block's own text can
+/// see it: the assignment is written in the callee.
+#[test]
+fn a_callee_may_not_retain_a_value_the_pool_allocated() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Box {
+    s: string
+}
+
+impl Box {
+    func stash(&mut self, v: string) {
+        self.s = v
+    }
+}
+
+func main() -> i32 {
+    mut b = Box { s: "" }
+    pool scratch {
+        b.stash("a" + "b")
+    }
+    println(b.s)
+    0
+}
+"#;
+    let err = test
+        .check("pool_callee_retains.nr", source)
+        .expect_err("storing an arena value through a callee should be rejected");
+    assert!(
+        err.contains("'stash'") && err.contains("'b'") && err.contains("'scratch'"),
+        "diagnostic should name the callee, the place and the pool, got: {err}"
+    );
+}
+
+/// The same call with text the compiler can trace to the heap: a declared function's
+/// body is emitted outside every arena, so what it returns survives the block and the
+/// receiver may keep it.
+#[test]
+fn a_callee_may_retain_a_value_the_pool_did_not_allocate() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Box {
+    s: string
+}
+
+impl Box {
+    func stash(&mut self, v: string) {
+        self.s = v
+    }
+}
+
+func label(n: i32) -> string {
+    return "row {n}"
+}
+
+func main() -> i32 {
+    mut b = Box { s: "" }
+    pool scratch {
+        b.stash(label(7))
+    }
+    println(b.s)
+    0
+}
+"#;
+    let code = test
+        .compile_and_run("pool_callee_keeps_heap.nr", source)
+        .expect("a heap-traced value should still cross the boundary");
+    assert_eq!(code, 0);
+}
+
+/// Place expressions made a plain `&mut` parameter assignable, so `&mut self` stopped
+/// being the only spelling that reaches the caller's memory. Both are the same channel.
+#[test]
+fn a_mut_reference_parameter_may_not_retain_a_pool_value_either() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Box {
+    s: string
+}
+
+func stash_into(target: &mut Box, v: string) {
+    target.s = v
+}
+
+func main() -> i32 {
+    mut b = Box { s: "" }
+    pool scratch {
+        stash_into(&mut b, "a" + "b")
+    }
+    println(b.s)
+    0
+}
+"#;
+    let err = test
+        .check("pool_param_retains.nr", source)
+        .expect_err("a &mut parameter should be refused the same value");
+    assert!(
+        err.contains("'stash_into'") && err.contains("'b'"),
+        "diagnostic should name the callee and the place, got: {err}"
+    );
+}

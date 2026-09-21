@@ -161,12 +161,18 @@ makes belongs to whoever that function hands it to, which the compiler cannot
 prove here, so it stays an ordinary heap allocation: the arena's speed is lost on
 that path and never its safety.
 
-Two rules keep arena memory from outliving the block, both checked at compile time:
+Three rules keep arena memory from outliving the block, all checked at compile time:
 
 - **Nothing that outlives the block may be written from inside it, unless the value
   is provably off the arena.** Storing a `string`, a collection, a tensor or a
   struct into a binding declared before the `pool` would leave it addressing bytes
   the block's exit reclaims. Scalars cross freely: an `i32` carries no address.
+- **Nothing the block allocated may be handed to a callee that can store it past
+  the block.** The rule above watches stores written inside the block; this one
+  watches the store a callee makes on your behalf. A `&mut self` receiver and a
+  `&mut` parameter are the two channels through which a callee reaches memory the
+  caller holds, so passing an arena value through either — to a place declared
+  before the `pool` — is refused.
 - **`return`, `break` and `continue` may not leave the block.** Each would jump
   past the arena release. Write the exit outside the pool instead; a `break`
   targeting a loop opened *inside* the block is fine, because it stays in it.
@@ -201,8 +207,32 @@ pool {
 println(kept)                    // still valid after the release
 ```
 
-The last two lines are the whole rule in miniature. A builtin method such as
-`.clone()` is not a function the backend emits somewhere else; it is instructions
+The same test decides the second rule, because the question is the same one: whether
+the value being handed over is arena memory. What differs is only where the store
+lands.
+
+```neuro
+struct Box { s: string }
+
+impl Box {
+    func stash(&mut self, v: string) { self.s = v }
+}
+
+mut b = Box { s: "" }
+pool scratch {
+    b.stash(render(7))       // fine: `render`'s allocation is heap memory
+    b.stash("a" + "b")       // error: `b` outlives the arena that built the text
+}
+```
+
+A callee's write access is read from its signature, not from its body: a method taking
+`&mut self`, or a function taking `&mut T`, is assumed to keep what it is given. A
+`&self` receiver and a shared `&T` parameter have no way to write back, so they take
+arena values freely.
+
+The last two lines of the previous example are the whole first rule in miniature. A
+builtin method such as `.clone()` is not a function the backend emits somewhere else;
+it is instructions
 placed where you wrote them, which puts its allocation in the arena. A call through
 a trait object (`&dyn Renderer`) is refused for the opposite reason: the
 implementation behind the vtable is not known until the program runs, so neither is

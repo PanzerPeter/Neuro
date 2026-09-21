@@ -191,6 +191,9 @@ impl TypeChecker {
                 if let Some(ty) = &ty {
                     self.check_pool_construction(ty, callee_name(func).as_deref(), *span);
                 }
+                // The reverse direction: what the block hands the callee, which the
+                // callee may store somewhere that outlives the pool.
+                self.check_pool_retention(func, args, *span);
                 ty
             }
 

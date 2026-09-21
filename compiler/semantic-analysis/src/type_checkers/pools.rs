@@ -167,25 +167,108 @@ impl TypeChecker {
     /// collection method answers false too, for the opposite reason — its body is not a
     /// function at all, but instructions inlined where the call was written.
     fn callee_is_user_code(&self, func: &Expr) -> bool {
+        self.callee_key(func).is_some()
+    }
+
+    /// The key into `functions` for a callee the program declares, or `None` where the
+    /// callee is a trait object, a builtin, or a generic template (which is not in
+    /// `functions` at all, since each call site monomorphizes its own instance).
+    fn callee_key(&self, func: &Expr) -> Option<String> {
         match func {
-            Expr::Identifier(id) => self.functions.contains_key(&id.name),
+            Expr::Identifier(id) => self
+                .functions
+                .contains_key(&id.name)
+                .then(|| id.name.clone()),
             Expr::Path {
                 type_name, member, ..
-            } => self.method_key(&type_name.name, &member.name).is_some(),
+            } => self.method_key(&type_name.name, &member.name).cloned(),
             Expr::FieldAccess { object, field, .. } => {
                 let Expr::Identifier(receiver) = &**object else {
-                    return false;
+                    return None;
                 };
-                let Some(symbol) = self.symbols.lookup(&receiver.name) else {
-                    return false;
-                };
+                let symbol = self.symbols.lookup(&receiver.name)?;
                 let Type::Struct(struct_name) = symbol.ty.referent() else {
-                    return false;
+                    return None;
                 };
-                self.method_key(struct_name, &field.name).is_some()
+                self.method_key(struct_name, &field.name).cloned()
             }
-            _ => false,
+            _ => None,
         }
+    }
+
+    /// Reject a call inside a pool that hands a value the block may have allocated to a
+    /// callee able to store it somewhere outliving the block.
+    ///
+    /// The store rules above watch places written in the block's own source; this one
+    /// covers the store a callee performs on the caller's behalf, which no amount of
+    /// looking at the block's text reveals. Inert outside a pool.
+    pub(crate) fn check_pool_retention(&mut self, func: &Expr, args: &[Expr], span: Span) {
+        let Some(pool) = self.pool_stack.last() else {
+            return;
+        };
+        // Nothing the block owns is being handed over, so there is nothing to retain.
+        if args.iter().all(|arg| self.off_arena(arg)) {
+            return;
+        }
+        let Some(place) = self.retaining_place(func, args) else {
+            return;
+        };
+        let pool = pool.pool.clone();
+        let callee = callee_label(func);
+        self.record_error(TypeError::PoolValueRetainedByCallee {
+            callee,
+            place,
+            pool,
+            span,
+        });
+    }
+
+    /// The outliving place this call gives the callee write access to, if any.
+    ///
+    /// Write access is read from the signature, not from the callee's body: a `&mut`
+    /// parameter, or a `&mut self` receiver, is the whole set of channels through which
+    /// a callee can leave something behind in its caller. Whether the body actually
+    /// stores through one is not asked, for the same reason `off_arena` does not ask
+    /// what a callee allocates — an unproven answer has to be the one that keeps the
+    /// value inside the block.
+    fn retaining_place(&self, func: &Expr, args: &[Expr]) -> Option<String> {
+        let key = self.callee_key(func)?;
+
+        // The receiver is not in `args`; it rides inside a field-access callee, and its
+        // mutability lives in `mut_self_methods` rather than in the signature, where
+        // `self` is recorded as the bare struct type.
+        let receiver = self.callee_operand(func);
+        if let Some(object) = receiver {
+            if self.mut_self_methods.contains(&key) {
+                if let Some(root) = self.outliving_root(object) {
+                    return Some(root);
+                }
+            }
+        }
+
+        let Some(Type::Function { params, .. }) = self.functions.get(&key) else {
+            return None;
+        };
+        // An instance method's signature carries the implicit `self` in front of the
+        // declared parameters, so the positional arguments start one later.
+        let declared = match receiver {
+            Some(_) => params.get(1..)?,
+            None => params.as_slice(),
+        };
+        declared
+            .iter()
+            .zip(args)
+            .filter(|(param, _)| matches!(param, Type::Reference { mutable: true, .. }))
+            .find_map(|(_, arg)| self.outliving_root(arg))
+    }
+
+    /// The binding a place expression is rooted in, quoted for a diagnostic, when that
+    /// binding was declared before every open pool. `None` when the expression is not
+    /// rooted in such a binding, which includes every expression that is not a place.
+    fn outliving_root(&self, place: &Expr) -> Option<String> {
+        let name = root_binding(place)?;
+        self.declared_before_pools(name)
+            .then(|| format!("'{name}'"))
     }
 
     /// The receiver a method call passes as `self`, which the operand walk must clear
@@ -322,6 +405,30 @@ impl TypeChecker {
             span,
         });
     }
+}
+
+/// The binding at the base of a place expression: the one a write through the
+/// expression ultimately lands in.
+fn root_binding(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Identifier(id) => Some(&id.name),
+        Expr::Paren(inner, _) => root_binding(inner),
+        Expr::Reference { operand, .. } | Expr::Deref { operand, .. } => root_binding(operand),
+        Expr::FieldAccess { object, .. } | Expr::Index { object, .. } => root_binding(object),
+        _ => None,
+    }
+}
+
+/// The callee's own name, quoted for a diagnostic. A callee with no name to quote is
+/// already excluded by [`TypeChecker::callee_key`].
+fn callee_label(func: &Expr) -> String {
+    let name = match func {
+        Expr::Identifier(id) => &id.name,
+        Expr::Path { member, .. } => &member.name,
+        Expr::FieldAccess { field, .. } => &field.name,
+        _ => return "the callee".to_string(),
+    };
+    format!("'{name}'")
 }
 
 /// Whether a value of this type can cross a pool boundary whatever its provenance.
@@ -630,6 +737,128 @@ func main() -> i32 {
     pool {
         val step = 3
         out = label(step)
+    }
+    return 0
+}",
+        );
+        assert!(errs.is_empty(), "expected no errors, got {errs:?}");
+    }
+
+    /// A `&mut self` method can stash its argument in a receiver that outlives the
+    /// block, which no rule watching the block's own stores can see. This is the shape
+    /// the retention rule exists for.
+    const STASH: &str = "\
+struct Box { s: string }
+impl Box {
+    func stash(&mut self, v: string) { self.s = v }
+    func peek(&self, v: string) -> i32 { 1 }
+}
+";
+
+    #[test]
+    fn a_callee_storing_an_arena_argument_is_rejected() {
+        let errs = errors(&format!(
+            "{STASH}
+func main() -> i32 {{
+    mut b = Box {{ s: \"\" }}
+    pool scratch {{
+        b.stash(\"a\" + \"b\")
+    }}
+    return 0
+}}"
+        ));
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("'stash'") && e.contains("'b'") && e.contains("'scratch'")),
+            "expected the callee, the place and the pool named, got {errs:?}"
+        );
+    }
+
+    /// The rule turns on the argument's provenance, not on the method: a value the
+    /// block never allocated may be stashed anywhere.
+    #[test]
+    fn a_callee_storing_an_off_arena_argument_is_accepted() {
+        let errs = errors(&format!(
+            "{STASH}
+func label() -> string {{ \"fixed\" }}
+func main() -> i32 {{
+    mut b = Box {{ s: \"\" }}
+    pool {{
+        b.stash(\"literal\")
+        b.stash(label())
+    }}
+    return 0
+}}"
+        ));
+        assert!(errs.is_empty(), "expected no errors, got {errs:?}");
+    }
+
+    /// A `&self` method has no channel to write back through, so it keeps taking
+    /// arena arguments. Without this the rule would refuse every read of a temporary.
+    #[test]
+    fn a_read_only_method_on_an_outer_receiver_is_accepted() {
+        let errs = errors(&format!(
+            "{STASH}
+func main() -> i32 {{
+    val b = Box {{ s: \"\" }}
+    pool {{
+        val n = b.peek(\"a\" + \"b\")
+    }}
+    return 0
+}}"
+        ));
+        assert!(errs.is_empty(), "expected no errors, got {errs:?}");
+    }
+
+    /// A receiver the block itself declared dies with the arena, so a store into it is
+    /// exactly as safe as the value being stored.
+    #[test]
+    fn a_callee_storing_into_a_receiver_the_block_built_is_accepted() {
+        let errs = errors(&format!(
+            "{STASH}
+func main() -> i32 {{
+    pool {{
+        mut b = Box {{ s: \"\" }}
+        b.stash(\"a\" + \"b\")
+    }}
+    return 0
+}}"
+        ));
+        assert!(errs.is_empty(), "expected no errors, got {errs:?}");
+    }
+
+    /// Place expressions made a plain `&mut` parameter assignable, so `&mut self` on a
+    /// method stopped being the only spelling that reaches the caller's memory.
+    #[test]
+    fn a_mut_reference_parameter_is_the_same_channel() {
+        let errs = errors(&format!(
+            "{STASH}
+func stash_into(target: &mut Box, v: string) {{ target.s = v }}
+func main() -> i32 {{
+    mut b = Box {{ s: \"\" }}
+    pool scratch {{
+        stash_into(&mut b, \"a\" + \"b\")
+    }}
+    return 0
+}}"
+        ));
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("'stash_into'") && e.contains("'b'")),
+            "expected a plain &mut parameter to be caught, got {errs:?}"
+        );
+    }
+
+    /// A shared reference parameter is not a channel back, so it stays open.
+    #[test]
+    fn a_shared_reference_parameter_is_not_a_channel() {
+        let errs = errors(
+            "struct Box { s: string }
+func read_from(target: &Box, v: string) -> i32 { 1 }
+func main() -> i32 {
+    val b = Box { s: \"\" }
+    pool {
+        val n = read_from(&b, \"a\" + \"b\")
     }
     return 0
 }",

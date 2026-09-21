@@ -42,7 +42,8 @@
 // arena. Its fields are scalars, so it never allocates at all.
 struct Tally {
     steps: i32,
-    total: f32
+    total: f32,
+    last: string
 }
 
 impl Tally {
@@ -50,6 +51,13 @@ impl Tally {
     // rendered and then kept.
     func render(&self) -> string {
         return "{self.steps} batches, mean sum {self.total:.3}"
+    }
+
+    // `&mut self` is a channel into memory the CALLER holds. Called from inside the
+    // arena on a tally declared outside it, this store is only sound because of what
+    // it is handed: see the note on `summarize` below.
+    func record(&mut self, note: string) {
+        self.last = note
     }
 }
 
@@ -103,7 +111,10 @@ func main() -> i32 {
 
     mut running: f32 = 0.0
     mut steps: i32 = 0
-    mut headline: string = "no batches yet"
+
+    // Declared before the arena, so it survives every block below — which is exactly
+    // what makes `tally.record(...)` inside them a rule the compiler has to check.
+    mut tally = Tally { steps: 0, total: 0.0, last: "no batches yet" }
 
     pool training {
         println("bias total = {bias.sum():.2}")
@@ -128,15 +139,19 @@ func main() -> i32 {
                 steps = steps + 1
 
                 // And so may this string, because the compiler can trace it to the heap.
-                headline = summarize(step, mean)
+                // Passing it THROUGH a `&mut self` method is checked on the same terms:
+                // `tally.record("step " + "{step}")` does not compile, because that text
+                // is arena memory and `tally` outlives the block that allocated it.
+                tally.record(summarize(step, mean))
             }
         }
     }
 
-    // Both arenas are back to their marks by here; the tally never left the stack, and
-    // `headline` still reads correctly because it never pointed into one.
-    println(headline)
-    val tally = Tally { steps: steps, total: running }
+    // Both arenas are back to their marks by here, and the line the callee stored
+    // still reads correctly because it never pointed into one.
+    println(tally.last)
+    tally.steps = steps
+    tally.total = running
     println(tally.render())
 
     steps

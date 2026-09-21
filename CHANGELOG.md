@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-09-21
+
+### Added
+
+- semantic: reject a pool value a callee stores past the block. A `pool` block's escape
+  rules watched stores written in the block's own text, so a store performed by a callee
+  went unseen: `pool { b.stash("a" + "b") }`, with `b` declared outside and `stash` taking
+  `&mut self`, type-checked clean and left the receiver's field pointing into the arena the
+  closing brace reclaimed. A call inside a pool is now refused when it hands a value the
+  block may have allocated to a callee that can write back into a place outliving the
+  block. The two channels for that are a `&mut self` receiver and a `&mut` parameter, both
+  read from the callee's signature; a `&self` receiver, a shared `&` parameter, and a
+  receiver the block itself declared are untouched, as is any argument already provable as
+  heap memory. The diagnostic names the callee, the place and the pool.
+
 ## [3.0.1] - 2026-09-19
 
 Audit pass after the v3.0.0 milestone. No language surface changed.

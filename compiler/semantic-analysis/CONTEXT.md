@@ -1003,8 +1003,9 @@ The checks hang off the statement arms that already know the types: every assign
 `check_pool_store` with the PLACE's type and the VALUE expression, `Stmt::DerefAssignment` calls
 `check_pool_ref_store` with the referent type and the value (the place behind a reference is not
 resolved here, so the referent type stands in for it), and `Return` / `Break` / `Continue` call the
-control-flow pair. All five are inert when `pool_stack` is empty, which is every program that
-writes no `pool`.
+control-flow pair. A sixth, `check_pool_retention`, hangs off the `Expr::Call` arm instead,
+because what it watches is not a store the block writes at all. All six are inert when
+`pool_stack` is empty, which is every program that writes no `pool`.
 
 One rule there is not an escape rule. `check_pool_construction` refuses a value of a `Drop`-only
 struct that the block would OWN: the arena is released in a single store and cannot run an
@@ -1043,6 +1044,28 @@ known until runtime and neither is what it allocates — the case the conservati
 for. A builtin or collection method fails it too, for the opposite reason: its body is not a
 function at all but instructions inlined where the call was written, so it DOES take the bump path.
 `name = a + b` is still refused; `name = render(step)` is not.
+
+The store rules above see only places the block's own text writes. A store a CALLEE performs
+is written in the callee, so `check_pool_retention` covers it separately: a call inside a pool
+is refused when an argument fails `off_arena` AND the call gives the callee write access to a
+place declared before the outermost open pool. Write access is read from the SIGNATURE, never
+from the callee's body — a `&mut self` receiver (found in `mut_self_methods`) and a `&mut T`
+parameter are the complete set of channels a callee has back into its caller, and whether the
+body actually stores through one is not asked. That over-approximates in the same direction
+`off_arena` does: unproven means refused.
+
+Both rules resolve their callee through the shared `callee_key`, which returns the key into
+`functions` for a free function, a `Type::method` path, or a method on a bare-identifier
+receiver, and `None` otherwise. `callee_is_user_code` is now just `callee_key(..).is_some()`.
+Note the two rules want OPPOSITE conservatism from it — an unnameable callee is assumed to
+allocate arena memory (safe) but cannot be shown to retain any (unsafe) — which is the gap
+LIM-110 records for generic callees and nested receivers.
+
+One asymmetry the parameter walk has to handle: an instance method's signature in `functions`
+carries the implicit `self` as `params[0]`, as the bare struct type rather than a reference, so
+a receiver's mutability is only ever in `mut_self_methods`. `Expr::Call`'s `args` exclude the
+receiver, so the walk skips `params[0]` exactly when the callee is a field-access expression —
+the same test `callee_operand` uses.
 
 ### Three rules that exist because the backend cannot answer them
 Each closed a path where a program type-checked and then aborted codegen with an internal error:
