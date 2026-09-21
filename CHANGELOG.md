@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-09-21
+
+### Changed
+
+- The gradient value model is settled, which opens Phase 3's AD work. `@grad`
+  lowers to a pure derivative function returning owned gradient tensors that
+  carry each parameter's own element type and static shape; `.backward()`,
+  `.grad()` and `.zero_grad()` are a thin layer that moves those tensors into a
+  slot on the tensor's DLPack control block, reads them by reference, and
+  releases them. Differentiated parameters are borrowed mutably and the borrow
+  runs to the matching `.backward()`, so a deferred gradient write is visible to
+  the borrow checker rather than hidden from it. Gradient buffers are never
+  taken from a `pool` arena. Second derivatives are read through `.hessian()`,
+  which closes the specification's open question about how a `[N, N]` result is
+  retrieved.
+
 ## [3.1.2] - 2026-09-21
 
 ### Changed
